@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "blint"
+version = "1.0.0"
+description = "Linter for binary files powered by lief"
+authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
+license = "Apache-2.0"
+repository = "https://git.sr.ht/~prabhu/blint"
+keywords = ["linter", "binary", "security", "sast"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+        "Intended Audience :: Developers",
+        "Intended Audience :: System Administrators",
+        "Topic :: Utilities",
+        "Topic :: Security",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Operating System :: OS Independent",
+]
+
+[tool.poetry.scripts]
+blint = 'blint.cli:main'
+
+[tool.poetry.dependencies]
+python = "^3.8"
+lief = "^0.11.5"
+rich = "^10.10.0"
+PyYAML = "^5.4.1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+black = "^21.9b0"
+flake8 = "^3.9.2"
+pytest-cov = "^2.12.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
