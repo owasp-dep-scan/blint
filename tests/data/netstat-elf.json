@@ -1,0 +1,109 @@
+{
+ "is_shared_library": true,
+ "magic": "7f 45 4c 46",
+ "class": "CLASS64",
+ "endianness": "LSB",
+ "identity_version": "CURRENT",
+ "identity_os_abi": "SYSTEMV",
+ "identity_abi_version": 0,
+ "file_type": "DYNAMIC",
+ "machine_type": "x86_64",
+ "object_file_version": "CURRENT",
+ "entrypoint": 35296,
+ "processor_flag": "0",
+ "name": "netstat",
+ "imagebase": 0,
+ "interpreter": "/lib64/ld-linux-x86-64.so.2",
+ "is_pie": true,
+ "virtual_size": 167936,
+ "has_nx": true,
+ "relro": "full",
+ "exe_type": "gnubinary",
+ "has_canary": true,
+ "dynamic_entries": [
+  {
+   "name": "libselinux.so.1",
+   "tag": "NEEDED",
+   "value": 1056
+  },
+  {
+   "name": "libc.so.6",
+   "tag": "NEEDED",
+   "value": 1072
+  }
+ ],
+ "symbols_version": [],
+ "notes": [
+  {
+   "description": "02 00 00 c0 04 00 00 00 03 00 00 00 00 00 00 00 ...",
+   "type": "???",
+   "details": "",
+   "sdk_version": "",
+   "ndk_version": "",
+   "ndk_build_number": "",
+   "abi": "",
+   "version": ""
+  },
+  {
+   "description": "37 1c c3 67 89 a0 38 6f bf f3 dc b8 6c 81 51 a3 ...",
+   "type": "BUILD_ID",
+   "details": "",
+   "sdk_version": "",
+   "ndk_version": "",
+   "ndk_build_number": "",
+   "abi": "",
+   "version": ""
+  },
+  {
+   "description": "00 00 00 00 03 00 00 00 02 00 00 00 00 00 00 00",
+   "type": "ABI_TAG",
+   "details": "",
+   "sdk_version": "",
+   "ndk_version": "",
+   "ndk_build_number": "",
+   "abi": "NOTE_ABIS.LINUX",
+   "version": "3.2.0"
+  }
+ ],
+ "strings": [
+  {
+   "value": "0.0.0.0",
+   "entropy": 0,
+   "secret_type": "ip"
+  }
+ ],
+ "functions": [
+  {
+   "index": 0,
+   "name": "__dt_init",
+   "address": 28672
+  },
+  {
+   "index": 7,
+   "name": "__dt_fini_array",
+   "address": 35456
+  },
+  {
+   "index": 8,
+   "name": "__dt_init_array",
+   "address": 35520
+  },
+  {
+   "index": 166,
+   "name": "__dt_fini",
+   "address": 103656
+  }
+ ],
+ "ctor_functions": [
+  {
+   "index": 0,
+   "name": "__dt_init_array",
+   "address": 35520
+  },
+  {
+   "index": 1,
+   "name": "__dt_init",
+   "address": 28672
+  }
+ ]
+}

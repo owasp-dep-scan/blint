@@ -1,0 +1,238 @@
+---
+text: Review for symbols identified in a binary produced by cargo build
+group: SYMBOL_REVIEWS
+exe_type: gnubinary
+rules:
+  - id: FILE_IO_READ
+    title: IO functions used
+    summary: Can Read Files & Directory
+    description: |
+      std::fs module contains basic methods to manipulate the contents of the local filesystem. All methods in this module represent cross-platform filesystem operations.
+    patterns:
+      - std::fs::try_exists
+      - std::fs::metadata
+      - std::fs::symlink_metadata
+      - std::fs::read
+      - std::fs::read_dir
+      - std::fs::read_link
+      - std::fs::read_to_string
+      - std::fs::FileType::is_symlink
+      - std::fs::DirBuilder::read
+      - std::fs::DirBuilder::read_dir
+      - std::fs::DirBuilder::read_link
+      - std::fs::DirBuilder::read_to_string
+      - std::fs::DirBuilder::try_exists
+      - std::fs::DirEntry::read
+      - std::fs::DirEntry::read_dir
+      - std::fs::DirEntry::read_link
+      - std::fs::DirEntry::read_to_string
+      - std::fs::DirEntry::try_exists
+      - std::fs::File::read
+      - std::fs::File::read_dir
+      - std::fs::File::read_link
+      - std::fs::File::read_to_string
+      - std::fs::File::try_exists
+      - std::fs::FileType::read
+      - std::fs::FileType::read_dir
+      - std::fs::FileType::read_link
+      - std::fs::FileType::read_to_string
+      - std::fs::FileType::try_exists
+      - std::fs::Metadata::is_dir
+      - std::path::Path::read_dir
+      - std::path::Path::read_link
+      - std::path::Path::try_exists
+  - id: FILE_IO_WRITE
+    title: IO functions used
+    summary: Can Create Files & Directory
+    description: |
+      std::fs module contains basic methods to manipulate the contents of the local filesystem. All methods in this module represent cross-platform filesystem operations.
+    patterns:
+      - std::io::copy
+      - std::fs::copy
+      - std::fs::create_dir
+      - std::fs::create_dir_all
+      - std::fs::hardlink
+      - std::fs::remove_dir
+      - std::fs::remove_dir_all
+      - std::fs::remove_file
+      - std::fs::rename
+      - std::fs::set_permissions
+      - std::fs::write
+      - std::fs::DirBuilder::copy
+      - std::fs::DirBuilder::create_dir
+      - std::fs::DirBuilder::create_dir_all
+      - std::fs::DirBuilder::hardlink
+      - std::fs::DirBuilder::remove_dir
+      - std::fs::DirBuilder::remove_dir_all
+      - std::fs::DirBuilder::remove_file
+      - std::fs::DirBuilder::rename
+      - std::fs::DirBuilder::set_permissions
+      - std::fs::DirBuilder::softlink
+      - std::fs::DirBuilder::write
+      - std::fs::DirEntry::copy
+      - std::fs::DirEntry::create_dir
+      - std::fs::DirEntry::create_dir_all
+      - std::fs::DirEntry::hardlink
+      - std::fs::DirEntry::remove_dir
+      - std::fs::DirEntry::remove_dir_all
+      - std::fs::DirEntry::remove_file
+      - std::fs::DirEntry::rename
+      - std::fs::DirEntry::set_permissions
+      - std::fs::DirEntry::softlink
+      - std::fs::DirEntry::write
+      - std::fs::File::copy
+      - std::fs::File::create_dir
+      - std::fs::File::create_dir_all
+      - std::fs::File::hardlink
+      - std::fs::File::remove_dir
+      - std::fs::File::remove_dir_all
+      - std::fs::File::remove_file
+      - std::fs::File::rename
+      - std::fs::File::set_permissions
+      - std::fs::File::softlink
+      - std::fs::File::write
+      - std::fs::FileType::copy
+      - std::fs::FileType::create_dir
+      - std::fs::FileType::create_dir_all
+      - std::fs::FileType::hardlink
+      - std::fs::FileType::remove_dir
+      - std::fs::FileType::remove_dir_all
+      - std::fs::FileType::remove_FileType
+      - std::fs::FileType::rename
+      - std::fs::FileType::set_permissions
+      - std::fs::FileType::softlink
+      - std::fs::FileType::write
+      - tokio::fs
+  - id: NET_METHODS
+    title: Net functions used
+    summary: Uses Network to send and receive data
+    description: |
+      std::net module provides networking functionality for the Transmission Control and User Datagram Protocols, as well as types for IP and socket addresses.
+    patterns:
+      - std::net::TcpListener::accept
+      - std::net::TcpListener::bind
+      - std::net::TcpListener::incoming
+      - std::net::TcpListener::set_nonblocking
+      - std::net::TcpListener::set_ttl
+      - std::net::TcpStream::connect
+      - std::net::TcpStream::connect_timeout
+      - std::net::TcpStream::peer_addr
+      - std::net::TcpStream::try_clone
+      - std::net::TcpStream::write_timeout
+      - std::net::UdpSocket::bind
+      - std::net::UdpSocket::broadcast
+      - std::net::UdpSocket::connect
+      - std::net::UdpSocket::join_multicast_v4
+      - std::net::UdpSocket::join_multicast_v6
+      - std::net::UdpSocket::local_addr
+      - std::net::UdpSocket::multicast_loop_v4
+      - std::net::UdpSocket::multicast_loop_v6
+      - std::net::UdpSocket::peek
+      - std::net::UdpSocket::read_timeout
+      - std::net::UdpSocket::recv
+      - std::net::UdpSocket::recv_from
+      - std::net::UdpSocket::send
+      - std::net::UdpSocket::send_to
+      - std::net::UdpSocket::set_broadcast
+      - std::net::UdpSocket::set_multicast_loop_v4
+      - std::net::UdpSocket::set_multicast_loop_v6
+      - std::net::UdpSocket::set_nonblocking
+      - std::net::UdpSocket::try_clone
+      - std::net::UdpSocket::write_timeout
+      - std::os::unix::net::UnixListener
+      - std::os::unix::net::UnixStream
+      - std::os::unix::net::SocketAncillary
+      - std::os::unix::net::SocketCred
+      - std::os::unix::net::UCred
+      - std::os::unix::net::UnixDatagram
+      - std::net::SocketAddr
+      - hyper_tls::HttpsConnector
+      - socket2::Socket
+      - socket2::Socket::accept
+      - socket2::Socket::accept4
+      - socket2::Socket::accept_raw
+      - socket2::Socket::bind
+      - socket2::Socket::bind_device
+      - socket2::Socket::broadcast
+      - socket2::Socket::connect
+      - socket2::Socket::connect_timeout
+      - socket2::Socket::device
+      - socket2::Socket::freebind
+      - socket2::Socket::join_multicast_v4
+      - socket2::Socket::join_multicast_v6
+      - socket2::Socket::listen
+      - socket2::Socket::multicast
+      - socket2::Socket::pair
+      - socket2::Socket::peek
+      - socket2::Socket::recv
+      - socket2::Socket::send
+      - socket2::Socket::sendfile
+      - socket2::Socket::write_timeout
+      - socket2::Domain
+      - tokio::net
+      - tokio::io::AsyncReadExt
+      - tokio::io::AsyncWriteExt
+      - rustls::Connection
+      - curl::easy::Easy
+      - ureq::Agent
+      - ureq::AgentBuilder
+      - awc::Client
+  - id: EXEC_METHODS
+    title: Execute functions used
+    summary: Can Execute Commands
+    description: |
+      The module std::process is mostly concerned with spawning and interacting with child processes, but it also provides abort and exit for terminating the current process.
+    patterns:
+      - std::process::Commmand::new
+      - std::process::Commmand::arg
+      - std::process::Commmand::args
+      - std::process::Commmand::output
+      - std::process::Commmand::get_envs
+      - std::process::Commmand::spawn
+      - std::process::Commmand::stdin
+      - std::process::Commmand::stdout
+      - std::process::Commmand::stderr
+      - std::process::Stdio::piped
+      - tokio::process
+  - id: FFI_METHODS
+    title: FFI functions used
+    summary: Can perform system-level operations via FFI
+    description: |
+      The module std::ffi provides utilities to handle data across non-Rust interfaces, like other programming languages and the underlying operating system. It is mainly of use for FFI (Foreign Function Interface) bindings and code that needs to exchange C-like strings with other languages.
+    patterns:
+      - std::ffi
+      - std::os::raw
+      - std::ffi::OsStr::new
+      - std::ffi::OsStr::to_os_string
+      - std::ffi::OsString::new
+      - std::ffi::OsString::push
+      - std::ffi::OsString::reserve
+      - std::ffi::OsString::reserve_exact
+      - std::ffi::OsString::shrink_to
+      - std::ffi::OsString::shrink_to_fit
+      - std::os::wasi::ffi::OsStrExt
+  - id: WEAK_CRYPTO
+    title: Weak cryptographic algorithm is used
+    summary: Uses Weak Cryptographic Algorithms
+    description: |
+      When there is a need to store or transmit sensitive data, use strong, up-to-date cryptographic algorithms to encrypt that data. Select a well-vetted algorithm that is currently considered to be strong by experts in the field, and use well-tested implementations.
+      Some older algorithms, once thought to require a billion years of computing time, can now be broken in days or hours. This includes MD4, MD5, SHA1, DES, and other algorithms that were once regarded as strong.
+    patterns:
+      - sha1::Sha1
+      - sha1::Digest
+      - md5::compute
+      - md5::Md5
+      - md5::Digest
+  - id: HTTP_METHODS
+    title: HTTP server functions used
+    summary: Can run an HTTP server
+    description: |
+      Packages that provides HTTP client and server implementations.
+    patterns:
+      - hyper::Body
+      - hyper::Request
+      - hyper::Response
+      - hyper::Server
+      - hyper::service
+      - hyper::Method
+      - hyper::Uri

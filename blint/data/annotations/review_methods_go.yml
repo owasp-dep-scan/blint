@@ -1,0 +1,377 @@
+---
+text: Review for functions identified in a binary produced by Go build
+group: METHOD_REVIEWS
+exe_type: gobinary
+rules:
+  - id: FILE_IOUTIL
+    title: IO util functions used
+    summary: Can Read and Write Files
+    description: |
+      Package ioutil implements some I/O utility functions.
+      As of Go 1.16, the same functionality is now provided by package io or package os, and those implementations should be preferred in new code.
+    patterns:
+      - ioutil.ReadAll
+      - ioutil.ReadDir
+      - ioutil.ReadFile
+      - ioutil.TempDir
+      - ioutil.TempFile
+      - ioutil.WriteFile
+  - id: FILE_IO_READ
+    title: IO functions used
+    summary: Can Read Files & Directory
+    description: |
+      Package io provides basic interfaces to I/O primitives. Its primary job is to wrap existing implementations of such primitives, such as those in package os, into shared public interfaces that abstract the functionality, plus some other related primitives.
+      Because these interfaces and primitives wrap lower-level operations with various implementations, unless otherwise informed clients should not assume they are safe for parallel execution.
+    patterns:
+      - io.ReadAll
+      - fs.ReadFile
+      - fs.WalkDir
+      - os.ReadFile
+      - os.Readlink
+      - os.OpenFile
+      - os.UserCacheDir
+      - os.UserConfigDir
+      - os.UserHomeDir
+      - os.ReadDir
+  - id: FILE_IO_WRITE
+    title: IO functions used
+    summary: Can Create Files & Directory
+    description: |
+      Package io provides basic interfaces to I/O primitives. Its primary job is to wrap existing implementations of such primitives, such as those in package os, into shared public interfaces that abstract the functionality, plus some other related primitives.
+      Because these interfaces and primitives wrap lower-level operations with various implementations, unless otherwise informed clients should not assume they are safe for parallel execution.
+    patterns:
+      - os.Mkdir
+      - os.MkdirAll
+      - os.MkdirTemp
+      - os.Remove
+      - os.RemoveAll
+      - os.Rename
+      - os.WriteFile
+      - os.Create
+      - os.CreateTemp
+      - os.NewFile
+      - os.DirFS
+  - id: OS_METHODS
+    title: OS functions used
+    summary: Can Execute OS commands
+    description: |
+      Package os provides a platform-independent interface to operating system functionality.
+    patterns:
+      - os.Chmod
+      - os.Chown
+      - os.Chtimes
+      - os.Environ
+      - os.Lchown
+      - os.FindProcess
+      - os.Kill
+  - id: EXEC_METHODS
+    title: Execute functions used
+    summary: Can Execute Commands
+    description: |
+      Package exec runs external commands. It wraps os.StartProcess to make it easier to remap stdin and stdout, connect I/O with pipes, and do other adjustments.
+      Unlike the "system" library call from C and other languages, the os/exec package intentionally does not invoke the system shell and does not expand any glob patterns or handle other expansions, pipelines, or redirections typically done by shells. The package behaves more like C's "exec" family of functions.
+    patterns:
+      - os.StartProcess
+      - exec.Run
+      - exec.Start
+      - exec.Command
+      - exec.CommandContext
+      - syscall.StartProcess
+      - syscall.Exec
+      - syscall.ForkExec
+      - syscall.ForkAndExecInChild
+      - syscall.ForkExecPipe
+  - id: SYSCALL_METHODS
+    title: Syscall functions used
+    summary: Can perform system-level operations
+    description: |
+      Package syscall contains an interface to the low-level operating system primitives.
+    patterns:
+      - syscall.Access
+      - syscall.BindToDevice
+      - syscall.Chmod
+      - syscall.Chown
+      - syscall.Chroot
+      - syscall.EpollCreate
+      - syscall.Fchmod
+      - syscall.Fchmodat
+      - syscall.Fchown
+      - syscall.Fchownat
+      - syscall.Fstatfs
+      - syscall.Fstat
+      - syscall.InotifyAddWatch
+      - syscall.InotifyInit
+      - syscall.Ioperm
+      - syscall.Kill
+      - syscall.Listen
+      - syscall.Mkdir
+      - syscall.Mkdirat
+      - syscall.Mkfifo
+      - syscall.Mknod
+      - syscall.Mknodat
+      - syscall.Mlock
+      - syscall.Mlockall
+      - syscall.Mmap
+      - syscall.Mount
+      - syscall.Mprotect
+      - syscall.Munlock
+      - syscall.Open
+      - syscall.Openat
+      - syscall.ParseDirent
+      - syscall.PtraceAttach
+      - syscall.PtraceCont
+      - syscall.Rmdir
+      - syscall.Sendfile
+      - syscall.Sendmsg
+      - syscall.Sysinfo
+      - syscall.UnixCredentials
+      - syscall.Unmount
+  - id: NET_METHODS
+    title: Net functions used
+    summary: Uses Network to send and receive data
+    description: |
+      Package net provides a portable interface for network I/O, including TCP/IP, UDP, domain name resolution, and Unix domain sockets.
+      Although the package provides access to low-level networking primitives, most clients will need only the basic interface provided by the Dial, Listen, and Accept functions and the associated Conn and Listener interfaces.
+    patterns:
+      - syscall.Bind
+      - net.JoinHostPort
+      - net.LookupAddr
+      - net.LookupCNAME
+      - net.LookupHost
+      - net.LookupPort
+      - net.LookupTXT
+      - net.ParseCIDR
+      - net.Pipe
+      - net.Dial
+      - net.DialContext
+      - net.DialTimeout
+      - net.FileConn
+      - net.Read
+      - net.ReadFrom
+      - net.ReadFromIP
+      - net.ReadMsgIP
+      - net.RemoteAddr
+      - net.Write
+      - net.WriteMsgIP
+      - net.WriteTo
+      - net.WriteToIP
+      - net.LookupAddr
+      - net.LookupCNAME
+      - net.LookupHost
+      - net.LookupIP
+      - net.LookupIPAddr
+      - net.LookupMX
+      - net.LookupNS
+      - net.LookupPort
+      - net.LookupSRV
+      - net.LookupTXT
+      - net.ResolveTCPAddr
+      - net.ListenTCP
+      - net.Accept
+      - net.AcceptTCP
+      - net.SyscallConn
+      - net.ResolveUDPAddr
+      - net.Network
+      - net.DialUDP
+      - net.ListenMulticastUDP
+      - net.ListenUDP
+      - net.ReadFromUDP
+      - net.ReadMsgUDP
+      - net.WriteToUDP
+      - net.ResolveUnixAddr
+      - net.ListenUnixgram
+      - net.ReadFromUnix
+      - net.ReadMsgUnix
+      - net.ListenUnix
+      - net.AcceptUnix
+  - id: HTTP_METHODS
+    title: HTTP server functions used
+    summary: Can run an HTTP server
+    description: |
+      Package http provides HTTP client and server implementations.
+    patterns:
+      - http.ListenAndServe
+      - http.ListenAndServeTLS
+      - http.Serve
+      - http.ServeContent
+      - http.ServeFile
+      - http.ServeTLS
+      - http.SetCookie
+      - http.Do
+      - http.Get
+      - http.Head
+      - http.Post
+      - http.PostForm
+      - http.Handle
+      - http.FileServer
+      - http.ServeHTTP
+      - http.NewRequest
+      - http.NewRequestWithContext
+      - http.ReadRequest
+      - http.AddCookie
+      - http.BasicAuth
+      - http.ParseForm
+      - http.ParseMultipartForm
+      - http.PostFormValue
+      - http.WithContext
+      - http.WriteProxy
+      - http.PostForm
+      - http.NewFileTransport
+      - httputil.DumpRequest
+      - httputil.DumpResponse
+      - httputil.NewChunkedReader
+      - httputil.NewChunkedWriter
+      - httputil.NewSingleHostReverseProxy
+      - httputil.ServeHTTP
+      - golang.org/x/net/http2
+  - id: RPC_METHODS
+    title: RPC functions used
+    summary: Can Execute Remote Procedures
+    description: |
+      Package rpc provides access to the exported methods of an object across a network or other I/O connection. A server registers an object, making it visible as a service with the name of the type of the object. After registration, exported methods of the object will be accessible remotely. A server may register multiple objects (services) of different types but it is an error to register multiple objects of the same type.
+    patterns:
+      - rpc.Accept
+      - rpc.HandleHTTP
+      - rpc.Register
+      - rpc.RegisterName
+      - rpc.ServeCodec
+      - rpc.ServeConn
+      - rpc.ServeRequest
+      - rpc.Dial
+      - rpc.DialHTTP
+      - rpc.DialHTTPPath
+      - rpc.NewClient
+      - rpc.NewClientWithCodec
+      - rpc.Call
+  - id: HTML_ESCAPE
+    title: HTML escape function used
+    summary: Can manipulate HTML
+    description: |
+      EscapeString escapes special characters like "<" to become "&lt;". It escapes only five such characters: <, >, &, ' and ". UnescapeString(EscapeString(s)) == s always holds, but the converse isn't always true.
+    patterns:
+      - html.EscapeString
+  - id: TEXT_TEMPLATE
+    title: Text template functions used
+    summary: Uses vulnerable text templates
+    description: |
+      Package template implements data-driven templates for generating textual output.
+      To generate HTML output, use package html/template, which has the same interface as this package but automatically secures HTML output against certain attacks.
+    patterns:
+      - text.HTMLEscape
+      - text.HTMLEscapeString
+      - text.HTMLEscaper
+      - text.JSEscape
+      - text.JSEscapeString
+      - text.JSEscaper
+      - text.URLQueryEscaper
+  - id: XML_METHODS
+    title: XML functions used
+    summary: Can perform XML Read and Write operations
+    description: |
+      Package xml implements a simple XML 1.0 parser that understands XML name spaces.
+    patterns:
+      - xml.Marshal
+      - xml.MarshalIndent
+      - xml.Unmarshal
+      - xml.Decode
+  - id: ZIP_METHODS
+    title: ZIP functions used
+    summary: Can perform Zip archive operations
+    description: |
+      Package zip provides support for reading and writing ZIP archives.
+    patterns:
+      - compress.NewReader
+      - compress.Read
+      - compress.MultiStream
+      - zlib.NewReader
+      - bzip2.NewReader
+      - gzip.NewReader
+      - flate.NewReader
+      - lzw.NewReader
+      - zip.FileInfo
+      - zip.OpenReader
+      - zip.NewReader
+      - zip.RegisterDecompressor
+      - zip.Open
+      - zip.Create
+      - zip.CreateRaw
+      - archive/tar
+      - github.com/ulikunitz/xz
+  - id: GIT_METHODS
+    title: Git library used
+    summary: Can perform Git Read and Write operations
+    description: |
+      Git library is used for performing various operations against repository.
+    patterns:
+      - gopkg.in/src-d/go-git
+  - id: GITHUB_SDK
+    title: GitHub SDK used
+    summary: Works with GitHub
+    description: |
+      GitHub SDK is used for performing various operations against GitHub account.
+    patterns:
+      - github.com/google/go-github
+  - id: WEAK_CRYPTO
+    title: Weak cryptographic algorithm is used
+    summary: Uses Weak Cryptographic Algorithms
+    description: |
+      When there is a need to store or transmit sensitive data, use strong, up-to-date cryptographic algorithms to encrypt that data. Select a well-vetted algorithm that is currently considered to be strong by experts in the field, and use well-tested implementations.
+      Some older algorithms, once thought to require a billion years of computing time, can now be broken in days or hours. This includes MD4, MD5, SHA1, DES, and other algorithms that were once regarded as strong.
+    patterns:
+      - SHA1.Create
+      - RIPEMD160Managed.Create
+      - TripleDES.Create
+      - crypto/md4
+      - crypto/md5
+      - crypto/sha1
+  - id: SSH_METHODS
+    title: ssh library used
+    summary: Can perform SSH operations
+    description: |
+      SSH library is used for communicating with remote servers.
+    patterns:
+      - golang.org/x/crypto/ssh
+      - github.com/kevinburke/ssh_config
+  - id: DOCKER_SDK
+    title: Docker library used
+    summary: Works with Docker
+    description: |
+      Docker library is used for building containers and communicating with docker registry.
+    patterns:
+      - github.com/docker/docker
+  - id: KUBERNETES_SDK
+    title: Kubernetes library used
+    summary: Works with Kubernetes
+    description: |
+      Kubernetes client library is used for communicating with kubernetes server.
+    patterns:
+      - k8s.io/client-go
+      - k8s.io/apimachinery
+  - id: OPENSHIFT_SDK
+    title: OpenShift library used
+    summary: Works with OpenShift
+    description: |
+      SDK for the Red Hat OpenShift Cluster Manager is used.
+    patterns:
+      - github.com/openshift-online/ocm-sdk-go
+  - id: AWS_SDK
+    title: AWS SDK used
+    summary: Works with AWS
+    description: |
+      SDK for the Red Hat OpenShift Cluster Manager is used.
+    patterns:
+      - github.com/aws/aws-sdk-go
+  - id: GCP_SDK
+    title: Google Cloud platform SDK used
+    summary: Works with Google Cloud Platform
+    description: |
+      SDK for the Google Cloud Platform is used.
+    patterns:
+      - cloud.google.com/go
+  - id: AZURE_SDK
+    title: Azure SDK used
+    summary: Works with Azure
+    description: |
+      Azure SDK is used.
+    patterns:
+      - github.com/Azure/azure-sdk-for-go

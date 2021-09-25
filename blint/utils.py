@@ -34,6 +34,53 @@ ignore_directories = [
     "mocks",
 ]
 
+strings_allowlist = [
+    "()",
+    "[]",
+    "{}",
+    " ",
+    "&*",
+    "(*",
+    "$*",
+    "!*",
+    "*func",
+    "*map",
+    "Enabled",
+    "crypto/",
+    "readBase",
+    "toFloat",
+    "encoding/",
+    "*tls",
+    "*http",
+    "*grpc",
+    "protobuf:",
+    "*runtime",
+    "*x509",
+    "*[",
+    "*struct",
+    "github.com",
+    "vendor/",
+    "golang.org",
+    "gopkg.in",
+    "*reflect",
+    "*base64",
+    "*pgtype",
+    "*dsa",
+    "*log",
+    "*sql",
+    "*zip",
+    "*json",
+    "*yaml",
+    "*xz",
+    "*errors",
+    "*flag",
+    "*object",
+    "*ssh",
+    "*syntax",
+    "*zip",
+    "json:",
+]
+
 secrets_regex = {
     "artifactory": [
         re.compile(r'(?:\s|=|:|"|^)AKC[a-zA-Z0-9]{10,}'),
@@ -100,7 +147,7 @@ secrets_regex = {
             r"""[a-zA-Z]{3,10}://[^/\\s:@]{3,20}:[^/\\s:@]{3,20}@.{1,100}["'\\s]"""
         ),
         re.compile(
-            r"^(ftp|jdbc:mysql)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"
+            r"(ftp|jdbc:mysql)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"
         ),
     ],
     "authorization": [
@@ -122,32 +169,69 @@ secrets_regex = {
 
 def is_base64(s):
     try:
-        return base64.b64encode(base64.b64decode(s)) == s
-    except Exception as e:
-        print(e)
+        return s.endswith("==") or base64.b64encode(base64.b64decode(s)) == s
+    except Exception:
         return False
 
 
 def decode_base64(s):
+    s = s.replace("\n", "")
     if is_base64(s):
-        return base64.b64decode(s)
+        decoded = base64.b64decode(s)
+        try:
+            return decoded.decode()
+        except Exception:
+            return str(decoded)
     return s
 
 
-def calculate_shannon_entropy(data):
+def is_camel_case(s):
+    s = re.sub(r"[*._#%&!\"]", "", s)
+    for x in string.digits:
+        if x in s:
+            return False
+    for x in string.punctuation:
+        if x in s:
+            return False
+    return s != s.lower() and s != s.upper() and "_" not in s
+
+
+def calculate_entropy(data):
     if not data or len(data) < 8:
         return 0
+    for text in strings_allowlist:
+        if text in data:
+            return 0
     entropy = 0.0
     # Remove protocol prefixes which tend to increase false positives
     data = re.sub(r"(file|s3|http(s)?|email|ftp)://", "", data)
+    digit_found = False
+    punctuation_found = False
+    ascii_found = False
     for x in charset:
         p_x = float(data.count(x)) / len(data)
         if p_x > 0:
+            if not ascii_found and x in string.ascii_letters:
+                ascii_found = True
+            if not digit_found and x in string.digits:
+                digit_found = True
+            if not punctuation_found and x in string.punctuation:
+                punctuation_found = True
             entropy += -p_x * math.log(p_x, 256)
-    return round(entropy, 2)
+    if is_camel_case(data) or data.lower() == data or data.upper() == data:
+        return min(0.2, round(entropy, 2))
+    if ascii_found and (digit_found or punctuation_found):
+        if not punctuation_found:
+            return min(0.38, round(entropy, 2))
+        return round(entropy, 2)
+    else:
+        return min(0.4, round(entropy, 2))
 
 
 def check_secret(data):
+    for text in strings_allowlist:
+        if text in data:
+            return None
     for category, rlist in secrets_regex.items():
         for regex in rlist:
             for match in regex.findall(data):

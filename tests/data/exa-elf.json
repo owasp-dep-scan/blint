@@ -1,0 +1,183 @@
+{
+ "is_shared_library": true,
+ "magic": "7f 45 4c 46",
+ "class": "CLASS64",
+ "endianness": "LSB",
+ "identity_version": "CURRENT",
+ "identity_os_abi": "SYSTEMV",
+ "identity_abi_version": 0,
+ "file_type": "DYNAMIC",
+ "machine_type": "x86_64",
+ "object_file_version": "CURRENT",
+ "entrypoint": 50336,
+ "processor_flag": "0",
+ "name": "exa",
+ "imagebase": 0,
+ "interpreter": "/lib64/ld-linux-x86-64.so.2",
+ "is_pie": true,
+ "virtual_size": 3637248,
+ "has_nx": true,
+ "relro": "full",
+ "exe_type": "gnubinary",
+ "has_canary": true,
+ "dynamic_entries": [
+  {
+   "name": "libgcc_s.so.1",
+   "tag": "NEEDED",
+   "value": 1
+  },
+  {
+   "name": "librt.so.1",
+   "tag": "NEEDED",
+   "value": 404
+  },
+  {
+   "name": "libpthread.so.0",
+   "tag": "NEEDED",
+   "value": 429
+  },
+  {
+   "name": "libm.so.6",
+   "tag": "NEEDED",
+   "value": 983
+  },
+  {
+   "name": "libdl.so.2",
+   "tag": "NEEDED",
+   "value": 1004
+  },
+  {
+   "name": "libc.so.6",
+   "tag": "NEEDED",
+   "value": 1021
+  }
+ ],
+ "symbols_version": [],
+ "notes": [
+  {
+   "description": "00 00 00 00 02 00 00 00 06 00 00 00 20 00 00 00",
+   "type": "ABI_TAG",
+   "details": "",
+   "sdk_version": "",
+   "ndk_version": "",
+   "ndk_build_number": "",
+   "abi": "NOTE_ABIS.LINUX",
+   "version": "2.6.32"
+  },
+  {
+   "description": "3c 48 5f 27 e5 34 55 59 2e a2 0a 84 ca 52 fd 6f ...",
+   "type": "BUILD_ID",
+   "details": "",
+   "sdk_version": "",
+   "ndk_version": "",
+   "ndk_build_number": "",
+   "abi": "",
+   "version": ""
+  }
+ ],
+ "strings": [],
+ "functions": [
+  {
+   "index": 0,
+   "name": "__dt_init",
+   "address": 49240
+  },
+  {
+   "index": 6,
+   "name": "__dt_fini_array",
+   "address": 50528
+  },
+  {
+   "index": 7,
+   "name": "__dt_init_array",
+   "address": 50592
+  },
+  {
+   "index": 659,
+   "name": "__dt_init_array",
+   "address": 508640
+  },
+  {
+   "index": 983,
+   "name": "git_buf_dispose",
+   "address": 695616
+  },
+  {
+   "index": 1008,
+   "name": "git_error_clear",
+   "address": 700384
+  },
+  {
+   "index": 1009,
+   "name": "git_error_last",
+   "address": 700480
+  },
+  {
+   "index": 1015,
+   "name": "git_libgit2_init",
+   "address": 700944
+  },
+  {
+   "index": 1232,
+   "name": "git_repository_discover",
+   "address": 776224
+  },
+  {
+   "index": 1243,
+   "name": "git_repository_workdir",
+   "address": 778592
+  },
+  {
+   "index": 1255,
+   "name": "git_repository_free",
+   "address": 782960
+  },
+  {
+   "index": 1257,
+   "name": "git_repository_open",
+   "address": 787184
+  },
+  {
+   "index": 1268,
+   "name": "git_status_list_entrycount",
+   "address": 790208
+  },
+  {
+   "index": 1269,
+   "name": "git_status_byindex",
+   "address": 790272
+  },
+  {
+   "index": 1270,
+   "name": "git_status_list_free",
+   "address": 790352
+  },
+  {
+   "index": 1271,
+   "name": "git_status_list_new",
+   "address": 790432
+  },
+  {
+   "index": 2047,
+   "name": "__dt_fini",
+   "address": 1214752
+  }
+ ],
+ "ctor_functions": [
+  {
+   "index": 0,
+   "name": "__dt_init_array",
+   "address": 508640
+  },
+  {
+   "index": 1,
+   "name": "__dt_init_array",
+   "address": 50592
+  },
+  {
+   "index": 2,
+   "name": "__dt_init",
+   "address": 49240
+  }
+ ]
+}

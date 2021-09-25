@@ -1,0 +1,105 @@
+---
+- id: CHECK_NX
+  title: Missing Non-Executable Memory Protection
+  description: |
+    Most modern CPUs protect against executing non-executable memory regions (heap, stack, etc). This is known either as `Non-eXecute (NX) or eXecute-Disable (XD)`. This protection reduces the areas an attacker can use to perform arbitrary code execution.
+    An operating system with support for the NX bit may mark certain areas of memory as non-executable. The processor will then refuse to execute any code residing in these areas of memory. The general technique, known as executable space protection, also called Write XOR Execute, is used to prevent certain types of malicious software from taking over computers by inserting their code into another program's data storage area and running their own code from within this section; one class of such attacks is known as the buffer overflow attack.
+    Do not disable this protection. Check and remove the below gcc flags.
+
+    ```bash
+    gcc -fno-stack-protector -z execstack
+    ```
+  severity: critical
+  exe_types:
+    - gnubinary
+    - gobinary
+- id: CHECK_PIE
+  title: Missing Position-Independent Executable (PIE) Protection
+  description: |
+    `Position-Independent Executable (PIE)` executes properly regardless of its absolute address. PIE binaries are used in some security-focused Linux distributions to allow PaX or Exec Shield to use address space layout randomization to prevent attackers from knowing where existing executable code is during a security attack using exploits that rely on knowing the offset of the executable code in the binary, such as return-to-libc attacks.
+    Apple's macOS and iOS fully support PIE executables; a warning is issued when non-PIE iOS executables are submitted for approval to Apple's App Store.
+    Android enabled support for PIEs in Jelly Bean and removed non-PIE linker support in Lollipop.
+    For go binary builds, enable pie by specifying the buildmode=pie as described in the [documentation](https://pkg.go.dev/cmd/go#hdr-Build_modes). The below command line enables pie along with relro and other protections.
+
+    ```bash
+    go build -buildmode=pie -ldflags -extldflags=-Wl,-z,now,-z,relro
+    ```
+  severity: high
+  exe_types:
+    - gnubinary
+    - gobinary
+- id: CHECK_RELRO
+  title: Missing Relocation Read-Only (RELRO) Protection
+  description: |
+    A dynamically linked ELF binary uses a look-up table called the Global Offset Table (GOT) to dynamically resolve functions that are located in shared libraries. Such calls point to the Procedure Linkage Table (PLT), which is present in the .plt section of the binary. The GOT is populated dynamically as the program is running. The first time a shared function is called, the GOT contains a pointer back to the PLT, where the dynamic linker is called to find the actual location of the function in question. Since GOT exists at a predefined place in memory, a program that contains a vulnerability allowing an attacker to write 4 bytes at a controlled place in memory (such as some integer overflows leading to out-of-bounds write), may be exploited to allow arbitrary code execution.
+    To prevent the above mentioned security weakness, we need to ensure that the linker resolves all dynamically linked functions at the beginning of the execution, and then makes the GOT read-only.  This technique is called RELRO and ensures that the GOT cannot be overwritten in vulnerable ELF binaries.
+
+    RELRO can be turned on when compiling a program by using the following options:
+
+    ```bash
+    gcc -g -O0 -Wl,-z,relro,-z,now -o <binary_name> <source_code>
+    ```
+
+    The below command line enables relro along with other protections.
+
+    ```bash
+    go build -buildmode=pie -ldflags -extldflags=-Wl,-z,now,-z,relro
+    ```
+  severity: high
+  exe_types:
+    - gnubinary
+    - gobinary
+- id: CHECK_CANARY
+  title: Missing Canary Protection
+  description: |
+    Canaries or canary words are known values that are placed between a buffer and control data on the stack to monitor buffer overflows. When the buffer overflows, the first data to be corrupted will usually be the canary, and a failed verification of the canary data will therefore alert of an overflow, which can then be handled, for example, by invalidating the corrupted data.
+    Canary can be set in GCC with the following parameters:
+    ```bash
+    -fstack-protector enables protection, but only inserts protection for functions that have arrays in local variables
+    -fstack-protector-all Enable protection, insert protection for all functions
+    -fstack-protector-strong
+    -fstack-protector-explicit Only protects functions with explicit stack_protect attribute
+    -fno-stack-protector Disable protection.
+    ```
+  severity: medium
+  exe_types:
+    - gnubinary
+- id: CHECK_RPATH
+  title: Avoid rpath and runpath
+  description: |
+    The job of the dynamic linker and loader (ld.so) is to resolve the executable's dependencies on shared libraries and to load the required ones at run-time. It relies on the executable's NEEDED headers to find the shared libraries with a matching SONAME (which includes the library name and ABI version). The current library search path:
+    - The RPATH binary header (set at build-time) of the library causing the lookup (if any)
+    - The RPATH binary header (set at build-time) of the executable
+    - The LD_LIBRARY_PATH environment variable (set at run-time)
+    - The RUNPATH binary header (set at build-time) of the executable
+    - /etc/ld.so.cache
+    - Base library directories (/lib and /usr/lib)
+
+    ## Why RPATH is an issue
+    A problem arises when binary A defines a NEEDED dependency on libraries B.so.1 and C.so.2, while library B.so.1 depends on library C.so.1. This means parts of the code will use one version of a library and other parts another. The many versions of a library scenario is needed to deal with gradual migrations, but maintainers shuffle libraries around when dealing with such a situation and packages with RPATH could end up finding the wrong version of a dependent library, one with incompatible dependencies.
+
+    Since RPATH is set at build-time, it can only be overridden with a rebuild or by setting the LD_LIBRARY_PATH variable and this turns packages using it into management problems:
+
+    LD_LIBRARY_PATH can't be used because it has its own problems: it'll be inherited by all processes generated by the parent and is therefore also discouraged for distribution-wide use for its possible side-effects.
+
+    Needing a rebuild means that all dependencies of the affected library would need to be rebuilt during any move, which is an unacceptable scenario for a distribution.
+    This situation would be better dealt with by the dynamic linker, since maintainers would have a central place to inform all dependent packages where to find libraries during transitional periods.
+  severity: medium
+  exe_types:
+    - gnubinary
+- id: CHECK_VIRTUAL_SIZE
+  title: Optimize binary virtual size
+  description: |
+    Checks the binary virtual size when mapped in memory (default 30MB).
+    Use a packer such as [upx](https://github.com/upx/upx) to compress your binaries.
+    For gcc, use flags such as `-s`, `-Os` or strip unwanted comment and build id sections from your ELF binaries.
+    When you compile and link your Go programs with the gc toolchain on Linux, macOS, FreeBSD or NetBSD, the resulting binaries contain DWARFv4 debugging information that recent versions (≥7.5) of the GDB debugger can use to inspect a live process or a core dump.
+    Use the -s and -w linker flags to strip the debugging information
+    ```
+    go build -ldflags="-s -w" main.go
+    ```
+  severity: medium
+  limit: 30MB
+  exe_types:
+    - gnubinary
+    - gobinary

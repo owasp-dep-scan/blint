@@ -1,9 +1,11 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.0"
+version = "0.0.0"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
 license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://rosa.cx"
 repository = "https://git.sr.ht/~prabhu/blint"
 keywords = ["linter", "binary", "security", "sast"]
 classifiers = [
@@ -16,6 +18,7 @@ classifiers = [
         "Programming Language :: Python :: 3.9",
         "Operating System :: OS Independent",
 ]
+include = ["blint/data/*.yml"]
 
 [tool.poetry.scripts]
 blint = 'blint.cli:main'

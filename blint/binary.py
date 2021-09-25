@@ -1,11 +1,12 @@
+import textwrap
 import lief
 from lief import ELF, MachO
 
 from blint.logger import LOG
-from blint.utils import *
+from blint.utils import calculate_entropy, check_secret, decode_base64
 
-
-MIN_ENTROPY = 0.4
+MIN_ENTROPY = 0.39
+MIN_LENGTH = 80
 
 
 def parse_desc(e):
@@ -104,10 +105,16 @@ def parse_functions(functions):
         func_list = []
         for idx, f in enumerate(functions):
             if f.name and f.address:
-                func_list.append({"index": idx, "name": f.name, "address": f.address})
+                func_list.append(
+                    {
+                        "index": idx,
+                        "name": f.name,
+                        "address": f.address,
+                    }
+                )
         return func_list
     except lief.exception:
-        return None
+        return []
 
 
 def parse_strings(parsed_obj):
@@ -117,9 +124,11 @@ def parse_strings(parsed_obj):
         strings = parsed_obj.strings
         for s in strings:
             if s and "[]" not in s and "{}" not in s:
-                entropy = calculate_shannon_entropy(s)
+                entropy = calculate_entropy(s)
                 secret_type = check_secret(s)
-                if (entropy and entropy > MIN_ENTROPY) or secret_type:
+                if (
+                    entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH)
+                ) or secret_type:
                     strings_list.append(
                         {
                             "value": decode_base64(s) if s.endswith("==") else s,
@@ -129,12 +138,55 @@ def parse_strings(parsed_obj):
                     )
         return strings_list
     except lief.exception:
-        return None
+        return []
+
+
+def parse_symbols(symbols):
+    try:
+        LOG.debug("Parsing symbols")
+        symbols_list = []
+        for symbol in symbols:
+            symbol_version = symbol.symbol_version if symbol.has_version else ""
+            is_imported = False
+            is_exported = False
+            if symbol.imported:
+                is_imported = True
+            if symbol.exported:
+                is_exported = True
+            try:
+                symbol_name = symbol.demangled_name
+            except Exception:
+                symbol_name = symbol.name
+            symbols_list.append(
+                {
+                    "name": symbol_name,
+                    "type": str(symbol.type).split(".")[-1],
+                    "value": symbol.value,
+                    "visibility": str(symbol.visibility).split(".")[-1],
+                    "binding": str(symbol.binding).split(".")[-1],
+                    "is_imported": is_imported,
+                    "is_exported": is_exported,
+                    "version": str(symbol_version),
+                }
+            )
+        return symbols_list
+    except lief.exception:
+        return []
 
 
 def parse_interpreter(parsed_obj):
     try:
         return parsed_obj.interpreter
+    except lief.exception:
+        return None
+
+
+def detect_exe_type(parsed_obj):
+    try:
+        if parsed_obj.has_section(".note.go.buildid"):
+            return "gobinary"
+        elif parsed_obj.has_section(".note.gnu.build-id"):
+            return "gnubinary"
     except lief.exception:
         return None
 
@@ -197,26 +249,28 @@ def parse(exe_file):
             metadata["virtual_size"] = parsed_obj.virtual_size
             metadata["has_nx"] = parsed_obj.has_nx
             metadata["relro"] = parse_relro(parsed_obj)
+            metadata["exe_type"] = detect_exe_type(parsed_obj)
             # Canary check
             canary_sections = ["__stack_chk_fail", "__intel_security_cookie"]
             for section in canary_sections:
                 try:
                     if parsed_obj.get_symbol(section):
                         metadata["has_canary"] = True
+                        break
                 except lief.not_found:
-                    pass
+                    metadata["has_canary"] = False
             # rpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RPATH):
                     metadata["has_rpath"] = True
             except lief.not_found:
-                pass
+                metadata["has_rpath"] = False
             # runpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RUNPATH):
                     metadata["has_runpath"] = True
             except lief.not_found:
-                pass
+                metadata["has_runpath"] = False
             static_symbols = parsed_obj.static_symbols
             if len(static_symbols):
                 metadata["static"] = True
@@ -259,8 +313,22 @@ def parse(exe_file):
             except lief.exception:
                 pass
             metadata["strings"] = parse_strings(parsed_obj)
-            metadata["functions"] = parse_functions(parsed_obj.functions)
-            metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+            try:
+                metadata["static_symbols"] = parse_symbols(parsed_obj.static_symbols)
+            except lief.exception:
+                pass
+            try:
+                metadata["dynamic_symbols"] = parse_symbols(parsed_obj.dynamic_symbols)
+            except lief.exception:
+                pass
+            try:
+                metadata["functions"] = parse_functions(parsed_obj.functions)
+            except lief.exception:
+                pass
+            try:
+                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+            except lief.exception:
+                pass
         elif isinstance(parsed_obj, MachO.Binary):
             metadata["name"] = parsed_obj.name
             metadata["imagebase"] = parsed_obj.imagebase
