@@ -1,0 +1,46 @@
+image: alpine/latest
+packages:
+  - python3
+  - py3-pip
+  - python3-dev
+  - curl
+  - wget
+  - jq
+  - tree
+  - cmake
+  - make
+  - gcc
+  - g++
+  - musl-dev
+  - libffi-dev
+  - openssl-dev
+  - py3-cffi
+  - py3-twine
+  - py3-wheel
+  - py3-setuptools
+tasks:
+  - install-rust-tooling: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
+      source $HOME/.cargo/env
+      rustup target add x86_64-unknown-linux-musl
+      cargo install pyoxidizer --version 0.17.0
+  - install-poetry: |
+      curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
+  - install-pkgs: |
+      cd blint
+      ~/.local/bin/poetry install
+  - run-lint: |
+      cd blint
+      ~/.local/bin/poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+      ~/.local/bin/poetry run flake8 . --count --exit-zero --statistics
+  - run-tests: |
+      cd blint
+      ~/.local/bin/poetry run pytest --cov=blint tests
+  - build-bins: |
+      cd blint
+      source $HOME/.cargo/env
+      export PYTHONIOENCODING=utf-8
+      ~/.local/bin/poetry export -f requirements.txt > requirements-dist.txt
+      pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
+  - list-builds: |
+      tree ./blint/build

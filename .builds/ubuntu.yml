@@ -12,6 +12,10 @@ packages:
   - gcc
   - g++
   - musl-tools
+  - language-pack-en
+environment:
+  PYTHONIOENCODING: utf-8
+  LANG: en_US.utf-8
 tasks:
   - install-py-pkgs: |
       python3 -m pip install twine setuptools wheel
@@ -27,26 +31,21 @@ tasks:
   - run-tests: |
       cd blint
       ~/.local/bin/poetry run pytest --cov=blint tests
-  - install-sccache: |
-      wget -O sccache.tar.gz --progress dot:mega https://github.com/mozilla/sccache/releases/download/v0.2.15/sccache-v0.2.15-x86_64-unknown-linux-musl.tar.gz
-      tar -xvzf sccache.tar.gz
-      mv sccache-*/sccache $HOME/.cargo/bin/sccache
-      chmod +x $HOME/.cargo/bin/sccache
-      sccache --start-server
   - install-rust-tooling: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
       source $HOME/.cargo/env
       rustup target add x86_64-unknown-linux-gnu
-      rustup target add x86_64-unknown-linux-musl
-      rustup target add x86_64-pc-windows-msvc
-      rustup target add x86_64-apple-darwin
-      rustup target add aarch64-apple-darwin
   - build-bins: |
       cd blint
       source $HOME/.cargo/env
       ~/.local/bin/poetry export -f requirements.txt > requirements-dist.txt
       python3 -m pip install pyoxidizer
       ~/.local/bin/pyoxidizer build --release --target-triple x86_64-unknown-linux-gnu
-      ~/.local/bin/pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
-  - list-builds: |
-      tree ./blint/build
+  - self-blint: |
+      ./blint/build/x86_64-unknown-linux-gnu/release/install/blint -i ./blint/build/x86_64-unknown-linux-gnu/release/install/blint -o reports
+      tree reports
+  - pkg-builds: |
+      cd ./blint/build/x86_64-unknown-linux-gnu/release/install
+      tar -cvzf $HOME/blint-linux-gnu.tar.gz .
+artifacts:
+  - ./blint-linux-gnu.tar.gz
