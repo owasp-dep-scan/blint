@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import sys
 
 from blint.analysis import report, start
 
@@ -21,7 +22,8 @@ def build_args():
     Constructs command line arguments for the vulndb tool
     """
     parser = argparse.ArgumentParser(
-        description="Linting tool for binary files powered by lief."
+        prog=sys.executable,
+        description="Linting tool for binary files powered by lief.",
     )
     parser.add_argument(
         "-i",

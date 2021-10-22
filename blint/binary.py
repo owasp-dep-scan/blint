@@ -1,4 +1,5 @@
 import textwrap
+
 import lief
 from lief import ELF, MachO
 

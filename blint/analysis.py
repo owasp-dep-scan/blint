@@ -1,3 +1,4 @@
+import importlib.resources
 import json
 import os
 import re
@@ -18,9 +19,10 @@ from blint.binary import parse
 from blint.logger import LOG, console
 from blint.utils import find_exe_files
 
-rules_file = Path(__file__).parent / "data" / "rules.yml"
-review_methods_dir = Path(__file__).parent / "data" / "annotations"
-review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
+review_files = []
+review_methods_dir = importlib.resources.contents("blint.data.annotations")
+review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
+# review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
 
 rules_dict = {}
 review_methods_dict = defaultdict(list)
@@ -31,7 +33,7 @@ review_rules_cache = {}
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 
 # Load the rules
-with open(rules_file) as fp:
+with importlib.resources.open_text("blint.data", "rules.yml") as fp:
     raw_data = fp.read().split("---")
     for tmp_data in raw_data:
         if not tmp_data:
@@ -44,7 +46,9 @@ with open(rules_file) as fp:
 for review_methods_file in review_files:
     if DEBUG_MODE:
         LOG.debug(f"Loading review file {review_methods_file}")
-    with open(review_methods_file) as fp:
+    with importlib.resources.open_text(
+        "blint.data.annotations", review_methods_file
+    ) as fp:
         raw_data = fp.read().split("---")
         for tmp_data in raw_data:
             if not tmp_data:

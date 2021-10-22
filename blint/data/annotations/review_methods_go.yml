@@ -81,6 +81,8 @@ rules:
       - syscall.ForkExec
       - syscall.ForkAndExecInChild
       - syscall.ForkExecPipe
+      - execabs.Command
+      - execabs.CommandContext
   - id: SYSCALL_METHODS
     title: Syscall functions used
     summary: Can perform system-level operations
