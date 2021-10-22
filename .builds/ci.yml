@@ -27,6 +27,12 @@ tasks:
   - run-tests: |
       cd blint
       ~/.local/bin/poetry run pytest --cov=blint tests
+  - install-sccache: |
+      wget -O sccache.tar.gz --progress dot:mega https://github.com/mozilla/sccache/releases/download/v0.2.15/sccache-v0.2.15-x86_64-unknown-linux-musl.tar.gz
+      tar -xvzf sccache.tar.gz
+      mv sccache-*/sccache $HOME/.cargo/bin/sccache
+      chmod +x $HOME/.cargo/bin/sccache
+      sccache --start-server
   - install-rust-tooling: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
       source $HOME/.cargo/env
