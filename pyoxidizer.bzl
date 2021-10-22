@@ -164,7 +164,7 @@ def make_exe(dist):
 
     # Enable the standard path-based importer which attempts to load
     # modules from the filesystem.
-    # python_config.filesystem_importer = True
+    python_config.filesystem_importer = True
 
     # Set `sys.frozen = True`
     # python_config.sys_frozen = True

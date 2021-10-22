@@ -2,10 +2,16 @@ image: ubuntu/lts
 packages:
   - python3.8
   - python3-pip
+  - python3-dev
   - curl
   - wget
   - jq
   - tree
+  - cmake
+  - make
+  - gcc
+  - g++
+  - musl-tools
 tasks:
   - install-py-pkgs: |
       python3 -m pip install twine setuptools wheel
@@ -26,17 +32,15 @@ tasks:
       source $HOME/.cargo/env
       rustup target add x86_64-unknown-linux-gnu
       rustup target add x86_64-unknown-linux-musl
-      rustup target add x86_64-pc-windows-gnu
+      rustup target add x86_64-pc-windows-msvc
       rustup target add x86_64-apple-darwin
       rustup target add aarch64-apple-darwin
   - build-bins: |
       cd blint
       source $HOME/.cargo/env
       ~/.local/bin/poetry export -f requirements.txt > requirements-dist.txt
-      pyoxidizer build --release --target-triple x86_64-unknown-linux-gnu
-      pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
-      pyoxidizer build --release --target-triple x86_64-pc-windows-gnu
-      pyoxidizer build --release --target-triple x86_64-apple-darwin
-      pyoxidizer build --release --target-triple aarch64-apple-darwin
+      python3 -m pip install pyoxidizer
+      ~/.local/bin/pyoxidizer build --release --target-triple x86_64-unknown-linux-gnu
+      ~/.local/bin/pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
   - list-builds: |
       tree ./blint/build
