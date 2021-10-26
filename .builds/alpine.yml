@@ -19,6 +19,7 @@ packages:
   - py3-wheel
   - py3-setuptools
   - rust
+  - cargo
   - ca-certificates
 environment:
   PYTHONIOENCODING: utf-8
