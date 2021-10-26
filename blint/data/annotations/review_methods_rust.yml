@@ -5,7 +5,7 @@ exe_type: gnubinary
 rules:
   - id: FILE_IO_READ
     title: IO functions used
-    summary: Can Read Files & Directory
+    summary: Can Read Files
     description: |
       std::fs module contains basic methods to manipulate the contents of the local filesystem. All methods in this module represent cross-platform filesystem operations.
     patterns:
@@ -43,7 +43,7 @@ rules:
       - std::path::Path::try_exists
   - id: FILE_IO_WRITE
     title: IO functions used
-    summary: Can Create Files & Directory
+    summary: Can Create and Remove Files
     description: |
       std::fs module contains basic methods to manipulate the contents of the local filesystem. All methods in this module represent cross-platform filesystem operations.
     patterns:
@@ -54,6 +54,7 @@ rules:
       - std::fs::hardlink
       - std::fs::remove_dir
       - std::fs::remove_dir_all
+      - std::sys_common::fs::remove_dir_all
       - std::fs::remove_file
       - std::fs::rename
       - std::fs::set_permissions
@@ -109,6 +110,7 @@ rules:
     description: |
       std::net module provides networking functionality for the Transmission Control and User Datagram Protocols, as well as types for IP and socket addresses.
     patterns:
+      - std::sys_common::net
       - std::net::TcpListener::accept
       - std::net::TcpListener::bind
       - std::net::TcpListener::incoming
@@ -118,6 +120,7 @@ rules:
       - std::net::TcpStream::connect_timeout
       - std::net::TcpStream::peer_addr
       - std::net::TcpStream::try_clone
+      - std::net::TcpStream::read_timeout
       - std::net::TcpStream::write_timeout
       - std::net::UdpSocket::bind
       - std::net::UdpSocket::broadcast
@@ -138,6 +141,7 @@ rules:
       - std::net::UdpSocket::set_multicast_loop_v6
       - std::net::UdpSocket::set_nonblocking
       - std::net::UdpSocket::try_clone
+      - std::net::UdpSocket::read_timeout
       - std::net::UdpSocket::write_timeout
       - std::os::unix::net::UnixListener
       - std::os::unix::net::UnixStream
@@ -211,6 +215,7 @@ rules:
       - std::ffi::OsString::shrink_to
       - std::ffi::OsString::shrink_to_fit
       - std::os::wasi::ffi::OsStrExt
+      - pyo3::ffi
   - id: WEAK_CRYPTO
     title: Weak cryptographic algorithm is used
     summary: Uses Weak Cryptographic Algorithms
@@ -236,3 +241,24 @@ rules:
       - hyper::service
       - hyper::Method
       - hyper::Uri
+  - id: BUNDLED_PYTHON
+    title: Bundled Python Runtime
+    summary: Includes bundled python runtime
+    description: |
+      Packages belonging to python.
+    patterns:
+      - python_oxidized_importer::importer
+      - python_oxidized_importer::python_resource_types
+      - python_oxidized_importer::python_resource_collector
+      - python_oxidized_importer::package_metadata
+      - python_oxidized_importer::conversion
+      - python_oxidized_importer::pkg_resources
+      - python_oxidized_importer::python_resources
+      - python_oxidized_importer::conversion
+      - python_packed_resources::writer
+      - python_packaging::bytecode
+      - python_oxidized_importer::decode_source
+      - python_packed_resources::resource
+      - python_packaging::policy
+      - pyo3::types
+      - pyo3::exceptions

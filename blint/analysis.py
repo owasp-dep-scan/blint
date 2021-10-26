@@ -11,7 +11,6 @@ from pathlib import Path
 
 import yaml
 from rich import box
-from rich.markdown import Markdown
 from rich.progress import Progress
 from rich.table import Table
 
@@ -185,12 +184,13 @@ def run_review(f, metadata):
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         results.update(run_review_methods_symbols(review_methods_list, functions_list))
     if review_symbols_list:
-        symbols_list = [
+        tmp_symbols_list = [
             f.get("name", "").lower() for f in metadata.get("dynamic_symbols", [])
         ]
-        symbols_list += [
+        tmp_symbols_list += [
             f.get("name", "").lower() for f in metadata.get("static_symbols", [])
         ]
+        symbols_list = [s for s in tmp_symbols_list if not s.startswith("_")]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         results.update(run_review_methods_symbols(review_symbols_list, symbols_list))
     return results
