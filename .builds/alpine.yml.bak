@@ -10,6 +10,7 @@ packages:
   - cmake
   - make
   - gcc
+  - git
   - g++
   - musl-dev
   - libffi-dev
