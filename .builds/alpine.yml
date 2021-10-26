@@ -18,12 +18,13 @@ packages:
   - py3-twine
   - py3-wheel
   - py3-setuptools
+  - rust
   - ca-certificates
+environment:
+  PYTHONIOENCODING: utf-8
+  LANG: en_US.utf-8
 tasks:
   - install-rust-tooling: |
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
-      source $HOME/.cargo/env
-      rustup target add x86_64-unknown-linux-musl
       cargo install pyoxidizer --version 0.17.0
   - install-poetry: |
       curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
@@ -39,8 +40,6 @@ tasks:
       ~/.local/bin/poetry run pytest --cov=blint tests
   - build-bins: |
       cd blint
-      source $HOME/.cargo/env
-      export PYTHONIOENCODING=utf-8
       ~/.local/bin/poetry export -f requirements.txt > requirements-dist.txt
       pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
   - list-builds: |
