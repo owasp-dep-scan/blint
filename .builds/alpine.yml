@@ -18,6 +18,7 @@ packages:
   - py3-twine
   - py3-wheel
   - py3-setuptools
+  - py3-rich
 tasks:
   - install-rust-tooling: |
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -q -y
