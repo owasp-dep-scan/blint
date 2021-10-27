@@ -170,7 +170,7 @@ def run_review(f, metadata):
         LOG.warn("No review methods loaded!")
         return None
     exe_type = metadata.get("exe_type")
-    if not metadata or not metadata.get("functions") or not exe_type:
+    if not metadata or not exe_type:
         return None
     review_methods_list = review_methods_dict.get(exe_type)
     review_symbols_list = review_symbols_dict.get(exe_type)
@@ -179,18 +179,22 @@ def run_review(f, metadata):
         return None
     if review_methods_list:
         functions_list = [
-            re.sub(r"[*&()]", "", f.get("name", "")) for f in metadata.get("functions")
+            re.sub(r"[*&()]", "", f.get("name", ""))
+            for f in metadata.get("functions", [])
         ]
+        if metadata.get("magic", "").startswith("PE"):
+            functions_list += [
+                f.get("name", "") for f in metadata.get("static_symbols", [])
+            ]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         results.update(run_review_methods_symbols(review_methods_list, functions_list))
     if review_symbols_list:
-        tmp_symbols_list = [
+        symbols_list = [
             f.get("name", "").lower() for f in metadata.get("dynamic_symbols", [])
         ]
-        tmp_symbols_list += [
+        symbols_list += [
             f.get("name", "").lower() for f in metadata.get("static_symbols", [])
         ]
-        symbols_list = [s for s in tmp_symbols_list if not s.startswith("_")]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         results.update(run_review_methods_symbols(review_symbols_list, symbols_list))
     return results
@@ -218,11 +222,11 @@ def start(args, src, reports_dir):
             metadata = parse(f)
             exe_name = metadata.get("name", "")
             # In case of debug store raw metadata
-            if DEBUG_MODE:
-                metadata_file = Path(reports_dir) / (exe_name + "-metadata.json")
-                LOG.debug(f"Metadata written to {metadata_file}")
-                with open(metadata_file, mode="w") as ffp:
-                    json.dump(metadata, ffp, indent=True)
+            # if DEBUG_MODE:
+            metadata_file = Path(reports_dir) / (exe_name + "-metadata.json")
+            LOG.debug(f"Metadata written to {metadata_file}")
+            with open(metadata_file, mode="w") as ffp:
+                json.dump(metadata, ffp, indent=True)
             progress.update(
                 task, description=f"Checking [bold]{f}[/bold] against rules"
             )

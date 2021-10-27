@@ -5,7 +5,7 @@ exe_type: gobinary
 rules:
   - id: FILE_IOUTIL
     title: IO util functions used
-    summary: Can Read and Write Files
+    summary: Can Read and Write Files (using deprecated API)
     description: |
       Package ioutil implements some I/O utility functions.
       As of Go 1.16, the same functionality is now provided by package io or package os, and those implementations should be preferred in new code.

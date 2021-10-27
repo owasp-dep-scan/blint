@@ -22,7 +22,7 @@ def build_args():
     Constructs command line arguments for the vulndb tool
     """
     parser = argparse.ArgumentParser(
-        prog=sys.executable,
+        prog="blint",
         description="Linting tool for binary files powered by lief.",
     )
     parser.add_argument(

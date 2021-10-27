@@ -1,5 +1,5 @@
 import lief
-from lief import ELF, MachO
+from lief import ELF, MachO, PE
 
 from blint.logger import LOG
 from blint.utils import calculate_entropy, check_secret, decode_base64
@@ -103,7 +103,7 @@ def parse_functions(functions):
         LOG.debug("Parsing functions")
         func_list = []
         for idx, f in enumerate(functions):
-            if f.name and f.address:
+            if f.name and f.address and not f.name.startswith("_"):
                 func_list.append(
                     {
                         "index": idx,
@@ -156,18 +156,19 @@ def parse_symbols(symbols):
                 symbol_name = symbol.demangled_name
             except Exception:
                 symbol_name = symbol.name
-            symbols_list.append(
-                {
-                    "name": symbol_name,
-                    "type": str(symbol.type).split(".")[-1],
-                    "value": symbol.value,
-                    "visibility": str(symbol.visibility).split(".")[-1],
-                    "binding": str(symbol.binding).split(".")[-1],
-                    "is_imported": is_imported,
-                    "is_exported": is_exported,
-                    "version": str(symbol_version),
-                }
-            )
+            if not symbol_name.startswith("_"):
+                symbols_list.append(
+                    {
+                        "name": symbol_name,
+                        "type": str(symbol.type).split(".")[-1],
+                        "value": symbol.value,
+                        "visibility": str(symbol.visibility).split(".")[-1],
+                        "binding": str(symbol.binding).split(".")[-1],
+                        "is_imported": is_imported,
+                        "is_exported": is_exported,
+                        "version": str(symbol_version),
+                    }
+                )
         return symbols_list
     except lief.exception:
         return []
@@ -188,6 +189,101 @@ def detect_exe_type(parsed_obj):
             return "gnubinary"
     except lief.exception:
         return None
+
+
+def parse_pe_data(parsed_obj):
+    try:
+        LOG.debug("Parsing data dictionaries")
+        data_list = []
+        data_directories = parsed_obj.data_directories
+        for directory in data_directories:
+            section_name = directory.section.name if directory.has_section else ""
+            dir_type = str(directory.type).split(".")[-1]
+            if not dir_type.startswith("?") and directory.size:
+                data_list.append(
+                    {
+                        "name": section_name,
+                        "type": dir_type,
+                        "rva": directory.rva,
+                        "size": directory.size,
+                    }
+                )
+        return data_list
+    except lief.exception:
+        return None
+
+
+def parse_pe_symbols(symbols):
+    try:
+        LOG.debug("Parsing symbols")
+        symbols_list = []
+        exe_type = None
+        for symbol in symbols:
+            section_nb_str = ""
+            if symbol.section_number <= 0:
+                section_nb_str = str(
+                    PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
+                ).split(".")[-1]
+            else:
+                try:
+                    section_nb_str = symbol.section.name
+                except Exception:
+                    section_nb_str = "section<{:d}>".format(symbol.section_number)
+            if not exe_type and "golang" in symbol.name.lower():
+                exe_type = "gobinary"
+            symbols_list.append(
+                {
+                    "name": symbol.name,
+                    "value": symbol.value,
+                    "id": section_nb_str,
+                    "base_type": str(symbol.base_type).split(".")[-1],
+                    "complex_type": str(symbol.complex_type).split(".")[-1],
+                    "storage_class": str(symbol.storage_class).split(".")[-1],
+                }
+            )
+        return symbols_list, exe_type
+    except lief.exception:
+        return [], None
+
+
+def parse_pe_imports(imports):
+    try:
+        LOG.debug("Parsing imports")
+        imports_list = []
+        for import_ in imports:
+            entries = import_.entries
+            for entry in entries:
+                imports_list.append(
+                    {
+                        "name": entry.name,
+                        "data": entry.data,
+                        "iat_value": entry.iat_value,
+                        "hint": entry.hint,
+                    }
+                )
+        return imports_list
+    except lief.exception:
+        return []
+
+
+def parse_pe_exports(exports):
+    try:
+        LOG.debug("Parsing exports")
+        exports_list = []
+        entries = exports.entries
+        for entry in entries:
+            extern = "[EXTERN]" if entry.is_extern else ""
+            exports_list.append(
+                {
+                    "name": entry.name,
+                    "ordinal": entry.ordinal,
+                    "address": entry.address,
+                    "extern": entry.extern,
+                }
+            )
+        return exports_list
+    except lief.exception:
+        return []
 
 
 def parse(exe_file):
@@ -328,7 +424,151 @@ def parse(exe_file):
                 metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
             except lief.exception:
                 pass
+        elif isinstance(parsed_obj, PE.Binary):
+            # PE
+            metadata["name"] = parsed_obj.name
+            metadata["is_pie"] = parsed_obj.is_pie
+            metadata["has_nx"] = parsed_obj.has_nx
+            # Parse header
+            try:
+                dos_header = parsed_obj.dos_header
+                metadata["exe_type"] = str(dos_header.magic)
+                header = parsed_obj.header
+                optional_header = parsed_obj.optional_header
+                metadata[
+                    "used_bytes_in_the_last_page"
+                ] = dos_header.used_bytes_in_the_last_page
+                metadata["file_size_in_pages"] = dos_header.file_size_in_pages
+                metadata["num_relocation"] = dos_header.numberof_relocation
+                metadata[
+                    "header_size_in_paragraphs"
+                ] = dos_header.header_size_in_paragraphs
+                metadata[
+                    "minimum_extra_paragraphs"
+                ] = dos_header.minimum_extra_paragraphs
+                metadata[
+                    "maximum_extra_paragraphs"
+                ] = dos_header.maximum_extra_paragraphs
+                metadata["initial_relative_ss"] = dos_header.initial_relative_ss
+                metadata["initial_sp"] = dos_header.initial_sp
+                metadata["checksum"] = dos_header.checksum
+                metadata["initial_ip"] = dos_header.initial_ip
+                metadata["initial_relative_cs"] = dos_header.initial_relative_cs
+                metadata[
+                    "address_relocation_table"
+                ] = dos_header.addressof_relocation_table
+                metadata["overlay_number"] = dos_header.overlay_number
+                metadata["oem_id"] = dos_header.oem_id
+                metadata["oem_info"] = dos_header.oem_info
+                metadata["address_new_exeheader"] = dos_header.addressof_new_exeheader
+                metadata["characteristics"] = ", ".join(
+                    [str(chara).split(".")[-1] for chara in header.characteristics_list]
+                )
+                metadata["num_sections"] = header.numberof_sections
+                metadata["time_date_stamps"] = header.time_date_stamps
+                metadata["pointer_symbol_table"] = header.pointerto_symbol_table
+                metadata["num_symbols"] = header.numberof_symbols
+                metadata["size_optional_header"] = header.sizeof_optional_header
+                metadata["dll_characteristics"] = ", ".join(
+                    [
+                        str(chara).split(".")[-1]
+                        for chara in optional_header.dll_characteristics_lists
+                    ]
+                )
+                metadata["subsystem"] = str(optional_header.subsystem).split(".")[-1]
+                metadata["magic"] = (
+                    "PE32" if optional_header.magic == PE.PE_TYPE.PE32 else "PE64"
+                )
+                metadata["major_linker_version"] = optional_header.major_linker_version
+                metadata["minor_linker_version"] = optional_header.minor_linker_version
+                metadata["sizeof_code"] = optional_header.sizeof_code
+                metadata[
+                    "sizeof_initialized_data"
+                ] = optional_header.sizeof_initialized_data
+                metadata[
+                    "sizeof_uninitialized_data"
+                ] = optional_header.sizeof_uninitialized_data
+                metadata["addressof_entrypoint"] = optional_header.addressof_entrypoint
+                metadata["baseof_code"] = optional_header.baseof_code
+                metadata["baseof_data"] = optional_header.baseof_data
+                metadata["imagebase"] = optional_header.imagebase
+                metadata["section_alignment"] = optional_header.section_alignment
+                metadata["file_alignment"] = optional_header.file_alignment
+                metadata[
+                    "major_operating_system_version"
+                ] = optional_header.major_operating_system_version
+                metadata[
+                    "minor_operating_system_version"
+                ] = optional_header.minor_operating_system_version
+                metadata["major_image_version"] = optional_header.major_image_version
+                metadata["minor_image_version"] = optional_header.minor_image_version
+                metadata[
+                    "major_subsystem_version"
+                ] = optional_header.major_subsystem_version
+                metadata[
+                    "minor_subsystem_version"
+                ] = optional_header.minor_subsystem_version
+                metadata["win32_version_value"] = optional_header.win32_version_value
+                metadata["sizeof_image"] = optional_header.sizeof_image
+                metadata["sizeof_headers"] = optional_header.sizeof_headers
+                metadata["checksum"] = optional_header.checksum
+                metadata["sizeof_stack_reserve"] = optional_header.sizeof_stack_reserve
+                metadata["sizeof_stack_commit"] = optional_header.sizeof_stack_commit
+                metadata["sizeof_heap_reserve"] = optional_header.sizeof_heap_reserve
+                metadata["sizeof_heap_commit"] = optional_header.sizeof_heap_commit
+                metadata["loader_flags"] = optional_header.loader_flags
+                metadata[
+                    "numberof_rva_and_size"
+                ] = optional_header.numberof_rva_and_size
+            except lief.exception:
+                pass
+            try:
+                metadata["data_directories"] = parse_pe_data(parsed_obj)
+            except lief.exception:
+                pass
+            try:
+                metadata["static_symbols"], exe_type = parse_pe_symbols(
+                    parsed_obj.symbols
+                )
+                if exe_type:
+                    metadata["exe_type"] = exe_type
+            except lief.exception:
+                pass
+            try:
+                metadata["imports"] = parse_pe_imports(parsed_obj.imports)
+            except lief.exception:
+                pass
+            try:
+                metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
+            except lief.exception:
+                pass
+            try:
+                metadata["functions"] = parse_functions(parsed_obj.functions)
+            except lief.exception:
+                pass
+            try:
+                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+            except lief.exception:
+                pass
+            try:
+                metadata["exception_functions"] = parse_functions(
+                    parsed_obj.exception_functions
+                )
+            except lief.exception:
+                pass
+            try:
+                tls = parsed_obj.tls
+                if tls and tls.sizeof_zero_fill:
+                    metadata["tls_address_index"] = tls.addressof_index
+                    metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
+                    metadata["tls_data_template_len"] = len(tls.data_template)
+                    metadata["tls_characteristics"] = tls.characteristics
+                    metadata["tls_section_name"] = tls.section.name
+                    metadata["tls_directory_type"] = str(tls.directory.type)
+            except lief.exception:
+                pass
         elif isinstance(parsed_obj, MachO.Binary):
+            # MachO
             metadata["name"] = parsed_obj.name
             metadata["imagebase"] = parsed_obj.imagebase
             metadata["is_pie"] = parsed_obj.is_pie
