@@ -190,6 +190,15 @@ def detect_exe_type(parsed_obj):
         return None
 
 
+def guess_exe_type(symbol_name):
+    exe_type = None
+    if "golang" in symbol_name:
+        exe_type = "gobinary"
+    if "_rust_" in symbol_name:
+        exe_type = "genericbinary"
+    return exe_type
+
+
 def parse_pe_data(parsed_obj):
     try:
         LOG.debug("Parsing data dictionaries")
@@ -229,10 +238,7 @@ def parse_pe_symbols(symbols):
                 except Exception:
                     section_nb_str = "section<{:d}>".format(symbol.section_number)
             if not exe_type:
-                if "golang" in symbol.name.lower():
-                    exe_type = "gobinary"
-                if "_rust_" in symbol.name:
-                    exe_type = "genericbinary"
+                exe_type = guess_exe_type(symbol.name.lower())
             if symbol.name:
                 symbols_list.append(
                     {
@@ -295,8 +301,9 @@ def parse_macho_symbols(symbols):
     try:
         LOG.debug("Parsing symbols")
         symbols_list = []
+        exe_type = None
         if len(symbols) == 0:
-            return []
+            return [], None
         for symbol in symbols:
             libname = ""
             if symbol.has_binding_info and symbol.binding_info.has_library:
@@ -312,9 +319,12 @@ def parse_macho_symbols(symbols):
                 symbol_name = symbol.demangled_name
             except:
                 symbol_name = symbol.name
+            symbol_name = symbol_name.replace("..", "::")
+            if not exe_type:
+                exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
                 {
-                    "name": symbol_name.replace("..", "::"),
+                    "name": symbol_name,
                     "type": symbol.type,
                     "num_sections": symbol.numberof_sections,
                     "description": symbol.description,
@@ -322,9 +332,9 @@ def parse_macho_symbols(symbols):
                     "libname": libname,
                 }
             )
-        return symbols_list
+        return symbols_list, exe_type
     except lief.exception:
-        return []
+        return [], None
 
 
 def parse(exe_file):
@@ -617,6 +627,7 @@ def parse(exe_file):
             metadata["imagebase"] = parsed_obj.imagebase
             metadata["is_pie"] = parsed_obj.is_pie
             metadata["has_nx"] = parsed_obj.has_nx
+            metadata["exe_type"] = "MachO"
             try:
                 version = parsed_obj.version_min.version
                 sdk = parsed_obj.version_min.sdk
@@ -718,17 +729,6 @@ def parse(exe_file):
                 metadata["has_thread_command"] = False
             try:
                 metadata["functions"] = parse_functions(parsed_obj.functions)
-                exe_type = "MachO"
-                if metadata["functions"]:
-                    for fn in metadata["functions"]:
-                        fn_name = fn.get("name", "").lower()
-                        if "golang" in fn_name:
-                            exe_type = "gobinary"
-                            break
-                        if "_rust_" in fn_name:
-                            exe_type = "genericbinary"
-                            break
-                    metadata["exe_type"] = exe_type
             except lief.exception:
                 pass
             try:
@@ -742,7 +742,10 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["static_symbols"] = parse_macho_symbols(parsed_obj.symbols)
+                metadata["static_symbols"], exe_type = parse_macho_symbols(
+                    parsed_obj.symbols
+                )
+                metadata["exe_type"] = exe_type
             except lief.exception:
                 pass
             try:

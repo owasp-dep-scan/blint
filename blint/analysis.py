@@ -186,6 +186,11 @@ def run_review(f, metadata):
             functions_list += [
                 f.get("name", "") for f in metadata.get("static_symbols", [])
             ]
+        # If there are no function but static symbols use that instead
+        if not functions_list and metadata.get("static_symbols"):
+            functions_list = [
+                f.get("name", "").lower() for f in metadata.get("static_symbols", [])
+            ]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         results.update(run_review_methods_symbols(review_methods_list, functions_list))
     if review_symbols_list:
