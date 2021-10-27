@@ -3,7 +3,6 @@
 
 import argparse
 import os
-import sys
 
 from blint.analysis import report, start
 

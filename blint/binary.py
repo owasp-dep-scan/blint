@@ -317,7 +317,7 @@ def parse_macho_symbols(symbols):
 
             try:
                 symbol_name = symbol.demangled_name
-            except:
+            except Exception:
                 symbol_name = symbol.name
             symbol_name = symbol_name.replace("..", "::")
             if not exe_type:
