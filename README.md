@@ -1,6 +1,6 @@
 # Introduction
 
-BLint is a Binary Linter to check the security properties, capabilities, and hardcoded credentials in your executables. It is powered by [lief](https://github.com/lief-project/LIEF)
+BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF)
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)
 
@@ -11,6 +11,18 @@ Supported binary formats:
 - ELF
 - PE
 - Mach-O
+
+## Motivation
+
+Nowadays, vendors distribute statically linked binaries produced by golang or rust or dotnet tooling. Users are used to running antivirus and anti-malware scans while using these binaries in their local devices. Blint augments these scans by listing the technical capabilities of a binary. For example, whether the binary could use network connections, or can perform file system operations and so on.
+
+The binary is first parsed using lief framework to identify the various properties such as functions, static, and dynamic symbols present. Thanks to a YAML based [annotations](./blint/data/annotations) data, this information could be matched against capabilities and presented visually using a rich table.
+
+NOTE: The presence of capabilities doesn't imply that the operations are always performed by the binary. Use the output of this tool to get an idea about a binary. Also, this tool is not suitable to review malware and other heavily obfuscated binaries for obvious reasons.
+
+## Use cases
+
+Blint was used at [ShiftLeft](https://shiftleft.io) to review and optimize the distributed cli binary.
 
 ## Installation
 
