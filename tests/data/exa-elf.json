@@ -18,7 +18,7 @@
  "virtual_size": 3637248,
  "has_nx": true,
  "relro": "full",
- "exe_type": "gnubinary",
+ "exe_type": "genericbinary",
  "has_canary": true,
  "dynamic_entries": [
   {

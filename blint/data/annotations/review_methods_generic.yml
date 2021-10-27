@@ -1,7 +1,7 @@
 ---
 text: Review for functions identified in a binary produced by GNU build
 group: METHOD_REVIEWS
-exe_type: gnubinary
+exe_type: genericbinary
 rules:
   - id: GIT_METHODS
     title: Git library used

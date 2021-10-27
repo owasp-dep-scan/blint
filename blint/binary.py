@@ -107,7 +107,7 @@ def parse_functions(functions):
                 func_list.append(
                     {
                         "index": idx,
-                        "name": f.name,
+                        "name": f.name.replace("..", "::"),
                         "address": f.address,
                     }
                 )
@@ -185,7 +185,7 @@ def detect_exe_type(parsed_obj):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         elif parsed_obj.has_section(".note.gnu.build-id"):
-            return "gnubinary"
+            return "genericbinary"
     except lief.exception:
         return None
 
@@ -232,7 +232,7 @@ def parse_pe_symbols(symbols):
                 if "golang" in symbol.name.lower():
                     exe_type = "gobinary"
                 if "_rust_" in symbol.name:
-                    exe_type = "gnubinary"
+                    exe_type = "genericbinary"
             if symbol.name:
                 symbols_list.append(
                     {
@@ -287,6 +287,42 @@ def parse_pe_exports(exports):
                     }
                 )
         return exports_list
+    except lief.exception:
+        return []
+
+
+def parse_macho_symbols(symbols):
+    try:
+        LOG.debug("Parsing symbols")
+        symbols_list = []
+        if len(symbols) == 0:
+            return []
+        for symbol in symbols:
+            libname = ""
+            if symbol.has_binding_info and symbol.binding_info.has_library:
+                libname = symbol.binding_info.library.name
+
+            symbol_value = (
+                symbol.value
+                if symbol.value > 0 or not symbol.has_binding_info
+                else symbol.binding_info.address
+            )
+
+            try:
+                symbol_name = symbol.demangled_name
+            except:
+                symbol_name = symbol.name
+            symbols_list.append(
+                {
+                    "name": symbol_name.replace("..", "::"),
+                    "type": symbol.type,
+                    "num_sections": symbol.numberof_sections,
+                    "description": symbol.description,
+                    "value": symbol_value,
+                    "libname": libname,
+                }
+            )
+        return symbols_list
     except lief.exception:
         return []
 
@@ -592,18 +628,24 @@ def parse(exe_file):
                 metadata["sdk"] = "{:d}.{:d}.{:d}".format(*sdk)
             except lief.exception:
                 pass
-            build_version = parsed_obj.build_version
-            metadata["platform"] = str(build_version.platform).split(".")[-1]
-            metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
-            metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
-            tools = build_version.tools
-            if len(tools) > 0:
-                metadata["tools"] = []
-                for tool in tools:
-                    tool_str = str(tool.tool).split(".")[-1]
-                    metadata["tools"].append(
-                        {"tool": tool_str, "version": "{}.{}.{}".format(*tool.version)}
-                    )
+            try:
+                build_version = parsed_obj.build_version
+                metadata["platform"] = str(build_version.platform).split(".")[-1]
+                metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
+                metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
+                tools = build_version.tools
+                if len(tools) > 0:
+                    metadata["tools"] = []
+                    for tool in tools:
+                        tool_str = str(tool.tool).split(".")[-1]
+                        metadata["tools"].append(
+                            {
+                                "tool": tool_str,
+                                "version": "{}.{}.{}".format(*tool.version),
+                            }
+                        )
+            except lief.exception:
+                pass
             try:
                 encryption_info = parsed_obj.encryption_info
                 if encryption_info:
@@ -621,9 +663,10 @@ def parse(exe_file):
                 pass
             try:
                 cmd = parsed_obj.rpath
+                metadata["has_rpath"] = True
                 metadata["rpath"] = cmd.path
             except lief.exception:
-                pass
+                metadata["has_rpath"] = False
             try:
                 cmd = parsed_obj.uuid
                 uuid_str = " ".join(map(parse_uuid, cmd.uuid))
@@ -652,7 +695,7 @@ def parse(exe_file):
                 pass
             try:
                 header = parsed_obj.header
-                flags_str = " - ".join(
+                flags_str = ", ".join(
                     [str(s).split(".")[-1] for s in header.flags_list]
                 )
                 metadata["magic"] = str(header.magic).split(".")[-1]
@@ -663,6 +706,47 @@ def parse(exe_file):
                 metadata["number_commands"] = header.nb_cmds
                 metadata["size_commands"] = header.sizeof_cmds
                 metadata["reserved"] = header.reserved
+            except lief.exception:
+                pass
+            try:
+                if parsed_obj.main_command:
+                    metadata["has_main_command"] = True
+                if parsed_obj.thread_command:
+                    metadata["has_thread_command"] = True
+            except lief.not_found:
+                metadata["has_main"] = False
+                metadata["has_thread_command"] = False
+            try:
+                metadata["functions"] = parse_functions(parsed_obj.functions)
+                exe_type = "MachO"
+                if metadata["functions"]:
+                    for fn in metadata["functions"]:
+                        fn_name = fn.get("name", "").lower()
+                        if "golang" in fn_name:
+                            exe_type = "gobinary"
+                            break
+                        if "_rust_" in fn_name:
+                            exe_type = "genericbinary"
+                            break
+                    metadata["exe_type"] = exe_type
+            except lief.exception:
+                pass
+            try:
+                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+            except lief.exception:
+                pass
+            try:
+                metadata["unwind_functions"] = parse_functions(
+                    parsed_obj.unwind_functions
+                )
+            except lief.exception:
+                pass
+            try:
+                metadata["static_symbols"] = parse_macho_symbols(parsed_obj.symbols)
+            except lief.exception:
+                pass
+            try:
+                metadata["dylinker"] = parsed_obj.dylinker.name
             except lief.exception:
                 pass
     except lief.exception as e:

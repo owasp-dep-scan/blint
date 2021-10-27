@@ -10,7 +10,7 @@ Supported binary formats:
 
 - ELF
 - PE
-- Mach-O (Soon)
+- Mach-O
 
 ## Installation
 

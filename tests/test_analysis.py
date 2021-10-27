@@ -15,7 +15,7 @@ def test_gobinary():
         assert results
 
 
-def test_gnubinary():
+def test_genericbinary():
     test_gnu_file = Path(__file__).parent / "data" / "netstat-elf.json"
     with open(test_gnu_file) as fp:
         metadata = json.load(fp)

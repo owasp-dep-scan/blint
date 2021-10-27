@@ -1,7 +1,7 @@
 ---
 text: Review for symbols identified in a binary produced by cargo build
 group: SYMBOL_REVIEWS
-exe_type: gnubinary
+exe_type: genericbinary
 rules:
   - id: FILE_IO_READ
     title: IO functions used
@@ -271,3 +271,6 @@ rules:
       - python_packaging::policy
       - pyo3::types
       - pyo3::exceptions
+      - pyembed::interpreter
+      - pyembed::config
+      - pyembed::pyalloc

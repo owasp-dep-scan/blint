@@ -11,7 +11,7 @@
     ```
   severity: critical
   exe_types:
-    - gnubinary
+    - genericbinary
     - gobinary
 - id: CHECK_PIE
   title: Missing Position-Independent Executable (PIE) Protection
@@ -26,7 +26,7 @@
     ```
   severity: high
   exe_types:
-    - gnubinary
+    - genericbinary
     - gobinary
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
@@ -47,7 +47,7 @@
     ```
   severity: high
   exe_types:
-    - gnubinary
+    - genericbinary
     - gobinary
 - id: CHECK_CANARY
   title: Missing Canary Protection
@@ -63,7 +63,7 @@
     ```
   severity: medium
   exe_types:
-    - gnubinary
+    - genericbinary
 - id: CHECK_RPATH
   title: Avoid rpath and runpath
   description: |
@@ -86,7 +86,7 @@
     This situation would be better dealt with by the dynamic linker, since maintainers would have a central place to inform all dependent packages where to find libraries during transitional periods.
   severity: medium
   exe_types:
-    - gnubinary
+    - genericbinary
 - id: CHECK_VIRTUAL_SIZE
   title: Optimize binary virtual size
   description: |
@@ -101,5 +101,5 @@
   severity: medium
   limit: 30MB
   exe_types:
-    - gnubinary
+    - genericbinary
     - gobinary
