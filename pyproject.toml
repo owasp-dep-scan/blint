@@ -2,7 +2,7 @@
 name = "blint"
 version = "0.0.0"
 description = "Linter for binary files powered by lief"
-authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
+authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
 readme = "README.md"
 homepage = "https://rosa.cx"
@@ -16,6 +16,7 @@ classifiers = [
         "Topic :: Security",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Operating System :: OS Independent",
 ]
 include = ["blint/data/*.yml"]

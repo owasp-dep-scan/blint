@@ -41,6 +41,7 @@ rules:
       - std::path::Path::read_dir
       - std::path::Path::read_link
       - std::path::Path::try_exists
+      - csv_core::reader
   - id: FILE_IO_WRITE
     title: IO functions used
     summary: Can Create and Remove Files
@@ -59,6 +60,7 @@ rules:
       - std::fs::rename
       - std::fs::set_permissions
       - std::fs::write
+      - std::fs::DirBuilder
       - std::fs::DirBuilder::copy
       - std::fs::DirBuilder::create_dir
       - std::fs::DirBuilder::create_dir_all
@@ -70,6 +72,7 @@ rules:
       - std::fs::DirBuilder::set_permissions
       - std::fs::DirBuilder::softlink
       - std::fs::DirBuilder::write
+      - std::fs::DirEntry
       - std::fs::DirEntry::copy
       - std::fs::DirEntry::create_dir
       - std::fs::DirEntry::create_dir_all
@@ -92,6 +95,7 @@ rules:
       - std::fs::File::set_permissions
       - std::fs::File::softlink
       - std::fs::File::write
+      - std::fs::FileType
       - std::fs::FileType::copy
       - std::fs::FileType::create_dir
       - std::fs::FileType::create_dir_all
@@ -103,6 +107,10 @@ rules:
       - std::fs::FileType::set_permissions
       - std::fs::FileType::softlink
       - std::fs::FileType::write
+      - std::fs::Permissions
+      - std::fs::ReadDir
+      - std::fs::OpenOptions
+      - std::fs::Metadata
       - tokio::fs
   - id: NET_METHODS
     title: Net functions used
@@ -111,6 +119,7 @@ rules:
       std::net module provides networking functionality for the Transmission Control and User Datagram Protocols, as well as types for IP and socket addresses.
     patterns:
       - std::sys_common::net
+      - std::sys_common::net::LookupHost
       - std::net::TcpListener::accept
       - std::net::TcpListener::bind
       - std::net::TcpListener::incoming

@@ -103,7 +103,7 @@ def parse_functions(functions):
         LOG.debug("Parsing functions")
         func_list = []
         for idx, f in enumerate(functions):
-            if f.name and f.address and not f.name.startswith("_"):
+            if f.name and f.address:
                 func_list.append(
                     {
                         "index": idx,
@@ -156,19 +156,18 @@ def parse_symbols(symbols):
                 symbol_name = symbol.demangled_name
             except Exception:
                 symbol_name = symbol.name
-            if not symbol_name.startswith("_"):
-                symbols_list.append(
-                    {
-                        "name": symbol_name,
-                        "type": str(symbol.type).split(".")[-1],
-                        "value": symbol.value,
-                        "visibility": str(symbol.visibility).split(".")[-1],
-                        "binding": str(symbol.binding).split(".")[-1],
-                        "is_imported": is_imported,
-                        "is_exported": is_exported,
-                        "version": str(symbol_version),
-                    }
-                )
+            symbols_list.append(
+                {
+                    "name": symbol_name,
+                    "type": str(symbol.type).split(".")[-1],
+                    "value": symbol.value,
+                    "visibility": str(symbol.visibility).split(".")[-1],
+                    "binding": str(symbol.binding).split(".")[-1],
+                    "is_imported": is_imported,
+                    "is_exported": is_exported,
+                    "version": str(symbol_version),
+                }
+            )
         return symbols_list
     except lief.exception:
         return []
@@ -229,18 +228,22 @@ def parse_pe_symbols(symbols):
                     section_nb_str = symbol.section.name
                 except Exception:
                     section_nb_str = "section<{:d}>".format(symbol.section_number)
-            if not exe_type and "golang" in symbol.name.lower():
-                exe_type = "gobinary"
-            symbols_list.append(
-                {
-                    "name": symbol.name,
-                    "value": symbol.value,
-                    "id": section_nb_str,
-                    "base_type": str(symbol.base_type).split(".")[-1],
-                    "complex_type": str(symbol.complex_type).split(".")[-1],
-                    "storage_class": str(symbol.storage_class).split(".")[-1],
-                }
-            )
+            if not exe_type:
+                if "golang" in symbol.name.lower():
+                    exe_type = "gobinary"
+                if "_rust_" in symbol.name:
+                    exe_type = "gnubinary"
+            if symbol.name:
+                symbols_list.append(
+                    {
+                        "name": symbol.name.replace("..", "::"),
+                        "value": symbol.value,
+                        "id": section_nb_str,
+                        "base_type": str(symbol.base_type).split(".")[-1],
+                        "complex_type": str(symbol.complex_type).split(".")[-1],
+                        "storage_class": str(symbol.storage_class).split(".")[-1],
+                    }
+                )
         return symbols_list, exe_type
     except lief.exception:
         return [], None
@@ -253,14 +256,15 @@ def parse_pe_imports(imports):
         for import_ in imports:
             entries = import_.entries
             for entry in entries:
-                imports_list.append(
-                    {
-                        "name": entry.name,
-                        "data": entry.data,
-                        "iat_value": entry.iat_value,
-                        "hint": entry.hint,
-                    }
-                )
+                if entry.name:
+                    imports_list.append(
+                        {
+                            "name": entry.name,
+                            "data": entry.data,
+                            "iat_value": entry.iat_value,
+                            "hint": entry.hint,
+                        }
+                    )
         return imports_list
     except lief.exception:
         return []
@@ -273,14 +277,15 @@ def parse_pe_exports(exports):
         entries = exports.entries
         for entry in entries:
             extern = "[EXTERN]" if entry.is_extern else ""
-            exports_list.append(
-                {
-                    "name": entry.name,
-                    "ordinal": entry.ordinal,
-                    "address": entry.address,
-                    "extern": entry.extern,
-                }
-            )
+            if entry.name:
+                exports_list.append(
+                    {
+                        "name": entry.name,
+                        "ordinal": entry.ordinal,
+                        "address": entry.address,
+                        "extern": extern,
+                    }
+                )
         return exports_list
     except lief.exception:
         return []
@@ -426,13 +431,13 @@ def parse(exe_file):
                 pass
         elif isinstance(parsed_obj, PE.Binary):
             # PE
-            metadata["name"] = parsed_obj.name
-            metadata["is_pie"] = parsed_obj.is_pie
-            metadata["has_nx"] = parsed_obj.has_nx
             # Parse header
             try:
+                metadata["name"] = parsed_obj.name
+                metadata["is_pie"] = parsed_obj.is_pie
+                metadata["has_nx"] = parsed_obj.has_nx
                 dos_header = parsed_obj.dos_header
-                metadata["exe_type"] = str(dos_header.magic)
+                metadata["magic"] = str(dos_header.magic)
                 header = parsed_obj.header
                 optional_header = parsed_obj.optional_header
                 metadata[
@@ -476,7 +481,10 @@ def parse(exe_file):
                     ]
                 )
                 metadata["subsystem"] = str(optional_header.subsystem).split(".")[-1]
-                metadata["magic"] = (
+                metadata["is_gui"] = (
+                    True if metadata["subsystem"] == "WINDOWS_GUI" else False
+                )
+                metadata["exe_type"] = (
                     "PE32" if optional_header.magic == PE.PE_TYPE.PE32 else "PE64"
                 )
                 metadata["major_linker_version"] = optional_header.major_linker_version
