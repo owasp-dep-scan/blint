@@ -9,7 +9,7 @@ Capabilities review is supported for go and rust binaries.
 Supported binary formats:
 
 - ELF
-- PE (Soon)
+- PE
 - Mach-O (Soon)
 
 ## Installation
@@ -49,6 +49,10 @@ Use -i to check any other binary. For eg: to check ngrok
 ```bash
 blint -i ~/ngrok -o /tmp/blint
 ```
+
+PowerShell example
+
+![PowerShell](./docs/blint-powershell.jpg)
 
 ## References
 
