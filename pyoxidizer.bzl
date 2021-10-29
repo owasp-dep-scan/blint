@@ -133,7 +133,7 @@ def make_exe(dist):
     # python_config.allocator_backend = "jemalloc"
 
     # Use mimalloc as Python's memory allocator.
-    # python_config.allocator_backend = "mimalloc"
+    python_config.allocator_backend = "mimalloc"
 
     # Use snmalloc as Python's memory allocator.
     # python_config.allocator_backend = "snmalloc"
@@ -156,7 +156,7 @@ def make_exe(dist):
     # python_config.allocator_pymalloc_arena = True
 
     # Enable Python memory allocator debug hooks.
-    # python_config.allocator_debug = True
+    python_config.allocator_debug = False
 
     # Control whether `oxidized_importer` is the first importer on
     # `sys.meta_path`.

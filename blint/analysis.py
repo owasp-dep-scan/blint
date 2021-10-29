@@ -226,12 +226,11 @@ def start(args, src, reports_dir):
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
             metadata = parse(f)
             exe_name = metadata.get("name", "")
-            # In case of debug store raw metadata
-            if DEBUG_MODE:
-                metadata_file = Path(reports_dir) / (exe_name + "-metadata.json")
-                LOG.debug(f"Metadata written to {metadata_file}")
-                with open(metadata_file, mode="w") as ffp:
-                    json.dump(metadata, ffp, indent=True)
+            # Store raw metadata
+            metadata_file = Path(reports_dir) / (exe_name + "-metadata.json")
+            LOG.debug(f"Metadata written to {metadata_file}")
+            with open(metadata_file, mode="w") as ffp:
+                json.dump(metadata, ffp, indent=True)
             progress.update(
                 task, description=f"Checking [bold]{f}[/bold] against rules"
             )
