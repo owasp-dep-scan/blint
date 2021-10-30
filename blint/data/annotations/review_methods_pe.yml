@@ -1,0 +1,477 @@
+---
+text: Review for imports identified in PE binary
+group: IMPORT_REVIEWS
+url:
+  documentation: https://docs.microsoft.com/en-us/windows/win32/api/_security/
+exe_type:
+  - PE32
+  - PE64
+rules:
+  - id: WIN32_PROCESS_API
+    title: Security sensitive process functions used
+    summary: Can Create Process and Threads
+    description: |
+      Process api are used by system services.
+    patterns:
+      - GetCurrentProcessToken
+      - CreateProcessAsUserA
+      - CreateProcessAsUserW
+      - CreateRemoteThread
+      - CreateRemoteThreadEx
+      - GetCurrentProcessToken
+      - GetCurrentThreadEffectiveToken
+      - GetCurrentThreadToken
+      - GetProcessMitigationPolicy
+      - OpenProcessToken
+      - OpenThreadToken
+      - SetProcessMitigationPolicy
+      - SetThreadToken
+  - id: CRYPT_XML_API
+    title: Security sensitive crypt xml functions used
+    summary: Uses Crypt XML API
+    description: |
+      Crypt XML api are used by system services.
+    patterns:
+      - CryptXmlAddObject
+      - CryptXmlCreateReference
+      - CryptXmlDigestReference
+      - CryptXmlEncode
+      - CryptXmlImportPublicKey
+      - CryptXmlOpenToDecode
+      - CryptXmlOpenToEncode
+      - CryptXmlSetHMACSecret
+      - CryptXmlSign
+      - CryptXmlVerifySignature
+  - id: DP_API
+    title: Security sensitive dpapi functions used
+    summary: Uses DP API
+    description: |
+      DP api are used by system services.
+    patterns:
+      - CryptProtectData
+      - CryptProtectMemory
+      - CryptUnprotectData
+      - CryptUnprotectMemory
+      - CryptUpdateProtectedState
+  - id: NCRYPT_API
+    title: Security sensitive NCrypt api functions used
+    summary: Uses NCrypt API
+    description: |
+      NCrypt api are used by system services.
+    patterns:
+      - NCryptCreateClaim
+      - NCryptCreatePersistedKey
+      - NCryptDecrypt
+      - NCryptEncrypt
+      - NCryptExportKey
+      - NCryptImportKey
+      - NCryptKeyDerivation
+      - NCryptNotifyChangeKey
+      - NCryptOpenKey
+      - NCryptSecretAgreement
+      - NCryptSignHash
+      - NCryptTranslateHandle
+      - NCryptVerifyClaim
+      - NCryptVerifySignature
+      - NCryptCreateProtectionDescriptor
+      - NCryptGetProtectionDescriptorInfo
+      - NCryptProtectSecret
+      - NCryptStreamOpenToProtect
+      - NCryptStreamOpenToUnprotect
+      - NCryptStreamOpenToUnprotectEx
+      - NCryptStreamUpdate
+      - NCryptUnprotectSecret
+  - id: SCHANNEL_API
+    title: Security sensitive schannel api functions used
+    summary: Uses schannel API
+    description: |
+      schannel api are used by system services.
+    patterns:
+      - SslCrackCertificate
+  - id: SECURITY_BASE_API
+    title: Security base api functions used
+    summary: Uses Security Base API
+    description: |
+      Security Base api are used by system services.
+    patterns:
+      - AccessCheck
+      - AccessCheckAndAuditAlarmW
+      - AddAccessAllowedAce
+      - AddAccessAllowedObjectAce
+      - AddAccessDeniedAce
+      - AddAccessDeniedObjectAce
+      - AddAce
+      - AddAuditAccessAce
+      - AddAuditAccessAceEx
+      - AddAuditAccessObjectAce
+      - AddMandatoryAce
+      - AddResourceAttributeAce
+      - AddScopedPolicyIDAce
+      - AdjustTokenGroups
+      - AdjustTokenPrivileges
+      - AreAllAccessesGranted
+      - AreAnyAccessesGranted
+      - CheckTokenCapability
+      - CheckTokenMembership
+      - ConvertToAutoInheritPrivateObjectSecurity
+      - CreatePrivateObjectSecurity
+      - CreatePrivateObjectSecurityWithMultipleInheritance
+      - CreateRestrictedToken
+      - DuplicateToken
+      - GetAclInformation
+      - GetFileSecurityW
+      - GetKernelObjectSecurity
+      - GetPrivateObjectSecurity
+      - GetSecurityDescriptorControl
+      - GetSecurityDescriptorDacl
+      - GetSecurityDescriptorGroup
+      - GetSecurityDescriptorOwner
+      - GetSidIdentifierAuthority
+      - GetTokenInformation
+      - GetWindowsAccountDomainSid
+      - ImpersonateAnonymousToken
+      - ImpersonateLoggedOnUser
+      - ImpersonateSelf
+      - IsTokenRestricted
+      - IsValidAcl
+      - IsWellKnownSid
+      - PrivilegeCheck
+      - PrivilegedServiceAuditAlarmW
+      - QuerySecurityAccessMask
+      - SetAclInformation
+      - SetFileSecurityW
+      - SetKernelObjectSecurity
+      - SetPrivateObjectSecurity
+      - SetPrivateObjectSecurityEx
+      - SetSecurityAccessMask
+      - SetSecurityDescriptorControl
+      - SetSecurityDescriptorDacl
+      - SetSecurityDescriptorGroup
+      - SetSecurityDescriptorOwner
+      - SetSecurityDescriptorRMControl
+      - SetSecurityDescriptorSacl
+      - SetTokenInformation
+  - id: SOFTWARE_LICENSING_API
+    title: Software Licensing api functions used
+    summary: Uses Software Licensing API
+    description: |
+      Software Licensing api are used by system services.
+    patterns:
+      - SLAcquireGenuineTicket
+      - SLActivateProduct
+      - SLConsumeRight
+      - SLDepositMigrationBlob
+      - SLDepositOfflineConfirmationId
+      - SLGenerateOfflineInstallationId
+      - SLGetApplicationPolicy
+      - SLGetAuthenticationResult
+      - SLGetGenuineInformation
+      - SLGetInstalledProductKeyIds
+      - SLGetLicense
+      - SLGetLicenseInformation
+      - SLGetLicensingStatusInformation
+      - SLGetPKeyId
+      - SLGetPKeyInformation
+      - SLGetPolicyInformation
+      - SLGetProductSkuInformation
+      - SLGetReferralInformation
+      - SLGetServerStatus
+      - SLGetServiceInformation
+      - SLGetWindowsInformation
+      - SLInstallLicense
+      - SLInstallProofOfPurchase
+      - SLIsGenuineLocal
+      - SLLoadApplicationPolicies
+      - SLQueryLicenseValueFromApp
+      - SLRegisterEvent
+      - SLSetAuthenticationData
+      - SLSetCurrentProductKey
+      - SLSetGenuineInformation
+  - id: SS_API
+    title: SS api functions used
+    summary: Uses SS API
+    description: |
+      SS api are used by system services.
+    patterns:
+      - AcceptSecurityContext
+      - AcquireCredentialsHandle
+      - AddSecurityPackage
+      - ApplyControlToken
+      - ChangeAccountPassword
+      - CompleteAuthToken
+      - DecryptMessage
+      - DeleteSecurityContext
+      - DeleteSecurityPackage
+      - ExportSecurityContext
+      - ImpersonateSecurityContext
+      - ImportSecurityContext
+      - MakeSignature
+      - QueryContextAttributes
+      - QueryCredentialsAttributes
+      - QuerySecurityContextToken
+      - QuerySecurityPackageInfo
+      - SaslAcceptSecurityContext
+      - SaslEnumerateProfiles
+      - SaslGetContextOption
+      - SaslGetProfilePackage
+      - SaslIdentifyPackage
+      - SaslInitializeSecurityContext
+      - SaslSetContextOption
+      - SetCredentialsAttributes
+      - SspiAcquireCredentialsHandleAsync
+      - SspiAsyncContextRequiresNotify
+      - SspiDecryptAuthIdentity
+      - SspiEncodeAuthIdentityAsStrings
+      - SspiEncryptAuthIdentity
+      - SspiEncodeStringsAsAuthIdentity
+      - SspiFreeAuthIdentity
+      - SspiMarshalAuthIdentity
+      - SspiPrepareForCredRead
+      - SspiPrepareForCredWrite
+      - SspiPromptForCredentials
+      - SspiUpdateCredentials
+      - SspiValidateAuthIdentity
+      - VerifySignature
+  - id: TOKEN_BINDING_API
+    title: Token Binding api functions used
+    summary: Uses Token Binding API
+    description: |
+      Token Binding api are used by system services.
+    patterns:
+      - TokenBindingGenerateBinding
+      - TokenBindingGenerateID
+      - TokenBindingGenerateMessage
+      - TokenBindingGetKeyTypesClient
+      - TokenBindingGetKeyTypesServer
+      - TokenBindingVerifyMessage
+  - id: WIN_BASE_API
+    title: Win Base api functions used
+    summary: Uses Win Base API
+    description: |
+      Win Base api are used by system services.
+    patterns:
+      - AccessCheckAndAuditAlarmA
+      - AccessCheckByTypeAndAuditAlarmA
+      - AddIntegrityLabelToBoundaryDescriptor
+      - AddSecureMemoryCacheCallback
+      - CheckNameLegalDOS8Dot3A
+      - CreateFiber
+      - CreateProcessWithLogonW
+      - CreateProcessWithTokenW
+      - DeleteVolumeMountPointA
+      - FindFirstVolumeA
+      - FindFirstVolumeMountPoint
+      - FindNextVolumeA
+      - FindNextVolumeMountPoint
+      - GetActiveProcessorCount
+      - GetActiveProcessorGroupCount
+      - GetCommModemStatus
+      - GetCompressedFileSizeTransactedA
+      - GetDevicePowerState
+      - GetEventLogInformation
+      - GetFirmwareEnvironmentVariable
+      - GetFirmwareType
+      - GetMaximumProcessorCount
+      - GetProcessDEPPolicy
+      - GetSystemRegistryQuota
+      - SetFileAttributesTransacted
+      - SetFirmwareEnvironmentVariable
+      - SetSystemPowerState
+      - SetVolumeMountPoint
+  - id: WIN_BASE_IO_API
+    title: Win Base IO api functions used
+    summary: Can Create and Encrypt Files
+    description: |
+      Win Base IO api are used by system services.
+    patterns:
+      - CopyFile
+      - CreateDirectory
+      - CreateHardLinkA
+      - DecryptFile
+      - DeleteFile
+      - EncryptFileA
+      - EncryptFileW
+      - FileEncryptionStatus
+      - GetFileAttributesTransacted
+      - GetFileBandwidthReservation
+      - GetFileSecurityA
+      - MoveFile
+      - OpenEncryptedFileRaw
+      - ReadEncryptedFileRaw
+      - ReadDirectoryChanges
+      - ReplaceFileA
+      - ReplaceFileW
+      - SetFileSecurityA
+      - SetFileAttributesTransacted
+      - WriteEncryptedFileRaw
+  - id: WIN_BASE_EXEC_API
+    title: Win Base Execute api functions used
+    summary: Can Execute other programs
+    description: |
+      Win Base Execute api are used by system services.
+    patterns:
+      - WinExec
+      - WinMain
+  - id: WIN_CRED_API
+    title: Win Cred api functions used
+    summary: Can manipute Windows Credentials
+    description: |
+      Win Cred api are used by system services.
+    patterns:
+      - CredDeleteA
+      - CredDeleteW
+      - CredEnumerate
+      - CredFindBestCredential
+      - CredGetSessionTypes
+      - CredGetTargetInfo
+      - CredIsMarshaledCredential
+      - CredIsProtected
+      - CredMarshalCredential
+      - CredPackAuthenticationBuffer
+      - CredProtect
+      - CredReadDomainCredentials
+      - CredRename
+      - CredUICmdLinePromptForCredentials
+      - CredUIConfirmCredentials
+      - CredUIParseUserName
+      - CredUIPromptForCredentials
+      - CredUIPromptForWindowsCredentials
+      - CredUIReadSSOCred
+      - CredUnmarshalCredential
+      - CredUnPackAuthenticationBuffer
+      - CredUnprotect
+      - CredWriteDomainCredentials
+  - id: WIN_CRYPT_API
+    title: Win Crypt api functions used
+    summary: Uses Windows Crypt API
+    description: |
+      Win Crypt api are used by system services.
+    patterns:
+      - CertAddCertificateContextToStore
+      - CertAddCertificateLinkToStore
+      - CertAddCRLContextToStore
+      - CertAddCRLLinkToStore
+      - CertAddCTLContextToStore
+      - CertAddCTLLinkToStore
+      - CertAddEncodedCertificateToStore
+      - CertAddEncodedCertificateToSystemStore
+      - CertAddEncodedCRLToStore
+      - CertAddEnhancedKeyUsageIdentifier
+      - CertAddRefServerOcspResponse
+      - CertAddSerializedElementToStore
+      - CertCompareCertificate
+      - CertCreateCertificateChainEngine
+      - CertCreateSelfSignCertificate
+      - CertDeleteCertificateFromStore
+      - CertDeleteCRLFromStore
+      - CertDeleteCTLFromStore
+      - CertDuplicateCertificateChain
+      - CertDuplicateCertificateContext
+      - CertDuplicateCRLContext
+      - CertDuplicateCTLContext
+      - CertDuplicateStore
+      - CertEnumCertificatesInStore
+      - CertEnumCRLsInStore
+      - CertFindAttribute
+      - CertFindCertificateInCRL
+      - CertFindCertificateInStore
+      - CertFindChainInStore
+      - CertFindCRLInStore
+      - CertFindCTLInStore
+      - CertFindExtension
+      - CertFindSubjectInCTL
+      - CertFindSubjectInSortedCTL
+      - CertFreeCertificateChain
+      - CertFreeCertificateChainEngine
+      - CertFreeCertificateChainList
+      - CertFreeCertificateContext
+      - CertFreeServerOcspResponseContext
+      - CertGetCertificateChain
+      - CertGetCertificateContextProperty
+      - CertGetCRLFromStore
+      - CertGetCTLContextProperty
+      - CertGetEnhancedKeyUsage
+      - CertGetIntendedKeyUsage
+      - CertGetIssuerCertificateFromStore
+      - CertGetServerOcspResponseContext
+      - CertGetValidUsages
+      - CertGetSubjectCertificateFromStore
+      - CertIsStrongHashToSign
+      - CertIsValidCRLForCertificate
+      - CertOpenServerOcspResponse
+      - CertOpenStore
+      - CertOpenSystemStore
+      - CertRegisterPhysicalStore
+      - CertRegisterSystemStore
+      - CertSelectCertificateChains
+      - CertSetEnhancedKeyUsage
+      - CertSetStoreProperty
+      - CertVerifyCertificateChainPolicy
+      - CertVerifyCRLRevocation
+      - CertVerifyCRLTimeValidity
+      - CertVerifyCTLUsage
+      - CertVerifyRevocation
+      - CertVerifySubjectCertificateContext
+      - CertVerifyTimeValidity
+      - CertVerifyValidityNesting
+      - CryptAcquireCertificatePrivateKey
+      - CryptAcquireContext
+      - CryptBinaryToString
+      - CryptCreateHash
+      - CryptCreateKeyIdentifierFromCSP
+      - CryptDecodeMessage
+      - CryptDecodeObject
+      - CryptDecrypt
+      - CryptDecryptAndVerifyMessageSignature
+      - CryptDecryptMessage
+      - CryptDeriveKey
+      - CryptEncodeObject
+      - CryptEncrypt
+      - CryptEncryptMessage
+      - CryptExportKey
+      - CryptExportPKCS8
+      - CryptExportPublicKeyInfo
+      - CryptExportPublicKeyInfoFromBCryptKeyHandle
+      - CryptFindCertificateKeyProvInfo
+      - CryptFindOIDInfo
+      - CryptGenKey
+      - CryptGenRandom
+      - CryptGetHashParam
+      - CryptGetMessageCertificates
+      - CryptGetMessageSignerCount
+      - CryptGetUserKey
+      - CryptHashCertificate
+      - CryptHashCertificate2
+      - CryptHashData
+      - CryptHashMessage
+      - CryptHashPublicKeyInfo
+      - CryptHashSessionKey
+      - CryptImportKey
+      - CryptImportPKCS8
+      - CryptImportPublicKeyInfo
+      - CryptMsgCountersign
+      - CryptMsgEncodeAndSignCTL
+      - CryptMsgGetAndVerifySigner
+      - CryptMsgOpenToDecode
+      - CryptMsgOpenToEncode
+      - CryptMsgSignCTL
+      - CryptSignAndEncodeCertificate
+      - CryptSignAndEncryptMessage
+      - CryptSignCertificate
+      - CryptSignHashA
+      - CryptSignHashW
+      - CryptSignMessage
+      - CryptSignMessageWithKey
+      - CryptVerifyCertificateSignature
+      - CryptVerifyDetachedMessageHash
+      - CryptVerifyDetachedMessageSignature
+      - CryptVerifyMessageHash
+      - CryptVerifyMessageSignature
+      - CryptVerifyMessageSignatureWithKey
+      - CryptVerifyTimeStampSignature
+      - CryptVerifySignature
+      - PFXExportCertStore
+      - PFXExportCertStoreEx
+      - PFXImportCertStore
+      - PFXIsPFXBlob
+      - PFXVerifyPassword

@@ -13,6 +13,8 @@
   exe_types:
     - genericbinary
     - gobinary
+    - PE32
+    - PE64
 - id: CHECK_PIE
   title: Missing Position-Independent Executable (PIE) Protection
   description: |
@@ -28,6 +30,8 @@
   exe_types:
     - genericbinary
     - gobinary
+    - PE32
+    - PE64
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
   description: |

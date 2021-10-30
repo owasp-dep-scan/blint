@@ -26,6 +26,7 @@ review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
 rules_dict = {}
 review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
+review_imports_dict = defaultdict(list)
 review_rules_cache = {}
 
 # Debug mode
@@ -53,19 +54,21 @@ for review_methods_file in review_files:
             if not tmp_data:
                 continue
             methods_reviews_groups = yaml.safe_load(tmp_data)
+            exe_type_list = methods_reviews_groups.get("exe_type")
+            if isinstance(exe_type_list, str):
+                exe_type_list = [exe_type_list]
             all_rules = methods_reviews_groups.get("rules")
             method_rules_dict = {}
             for rule in all_rules:
                 method_rules_dict[rule.get("id")] = rule
                 review_rules_cache[rule.get("id")] = rule
-            if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
-                review_methods_dict[methods_reviews_groups.get("exe_type")].append(
-                    method_rules_dict
-                )
-            elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
-                review_symbols_dict[methods_reviews_groups.get("exe_type")].append(
-                    method_rules_dict
-                )
+            for exe_type in exe_type_list:
+                if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                    review_methods_dict[exe_type].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                    review_symbols_dict[exe_type].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                    review_imports_dict[exe_type].append(method_rules_dict)
 
 
 def check_nx(f, metadata, rule_obj):
@@ -174,8 +177,9 @@ def run_review(f, metadata):
         return None
     review_methods_list = review_methods_dict.get(exe_type)
     review_symbols_list = review_symbols_dict.get(exe_type)
+    review_imports_list = review_imports_dict.get(exe_type)
     # Check if reviews are available for this exe type
-    if not review_methods_list and not review_symbols_list:
+    if not review_methods_list and not review_symbols_list and not review_imports_list:
         return None
     if review_methods_list:
         functions_list = [
@@ -189,19 +193,19 @@ def run_review(f, metadata):
         # If there are no function but static symbols use that instead
         if not functions_list and metadata.get("static_symbols"):
             functions_list = [
-                f.get("name", "").lower() for f in metadata.get("static_symbols", [])
+                f.get("name", "") for f in metadata.get("static_symbols", [])
             ]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         results.update(run_review_methods_symbols(review_methods_list, functions_list))
     if review_symbols_list:
-        symbols_list = [
-            f.get("name", "").lower() for f in metadata.get("dynamic_symbols", [])
-        ]
-        symbols_list += [
-            f.get("name", "").lower() for f in metadata.get("static_symbols", [])
-        ]
+        symbols_list = [f.get("name", "") for f in metadata.get("dynamic_symbols", [])]
+        symbols_list += [f.get("name", "") for f in metadata.get("static_symbols", [])]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         results.update(run_review_methods_symbols(review_symbols_list, symbols_list))
+    if review_imports_list:
+        imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
+        LOG.debug(f"Reviewing {len(imports_list)} imports")
+        results.update(run_review_methods_symbols(review_imports_list, imports_list))
     return results
 
 

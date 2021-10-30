@@ -238,18 +238,23 @@ def parse_pe_symbols(symbols):
                 except Exception:
                     section_nb_str = "section<{:d}>".format(symbol.section_number)
             if not exe_type:
-                exe_type = guess_exe_type(symbol.name.lower())
-            if symbol.name:
-                symbols_list.append(
-                    {
-                        "name": symbol.name.replace("..", "::"),
-                        "value": symbol.value,
-                        "id": section_nb_str,
-                        "base_type": str(symbol.base_type).split(".")[-1],
-                        "complex_type": str(symbol.complex_type).split(".")[-1],
-                        "storage_class": str(symbol.storage_class).split(".")[-1],
-                    }
-                )
+                try:
+                    exe_type = guess_exe_type(symbol.name.lower())
+                    if symbol.name:
+                        symbols_list.append(
+                            {
+                                "name": symbol.name.replace("..", "::"),
+                                "value": symbol.value,
+                                "id": section_nb_str,
+                                "base_type": str(symbol.base_type).split(".")[-1],
+                                "complex_type": str(symbol.complex_type).split(".")[-1],
+                                "storage_class": str(symbol.storage_class).split(".")[
+                                    -1
+                                ],
+                            }
+                        )
+                except Exception:
+                    pass
         return symbols_list, exe_type
     except lief.exception:
         return [], None
