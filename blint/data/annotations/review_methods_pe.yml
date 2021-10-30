@@ -191,7 +191,7 @@ rules:
     title: SS api functions used
     summary: Uses SS API
     description: |
-      SS api are used by system services.
+      API to allow an application to use various security models available on a computer or network without changing the interface to the security system.
     patterns:
       - AcceptSecurityContext
       - AcquireCredentialsHandle
@@ -278,6 +278,17 @@ rules:
       - SetFirmwareEnvironmentVariable
       - SetSystemPowerState
       - SetVolumeMountPoint
+      - NtQueryInformationProcess
+      - NtQueryInformationThread
+      - NtQueryMultipleValueKey
+      - NtQuerySystemInformation
+      - LoadLibraryA
+      - LoadLibraryW
+      - GetDriveTypeA
+      - GetVolumeInformation
+      - GetSystemInfo
+      - GetStartupInfoW
+      - GetDiskFreeSpaceA
   - id: WIN_BASE_IO_API
     title: Win Base IO api functions used
     summary: Can Create and Encrypt Files
@@ -304,6 +315,25 @@ rules:
       - SetFileSecurityA
       - SetFileAttributesTransacted
       - WriteEncryptedFileRaw
+      - NtCreateFile
+      - NtDeviceIoControlFile
+      - NtNotifyChangeMultipleKeys
+      - NtOpenFile
+      - GetWindowsDirectoryA
+      - GetWindowsDirectoryW
+      - GetSystemDirectoryA
+      - GetSystemDirectoryW
+      - GetFileAttributesA
+      - GetFileAttributesW
+      - FindFirstFileA
+      - FindFirstFileW
+      - RemoveDirectoryA
+      - RemoveDirectoryW
+      - GetTempFileNameA
+      - GetTempFileNameW
+      - GetTempPathA
+      - GetFileVersionInfoSize
+      - GetFileVersionInfo
   - id: WIN_BASE_EXEC_API
     title: Win Base Execute api functions used
     summary: Can Execute other programs
@@ -345,7 +375,7 @@ rules:
     title: Win Crypt api functions used
     summary: Uses Windows Crypt API
     description: |
-      Win Crypt api are used by system services.
+      Cryptography is the use of codes to convert data so that only a specific recipient will be able to read it, using a key. Microsoft cryptographic technologies include CryptoAPI, Cryptographic Service Providers (CSP), CryptoAPI Tools, CAPICOM, WinTrust, issuing and managing certificates, and developing customizable public key infrastructures.
     patterns:
       - CertAddCertificateContextToStore
       - CertAddCertificateLinkToStore
@@ -475,3 +505,214 @@ rules:
       - PFXImportCertStore
       - PFXIsPFXBlob
       - PFXVerifyPassword
+  - id: WIN_REG_API
+    title: Win Registry api functions used
+    summary: Can Manipulate Windows Registry
+    description: |
+      The registry is a system-defined database in which applications and system components store and retrieve configuration data. The data stored in the registry varies according to the version of Microsoft Windows. Applications use the registry API to retrieve, modify, or delete registry data.
+    patterns:
+      - RegConnectRegistry
+      - RegCopyTree
+      - RegCreateKey
+      - RegDeleteKey
+      - RegDisablePredefinedCache
+      - RegDisableReflectionKey
+      - RegEnableReflectionKey
+      - RegGetKeySecurity
+      - RegGetValue
+      - RegLoadAppKey
+      - RegLoadKey
+      - RegLoadMUIString
+      - RegNotifyChangeKeyValue
+      - RegOpenCurrentUser
+      - RegOpenKey
+      - RegOpenUserClassesRoot
+      - RegQueryInfoKey
+      - RegQueryMultipleValues
+      - RegQueryReflectionKey
+      - RegQueryValue
+      - RegRenameKey
+      - RegReplaceKey
+      - RegRestoreKey
+      - RegSaveKey
+      - RegSetKeySecurity
+      - RegSetKeyValue
+      - RegSetValue
+      - RegUnLoadKey
+  - id: WIN_SAFER_API
+    title: Win Safer api functions used
+    summary: Uses Windows Safer API
+    description: |
+      Functions in the Safer API provide any application that starts programs from external sources the ability to query security policy for approval before an executable is started. These functions can be called before loading and running an executable or active content.
+    patterns:
+      - SaferCloseLevel
+      - SaferComputeTokenFromLevel
+      - SaferCreateLevel
+      - SaferGetLevelInformation
+      - SaferGetPolicyInformation
+      - SaferIdentifyLevel
+      - SaferiIsExecutableFileType
+      - SaferRecordEventLogEntry
+      - SaferSetPolicyInformation
+  - id: WIN_SCARD_API
+    title: Win Smart Card api functions used
+    summary: Supports Windows Smart Card
+    description: |
+      Windows Smart Card API functions.
+    patterns:
+      - GetOpenCardName
+      - SCardAccessStartedEvent
+      - SCardAddReaderToGroup
+      - SCardAudit
+      - SCardBeginTransaction
+      - SCardConnect
+      - SCardControl
+      - SCardDisconnect
+      - SCardEndTransaction
+      - SCardEstablishContext
+      - SCardForgetCardType
+      - SCardForgetReader
+      - SCardForgetReaderGroup
+      - SCardGetAttrib
+      - SCardGetCardTypeProviderName
+      - SCardGetDeviceTypeId
+      - SCardGetProviderId
+      - SCardGetReaderDeviceInstanceId
+      - SCardGetReaderIcon
+      - SCardGetStatusChange
+      - SCardGetTransmitCount
+      - SCardIntroduceCardType
+      - SCardIntroduceReader
+      - SCardIntroduceReaderGroup
+      - SCardIsValidContext
+      - SCardListCards
+      - SCardListInterfaces
+      - SCardListReaderGroups
+      - SCardListReaders
+      - SCardListReadersWithDeviceInstanceId
+      - SCardLocateCards
+      - SCardLocateCardsByATR
+      - SCardReadCache
+      - SCardReconnect
+      - SCardReleaseContext
+      - SCardRemoveReaderFromGroup
+      - SCardSetCardTypeProviderName
+      - SCardStatus
+      - SCardUIDlgSelectCard
+      - SCardWriteCache
+  - id: WIN_NETWORK_API
+    title: Win Network api functions used
+    summary: Supports Windows Networking
+    description: |
+      Windows Network API functions.
+    patterns:
+      - MultinetGetConnectionPerformance
+      - WNetAddConnection
+      - WNetConnectionDialog
+      - WNetDisconnectDialog
+      - WNetEnumResource
+      - WNetGetNetworkInformation
+      - WNetGetProviderName
+      - WNetGetResourceInformation
+      - WNetGetResourceParent
+      - WNetGetUniversalName
+      - WNetGetUser
+      - WNetOpenEnum
+      - WNetUseConnection
+  - id: WIN_SVC_API
+    title: Win Service api functions used
+    summary: Can Manipulate Windows Services
+    description: |
+      Windows Service API functions.
+    patterns:
+      - ChangeServiceConfig
+      - ControlService
+      - CreateServiceA
+      - CreateServiceW
+      - EnumDependentServices
+      - GetServiceDirectory
+      - GetServiceDisplayNameA
+      - GetServiceDisplayNameW
+      - GetServiceKeyNameA
+      - GetServiceKeyNameW
+      - GetServiceRegistryStateKey
+      - GetSharedServiceDirectory
+      - GetSharedServiceRegistryStateKey
+      - OpenSCManager
+      - OpenServiceA
+      - OpenServiceW
+      - QueryServiceConfig
+      - QueryServiceLockStatus
+      - QueryServiceStatus
+      - RegisterServiceCtrlHandler
+      - SetServiceObjectSecurity
+      - StartServiceA
+      - StartServiceW
+      - StartServiceCtrlDispatcher
+      - UnlockServiceDatabase
+  - id: WIN_TRUST_API
+    title: Win Trust api functions used
+    summary: Uses Windows Trust API
+    description: |
+      Windows Trust API functions.
+    patterns:
+      - OpenPersonalTrustDBDialog
+      - WintrustAddActionID
+      - WintrustAddDefaultForUsage
+      - WintrustGetDefaultForUsage
+      - WintrustGetRegPolicyFlags
+      - WintrustSetDefaultIncludePEPageHashes
+      - WintrustSetRegPolicyFlags
+      - WinVerifyTrust
+      - WTHelperCertCheckValidSignature
+      - WTHelperCertIsSelfSigned
+      - WTHelperGetProvCertFromChain
+      - WTHelperGetProvPrivateDataFromChain
+      - WTHelperProvDataFromStateData
+  - id: WIN_USER_API
+    title: Win User api functions used
+    summary: Performs GUI Actions
+    description: |
+      Windows User API functions.
+    patterns:
+      - ActivateKeyboardLayout
+      - AddClipboardFormatListener
+      - AppendMenu
+      - BlockInput
+      - BroadcastSystemMessage
+      - CloseDesktop
+      - CreateMenu
+      - EmptyClipboard
+      - FindWindow
+      - LockWorkStation
+      - OpenClipboard
+      - OpenInputDesktop
+      - PeekMessageA
+      - PeekMessageW
+      - CreateDialogA
+      - CreateDialogW
+      - CreateWindowA
+      - CreateWindowW
+      - CreateWindowExA
+      - CreateWindowExW
+      - CreateWindowStation
+  - id: WIN_LOGON_API
+    title: Win Logon api functions used
+    summary: Performs Winlogon calls
+    description: |
+      Winlogon functions are used.
+    patterns:
+      - WlxActivateUserShell
+      - WlxDisconnectNotify
+      - WlxDisplayLockedNotice
+      - WlxDisplaySASNotice
+      - WlxDisplayStatusMessage
+      - WlxGetConsoleSwitchCredentials
+      - WlxGetStatusMessage
+      - WlxInitialize
+      - WlxLogoff
+      - WlxNetworkProviderLoad
+      - WlxScreenSaverNotify
+      - WlxStartApplication
+      - WlxShutdown
+      - WlxWkstaLockedSAS

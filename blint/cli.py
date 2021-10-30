@@ -73,6 +73,9 @@ def main():
         if args.reports_dir
         else os.path.join(reports_base_dir, "reports")
     )
+    if not os.path.exists(src_dir):
+        print(f"{src_dir} is an invalid file or directory!")
+        return
     # Create reports directory
     if not os.path.exists(reports_dir):
         os.makedirs(reports_dir)

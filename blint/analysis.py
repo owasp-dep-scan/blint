@@ -294,7 +294,7 @@ def print_reviews_table(reviews):
     table.add_column("ID")
     table.add_column("Binary")
     table.add_column("Capabilities")
-    table.add_column("Evidence (Top 2)")
+    table.add_column("Evidence")
     for r in reviews:
         evidences = [e.get("function") for e in r.get("evidence")]
         evidences = list(islice(evidences, 2))
