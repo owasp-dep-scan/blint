@@ -1,5 +1,7 @@
 # Introduction
 
+[![builds.sr.ht status](https://builds.sr.ht/~prabhu/blint.svg)](https://builds.sr.ht/~prabhu/blint?)
+
 BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF)
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)

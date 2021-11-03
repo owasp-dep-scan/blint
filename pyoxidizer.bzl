@@ -302,7 +302,7 @@ def register_code_signers():
     #     "password for code signing certificate file",
     #     confirm = True
     # )
-    # signer = code_signer_from_pfx_file(pfx_path, pfx_password)
+    signer = code_signer_from_pfx_file(pfx_path, pfx_password)
 
     # Use a code signing certificate in the Windows certificate store, specified
     # by its SHA-1 thumbprint. (This allows you to use YubiKeys and other

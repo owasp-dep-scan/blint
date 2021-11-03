@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.1"
+version = "1.0.2"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
@@ -10,16 +10,20 @@ repository = "https://git.sr.ht/~prabhu/blint"
 keywords = ["linter", "binary", "security", "sast"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-        "Intended Audience :: Developers",
-        "Intended Audience :: System Administrators",
-        "Topic :: Utilities",
-        "Topic :: Security",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Utilities",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
 ]
 include = ["blint/data/*.yml"]
+
+[tool.poetry.urls]
+"Mailing List" = "https://lists.sr.ht/~prabhu/blint-community"
+"CI" = "https://builds.sr.ht/~prabhu/blint"
 
 [tool.poetry.scripts]
 blint = 'blint.cli:main'
