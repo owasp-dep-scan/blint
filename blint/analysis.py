@@ -115,6 +115,17 @@ def check_virtual_size(f, metadata, rule_obj):
     return True
 
 
+def check_authenticode(f, metadata, rule_obj):
+    if metadata.get("authenticode"):
+        authenticode_obj = metadata.get("authenticode")
+        if not authenticode_obj.get("verification_flags", "").lower() == "ok":
+            return False
+        if not authenticode_obj.get("cert_signer"):
+            return False
+        return True
+    return False
+
+
 def run_checks(f, metadata):
     results = []
     if not rules_dict:

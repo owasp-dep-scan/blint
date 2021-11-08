@@ -107,3 +107,15 @@
   exe_types:
     - genericbinary
     - gobinary
+- id: CHECK_AUTHENTICODE
+  title: Check for Authenticode
+  description: |
+    Authenticode is a digital signature format that is used to determine the origin and integrity of software binaries. Authenticode is based on Public-Key Cryptography Standards (PKCS) #7 signed data and X.509 certificates to bind an Authenticode-signed binary to the identity of a software publisher.
+    At its core, Authenticode supplies (or can supply, as optional features) a number of properties for signed programs:
+    * Authenticity
+    * Integrity
+    * Timeliness
+  severity: critical
+  exe_types:
+    - PE32
+    - PE64

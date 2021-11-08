@@ -1,5 +1,7 @@
+import sys
+
 import lief
-from lief import ELF, MachO, PE
+from lief import ELF, PE, MachO
 
 from blint.logger import LOG
 from blint.utils import calculate_entropy, check_secret, decode_base64
@@ -217,6 +219,32 @@ def parse_pe_data(parsed_obj):
                     }
                 )
         return data_list
+    except lief.exception:
+        return None
+
+
+def parse_pe_authenticode(parsed_obj):
+    try:
+        LOG.debug("Parsing authentihash")
+        authenticode = {}
+        sep = ":" if sys.version_info.minor > 7 else ()
+        authenticode["md5_hash"] = parsed_obj.authentihash_md5.hex(*sep)
+        authenticode["sha256_hash"] = parsed_obj.authentihash_sha256.hex(*sep)
+        authenticode["sha1_hash"] = parsed_obj.authentihash(
+            lief.PE.ALGORITHMS.SHA_1
+        ).hex(*sep)
+        authenticode["verification_flags"] = str(parsed_obj.verify_signature())
+        cert_signer_str = str(parsed_obj.signatures[0].signers[0].cert)
+        cert_signer_obj = {}
+        for p in cert_signer_str.split("\n"):
+            tmpA = p.split(" : ")
+            if len(tmpA) == 2:
+                tmpKey = tmpA[0].strip().replace(" ", "_")
+                if "version" in tmpKey:
+                    tmpKey = "version"
+                cert_signer_obj[tmpKey] = tmpA[1].strip()
+        authenticode["cert_signer"] = cert_signer_obj
+        return authenticode
     except lief.exception:
         return None
 
@@ -583,6 +611,10 @@ def parse(exe_file):
                 pass
             try:
                 metadata["data_directories"] = parse_pe_data(parsed_obj)
+            except lief.exception:
+                pass
+            try:
+                metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
             except lief.exception:
                 pass
             try:

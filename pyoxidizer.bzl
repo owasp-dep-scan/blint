@@ -302,6 +302,8 @@ def register_code_signers():
     #     "password for code signing certificate file",
     #     confirm = True
     # )
+    pfx_path = VARS.get("PFX_PATH")
+    pfx_password = VARS.get("PFX_PASSWORD")
     signer = code_signer_from_pfx_file(pfx_path, pfx_password)
 
     # Use a code signing certificate in the Windows certificate store, specified
@@ -317,7 +319,7 @@ def register_code_signers():
     # signer = code_signer_from_windows_store_auto()
 
     # Activate your signer so it gets called automatically.
-    # signer.activate()
+    signer.activate()
 
 
 # Call our function to set up automatic code signers.
