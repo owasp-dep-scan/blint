@@ -223,6 +223,59 @@ def parse_pe_data(parsed_obj):
         return None
 
 
+def process_pe_resources(parsed_obj):
+    try:
+        rm = parsed_obj.resources_manager
+        metadata = {
+            "has_accelerator": rm.has_accelerator,
+            "has_dialogs": rm.has_dialogs,
+            "has_html": rm.has_html,
+            "has_icons": rm.has_icons,
+            "has_manifest": rm.has_manifest,
+            "has_string_table": rm.has_string_table,
+            "has_version": rm.has_version,
+            "html": rm.html if rm.has_html else None,
+            "manifest": rm.manifest if rm.has_manifest else None,
+            "version_info": str(rm.version),
+        }
+        return metadata
+    except lief.exception as e:
+        print(e)
+        return None
+
+
+def process_pe_signature(parsed_obj):
+    try:
+        signature_list = []
+        for idx, sig in enumerate(parsed_obj.signatures):
+            ci = sig.content_info
+            signature_obj = {
+                "version": sig.version,
+                "digest_algorithm": str(sig.digest_algorithm),
+                "content_info": {
+                    "content_type": lief.PE.oid_to_string(ci.content_type),
+                    "digest_algorithm": str(ci.digest_algorithm),
+                    "digest": ci.digest.hex(),
+                },
+            }
+            signers_list = []
+            for signer in sig.signers:
+                signer_obj = {
+                    "version": signer.version,
+                    "serial_number": signer.serial_number.hex(),
+                    "issuer": str(signer.issuer),
+                    "digest_algorithm": str(signer.digest_algorithm),
+                    "encryption_algorithm": str(signer.encryption_algorithm),
+                    "encrypted_digest": signer.encrypted_digest.hex(),
+                }
+                signers_list.append(signer_obj)
+            signature_obj["signers"] = signers_list
+            signature_list.append(signature_obj)
+        return signature_list
+    except lief.exception:
+        return None
+
+
 def parse_pe_authenticode(parsed_obj):
     try:
         LOG.debug("Parsing authentihash")
@@ -615,6 +668,14 @@ def parse(exe_file):
                 pass
             try:
                 metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
+            except lief.exception:
+                pass
+            try:
+                metadata["signatures"] = process_pe_signature(parsed_obj)
+            except lief.exception:
+                pass
+            try:
+                metadata["resources"] = process_pe_resources(parsed_obj)
             except lief.exception:
                 pass
             try:
