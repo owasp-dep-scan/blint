@@ -79,6 +79,20 @@ strings_allowlist = [
     "*syntax",
     "*zip",
     "json:",
+    "basic_string",
+    "std::",
+    "vector::",
+    "coreclr_",
+    "deps_resolver_",
+    "deps_json_",
+    "NativeExceptionHolder",
+    "System.Runtime",
+    "Microsoft-",
+    "ProfilerEnum",
+    "FastSerialization",
+    "InlineDiscretionary",
+    "src/libraries",
+    "ECDHE-ECDSA-AES256-GCM",
 ]
 
 secrets_regex = {

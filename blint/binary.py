@@ -198,6 +198,8 @@ def guess_exe_type(symbol_name):
         exe_type = "gobinary"
     if "_rust_" in symbol_name:
         exe_type = "genericbinary"
+    if "DotNetRuntimeInfo" in symbol_name:
+        exe_type = "dotnetbinary"
     return exe_type
 
 
