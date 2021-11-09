@@ -227,6 +227,7 @@ def parse_pe_data(parsed_obj):
 
 def process_pe_resources(parsed_obj):
     try:
+        LOG.debug("Parsing PE resources")
         rm = parsed_obj.resources_manager
         metadata = {
             "has_accelerator": rm.has_accelerator,
@@ -238,11 +239,10 @@ def process_pe_resources(parsed_obj):
             "has_version": rm.has_version,
             "html": rm.html if rm.has_html else None,
             "manifest": rm.manifest if rm.has_manifest else None,
-            "version_info": str(rm.version),
+            "version_info": str(rm.version) if rm.has_version else None,
         }
         return metadata
-    except lief.exception as e:
-        print(e)
+    except lief.exception:
         return None
 
 
@@ -288,17 +288,24 @@ def parse_pe_authenticode(parsed_obj):
         authenticode["sha1_hash"] = parsed_obj.authentihash(
             lief.PE.ALGORITHMS.SHA_1
         ).hex(*sep)
-        authenticode["verification_flags"] = str(parsed_obj.verify_signature())
-        cert_signer_str = str(parsed_obj.signatures[0].signers[0].cert)
-        cert_signer_obj = {}
-        for p in cert_signer_str.split("\n"):
-            tmpA = p.split(" : ")
-            if len(tmpA) == 2:
-                tmpKey = tmpA[0].strip().replace(" ", "_")
-                if "version" in tmpKey:
-                    tmpKey = "version"
-                cert_signer_obj[tmpKey] = tmpA[1].strip()
-        authenticode["cert_signer"] = cert_signer_obj
+        authenticode["verification_flags"] = str(parsed_obj.verify_signature()).replace(
+            "VERIFICATION_FLAGS.", ""
+        )
+        if (
+            parsed_obj.signatures
+            and len(parsed_obj.signatures) > 0
+            and parsed_obj.signatures[0].signers
+        ):
+            cert_signer_str = str(parsed_obj.signatures[0].signers[0].cert)
+            cert_signer_obj = {}
+            for p in cert_signer_str.split("\n"):
+                tmpA = p.split(" : ")
+                if len(tmpA) == 2:
+                    tmpKey = tmpA[0].strip().replace(" ", "_")
+                    if "version" in tmpKey:
+                        tmpKey = "version"
+                    cert_signer_obj[tmpKey] = tmpA[1].strip()
+            authenticode["cert_signer"] = cert_signer_obj
         return authenticode
     except lief.exception:
         return None
@@ -353,6 +360,7 @@ def parse_pe_imports(imports):
                 if entry.name:
                     imports_list.append(
                         {
+                            "dll_name": import_.name,
                             "name": entry.name,
                             "data": entry.data,
                             "iat_value": entry.iat_value,
@@ -372,14 +380,18 @@ def parse_pe_exports(exports):
         for entry in entries:
             extern = "[EXTERN]" if entry.is_extern else ""
             if entry.name:
-                exports_list.append(
-                    {
-                        "name": entry.name,
-                        "ordinal": entry.ordinal,
-                        "address": entry.address,
-                        "extern": extern,
-                    }
-                )
+                metadata = {
+                    "name": entry.name,
+                    "ordinal": entry.ordinal,
+                    "address": entry.address,
+                    "extern": extern,
+                }
+            fwd = entry.forward_information if entry.is_forwarded else None
+            metadata["is_forwarded"] = entry.is_forwarded
+            if fwd:
+                metadata["fwd_library"] = fwd.library
+                metadata["fwd_function"] = fwd.function
+            exports_list.append(metadata)
         return exports_list
     except lief.exception:
         return []
@@ -527,6 +539,9 @@ def parse(exe_file):
                                 "value": entry.value,
                             }
                         )
+                        # Detect dotnet binary
+                        if "netcoredeps" in entry.name:
+                            metadata["exe_type"] = "dotnetbinary"
             try:
                 symbols_version = parsed_obj.symbols_version
                 if len(symbols_version):
