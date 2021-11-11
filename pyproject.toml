@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.4"
+version = "1.0.5"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
@@ -14,6 +14,7 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Topic :: Utilities",
     "Topic :: Security",
+    "Programming Language :: Python :: 3.6",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -29,7 +30,7 @@ include = ["blint/data/*.yml"]
 blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.6.2,<4.0"
 lief = "^0.11.5"
 rich = "^10.10.0"
 PyYAML = "^5.4.1"
