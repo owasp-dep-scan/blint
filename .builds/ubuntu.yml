@@ -3,6 +3,7 @@ packages:
   - python3.8
   - python3-pip
   - python3-dev
+  - python3-venv
   - curl
   - wget
   - jq
