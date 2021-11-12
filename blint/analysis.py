@@ -1,4 +1,4 @@
-import importlib.resources
+import importlib
 import json
 import os
 import re
@@ -18,10 +18,22 @@ from blint.binary import parse
 from blint.logger import LOG, console
 from blint.utils import find_exe_files
 
+try:
+    import importlib.resources
+
+    # Defeat lazy module importers.
+    importlib.resources.open_text
+    HAVE_RESOURCE_READER = True
+except ImportError:
+    HAVE_RESOURCE_READER = False
+
 review_files = []
-review_methods_dir = importlib.resources.contents("blint.data.annotations")
-review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
-# review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
+if HAVE_RESOURCE_READER:
+    review_methods_dir = importlib.resources.contents("blint.data.annotations")
+    review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
+else:
+    review_methods_dir = Path(__file__).parent / "data" / "annotations"
+    review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
 
 rules_dict = {}
 review_methods_dict = defaultdict(list)
@@ -32,8 +44,45 @@ review_rules_cache = {}
 # Debug mode
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 
+
+def get_resource(package, resource):
+    """Return a file handle on a named resource in a Package."""
+
+    # Prefer ResourceReader APIs, as they are newest.
+    if HAVE_RESOURCE_READER:
+        # If we're in the context of a module, we could also use
+        # ``__loader__.get_resource_reader(__name__).open_resource(resource)``.
+        # We use open_binary() because it is simple.
+        return importlib.resources.open_text(package, resource)
+
+    # Fall back to __file__.
+
+    # We need to first import the package so we can find its location.
+    # This could raise an exception!
+    mod = importlib.import_module(package)
+
+    # Undefined __file__ will raise NameError on variable access.
+    try:
+        package_path = os.path.abspath(os.path.dirname(mod.__file__))
+    except NameError:
+        package_path = None
+
+    if package_path is not None:
+        # Warning: there is a path traversal attack possible here if
+        # resource contains values like ../../../../etc/password. Input
+        # must be trusted or sanitized before blindly opening files or
+        # you may have a security vulnerability!
+        resource_path = os.path.join(package_path, resource)
+
+        return open(resource_path)
+
+    # Could not resolve package path from __file__.
+    LOG.warn("Unable to load resource: %s:%s" % (package, resource))
+    return None
+
+
 # Load the rules
-with importlib.resources.open_text("blint.data", "rules.yml") as fp:
+with get_resource("blint.data", "rules.yml") as fp:
     raw_data = fp.read().split("---")
     for tmp_data in raw_data:
         if not tmp_data:
@@ -46,9 +95,7 @@ with importlib.resources.open_text("blint.data", "rules.yml") as fp:
 for review_methods_file in review_files:
     if DEBUG_MODE:
         LOG.debug(f"Loading review file {review_methods_file}")
-    with importlib.resources.open_text(
-        "blint.data.annotations", review_methods_file
-    ) as fp:
+    with get_resource("blint.data.annotations", review_methods_file) as fp:
         raw_data = fp.read().split("---")
         for tmp_data in raw_data:
             if not tmp_data:
