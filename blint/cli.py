@@ -67,7 +67,9 @@ def main():
     src_dir = args.src_dir_image
     if not src_dir:
         src_dir = os.getcwd()
-    reports_base_dir = os.path.dirname(src_dir)
+        reports_base_dir = src_dir
+    else:
+        reports_base_dir = os.path.dirname(src_dir)
     reports_dir = (
         args.reports_dir
         if args.reports_dir
