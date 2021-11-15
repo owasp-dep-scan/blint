@@ -2,6 +2,7 @@
 # performed. See PyOxidizer's documentation at
 # https://pyoxidizer.readthedocs.io/en/stable/ for details of this
 # configuration file format.
+TIME_STAMP_SERVER_URL = VARS.get("TIME_STAMP_SERVER_URL", "http://timestamp.digicert.com")
 
 # Obtain the default PythonDistribution for our build target. We link
 # this distribution into our produced executable and extract the Python
@@ -287,6 +288,35 @@ def make_msi(exe):
         "Team Rosa"
     )
 
+def make_macos_app_bundle():
+    ARCHES = ["x86_64-apple-darwin"]
+
+    bundle = MacOsApplicationBundleBuilder("blint")
+    bundle.set_info_plist_required_keys(
+        display_name = "blint",
+        identifier = "io.ngcloud.blint",
+        version = "1.0.2",
+        signature = "lint",
+        executable = "blint",
+    )
+
+    universal = AppleUniversalBinary("blint")
+
+    for arch in ARCHES:
+        path = "build/" + arch + "/release/install/blint"
+        universal.add_path(path)
+
+    m = FileManifest()
+    m.add_file(universal.to_file_content())
+    bundle.add_macos_manifest(m)
+
+    return bundle
+
+def code_signer_callback(request):
+    # Match a known filename that doesn't need signed and set
+    # `prevent_signing = True` to prevent it from being signed.
+    if request.filename != "blint" and request.filename != "blint.app":
+        request.prevent_signing = True
 
 # Dynamically enable automatic code signing.
 def register_code_signers():
@@ -298,12 +328,12 @@ def register_code_signers():
     # Use a code signing certificate in a .pfx/.p12 file, prompting the
     # user for its path and password to open.
     # pfx_path = prompt_input("path to code signing certificate file")
-    # pfx_password = prompt_password(
-    #     "password for code signing certificate file",
-    #     confirm = True
-    # )
+    pfx_password = prompt_password(
+         "password for code signing certificate file",
+         confirm = False
+    )
     pfx_path = VARS.get("PFX_PATH")
-    pfx_password = VARS.get("PFX_PASSWORD")
+    # pfx_password = VARS.get("PFX_PASSWORD")
     signer = code_signer_from_pfx_file(pfx_path, pfx_password)
 
     # Use a code signing certificate in the Windows certificate store, specified
@@ -317,8 +347,8 @@ def register_code_signers():
     # Choose a code signing certificate automatically from the Windows
     # certificate store.
     # signer = code_signer_from_windows_store_auto()
-
     # Activate your signer so it gets called automatically.
+    # signer.set_signing_callback(code_signer_callback)
     signer.activate()
 
 
@@ -328,6 +358,7 @@ register_code_signers()
 # Tell PyOxidizer about the build targets defined above.
 register_target("dist", make_dist)
 register_target("exe", make_exe, depends=["dist"])
+register_target("macos_app_bundle", make_macos_app_bundle)
 register_target("resources", make_embedded_resources, depends=["exe"], default_build_script=True)
 register_target("install", make_install, depends=["exe"], default=True)
 register_target("msi_installer", make_msi, depends=["exe"])

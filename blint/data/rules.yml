@@ -16,6 +16,7 @@
     - PE32
     - PE64
     - dotnetbinary
+    - MachO
 - id: CHECK_PIE
   title: Missing Position-Independent Executable (PIE) Protection
   description: |
@@ -34,6 +35,7 @@
     - PE32
     - PE64
     - dotnetbinary
+    - MachO
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
   description: |

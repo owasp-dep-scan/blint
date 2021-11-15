@@ -171,7 +171,7 @@ def check_authenticode(f, metadata, rule_obj):
         if not authenticode_obj.get("cert_signer"):
             return False
         return True
-    return False
+    return True
 
 
 def run_checks(f, metadata):
@@ -276,8 +276,8 @@ def start(args, src, reports_dir):
         files = find_exe_files(src)
     with Progress(
         transient=True,
-        redirect_stderr=False,
-        redirect_stdout=False,
+        redirect_stderr=True,
+        redirect_stdout=True,
         refresh_per_second=1,
     ) as progress:
         task = progress.add_task(

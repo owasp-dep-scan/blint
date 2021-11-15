@@ -444,7 +444,7 @@ def parse(exe_file):
     :param: exe_file Binary file
     :return Metadata dict
     """
-    metadata = {}
+    metadata = {"file_path": exe_file}
     try:
         parsed_obj = lief.parse(exe_file)
         metadata["is_shared_library"] = is_shared_library(parsed_obj)
@@ -860,7 +860,8 @@ def parse(exe_file):
                 metadata["static_symbols"], exe_type = parse_macho_symbols(
                     parsed_obj.symbols
                 )
-                metadata["exe_type"] = exe_type
+                if exe_type:
+                    metadata["exe_type"] = exe_type
             except lief.exception:
                 pass
             try:

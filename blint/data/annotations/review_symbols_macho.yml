@@ -1,0 +1,479 @@
+---
+text: Review for symbols identified in a MachO binary
+group: SYMBOL_REVIEWS
+exe_type: MachO
+rules:
+  - id: FS_EVENTS_API
+    title: File System Events functions used
+    summary: Can Monitor Files
+    description: |
+      The file system events API provides a way for your application to ask for notification when the contents of a directory hierarchy are modified. For example, your application can use this to quickly detect when the user modifies a file within a project bundle using another application.
+    patterns:
+      - FSEventStreamCopyDescription
+      - FSEventStreamCopyPathsBeingWatched
+      - FSEventStreamCreate
+      - FSEventStreamCreateRelativeToDevice
+      - FSEventStreamFlushAsync
+      - FSEventStreamFlushSync
+      - FSEventStreamGetDeviceBeingWatched
+      - FSEventStreamGetLatestEventId
+      - FSEventStreamInvalidate
+      - FSEventStreamRelease
+      - FSEventStreamRetain
+      - FSEventStreamScheduleWithRunLoop
+      - FSEventStreamSetDispatchQueue
+      - FSEventStreamSetExclusionPaths
+      - FSEventStreamShow
+      - FSEventStreamStart
+      - FSEventStreamStop
+      - FSEventStreamUnscheduleFromRunLoop
+      - FSEventsCopyUUIDForDevice
+      - FSEventsGetCurrentEventId
+      - FSEventsGetLastEventIdForDeviceBeforeTime
+      - FSEventsPurgeEventsForDeviceUpToEventId
+  - id: LAUNCH_SERVICES_API
+    title: Launch Services API functions used
+    summary: Can Launch Apps & URLs
+    description: |
+      macOS Launch Services is an API that enables a running app to open other apps or their document files, similar to the Finder or the Dock. Using Launch Services, an app can perform such tasks as:
+
+      - Open (launch or activate) another app
+      - Open a document or a URL in another app
+      - Identify the preferred app for opening a document or URL
+      - Register information about the kinds of document files and URLs an app can open
+      - Obtain information for displaying a file or URL on the screen, such as its icon, display name, and kind string
+      - Maintain and update the contents of the Recent Items menu
+    patterns:
+      - LSCanURLAcceptURLDescription
+      - LSOpenCFURLRef
+      - LSOpenFromURLSpec
+      - LSRegisterURL
+      - LSCopyDefaultApplicationURLForURL
+      - LSCopyDefaultApplicationURLForContentType
+      - LSCopyApplicationURLsForURL
+      - LSCopyApplicationURLsForBundleIdentifier
+      - LSCopyAllRoleHandlersForContentType
+      - LSCopyDefaultRoleHandlerForContentType
+      - LSSetDefaultRoleHandlerForContentType
+      - LSSetDefaultHandlerForURLScheme
+  - id: IDENTITY_SERVICES_API
+    title: Identity Services API functions used
+    summary: Can Access User Identity
+    description: |
+      The Core Services Identity Reference allows developers to support user and group creation, enumeration, attribute inspection, credential management as well as group membership management in their applications.
+    patterns:
+      - CSGetDefaultIdentityAuthority
+      - CSGetLocalIdentityAuthority
+      - CSGetManagedIdentityAuthority
+      - CSIdentityAddAlias
+      - CSIdentityAddMember
+      - CSIdentityAuthenticateUsingPassword
+      - CSIdentityAuthorityCopyLocalizedName
+      - CSIdentityAuthorityGetTypeID
+      - CSIdentityCommit
+      - CSIdentityCreate
+      - CSIdentityCreateGroupMembershipQuery
+      - CSIdentityCreatePersistentReference
+      - CSIdentityDelete
+      - CSIdentityGetAliases
+      - CSIdentityGetAuthority
+      - CSIdentityGetCertificate
+      - CSIdentityGetClass
+      - CSIdentityGetEmailAddress
+      - CSIdentityGetFullName
+      - CSIdentityGetImageData
+      - CSIdentityGetImageDataType
+      - CSIdentityGetImageURL
+      - CSIdentityGetUUID
+      - CSIdentityIsMemberOfGroup
+      - CSIdentityQueryCreate
+      - CSIdentityQueryExecute
+      - CSIdentityRemoveAlias
+      - CSIdentityRemoveClient
+      - CSIdentityRemoveMember
+      - CSIdentitySetCertificate
+      - CSIdentitySetEmailAddress
+      - CSIdentitySetFullName
+      - CSIdentitySetImageData
+      - CSIdentitySetImageURL
+      - CSIdentitySetPassword
+  - id: SEARCH_KIT_API
+    title: Search Kit API functions used
+    summary: Can Search for Files
+    description: |
+      Search Kit is a powerful and streamlined C language framework for indexing and searching text in most human languages. You can use Search Kit or Spotlight to provide similar functionality and powerful information-access capabilities within your Mac OS X application. The Search Kit API is appropriate when you want your application to have full control over indexing and searching, and when your focus is file content. Search Kit is thread-safe and works with Cocoa, Carbon, and command-line tools.
+    patterns:
+      - SKIndexCreateWithURL
+      - SKIndexCreateWithMutableData
+      - SKIndexOpenWithData
+      - SKIndexOpenWithMutableData
+      - SKIndexOpenWithURL
+      - SKIndexAddDocumentWithText
+      - SKIndexAddDocument
+      - SKIndexGetDocumentCount
+      - SKIndexGetMaximumDocumentID
+      - SKIndexDocumentIteratorCreate
+      - SKIndexDocumentIteratorCopyNext
+      - SKIndexGetAnalysisProperties
+      - SKIndexMoveDocument
+      - SKIndexRemoveDocument
+      - SKIndexRenameDocument
+      - SKLoadDefaultExtractorPlugIns
+      - SKDocumentCreateWithURL
+      - SKDocumentCreate
+      - SKDocumentCopyURL
+      - SKDocumentGetParent
+      - SKIndexCopyDocumentForDocumentID
+      - SKIndexCopyDocumentRefsForDocumentIDs
+      - SKIndexCopyDocumentURLsForDocumentIDs
+      - SKIndexCopyTermIDArrayForDocumentID
+      - SKIndexCopyDocumentProperties
+      - SKIndexGetDocumentState
+      - SKSearchCreate
+      - SKSearchFindMatches
+      - SKSearchCancel
+      - SKSummaryCreateWithString
+      - SKSummaryGetSentenceSummaryInfo
+      - SKSummaryGetParagraphSummaryInfo
+      - SKSummaryCopySentenceSummaryString
+      - SKSummaryCopyParagraphSummaryString
+  - id: FS_API
+    title: File System API functions used
+    summary: Can Manipulate Files
+    description: |
+      A convenient interface to the contents of the file system, and the primary means of interacting with it. A file manager object lets you examine the contents of the file system and make changes to it. The FileManager class provides convenient access to a shared file manager object that is suitable for most types of file-related manipulations. A file manager object is typically your primary mode of interaction with the file system. You use it to locate, create, copy, and move files and directories. You also use it to get information about a file or directory or change some of its attributes.
+    patterns:
+      - NSHomeDirectory
+      - NSUserName
+      - NSFullUserName
+      - homeDirectory
+      - NSHomeDirectoryForUser
+      - NSTemporaryDirectory
+      - NSSearchPathForDirectoriesInDomains
+      - NSOpenStepRootDirectory
+      - containerURL
+      - contentsOfDirectory
+      - mountedVolumeURLs
+      - subpathsOfDirectory
+      - subpaths
+      - createDirectory
+      - createDirectory
+      - createFile
+      - removeItem
+      - removeItem
+      - trashItem
+      - replaceItem
+      - copyItem
+      - moveItem
+      - isUbiquitousItem
+      - startDownloadingUbiquitousItem
+      - evictUbiquitousItem
+      - createSymbolicLink
+      - linkItem
+      - destinationOfSymbolicLink
+      - fileExists
+      - isReadableFile
+      - isWritableFile
+      - isExecutableFile
+      - isDeletableFile
+      - attributesOfFileSystem
+      - changeCurrentDirectoryPath
+      - NSFileTypeForHFSTypeCode
+      - changeFileAttributes
+      - fileSystemAttributes
+      - directoryContents
+      - pathContentOfSymbolicLink
+  - id: ES_API
+    title: Endpoint Security API functions used
+    summary: Provides Endpoint Security
+    description: |
+      Endpoint Security is a C API for monitoring system events for potentially malicious activity. You can write your client in any language supporting native calls. Your client registers with Endpoint Security to authorize pending events, or receive notifications of events that have already occurred. These events include process executions, mounting file systems, forking processes, and raising signals.
+    patterns:
+      - es_exec_fd
+      - es_exec_fd_count
+      - es_mute_path
+      - es_mute_path_events
+      - es_mute_process_events
+      - es_muted_paths_events
+      - es_muted_processes_events
+      - es_release_message
+      - es_release_muted_paths
+      - es_release_muted_processes
+      - es_retain_message
+      - es_unmute_path
+      - es_unmute_path_events
+      - es_unmute_process_events
+  - id: VMNET_API
+    title: Vmnet API functions used
+    summary: Can Access Virtualization Guest
+    description: |
+      The vmnet framework is an API for virtual machines to read and write packets on guest operating systems.
+      
+      The API allows a Guest OS interface to be in host mode or shared mode. Interfaces in host mode can communicate with the native host system and other interfaces running in host mode. In shared mode, the network interface can send and receive packets to the Internet, the native host, and other interfaces running in sharing mode.
+    patterns:
+      - vmnet_copy_shared_interface_list
+      - vmnet_interface_add_ip_port_forwarding_rule
+      - vmnet_interface_add_port_forwarding_rule
+      - vmnet_interface_get_ip_port_forwarding_rules
+      - vmnet_interface_get_port_forwarding_rules
+      - vmnet_interface_remove_ip_port_forwarding_rule
+      - vmnet_interface_remove_port_forwarding_rule
+      - vmnet_ip_port_forwarding_rule_get_details
+      - vmnet_port_forwarding_rule_get_details
+  - id: VIRT_API
+    title: Virtualization API functions used
+    summary: Can Create Virtual Machines
+    description: |
+      The Virtualization framework provides high-level APIs for creating and managing virtual machines on Apple silicon and Intel-based Mac computers. Use this framework to boot and run a Linux-based operating system in a custom environment that you define. The framework supports the Virtio specification, which defines standard interfaces for many device types, including network, socket, serial port, storage, entropy, and memory-balloon devices.
+    patterns:
+      - VZVirtualMachineConfiguration
+      - VZVirtualMachine
+      - VZLinuxBootLoader
+      - VZBootLoader
+      - VZAudioDeviceConfiguration
+      - VZAudioInputStreamSource
+      - VZAudioOutputStreamSink
+      - VZDirectoryShare
+      - VZDirectorySharingDevice
+      - VZDirectorySharingDeviceConfiguration
+      - VZGenericPlatformConfiguration
+      - VZGraphicsDeviceConfiguration
+      - VZHostAudioInputStreamSource
+      - VZHostAudioOutputStreamSink
+      - VZKeyboardConfiguration
+      - VZMacAuxiliaryStorage
+      - VZMacGraphicsDeviceConfiguration
+      - VZMacGraphicsDisplayConfiguration
+      - VZMacHardwareModel
+      - VZMacMachineIdentifier
+      - VZMacOSBootLoader
+      - VZMacOSConfigurationRequirements
+      - VZMacOSInstaller
+      - VZMacOSRestoreImage
+      - VZMacPlatformConfiguration
+      - VZMultipleDirectoryShare
+      - VZNetworkDevice
+      - VZPlatformConfiguration
+      - VZPointingDeviceConfiguration
+      - VZSharedDirectory
+      - VZSingleDirectoryShare
+      - VZUSBKeyboardConfiguration
+      - VZUSBScreenCoordinatePointingDeviceConfiguration
+      - VZVirtioFileSystemDevice
+      - VZVirtioFileSystemDeviceConfiguration
+      - VZVirtioSoundDeviceConfiguration
+      - VZVirtioSoundDeviceInputStreamConfiguration
+      - VZVirtioSoundDeviceOutputStreamConfiguration
+      - VZVirtioSoundDeviceStreamConfiguration
+      - VZVirtualMachineView
+      - hv_vcpu_apic_ctrl
+      - hv_vcpu_apic_get_state
+      - hv_vcpu_apic_lsc_enter_imm32
+      - hv_vcpu_apic_lsc_enter_r32
+      - hv_vcpu_apic_lsc_invalidate
+      - hv_vcpu_apic_put_state
+      - hv_vcpu_apic_read
+      - hv_vcpu_apic_trigger_lvt
+      - hv_vcpu_apic_write
+      - hv_vcpu_exit_apic_access_read
+      - hv_vcpu_exit_info
+      - hv_vcpu_exit_init_ap
+      - hv_vcpu_exit_inject_excp
+      - hv_vcpu_exit_ioapic_eoi
+      - hv_vcpu_exit_startup_ap
+      - hv_vcpu_get_idle_time
+      - hv_vcpu_inject_extint
+      - hv_vcpu_vmx_status
+      - hv_vm_allocate
+      - hv_vm_atpic_assert_irq
+      - hv_vm_atpic_deassert_irq
+      - hv_vm_atpic_get_state
+      - hv_vm_atpic_port_read
+      - hv_vm_atpic_port_write
+      - hv_vm_atpic_put_state
+      - hv_vm_deallocate
+      - hv_vm_ioapic_assert_irq
+      - hv_vm_ioapic_deassert_irq
+      - hv_vm_ioapic_get_state
+      - hv_vm_ioapic_pulse_irq
+      - hv_vm_ioapic_put_state
+      - hv_vm_ioapic_read
+      - hv_vm_ioapic_write
+      - hv_vm_lapic_msi
+      - hv_vm_lapic_set_intr
+      - hv_vm_send_ioapic_intr
+      - hv_vm_set_apic_bus_freq
+      - hv_vmx_vcpu_set_apic_address_space
+  - id: NET_API
+    title: Network API functions used
+    summary: Can Create Network Connections
+    description: |
+      Create network connections to send and receive data using transport and security protocols. Use this framework when you need direct access to protocols like TLS, TCP, and UDP for your custom application protocols.
+    patterns:
+      - NWEndpoint
+      - NWParameters
+      - NWConnection
+      - NWListener
+      - NWBrowser
+      - NWConnectionGroup
+      - NWEthernetChannel
+      - NWProtocolTCP
+      - NWProtocolTLS
+      - NWProtocolUDP
+      - NWProtocolIP
+      - NWProtocolWebSocket
+      - NWProtocolFramer
+      - NWPathMonitor
+      - NWInterface
+      - nw_advertise_descriptor_copy_txt_record_object
+      - nw_advertise_descriptor_create_bonjour_service
+      - nw_advertise_descriptor_get_no_auto_rename
+      - nw_advertise_descriptor_set_no_auto_rename
+      - nw_advertise_descriptor_set_txt_record
+      - nw_advertise_descriptor_set_txt_record_object
+      - nw_browse_descriptor_create_bonjour_service
+      - nw_browse_descriptor_get_bonjour_service_domain
+      - nw_browse_descriptor_get_bonjour_service_type
+      - nw_browse_descriptor_get_include_txt_record
+      - nw_browse_descriptor_set_include_txt_record
+      - nw_browse_result_copy_endpoint
+      - nw_browse_result_copy_txt_record_object
+      - nw_browse_result_enumerate_interfaces
+      - nw_browse_result_get_changes
+      - nw_browse_result_get_interfaces_count
+      - nw_browser_cancel
+      - nw_browser_copy_browse_descriptor
+      - nw_browser_copy_parameters
+      - nw_browser_create
+      - nw_browser_set_browse_results_changed_handler
+      - nw_browser_set_queue
+      - nw_browser_set_state_changed_handler
+      - nw_browser_start
+      - nw_connection_access_establishment_report
+      - nw_connection_batch
+      - nw_connection_cancel
+      - nw_connection_cancel_current_endpoint
+      - nw_connection_copy_current_path
+      - nw_connection_copy_description
+      - nw_connection_copy_endpoint
+      - nw_connection_copy_parameters
+      - nw_connection_copy_protocol_metadata
+      - nw_connection_create
+      - nw_connection_create_new_data_transfer_report
+      - nw_connection_force_cancel
+      - nw_connection_get_maximum_datagram_size
+      - nw_connection_group_cancel
+      - nw_connection_group_copy_descriptor
+      - nw_connection_group_copy_local_endpoint_for_message
+      - nw_connection_group_copy_parameters
+      - nw_connection_group_copy_path_for_message
+      - nw_connection_group_copy_protocol_metadata
+      - nw_connection_group_copy_protocol_metadata_for_message
+      - nw_connection_group_copy_remote_endpoint_for_message
+      - nw_connection_group_create
+      - nw_connection_group_extract_connection
+      - nw_connection_group_extract_connection_for_message
+      - nw_connection_group_reinsert_extracted_connection
+      - nw_connection_group_reply
+      - nw_connection_group_send_message
+      - nw_connection_group_set_new_connection_handler
+      - nw_connection_group_set_queue
+      - nw_connection_group_set_receive_handler
+      - nw_connection_group_set_state_changed_handler
+      - nw_connection_group_start
+      - nw_connection_receive
+      - nw_connection_restart
+      - nw_connection_send
+      - nw_connection_start
+      - nw_ethernet_channel_create
+      - nw_ethernet_channel_set_queue
+      - nw_ethernet_channel_start
+      - nw_framer_async
+      - nw_framer_create_options
+      - nw_ip_create_metadata
+      - nw_listener_create
+      - nw_listener_create_with_connection
+      - nw_listener_create_with_port
+      - nw_listener_set_advertised_endpoint_changed_handler
+      - nw_quic_create_options
+      - nw_quic_add_tls_application_protocol
+      - nw_tcp_create_options
+      - nw_txt_record_apply
+      - nw_tcp_options_set_connection_timeout
+      - nw_txt_record_copy
+      - nw_udp_create_options
+      - nw_ws_metadata_get_opcode
+      - nw_ws_response_get_status
+      - MCAdvertiserAssistant
+      - MCBrowserViewController
+      - MCNearbyServiceAdvertiser
+      - MCNearbyServiceBrowser
+      - MCPeerID
+      - MCSession
+  - id: IOKIT_API
+    title: IOKit API functions used
+    summary: Can Access Hardware Devices & Drivers
+    description: |
+      Access hardware devices and drivers from your apps and services. The IOKit framework implements nonkernel access to IOKit objects such drivers and nubs through the device-interface mechanism.
+    patterns:
+      - IOKit
+      - IOCFSerialize
+      - IOCFUnserialize
+      - IOCFUnserializeBinary
+      - IOCFUnserializeWithSize
+      - IOCatalogueGetData
+      - IOCatalogueModuleLoaded
+      - IOCatalogueReset
+      - IOCatalogueSendData
+      - IOCatalogueTerminate
+      - IOConnectCallAsyncMethod
+      - IOConnectCallAsyncScalarMethod
+      - IOConnectCallAsyncStructMethod
+      - IOConnectCallMethod
+      - IOConnectCallScalarMethod
+      - IOConnectCallStructMethod
+      - IOConnectTrap
+      - IOCreatePlugInInterfaceForService
+      - IODestroyPlugInInterface
+      - IOOpenFirmwarePathMatching
+      - IORegistryEntryCopyFromPath
+      - IORegistryEntryCopyPath
+      - IORegistryEntryGetProperty
+      - IOServiceAddNotification
+      - IOServiceAuthorize
+      - IOServiceOFPathToBSDName
+      - IOServiceOpenAsFileDescriptor
+      - IOURLCreateDataAndPropertiesFromResource
+      - IOURLCreatePropertyFromResource
+      - IOURLWriteDataAndPropertiesToResource
+      - OSGetNotificationFromMessage
+      - IOMainPort
+      - IONotificationPortSetImportanceReceiver
+      - IORPCMessageFromMach
+      - IOBluetoothDevice
+      - IOBluetoothDeviceInquiry
+      - IOBluetoothDevicePair
+      - IOBluetoothDeviceRef
+      - IOBluetoothHandsFree
+      - IOBluetoothHandsFreeAudioGateway
+      - IOBluetoothHandsFreeDevice
+      - IOBluetoothHostController
+      - IOBluetoothL2CAPChannel
+      - IOBluetoothL2CAPChannelRef
+      - IOBluetoothOBEXSession
+      - IOBluetoothObject
+      - IOBluetoothObjectRef
+      - IOBluetoothRFCOMMChannel
+      - IOBluetoothRFCOMMChannelRef
+      - IOBluetoothSDPDataElement
+      - IOBluetoothSDPDataElementRef
+      - IOBluetoothSDPServiceAttribute
+      - IOBluetoothSDPServiceRecord
+      - IOBluetoothSDPServiceRecordRef
+      - IOBluetoothSDPUUID
+      - IOBluetoothSDPUUIDRef
+      - IOBluetoothUserNotification
+      - IOBluetoothUserNotificationRef
+      - OBEXFileTransferServices
+      - OBEXSession
+

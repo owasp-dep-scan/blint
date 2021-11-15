@@ -3,6 +3,7 @@ import math
 import os
 import re
 import string
+from pathlib import Path
 
 charset = string.digits + string.ascii_letters + r"""!&@"""
 
@@ -32,6 +33,49 @@ ignore_directories = [
     "stubs",
     "mock",
     "mocks",
+]
+
+ignore_files = [
+    ".pyc",
+    ".gz",
+    ".tar",
+    ".tar.gz",
+    ".tar",
+    ".log",
+    ".tmp",
+    ".gif",
+    ".png",
+    ".jpg",
+    ".webp",
+    ".webm",
+    ".icns",
+    ".pcm",
+    ".wav",
+    ".mp3",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".d.ts",
+    ".min.js",
+    ".min.css",
+    ".eslintrc.js",
+    ".babelrc.js",
+    ".spec.js",
+    ".spec.ts",
+    ".component.spec.js",
+    ".component.spec.ts",
+    ".data.js",
+    ".data.ts",
+    ".bundle.js",
+    ".snap",
+    ".pb.go",
+    ".tests.py",
+    ".vdb",
+    ".txt",
+    ".strings",
+    ".nib",
 ]
 
 strings_allowlist = [
@@ -261,6 +305,24 @@ def is_binary_string(content):
     return bool(content.translate(None, textchars))
 
 
+def is_ignored_file(file_name):
+    """
+    Method to find if the given file can be ignored
+    :param file_name: File to compare
+    :return: Boolean True if file can be ignored. False otherwise
+    """
+    if not file_name:
+        return False
+    file_name = file_name.lower()
+    extn = "".join(Path(file_name).suffixes)
+    if extn in ignore_files or file_name in ignore_files:
+        return True
+    for ie in ignore_files:
+        if file_name.endswith(ie):
+            return True
+    return False
+
+
 def is_exe(src):
     """Detect if the source is a binary file
 
@@ -296,9 +358,11 @@ def find_exe_files(src):
     """
     result = []
     for root, dirs, files in os.walk(src):
-        print(root, dirs)
         filter_ignored_dirs(dirs)
         for file in files:
-            if is_exe(file):
-                result.append(os.path.join(root, file))
+            if is_ignored_file(file):
+                continue
+            fullPath = os.path.join(root, file)
+            if is_exe(fullPath):
+                result.append(fullPath)
     return result
