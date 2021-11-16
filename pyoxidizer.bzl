@@ -295,7 +295,7 @@ def make_macos_app_bundle():
     bundle.set_info_plist_required_keys(
         display_name = "blint",
         identifier = "io.ngcloud.blint",
-        version = "1.0.2",
+        version = "1.0.8",
         signature = "lint",
         executable = "blint",
     )
@@ -303,11 +303,14 @@ def make_macos_app_bundle():
     universal = AppleUniversalBinary("blint")
 
     for arch in ARCHES:
-        path = "build/" + arch + "/release/install/blint"
-        universal.add_path(path)
+        path = "build/" + arch + "/release/install"
+        universal.add_path(path + "/blint")
 
     m = FileManifest()
     m.add_file(universal.to_file_content())
+    for arch in ARCHES:
+        m.add_path("build/" + arch + "/release/install/lib/lief.cpython-39-darwin.so", "build/x86_64-apple-darwin/release/install/")
+        m.add_path("build/" + arch + "/release/install/lib/yaml/_yaml.cpython-39-darwin.so", "build/x86_64-apple-darwin/release/install/")
     bundle.add_macos_manifest(m)
 
     return bundle
