@@ -199,18 +199,10 @@ rules:
       - http.ServeFile
       - http.ServeTLS
       - http.SetCookie
-      - http.Do
-      - http.Get
-      - http.Head
-      - http.Post
-      - http.PostForm
       - http.Handle
       - http.FileServer
       - http.ServeHTTP
-      - http.NewRequest
-      - http.NewRequestWithContext
       - http.ReadRequest
-      - http.AddCookie
       - http.BasicAuth
       - http.ParseForm
       - http.ParseMultipartForm
@@ -226,6 +218,20 @@ rules:
       - httputil.NewSingleHostReverseProxy
       - httputil.ServeHTTP
       - golang.org/x/net/http2
+  - id: HTTP_CLIENT_METHODS
+    title: HTTP client functions used
+    summary: Invokes HTTP service
+    description: |
+      Package http provides HTTP client and server implementations.
+    patterns:
+      - http.Do
+      - http.Get
+      - http.Head
+      - http.Post
+      - http.PostForm
+      - http.NewRequest
+      - http.NewRequestWithContext
+      - http.AddCookie
   - id: RPC_METHODS
     title: RPC functions used
     summary: Can Execute Remote Procedures
