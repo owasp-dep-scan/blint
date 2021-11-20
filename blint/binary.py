@@ -358,20 +358,23 @@ def parse_pe_imports(imports):
     try:
         LOG.debug("Parsing imports")
         imports_list = []
+        dlls = set()
         for import_ in imports:
             entries = import_.entries
             for entry in entries:
                 if entry.name:
+                    dlls.add(import_.name)
                     imports_list.append(
                         {
-                            "dll_name": import_.name,
-                            "name": entry.name,
+                            "name": "{}::{}".format(import_.name, entry.name),
+                            "short_name": entry.name,
                             "data": entry.data,
                             "iat_value": entry.iat_value,
                             "hint": entry.hint,
                         }
                     )
-        return imports_list
+        dll_list = [{"name": d, "tag": "NEEDED"} for d in list(dlls)]
+        return imports_list, dll_list
     except lief.exception:
         return []
 
@@ -708,7 +711,9 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["imports"] = parse_pe_imports(parsed_obj.imports)
+                metadata["imports"], metadata["dynamic_entries"] = parse_pe_imports(
+                    parsed_obj.imports
+                )
             except lief.exception:
                 pass
             try:

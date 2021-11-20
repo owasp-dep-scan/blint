@@ -256,8 +256,10 @@ rules:
       - AddSecureMemoryCacheCallback
       - CheckNameLegalDOS8Dot3A
       - CreateFiber
+      - CreateProcessW
       - CreateProcessWithLogonW
       - CreateProcessWithTokenW
+      - TerminateProcess
       - DeleteVolumeMountPointA
       - FindFirstVolumeA
       - FindFirstVolumeMountPoint
@@ -289,6 +291,30 @@ rules:
       - GetSystemInfo
       - GetStartupInfoW
       - GetDiskFreeSpaceA
+  - id: WIN_BASE_USER_API
+    title: Win Base user api functions used
+    summary: Retrieves Account Information
+    description: |
+      Win Base api are used by system services.
+    patterns:
+      - GetUserNameW
+      - GetUserNameA
+      - LogonUserA
+      - LogonUserExA
+      - LogonUserExW
+      - LogonUserW
+      - LookupAccountNameA
+      - LookupAccountNameW
+      - LookupAccountSidA
+      - LookupAccountSidLocalA
+      - LookupAccountSidLocalW
+      - LookupAccountSidW
+      - LookupPrivilegeDisplayNameA
+      - LookupPrivilegeDisplayNameW
+      - LookupPrivilegeNameA
+      - LookupPrivilegeNameW
+      - LookupPrivilegeValueA
+      - LookupPrivilegeValueW
   - id: WIN_BASE_IO_API
     title: Win Base IO api functions used
     summary: Can Create and Encrypt Files
@@ -1326,3 +1352,287 @@ rules:
       - WebSocketGetGlobalProperty
       - WebSocketReceive
       - WebSocketSend
+  - id: CLIPBOARD_ACCESS_API
+    title: Clipboard api functions used
+    summary: Can Manipulate Clipboard
+    description: |
+      Libraries such as SDL is used to monitor clipboard.
+    patterns:
+      - SDL_SetClipboardText
+      - SDL_GetClipboardText
+      - SDL_HasClipboardText
+  - id: AUDIO_ACCESS_API
+    title: Audio Hardware api functions used
+    summary: Can Manipulate Audio Hardware
+    description: |
+      Libraries such as SDL is used to manipulate audio devices.
+    patterns:
+      - SDL_GetNumAudioDrivers
+      - SDL_GetAudioDriver
+      - SDL_AudioInit
+      - SDL_GetCurrentAudioDriver
+      - SDL_OpenAudio
+      - SDL_GetNumAudioDevices
+      - SDL_GetAudioDeviceName
+      - SDL_GetAudioDeviceSpec
+      - SDL_OpenAudioDevice
+      - SDL_GetAudioStatus
+      - SDL_GetAudioDeviceStatus
+      - SDL_PauseAudio
+      - SDL_PauseAudioDevice
+      - SDL_LoadWAV_RW
+      - SDL_FreeWAV
+      - SDL_LoadWAV
+      - SDL_BuildAudioCVT
+      - SDL_ConvertAudio
+      - SDL_NewAudioStream
+      - SDL_AudioStreamPut
+      - SDL_AudioStreamGet
+      - SDL_AudioStreamAvailable
+      - SDL_AudioStreamFlush
+      - SDL_AudioStreamClear
+      - SDL_FreeAudioStream
+      - SDL_MixAudio
+      - SDL_MixAudioFormat
+      - SDL_QueueAudio
+      - SDL_DequeueAudio
+      - SDL_GetQueuedAudioSize
+      - SDL_ClearQueuedAudio
+      - SDL_LockAudio
+      - SDL_LockAudioDevice
+      - SDL_UnlockAudio
+      - SDL_UnlockAudioDevice
+      - SDL_CloseAudio
+      - SDL_CloseAudioDevice
+  - id: VIDEO_ACCESS_API
+    title: Video Hardware api functions used
+    summary: Can Manipulate Video Hardware
+    description: |
+      Libraries such as SDL is used to manipulate video devices.
+    patterns:
+      - SDL_GetNumVideoDrivers
+      - SDL_GetVideoDriver
+      - SDL_VideoInit
+      - SDL_VideoQuit
+      - SDL_GetCurrentVideoDriver
+      - SDL_GetNumVideoDisplays
+      - SDL_GetDisplayName
+      - SDL_GetDisplayBounds
+      - SDL_GetDisplayUsableBounds
+      - SDL_GetDisplayDPI
+      - SDL_GetNumDisplayModes
+      - SDL_GetDisplayMode
+      - SDL_GetDesktopDisplayMode
+      - SDL_GetCurrentDisplayMode
+      - SDL_GetClosestDisplayMode
+      - SDL_GetWindowDisplayIndex
+      - SDL_SetWindowDisplayMode
+      - SDL_GetWindowDisplayMode
+      - SDL_GetWindowICCProfile
+      - SDL_GetWindowPixelFormat
+      - SDL_CreateWindow
+      - SDL_CreateWindowFrom
+      - SDL_GetWindowID
+      - SDL_GetWindowFromID
+      - SDL_GetWindowFlags
+      - SDL_SetWindowTitle
+      - SDL_GetWindowTitle
+      - SDL_SetWindowData
+      - SDL_GetWindowData
+      - SDL_ShowWindow
+      - SDL_GetWindowSurface
+      - SDL_SetWindowInputFocus
+      - SDL_EnableScreenSaver
+      - SDL_DisableScreenSaver
+      - SDL_GL_LoadLibrary
+      - SDL_GL_GetProcAddress
+      - SDL_GL_UnloadLibrary
+      - SDL_GL_ExtensionSupported
+  - id: WIN_SOCK_API
+    title: Windows socket 2 library used
+    summary: Uses Network to send and receive data
+    description: |
+      Windows Sockets 2 (Winsock) enables programmers to create advanced Internet, intranet, and other network-capable applications to transmit application data across the wire, independent of the network protocol being used. With Winsock, programmers are provided access to advanced Microsoft® Windows® networking capabilities such as multicast and Quality of Service (QoS).
+    patterns:
+      - WS2_32.dll::accept
+      - WS2_32.dll::AcceptEx
+      - WS2_32.dll::bind
+      - WS2_32.dll::closesocket
+      - WS2_32.dll::connect
+      - WS2_32.dll::ConnectEx
+      - WS2_32.dll::DisconnectEx
+      - WS2_32.dll::EnumProtocols
+      - WS2_32.dll::freeaddrinfo
+      - WS2_32.dll::FreeAddrInfoEx
+      - WS2_32.dll::FreeAddrInfoW
+      - WS2_32.dll::gai_strerror
+      - WS2_32.dll::GetAcceptExSockaddrs
+      - WS2_32.dll::GetAddressByName
+      - WS2_32.dll::getaddrinfo
+      - WS2_32.dll::GetAddrInfoEx
+      - WS2_32.dll::GetAddrInfoExCancel
+      - WS2_32.dll::GetAddrInfoExOverlappedResult
+      - WS2_32.dll::GetAddrInfoW
+      - WS2_32.dll::gethostbyaddr
+      - WS2_32.dll::gethostbyname
+      - WS2_32.dll::gethostname
+      - WS2_32.dll::GetHostNameW
+      - WS2_32.dll::getipv4sourcefilter
+      - WS2_32.dll::GetNameByType
+      - WS2_32.dll::getnameinfo
+      - WS2_32.dll::GetNameInfoW
+      - WS2_32.dll::getpeername
+      - WS2_32.dll::getprotobyname
+      - WS2_32.dll::getprotobynumber
+      - WS2_32.dll::getservbyname
+      - WS2_32.dll::getservbyport
+      - WS2_32.dll::GetService
+      - WS2_32.dll::getsockname
+      - WS2_32.dll::getsockopt
+      - WS2_32.dll::getsourcefilter
+      - WS2_32.dll::GetTypeByName
+      - WS2_32.dll::htond
+      - WS2_32.dll::htonf
+      - WS2_32.dll::htonl
+      - WS2_32.dll::htonll
+      - WS2_32.dll::htons
+      - WS2_32.dll::inet_addr
+      - WS2_32.dll::inet_ntoa
+      - WS2_32.dll::InetNtop
+      - WS2_32.dll::InetPton
+      - WS2_32.dll::ioctlsocket
+      - WS2_32.dll::listen
+      - WS2_32.dll::ntohd
+      - WS2_32.dll::ntohf
+      - WS2_32.dll::ntohl
+      - WS2_32.dll::ntohll
+      - WS2_32.dll::ntohs
+      - WS2_32.dll::recv
+      - WS2_32.dll::recvfrom
+      - WS2_32.dll::RIOCloseCompletionQueue
+      - WS2_32.dll::RIOCreateCompletionQueue
+      - WS2_32.dll::RIOCreateRequestQueue
+      - WS2_32.dll::RIODequeueCompletion
+      - WS2_32.dll::RIODeregisterBuffer
+      - WS2_32.dll::RIONotify
+      - WS2_32.dll::RIOReceive
+      - WS2_32.dll::RIOReceiveEx
+      - WS2_32.dll::RIORegisterBuffer
+      - WS2_32.dll::RIOResizeCompletionQueue
+      - WS2_32.dll::RIOResizeRequestQueue
+      - WS2_32.dll::RIOSend
+      - WS2_32.dll::RIOSendEx
+      - WS2_32.dll::select
+      - WS2_32.dll::send
+      - WS2_32.dll::sendto
+      - WS2_32.dll::SetAddrInfoEx
+      - WS2_32.dll::setipv4sourcefilter
+      - WS2_32.dll::SetService
+      - WS2_32.dll::SetSocketMediaStreamingMode
+      - WS2_32.dll::setsockopt
+      - WS2_32.dll::setsourcefilter
+      - WS2_32.dll::shutdown
+      - WS2_32.dll::socket
+      - WS2_32.dll::TransmitFile
+      - WS2_32.dll::TransmitPackets
+      - WS2_32.dll::WSAAccept
+      - WS2_32.dll::WSAAddressToString
+      - WS2_32.dll::WSAAsyncGetHostByAddr
+      - WS2_32.dll::WSAAsyncGetHostByName
+      - WS2_32.dll::WSAAsyncGetProtoByName
+      - WS2_32.dll::WSAAsyncGetProtoByNumber
+      - WS2_32.dll::WSAAsyncGetServByName
+      - WS2_32.dll::WSAAsyncGetServByPort
+      - WS2_32.dll::WSAAsyncSelect
+      - WS2_32.dll::WSACancelAsyncRequest
+      - WS2_32.dll::WSACleanup
+      - WS2_32.dll::WSACloseEvent
+      - WS2_32.dll::WSAConnect
+      - WS2_32.dll::WSAConnectByList
+      - WS2_32.dll::WSAConnectByName
+      - WS2_32.dll::WSACreateEvent
+      - WS2_32.dll::WSADeleteSocketPeerTargetName
+      - WS2_32.dll::WSADuplicateSocket
+      - WS2_32.dll::WSAEnumNameSpaceProviders
+      - WS2_32.dll::WSAEnumNameSpaceProvidersEx
+      - WS2_32.dll::WSAEnumNetworkEvents
+      - WS2_32.dll::WSAEnumProtocols
+      - WS2_32.dll::WSAEventSelect
+      - WS2_32.dll::__WSAFDIsSet
+      - WS2_32.dll::WSAGetFailConnectOnIcmpError
+      - WS2_32.dll::WSAGetIcmpErrorInfo
+      - WS2_32.dll::WSAGetIPUserMtu
+      - WS2_32.dll::WSAGetLastError
+      - WS2_32.dll::WSAGetOverlappedResult
+      - WS2_32.dll::WSAGetQOSByName
+      - WS2_32.dll::WSAGetServiceClassInfo
+      - WS2_32.dll::WSAGetServiceClassNameByClassId
+      - WS2_32.dll::WSAGetUdpRecvMaxCoalescedSize
+      - WS2_32.dll::WSAGetUdpSendMessageSize
+      - WS2_32.dll::WSAHtonl
+      - WS2_32.dll::WSAHtons
+      - WS2_32.dll::WSAImpersonateSocketPeer
+      - WS2_32.dll::WSAInstallServiceClass
+      - WS2_32.dll::WSAIoctl
+      - WS2_32.dll::WSAJoinLeaf
+      - WS2_32.dll::WSALookupServiceBegin
+      - WS2_32.dll::WSALookupServiceEnd
+      - WS2_32.dll::WSALookupServiceNext
+      - WS2_32.dll::WSANSPIoctl
+      - WS2_32.dll::WSANtohl
+      - WS2_32.dll::WSANtohs
+      - WS2_32.dll::WSAPoll
+      - WS2_32.dll::WSAProviderConfigChange
+      - WS2_32.dll::WSAQuerySocketSecurity
+      - WS2_32.dll::WSARecv
+      - WS2_32.dll::WSARecvDisconnect
+      - WS2_32.dll::WSARecvEx
+      - WS2_32.dll::WSARecvFrom
+      - WS2_32.dll::LPFN_WSARECVMSG (WSARecvMsg)
+      - WS2_32.dll::WSARemoveServiceClass
+      - WS2_32.dll::WSAResetEvent
+      - WS2_32.dll::WSARevertImpersonation
+      - WS2_32.dll::WSASend
+      - WS2_32.dll::WSASendDisconnect
+      - WS2_32.dll::WSASendMsg
+      - WS2_32.dll::WSASendTo
+      - WS2_32.dll::WSASetEvent
+      - WS2_32.dll::WSASetFailConnectOnIcmpError
+      - WS2_32.dll::WSASetIPUserMtu
+      - WS2_32.dll::WSASetLastError
+      - WS2_32.dll::WSASetService
+      - WS2_32.dll::WSASetSocketPeerTargetName
+      - WS2_32.dll::WSASetSocketSecurity
+      - WS2_32.dll::WSASetUdpRecvMaxCoalescedSize
+      - WS2_32.dll::WSASetUdpSendMessageSize
+      - WS2_32.dll::WSASocket
+      - WS2_32.dll::WSAStartup
+      - WS2_32.dll::WSAStringToAddress
+      - WS2_32.dll::WSAWaitForMultipleEvents
+  - id: SHELL_API
+    title: Shell api functions used
+    summary: Manipulates System Shell
+    description: |
+      Shell Windows API allows applications to access functions provided by the operating system shell, and to change and enhance it.
+    patterns:
+      - FindExecutableA
+      - FindExecutableW
+      - InitNetworkAddressControl
+      - NetAddr_GetAddress
+      - ShellExecute
+      - ShellExecuteEx
+      - SHFileOperation
+      - SHGetDiskFreeSpaceEx
+      - SHGetFileInfo
+      - SHGetNewLinkInfo
+      - SHGetUnreadMailCount
+      - SHInvokePrinterCommand
+      - SHIsFileAvailableOffline
+      - SHQueryRecycleBin
+      - SHSetUnreadMailCount
+      - SHTestTokenMembership
+      - GetLocalManagedApplications
+      - GetManagedApplicationCategories
+      - GetManagedApplications
+      - InstallApplication
+      - UninstallApplication

@@ -1,0 +1,101 @@
+---
+text: Review for symbols identified in a binary produced by GNU build
+group: SYMBOL_REVIEWS
+exe_type: genericbinary
+rules:
+  - id: CLIPBOARD_ACCESS_API
+    title: Clipboard api functions used
+    summary: Can Manipulate Clipboard
+    description: |
+      Libraries such as SDL is used to monitor clipboard.
+    patterns:
+      - SDL_SetClipboardText
+      - SDL_GetClipboardText
+      - SDL_HasClipboardText
+  - id: AUDIO_ACCESS_API
+    title: Audio Hardware api functions used
+    summary: Can Manipulate Audio Hardware
+    description: |
+      Libraries such as SDL is used to manipulate audio devices.
+    patterns:
+      - SDL_GetNumAudioDrivers
+      - SDL_GetAudioDriver
+      - SDL_AudioInit
+      - SDL_GetCurrentAudioDriver
+      - SDL_OpenAudio
+      - SDL_GetNumAudioDevices
+      - SDL_GetAudioDeviceName
+      - SDL_GetAudioDeviceSpec
+      - SDL_OpenAudioDevice
+      - SDL_GetAudioStatus
+      - SDL_GetAudioDeviceStatus
+      - SDL_PauseAudio
+      - SDL_PauseAudioDevice
+      - SDL_LoadWAV_RW
+      - SDL_FreeWAV
+      - SDL_LoadWAV
+      - SDL_BuildAudioCVT
+      - SDL_ConvertAudio
+      - SDL_NewAudioStream
+      - SDL_AudioStreamPut
+      - SDL_AudioStreamGet
+      - SDL_AudioStreamAvailable
+      - SDL_AudioStreamFlush
+      - SDL_AudioStreamClear
+      - SDL_FreeAudioStream
+      - SDL_MixAudio
+      - SDL_MixAudioFormat
+      - SDL_QueueAudio
+      - SDL_DequeueAudio
+      - SDL_GetQueuedAudioSize
+      - SDL_ClearQueuedAudio
+      - SDL_LockAudio
+      - SDL_LockAudioDevice
+      - SDL_UnlockAudio
+      - SDL_UnlockAudioDevice
+      - SDL_CloseAudio
+      - SDL_CloseAudioDevice
+  - id: VIDEO_ACCESS_API
+    title: Video Hardware api functions used
+    summary: Can Manipulate Video Hardware
+    description: |
+      Libraries such as SDL is used to manipulate video devices.
+    patterns:
+      - SDL_GetNumVideoDrivers
+      - SDL_GetVideoDriver
+      - SDL_VideoInit
+      - SDL_VideoQuit
+      - SDL_GetCurrentVideoDriver
+      - SDL_GetNumVideoDisplays
+      - SDL_GetDisplayName
+      - SDL_GetDisplayBounds
+      - SDL_GetDisplayUsableBounds
+      - SDL_GetDisplayDPI
+      - SDL_GetNumDisplayModes
+      - SDL_GetDisplayMode
+      - SDL_GetDesktopDisplayMode
+      - SDL_GetCurrentDisplayMode
+      - SDL_GetClosestDisplayMode
+      - SDL_GetWindowDisplayIndex
+      - SDL_SetWindowDisplayMode
+      - SDL_GetWindowDisplayMode
+      - SDL_GetWindowICCProfile
+      - SDL_GetWindowPixelFormat
+      - SDL_CreateWindow
+      - SDL_CreateWindowFrom
+      - SDL_GetWindowID
+      - SDL_GetWindowFromID
+      - SDL_GetWindowFlags
+      - SDL_SetWindowTitle
+      - SDL_GetWindowTitle
+      - SDL_SetWindowData
+      - SDL_GetWindowData
+      - SDL_ShowWindow
+      - SDL_GetWindowSurface
+      - SDL_SetWindowInputFocus
+      - SDL_EnableScreenSaver
+      - SDL_DisableScreenSaver
+      - SDL_GL_LoadLibrary
+      - SDL_GL_GetProcAddress
+      - SDL_GL_UnloadLibrary
+      - SDL_GL_ExtensionSupported

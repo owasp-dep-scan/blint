@@ -295,7 +295,7 @@ def make_macos_app_bundle():
     bundle.set_info_plist_required_keys(
         display_name = "blint",
         identifier = "io.ngcloud.blint",
-        version = "1.0.9",
+        version = "1.0.10",
         signature = "lint",
         executable = "blint",
     )

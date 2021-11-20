@@ -39,6 +39,7 @@ rules_dict = {}
 review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
+review_entries_dict = defaultdict(list)
 review_rules_cache = {}
 
 # Debug mode
@@ -116,6 +117,8 @@ for review_methods_file in review_files:
                     review_symbols_dict[exe_type].append(method_rules_dict)
                 elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
                     review_imports_dict[exe_type].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                    review_entries_dict[exe_type].append(method_rules_dict)
 
 
 def check_nx(f, metadata, rule_obj):
@@ -212,7 +215,7 @@ def run_review_methods_symbols(review_methods_list, functions_list):
                 if found_pattern.get(apattern) or found_cid.get(cid):
                     continue
                 for afun in functions_list:
-                    if apattern.lower() in afun.lower() and not found_function.get(
+                    if (apattern.lower() in afun.lower()) and not found_function.get(
                         afun.lower()
                     ):
                         result = {
@@ -237,8 +240,14 @@ def run_review(f, metadata):
     review_methods_list = review_methods_dict.get(exe_type)
     review_symbols_list = review_symbols_dict.get(exe_type)
     review_imports_list = review_imports_dict.get(exe_type)
+    review_entries_list = review_entries_dict.get(exe_type)
     # Check if reviews are available for this exe type
-    if not review_methods_list and not review_symbols_list and not review_imports_list:
+    if (
+        not review_methods_list
+        and not review_symbols_list
+        and not review_imports_list
+        and not review_entries_list
+    ):
         return None
     if review_methods_list:
         functions_list = [
@@ -265,6 +274,14 @@ def run_review(f, metadata):
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
         LOG.debug(f"Reviewing {len(imports_list)} imports")
         results.update(run_review_methods_symbols(review_imports_list, imports_list))
+    if review_entries_list:
+        entries_list = [
+            f.get("name", "")
+            for f in metadata.get("dynamic_entries", [])
+            if f.get("tag") == "NEEDED"
+        ]
+        LOG.debug(f"Reviewing {len(entries_list)} dynamic entries")
+        results.update(run_review_methods_symbols(review_entries_list, entries_list))
     return results
 
 

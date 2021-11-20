@@ -137,6 +137,8 @@ strings_allowlist = [
     "InlineDiscretionary",
     "src/libraries",
     "ECDHE-ECDSA-AES256-GCM",
+    "setsockopt",
+    ".jar",
 ]
 
 secrets_regex = {

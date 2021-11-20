@@ -1,0 +1,35 @@
+---
+text: Review for dynamic entries (.dll files) identified in a PE binary
+group: ENTRIES_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+rules:
+  - id: FFMPEG_LIB
+    title: FFMPEG library used
+    summary: Can Manipulate Multimedia files
+    description: |
+      FFmpeg is the leading multimedia framework, able to decode, encode, transcode, mux, demux, stream, filter and play pretty much anything that humans and machines have created. It supports the most obscure ancient formats up to the cutting edge. No matter if they were designed by some standards committee, the community or a corporation. It is also highly portable: FFmpeg compiles, runs, and passes our testing infrastructure FATE across Linux, Mac OS X, Microsoft Windows, the BSDs, Solaris, etc. under a wide variety of build environments, machine architectures, and configurations.
+    patterns:
+      - avutil
+      - swscale
+      - swresample
+      - avcodec
+      - avformat
+      - avdevice
+      - avfilter
+  - id: SDL_LIB
+    title: Simple DirectMedia layer library used
+    summary: Can Access Graphics & Input Devices
+    description: |
+      Simple DirectMedia Layer is a cross-platform development library designed to provide low level access to audio, keyboard, mouse, joystick, and graphics hardware via OpenGL and Direct3D. It is used by video playback software, emulators, and popular games including Valve's award winning catalog and many Humble Bundle games.
+    patterns:
+      - sdl2
+  - id: ADB_LIB
+    title: Android Debug Bridge library used
+    summary: Can Access Android Devices
+    description: |
+      Android Debug Bridge (adb) is a versatile command-line tool that lets you communicate with a device. The adb command facilitates a variety of device actions, such as installing and debugging apps, and it provides access to a Unix shell that you can use to run a variety of commands on a device.
+    patterns:
+      - adbwinapi
+      - adbwinusbapi
