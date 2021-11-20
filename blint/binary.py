@@ -182,12 +182,16 @@ def parse_interpreter(parsed_obj):
         return None
 
 
-def detect_exe_type(parsed_obj):
+def detect_exe_type(parsed_obj, metadata):
     try:
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         elif parsed_obj.has_section(".note.gnu.build-id"):
             return "genericbinary"
+        if metadata.get("machine_type") and metadata.get("file_type"):
+            return "{}-{}".format(
+                metadata.get("machine_type"), metadata.get("file_type")
+            ).lower()
     except lief.exception:
         return None
 
@@ -495,7 +499,7 @@ def parse(exe_file):
             metadata["virtual_size"] = parsed_obj.virtual_size
             metadata["has_nx"] = parsed_obj.has_nx
             metadata["relro"] = parse_relro(parsed_obj)
-            metadata["exe_type"] = detect_exe_type(parsed_obj)
+            metadata["exe_type"] = detect_exe_type(parsed_obj, metadata)
             # Canary check
             canary_sections = ["__stack_chk_fail", "__intel_security_cookie"]
             for section in canary_sections:

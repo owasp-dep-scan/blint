@@ -1,0 +1,193 @@
+---
+text: Review for functions identified in a binary produced for MIPS
+group: METHOD_REVIEWS
+exe_type: mips-executable
+rules:
+  - id: JSON_METHODS
+    title: Json library used
+    summary: Uses JSON data
+    description: |
+      Json library such as jansson is used for reading & write json data.
+    patterns:
+      - json_string
+      - json_string_nocheck
+      - json_stringn_nocheck
+      - json_string_set
+      - json_string_set_nocheck
+      - json_string_setn_nocheck
+      - json_array_get
+      - json_array_set
+      - json_array_set_new
+      - json_array_append_new
+      - json_array_insert_new
+      - json_array_extend
+      - json_object_get
+      - json_object_set_nocheck
+      - json_object_setn_nocheck
+      - json_object_set_new_nocheck
+      - json_object_setn_new_nocheck
+      - json_dumps
+      - json_dumpb
+      - json_dumpf
+      - json_dumpfd
+      - json_dump_file
+      - json_dump_callback
+      - json_loads
+      - json_loadb
+      - json_loadf
+      - json_loadfd
+      - json_load_file
+      - json_load_callback
+      - json_pack
+      - json_pack_ex
+      - json_vpack_ex
+      - json_unpack
+      - json_unpack_ex
+      - json_vunpack_ex
+      - json_deep_copy
+      - json_malloc_t
+      - json_free_t
+      - json_set_alloc_funcs
+      - json_get_alloc_funcs
+      - json_object_get
+      - json_object_put
+      - json_object_is_type
+      - json_object_get_type
+      - json_object_to_json_string
+      - json_object_to_json_string_ext
+      - json_object_to_json_string_length
+      - json_object_get_userdata
+      - json_object_set_userdata
+      - json_object_set_serializer
+      - json_object_new_object
+      - json_object_get_object
+      - json_object_object_length
+      - json_object_object_add
+      - json_object_object_add_ex
+      - json_object_object_get
+      - json_object_object_get_ex
+      - json_object_object_del
+      - json_object_new_array
+      - json_object_new_array_ext
+      - json_object_get_array
+      - json_object_array_length
+      - json_object_array_sort
+      - json_object_array_bsearch
+      - json_object_array_add
+      - json_object_array_put_idx
+      - json_object_array_get_idx
+      - json_object_array_del_idx
+      - json_object_array_shrink
+      - json_object_new_boolean
+      - json_object_get_boolean
+      - json_object_set_boolean
+      - json_object_new_int
+      - json_object_new_int64
+      - json_object_new_uint64
+      - json_object_get_int
+      - json_object_set_int
+      - json_object_int_inc
+      - json_object_get_int64
+      - json_object_get_uint64
+      - json_object_set_int64
+      - json_object_set_uint64
+      - json_object_new_double
+      - json_object_new_double_s
+      - json_c_set_serialization_double_format
+      - json_object_double_to_json_string
+      - json_object_get_double
+      - json_object_set_double
+      - json_object_new_string
+      - json_object_new_string_len
+      - json_object_get_string
+      - json_object_get_string_len
+      - json_object_set_string
+      - json_object_set_string_len
+      - json_object_new_null
+      - json_object_equal
+      - json_object_deep_copy
+  - id: HTTP_METHODS
+    title: HTTP server functions used
+    summary: Can run an HTTP server
+    description: |
+      CivetWeb is a small and easy to use web server. It may be embedded into C/C++ host applications or used as a stand-alone server.
+    patterns:
+      - mg_init_library
+      - mg_exit_library
+      - mg_start
+      - mg_stop
+      - mg_start_domain
+      - mg_set_request_handler
+      - mg_set_auth_handler
+      - mg_get_option
+      - mg_get_context
+      - mg_get_user_context_data
+      - mg_get_user_data
+      - mg_get_thread_pointer
+      - mg_set_user_connection_data
+      - mg_get_user_connection_data
+      - mg_get_request_link
+      - mg_get_valid_options
+      - mg_get_server_ports
+      - mg_modify_passwords_file
+      - mg_modify_passwords_file_ha1
+      - mg_get_request_info
+      - mg_get_response_info
+      - mg_write
+      - mg_lock_connection
+      - mg_unlock_connection
+      - mg_lock_context
+      - mg_unlock_context
+      - mg_send_chunk
+      - mg_send_file
+      - mg_send_file_body
+      - mg_send_http_error
+      - mg_send_http_ok
+      - mg_send_http_redirect
+      - mg_send_digest_access_authentication_request
+      - mg_check_digest_access_authentication
+      - mg_send_mime_file
+      - mg_store_body
+      - mg_read
+      - mg_get_header
+      - mg_get_var
+      - mg_split_form_urlencoded
+      - mg_get_cookie
+      - mg_download
+      - mg_close_connection
+      - mg_handle_form_request
+      - mg_start_thread
+      - mg_get_builtin_mime_type
+      - mg_get_response_code_text
+      - mg_url_decode
+      - mg_url_encode
+      - mg_md5
+      - mg_connect_client
+      - mg_connect_client_secure
+      - mg_get_response
+      - mg_response_header_start
+      - mg_response_header_add
+      - mg_response_header_add_lines
+      - mg_response_header_send
+      - mg_check_feature
+      - mg_get_system_info
+      - mg_get_context_info
+      - mg_disable_connection_keep_alive
+      - mg_get_connection_info
+      - mg_connect_client2
+      - mg_get_response2
+      - mg_start2
+  - id: WEB_SOCKET_API
+    title: HTTP Web Socket api functions used
+    summary: Uses Web Sockets
+    description: |
+      CivetWeb is a small and easy to use web server. It may be embedded into C/C++ host applications or used as a stand-alone server.
+    patterns:
+      - mg_websocket_write
+      - mg_websocket_client_write
+      - mg_set_websocket_handler
+      - mg_set_websocket_handler_with_subprotocols
+      - mg_connect_websocket_client
+      - mg_connect_websocket_client_extensions
+      - mg_connect_websocket_client_secure
+      - mg_connect_websocket_client_secure_extensions

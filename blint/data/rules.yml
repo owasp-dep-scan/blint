@@ -17,6 +17,7 @@
     - PE64
     - dotnetbinary
     - MachO
+    - mips-executable
 - id: CHECK_PIE
   title: Missing Position-Independent Executable (PIE) Protection
   description: |
@@ -36,6 +37,7 @@
     - PE64
     - dotnetbinary
     - MachO
+    - mips-executable
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
   description: |
@@ -57,6 +59,7 @@
   exe_types:
     - genericbinary
     - gobinary
+    - mips-executable
 - id: CHECK_CANARY
   title: Missing Canary Protection
   description: |
@@ -73,6 +76,7 @@
   exe_types:
     - genericbinary
     - dotnetbinary
+    - mips-executable
 - id: CHECK_RPATH
   title: Avoid rpath and runpath
   description: |
