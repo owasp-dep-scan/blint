@@ -213,15 +213,29 @@ def parse_pe_data(parsed_obj):
         data_list = []
         data_directories = parsed_obj.data_directories
         for directory in data_directories:
-            section_name = directory.section.name if directory.has_section else ""
+            section_name = ""
+            section_chars = ""
+            section_entropy = ""
             dir_type = str(directory.type).split(".")[-1]
             if not dir_type.startswith("?") and directory.size:
+                if directory.has_section:
+                    if directory.section.has_characteristic:
+                        section_chars = ", ".join(
+                            [
+                                str(chara).split(".")[-1]
+                                for chara in directory.section.characteristics_lists
+                            ]
+                        )
+                    section_name = directory.section.name
+                    section_entropy = directory.section.entropy
                 data_list.append(
                     {
                         "name": section_name,
                         "type": dir_type,
                         "rva": directory.rva,
                         "size": directory.size,
+                        "section_characteristics": section_chars,
+                        "section_entropy": section_entropy,
                     }
                 )
         return data_list
@@ -289,6 +303,7 @@ def parse_pe_authenticode(parsed_obj):
         sep = ":" if sys.version_info.minor > 7 else ()
         authenticode["md5_hash"] = parsed_obj.authentihash_md5.hex(*sep)
         authenticode["sha256_hash"] = parsed_obj.authentihash_sha256.hex(*sep)
+        authenticode["sha512_hash"] = parsed_obj.authentihash_sha512.hex(*sep)
         authenticode["sha1_hash"] = parsed_obj.authentihash(
             lief.PE.ALGORITHMS.SHA_1
         ).hex(*sep)
@@ -591,6 +606,8 @@ def parse(exe_file):
             try:
                 metadata["name"] = parsed_obj.name
                 metadata["is_pie"] = parsed_obj.is_pie
+                metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
+                metadata["virtual_size"] = parsed_obj.virtual_size
                 metadata["has_nx"] = parsed_obj.has_nx
                 dos_header = parsed_obj.dos_header
                 metadata["magic"] = str(dos_header.magic)

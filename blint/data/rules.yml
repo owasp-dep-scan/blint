@@ -130,3 +130,26 @@
   exe_types:
     - PE32
     - PE64
+- id: CHECK_DLL_CHARACTERISTICS
+  title: Missing dll Security Characteristics
+  description: |
+    NX_COMPAT: Image is NX compatible.
+    FORCE_INTEGRITY: Code Integrity checks are enforced.
+    HIGH_ENTROPY_VA: Image can handle a high entropy 64-bit virtual address space.
+    GUARD_CF: Image supports Control Flow Guard.
+    DYNAMIC_BASE: DLL can be relocated at load time.
+
+    Control Flow Guard (CFG) is a highly-optimized platform security feature that was created to combat memory corruption vulnerabilities. By placing tight restrictions on where an application can execute code from, it makes it much harder for exploits to execute arbitrary code through vulnerabilities such as buffer overflows.
+
+    - [PE format](https://docs.microsoft.com/en-us/windows/win32/debug/pe-format#dll-characteristics)
+    - [Control Flow Guard](https://docs.microsoft.com/en-gb/windows/win32/secbp/control-flow-guard)
+  severity: high
+  mandatory_values:
+    - HIGH_ENTROPY_VA
+    - NX_COMPAT
+    - GUARD_CF
+    - FORCE_INTEGRITY
+    - DYNAMIC_BASE
+  exe_types:
+    - PE32
+    - PE64

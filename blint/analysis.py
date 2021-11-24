@@ -177,6 +177,14 @@ def check_authenticode(f, metadata, rule_obj):
     return True
 
 
+def check_dll_characteristics(f, metadata, rule_obj):
+    if metadata.get("dll_characteristics"):
+        for c in rule_obj.get("mandatory_values", []):
+            if c not in metadata.get("dll_characteristics"):
+                return False
+    return True
+
+
 def run_checks(f, metadata):
     results = []
     if not rules_dict:
