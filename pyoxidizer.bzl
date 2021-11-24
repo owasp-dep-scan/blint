@@ -3,12 +3,93 @@
 # https://pyoxidizer.readthedocs.io/en/stable/ for details of this
 # configuration file format.
 TIME_STAMP_SERVER_URL = VARS.get("TIME_STAMP_SERVER_URL", "http://timestamp.digicert.com")
+BLINT_VERSION = "1.0.11"
+AUTHOR = "Team Rosa"
 
 # Obtain the default PythonDistribution for our build target. We link
 # this distribution into our produced executable and extract the Python
 # standard library from it.
 def make_dist():
     return default_python_distribution()
+
+def make_msi(target_triple, add_vc_redist):
+    if target_triple == "i686-pc-windows-msvc":
+        arch = "x86"
+    elif target_triple == "x86_64-pc-windows-msvc":
+        arch = "x64"
+    else:
+        arch = "unknown"
+
+    msi = WiXMSIBuilder(
+        id_prefix = "io.ngcloud",
+        product_name = "blint",
+        product_version = BLINT_VERSION,
+        product_manufacturer = AUTHOR,
+        arch = arch,
+    )
+    msi.help_url = "https://git.sr.ht/~prabhu/blint"
+    msi.license_path = CWD + "/LICENSE"
+
+    msi.msi_filename = "blint-" + BLINT_VERSION + "-" + arch + ".msi"
+
+    if add_vc_redist:
+        msi.add_visual_cpp_redistributable(redist_version = "14", platform = arch)
+
+    m = FileManifest()
+    exe_prefix = "./build/" + target_triple + "/release/install/"
+
+    m.add_path(
+        path = exe_prefix + "blint.exe",
+        strip_prefix = exe_prefix,
+    )
+    m.add_path(
+        path = exe_prefix + "python3.dll",
+        strip_prefix = exe_prefix,
+    )
+    m.add_path(
+        path = exe_prefix + "python39.dll",
+        strip_prefix = exe_prefix,
+    )
+    m.add_path(
+        path = exe_prefix + "vcruntime140.dll",
+        strip_prefix = exe_prefix,
+    )
+    if target_triple == "x86_64-pc-windows-msvc":
+        m.add_path(
+            path = exe_prefix + "vcruntime140_1.dll",
+            strip_prefix = exe_prefix,
+        )
+    msi.add_program_files_manifest(m)
+    return msi
+
+def make_msi_x86():
+    return make_msi("i686-pc-windows-msvc", True)
+
+def make_msi_x86_64():
+    return make_msi("x86_64-pc-windows-msvc", True)
+
+def make_exe_installer():
+    bundle = WiXBundleBuilder(
+        id_prefix = "io.ngcloud",
+        name = "blint",
+        version = BLINT_VERSION,
+        manufacturer = AUTHOR,
+    )
+
+    bundle.add_vc_redistributable("x86")
+    bundle.add_vc_redistributable("x64")
+
+    bundle.add_wix_msi_builder(
+        builder = make_msi("i686-pc-windows-msvc", False),
+        display_internal_ui = True,
+        install_condition = "Not VersionNT64",
+    )
+    bundle.add_wix_msi_builder(
+        builder = make_msi("x86_64-pc-windows-msvc", False),
+        display_internal_ui = True,
+        install_condition = "VersionNT64",
+    )
+    return bundle
 
 # Configuration files consist of functions which define build "targets."
 # This function creates a Python executable and installs it in a destination
@@ -273,21 +354,6 @@ def make_install(exe):
 
     return files
 
-def make_msi(exe):
-    # See the full docs for more. But this will convert your Python executable
-    # into a `WiXMSIBuilder` Starlark type, which will be converted to a Windows
-    # .msi installer when it is built.
-    return exe.to_wix_msi_builder(
-        # Simple identifier of your app.
-        "blint",
-        # The name of your application.
-        "Binary Linter",
-        # The version of your application.
-        "1.0.0",
-        # The author/manufacturer of your application.
-        "Team Rosa"
-    )
-
 def make_macos_app_bundle():
     ARCHES = ["x86_64-apple-darwin"]
 
@@ -295,7 +361,7 @@ def make_macos_app_bundle():
     bundle.set_info_plist_required_keys(
         display_name = "blint",
         identifier = "io.ngcloud.blint",
-        version = "1.0.11",
+        version = BLINT_VERSION,
         signature = "lint",
         executable = "blint",
     )
@@ -361,6 +427,9 @@ register_code_signers()
 # Tell PyOxidizer about the build targets defined above.
 register_target("dist", make_dist)
 register_target("exe", make_exe, depends=["dist"])
+register_target("msi_x86", make_msi_x86)
+register_target("msi_x86_64", make_msi_x86_64)
+register_target("exe_installer", make_exe_installer, default = True)
 register_target("macos_app_bundle", make_macos_app_bundle)
 register_target("resources", make_embedded_resources, depends=["exe"], default_build_script=True)
 register_target("install", make_install, depends=["exe"], default=True)
