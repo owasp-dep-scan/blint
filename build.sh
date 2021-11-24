@@ -13,3 +13,5 @@ pyoxidizer build --release --target-triple x86_64-unknown-linux-gnu
 # pyoxidizer build --release --target-triple aarch64-apple-darwin
 # pyoxidizer run
 rm requirements-dist.txt
+
+# poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint

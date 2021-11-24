@@ -476,4 +476,49 @@ rules:
       - IOBluetoothUserNotificationRef
       - OBEXFileTransferServices
       - OBEXSession
+  - id: BUNDLED_PYTHON
+    title: Bundled Python Runtime
+    summary: Includes bundled python runtime
+    description: |
+      Packages belonging to python.
+    patterns:
+      - _pyi_arch_increment_toc_ptr
+      - _pyi_arch_extract
+      - _pyi_arch_extract2fs
+      - _pyi_arch_get_pyversion
+      - _pyi_arch_open
+      - _pyi_arch_get_option
+      - _pyi_arch_setup
+      - _pyi_arch_status_new
+      - _pyi_arch_status_free
+      - _pyi_arch_find_by_name
+      - _pyi_launch_need_to_extract_binaries
+      - _pyi_launch_extract_binaries
+      - _pyi_launch_execute
+      - _pyi_launch_run_scripts
+      - _pyi_launch_initialize
+      - _pyi_launch_finalize
+      - _pyi_parent_to_background
+      - _pyi_pylib_load
+      - _pyi_pylib_attach
+      - _pyi_pylib_start_python
+      - _pyi_pylib_import_modules
+      - _pyi_pylib_install_zlib
+      - _pyi_pylib_finalize
+      - _pyi_main
+      - _pyi_splash_setup
+      - _pyi_splash_send
+      - _pyi_splash_start
+      - _pyi_splash_status_new
+      - _pyi_splash_status_free
+      - _pyi_splash_extract
+      - _pyi_splash_find
+      - _pyi_splash_update_prg
+      - _pyi_splashlib_attach
+      - _pyi_utils_set_environment
+      - _pyi_utils_create_child
+      - _pyi_create_temp_path
+      - _pyi_copy_file
+      - _pyi_remove_temp_path
+      - _pyi_open_target
 

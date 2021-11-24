@@ -19,20 +19,21 @@ packages:
   - py3-twine
   - py3-wheel
   - py3-setuptools
-  - rust
-  - cargo
   - ca-certificates
+  - zlib-dev
+  - xz
 environment:
   PYTHONIOENCODING: utf-8
   LANG: en_US.utf-8
 tasks:
-  - install-rust-tooling: |
-      cargo install pyoxidizer --version 0.17.0
   - install-poetry: |
       curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
   - install-pkgs: |
       cd blint
       ~/.local/bin/poetry install
+      wget https://github.com/upx/upx/releases/download/v3.96/upx-3.96-amd64_linux.tar.xz
+      tar -xvf upx-3.96-amd64_linux.tar.xz
+      cp upx-3.96-amd64_linux/upx ~/.local/bin/
   - run-lint: |
       cd blint
       ~/.local/bin/poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
@@ -42,7 +43,9 @@ tasks:
       ~/.local/bin/poetry run pytest --cov=blint tests
   - build-bins: |
       cd blint
-      ~/.local/bin/poetry export -f requirements.txt > requirements-dist.txt
-      pyoxidizer build --release --target-triple x86_64-unknown-linux-musl
-  - list-builds: |
-      tree ./blint/build
+      ~/.local/bin/poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --upx-dir ~/.local/bin/
+  - self-blint: |
+      ./blint/dist/blint -i ./blint/dist/blint -o reports
+      tree reports
+artifacts:
+  - ./blint/dist/blint

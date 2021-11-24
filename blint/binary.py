@@ -186,7 +186,9 @@ def detect_exe_type(parsed_obj, metadata):
     try:
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
-        elif parsed_obj.has_section(".note.gnu.build-id"):
+        if parsed_obj.has_section(".note.gnu.build-id") or "musl" in metadata.get(
+            "interpreter"
+        ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
             return "{}-{}".format(
@@ -446,12 +448,14 @@ def parse_macho_symbols(symbols):
                 exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
                 {
-                    "name": symbol_name,
+                    "name": "{}::{}".format(libname, symbol_name)
+                    if libname
+                    else symbol_name,
+                    "short_name": symbol_name,
                     "type": symbol.type,
                     "num_sections": symbol.numberof_sections,
                     "description": symbol.description,
                     "value": symbol_value,
-                    "libname": libname,
                 }
             )
         return symbols_list, exe_type

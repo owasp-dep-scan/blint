@@ -1,0 +1,14 @@
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.ngcloud.blint</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>blint</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.8</string>
+</dict>
+</plist>
