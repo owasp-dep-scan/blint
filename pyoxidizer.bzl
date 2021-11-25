@@ -161,7 +161,7 @@ def make_exe(dist):
     # policy.include_non_distribution_sources = True
 
     # Toggle whether files associated with tests are included.
-    # policy.include_test = False
+    policy.include_test = False
 
     # Resources are loaded from "in-memory" or "filesystem-relative" paths.
     # The locations to attempt to add resources to are defined by the
@@ -319,8 +319,6 @@ def make_exe(dist):
     # Invoke `pip install` using a requirements file and add the collected resources
     # to our binary.
     exe.add_python_resources(exe.pip_install(["-r", "requirements-dist.txt"]))
-
-    
 
     # Read Python files from a local directory and add them to our embedded
     # context, taking just the resources belonging to the `foo` and `bar`
