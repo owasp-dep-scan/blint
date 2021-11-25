@@ -36,6 +36,10 @@ Blint was used at [ShiftLeft](https://shiftleft.io) to review and optimize the d
 pip3 install blint
 ```
 
+### Single binary releases
+
+You can download single binary builds from the [blint-bin releases](https://github.com/ngcloudsec/blint-bin/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
+
 ## Usage
 
 ```bash
