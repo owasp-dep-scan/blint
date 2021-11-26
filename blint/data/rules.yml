@@ -130,6 +130,8 @@
   exe_types:
     - PE32
     - PE64
+    - gobinary
+    - dotnetbinary
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |
@@ -153,3 +155,4 @@
   exe_types:
     - PE32
     - PE64
+    - dotnetbinary
