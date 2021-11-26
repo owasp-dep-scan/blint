@@ -1,6 +1,6 @@
 ---
 text: Review for functions identified in a binary produced by Go build
-group: METHOD_REVIEWS
+group: EXE_REVIEWS
 exe_type: gobinary
 rules:
   - id: FILE_IOUTIL
@@ -218,6 +218,9 @@ rules:
       - httputil.NewSingleHostReverseProxy
       - httputil.ServeHTTP
       - golang.org/x/net/http2
+      - github.com/lucas-clemente/quic-go
+      - github.com/gorilla/websocket
+      - github.com/gorilla/mux
   - id: HTTP_CLIENT_METHODS
     title: HTTP client functions used
     summary: Invokes HTTP service
@@ -253,7 +256,7 @@ rules:
       - rpc.Call
   - id: HTML_ESCAPE
     title: HTML escape function used
-    summary: Can manipulate HTML
+    summary: Can Manipulate HTML
     description: |
       EscapeString escapes special characters like "<" to become "&lt;". It escapes only five such characters: <, >, &, ' and ". UnescapeString(EscapeString(s)) == s always holds, but the converse isn't always true.
     patterns:
@@ -383,3 +386,60 @@ rules:
       Azure SDK is used.
     patterns:
       - github.com/Azure/azure-sdk-for-go
+  - id: DNS_METHODS
+    title: DNS client functions used
+    summary: Performs DNS calls
+    description: |
+      Package dnsmessage provides a mostly RFC 1035 compliant implementation of DNS message packing and unpacking.
+      The package also supports messages with Extension Mechanisms for DNS (EDNS(0)) as defined in RFC 6891.
+      This implementation is designed to minimize heap allocations and avoid unnecessary packing and unpacking as much as possible.
+    patterns:
+      - golang.org/x/net/dns/dnsmessage
+  - id: C_C_LIB
+    title: Command and Control Framework used
+    summary: Can Attack Devices
+    description: |
+      Known Command and Control framework used.
+    patterns:
+      - github.com/Ne0nd0g/merlin
+      - github.com/DeimosC2/DeimosC2
+  - id: CERT_METHODS
+    title: Digital Certificates API functions used
+    summary: Manipulates Certificates and Keys
+    description: |
+      Manage digital certificates.
+    patterns:
+      - x509.CreateCertificate
+      - x509.CreateCertificateRequest
+      - x509.CreateRevocationList
+      - x509.DecryptPEMBlock
+      - x509.EncryptPEMBlock
+      - x509.IsEncryptedPEMBlock
+      - x509.MarshalECPrivateKey
+      - x509.MarshalPKCS1PrivateKey
+      - x509.MarshalPKCS1PublicKey
+      - x509.MarshalPKCS8PrivateKey
+      - x509.MarshalPKIXPublicKey
+      - x509.ParseCRL
+      - x509.ParseDERCRL
+      - x509.ParseECPrivateKey
+      - x509.ParsePKCS1PrivateKey
+      - x509.ParsePKCS1PublicKey
+      - x509.ParsePKCS8PrivateKey
+      - x509.ParsePKIXPublicKey
+      - x509.CertPool.NewCertPool
+      - x509.CertPool.AddCert
+      - x509.CertPool.AppendCertsFromPEM
+      - x509.Certificate.ParseCertificate
+      - x509.Certificate.CheckCRLSignature
+      - x509.Certificate.CheckSignature
+      - x509.Certificate.CheckSignatureFrom
+      - x509.Certificate.CreateCRL
+      - x509.Certificate.Verify
+      - x509.Certificate.VerifyHostname
+      - x509.internal.macos.SecTrustSettingsDomain
+      - x509.internal.macos.SecTrustSettingsResult
+      - x509.internal.macos.SecItemExport
+      - x509.internal.macos.SecPolicyCopyProperties
+      - x509.internal.macos.SecTrustSettingsCopyCertificates
+      - x509.internal.macos.SecTrustSettingsCopyTrustSettings

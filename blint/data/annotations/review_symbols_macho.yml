@@ -2,6 +2,7 @@
 text: Review for symbols identified in a MachO binary
 group: SYMBOL_REVIEWS
 exe_type: MachO
+binary_type: MachO
 rules:
   - id: FS_EVENTS_API
     title: File System Events functions used
@@ -521,4 +522,92 @@ rules:
       - _pyi_copy_file
       - _pyi_remove_temp_path
       - _pyi_open_target
-
+  - id: CERT_API
+    title: Digital Certificates API functions used
+    summary: Manipulates Certificates and Keys
+    description: |
+      Manage digital certificates.
+    patterns:
+      - SecCertificate
+      - SecCertificateGetTypeID
+      - SecCertificateCreateWithData
+      - SecCertificateCopyData
+      - SecCertificateCopySubjectSummary
+      - SecCertificateCopyCommonName
+      - SecCertificateCopyEmailAddresses
+      - SecCertificateCopyNormalizedIssuerSequence
+      - SecCertificateCopyNormalizedSubjectSequence
+      - SecCertificateCopySerialNumberData
+      - SecCertificateCopyKey
+      - SecCertificateCopyShortDescription
+      - SecCertificateCopyLongDescription
+      - SecCertificateCopyValues
+      - SecCertificateSetPreferred
+      - SecCertificateCopyPreferred
+      - SecCertificateAddToKeychain
+      - SecTrustCreateWithCertificates
+      - SecTrustEvaluateWithError
+      - SecTrustEvaluateAsyncWithError
+      - SecTrustGetTrustResult
+      - SecTrustCopyResult
+      - SecTrustGetCertificateCount
+      - SecTrustGetVerifyTime
+      - SecTrustCopyAnchorCertificates
+      - SecTrustCopyCustomAnchorCertificates
+      - SecTrustCopyExceptions
+      - SecTrustCopyPolicies
+      - SecTrustSetVerifyDate
+      - SecTrustSetAnchorCertificates
+      - SecTrustSetAnchorCertificatesOnly
+      - SecTrustSetExceptions
+      - SecTrustSetPolicies
+      - SecTrustSetOptions
+      - SecTrustGetNetworkFetchAllowed
+      - SecTrustSetNetworkFetchAllowed
+      - SecTrustSetOCSPResponse
+      - SecTrustSetSignedCertificateTimestamps
+      - SecTrustSettingsCopyCertificates
+      - SecTrustSettingsCopyModificationDate
+      - SecTrustSettingsCopyTrustSettings
+      - SecTrustSettingsCreateExternalRepresentation
+      - SecTrustSettingsImportExternalRepresentation
+      - SecTrustSettingsRemoveTrustSettings
+      - SecTrustSettingsSetTrustSettings
+      - SecKeyCreateRandomKey
+      - SecKeyCopyPublicKey
+      - SecKeyIsAlgorithmSupported
+      - SecKeyGetBlockSize
+      - SecKeyCopyAttributes
+      - SecKeyCopyExternalRepresentation
+      - SecKeyCreateWithData
+      - SecKeyCopyKeyExchangeResult
+      - SecKeyCreateEncryptedData
+      - SecKeyCreateDecryptedData
+      - SecKeyCreateSignature
+      - SecKeyVerifySignature
+      - SecKeyGeneratePair
+      - SecKeyEncrypt
+      - SecKeyDecrypt
+      - SecKeyRawSign
+      - SecKeyRawVerify
+      - SecKeyGeneratePairAsync
+      - SecKeyGenerateSymmetric
+      - SecKeyCreateFromData
+      - SecKeyDeriveFromPassword
+      - SecKeyWrapSymmetric
+      - SecKeyUnwrapSymmetric
+      - SecIdentityCreateWithCertificate
+      - SecIdentityGetTypeID
+      - SecPKCS12Import
+      - SecIdentityCopyCertificate
+      - SecIdentityCopyPrivateKey
+      - SecIdentityCopySystemIdentity
+      - SecIdentitySetSystemIdentity
+      - SecIdentitySetPreferred
+      - SecIdentityCopyPreferred
+      - SecPolicyCreateBasicX509
+      - SecPolicyCreateSSL
+      - SecPolicyCreateRevocation
+      - SecPolicyGetTypeID
+      - SecPolicyCreateWithProperties
+      - SecPolicyCopyProperties

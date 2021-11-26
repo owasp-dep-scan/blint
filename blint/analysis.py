@@ -36,6 +36,7 @@ else:
     review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
 
 rules_dict = {}
+review_exe_dict = defaultdict(list)
 review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
@@ -113,6 +114,8 @@ for review_methods_file in review_files:
             for exe_type in exe_type_list:
                 if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
                     review_methods_dict[exe_type].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                    review_exe_dict[exe_type].append(method_rules_dict)
                 elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
                     review_symbols_dict[exe_type].append(method_rules_dict)
                 elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
@@ -185,6 +188,15 @@ def check_dll_characteristics(f, metadata, rule_obj):
     return True
 
 
+def check_codesign(f, metadata, rule_obj):
+    if metadata.get("code_signature"):
+        code_signature = metadata.get("code_signature")
+        if code_signature and code_signature.get("available") is False:
+            return False
+        return True
+    return True
+
+
 def run_checks(f, metadata):
     results = []
     if not rules_dict:
@@ -248,18 +260,20 @@ def run_review(f, metadata):
     if not metadata or not exe_type:
         return None
     review_methods_list = review_methods_dict.get(exe_type)
+    review_exe_list = review_exe_dict.get(exe_type)
     review_symbols_list = review_symbols_dict.get(exe_type)
     review_imports_list = review_imports_dict.get(exe_type)
     review_entries_list = review_entries_dict.get(exe_type)
     # Check if reviews are available for this exe type
     if (
         not review_methods_list
+        and not review_exe_list
         and not review_symbols_list
         and not review_imports_list
         and not review_entries_list
     ):
         return None
-    if review_methods_list:
+    if review_methods_list or review_exe_list:
         functions_list = [
             re.sub(r"[*&()]", "", f.get("name", ""))
             for f in metadata.get("functions", [])
@@ -274,12 +288,22 @@ def run_review(f, metadata):
                 f.get("name", "") for f in metadata.get("static_symbols", [])
             ]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
-        results.update(run_review_methods_symbols(review_methods_list, functions_list))
-    if review_symbols_list:
+        if review_methods_list:
+            results.update(
+                run_review_methods_symbols(review_methods_list, functions_list)
+            )
+        if review_exe_list:
+            results.update(run_review_methods_symbols(review_exe_list, functions_list))
+    if review_symbols_list or review_exe_list:
         symbols_list = [f.get("name", "") for f in metadata.get("dynamic_symbols", [])]
         symbols_list += [f.get("name", "") for f in metadata.get("static_symbols", [])]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
-        results.update(run_review_methods_symbols(review_symbols_list, symbols_list))
+        if review_symbols_list:
+            results.update(
+                run_review_methods_symbols(review_symbols_list, symbols_list)
+            )
+        if review_exe_list:
+            results.update(run_review_methods_symbols(review_exe_list, symbols_list))
     if review_imports_list:
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
         LOG.debug(f"Reviewing {len(imports_list)} imports")

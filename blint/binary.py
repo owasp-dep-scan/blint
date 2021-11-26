@@ -9,6 +9,8 @@ from blint.utils import calculate_entropy, check_secret, decode_base64
 MIN_ENTROPY = 0.39
 MIN_LENGTH = 80
 
+lief.logging.disable()
+
 
 def parse_desc(e):
     return "{:02x}".format(e)
@@ -146,6 +148,7 @@ def parse_symbols(symbols):
     try:
         LOG.debug("Parsing symbols")
         symbols_list = []
+        exe_type = None
         for symbol in symbols:
             symbol_version = symbol.symbol_version if symbol.has_version else ""
             is_imported = False
@@ -158,6 +161,8 @@ def parse_symbols(symbols):
                 symbol_name = symbol.demangled_name
             except Exception:
                 symbol_name = symbol.name
+            if not exe_type:
+                exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
                 {
                     "name": symbol_name,
@@ -170,9 +175,9 @@ def parse_symbols(symbols):
                     "version": str(symbol_version),
                 }
             )
-        return symbols_list
+        return symbols_list, exe_type
     except lief.exception:
-        return []
+        return [], None
 
 
 def parse_interpreter(parsed_obj):
@@ -186,8 +191,10 @@ def detect_exe_type(parsed_obj, metadata):
     try:
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
-        if parsed_obj.has_section(".note.gnu.build-id") or "musl" in metadata.get(
-            "interpreter"
+        if (
+            parsed_obj.has_section(".note.gnu.build-id")
+            or "musl" in metadata.get("interpreter")
+            or "ld-linux" in metadata.get("interpreter")
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -200,7 +207,7 @@ def detect_exe_type(parsed_obj, metadata):
 
 def guess_exe_type(symbol_name):
     exe_type = None
-    if "golang" in symbol_name:
+    if "golang" in symbol_name or "_cgo_" in symbol_name:
         exe_type = "gobinary"
     if "_rust_" in symbol_name:
         exe_type = "genericbinary"
@@ -338,7 +345,6 @@ def parse_pe_symbols(symbols):
         symbols_list = []
         exe_type = None
         for symbol in symbols:
-            section_nb_str = ""
             if symbol.section_number <= 0:
                 section_nb_str = str(
                     PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
@@ -348,24 +354,25 @@ def parse_pe_symbols(symbols):
                     section_nb_str = symbol.section.name
                 except Exception:
                     section_nb_str = "section<{:d}>".format(symbol.section_number)
-            if not exe_type:
-                try:
-                    exe_type = guess_exe_type(symbol.name.lower())
-                    if symbol.name:
-                        symbols_list.append(
-                            {
-                                "name": symbol.name.replace("..", "::"),
-                                "value": symbol.value,
-                                "id": section_nb_str,
-                                "base_type": str(symbol.base_type).split(".")[-1],
-                                "complex_type": str(symbol.complex_type).split(".")[-1],
-                                "storage_class": str(symbol.storage_class).split(".")[
-                                    -1
-                                ],
-                            }
-                        )
-                except Exception:
-                    pass
+            try:
+                if not exe_type:
+                    try:
+                        exe_type = guess_exe_type(symbol.name.lower())
+                    except Exception:
+                        pass
+                if symbol.name:
+                    symbols_list.append(
+                        {
+                            "name": symbol.name.replace("..", "::"),
+                            "value": symbol.value,
+                            "id": section_nb_str,
+                            "base_type": str(symbol.base_type).split(".")[-1],
+                            "complex_type": str(symbol.complex_type).split(".")[-1],
+                            "storage_class": str(symbol.storage_class).split(".")[-1],
+                        }
+                    )
+            except Exception:
+                pass
         return symbols_list, exe_type
     except lief.exception:
         return [], None
@@ -476,6 +483,7 @@ def parse(exe_file):
         metadata["is_shared_library"] = is_shared_library(parsed_obj)
         # ELF Binary
         if isinstance(parsed_obj, ELF.Binary):
+            metadata["binary_type"] = "ELF"
             header = parsed_obj.header
             identity = header.identity
             eflags_str = ""
@@ -589,11 +597,19 @@ def parse(exe_file):
                 pass
             metadata["strings"] = parse_strings(parsed_obj)
             try:
-                metadata["static_symbols"] = parse_symbols(parsed_obj.static_symbols)
+                metadata["static_symbols"], exe_type = parse_symbols(
+                    parsed_obj.static_symbols
+                )
+                if exe_type:
+                    metadata["exe_type"] = exe_type
             except lief.exception:
                 pass
             try:
-                metadata["dynamic_symbols"] = parse_symbols(parsed_obj.dynamic_symbols)
+                metadata["dynamic_symbols"], exe_type = parse_symbols(
+                    parsed_obj.dynamic_symbols
+                )
+                if exe_type:
+                    metadata["exe_type"] = exe_type
             except lief.exception:
                 pass
             try:
@@ -608,6 +624,7 @@ def parse(exe_file):
             # PE
             # Parse header
             try:
+                metadata["binary_type"] = "PE"
                 metadata["name"] = parsed_obj.name
                 metadata["is_pie"] = parsed_obj.is_pie
                 metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
@@ -768,6 +785,7 @@ def parse(exe_file):
                 pass
         elif isinstance(parsed_obj, MachO.Binary):
             # MachO
+            metadata["binary_type"] = "MachO"
             metadata["name"] = parsed_obj.name
             metadata["imagebase"] = parsed_obj.imagebase
             metadata["is_pie"] = parsed_obj.is_pie
@@ -803,13 +821,14 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                encryption_info = parsed_obj.encryption_info
-                if encryption_info:
-                    metadata["encryption_info"] = {
-                        "crypt_offset": encryption_info.crypt_offset,
-                        "crypt_size": encryption_info.crypt_size,
-                        "crypt_id": encryption_info.crypt_id,
-                    }
+                if parsed_obj.has_encryption_info:
+                    encryption_info = parsed_obj.encryption_info
+                    if encryption_info:
+                        metadata["encryption_info"] = {
+                            "crypt_offset": encryption_info.crypt_offset,
+                            "crypt_size": encryption_info.crypt_size,
+                            "crypt_id": encryption_info.crypt_id,
+                        }
             except lief.exception:
                 pass
             try:
@@ -896,6 +915,40 @@ def parse(exe_file):
                 pass
             try:
                 metadata["dylinker"] = parsed_obj.dylinker.name
+            except lief.exception:
+                pass
+            try:
+                if parsed_obj.has_code_signature:
+                    code_signature = parsed_obj.code_signature
+                    metadata["code_signature"] = {
+                        "available": True if code_signature.size else False,
+                        "data": str(bytes(code_signature.data).hex()),
+                        "data_size": str(code_signature.data_size),
+                        "size": str(code_signature.size),
+                    }
+                if (
+                    not parsed_obj.has_code_signature
+                    and parsed_obj.has_code_signature_dir
+                ):
+                    code_signature = parsed_obj.has_code_signature_dir
+                    metadata["code_signature"] = {
+                        "available": True if code_signature.size else False,
+                        "data": str(bytes(code_signature.data).hex()),
+                        "data_size": str(code_signature.data_size),
+                        "size": str(code_signature.size),
+                    }
+                if (
+                    not parsed_obj.has_code_signature
+                    and not parsed_obj.has_code_signature_dir
+                ):
+                    metadata["code_signature"] = {"available": False}
+                if parsed_obj.has_data_in_code:
+                    data_in_code = parsed_obj.data_in_code
+                    metadata["data_in_code"] = {
+                        "data": str(bytes(data_in_code.data).hex()),
+                        "data_size": str(data_in_code.data_size),
+                        "size": str(data_in_code.size),
+                    }
             except lief.exception:
                 pass
     except lief.exception as e:

@@ -18,13 +18,15 @@ You can run blint on Linux, Windows and Mac against any of these binary formats.
 
 Nowadays, vendors distribute statically linked binaries produced by golang or rust or dotnet tooling. Users are used to running antivirus and anti-malware scans while using these binaries in their local devices. Blint augments these scans by listing the technical capabilities of a binary. For example, whether the binary could use network connections, or can perform file system operations and so on.
 
-The binary is first parsed using lief framework to identify the various properties such as functions, static, and dynamic symbols present. Thanks to a YAML based [annotations](./blint/data/annotations) data, this information could be matched against capabilities and presented visually using a rich table.
+The binary is first parsed using lief framework to identify the various properties such as functions, static, and dynamic symbols present. Thanks to YAML based [annotations](./blint/data/annotations) data, this information could be matched against capabilities and presented visually using a rich table.
 
 NOTE: The presence of capabilities doesn't imply that the operations are always performed by the binary. Use the output of this tool to get an idea about a binary. Also, this tool is not suitable to review malware and other heavily obfuscated binaries for obvious reasons.
 
 ## Use cases
 
-Blint was used at [ShiftLeft](https://shiftleft.io) to review and optimize the distributed cli binary.
+- Add blint to CI/CD to inspect the final binaries to ensure code signing or authenticode is applied correctly
+- Blint was used at [ShiftLeft](https://shiftleft.io) to review the statically linked packages and optimize the distributed cli binary
+- Quickly identify malicious binaries by looking at their capabilities (Ability to manipulate networks or drivers or kernels etc)
 
 ## Installation
 
@@ -71,6 +73,14 @@ blint -i ~/ngrok -o /tmp/blint
 PowerShell example
 
 ![PowerShell](./docs/blint-powershell.jpg)
+
+## Reports
+
+Blint produces the following json artifacts in the reports directory:
+
+- exename-metadata.json - Raw metadata about the parsed binary. Includes symbols, functions, and signature information
+- findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
+- reviews.json - Contains information from the capability reviews. Useful for further analysis
 
 ## References
 

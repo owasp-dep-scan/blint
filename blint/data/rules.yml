@@ -156,3 +156,13 @@
     - PE32
     - PE64
     - dotnetbinary
+- id: CHECK_CODESIGN
+  title: Missing Code Signing
+  description: |
+    Code signing is a macOS security technology that you use to certify that an app was created by you. Once an app is signed, the system can detect any change to the app—whether the change is introduced accidentally or by malicious code.
+    You participate in code signing as a developer when you obtain a signing identity and apply your signature to apps that you ship. A certificate authority (often Apple) vouches for your signing identity.
+  severity: high
+  exe_types:
+    - MachO
+    - genericbinary
+    - gobinary

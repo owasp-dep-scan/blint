@@ -12,6 +12,7 @@ packages:
   - make
   - gcc
   - g++
+  - git
   - language-pack-en
 environment:
   PYTHONIOENCODING: utf-8
@@ -39,6 +40,8 @@ tasks:
       ~/.local/bin/poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --upx-dir ~/.local/bin/
   - self-blint: |
       ./blint/dist/blint -i ./blint/dist/blint -o reports
+      git clone https://github.com/juice-shop/juicy-malware.git --depth=1
+      ./blint/dist/blint -i ./juicy-malware -o reports
       tree reports
 artifacts:
   - ./blint/dist/blint

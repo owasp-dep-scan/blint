@@ -6,6 +6,7 @@ url:
 exe_type:
   - PE32
   - PE64
+binary_type: PE
 rules:
   - id: WIN32_PROCESS_API
     title: Security sensitive process functions used
@@ -370,7 +371,7 @@ rules:
       - WinMain
   - id: WIN_CRED_API
     title: Win Cred api functions used
-    summary: Can manipute Windows Credentials
+    summary: Can Manipute Windows Credentials
     description: |
       Win Cred api are used by system services.
     patterns:
@@ -1636,3 +1637,176 @@ rules:
       - GetManagedApplications
       - InstallApplication
       - UninstallApplication
+  - id: KERNEL_API
+    title: Kernel api functions used
+    summary: Manipulates Windows Kernel & Drivers
+    description: |
+      Kernel and Device Driver functions are used.
+    patterns:
+      - IoGetDeviceProperty
+      - IoReportDetectedDevice
+      - IoReportResourceForDetection
+      - IoGetDmaAdapter
+      - IoGetConfigurationInformation
+      - HalExamineMBR
+      - IoReadPartitionTable
+      - IoInvalidateDeviceRelations
+      - IoInvalidateDeviceState
+      - IoRegisterPlugPlayNotification
+      - IoUnregisterPlugPlayNotification
+      - IoRequestDeviceEject
+      - IoReportTargetDeviceChange
+      - IoOpenDeviceInterfaceRegistryKey
+      - IoOpenDeviceRegistryKey
+      - IoRegisterDeviceInterface
+      - IoSetDeviceInterfaceState
+      - RtlCheckRegistryKey
+      - RtlCreateRegistryKey
+      - RtlQueryRegistryValues
+      - RtlWriteRegistryValue
+      - RtlDeleteRegistryValue
+      - InitializeObjectAttributes
+      - IoCreateDevice
+      - IoDeleteDevice
+      - IoGetDeviceObjectPointer
+      - IoAttachDeviceToDeviceStack
+      - IoGetAttachedDeviceReference
+      - IoDetachDevice
+      - IoAllocateDriverObjectExtension
+      - IoGetDriverObjectExtension
+      - IoRegisterDeviceInterface
+      - IoIsWdmVersionAvailable
+      - IoDeleteSymbolicLink
+      - IoAssignArcName
+      - IoDeassignArcName
+      - IoSetShareAccess
+      - IoConnectInterrupt
+      - IoDisconnectInterrupt
+      - IoConnectInterruptEx
+      - IoDisconnectInterruptEx
+      - IoInitializeDpcRequest
+      - IoReadPartitionTable
+      - IoSetPartitionInformation
+      - IoWritePartitionTable
+      - IoCreateController
+      - IoDeleteController
+      - KeInitializeSpinLock
+      - KeInitializeDpc
+      - KeInitializeTimer
+      - KeInitializeTimerEx
+      - KeInitializeEvent
+      - ExInitializeFastMutex
+      - KeInitializeMutex
+      - KeInitializeSemaphore
+      - IoCreateNotificationEvent
+      - IoCreateSynchronizationEvent
+      - PsCreateSystemThread
+      - PsTerminateSystemThread
+      - KeSetBasePriorityThread
+      - KeSetPriorityThread
+      - MmIsThisAnNtAsSystem
+      - MmQuerySystemSize
+      - ExInitializeNPagedLookasideList
+      - ExInitializePagedLookasideList
+      - ExInitializeResourceLite
+      - ExReinitializeResourceLite
+      - ExDeleteResourceLite
+      - ObReferenceObjectByHandle
+      - ObReferenceObjectByPointer
+      - ObReferenceObject
+      - ObDereferenceObject
+      - RtlInitString
+      - RtlInitAnsiString
+      - RtlInitUnicodeString
+      - InitializeObjectAttributes
+      - ZwCreateKey
+      - ZwOpenKey
+      - ZwQueryKey
+      - ZwEnumerateKey
+      - ZwEnumerateValueKey
+      - ZwQueryValueKey
+      - ZwSetValueKey
+      - ZwFlushKey
+      - ZwDeleteKey
+      - ZwClose
+      - ZwCreateDirectoryObject
+      - ZwCreateFile
+      - ZwMakeTemporaryObject
+      - PsGetVersion
+      - ObGetObjectSecurity
+      - ObReleaseObjectSecurity
+      - KeInitializeSpinLock
+      - InitializeListHead
+      - ExInitializeSListHead
+      - KeInitializeDeviceQueue
+      - IoCsqInitialize
+  - id: FS_DRIVER_API
+    title: File System Drivers and Minifilter functions used
+    summary: Creates File System & Minifilter
+    description: |
+      File System Drivers and Minifilter functions used.
+    patterns:
+      - FLTMGR.SYS
+  - id: PRINT_SPOOLER_API
+    title: Print Spooler functions used
+    summary: Manipulates Printer Drivers
+    description: |
+      Print Spooler functions used.
+    patterns:
+      - AddPortUI
+      - AddPrintDeviceObject
+      - AppendPrinterNotifyInfoData
+      - CallRouterFindFirstPrinterChangeNotification
+      - ClosePort
+      - ClosePrintProcessor
+      - ConfigurePortUI
+      - ControlPrintProcessor
+      - CreatePrinterIC
+      - DeletePortUI
+      - DeletePrinterIC
+      - DevQueryPrint
+      - GenerateCopyFilePaths
+      - GetJobAttributes
+      - GetJobAttributesEx
+      - GetPrintProcessorCapabilities
+      - ImpersonatePrinterClient
+      - InitializeMonitor
+      - InitializeMonitorEx
+      - InitializePrintMonitor
+      - InitializePrintMonitor2
+      - InitializePrintMonitorUI
+      - InitializePrintProvidor
+      - LogJobInfoForBranchOffice
+      - OpenPort
+      - OpenPrintProcessor
+      - PartialReplyPrinterChangeNotification
+      - PlayGdiScriptOnPrinterIC
+      - PrintDocumentOnPrintProcessor
+      - ProvidorFindClosePrinterChangeNotification
+      - ProvidorFindFirstPrinterChangeNotification
+      - ReadPort
+      - RemovePrintDeviceObject
+      - ReplyPrinterChangeNotification
+      - ReplyPrinterChangeNotificationEx
+      - RevertToPrinterSelf
+      - RouterAllocBidiMem
+      - RouterAllocBidiResponseContainer
+      - RouterAllocPrinterNotifyInfo
+      - RouterFreeBidiMem
+      - RouterFreeBidiResponseContainer
+      - RouterFreePrinterNotifyInfo
+      - SplDeleteSpoolerPortEnd
+      - SplDeleteSpoolerPortStart
+      - SplIsSessionZero
+      - SplPromptUIInUsersSession
+      - SpoolerCopyFileEvent
+      - SpoolerFindClosePrinterChangeNotification
+      - SpoolerFindFirstPrinterChangeNotification
+      - SpoolerFindNextPrinterChangeNotification
+      - SpoolerFreePrinterNotifyInfo
+      - SpoolerRefreshPrinterChangeNotification
+      - UpdatePrintDeviceObject
+      - WritePort
+      - XcvClosePort
+      - XcvDataPort
+      - XcvOpenPort

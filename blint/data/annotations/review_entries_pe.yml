@@ -4,6 +4,8 @@ group: ENTRIES_REVIEWS
 exe_type:
   - PE32
   - PE64
+  - dotnetbinary
+binary_type: PE
 rules:
   - id: FFMPEG_LIB
     title: FFMPEG library used
@@ -33,3 +35,22 @@ rules:
     patterns:
       - adbwinapi
       - adbwinusbapi
+  - id: C_C_LIB
+    title: Command and Control Framework used
+    summary: Can Attack Devices
+    description: |
+      Known Command and Control framework used.
+    patterns:
+      - covenant
+      - drone
+      - SharpC2
+      - TeamServer
+      - C2Lint
+      - ssh
+      - mimikatz
+      - mimilib
+      - mimispool
+      - mimidrv
+      - mimilove
+      - tokenvator
+      - monkeyworks
