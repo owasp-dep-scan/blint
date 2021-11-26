@@ -181,7 +181,7 @@ def check_dll_characteristics(f, metadata, rule_obj):
     if metadata.get("dll_characteristics"):
         for c in rule_obj.get("mandatory_values", []):
             if c not in metadata.get("dll_characteristics"):
-                return False
+                return c
     return True
 
 
@@ -201,8 +201,10 @@ def run_checks(f, metadata):
         cfn = getattr(sys.modules[__name__], cid.lower(), None)
         if cfn:
             result = cfn(f, metadata, rule_obj=rule_obj)
-            if result is False:
+            if result is False or isinstance(result, str):
                 aresult = {**rule_obj, "filename": f}
+                if isinstance(result, str):
+                    aresult["title"] = "{} ({})".format(aresult["title"], result)
                 if metadata.get("name"):
                     aresult["exe_name"] = metadata.get("name")
                 results.append(aresult)

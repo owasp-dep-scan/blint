@@ -6,13 +6,11 @@ BLint is a Binary Linter to check the security properties, and capabilities in y
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)
 
-Capabilities review is supported for go and rust binaries. Support for dotnet would be available shortly.
-
 Supported binary formats:
 
-- ELF
-- PE
-- Mach-O
+- ELF (GNU, musl)
+- PE (exe, dll)
+- Mach-O (x64, arm64)
 
 You can run blint on Linux, Windows and Mac against any of these binary formats.
 
