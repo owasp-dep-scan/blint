@@ -259,19 +259,19 @@ rules:
       - AddSecureMemoryCacheCallback
       - CheckNameLegalDOS8Dot3A
       - CreateFiber
-      - CreateProcessW
-      - CreateProcessWithLogonW
-      - CreateProcessWithTokenW
+      - CreateProcess
+      - CreateProcessWithLogon
+      - CreateProcessWithToken
       - TerminateProcess
-      - DeleteVolumeMountPointA
-      - FindFirstVolumeA
+      - DeleteVolumeMountPoint
+      - FindFirstVolume
       - FindFirstVolumeMountPoint
-      - FindNextVolumeA
+      - FindNextVolume
       - FindNextVolumeMountPoint
       - GetActiveProcessorCount
       - GetActiveProcessorGroupCount
       - GetCommModemStatus
-      - GetCompressedFileSizeTransactedA
+      - GetCompressedFileSizeTransacted
       - GetDevicePowerState
       - GetEventLogInformation
       - GetFirmwareEnvironmentVariable
@@ -286,13 +286,13 @@ rules:
       - NtQueryInformationThread
       - NtQueryMultipleValueKey
       - NtQuerySystemInformation
-      - LoadLibraryA
-      - LoadLibraryW
-      - GetDriveTypeA
+      - LoadLibrary
+      - GetDriveType
       - GetVolumeInformation
       - GetSystemInfo
-      - GetStartupInfoW
-      - GetDiskFreeSpaceA
+      - GetStartupInfo
+      - GetDiskFreeSpace
+      - GetCommandLine
   - id: WIN_BASE_USER_API
     title: Win Base user api functions used
     summary: Retrieves Account Information
@@ -329,6 +329,7 @@ rules:
       - CopyFile
       - CreateDirectory
       - CreateHardLinkA
+      - CreateFile
       - DecryptFile
       - DeleteFile
       - EncryptFileA
@@ -2353,3 +2354,22 @@ rules:
       - URLOpenBlockingStream
       - URLOpenPullStream
       - URLOpenStream
+  - id: COM_BASE_API
+    title: COM API functions used
+    summary: Can Download & Execute components
+    description: |
+      Uses COM Services (COM+) and Component Object Model (COM) technology.
+    patterns:
+      - CLSIDFromProgID
+      - CoAddRefServerProcess
+      - CoCreateInstance
+      - CoCreateInstanceFromApp
+      - CoFreeUnusedLibraries
+      - CoGetCallContext
+      - CoGetCurrentProcess
+      - CoInitializeSecurity
+      - CreateStreamOnHGlobal
+      - DllCanUnloadNow
+      - DllGetClassObject
+      - DllRegisterServer
+      - DllUnregisterServer
