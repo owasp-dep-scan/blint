@@ -16,7 +16,7 @@ from rich.table import Table
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import find_exe_files
+from blint.utils import find_exe_files, parse_pe_manifest
 
 try:
     import importlib.resources
@@ -45,6 +45,9 @@ review_rules_cache = {}
 
 # Debug mode
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
+
+# No of evidences per category
+EVIDENCE_LIMIT = 5
 
 
 def get_resource(package, resource):
@@ -197,6 +200,23 @@ def check_codesign(f, metadata, rule_obj):
     return True
 
 
+def check_trust_info(f, metadata, rule_obj):
+    if metadata.get("resources"):
+        manifest = metadata.get("resources").get("manifest")
+        if manifest:
+            attribs_dict = parse_pe_manifest(manifest)
+            if not attribs_dict:
+                return True
+            allowed_values = rule_obj.get("allowed_values", {})
+            for k, v in allowed_values.items():
+                manifest_k = attribs_dict.get(k)
+                if isinstance(v, dict) and isinstance(manifest_k, dict):
+                    for vk, vv in v.items():
+                        if str(manifest_k.get(vk)).lower() != str(vv).lower():
+                            return "{}:{}".format(vk, manifest_k.get(vk))
+    return True
+
+
 def run_checks(f, metadata):
     results = []
     if not rules_dict:
@@ -225,16 +245,19 @@ def run_checks(f, metadata):
 
 def run_review_methods_symbols(review_methods_list, functions_list):
     results = defaultdict(list)
-    found_cid = {}
-    found_pattern = {}
+    found_cid = defaultdict(int)
+    found_pattern = defaultdict(int)
     found_function = {}
     for review_methods in review_methods_list:
         for cid, rule_obj in review_methods.items():
-            if found_cid.get(cid):
+            if found_cid[cid] > EVIDENCE_LIMIT:
                 continue
             patterns = rule_obj.get("patterns")
             for apattern in patterns:
-                if found_pattern.get(apattern) or found_cid.get(cid):
+                if (
+                    found_pattern[apattern] > EVIDENCE_LIMIT
+                    or found_cid[cid] > EVIDENCE_LIMIT
+                ):
                     continue
                 for afun in functions_list:
                     if (apattern.lower() in afun.lower()) and not found_function.get(
@@ -245,8 +268,8 @@ def run_review_methods_symbols(review_methods_list, functions_list):
                             "function": afun,
                         }
                         results[cid].append(result)
-                        found_cid[cid] = True
-                        found_pattern[apattern] = True
+                        found_cid[cid] += 1
+                        found_pattern[apattern] += 1
                         found_function[afun.lower()] = True
     return results
 
@@ -367,10 +390,10 @@ def start(args, src, reports_dir):
                         del aresult["patterns"]
                         reviews.append(aresult)
             progress.advance(task)
-    return findings, reviews
+    return findings, reviews, files
 
 
-def print_findings_table(findings):
+def print_findings_table(findings, files):
     table = Table(
         title="BLint Findings",
         box=box.DOUBLE_EDGE,
@@ -378,23 +401,32 @@ def print_findings_table(findings):
         show_lines=True,
     )
     table.add_column("ID")
-    table.add_column("Binary")
+    if len(files) > 1:
+        table.add_column("Binary")
     table.add_column("Title")
     table.add_column("Severity")
     for f in findings:
         severity = f.get("severity").upper()
-        table.add_row(
-            f.get("id"),
-            f.get("exe_name"),
-            f.get("title"),
-            "{}{}".format(
-                "[bright_red]" if severity in ("CRITICAL", "HIGH") else "", severity
-            ),
+        severity_fmt = "{}{}".format(
+            "[bright_red]" if severity in ("CRITICAL", "HIGH") else "", severity
         )
+        if len(files) > 1:
+            table.add_row(
+                f.get("id"),
+                f.get("exe_name"),
+                f.get("title"),
+                severity_fmt,
+            )
+        else:
+            table.add_row(
+                f.get("id"),
+                f.get("title"),
+                severity_fmt,
+            )
     console.print(table)
 
 
-def print_reviews_table(reviews):
+def print_reviews_table(reviews, files):
     table = Table(
         title="BLint Capability Review",
         box=box.DOUBLE_EDGE,
@@ -402,38 +434,49 @@ def print_reviews_table(reviews):
         show_lines=True,
     )
     table.add_column("ID")
-    table.add_column("Binary")
+    if len(files) > 1:
+        table.add_column("Binary")
     table.add_column("Capabilities")
-    table.add_column("Evidence")
+    table.add_column("Evidence (Top 5)")
     for r in reviews:
         evidences = [e.get("function") for e in r.get("evidence")]
-        evidences = list(islice(evidences, 2))
-        table.add_row(
-            r.get("id"),
-            r.get("exe_name"),
-            r.get("summary"),
-            "\n".join(evidences),
-        )
+        evidences = list(islice(evidences, EVIDENCE_LIMIT))
+        if len(files) > 1:
+            table.add_row(
+                r.get("id"),
+                r.get("exe_name"),
+                r.get("summary"),
+                "\n".join(evidences),
+            )
+        else:
+            table.add_row(
+                r.get("id"),
+                r.get("summary"),
+                "\n".join(evidences),
+            )
     console.print(table)
 
 
-def report(args, src_dir, reports_dir, findings, reviews):
+def report(args, src_dir, reports_dir, findings, reviews, files):
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
     common_metadata = {
         "scan_id": run_uuid,
         "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
     }
     if findings:
-        print_findings_table(findings)
+        print_findings_table(findings, files)
         findings_file = Path(reports_dir) / "findings.json"
         LOG.info(f"Findings written to {findings_file}")
         with open(findings_file, mode="w") as ffp:
             json.dump({**common_metadata, "findings": findings}, ffp, indent=True)
     if reviews:
-        print_reviews_table(reviews)
+        print_reviews_table(reviews, files)
         reviews_file = Path(reports_dir) / "reviews.json"
         LOG.info(f"Review written to {reviews_file}")
         with open(reviews_file, mode="w") as rfp:
             json.dump({**common_metadata, "reviews": reviews}, rfp, indent=True)
     if not findings and not reviews:
         LOG.info(f":white_heavy_check_mark: No issues found in {src_dir}!")
+    # Try console output as html
+    html_file = Path(reports_dir) / "blint-output.html"
+    console.save_html(html_file)

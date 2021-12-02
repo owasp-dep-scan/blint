@@ -5,6 +5,8 @@ import re
 import string
 from pathlib import Path
 
+from defusedxml.ElementTree import fromstring
+
 charset = string.digits + string.ascii_letters + r"""!&@"""
 
 # Default ignore list
@@ -265,6 +267,8 @@ def calculate_entropy(data):
     entropy = 0.0
     # Remove protocol prefixes which tend to increase false positives
     data = re.sub(r"(file|s3|http(s)?|email|ftp)://", "", data)
+    if not data:
+        return entropy
     digit_found = False
     punctuation_found = False
     ascii_found = False
@@ -368,3 +372,31 @@ def find_exe_files(src):
             if is_exe(fullPath):
                 result.append(fullPath)
     return result
+
+
+def bomstrip(manifest):
+    """
+    Function to delete UTF-8 BOM character in "string"
+    """
+    utf8bom = b"\xef\xbb\xbf"
+    if manifest[:3] == utf8bom:
+        return manifest[3:]
+    else:
+        return manifest
+
+
+def parse_pe_manifest(manifest):
+    """
+    Method to parse xml pe manifest
+    :param manifest: String manifest
+    :return: dict with flattened keys and values
+    """
+    try:
+        attribs_dict = {}
+        root = fromstring(bomstrip(manifest))
+        for child in root:
+            for ele in child.iter():
+                attribs_dict[ele.tag.rpartition("}")[-1]] = ele.attrib
+        return attribs_dict
+    except Exception as e:
+        return None

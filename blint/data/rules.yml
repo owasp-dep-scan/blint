@@ -166,3 +166,20 @@
     - MachO
     - genericbinary
     - gobinary
+- id: CHECK_TRUST_INFO
+  title: Requires Elevated Execution
+  description: |
+    Identifies and checks the security level at which the application requests to be executed.
+
+    - [trustInfo docs](https://docs.microsoft.com/en-us/visualstudio/deployment/trustinfo-element-clickonce-application?view=vs-2022)
+  severity: high
+  allowed_values:
+    requestedExecutionLevel:
+      level: asInvoker
+      uiAccess: false
+    PermissionSet:
+      Unrestricted: false
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary

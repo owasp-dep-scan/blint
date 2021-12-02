@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from blint.analysis import run_checks, run_review
+from blint.analysis import run_checks, run_review, check_trust_info
 
 
 def test_gobinary():

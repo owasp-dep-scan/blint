@@ -283,7 +283,7 @@ def make_msi(exe):
         # The name of your application.
         "Binary Linter",
         # The version of your application.
-        "1.0.0",
+        "1.0.14",
         # The author/manufacturer of your application.
         "Team Rosa"
     )
@@ -295,7 +295,7 @@ def make_macos_app_bundle():
     bundle.set_info_plist_required_keys(
         display_name = "blint",
         identifier = "io.ngcloud.blint",
-        version = "1.0.11",
+        version = "1.0.14",
         signature = "lint",
         executable = "blint",
     )

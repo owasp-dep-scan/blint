@@ -27,6 +27,8 @@ rules:
       - OpenThreadToken
       - SetProcessMitigationPolicy
       - SetThreadToken
+      - SetProcessShutdownParameters
+      - OpenSemaphore
   - id: CRYPT_XML_API
     title: Security sensitive crypt xml functions used
     summary: Uses Crypt XML API
@@ -280,7 +282,6 @@ rules:
       - SetFileAttributesTransacted
       - SetFirmwareEnvironmentVariable
       - SetSystemPowerState
-      - SetVolumeMountPoint
       - NtQueryInformationProcess
       - NtQueryInformationThread
       - NtQueryMultipleValueKey
@@ -298,6 +299,8 @@ rules:
     description: |
       Win Base api are used by system services.
     patterns:
+      - GetComputerNameA
+      - GetComputerNameW
       - GetUserNameW
       - GetUserNameA
       - LogonUserA
@@ -316,6 +319,7 @@ rules:
       - LookupPrivilegeNameW
       - LookupPrivilegeValueA
       - LookupPrivilegeValueW
+      - QueryDosDevice
   - id: WIN_BASE_IO_API
     title: Win Base IO api functions used
     summary: Can Create and Encrypt Files
@@ -361,6 +365,84 @@ rules:
       - GetTempPathA
       - GetFileVersionInfoSize
       - GetFileVersionInfo
+      - SetVolumeMountPoint
+      - GetSystemWow64Directory
+      - DeleteVolumeMountPointW
+      - SetDllDirectory
+      - GetVolumePathNamesForVolumeName
+      - BackupWrite
+      - CreateHardLink
+      - BackupEventLog
+  - id: WIN_BCRYPT_API
+    title: Win bcrypt api functions used
+    summary: Can Encrypt Files
+    description: |
+      Win Bcrypt api are used by system services.
+    patterns:
+      - BCryptAddContextFunction
+      - BCryptConfigureContext
+      - BCryptConfigureContextFunction
+      - BCryptCreateContext
+      - BCryptCreateHash
+      - BCryptCreateMultiHash
+      - BCryptDecrypt
+      - BCryptDeleteContext
+      - BCryptDeriveKey
+      - BCryptDeriveKeyCapi
+      - BCryptDeriveKeyPBKDF2
+      - BCryptDestroyHash
+      - BCryptDestroyKey
+      - BCryptDestroySecret
+      - BCryptDuplicateHash
+      - BCryptDuplicateKey
+      - BCryptEncrypt
+      - BCryptEnumAlgorithms
+      - BCryptEnumContextFunctionProviders
+      - BCryptEnumContextFunctions
+      - BCryptEnumContexts
+      - BCryptEnumProviders
+      - BCryptEnumRegisteredProviders
+      - BCryptExportKey
+      - BCryptFinalizeKeyPair
+      - BCryptFinishHash
+      - BCryptFreeBuffer
+      - BCryptGenerateKeyPair
+      - BCryptGenerateSymmetricKey
+      - BCryptGenRandom
+      - BCryptGetFipsAlgorithmMode
+      - BCryptGetProperty
+      - BCryptHash
+      - BCryptHashData
+      - BCryptImportKey
+      - BCryptImportKeyPair
+      - BCryptKeyDerivation
+      - BCryptOpenAlgorithmProvider
+      - BCryptProcessMultiOperations
+      - BCryptQueryContextConfiguration
+      - BCryptQueryContextFunctionConfiguration
+      - BCryptQueryContextFunctionProperty
+      - BCryptQueryProviderRegistration
+      - BCryptRegisterConfigChangeNotify
+      - BCryptRegisterConfigChangeNotify
+      - BCryptRemoveContextFunction
+      - BCryptResolveProviders
+      - BCryptSecretAgreement
+      - BCryptSetContextFunctionProperty
+      - BCryptSetProperty
+      - BCryptSignHash
+      - BCryptUnregisterConfigChangeNotify
+      - BCryptUnregisterConfigChangeNotify
+      - BCryptVerifySignature
+      - BCryptCloseAlgorithmProvider
+  - id: WIN_TIME_API
+    title: Date and Time api functions used
+    summary: Can Modify Time
+    description: |
+      Can modify system date and time.
+    patterns:
+      - SetLocalTime
+      - SetSystemTimeAdjustment
+      - SetSystemTime
   - id: WIN_BASE_EXEC_API
     title: Win Base Execute api functions used
     summary: Can Execute other programs
@@ -369,6 +451,49 @@ rules:
     patterns:
       - WinExec
       - WinMain
+      - LoadLibraryW
+      - ReadConsoleOutputW
+      - AddConsoleAlias
+      - AllocConsole
+      - AttachConsole
+      - ClosePseudoConsole
+      - CreateConsoleScreenBuffer
+      - CreatePseudoConsole
+      - FillConsoleOutputAttribute
+      - FillConsoleOutputCharacter
+      - FlushConsoleInputBuffer
+      - WriteConsole
+      - WriteConsoleInput
+      - WriteConsoleOutput
+      - WriteConsoleOutputAttribute
+      - WriteConsoleOutputCharacter
+      - FreeConsole
+      - HandlerRoutine
+      - PeekConsoleInput
+      - ReadConsole
+      - ReadConsoleInput
+      - ReadConsoleOutput
+      - ReadConsoleOutputAttribute
+      - ReadConsoleOutputCharacter
+      - ResizePseudoConsole
+      - ScrollConsoleScreenBuffer
+      - SetConsoleActiveScreenBuffer
+      - SetConsoleCP
+      - SetConsoleCtrlHandler
+      - SetConsoleCursorInfo
+      - SetConsoleCursorPosition
+      - SetConsoleDisplayMode
+      - SetConsoleHistoryInfo
+      - SetConsoleMode
+      - SetConsoleOutputCP
+      - SetConsoleScreenBufferInfoEx
+      - SetConsoleScreenBufferSize
+      - SetConsoleTextAttribute
+      - SetConsoleTitle
+      - SetConsoleWindowInfo
+      - SetCurrentConsoleFontEx
+      - SetStdHandle
+      - GenerateConsoleCtrlEvent
   - id: WIN_CRED_API
     title: Win Cred api functions used
     summary: Can Manipute Windows Credentials
@@ -853,6 +978,55 @@ rules:
       - HttpReceiveClientCertificate
       - HttpAddUrl
       - HttpRemoveUrl
+  - id: WIN_HTTP_API
+    title: HTTP api functions used
+    summary: Uses HTTP services
+    description: |
+      Windows HTTP services api used.
+    patterns:
+      - WinHttpAddRequestHeaders
+      - WinHttpAddRequestHeadersEx
+      - WinHttpCheckPlatform
+      - WinHttpConnect
+      - WinHttpCrackUrl
+      - WinHttpCreateProxyResolver
+      - WinHttpCreateUrl
+      - WinHttpDetectAutoProxyConfigUrl
+      - WinHttpFreeProxyResult
+      - WinHttpFreeQueryConnectionGroupResult
+      - WinHttpGetDefaultProxyConfiguration
+      - WinHttpGetIEProxyConfigForCurrentUser
+      - WinHttpGetProxyForUrl
+      - WinHttpGetProxyForUrlEx
+      - WinHttpGetProxyResult
+      - WinHttpOpen
+      - WinHttpOpenRequest
+      - WinHttpQueryAuthSchemes
+      - WinHttpQueryConnectionGroup
+      - WinHttpQueryDataAvailable
+      - WinHttpQueryHeaders
+      - WinHttpQueryHeadersEx
+      - WinHttpQueryOption
+      - WinHttpReadData
+      - WinHttpReadDataEx
+      - WinHttpReceiveResponse
+      - WinHttpResetAutoProxy
+      - WinHttpSendRequest
+      - WinHttpSetCredentials
+      - WinHttpSetDefaultProxyConfiguration
+      - WinHttpSetOption
+      - WinHttpSetStatusCallback
+      - WinHttpSetTimeouts
+      - WinHttpTimeFromSystemTime
+      - WinHttpTimeToSystemTime
+      - WinHttpWebSocketClose
+      - WinHttpWebSocketCompleteUpgrade
+      - WinHttpWebSocketQueryCloseStatus
+      - WinHttpWebSocketReceive
+      - WinHttpWebSocketSend
+      - WinHttpWebSocketShutdown
+      - WinHttpWriteData
+      - WinHttpCloseHandle
   - id: NET_SHARE_API
     title: Network share api functions used
     summary: Can access Network Share
@@ -875,8 +1049,8 @@ rules:
       - NetShareSetInfo
       - NetStatisticsGet
   - id: P2P_API
-    title: Network share api functions used
-    summary: Can access Network Share
+    title: P2P api functions used
+    summary: Uses Peer-to-Peer (p2p)
     description: |
       Peer-to-peer technologies are used to facilitate real-time communication and collaboration across distributed networks. In the peer-to-peer model, without using Internet servers, each PC user can do the following:
 
@@ -1740,6 +1914,7 @@ rules:
       - ExInitializeSListHead
       - KeInitializeDeviceQueue
       - IoCsqInitialize
+      - SetFirmwareEnvironmentVariable
   - id: FS_DRIVER_API
     title: File System Drivers and Minifilter functions used
     summary: Creates File System & Minifilter
@@ -1810,3 +1985,371 @@ rules:
       - XcvClosePort
       - XcvDataPort
       - XcvOpenPort
+  - id: VB_API
+    title: Visual Basic API functions used
+    summary: Legacy Visual Basic API used
+    description: |
+      Visual Basic API functions used.
+    patterns:
+      - __vbaCopyBytes
+      - __vbaSetSystemError
+      - __vbaExitProc
+      - __vbaObjSetAddref
+      - EVENT_SINK_AddRef
+      - __vbaPrintFile
+      - __vbaFileOpen
+      - __vbaLateMemCallLd
+      - __vbaErrorOverflow
+  - id: MULTIMEDIA_API
+    title: Multimedia API functions used
+    summary: Can Play Multimedia
+    description: |
+      Microsoft Windows multimedia support enables applications to use sound and video.
+    patterns:
+      - acmDriverAdd
+      - acmDriverClose
+      - acmDriverDetails
+      - acmDriverEnum
+      - acmDriverEnumCallback
+      - acmDriverID
+      - acmDriverMessage
+      - acmDriverOpen
+      - acmDriverPriority
+      - acmDriverProc
+      - acmDriverRemove
+      - acmFilterChoose
+      - acmFilterChooseHookProc
+      - acmFilterDetails
+      - acmFilterEnum
+      - acmFilterEnumCallback
+      - acmFilterTagDetails
+      - acmFilterTagEnum
+      - acmFilterTagEnumCallback
+      - acmFormatChoose
+      - acmFormatChooseHookProc
+      - acmFormatDetails
+      - acmFormatEnum
+      - acmFormatEnumCallback
+      - acmFormatSuggest
+      - acmFormatTagDetails
+      - acmFormatTagEnum
+      - acmFormatTagEnumCallback
+      - acmGetVersion
+      - acmMetrics
+      - acmStreamClose
+      - acmStreamConvert
+      - acmStreamConvertCallback
+      - acmStreamMessage
+      - acmStreamOpen
+      - acmStreamPrepareHeader
+      - acmStreamReset
+      - acmStreamSize
+      - acmStreamUnprepareHeader
+      - auxGetDevCaps
+      - auxGetNumDevs
+      - auxGetVolume
+      - auxOutMessage
+      - auxSetVolume
+      - AVIBuildFilter
+      - AVIClearClipboard
+      - AVIFileAddRef
+      - AVIFileCreateStream
+      - AVIFileEndRecord
+      - AVIFileExit
+      - AVIFileGetStream
+      - AVIFileInfo
+      - AVIFileInit
+      - AVIFileOpen
+      - AVIFileReadData
+      - AVIFileRelease
+      - AVIFileWriteData
+      - AVIGetFromClipboard
+      - AVIMakeCompressedStream
+      - AVIMakeFileFromStreams
+      - AVIMakeStreamFromClipboard
+      - AVIPutFileOnClipboard
+      - AVISave
+      - AVISaveOptions
+      - AVISaveOptionsFree
+      - AVISaveV
+      - AVIStreamAddRef
+      - AVIStreamBeginStreaming
+      - AVIStreamCreate
+      - AVIStreamEndStreaming
+      - AVIStreamFindSample
+      - AVIStreamGetFrame
+      - AVIStreamGetFrameClose
+      - AVIStreamGetFrameOpen
+      - AVIStreamInfo
+      - AVIStreamLength
+      - AVIStreamOpenFromFile
+      - AVIStreamRead
+      - AVIStreamReadData
+      - AVIStreamReadFormat
+      - AVIStreamRelease
+      - AVIStreamSampleToTime
+      - AVIStreamSetFormat
+      - AVIStreamStart
+      - AVIStreamTimeToSample
+      - AVIStreamWrite
+      - AVIStreamWriteData
+      - capControlCallback
+      - capCreateCaptureWindow
+      - capErrorCallback
+      - capGetDriverDescription
+      - capStatusCallback
+      - capVideoStreamCallback
+      - capWaveStreamCallback
+      - capYieldCallback
+      - CreateEditableStream
+      - DllGetClassObject
+      - DrawDibBegin
+      - DrawDibChangePalette
+      - DrawDibClose
+      - DrawDibDraw
+      - DrawDibEnd
+      - DrawDibGetBuffer
+      - DrawDibGetPalette
+      - DrawDibOpen
+      - DrawDibProfileDisplay
+      - DrawDibRealize
+      - DrawDibSetPalette
+      - DrawDibStart
+      - DrawDibStop
+      - DrawDibTime
+      - EditStreamClone
+      - EditStreamCopy
+      - EditStreamCut
+      - EditStreamPaste
+      - EditStreamSetInfo
+      - EditStreamSetName
+      - GetOpenFileNamePreview
+      - GetSaveFileNamePreview
+      - ICClose
+      - ICCompress
+      - ICCompressorChoose
+      - ICCompressorFree
+      - ICDecompress
+      - ICDecompressEx
+      - ICDecompressExBegin
+      - ICDecompressExQuery
+      - ICDraw
+      - ICDrawBegin
+      - ICDrawSuggestFormat
+      - ICGetDisplayFormat
+      - ICGetInfo
+      - ICImageCompress
+      - ICImageDecompress
+      - ICInfo
+      - ICInstall
+      - ICLocate
+      - ICOpen
+      - ICOpenFunction
+      - ICRemove
+      - ICSendMessage
+      - ICSeqCompressFrame
+      - ICSeqCompressFrameEnd
+      - ICSeqCompressFrameStart
+      - ICSetStatusProc
+      - IOProc
+      - joyConfigChanged
+      - joyGetDevCaps
+      - joyGetNumDevs
+      - joyGetPos
+      - joyGetPosEx
+      - joyGetThreshold
+      - joyReleaseCapture
+      - joySetCapture
+      - joySetThreshold
+      - mciExecute
+      - mciGetCreatorTask
+      - mciGetDeviceID
+      - mciGetDeviceIDFromElementID
+      - mciGetErrorString
+      - mciGetYieldProc
+      - mciSendCommand
+      - mciSendString
+      - mciSetYieldProc
+      - MCIWndCreate
+      - MCIWndRegisterClass
+      - midiConnect
+      - midiDisconnect
+      - midiInAddBuffer
+      - midiInClose
+      - midiInGetDevCaps
+      - midiInGetErrorText
+      - midiInGetID
+      - midiInGetNumDevs
+      - midiInMessage
+      - midiInOpen
+      - midiInPrepareHeader
+      - MidiInProc
+      - midiInReset
+      - midiInStart
+      - midiInStop
+      - midiInUnprepareHeader
+      - midiOutCacheDrumPatches
+      - midiOutCachePatches
+      - midiOutClose
+      - midiOutGetDevCaps
+      - midiOutGetErrorText
+      - midiOutGetID
+      - midiOutGetNumDevs
+      - midiOutGetVolume
+      - midiOutLongMsg
+      - midiOutMessage
+      - midiOutOpen
+      - midiOutPrepareHeader
+      - MidiOutProc
+      - midiOutReset
+      - midiOutSetVolume
+      - midiOutShortMsg
+      - midiOutUnprepareHeader
+      - midiStreamClose
+      - midiStreamOpen
+      - midiStreamOut
+      - midiStreamPause
+      - midiStreamPosition
+      - midiStreamProperty
+      - midiStreamRestart
+      - midiStreamStop
+      - mixerClose
+      - mixerGetControlDetails
+      - mixerGetDevCaps
+      - mixerGetID
+      - mixerGetLineControls
+      - mixerGetLineInfo
+      - mixerGetNumDevs
+      - mixerMessage
+      - mixerOpen
+      - mixerSetControlDetails
+      - mmGetCurrentTask
+      - mmioAdvance
+      - mmioAscend
+      - mmioClose
+      - mmioCreateChunk
+      - mmioDescend
+      - mmioFlush
+      - mmioGetInfo
+      - mmioInstallIOProc
+      - mmioOpen
+      - MMIOProc
+      - mmioRead
+      - mmioRename
+      - mmioSeek
+      - mmioSendMessage
+      - mmioSetBuffer
+      - mmioSetInfo
+      - mmioStringToFOURCC
+      - mmioWrite
+      - mmsystemGetVersion
+      - mmTaskBlock
+      - mmTaskCreate
+      - mmTaskSignal
+      - mmTaskYield
+      - MyStatusProc
+      - PlaySound
+      - sndOpenSound
+      - sndPlaySound
+      - StretchDIB
+      - timeBeginPeriod
+      - timeEndPeriod
+      - timeGetDevCaps
+      - timeGetSystemTime
+      - timeGetTime
+      - timeKillEvent
+      - TimeProc
+      - timeSetEvent
+      - waveInAddBuffer
+      - waveInClose
+      - waveInGetDevCaps
+      - waveInGetErrorText
+      - waveInGetID
+      - waveInGetNumDevs
+      - waveInGetPosition
+      - waveInMessage
+      - waveInOpen
+      - waveInPrepareHeader
+      - waveInProc
+      - waveInReset
+      - waveInStart
+      - waveInStop
+      - waveInUnprepareHeader
+      - waveOutBreakLoop
+      - waveOutClose
+      - waveOutGetDevCaps
+      - waveOutGetErrorText
+      - waveOutGetID
+      - waveOutGetNumDevs
+      - waveOutGetPitch
+      - waveOutGetPlaybackRate
+      - waveOutGetPosition
+      - waveOutGetVolume
+      - waveOutMessage
+      - waveOutOpen
+      - waveOutPause
+      - waveOutPrepareHeader
+      - waveOutProc
+      - waveOutReset
+      - waveOutRestart
+      - waveOutSetPitch
+      - waveOutSetPlaybackRate
+      - waveOutSetVolume
+      - waveOutUnprepareHeader
+      - waveOutWrite
+  - id: URL_MONIKERS_API
+    title: URL Monikers API functions used
+    summary: Can Download & Execute components
+    description: |
+      A moniker is a COM object that identifies an object and provides services to allow other components to obtain a pointer to that object. The system-provided moniker class supports asynchronous binding to a Uniform Resource Locator (URL).
+    patterns:
+      - AsyncInstallDistributionUnit
+      - CoGetClassObjectFromURL
+      - CoInternetCombineIUri
+      - CoInternetCombineUrl
+      - CoInternetCombineUrlEx
+      - CoInternetCompareUrl
+      - CoInternetParseIUri
+      - CoInternetParseUrl
+      - CoInternetQueryInfo
+      - CompareSecurityIds
+      - CompatFlagsFromClsid
+      - CopyBindInfo
+      - CopyStgMedium
+      - CreateAsyncBindCtx
+      - CreateAsyncBindCtxEx
+      - CreateFormatEnumerator
+      - CreateIUriBuilder
+      - CreateUri
+      - CreateUriFromMultiByteString
+      - CreateUriWithFragment
+      - CreateURLBinding
+      - CreateURLMoniker
+      - CreateURLMonikerEx
+      - CreateURLMonikerEx2
+      - FaultInIEFeature
+      - FindMediaType
+      - FindMediaTypeClass
+      - FindMimeFromData
+      - GetClassFileOrMime
+      - GetClassURL
+      - GetComponentIDFromCLSSPEC
+      - IEInstallScope
+      - IsAsyncMoniker
+      - IsValidURL
+      - MkParseDisplayNameEx
+      - ObtainUserAgentString
+      - RegisterBindStatusCallback
+      - RegisterFormatEnumerator
+      - RegisterMediaTypeClass
+      - RegisterMediaTypes
+      - ReleaseBindInfo
+      - RevokeBindStatusCallback
+      - RevokeFormatEnumerator
+      - URLDownloadToCacheFile
+      - URLDownloadToFile
+      - UrlMkGetSessionOption
+      - UrlMkSetSessionOption
+      - URLOpenBlockingStream
+      - URLOpenPullStream
+      - URLOpenStream

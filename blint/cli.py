@@ -81,8 +81,8 @@ def main():
     # Create reports directory
     if not os.path.exists(reports_dir):
         os.makedirs(reports_dir)
-    findings, reviews = start(args, src_dir, reports_dir)
-    report(args, src_dir, reports_dir, findings, reviews)
+    findings, reviews, files = start(args, src_dir, reports_dir)
+    report(args, src_dir, reports_dir, findings, reviews, files)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,7 @@ PowerShell example
 
 Blint produces the following json artifacts in the reports directory:
 
+- blint-output.html - HTML output from the console logs
 - exename-metadata.json - Raw metadata about the parsed binary. Includes symbols, functions, and signature information
 - findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
 - reviews.json - Contains information from the capability reviews. Useful for further analysis

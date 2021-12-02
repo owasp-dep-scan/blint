@@ -183,8 +183,8 @@ def parse_symbols(symbols):
 def parse_interpreter(parsed_obj):
     try:
         return parsed_obj.interpreter
-    except lief.exception:
-        return None
+    except lief.exception as e:
+        return ""
 
 
 def detect_exe_type(parsed_obj, metadata):
@@ -202,7 +202,7 @@ def detect_exe_type(parsed_obj, metadata):
                 metadata.get("machine_type"), metadata.get("file_type")
             ).lower()
     except lief.exception:
-        return None
+        return ""
 
 
 def guess_exe_type(symbol_name):
@@ -265,7 +265,9 @@ def process_pe_resources(parsed_obj):
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
             "html": rm.html if rm.has_html else None,
-            "manifest": rm.manifest if rm.has_manifest else None,
+            "manifest": rm.manifest.replace("\\xef\\xbb\\xbf", "")
+            if rm.has_manifest
+            else None,
             "version_info": str(rm.version) if rm.has_version else None,
         }
         return metadata
