@@ -509,9 +509,7 @@ def parse(exe_file):
                 eflags_str = " - ".join(
                     [str(s).split(".")[-1] for s in header.hexagon_flags_list]
                 )
-            metadata["magic"] = "{:<02x} {:<02x} {:<02x} {:<02x}".format(
-                identity[0], identity[1], identity[2], identity[3]
-            )
+            metadata["magic"] = ("{:<02x} " * 8).format(*identity[:8]).strip()
             metadata["class"] = str(header.identity_class).split(".")[-1]
             metadata["endianness"] = str(header.identity_data).split(".")[-1]
             metadata["identity_version"] = str(header.identity_version).split(".")[-1]
