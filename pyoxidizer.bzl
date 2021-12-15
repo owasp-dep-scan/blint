@@ -283,7 +283,7 @@ def make_msi(exe):
         # The name of your application.
         "Binary Linter",
         # The version of your application.
-        "1.0.14",
+        "1.0.15",
         # The author/manufacturer of your application.
         "Team Rosa"
     )

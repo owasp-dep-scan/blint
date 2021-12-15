@@ -57,6 +57,13 @@ def build_args():
         dest="no_reviews",
         help="Do not perform method reviews",
     )
+    parser.add_argument(
+        "--suggest-fuzzable",
+        action="store_true",
+        default=False,
+        dest="suggest_fuzzable",
+        help="Suggest functions and symbols for fuzzing based on a dictionary",
+    )
     return parser.parse_args()
 
 
@@ -81,8 +88,8 @@ def main():
     # Create reports directory
     if not os.path.exists(reports_dir):
         os.makedirs(reports_dir)
-    findings, reviews, files = start(args, src_dir, reports_dir)
-    report(args, src_dir, reports_dir, findings, reviews, files)
+    findings, reviews, files, fuzzables = start(args, src_dir, reports_dir)
+    report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
 
 
 if __name__ == "__main__":

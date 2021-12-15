@@ -25,6 +25,7 @@ NOTE: The presence of capabilities doesn't imply that the operations are always 
 ## Use cases
 
 - Add blint to CI/CD to inspect the final binaries to ensure code signing or authenticode is applied correctly
+- Identify interesting functions and symbols for fuzzing
 - Blint was used at [ShiftLeft](https://shiftleft.io) to review the statically linked packages and optimize the distributed cli binary
 - Quickly identify malicious binaries by looking at their capabilities (Ability to manipulate networks or drivers or kernels etc)
 
@@ -56,6 +57,7 @@ optional arguments:
   --no-error            Continue on error to prevent build from breaking
   --no-banner           Do not display banner
   --no-reviews          Do not perform method reviews
+  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary
 ```
 
 To test any binary including default commands
@@ -70,6 +72,12 @@ Use -i to check any other binary. For eg: to check ngrok
 blint -i ~/ngrok -o /tmp/blint
 ```
 
+Pass `--suggest-fuzzable` to get suggestions for fuzzing. A dictionary containing "common verbs" is used to identify these functions.
+
+```bash
+blint -i ~/ngrok -o /tmp/blint --suggest-fuzzable
+```
+
 PowerShell example
 
 ![PowerShell](./docs/blint-powershell.jpg)
@@ -82,6 +90,7 @@ Blint produces the following json artifacts in the reports directory:
 - exename-metadata.json - Raw metadata about the parsed binary. Includes symbols, functions, and signature information
 - findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
 - reviews.json - Contains information from the capability reviews. Useful for further analysis
+- fuzzables.json - Contains a suggested list of methods for fuzzing
 
 ## References
 

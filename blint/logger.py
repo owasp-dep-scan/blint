@@ -10,7 +10,7 @@ console = Console(
     log_time=False,
     log_path=False,
     theme=custom_theme,
-    width=200,
+    width=280,
     color_system="auto",
     record=True,
 )

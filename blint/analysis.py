@@ -16,7 +16,7 @@ from rich.table import Table
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import find_exe_files, parse_pe_manifest
+from blint.utils import find_exe_files, parse_pe_manifest, is_fuzzable_name
 
 try:
     import importlib.resources
@@ -342,10 +342,53 @@ def run_review(f, metadata):
     return results
 
 
+def run_prefuzz(f, metadata):
+    functions_list = [
+        {
+            "name": re.sub(r"[*&()]", "", f.get("name", "")),
+            "address": f.get("address", ""),
+        }
+        for f in metadata.get("functions", [])
+    ]
+    functions_list += [
+        {
+            "name": re.sub(r"[*&()]", "", f.get("name", "")),
+            "address": f.get("address", ""),
+        }
+        for f in metadata.get("ctor_functions", [])
+    ]
+    functions_list += [
+        {
+            "name": re.sub(r"[*&()]", "", f.get("name", "")),
+            "address": f.get("address", ""),
+        }
+        for f in metadata.get("exception_functions", [])
+    ]
+    functions_list += [
+        {
+            "name": re.sub(r"[*&()]", "", f.get("name", "")),
+            "address": f.get("address", ""),
+        }
+        for f in metadata.get("unwind_functions", [])
+    ]
+    functions_list += [
+        {"name": f.get("name", ""), "address": f.get("address", "")}
+        for f in metadata.get("exports", [])
+    ]
+    fuzzables = [
+        {"name": f.get("name"), "address": f.get("address", "")}
+        for f in functions_list
+        if is_fuzzable_name(f.get("name"))
+    ]
+    LOG.debug(f"Found {len(fuzzables)} fuzzable methods")
+    return fuzzables
+
+
 def start(args, src, reports_dir):
     files = [src]
     findings = []
     reviews = []
+    fuzzables = []
     if os.path.isdir(src):
         files = find_exe_files(src)
     with Progress(
@@ -371,9 +414,11 @@ def start(args, src, reports_dir):
             progress.update(
                 task, description=f"Checking [bold]{f}[/bold] against rules"
             )
+            # Check security properties
             finding = run_checks(f, metadata)
             if finding:
                 findings += finding
+            # Perform symbol reviews
             if not args.no_reviews:
                 progress.update(
                     task, description="Checking methods against review rules"
@@ -389,8 +434,15 @@ def start(args, src, reports_dir):
                         }
                         del aresult["patterns"]
                         reviews.append(aresult)
+            # Suggest fuzzable targets
+            if args.suggest_fuzzable:
+                fuzzdata = run_prefuzz(f, metadata)
+                if fuzzdata:
+                    fuzzables.append(
+                        {"filename": f, "exe_name": exe_name, "methods": fuzzdata}
+                    )
             progress.advance(task)
-    return findings, reviews, files
+    return findings, reviews, files, fuzzables
 
 
 def print_findings_table(findings, files):
@@ -457,7 +509,7 @@ def print_reviews_table(reviews, files):
     console.print(table)
 
 
-def report(args, src_dir, reports_dir, findings, reviews, files):
+def report(args, src_dir, reports_dir, findings, reviews, files, fuzzables):
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
     common_metadata = {
         "scan_id": run_uuid,
@@ -475,6 +527,14 @@ def report(args, src_dir, reports_dir, findings, reviews, files):
         LOG.info(f"Review written to {reviews_file}")
         with open(reviews_file, mode="w") as rfp:
             json.dump({**common_metadata, "reviews": reviews}, rfp, indent=True)
+    if fuzzables:
+        fuzzables_file = Path(reports_dir) / "fuzzables.json"
+        LOG.info(f"Fuzzables data written to {fuzzables_file}")
+        with open(fuzzables_file, mode="w") as rfp:
+            json.dump({**common_metadata, "fuzzables": fuzzables}, rfp, indent=True)
+    else:
+        LOG.debug("No suggestion available for fuzzing")
+
     if not findings and not reviews:
         LOG.info(f":white_heavy_check_mark: No issues found in {src_dir}!")
     # Try console output as html

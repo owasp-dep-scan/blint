@@ -11,6 +11,8 @@ MIN_LENGTH = 80
 
 lief.logging.disable()
 
+address_fmt = "0x{:<10x}"
+
 
 def parse_desc(e):
     return "{:02x}".format(e)
@@ -108,11 +110,12 @@ def parse_functions(functions):
         func_list = []
         for idx, f in enumerate(functions):
             if f.name and f.address:
+                cleaned_name = f.name.replace("..", "::")
                 func_list.append(
                     {
                         "index": idx,
-                        "name": f.name.replace("..", "::"),
-                        "address": f.address,
+                        "name": cleaned_name,
+                        "address": address_fmt.format(f.address),
                     }
                 )
         return func_list
@@ -416,7 +419,7 @@ def parse_pe_exports(exports):
                 metadata = {
                     "name": entry.name,
                     "ordinal": entry.ordinal,
-                    "address": entry.address,
+                    "address": address_fmt.format(entry.address),
                     "extern": extern,
                 }
             fwd = entry.forward_information if entry.is_forwarded else None
@@ -445,7 +448,7 @@ def parse_macho_symbols(symbols):
             symbol_value = (
                 symbol.value
                 if symbol.value > 0 or not symbol.has_binding_info
-                else symbol.binding_info.address
+                else address_fmt.format(symbol.binding_info.address)
             )
 
             try:
@@ -653,13 +656,15 @@ def parse(exe_file):
                 metadata["checksum"] = dos_header.checksum
                 metadata["initial_ip"] = dos_header.initial_ip
                 metadata["initial_relative_cs"] = dos_header.initial_relative_cs
-                metadata[
-                    "address_relocation_table"
-                ] = dos_header.addressof_relocation_table
+                metadata["address_relocation_table"] = address_fmt.format(
+                    dos_header.addressof_relocation_table
+                )
                 metadata["overlay_number"] = dos_header.overlay_number
                 metadata["oem_id"] = dos_header.oem_id
                 metadata["oem_info"] = dos_header.oem_info
-                metadata["address_new_exeheader"] = dos_header.addressof_new_exeheader
+                metadata["address_new_exeheader"] = address_fmt.format(
+                    dos_header.addressof_new_exeheader
+                )
                 metadata["characteristics"] = ", ".join(
                     [str(chara).split(".")[-1] for chara in header.characteristics_list]
                 )
@@ -690,7 +695,9 @@ def parse(exe_file):
                 metadata[
                     "sizeof_uninitialized_data"
                 ] = optional_header.sizeof_uninitialized_data
-                metadata["addressof_entrypoint"] = optional_header.addressof_entrypoint
+                metadata["addressof_entrypoint"] = address_fmt.format(
+                    optional_header.addressof_entrypoint
+                )
                 metadata["baseof_code"] = optional_header.baseof_code
                 metadata["baseof_data"] = optional_header.baseof_data
                 metadata["imagebase"] = optional_header.imagebase

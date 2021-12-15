@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.14"
+version = "1.0.15"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
 readme = "README.md"
-homepage = "https://rosa.cx"
+homepage = "https://git.sr.ht/~prabhu/blint"
 repository = "https://git.sr.ht/~prabhu/blint"
 keywords = ["linter", "binary", "security", "sast"]
 classifiers = [
