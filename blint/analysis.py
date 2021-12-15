@@ -376,7 +376,7 @@ def run_prefuzz(f, metadata):
         for f in metadata.get("exports", [])
     ]
     fuzzables = [
-        {"name": f.get("name"), "address": f.get("address", "")}
+        {"name": f.get("name"), "address": f.get("address", "").strip()}
         for f in functions_list
         if is_fuzzable_name(f.get("name"))
     ]
