@@ -19,16 +19,26 @@ rules:
       - CreateProcessAsUserW
       - CreateRemoteThread
       - CreateRemoteThreadEx
+      - CreateKernelThread
+      - CreateProcess
+      - CreateProcessInternal
       - GetCurrentProcessToken
       - GetCurrentThreadEffectiveToken
       - GetCurrentThreadToken
       - GetProcessMitigationPolicy
+      - OpenProcess
       - OpenProcessToken
       - OpenThreadToken
       - SetProcessMitigationPolicy
       - SetThreadToken
       - SetProcessShutdownParameters
       - OpenSemaphore
+      - VirtualAllocEx
+      - WriteProcessMemory
+      - CloseHandle
+      - CreateSocketHandle
+      - CreateThread
+      - CreateThreadpool
   - id: CRYPT_XML_API
     title: Security sensitive crypt xml functions used
     summary: Uses Crypt XML API
@@ -293,6 +303,7 @@ rules:
       - GetStartupInfo
       - GetDiskFreeSpace
       - GetCommandLine
+      - BaseThreadStart
   - id: WIN_BASE_USER_API
     title: Win Base user api functions used
     summary: Retrieves Account Information
@@ -320,33 +331,28 @@ rules:
       - LookupPrivilegeValueA
       - LookupPrivilegeValueW
       - QueryDosDevice
+      - AddLocalAlternateComputerName
+      - DnsHostnameToComputerName
   - id: WIN_BASE_IO_API
     title: Win Base IO api functions used
-    summary: Can Create and Encrypt Files
+    summary: Can Create Files
     description: |
       Win Base IO api are used by system services.
     patterns:
       - CopyFile
       - CreateDirectory
-      - CreateHardLinkA
+      - CreateHardLink
       - CreateFile
-      - DecryptFile
       - DeleteFile
-      - EncryptFileA
-      - EncryptFileW
-      - FileEncryptionStatus
       - GetFileAttributesTransacted
       - GetFileBandwidthReservation
       - GetFileSecurityA
       - MoveFile
-      - OpenEncryptedFileRaw
-      - ReadEncryptedFileRaw
       - ReadDirectoryChanges
       - ReplaceFileA
       - ReplaceFileW
       - SetFileSecurityA
       - SetFileAttributesTransacted
-      - WriteEncryptedFileRaw
       - NtCreateFile
       - NtDeviceIoControlFile
       - NtNotifyChangeMultipleKeys
@@ -374,12 +380,20 @@ rules:
       - BackupWrite
       - CreateHardLink
       - BackupEventLog
+      - CreateFileMapping
   - id: WIN_BCRYPT_API
     title: Win bcrypt api functions used
     summary: Can Encrypt Files
     description: |
-      Win Bcrypt api are used by system services.
+      Uses encryption libraries to encrypt/decrypt files.
     patterns:
+      - EncryptFileA
+      - EncryptFileW
+      - FileEncryptionStatus
+      - DecryptFile
+      - OpenEncryptedFileRaw
+      - ReadEncryptedFileRaw
+      - WriteEncryptedFileRaw
       - BCryptAddContextFunction
       - BCryptConfigureContext
       - BCryptConfigureContextFunction
@@ -435,6 +449,27 @@ rules:
       - BCryptUnregisterConfigChangeNotify
       - BCryptVerifySignature
       - BCryptCloseAlgorithmProvider
+      - AES_ECB_encrypt
+      - AES_ECB_decrypt
+      - AES_CBC_encrypt_buffer
+      - AES_CBC_decrypt_buffer
+      - AES_CTR_xcrypt_buffer
+      - EncryptBlock
+      - DecryptBlock
+      - XorBlocks
+      - EncryptECB
+      - DecryptECB
+      - EncryptCBC
+      - DecryptCBC
+      - EncryptCFB
+      - DecryptCFB
+      - get_padded_encrypted_size
+      - encrypt_ecb
+      - decrypt_ecb
+      - encrypt_cbc
+      - decrypt_cbc
+      - encrypt_gcm
+      - decrypt_gcm
   - id: WIN_TIME_API
     title: Date and Time api functions used
     summary: Can Modify Time
@@ -495,6 +530,17 @@ rules:
       - SetCurrentConsoleFontEx
       - SetStdHandle
       - GenerateConsoleCtrlEvent
+      - AssignProcessToJobObject
+      - BaseCheckRunApp
+      - GetConsole
+      - GetConsoleCommandHistory
+      - GetConsoleAlias
+      - GetConsoleHardwareState
+      - LoadLibrary
+      - LoadModule
+      - LoadPackagedLibrary
+      - LoadAppInitDlls
+      - OpenConsole
   - id: WIN_CRED_API
     title: Win Cred api functions used
     summary: Can Manipute Windows Credentials
@@ -692,6 +738,8 @@ rules:
       - RegSetKeyValue
       - RegSetValue
       - RegUnLoadKey
+      - RegDeleteTree
+      - RegisterWowExec
   - id: WIN_SAFER_API
     title: Win Safer api functions used
     summary: Uses Windows Safer API
