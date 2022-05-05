@@ -87,15 +87,15 @@ def parse_relro(parsed_obj):
     except lief.not_found:
         return "no"
     try:
-        bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in parsed_obj.get(
-            lief.ELF.DYNAMIC_TAGS.FLAGS
-        )
+        dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS)
+        if dynamic_tags:
+            bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in dynamic_tags
     except lief.not_found:
         pass
     try:
-        now = lief.ELF.DYNAMIC_FLAGS_1.NOW in parsed_obj.get(
-            lief.ELF.DYNAMIC_TAGS.FLAGS_1
-        )
+        dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS_1)
+        if dynamic_tags:
+            now = lief.ELF.DYNAMIC_FLAGS_1.NOW in dynamic_tags
     except lief.not_found:
         pass
     if bind_now or now:
@@ -799,14 +799,23 @@ def parse(exe_file):
             metadata["has_nx"] = parsed_obj.has_nx
             metadata["exe_type"] = "MachO"
             try:
-                version = parsed_obj.version_min.version
-                sdk = parsed_obj.version_min.sdk
-                source_version = parsed_obj.source_version.version
-                metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(
-                    *source_version
+                version = (
+                    parsed_obj.version_min.version if parsed_obj.version_min else None
                 )
-                metadata["version"] = "{:d}.{:d}.{:d}".format(*version)
-                metadata["sdk"] = "{:d}.{:d}.{:d}".format(*sdk)
+                sdk = parsed_obj.version_min.sdk if parsed_obj.version_min else None
+                source_version = (
+                    parsed_obj.source_version.version
+                    if parsed_obj.source_version
+                    else None
+                )
+                if source_version:
+                    metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(
+                        *source_version
+                    )
+                if version:
+                    metadata["version"] = "{:d}.{:d}.{:d}".format(*version)
+                if sdk:
+                    metadata["sdk"] = "{:d}.{:d}.{:d}".format(*sdk)
             except lief.exception:
                 pass
             try:
@@ -840,19 +849,22 @@ def parse(exe_file):
                 pass
             try:
                 sinfo = parsed_obj.sub_framework
-                metadata["umbrella"] = sinfo.umbrella
+                if sinfo:
+                    metadata["umbrella"] = sinfo.umbrella
             except lief.exception:
                 pass
             try:
                 cmd = parsed_obj.rpath
-                metadata["has_rpath"] = True
-                metadata["rpath"] = cmd.path
+                if cmd:
+                    metadata["has_rpath"] = True
+                    metadata["rpath"] = cmd.path
             except lief.exception:
                 metadata["has_rpath"] = False
             try:
                 cmd = parsed_obj.uuid
-                uuid_str = " ".join(map(parse_uuid, cmd.uuid))
-                metadata["uuid"] = str(uuid_str)
+                if cmd:
+                    uuid_str = " ".join(map(parse_uuid, cmd.uuid))
+                    metadata["uuid"] = str(uuid_str)
             except lief.exception:
                 pass
             try:
