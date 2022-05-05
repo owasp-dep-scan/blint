@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.17"
+version = "1.0.18"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
@@ -30,18 +30,18 @@ include = ["blint/data/*.yml"]
 blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
-python = ">=3.6.2,<3.11"
-lief = "^0.11.5"
-rich = "^10.10.0"
-PyYAML = "^5.4.1"
+python = ">=3.7,<3.11"
+lief = "^0.12.1"
+rich = "^12.3.0"
+PyYAML = "^6.0"
 defusedxml = "^0.7.1"
 
 [tool.poetry.dev-dependencies]
-pytest = "^5.2"
-black = "^21.9b0"
-flake8 = "^3.9.2"
-pytest-cov = "^2.12.1"
-pyinstaller = "^4.7"
+pytest = "^7.1.2"
+black = "^22.3.0"
+flake8 = "^4.0.1"
+pytest-cov = "^3.0.0"
+pyinstaller = "^5.0.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
