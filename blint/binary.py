@@ -175,6 +175,10 @@ def parse_symbols(symbols):
                     "binding": str(symbol.binding).split(".")[-1],
                     "is_imported": is_imported,
                     "is_exported": is_exported,
+                    "information": symbol.information,
+                    "is_function": symbol.is_function,
+                    "is_static": symbol.is_static,
+                    "is_variable": symbol.is_variable,
                     "version": str(symbol_version),
                 }
             )
