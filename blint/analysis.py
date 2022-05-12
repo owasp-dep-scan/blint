@@ -407,7 +407,9 @@ def start(args, src, reports_dir):
             metadata = parse(f)
             exe_name = metadata.get("name", "")
             # Store raw metadata
-            metadata_file = Path(reports_dir) / (exe_name + "-metadata.json")
+            metadata_file = Path(reports_dir) / (
+                os.path.basename(exe_name) + "-metadata.json"
+            )
             LOG.debug(f"Metadata written to {metadata_file}")
             with open(metadata_file, mode="w") as ffp:
                 json.dump(metadata, ffp, indent=True)
