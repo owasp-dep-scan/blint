@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.18"
+version = "1.0.19"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@ngcloud.io>"]
 license = "Apache-2.0"
