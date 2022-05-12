@@ -586,7 +586,7 @@ def parse(exe_file):
                     for entry in symbols_version:
                         metadata["symbols_version"].append(
                             {
-                                "name": entry.symbol_version_auxiliary,
+                                "name": str(entry.symbol_version_auxiliary),
                                 "value": entry.value,
                             }
                         )
