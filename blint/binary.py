@@ -583,13 +583,25 @@ def parse(exe_file):
                 symbols_version = parsed_obj.symbols_version
                 if len(symbols_version):
                     metadata["symbols_version"] = []
+                    symbol_version_auxiliary_cache = {}
                     for entry in symbols_version:
-                        metadata["symbols_version"].append(
-                            {
-                                "name": str(entry.symbol_version_auxiliary),
-                                "value": entry.value,
-                            }
-                        )
+                        symbol_version_auxiliary = entry.symbol_version_auxiliary
+                        if (
+                            symbol_version_auxiliary
+                            and not symbol_version_auxiliary_cache.get(
+                                symbol_version_auxiliary.name
+                            )
+                        ):
+                            symbol_version_auxiliary_cache[
+                                symbol_version_auxiliary.name
+                            ] = True
+                            metadata["symbols_version"].append(
+                                {
+                                    "name": symbol_version_auxiliary.name,
+                                    "hash": symbol_version_auxiliary.hash,
+                                    "value": entry.value,
+                                }
+                            )
             except lief.exception:
                 metadata["symbols_version"] = []
             try:
