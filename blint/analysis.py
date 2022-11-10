@@ -13,10 +13,11 @@ import yaml
 from rich import box
 from rich.progress import Progress
 from rich.table import Table
+from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import find_exe_files, parse_pe_manifest, is_fuzzable_name
+from blint.utils import find_exe_files, is_fuzzable_name, parse_pe_manifest
 
 try:
     import importlib.resources
@@ -491,7 +492,7 @@ def print_reviews_table(reviews, files):
     if len(files) > 1:
         table.add_column("Binary")
     table.add_column("Capabilities")
-    table.add_column("Evidence (Top 5)")
+    table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:
         evidences = [e.get("function") for e in r.get("evidence")]
         evidences = list(islice(evidences, EVIDENCE_LIMIT))
@@ -541,4 +542,5 @@ def report(args, src_dir, reports_dir, findings, reviews, files, fuzzables):
         LOG.info(f":white_heavy_check_mark: No issues found in {src_dir}!")
     # Try console output as html
     html_file = Path(reports_dir) / "blint-output.html"
-    console.save_html(html_file)
+    console.save_html(html_file, theme=MONOKAI)
+    LOG.info(f"HTML report written to {html_file}")
