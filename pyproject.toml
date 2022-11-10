@@ -31,10 +31,11 @@ blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
 python = ">=3.7,<3.11"
-lief = "^0.12.1"
-rich = "^12.3.0"
+lief = "^0.12.3"
+rich = "^12.6.0"
 PyYAML = "^6.0"
 defusedxml = "^0.7.1"
+pyyaml = "^6.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"

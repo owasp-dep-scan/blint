@@ -86,7 +86,7 @@ def main():
         print(f"{src_dir} is an invalid file or directory!")
         return
     # Create reports directory
-    if not os.path.exists(reports_dir):
+    if reports_dir and not os.path.exists(reports_dir):
         os.makedirs(reports_dir)
     findings, reviews, files, fuzzables = start(args, src_dir, reports_dir)
     report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
