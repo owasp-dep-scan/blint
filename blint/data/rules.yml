@@ -12,6 +12,7 @@
   severity: critical
   exe_types:
     - genericbinary
+    - x86_64-executable
     - gobinary
     - PE32
     - PE64
@@ -32,6 +33,7 @@
   severity: high
   exe_types:
     - genericbinary
+    - x86_64-executable
     - gobinary
     - PE32
     - PE64
@@ -58,6 +60,7 @@
   severity: high
   exe_types:
     - genericbinary
+    - x86_64-executable
     - gobinary
     - mips-executable
 - id: CHECK_CANARY
@@ -75,6 +78,7 @@
   severity: medium
   exe_types:
     - genericbinary
+    - x86_64-executable
     - dotnetbinary
     - mips-executable
 - id: CHECK_RPATH
@@ -118,6 +122,7 @@
     - genericbinary
     - gobinary
     - dotnetbinary
+    - x86_64-executable
 - id: CHECK_AUTHENTICODE
   title: Missing Authenticode
   description: |
@@ -132,6 +137,7 @@
     - PE64
     - gobinary
     - dotnetbinary
+    - x86_64-executable
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |
@@ -166,6 +172,7 @@
     - MachO
     - genericbinary
     - gobinary
+    - x86_64-executable
 - id: CHECK_TRUST_INFO
   title: Requires Elevated Execution
   description: |
