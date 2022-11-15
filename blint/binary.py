@@ -208,6 +208,8 @@ def detect_exe_type(parsed_obj, metadata):
             return "{}-{}".format(
                 metadata.get("machine_type"), metadata.get("file_type")
             ).lower()
+        if metadata["relro"] in ("partial", "full"):
+            return "genericbinary"
     except lief.exception:
         return ""
 
@@ -836,20 +838,21 @@ def parse(exe_file):
                 pass
             try:
                 build_version = parsed_obj.build_version
-                metadata["platform"] = str(build_version.platform).split(".")[-1]
-                metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
-                metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
-                tools = build_version.tools
-                if len(tools) > 0:
-                    metadata["tools"] = []
-                    for tool in tools:
-                        tool_str = str(tool.tool).split(".")[-1]
-                        metadata["tools"].append(
-                            {
-                                "tool": tool_str,
-                                "version": "{}.{}.{}".format(*tool.version),
-                            }
-                        )
+                if build_version:
+                    metadata["platform"] = str(build_version.platform).split(".")[-1]
+                    metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
+                    metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
+                    tools = build_version.tools
+                    if len(tools) > 0:
+                        metadata["tools"] = []
+                        for tool in tools:
+                            tool_str = str(tool.tool).split(".")[-1]
+                            metadata["tools"].append(
+                                {
+                                    "tool": tool_str,
+                                    "version": "{}.{}.{}".format(*tool.version),
+                                }
+                            )
             except lief.exception:
                 pass
             try:
@@ -949,7 +952,8 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["dylinker"] = parsed_obj.dylinker.name
+                if parsed_obj.dylinker:
+                    metadata["dylinker"] = parsed_obj.dylinker.name
             except lief.exception:
                 pass
             try:

@@ -225,8 +225,8 @@ def run_checks(f, metadata):
         return None
     if not metadata:
         return None
+    exe_type = metadata.get("exe_type")
     for cid, rule_obj in rules_dict.items():
-        exe_type = metadata.get("exe_type")
         rule_exe_types = rule_obj.get("exe_types")
         # Skip rules that are not valid for this exe type
         if exe_type and rule_exe_types and exe_type not in rule_exe_types:
@@ -240,6 +240,7 @@ def run_checks(f, metadata):
                     aresult["title"] = "{} ({})".format(aresult["title"], result)
                 if metadata.get("name"):
                     aresult["exe_name"] = metadata.get("name")
+                aresult["exe_type"] = exe_type
                 results.append(aresult)
     return results
 

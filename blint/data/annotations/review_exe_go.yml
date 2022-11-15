@@ -1,7 +1,9 @@
 ---
 text: Review for functions identified in a binary produced by Go build
 group: EXE_REVIEWS
-exe_type: gobinary
+exe_type:
+  - gobinary
+  - x86_64-executable
 rules:
   - id: FILE_IOUTIL
     title: IO util functions used
