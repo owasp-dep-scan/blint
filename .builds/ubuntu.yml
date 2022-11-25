@@ -25,9 +25,9 @@ tasks:
   - install-pkgs: |
       cd blint
       ~/.local/bin/poetry install
-      wget https://github.com/upx/upx/releases/download/v3.96/upx-3.96-amd64_linux.tar.xz
-      tar -xvf upx-3.96-amd64_linux.tar.xz
-      cp upx-3.96-amd64_linux/upx ~/.local/bin/
+      wget https://github.com/upx/upx/releases/download/v4.0.1/upx-4.0.1-amd64_linux.tar.xz
+      tar -xvf upx-4.0.1-amd64_linux.tar.xz
+      cp upx-4.0.1-amd64_linux/upx ~/.local/bin/
   - run-lint: |
       cd blint
       ~/.local/bin/poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
