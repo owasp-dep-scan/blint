@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Operating System :: OS Independent",
 ]
 include = ["blint/data/*.yml"]
@@ -30,7 +31,7 @@ include = ["blint/data/*.yml"]
 blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
-python = ">=3.7,<3.11"
+python = ">=3.7,<=3.11"
 lief = "^0.12.3"
 rich = "^12.6.0"
 PyYAML = "^6.0"
