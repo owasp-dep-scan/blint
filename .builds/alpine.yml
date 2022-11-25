@@ -50,3 +50,4 @@ tasks:
       tree reports
 artifacts:
   - ./blint/dist/blint
+
