@@ -18,7 +18,7 @@ blint_logo = """
 
 def build_args():
     """
-    Constructs command line arguments for the vulndb tool
+    Constructs command line arguments for the blint tool
     """
     parser = argparse.ArgumentParser(
         prog="blint",

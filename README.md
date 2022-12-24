@@ -96,3 +96,7 @@ Blint produces the following json artifacts in the reports directory:
 
 - [lief examples](https://github.com/lief-project/LIEF/tree/master/examples/python)
 - [checksec](https://github.com/Wenzel/checksec.py)
+
+## Discord support
+
+The developers could be reached via the [discord](https://discord.gg/DCNxzaeUpd) channel.
