@@ -4,15 +4,13 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-latest]
-        python-version: ['3.6', '3.8', '3.9']
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.8', '3.9']
     steps:
-    - name: Checkout
-      run: |
-        git clone https://git.sr.ht/~prabhu/blint
+    - uses: actions/checkout@v3
     - name: Set up Python
       uses: actions/setup-python@v1
       with:
@@ -21,18 +19,14 @@ jobs:
       run: python -c "import sys; print(sys.version)"
     - name: Install poetry
       run: |
-        python3 -m pip install twine setuptools wheel
-        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
-        cd blint
-        ~/.local/bin/poetry install
+        python3 -m pip install poetry
+        poetry install
     - name: Test with pytest
       run: |
-        cd blint
-        ~/.local/bin/poetry run pytest --cov=blint tests
+        poetry run pytest --cov=blint tests
     - name: Lint with flake8
       run: |
-        cd blint
         # stop the build if there are Python syntax errors or undefined names
-        ~/.local/bin/poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        ~/.local/bin/poetry run flake8 . --count --exit-zero --statistics
+        poetry run flake8 . --count --exit-zero --statistics

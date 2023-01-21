@@ -8,11 +8,8 @@ jobs:
   Blint-Build:
     runs-on: macos-11
     steps:
-    - uses: actions/checkout@v2
-    - name: Checkout
-      run: |
-        git clone https://git.sr.ht/~prabhu/blint --depth=1
-    - uses: actions/setup-python@v2
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     - name: Install the Apple certificate
@@ -44,12 +41,10 @@ jobs:
       run: |
         python3 -m pip install twine setuptools wheel
         curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
-        cd blint
-        ~/.local/bin/poetry install
+        poetry install
     - name: Binary darwin build
       run: |
-        cd blint
-        ~/.local/bin/poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --osx-bundle-identifier ${PRODUCT_IDENTIFIER} --target-architecture x86_64 --codesign-identity ${CODESIGN_ID} --osx-entitlements-file .builds/Entitlements.plist --icon ../blint.icns
+        poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --osx-bundle-identifier ${PRODUCT_IDENTIFIER} --target-architecture x86_64 --codesign-identity ${CODESIGN_ID} --osx-entitlements-file Entitlements.plist --icon ./blint.icns
         ./dist/blint -i dist/blint -o /tmp/reports
       env:
         CODESIGN_ID: ${{ secrets.CODESIGN_ID }}
@@ -57,7 +52,6 @@ jobs:
     - name: sign darwin build
       if: startsWith(github.ref, 'refs/tags/')
       run: |
-        cd blint
         mkdir /tmp/blint
         ditto ./dist /tmp/blint/usr/local/bin
         productbuild --identifier ${PRODUCT_IDENTIFIER} --sign ${INSTALLER_ID} --timestamp --root /tmp/blint / blint.pkg
@@ -75,14 +69,14 @@ jobs:
     - uses: actions/upload-artifact@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        path: blint/blint.pkg
+        path: blint.pkg
         name: blint-macos
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          blint/blint.pkg
+          blint.pkg
     - name: Clean up keychain
       if: ${{ always() }}
       run: |
