@@ -30,15 +30,15 @@ VSVersionInfo(
       [
       StringTable(
         u'040904B0',
-        [StringStruct(u'CompanyName', u'Team Rosa'),
+        [StringStruct(u'CompanyName', u'AppThreat'),
         StringStruct(u'FileDescription', u'blint - The Binary Linter'),
-        StringStruct(u'FileVersion', u'1.0.11.0'),
+        StringStruct(u'FileVersion', u'1.0.24.0'),
         StringStruct(u'InternalName', u'blint'),
-        StringStruct(u'LegalCopyright', u'© Team Rosa. All rights reserved.'),
+        StringStruct(u'LegalCopyright', u'© AppThreat. All rights reserved.'),
         StringStruct(u'OriginalFilename', u'blint.exe'),
         StringStruct(u'ProductName', u'blint'),
-        StringStruct(u'ProductVersion', u'1.0.11.0')])
-      ]), 
+        StringStruct(u'ProductVersion', u'1.0.24.0')])
+      ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]
 )
