@@ -24,7 +24,7 @@ jobs:
     - name: Binary windows build
       run: |
         cd blint
-        C:\Users\runneradmin\AppData\Roaming\Python\Scripts\poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --disable-windowed-traceback -i ../blint.ico --version-file=../file_version_info.txt
+        C:\Users\runneradmin\AppData\Roaming\Python\Scripts\poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --disable-windowed-traceback -i blint.ico --version-file=file_version_info.txt
         set PYTHONIOENCODING=UTF-8
         .\dist\blint.exe -i .\dist\blint.exe -o reports --no-banner
       env:
