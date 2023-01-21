@@ -1,0 +1,89 @@
+name: Build Mac Binaries
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  Blint-Build:
+    runs-on: macos-11
+    steps:
+    - uses: actions/checkout@v2
+    - name: Checkout
+      run: |
+        git clone https://git.sr.ht/~prabhu/blint --depth=1
+    - uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+    - name: Install the Apple certificate
+      env:
+        BUILD_CERTIFICATE_BASE64: ${{ secrets.CERTIFICATES_P12 }}
+        INSTALLER_CERTIFICATE_BASE64: ${{ secrets.INSTALLER_CERTIFICATES_P12 }}
+        P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      run: |
+        # create variables
+        CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+        INSTALLER_CERTIFICATE_PATH=$RUNNER_TEMP/installer_certificate.p12
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+        # import certificate from secrets
+        echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode --output $CERTIFICATE_PATH
+        echo -n "$INSTALLER_CERTIFICATE_BASE64" | base64 --decode --output $INSTALLER_CERTIFICATE_PATH
+
+        # create temporary keychain
+        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+        # import certificate to keychain
+        security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+        security import $INSTALLER_CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+        security list-keychain -d user -s $KEYCHAIN_PATH
+    - name: Install poetry
+      run: |
+        python3 -m pip install twine setuptools wheel
+        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
+        cd blint
+        ~/.local/bin/poetry install
+    - name: Binary darwin build
+      run: |
+        cd blint
+        ~/.local/bin/poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --osx-bundle-identifier ${PRODUCT_IDENTIFIER} --target-architecture x86_64 --codesign-identity ${CODESIGN_ID} --osx-entitlements-file .builds/Entitlements.plist --icon ../blint.icns
+        ./dist/blint -i dist/blint -o /tmp/reports
+      env:
+        CODESIGN_ID: ${{ secrets.CODESIGN_ID }}
+        PRODUCT_IDENTIFIER: ${{ secrets.PRODUCT_IDENTIFIER }}
+    - name: sign darwin build
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        cd blint
+        mkdir /tmp/blint
+        ditto ./dist /tmp/blint/usr/local/bin
+        productbuild --identifier ${PRODUCT_IDENTIFIER} --sign ${INSTALLER_ID} --timestamp --root /tmp/blint / blint.pkg
+        xcrun altool --notarize-app --primary-bundle-id ${PRODUCT_IDENTIFIER} --username="${APPLE_USERNAME}" --password "${APPLE_PASSWORD}" --file ./blint.pkg
+        sleep 120
+        xcrun stapler staple blint.pkg
+      env:
+        CODESIGN_ID: ${{ secrets.CODESIGN_ID }}
+        INSTALLER_ID: ${{ secrets.INSTALLER_ID }}
+        PRODUCT_IDENTIFIER: ${{ secrets.PRODUCT_IDENTIFIER }}
+        APPLE_USERNAME: ${{ secrets.APPLE_USERNAME }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        PYTHONIOENCODING: utf-8
+        LANG: en_US.utf-8
+    - uses: actions/upload-artifact@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        path: blint/blint.pkg
+        name: blint-macos
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          blint/blint.pkg
+    - name: Clean up keychain
+      if: ${{ always() }}
+      run: |
+        security delete-keychain $RUNNER_TEMP/app-signing.keychain-db

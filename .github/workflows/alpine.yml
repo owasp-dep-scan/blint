@@ -1,0 +1,45 @@
+name: Build Linux Musl Binaries
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  Blint-Musl-Build:
+    runs-on: ubuntu-latest
+    container: python:3.9-alpine
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install packages
+      run: |
+        apk update
+        apk add py3-pip python3-dev curl wget jq tree cmake make gcc git g++ musl-dev libffi-dev openssl-dev py3-cffi py3-twine py3-wheel py3-setuptools ca-certificates zlib-dev xz 
+    - name: Checkout
+      run: |
+        git clone https://git.sr.ht/~prabhu/blint --depth=1
+    - name: Install poetry
+      run: |
+        curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
+        cd blint
+        ~/.local/bin/poetry install
+        wget https://github.com/upx/upx/releases/download/v3.96/upx-3.96-amd64_linux.tar.xz
+        tar -xvf upx-3.96-amd64_linux.tar.xz
+        cp upx-3.96-amd64_linux/upx ~/.local/bin/
+    - name: Binary musl build
+      run: |
+        cd blint
+        ~/.local/bin/poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint-musl --collect-all blint --upx-dir ~/.local/bin/
+        ./dist/blint-musl -i dist/blint-musl -o /tmp/reports
+      env:
+        PYTHONIOENCODING: utf-8
+        LANG: en_US.utf-8
+    - uses: actions/upload-artifact@v1
+      with:
+        path: ./blint/dist
+        name: blint-linux-musl
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          blint/dist/blint-musl
