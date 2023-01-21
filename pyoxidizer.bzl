@@ -239,7 +239,7 @@ def make_exe(dist):
     # to our binary.
     exe.add_python_resources(exe.pip_install(["-r", "requirements-dist.txt"]))
 
-    
+
 
     # Read Python files from a local directory and add them to our embedded
     # context, taking just the resources belonging to the `foo` and `bar`
@@ -294,7 +294,7 @@ def make_macos_app_bundle():
     bundle = MacOsApplicationBundleBuilder("blint")
     bundle.set_info_plist_required_keys(
         display_name = "blint",
-        identifier = "io.ngcloud.blint",
+        identifier = "io.appthreat.blint",
         version = "1.0.14",
         signature = "lint",
         executable = "blint",

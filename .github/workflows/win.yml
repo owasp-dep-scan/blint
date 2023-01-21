@@ -8,11 +8,10 @@ jobs:
   Blint-Build:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Checkout
-      run: |
-        git clone https://git.sr.ht/~prabhu/blint --depth=1
-    - uses: actions/setup-python@v2
+    - uses: actions/checkout@v3
+      with:
+        path: blint
+    - uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     - name: Install poetry
