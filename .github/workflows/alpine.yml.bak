@@ -19,9 +19,9 @@ jobs:
         curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 -
         ~/.local/bin/poetry config virtualenvs.create false
         ~/.local/bin/poetry install
-        wget https://github.com/upx/upx/releases/download/v3.96/upx-3.96-amd64_linux.tar.xz
-        tar -xvf upx-3.96-amd64_linux.tar.xz
-        cp upx-3.96-amd64_linux/upx /usr/local/bin/
+        wget https://github.com/upx/upx/releases/download/v4.0.2/upx-4.0.2-amd64_linux.tar.xz
+        tar -xvf upx-4.0.2-amd64_linux.tar.xz
+        cp upx-4.0.2-amd64_linux/upx /usr/local/bin/
     - name: Binary musl build
       run: |
         ~/.local/bin/poetry run pyinstaller cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint-musl --collect-all blint --upx-dir /usr/local/bin/
