@@ -1,0 +1,87 @@
+---
+text: Review for use of monero crypto api
+group: SYMBOL_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+  - genericbinary
+rules:
+  - id: MONERO_WALLET_API
+    title: Detect monero api
+    summary: Uses Monero Wallet
+    description: |
+      Monero is a cryptocurrency focused on private and censorship-resistant transactions.
+    patterns:
+      - start_mining
+      - stop_mining
+      - wait_for_next_block
+      - monero_wallet_config
+      - monero_sync_result
+      - monero_subaddress
+      - monero_account
+      - monero_destination
+      - monero_tx_wallet
+      - monero_tx_query
+      - monero_tx_set
+      - monero_transfer
+      - monero_incoming_transfer
+      - monero_outgoing_transfer
+      - monero_transfer_query
+      - monero_output_wallet
+      - monero_output_query
+      - monero_tx_wallet
+      - monero_tx_query
+      - monero_tx_set
+      - monero_integrated_address
+      - monero_tx_config
+      - monero_key_image_import_result
+      - monero_message_signature_result
+      - monero_check
+      - monero_check_tx
+      - monero_check_reserve
+      - monero_multisig_info
+      - monero_multisig_init_result
+      - monero_multisig_sign_result
+      - monero_address_book_entry
+      - monero_wallet_keys
+      - create_wallet_random
+      - create_wallet_from_mnemonic
+      - create_wallet_from_keys
+      - get_private_view_key
+      - get_private_spend_key
+      - get_public_view_key
+      - get_public_spend_key
+      - get_integrated_address
+      - wallet_exists
+      - open_wallet_data
+      - create_wallet
+      - get_unlocked_balance
+      - get_spend_proof
+      - check_tx_proof
+      - get_reserve_proof_wallet
+      - get_reserve_proof_account
+      - check_reserve_proof
+      - get_payment_uri
+      - parse_payment_uri
+      - exchange_multisig_keys
+      - sign_multisig_tx_hex
+      - submit_multisig_tx_hex
+      - rescan_blockchain
+      - import_multisig_hex
+      - is_valid_private_view_key
+      - validate_private_view_key
+      - validate_private_spend_key
+      - cn_block_to_block
+      - cn_tx_to_tx
+      - get_pruned_tx_json
+  - id: MONERO_RPC_API
+    title: Detect monero rpc
+    summary: Uses Monero RPC
+    description: |
+      Monero is a cryptocurrency focused on private and censorship-resistant transactions.
+    patterns:
+      - monero_rpc_connection
+      - monero_block_header
+      - monero_tx
+      - monero_key_image
+      - monero_output
