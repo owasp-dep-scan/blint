@@ -1,0 +1,65 @@
+---
+text: Review for Monero identified in a binary produced by Go build
+group: SYMBOL_REVIEWS
+exe_type: 
+  - gobinary
+  - x86_64-executable
+rules:
+  - id: MONERO_API_GO
+    title: Detect use of Monero wallet
+    summary: 
+    description: |
+      Monero is a cryptocurrency focused on private and censorship-resistant transactions.
+    patterns:
+      - AddAddressBook
+      - ChangeWalletPassword
+      - CheckReserveProof
+      - CheckSpendProof
+      - CheckTxKey
+      - CheckTxProof
+      - CloseWallet
+      - CreateWallet
+      - DeleteAddressBook
+      - ErrDaemonIsBusy
+      - ErrWrongKeyImage
+      - ErrWrongPaymentID
+      - ErrWrongTxID
+      - ExportKeyImages
+      - ExportMultisigInfo
+      - FinalizeMultisig
+      - Float64ToXMR
+      - GenerateFromKeys
+      - GetBalance
+      - GetBulkPayments
+      - GetPayments
+      - GetReserveProof
+      - GetSpendProof
+      - GetTransferByTxID
+      - GetTransfers
+      - GetTxKey
+      - GetTxNotes
+      - GetTxProof
+      - ImportKeyImages
+      - ImportMultisigInfo
+      - IncomingTransfers
+      - MakeIntegratedAddress
+      - MakeMultisig
+      - NewPaymentID256
+      - NewPaymentID64
+      - OpenWallet
+      - PrepareMultisig
+      - RelayTx
+      - RescanBlockchain
+      - RescanSpent
+      - SetTxNotes
+      - SignTransfer
+      - SplitIntegratedAddress
+      - StartMining
+      - StopMining
+      - StopWallet
+      - StringToXMR
+      - SubmitMultisig
+      - SubmitTransfer
+      - TransferSplit
+      - XMRToDecimal
+      - XMRToFloat64
