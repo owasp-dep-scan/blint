@@ -1,0 +1,31 @@
+---
+text: Review for Monero identified in a binary produced by cargo build
+group: SYMBOL_REVIEWS
+exe_type: genericbinary
+rules:
+  - id: MONERO_API_RUST
+    title: Detect monero API
+    summary: 
+    description: |
+      Monero is a cryptocurrency focused on private and censorship-resistant transactions.
+    patterns:
+      - blockdata::block::Block
+      - blockdata::block::BlockHeader
+      - blockdata::transaction::OwnedTxOut
+      - blockdata::transaction::Transaction
+      - blockdata::transaction::TransactionPrefix
+      - blockdata::transaction::TxIn
+      - blockdata::transaction::TxOut
+      - consensus_encode
+      - consensus_decode
+      - cryptonote::hash::Hash
+      - monero::blockdata::transaction::Transaction
+      - monero::consensus::encode::deserialize
+      - monero::util::key
+      - Network::Mainnet
+      - Network::Stagenet
+      - util::amount::SignedAmount
+      - MONERO_MUL_FACTOR
+      - consensus::encode::Encodable
+      - TxOutTarget
+      - tx_pubkey
