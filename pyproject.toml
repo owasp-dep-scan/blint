@@ -5,8 +5,8 @@ description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
 license = "Apache-2.0"
 readme = "README.md"
-homepage = "https://git.sr.ht/~prabhu/blint"
-repository = "https://git.sr.ht/~prabhu/blint"
+homepage = "https://github.com/AppThreat/blint"
+repository = "https://github.com/AppThreat/blint"
 keywords = ["linter", "binary", "security", "sast"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
