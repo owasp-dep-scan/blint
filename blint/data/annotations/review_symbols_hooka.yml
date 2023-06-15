@@ -1,0 +1,50 @@
+---
+text: Review for Hooka
+group: SYMBOL_REVIEWS
+exe_type:
+  - gobinary
+  - x86_64-executable
+  - genericbinary
+rules:
+  - id: HOOKA
+    title: Detect use of Hooka tools
+    summary:
+    description: |
+      Hooka is a shellcode loader with bypassing capabilities, hooks detector and more written in Golang
+    patterns:
+      - hooka.CreateRemoteThreadHalos
+      - hooka.DetectHooks
+      - hooka.DetectHooks
+      - hooka.DumpLsass
+      - hooka.ElevateProcessToken
+      - hooka.EnumSystemLocales
+      - hooka.EnumSystemLocalesHalos
+      - hooka.EtwpCreateEtwThread
+      - hooka.Execute
+      - hooka.Fibers
+      - hooka.FullUnhook
+      - hooka.FuncFromHash
+      - hooka.GetEventLogPid
+      - hooka.GetFuncPtr
+      - hooka.GetShellcodeFromFile
+      - hooka.GetShellcodeFromFile
+      - hooka.GetShellcodeFromUrl
+      - hooka.GetShellcodeFromUrl
+      - hooka.GetSysId
+      - hooka.HashFromFunc
+      - hooka.Inject
+      - hooka.IsHooked
+      - hooka.PatchAmsi
+      - hooka.PatchAmsi
+      - hooka.PatchEtw
+      - hooka.PerunsUnhook
+      - hooka.Phant0m
+      - hooka.Phant0mWithOutput
+      - hooka.Phant0mWithOutput
+      - hooka.QueueUserApc
+      - hooka.RtlCreateUserThread
+      - hooka.Syscall
+      - hooka.UuidFromString
+      - hooka.WriteMemory
+
+
