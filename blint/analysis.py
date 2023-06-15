@@ -30,8 +30,11 @@ except ImportError:
 
 review_files = []
 if HAVE_RESOURCE_READER:
-    review_methods_dir = importlib.resources.contents("blint.data.annotations")
-    review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
+    try:
+        review_methods_dir = importlib.resources.contents("blint.data.annotations")
+        review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
+    except Exception:
+        pass
 else:
     review_methods_dir = Path(__file__).parent / "data" / "annotations"
     review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]

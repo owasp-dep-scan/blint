@@ -17,19 +17,22 @@ jobs:
     - name: Install poetry
       id: poetry
       run: |
-        python -m pip install twine setuptools wheel poetry
+        python -m pip install --upgrade pip
+        python -m pip install setuptools pyinstaller tzdata poetry
         cd blint
-        python -m poetry install
-
+        poetry config virtualenvs.create false
+        poetry install --no-cache --without dev
     - name: Binary windows build
       run: |
         cd blint
-        python -m poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --disable-windowed-traceback -i blint.ico --version-file=file_version_info.txt 
+        pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --add-data="blint/data;blint/data" --add-data="blint/data/annotations;blint/data/annotations" \ --collect-submodules blint --disable-windowed-traceback -i blint.ico --version-file=file_version_info.txt --noupx
+        (Get-FileHash .\dist\blint.exe).hash | Out-File -FilePath .\dist\blint.exe.sha256
         set PYTHONIOENCODING=UTF-8
         .\dist\blint.exe -i .\dist\blint.exe -o reports --no-banner
       env:
         PYTHONIOENCODING: utf-8
         LANG: en_US.utf-8
+        PYTHONUTF8: 1
     - uses: actions/upload-artifact@v1
       with:
         path: blint/dist
@@ -40,3 +43,4 @@ jobs:
       with:
         files: |
           blint/dist/blint.exe
+          blint/dist/blint.exe.sha256
