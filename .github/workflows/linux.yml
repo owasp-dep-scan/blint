@@ -6,7 +6,7 @@ on:
 
 jobs:
   Blint-GNU-Build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
       with:
@@ -18,23 +18,23 @@ jobs:
       id: poetry
       run: |
         python3 -m pip install --upgrade pip
-        python3 -m pip install poetry
+        python3 -m pip install setuptools pyinstaller poetry
         cd blint
-        python -m poetry install
-        wget https://github.com/upx/upx/releases/download/v4.0.2/upx-4.0.2-amd64_linux.tar.xz
-        tar -xvf upx-4.0.2-amd64_linux.tar.xz
-        mkdir -p ~/.local/bin
-        cp upx-4.0.2-amd64_linux/upx ~/.local/bin/
+        poetry config virtualenvs.create false
+        poetry install --no-cache
     - name: Binary gnu build
       run: |
         cd blint
-        python -m poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN \
+        pyinstaller blint/cli.py --noconfirm --log-level=WARN \
           --nowindow \
           --onefile \
           --name blint \
-          --collect-all blint \
-          --upx-dir ~/.local/bin/ 
+          --add-data="blint/data:blint/data" \
+          --add-data="blint/data/annotations:blint/data/annotations" \
+          --collect-submodules blint \
+          --noupx
         ./dist/blint -i dist/blint -o /tmp/reports
+        sha256sum ./dist/blint > ./dist/blint.sha256
       env:
         PYTHONIOENCODING: utf-8
         LANG: en_US.utf-8
@@ -48,3 +48,4 @@ jobs:
       with:
         files: |
           blint/dist/blint
+          blint/dist/blint.sha256
