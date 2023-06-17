@@ -1,0 +1,178 @@
+---
+text: Review for Windows rootkits
+group: METHOD_REVIEWS
+exe_type:
+  - x86_64-executable
+rules:
+  - id: BANSHEE
+    title: Detect Banshee
+    summary: Patches Kernel to Gain Privileged Access
+    description: |
+      Banshee is an experimental Windows x64 Kernel Driver/Rootkit.
+    patterns:
+      - banshee.Banshee
+      - banshee.deviceName
+      - banshee.driverPath
+      - banshee.hDevice
+      - banshee.hSCManager
+      - banshee.hService
+      - banshee.Initialize
+      - banshee.Install
+      - banshee.InstallDriver
+      - banshee.IoCtlBuryProcess
+      - banshee.IoCtlElevateProcessAccessToken
+      - banshee.IoCtlEnumerateCallbacks
+      - banshee.IoCtlHideProcess
+      - banshee.IoCtlKillProcess
+      - banshee.IoCtlProtectProcess
+      - banshee.IoCtlTestDriver
+      - banshee.serviceDescription
+      - banshee.serviceName
+      - banshee.StartDriver
+      - banshee.Unload
+      - BANSHEE_STATUS
+      - BE_IOCTL_BURY_PROCESS
+      - BE_IOCTL_ELEVATE_TOKEN
+      - BE_IOCTL_ENUMERATE_PROCESS_CALLBACKS
+      - BE_IOCTL_ENUMERATE_THREAD_CALLBACKS
+      - BE_IOCTL_HIDE_PROCESS
+      - BE_IOCTL_KILL_PROCESS
+      - BE_IOCTL_PROTECT_PROCESS
+      - BE_IOCTL_TEST_DRIVER
+      - BeBury_ProcessNotifyRoutineEx
+      - BeEnumerateDrivers
+      - BeEnumerateKernelCallbacks
+      - BeGetAccessTokenOffset
+      - BeGetDriverForAddress
+      - BeGetEprocessByPid
+      - BeGetEprocessProcessProtectionOffset
+      - BeGetKernelBaseAddr
+      - BeGetKernelCallbackArrayAddr
+      - BeGetProcessLinkedListOffset
+      - BeGlobals::beBuryMutex
+      - BeGlobals::beBuryTargetProcesses
+      - BeInitGlobals
+      - BeGlobals::driverObject
+      - BeGlobals::NtOsKrnlAddr
+      - BeIoControl
+      - BeIoctlBuryProcess
+      - BeIoCtlElevateProcessAcessToken
+      - BeIoctlEnumerateCallbacks
+      - BeIoctlHideProcess
+      - BeIoctlKillProcess
+      - BeIoctlProtectProcess
+      - BeIoctlTestDriver
+      - BeIsStringNull
+      - BeIsStringTerminated
+      - BeUnSupportedFunction
+
+  - id: NIDHOGG
+    title: Detect Nidhogg
+    summary: Provides Tools for Gaining Privileged Access and Injecting Malicious Code
+    description: |
+      Nidhogg is a multi-functional rootkit.
+    patterns:
+      - CmCallback
+      - CmCallbacksList
+      - IOCTL_NIDHOGG_CLEAR_FILE_PROTECTION
+      - IOCTL_NIDHOGG_CLEAR_PROCESS_PROTECTION
+      - IOCTL_NIDHOGG_CLEAR_REGITEMS
+      - IOCTL_NIDHOGG_CLEAR_THREAD_PROTECTION
+      - IOCTL_NIDHOGG_ELEVATE_PROCESS
+      - IOCTL_NIDHOGG_ENABLE_DISABLE_ETWTI
+      - IOCTL_NIDHOGG_HIDE_PROCESS
+      - IOCTL_NIDHOGG_HIDE_THREAD
+      - IOCTL_NIDHOGG_INJECT_DLL
+      - IOCTL_NIDHOGG_INJECT_SHELLCODE
+      - IOCTL_NIDHOGG_LIST_OBCALLBACKS
+      - IOCTL_NIDHOGG_LIST_PSROUTINES
+      - IOCTL_NIDHOGG_LIST_REGCALLBACKS
+      - IOCTL_NIDHOGG_PATCH_MODULE
+      - IOCTL_NIDHOGG_PROTECT_FILE
+      - IOCTL_NIDHOGG_PROTECT_PROCESS
+      - IOCTL_NIDHOGG_PROTECT_REGITEM
+      - IOCTL_NIDHOGG_PROTECT_THREAD
+      - IOCTL_NIDHOGG_QUERY_FILES
+      - IOCTL_NIDHOGG_QUERY_PROTECTED_PROCESSES
+      - IOCTL_NIDHOGG_QUERY_PROTECTED_THREADS
+      - IOCTL_NIDHOGG_QUERY_REGITEMS
+      - IOCTL_NIDHOGG_READ_DATA
+      - IOCTL_NIDHOGG_REMOVE_CALLBACK
+      - IOCTL_NIDHOGG_RESTORE_CALLBACK
+      - IOCTL_NIDHOGG_SET_PROCESS_SIGNATURE_LEVEL
+      - IOCTL_NIDHOGG_UNHIDE_PROCESS
+      - IOCTL_NIDHOGG_UNPROTECT_FILE
+      - IOCTL_NIDHOGG_UNPROTECT_PROCESS
+      - IOCTL_NIDHOGG_UNPROTECT_REGITEM
+      - IOCTL_NIDHOGG_UNPROTECT_THREAD
+      - IOCTL_NIDHOGG_WRITE_DATA
+      - Nidhogg::AntiAnalysis
+      - Nidhogg::FileUtils
+      - Nidhogg::ModuleUtils
+      - Nidhogg::ProcessUtils
+      - Nidhogg::RegistryUtils
+      - NIDHOGG_ERROR_CONNECT_DRIVER
+      - NIDHOGG_ERROR_DEVICECONTROL_DRIVER
+      - NIDHOGG_GENERAL_ERROR
+      - NIDHOGG_INVALID_COMMAND
+      - NIDHOGG_INVALID_OPTION
+      - NIDHOGG_SUCCESS
+      - NidhoggAmsiBypass
+      - NidhoggDisableCallback
+      - NidhoggEnableDisableEtwTi
+      - NidhoggETWBypass
+      - NidhoggFileClearAllProtection
+      - NidhoggFileProtect
+      - NidhoggFileUnprotect
+      - NidhoggInjectDll
+      - NidhoggInjectShellcode
+      - NidhoggListObCallbacks
+      - NidhoggListPsRoutines
+      - NidhoggListRegistryCallbacks
+      - NidhoggPatchModule
+      - NidhoggProcessClearAllProtection
+      - NidhoggProcessElevate
+      - NidhoggProcessHide
+      - NidhoggProcessProtect
+      - NidhoggProcessSetProtection
+      - NidhoggProcessUnhide
+      - NidhoggProcessUnprotect
+      - NidhoggQueryFiles
+      - NidhoggQueryProcesses
+      - NidhoggQueryThreads
+      - NidhoggReadData
+      - NidhoggRegistryClearAll
+      - NidhoggRegistryHideKey
+      - NidhoggRegistryHideValue
+      - NidhoggRegistryProtectKey
+      - NidhoggRegistryProtectValue
+      - NidhoggRegistryQueryHiddenKeys
+      - NidhoggRegistryQueryHiddenValues
+      - NidhoggRegistryQueryProtectedKeys
+      - NidhoggRegistryQueryProtectedValues
+      - NidhoggRegistryUnhideKey
+      - NidhoggRegistryUnhideValue
+      - NidhoggRegistryUnprotectKey
+      - NidhoggRegistryUnprotectValue
+      - NidhoggRestoreCallback
+      - NidhoggThreadClearAllProtection
+      - NidhoggThreadHide
+      - NidhoggThreadProtect
+      - NidhoggThreadUnprotect
+      - NidhoggWriteData
+      - ObCallbacksList
+      - PatchedModule.FunctionName
+      - PatchedModule.ModuleName
+      - PatchedModule.Patch
+      - PatchedModule.PatchLength
+      - PatchedModule.Pid
+      - PkgReadWriteData
+      - PROCESS_TYPE_PROTECTED
+      - PROCESS_TYPE_SPOOFED
+      - ProcessSignature.Pid
+      - ProcessSignature.SignatureSigner
+      - ProcessSignature.SignerType
+      - PsRoutinesList
+      - ShellcodeInformation
+
+
