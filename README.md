@@ -24,10 +24,9 @@ NOTE: The presence of capabilities doesn't imply that the operations are always 
 
 ## Use cases
 
+- Quickly identify malicious binaries by looking at their capabilities (Ability to manipulate networks or drivers or kernels etc)
 - Add blint to CI/CD to inspect the final binaries to ensure code signing or authenticode is applied correctly
 - Identify interesting functions and symbols for fuzzing
-- Blint was used at [ShiftLeft](https://shiftleft.io) to review the statically linked packages and optimize the distributed cli binary
-- Quickly identify malicious binaries by looking at their capabilities (Ability to manipulate networks or drivers or kernels etc)
 
 ## Installation
 
