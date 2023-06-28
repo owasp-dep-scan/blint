@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.27"
+version = "1.0.29"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
 license = "Apache-2.0"
@@ -24,8 +24,7 @@ classifiers = [
 include = ["blint/data/*.yml"]
 
 [tool.poetry.urls]
-"Mailing List" = "https://lists.sr.ht/~prabhu/blint-community"
-"CI" = "https://builds.sr.ht/~prabhu/blint"
+"CI" = "https://github.com/AppThreat/blint/actions"
 
 [tool.poetry.scripts]
 blint = 'blint.cli:main'
@@ -33,7 +32,7 @@ blint = 'blint.cli:main'
 [tool.poetry.dependencies]
 python = ">=3.7,<3.12"
 lief = "^0.12.3"
-rich = "^13.3.5"
+rich = "^13.4.1"
 PyYAML = "^6.0"
 defusedxml = "^0.7.1"
 
