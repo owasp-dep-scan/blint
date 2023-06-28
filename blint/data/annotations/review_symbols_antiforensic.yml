@@ -79,7 +79,6 @@ rules:
       - PupyCmd
       - PupyCmdLoop
       - PupyConfig
-      - PupyConfig
       - PupyDnsActivationHandler
       - PupyDnsCnc
       - PupyDnsCommandServerHandler
@@ -101,7 +100,6 @@ rules:
       - PupyOffloadSocket
       - PupyServer
       - PupyService
-      - PupyWebServer
       - PupyWebServer
       - Py_find_function_address
       - Py_get_arch
