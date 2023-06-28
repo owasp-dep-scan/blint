@@ -36,15 +36,8 @@ rules:
     description: |
       Pupy is an opensource, cross-platform (Windows, Linux, OSX, Android) C2 and post-exploitation framework written in python and C
     patterns:
-      - run_pupy
-      - _run_pupy_thread
       - GetVersionExA_Hooked
       - GetVersionExW_Hooked
-      - init_pupy
-      - inject_dll
-      - inject_via_apcthread
-      - inject_via_remotethread
-      - inject_via_remotethread_wow64
       - MapNewExecutableRegionInProcess
       - MemLoadLibrary
       - MemoryFindResourceA
@@ -74,9 +67,42 @@ rules:
       - MyGetUnhandledExceptionFilter
       - MyLoadStringA
       - MySetLibraries
+      - PUPY_LOAD_H
+      - PayloadsHandler
       - PostmortemFilter
+      - PupyArgumentParser
+      - PupyArgumentParserRef
+      - PupyArgumentParserWrap
+      - PupyBindService
+      - PupyCategories
+      - PupyClient
+      - PupyCmd
+      - PupyCmdLoop
+      - PupyConfig
+      - PupyConfig
+      - PupyDnsActivationHandler
+      - PupyDnsCnc
+      - PupyDnsCommandServerHandler
       - PupyFunctionTableAccess
       - PupyGetModuleBase
+      - PupyJob
+      - PupyKCPSocketStream
+      - PupyModCompleter
+      - PupyModule
+      - PupyModuleDisabled
+      - PupyModuleError
+      - PupyModuleExit
+      - PupyModuleMetaclass
+      - PupyModuleNotFound
+      - PupyModuleUsageError
+      - PupyOffloadAcceptor
+      - PupyOffloadDNS
+      - PupyOffloadManager
+      - PupyOffloadSocket
+      - PupyServer
+      - PupyService
+      - PupyWebServer
+      - PupyWebServer
       - Py_find_function_address
       - Py_get_arch
       - Py_is_shared_object
@@ -87,13 +113,25 @@ rules:
       - Py_set_is_shared_object
       - REFLECTIVE_LOADER_SYM
       - WrappedThreadRoutine
-      - PUPY_LOAD_H
-      - init_pupy
       - _PUPY_MEMFD_H
-      - pupy_memfd_supported
-      - pupy_memfd_create
+      - __loadRubberDuckyConf__
       - _pupy_main
+      - _run_pupy_thread
+      - createRubberDuckyScriptForWindowsTarget
+      - init_pupy
+      - inject_dll
+      - inject_via_apcthread
+      - inject_via_remotethread
+      - inject_via_remotethread_wow64
+      - keylogger_start
+      - load_pupyimporter
       - pupy_main
+      - pupy_memfd_create
+      - pupy_memfd_supported
+      - pupycompile
+      - pupygen
+      - run_pupy
+
 
 
 
