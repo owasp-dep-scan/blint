@@ -1,0 +1,137 @@
+---
+text: Review for Anti-Forensics
+group: SYMBOL_REVIEWS
+exe_type:
+    - genericbinary
+    - x86_64-executable
+    - gobinary
+    - PE32
+    - PE64
+    - dotnetbinary
+    - MachO
+    - mips-executable
+rules:
+  - id: FORENSIA
+    title: Forensia Anti-Forensics Tool
+    summary: Detect Erasing of Evidence of Exploitation
+    description: |
+      Forensia is an anti forensics tool for red teamers used for erasing footprints in the post exploitation phase.
+    patterns:
+      - CorruptStep
+      - disableETW
+      - ds_deposite_handle
+      - ds_open_handle
+      - ds_rename_handle
+      - DS_STREAM_RENAME
+      - GIOVANNI_DICANIO_WINREG_HPP_INCLUDED
+      - g_pwszExecutionMode
+      - JLSS_ID_POSIXVER_H
+      - MeltFile
+      - SysmonUnload
+      - _RtlAdjustPrivilege
+
+  - id: PUPY
+    title: Pupy Post-Exploitation Framework
+    summary: Detect Erasing of Evidence of Exploitation
+    description: |
+      Pupy is an opensource, cross-platform (Windows, Linux, OSX, Android) C2 and post-exploitation framework written in python and C
+    patterns:
+      - GetVersionExA_Hooked
+      - GetVersionExW_Hooked
+      - MapNewExecutableRegionInProcess
+      - MemLoadLibrary
+      - MemoryFindResourceA
+      - MemoryFindResourceExA
+      - MemoryFindResourceExW
+      - MemoryFindResourceW
+      - MemoryModuleFileNameA
+      - MemoryModuleFileNameW
+      - MyEnumerateLibraries
+      - MyEnumerateLoadedLibraries
+      - MyEtwEventWrite
+      - MyEtwEventWriteFull
+      - MyEtwRegister
+      - MyEtwUnregister
+      - MyFindMemoryModuleNameByAddr
+      - MyFindProcAddress
+      - MyFindResourceA
+      - MyFindResourceExA
+      - MyFindResourceExW
+      - MyFindResourceW
+      - MyGetLibraries
+      - MyGetModuleFileNameA
+      - MyGetModuleFileNameW
+      - MyGetModuleHandleExA
+      - MyGetModuleHandleExW
+      - MyGetModuleHandleW
+      - MyGetUnhandledExceptionFilter
+      - MyLoadStringA
+      - MySetLibraries
+      - PUPY_LOAD_H
+      - PayloadsHandler
+      - PostmortemFilter
+      - PupyArgumentParser
+      - PupyArgumentParserRef
+      - PupyArgumentParserWrap
+      - PupyBindService
+      - PupyCategories
+      - PupyClient
+      - PupyCmd
+      - PupyCmdLoop
+      - PupyConfig
+      - PupyDnsActivationHandler
+      - PupyDnsCnc
+      - PupyDnsCommandServerHandler
+      - PupyFunctionTableAccess
+      - PupyGetModuleBase
+      - PupyJob
+      - PupyKCPSocketStream
+      - PupyModCompleter
+      - PupyModule
+      - PupyModuleDisabled
+      - PupyModuleError
+      - PupyModuleExit
+      - PupyModuleMetaclass
+      - PupyModuleNotFound
+      - PupyModuleUsageError
+      - PupyOffloadAcceptor
+      - PupyOffloadDNS
+      - PupyOffloadManager
+      - PupyOffloadSocket
+      - PupyServer
+      - PupyService
+      - PupyWebServer
+      - Py_find_function_address
+      - Py_get_arch
+      - Py_is_shared_object
+      - Py_load_dll
+      - Py_mexec
+      - Py_reflective_inject_dll
+      - Py_set_exit_session_callback
+      - Py_set_is_shared_object
+      - REFLECTIVE_LOADER_SYM
+      - WrappedThreadRoutine
+      - _PUPY_MEMFD_H
+      - __loadRubberDuckyConf__
+      - _pupy_main
+      - _run_pupy_thread
+      - createRubberDuckyScriptForWindowsTarget
+      - init_pupy
+      - inject_dll
+      - inject_via_apcthread
+      - inject_via_remotethread
+      - inject_via_remotethread_wow64
+      - keylogger_start
+      - load_pupyimporter
+      - pupy_main
+      - pupy_memfd_create
+      - pupy_memfd_supported
+      - pupycompile
+      - pupygen
+      - run_pupy
+
+
+
+
+
+
