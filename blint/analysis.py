@@ -390,12 +390,13 @@ def run_prefuzz(f, metadata):
 
 
 def start(args, src, reports_dir):
-    files = [src]
+    files = src
     findings = []
     reviews = []
     fuzzables = []
-    if os.path.isdir(src):
-        files = find_exe_files(src)
+    for i in src:
+        if os.path.isdir(i):
+            files = find_exe_files(i)
     with Progress(
         transient=True,
         redirect_stderr=True,
