@@ -77,10 +77,11 @@ def main():
     if not src_dir:
         src_dir = os.getcwd()
         reports_base_dir = src_dir
-    elif args.reports_dir:
-        reports_base_dir = args.reports_dir
+    elif len(src_dir)>1:
+        print("You must use the -o option to specify a reports output directory when scanning multiple sources.")
+        exit()
     else:
-        reports_base_dir = os.path.dirname(src_dir)
+        reports_base_dir = os.path.dirname(src_dir[0])
     reports_dir = (
         args.reports_dir
         if args.reports_dir
