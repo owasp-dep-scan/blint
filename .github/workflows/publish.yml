@@ -34,18 +34,6 @@ jobs:
         run: |
           poetry install --no-cache --without dev
           echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        if: steps.prep.outcome == 'success'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
           
       - name: Release PyPI
         if: steps.prep.outcome == 'success'
@@ -88,3 +76,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=blint
           provenance: true
           sbom: true
+          
+      - name: Create Release
+        id: create_release
+        if: steps.prep.outcome == 'success'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
