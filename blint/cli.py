@@ -28,7 +28,9 @@ def build_args():
         "-i",
         "--src",
         dest="src_dir_image",
-        help="Source directory or container image or binary file. Defaults to current directory.",
+        action="extend",
+        nargs="+",
+        help="Source directories, container images or binary files. Defaults to current directory.",
     )
     parser.add_argument(
         "-o",
@@ -75,16 +77,20 @@ def main():
     if not src_dir:
         src_dir = os.getcwd()
         reports_base_dir = src_dir
+    elif len(src_dir)>1:
+        print("You must use the -o option to specify a reports output directory when scanning multiple sources.")
+        exit()
     else:
-        reports_base_dir = os.path.dirname(src_dir)
+        reports_base_dir = os.path.dirname(src_dir[0])
     reports_dir = (
         args.reports_dir
         if args.reports_dir
         else os.path.join(reports_base_dir, "reports")
     )
-    if not os.path.exists(src_dir):
-        print(f"{src_dir} is an invalid file or directory!")
-        return
+    for dir in src_dir:
+        if not os.path.exists(dir):
+            print(f"{src_dir} is an invalid file or directory!")
+            return
     # Create reports directory
     if reports_dir and not os.path.exists(reports_dir):
         os.makedirs(reports_dir)
