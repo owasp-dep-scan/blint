@@ -35,7 +35,7 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
-RUN microdnf install -y python3.11 python3.11-pip \
+RUN microdnf install -y python3.11 python3.11-pip cmake \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
@@ -43,6 +43,7 @@ RUN microdnf install -y python3.11 python3.11-pip \
     && python3 -m pip install -e . \
     && chmod a-w -R /opt \
     && microdnf clean all
+
 
 WORKDIR /app
 
