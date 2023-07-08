@@ -21,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           
       - name: Install dependencies
         run: |
@@ -34,18 +34,6 @@ jobs:
         run: |
           poetry install --no-cache --without dev
           echo "version=$(poetry version -s)" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        if: steps.prep.outcome == 'success'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
           
       - name: Release PyPI
         if: steps.prep.outcome == 'success'
@@ -55,7 +43,7 @@ jobs:
         env:
           PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
           PYPI_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-
+      
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
       - name: Set up Docker Buildx
@@ -88,43 +76,15 @@ jobs:
           cache-to: type=gha,mode=max,scope=blint
           provenance: true
           sbom: true
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v2
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: dmeta
-        uses: docker/metadata-action@v4
-        with:
-          images: |
-            ${{ github.repository }}
-
-      - name: Build and push Docker images
+          
+      - name: Create Release
+        id: create_release
         if: steps.prep.outcome == 'success'
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.dmeta.outputs.tags }}
-          labels: ${{ steps.dmeta.outputs.labels }}
-          cache-from: type=gha,scope=blint-docker
-          cache-to: type=gha,mode=max,scope=blint-docker
-          provenance: true
-          sbom: true
-
-      - name: Release public ecr
-        if: startsWith(github.ref, 'refs/tags/') &&  steps.prep.outcome == 'success'
-        run: |
-          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/appthreat
-          docker build -t blint .
-          docker tag blint:latest public.ecr.aws/appthreat/blint:latest
-          docker push public.ecr.aws/appthreat/blint:latest
+        uses: actions/create-release@v1
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
