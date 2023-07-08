@@ -74,19 +74,16 @@ def main():
     if not args.no_banner:
         print(blint_logo)
     src_dir = args.src_dir_image
-    if not src_dir:
-        src_dir = os.getcwd()
-        reports_base_dir = src_dir
-    elif len(src_dir)>1:
+    if args.reports_dir:
+        reports_dir = args.reports_dir
+    elif not src_dir:
+        reports_base_dir, src_dir= os.getcwd(), [os.getcwd()]
+        reports_dir = os.path.join(reports_base_dir, "reports")
+    elif len(src_dir) == 1:
+        reports_dir = os.path.dirname(src_dir[0])
+    else:
         print("You must use the -o option to specify a reports output directory when scanning multiple sources.")
         exit()
-    else:
-        reports_base_dir = os.path.dirname(src_dir[0])
-    reports_dir = (
-        args.reports_dir
-        if args.reports_dir
-        else os.path.join(reports_base_dir, "reports")
-    )
     for dir in src_dir:
         if not os.path.exists(dir):
             print(f"{src_dir} is an invalid file or directory!")

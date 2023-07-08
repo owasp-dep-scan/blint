@@ -395,8 +395,7 @@ def start(args, src, reports_dir):
     reviews = []
     fuzzables = []
     for i in src:
-        if os.path.isdir(i):
-            files = find_exe_files(i)
+        files += find_exe_files(i)
     with Progress(
         transient=True,
         redirect_stderr=True,
