@@ -49,8 +49,8 @@ Linting tool for binary files powered by lief.
 
 optional arguments:
   -h, --help            show this help message and exit
-  -i SRC_DIR_IMAGE, --src SRC_DIR_IMAGE
-                        Source directory or container image or binary file
+  -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
+                        Source directories, container images or binary files. Defaults to current directory.
   -o REPORTS_DIR, --reports REPORTS_DIR
                         Reports directory
   --no-error            Continue on error to prevent build from breaking
