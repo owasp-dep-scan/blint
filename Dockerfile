@@ -40,7 +40,7 @@ RUN microdnf install -y python3.11 python3.11-pip wget \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && wget https://github.com/lief-project/LIEF/releases/download/0.12.3/lief-0.12.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
-    && python3 -m pip install lief-0.12.3-cp311-cp311-manylinux2014_aarch64.whl \
+    && python3 -m pip install lief-0.12.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
     && cd /opt/blint \
     && python3 -m pip install -e . \
     && chmod a-w -R /opt \
