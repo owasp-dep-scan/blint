@@ -39,8 +39,9 @@ RUN microdnf install -y python3.11 python3.11-devel python3.11-pip cmake gcc gcc
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
-    && python3 -m pip install cmake ninja \
-    && cd /opt/blint \
+    && python3 -m pip install cmake ninja 
+    
+RUN cd /opt/blint \
     && python3 -m pip install -e . \
     && chmod a-w -R /opt \
     && microdnf clean all
