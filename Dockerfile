@@ -35,6 +35,15 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
+
+RUN set -e; \
+    ARCH_NAME="$(rpm --eval '%{_arch}')"; \
+    case "${ARCH_NAME##*-}" in \
+        'x86_64') \
+            OS_ARCH_SUFFIX='amd64'; \
+            GOBIN_SUFFIX='x64'; \
+            ;;
+
 RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
