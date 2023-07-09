@@ -39,7 +39,7 @@ RUN microdnf install -y python3.11 python3.11-pip cmake gcc-c++ \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
-    && wget https://github.com/cerrussell/LIEF/releases/download/0.12.3/lief-0.12.3-cp311-cp311-manylinux2014_aarch64.whl
+    && wget https://github.com/cerrussell/LIEF/releases/download/0.12.3/lief-0.12.3-cp311-cp311-manylinux2014_aarch64.whl \
     && python3 -m pip install lief-0.12.3-cp311-cp311-manylinux2014_aarch64.whl \
     && cd /opt/blint \
     && python3 -m pip install -e . \
