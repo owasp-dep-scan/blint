@@ -16,6 +16,7 @@ ARG JAVA_VERSION=22.3.r19-grl
 ARG SBT_VERSION=1.9.0
 ARG MAVEN_VERSION=3.9.2
 ARG GRADLE_VERSION=8.1.1
+ARG ARCH_NAME=x86_64
 
 ENV GOPATH=/opt/app-root/go \
     GO_VERSION=1.20.4 \
@@ -34,15 +35,6 @@ ENV GOPATH=/opt/app-root/go \
 ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOME}/bin:${GOPATH}/bin:/usr/local/go/bin:/usr/local/bin/:/root/.local/bin:
 
 COPY . /opt/blint
-
-
-RUN set -e; \
-    ARCH_NAME="$(rpm --eval '%{_arch}')"; \
-    case "${ARCH_NAME##*-}" in \
-        'x86_64') \
-            OS_ARCH_SUFFIX='amd64'; \
-            GOBIN_SUFFIX='x64'; \
-            ;;
 
 RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
