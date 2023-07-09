@@ -35,12 +35,11 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
-RUN microdnf install -y python3.11 python3.11-pip wget \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip cmake gcc gcc-c++ libstdc++-devel glibc-common \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
-    && wget https://github.com/lief-project/LIEF/releases/download/0.12.3/lief-0.12.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
-    && python3 -m pip install lief-0.12.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
+    && python3 -m pip install cmake ninja \
     && cd /opt/blint \
     && python3 -m pip install -e . \
     && chmod a-w -R /opt \
