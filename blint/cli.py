@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import sys
 
 from blint.analysis import report, start
 
@@ -93,6 +94,10 @@ def main():
         os.makedirs(reports_dir)
     findings, reviews, files, fuzzables = start(args, src_dir, reports_dir)
     report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
+
+    if os.getenv("IS_GHA"):
+        if len(findings) > 0:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
