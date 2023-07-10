@@ -36,12 +36,13 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
-RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common cmake \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install setuptools --upgrade \
-    && python3 -m pip install cmake==3.13.2 ninja==1.10.0.post2
+    && python3 -m pip install scikit-build \
+    && python3 -m pip install cmake==3.13.3 ninja==1.10.0.post2
     
 RUN cd /opt/blint \
     && python3 -m pip install -e . \
