@@ -16,6 +16,7 @@ ARG JAVA_VERSION=22.3.r19-grl
 ARG SBT_VERSION=1.9.0
 ARG MAVEN_VERSION=3.9.2
 ARG GRADLE_VERSION=8.1.1
+ARG ARCH_NAME=x86_64
 
 ENV GOPATH=/opt/app-root/go \
     GO_VERSION=1.20.4 \
@@ -35,12 +36,15 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
-RUN microdnf install -y python3.11 python3.11-pip \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common cmake openssl-libs compat-openssl11 \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
-    && python3 -m pip install lief \
-    && cd /opt/blint \
+    && python3 -m pip install setuptools --upgrade \
+    && python3 -m pip install scikit-build \
+    && python3 -m pip install cmake==3.16.3 ninja==1.10.0.post2
+    
+RUN cd /opt/blint \
     && python3 -m pip install -e . \
     && chmod a-w -R /opt \
     && microdnf clean all
