@@ -70,11 +70,20 @@ def build_args():
     return parser.parse_args()
 
 
+def parse_input(input):
+    input_value = os.getenv(input)
+    input_lines = input_value.split("\n")
+    processed_lines = [line.replace("! ", "!").strip() for line in input_lines if line.strip() != ""]
+    return processed_lines
+
+
 def main():
     args = build_args()
     if not args.no_banner:
         print(blint_logo)
     src_dir = args.src_dir_image
+    if os.getenv("IS_GHA"):
+        src_dir = parse_input(args.src_dir_image)
     if args.reports_dir:
         reports_dir = args.reports_dir
     elif not src_dir:
