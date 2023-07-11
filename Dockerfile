@@ -4,7 +4,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/AppThreat/blint" \
       org.opencontainers.image.url="https://github.com/AppThreat/blint" \
-      org.opencontainers.image.version="1.0.33-beta.2" \
+      org.opencontainers.image.version="1.0.33-beta.3" \
       org.opencontainers.image.vendor="AppThreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="blint" \
@@ -37,7 +37,7 @@ ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOM
 
 COPY . /opt/blint
 
-RUN microdnf install -y python3.11 python3.11-devel python3.11-pip gcc gcc-c++ libstdc++-devel glibc-common cmake openssl-libs compat-openssl11 \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
@@ -50,8 +50,5 @@ RUN cd /opt/blint \
     && poetry install --no-cache --without dev \
     && chmod a-w -R /opt \
     && microdnf clean all
-
-
-WORKDIR /app
 
 ENTRYPOINT [ "blint" ]
