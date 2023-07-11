@@ -96,7 +96,7 @@ def main():
         exit()
     for dir in src_dir:
         if not os.path.exists(dir):
-            print(f"{src_dir} is an invalid file or directory!")
+            print(f"{str(src_dir)} is an invalid file or directory!")
             return
     # Create reports directory
     if reports_dir and not os.path.exists(reports_dir):
