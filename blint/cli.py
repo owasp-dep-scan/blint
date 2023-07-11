@@ -72,9 +72,7 @@ def build_args():
 
 def parse_input(src):
     path = src[0]
-    print(path)
     result=path.replace("\\n", " ")
-    print(result)
     return [result]
 
 
