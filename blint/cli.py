@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import sys
 
 from blint.analysis import report, start
 
@@ -69,11 +70,20 @@ def build_args():
     return parser.parse_args()
 
 
+def parse_input(input):
+    input_value = os.getenv(input)
+    input_lines = input_value.split("\n")
+    processed_lines = [line.replace("! ", "!").strip() for line in input_lines if line.strip() != ""]
+    return processed_lines
+
+
 def main():
     args = build_args()
     if not args.no_banner:
         print(blint_logo)
     src_dir = args.src_dir_image
+    if os.getenv("IS_GHA"):
+        src_dir = parse_input(args.src_dir_image)
     if args.reports_dir:
         reports_dir = args.reports_dir
     elif not src_dir:
@@ -86,13 +96,17 @@ def main():
         exit()
     for dir in src_dir:
         if not os.path.exists(dir):
-            print(f"{src_dir} is an invalid file or directory!")
+            print(f"{str(src_dir)} is an invalid file or directory!")
             return
     # Create reports directory
     if reports_dir and not os.path.exists(reports_dir):
         os.makedirs(reports_dir)
     findings, reviews, files, fuzzables = start(args, src_dir, reports_dir)
     report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
+
+    if os.getenv("IS_GHA"):
+        if len(findings) > 0:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
