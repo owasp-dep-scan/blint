@@ -72,7 +72,7 @@ def build_args():
 
 def parse_input(src):
     path = src[0]
-    result = path.split("\n")
+    result = path.split("\r")
     result.pop()
     return result
 
