@@ -70,11 +70,12 @@ def build_args():
     return parser.parse_args()
 
 
-def parse_input(input):
-    input_value = os.getenv(input)
-    input_lines = input_value.split("\n")
-    processed_lines = [line.replace("! ", "!").strip() for line in input_lines if line.strip() != ""]
-    return processed_lines
+def parse_input(src):
+    path = src[0]
+    print(path)
+    result=path.replace("\\n", " ")
+    print(result)
+    return [result]
 
 
 def main():
@@ -96,7 +97,7 @@ def main():
         exit()
     for dir in src_dir:
         if not os.path.exists(dir):
-            print(f"{str(src_dir)} is an invalid file or directory!")
+            print(f"{dir} is an invalid file or directory!")
             return
     # Create reports directory
     if reports_dir and not os.path.exists(reports_dir):
