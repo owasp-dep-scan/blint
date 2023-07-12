@@ -41,7 +41,6 @@ RUN microdnf install -y python3.11 python3.11-devel python3.11-pip \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install setuptools --upgrade \
-    #&& python3 -m pip install scikit-build \
     && python3 -m pip install poetry
     
 RUN cd /opt/blint \
@@ -50,6 +49,5 @@ RUN cd /opt/blint \
     && chmod a-w -R /opt \
     && microdnf clean all
 
-RUN chmod +x deployment-service
 
-ENTRYPOINT [ "blint -e IS_GHA=$GITHUB_ACTIONS" ]
+ENTRYPOINT [ "blint" ]
