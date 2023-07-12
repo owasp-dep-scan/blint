@@ -4,7 +4,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/AppThreat/blint" \
       org.opencontainers.image.url="https://github.com/AppThreat/blint" \
-      org.opencontainers.image.version="1.0.33-beta.7" \
+      org.opencontainers.image.version="1.0.33-beta.8" \
       org.opencontainers.image.vendor="AppThreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="blint" \
@@ -32,7 +32,6 @@ ENV GOPATH=/opt/app-root/go \
     COMPOSER_ALLOW_SUPERUSER=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8" \
-    IS_GHA=$GITHUB_ACTIONS
 ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOME}/bin:${GOPATH}/bin:/usr/local/go/bin:/usr/local/bin/:/root/.local/bin:
 
 COPY . /opt/blint
@@ -43,8 +42,8 @@ RUN microdnf install -y python3.11 python3.11-devel python3.11-pip \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install setuptools --upgrade \
-    && python3 -m pip install scikit-build \
-    && python3 -m pip install cmake==3.16.3 ninja==1.10.0.post2 poetry
+    #&& python3 -m pip install scikit-build \
+    && python3 -m pip install poetry
     
 RUN cd /opt/blint \
     && poetry config virtualenvs.create false \
@@ -52,4 +51,4 @@ RUN cd /opt/blint \
     && chmod a-w -R /opt \
     && microdnf clean all
 
-ENTRYPOINT [ "blint" ]
+ENTRYPOINT [ "blint -e IS_GHA=$GITHUB_ACTIONS" ]
