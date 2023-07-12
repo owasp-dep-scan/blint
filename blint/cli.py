@@ -69,6 +69,7 @@ def build_args():
     )
     parser.add_argument(
         "--github-actions",
+        action="store_true",
         default=False,
         dest="github_actions",
         help="BLint-action is being used",
