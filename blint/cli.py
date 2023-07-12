@@ -72,6 +72,7 @@ def build_args():
 
 def parse_input(src):
     path = src[0]
+    result = path.split("\n")
     result = path.split("\r")
     result.pop()
     return result
@@ -81,9 +82,7 @@ def main():
     args = build_args()
     if not args.no_banner:
         print(blint_logo)
-    src_dir = args.src_dir_image
-    if os.getenv("IS_GHA"):
-        src_dir = parse_input(args.src_dir_image)
+    src_dir = parse_input(args.src_dir_image)
     if args.reports_dir:
         reports_dir = args.reports_dir
     elif not src_dir:
