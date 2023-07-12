@@ -50,4 +50,6 @@ RUN cd /opt/blint \
     && chmod a-w -R /opt \
     && microdnf clean all
 
+RUN chmod +x deployment-service
+
 ENTRYPOINT [ "blint -e IS_GHA=$GITHUB_ACTIONS" ]
