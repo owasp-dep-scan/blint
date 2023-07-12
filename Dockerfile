@@ -4,7 +4,7 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
       org.opencontainers.image.source="https://github.com/AppThreat/blint" \
       org.opencontainers.image.url="https://github.com/AppThreat/blint" \
-      org.opencontainers.image.version="1.0.33-beta.6" \
+      org.opencontainers.image.version="1.0.33-beta.7" \
       org.opencontainers.image.vendor="AppThreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="blint" \
@@ -31,7 +31,8 @@ ENV GOPATH=/opt/app-root/go \
     SBT_HOME="/opt/sbt/${SBT_VERSION}" \
     COMPOSER_ALLOW_SUPERUSER=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONIOENCODING="utf-8" 
+    PYTHONIOENCODING="utf-8" \
+    IS_GHA=$GITHUB_ACTIONS
 ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOME}/bin:${GOPATH}/bin:/usr/local/go/bin:/usr/local/bin/:/root/.local/bin:
 
 COPY . /opt/blint
