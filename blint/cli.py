@@ -6,6 +6,7 @@ import os
 import sys
 
 from blint.analysis import report, start
+from blint.logger import console
 
 blint_logo = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
@@ -72,7 +73,8 @@ def build_args():
 
 def parse_input(src):
     path = src[0]
-    result = path.split(" ")
+    result = path.split("\n")
+    console.log(result)
     return result
 
 
