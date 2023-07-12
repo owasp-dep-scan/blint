@@ -67,20 +67,13 @@ def build_args():
         dest="suggest_fuzzable",
         help="Suggest functions and symbols for fuzzing based on a dictionary",
     )
-    parser.add_argument(
-        "--github-actions",
-        action="store_true",
-        default=False,
-        dest="github_actions",
-        help="BLint-action is being used",
-    )
     return parser.parse_args()
 
 
 def parse_input(src):
     path = src[0]
-    result = path.split("\\n")
-    result.pop()
+    result = path.split("\n")
+   # result.pop()
     return result
 
 
@@ -88,7 +81,7 @@ def main():
     args = build_args()
     if not args.no_banner:
         print(blint_logo)
-    if not args.github_actions:
+    if not os.getenv("IS_GHA"):
         src_dir = args.src_dir_image
     else:
         src_dir = parse_input(args.src_dir_image)
@@ -112,7 +105,7 @@ def main():
     findings, reviews, files, fuzzables = start(args, src_dir, reports_dir)
     report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
 
-    if args.github_actions:
+    if os.getenv("IS_GHA"):
         if len(findings) > 0:
             sys.exit(1)
 
