@@ -74,6 +74,7 @@ def build_args():
 def parse_input(src):
     path = src[0]
     result = path.split("\n")
+    result.pop()
     console.log(result)
     return result
 
