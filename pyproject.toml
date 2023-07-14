@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.33"
+version = "1.0.34"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
 license = "Apache-2.0"
@@ -14,7 +14,7 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Topic :: Utilities",
     "Topic :: Security",
-    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
