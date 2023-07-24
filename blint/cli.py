@@ -103,8 +103,9 @@ def main():
     report(args, src_dir, reports_dir, findings, reviews, files, fuzzables)
 
     if os.getenv("CI"):
-        if len(findings) > 0:
-            sys.exit(1)
+        for f in findings:
+            if f['severity'] == 'critical':
+                sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,7 @@ ignore_files = [
     ".txt",
     ".strings",
     ".nib",
+    ".nupkg",
 ]
 
 strings_allowlist = [
