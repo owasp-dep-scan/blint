@@ -17,7 +17,8 @@ from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import find_exe_files, is_fuzzable_name, parse_pe_manifest
+from blint.utils import (find_exe_files, is_exe, is_fuzzable_name,
+                         is_ignored_file, parse_pe_manifest)
 
 try:
     import importlib.resources
@@ -395,7 +396,14 @@ def start(args, src, reports_dir):
     reviews = []
     fuzzables = []
     for s in src:
-        files += find_exe_files(s)
+        if os.path.isdir(s):
+            files += find_exe_files(s)
+        else:
+            if is_ignored_file(s):
+                continue
+            fullPath = os.path.abspath(s)
+            if is_exe(fullPath):
+                files.append(fullPath)
     with Progress(
         transient=True,
         redirect_stderr=True,
