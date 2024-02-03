@@ -1,12 +1,13 @@
 [tool.poetry]
 name = "blint"
-version = "1.0.36"
+version = "2.0.0"
 description = "Linter for binary files powered by lief"
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
+maintainers= ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "Apache-2.0"
 readme = "README.md"
-homepage = "https://github.com/AppThreat/blint"
-repository = "https://github.com/AppThreat/blint"
+homepage = "https://github.com/OWASP-dep-scan/blint"
+repository = "https://github.com/OWASP-dep-scan/blint"
 keywords = ["linter", "binary", "security", "sast"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -14,11 +15,9 @@ classifiers = [
     "Intended Audience :: System Administrators",
     "Topic :: Utilities",
     "Topic :: Security",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
 include = ["blint/data/*.yml"]
@@ -30,7 +29,7 @@ include = ["blint/data/*.yml"]
 blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
-python = ">=3.7,<3.12"
+python = ">=3.7,<3.13"
 lief = "^0.12.3"
 rich = "^13.4.1"
 PyYAML = "^6.0"
