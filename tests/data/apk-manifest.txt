@@ -1,0 +1,1923 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1"
+    android:versionName="2024.2.1-beta.0.0+20240202T181312Z-full"
+    android:compileSdkVersion="34"
+    android:compileSdkVersionCodename="14"
+    package="io.homeassistant.companion.android.debug"
+    platformBuildVersionCode="34"
+    platformBuildVersionName="14">
+
+    <uses-sdk
+        android:minSdkVersion="21"
+        android:targetSdkVersion="33" />
+
+    <uses-permission
+        android:name="com.google.android.gms.permission.CAR_FUEL" />
+
+    <uses-permission
+        android:name="com.google.android.gms.permission.CAR_MILEAGE" />
+
+    <queries>
+
+        <package
+            android:name="com.google.android.gms" />
+
+        <package
+            android:name="com.android.vending" />
+
+        <provider
+            android:name="androidx.car.app.connection.provider"
+            android:authorities="androidx.car.app.connection" />
+    </queries>
+
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <uses-permission
+        android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30"
+        android:required="false" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30"
+        android:required="false" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <uses-permission
+        android:name="android.permission.INTERNET" />
+
+    <uses-permission
+        android:name="android.permission.VIBRATE" />
+
+    <uses-permission
+        android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <uses-permission
+        android:name="android.permission.CAMERA" />
+
+    <uses-permission
+        android:name="android.permission.CALL_PHONE" />
+
+    <uses-permission
+        android:name="android.permission.RECORD_AUDIO" />
+
+    <uses-permission
+        android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <uses-permission
+        android:name="android.permission.NFC" />
+
+    <uses-permission
+        android:name="android.permission.READ_PHONE_STATE" />
+
+    <uses-permission
+        android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <uses-permission
+        android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+
+    <uses-permission
+        android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <uses-permission
+        android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <uses-permission
+        android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <uses-permission
+        android:name="android.permission.WAKE_LOCK" />
+
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS" />
+
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS" />
+
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.sensor"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <uses-permission
+        android:name="android.permission.USE_BIOMETRIC" />
+
+    <uses-permission
+        android:name="android.permission.USE_FINGERPRINT" />
+
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <uses-permission
+        android:name="com.google.android.c2dm.permission.RECEIVE" />
+
+    <permission
+        android:name="io.homeassistant.companion.android.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:protectionLevel="0x2" />
+
+    <uses-permission
+        android:name="io.homeassistant.companion.android.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+
+    <application
+        android:theme="@ref/0x7f140277"
+        android:label="@ref/0x7f13003b"
+        android:icon="@ref/0x7f100002"
+        android:name="io.homeassistant.companion.android.HomeAssistantApplication"
+        android:debuggable="true"
+        android:allowBackup="true"
+        android:supportsRtl="true"
+        android:banner="@ref/0x7f100001"
+        android:extractNativeLibs="true"
+        android:fullBackupContent="@ref/0x7f160001"
+        android:networkSecurityConfig="@ref/0x7f16000a"
+        android:roundIcon="@ref/0x7f100003"
+        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+        android:dataExtractionRules="@ref/0x7f160002"
+        android:localeConfig="@ref/0x7f160008"
+        android:enableOnBackInvokedCallback="true">
+
+        <meta-data
+            android:name="io.sentry.auto-init"
+            android:value="false" />
+
+        <meta-data
+            android:name="io.sentry.release"
+            android:value="io.homeassistant.companion.android@2024.2.1-beta.0.0+20240202T181312Z" />
+
+        <meta-data
+            android:name="io.sentry.dsn"
+            android:value="@string/0x36" />
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:name="io.homeassistant.companion.android.matter.MatterCommissioningActivity"
+            android:exported="true"
+            android:launchMode="1"
+            android:configChanges="0x480">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.android.gms.home.matter.ACTION_COMMISSION_DEVICE" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.location.HighAccuracyLocationReceiver"
+            android:enabled="true"
+            android:exported="true" />
+
+        <service
+            android:name="io.homeassistant.companion.android.notifications.FirebaseCloudMessagingService"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="io.homeassistant.companion.android.location.HighAccuracyLocationService"
+            android:enabled="true"
+            android:exported="true" />
+
+        <service
+            android:name="io.homeassistant.companion.android.matter.MatterCommissioningService"
+            android:exported="true" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@ref/0x7f080143" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@ref/0x7f060051" />
+
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="1" />
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@ref/0x7f160000" />
+
+        <service
+            android:name="io.homeassistant.companion.android.vehicle.HaCarAppService"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.car.app.CarAppService" />
+
+                <category
+                    android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.google.android.gms.metadata.ModuleDependencies"
+            android:enabled="false"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.android.gms.metadata.MODULE_DEPENDENCIES" />
+            </intent-filter>
+
+            <meta-data
+                android:name="home:0:preferred"
+                android:value="@string/0x36" />
+        </service>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.websocket.WebsocketBroadcastReceiver"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_SUSPENDED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_UNSUSPENDED" />
+
+                <action
+                    android:name="android.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.sensors.SensorReceiver"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_SUSPENDED" />
+
+                <action
+                    android:name="android.intent.action.MY_PACKAGE_UNSUSPENDED" />
+
+                <action
+                    android:name="android.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.UPDATE_SENSORS" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:label="@ref/0x7f1305cc"
+            android:name="io.homeassistant.companion.android.widgets.button.ButtonWidget"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.ButtonWidget.CALL_SERVICE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.ButtonWidget.CALL_SERVICE_AUTH" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.ButtonWidget.RECEIVE_DATA" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@ref/0x7f160003" />
+        </receiver>
+
+        <receiver
+            android:label="@ref/0x7f1305ce"
+            android:name="io.homeassistant.companion.android.widgets.camera.CameraWidget"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.camera.CameraWidget.RECEIVE_DATA" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.camera.CameraWidget.UPDATE_IMAGE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@ref/0x7f160004" />
+        </receiver>
+
+        <receiver
+            android:label="@ref/0x7f1305ec"
+            android:name="io.homeassistant.companion.android.widgets.entity.EntityWidget"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.StaticWidget.RECEIVE_DATA" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@ref/0x7f160007" />
+        </receiver>
+
+        <receiver
+            android:label="@ref/0x7f1305dd"
+            android:name="io.homeassistant.companion.android.widgets.mediaplayer.MediaPlayerControlsWidget"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.RECEIVE_DATA" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.UPDATE_MEDIA_IMAGE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_PREV_TRACK" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_REWIND" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_PLAYPAUSE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_FASTFORWARD" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.media_player_controls.MediaPlayerControlsWidget.CALL_NEXT_TRACK" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@ref/0x7f160009" />
+        </receiver>
+
+        <receiver
+            android:label="@ref/0x7f130529"
+            android:name="io.homeassistant.companion.android.widgets.template.TemplateWidget"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+
+                <action
+                    android:name="android.app.action.NEXT_ALARM_CLOCK_CHANGED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+
+                <action
+                    android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.background.REQUEST_SENSORS_UPDATE" />
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+
+                <action
+                    android:name="io.homeassistant.companion.android.widgets.template.TemplateWidget.RECEIVE_DATA" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@ref/0x7f160010" />
+        </receiver>
+
+        <activity
+            android:name="io.homeassistant.companion.android.widgets.button.ButtonWidgetConfigureActivity"
+            android:exported="true"
+            android:configChanges="0x480">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f1402cb"
+            android:name="io.homeassistant.companion.android.widgets.common.WidgetAuthenticationActivity"
+            android:exported="true"
+            android:configChanges="0x480" />
+
+        <activity
+            android:name="io.homeassistant.companion.android.widgets.camera.CameraWidgetConfigureActivity"
+            android:exported="true"
+            android:configChanges="0x480">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="io.homeassistant.companion.android.widgets.entity.EntityWidgetConfigureActivity"
+            android:exported="true"
+            android:configChanges="0x480">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="io.homeassistant.companion.android.widgets.mediaplayer.MediaPlayerControlsWidgetConfigureActivity"
+            android:exported="true"
+            android:configChanges="0x480">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="io.homeassistant.companion.android.widgets.template.TemplateWidgetConfigureActivity"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="io.homeassistant.companion.android.sensors.NotificationSensorManager"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="io.homeassistant.companion.android.controls.HaControlsProviderService"
+            android:permission="android.permission.BIND_CONTROLS"
+            android:exported="true">
+
+            <meta-data
+                android:name="android.service.controls.META_DATA_PANEL_ACTIVITY"
+                android:value="io.homeassistant.companion.android.debug/io.homeassistant.companion.android.controls.HaControlsPanelActivity" />
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.controls.ControlsProviderService" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name="io.homeassistant.companion.android.controls.HaControlsPanelActivity"
+            android:permission="android.permission.BIND_CONTROLS"
+            android:enabled="false"
+            android:exported="true"
+            android:taskAffinity="io.homeassistant.companion.android.controls"
+            android:resizeableActivity="true" />
+
+        <receiver
+            android:name="io.homeassistant.companion.android.sensors.LocationSensorManager"
+            android:enabled="true"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="io.homeassistant.companion.android.background.REQUEST_ACCURATE_UPDATE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.sensors.ActivitySensorManager"
+            android:enabled="true"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="io.homeassistant.companion.android.background.REQUEST_ACTIVITY_UPDATES" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:theme="@ref/0x7f14027f"
+            android:name="io.homeassistant.companion.android.launch.LaunchActivity"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.MAIN" />
+
+                <category
+                    android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.MAIN" />
+
+                <category
+                    android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter
+                android:autoVerify="true">
+
+                <action
+                    android:name="android.intent.action.VIEW" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <category
+                    android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="homeassistant"
+                    android:host="navigate" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="io.homeassistant.companion.android.launch.my.MyActivity"
+            android:exported="true">
+
+            <intent-filter
+                android:autoVerify="true">
+
+                <action
+                    android:name="android.intent.action.VIEW" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <category
+                    android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="my.home-assistant.io"
+                    android:pathPrefix="/redirect/" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:name="io.homeassistant.companion.android.onboarding.OnboardingActivity"
+            android:configChanges="0x4f0" />
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:name="io.homeassistant.companion.android.settings.wear.SettingsWearActivity"
+            android:exported="true"
+            android:configChanges="0x480"
+            android:parentActivityName="io.homeassistant.companion.android.settings.SettingsActivity">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.VIEW" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <category
+                    android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="homeassistant"
+                    android:host="wear-phone-signin" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:name="io.homeassistant.companion.android.settings.wear.views.SettingsWearMainView"
+            android:configChanges="0x480"
+            android:parentActivityName="io.homeassistant.companion.android.settings.SettingsActivity" />
+
+        <service
+            android:name="io.homeassistant.companion.android.onboarding.WearOnboardingListener"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+
+                <action
+                    android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:path="/request_home_assistant_instance" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name="io.homeassistant.companion.android.webview.WebViewActivity"
+            android:exported="false"
+            android:configChanges="0xdf0"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true" />
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:name="io.homeassistant.companion.android.settings.SettingsActivity"
+            android:exported="false"
+            android:configChanges="0x480"
+            android:parentActivityName="io.homeassistant.companion.android.webview.WebViewActivity" />
+
+        <activity
+            android:label="@ref/0x7f130517"
+            android:name="io.homeassistant.companion.android.nfc.TagReaderActivity"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.nfc.action.NDEF_DISCOVERED" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <category
+                    android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="www.home-assistant.io"
+                    android:pathPrefix="/tag/" />
+            </intent-filter>
+
+            <intent-filter
+                android:autoVerify="true">
+
+                <action
+                    android:name="android.intent.action.VIEW" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <category
+                    android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="www.home-assistant.io"
+                    android:pathPrefix="/tag/" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:label="@ref/0x7f1302f7"
+            android:name="io.homeassistant.companion.android.nfc.NfcSetupActivity"
+            android:exported="false" />
+
+        <activity
+            android:name="io.homeassistant.companion.android.share.ShareActivity"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.SEND" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+
+                <data
+                    android:mimeType="text/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f140278"
+            android:name="io.homeassistant.companion.android.assist.AssistActivity"
+            android:exported="true"
+            android:taskAffinity="io.homeassistant.companion.android.assist"
+            android:launchMode="2"
+            android:windowSoftInputMode="0x10"
+            android:autoRemoveFromRecents="true"
+            android:showWhenLocked="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.ASSIST" />
+
+                <category
+                    android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:theme="@ref/0x7f140279"
+            android:label="@ref/0x7f13004e"
+            android:icon="@ref/0x7f100000"
+            android:name="io.homeassistant.companion.android.widgets.assist.AssistShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.CREATE_SHORTCUT" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.provider"
+            android:grantUriPermissions="true">
+
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@ref/0x7f16000f" />
+        </provider>
+
+        <service
+            android:label="@ref/0x7f130546"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile1Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130551"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile2Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055c"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile3Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130567"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile4Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130569"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile5Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13056a"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile6Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13056b"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile7Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13056c"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile8Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13056d"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile9Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130547"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile10Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130548"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile11Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130549"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile12Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054a"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile13Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054b"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile14Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054c"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile15Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054d"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile16Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054e"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile17Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13054f"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile18Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130550"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile19Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130552"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile20Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130553"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile21Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130554"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile22Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130555"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile23Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130556"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile24Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130557"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile25Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130558"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile26Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130559"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile27Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055a"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile28Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055b"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile29Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055d"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile30Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055e"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile31Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f13055f"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile32Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130560"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile33Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130561"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile34Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130562"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile35Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130563"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile36Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130564"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile37Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130565"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile38Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130566"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile39Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:label="@ref/0x7f130568"
+            android:icon="@ref/0x7f080143"
+            android:name="io.homeassistant.companion.android.qs.Tile40Service"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:enabled="false"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
+            android:enabled="false"
+            android:exported="false">
+
+            <meta-data
+                android:name="autoStoreLocales"
+                android:value="true" />
+        </service>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.notifications.NotificationActionReceiver"
+            android:enabled="true"
+            android:exported="true" />
+
+        <receiver
+            android:name="io.homeassistant.companion.android.common.sensors.SensorUpdateReceiver"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="io.homeassistant.companion.android.UPDATE_SENSORS" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="io.homeassistant.companion.android.common.notifications.NotificationDeleteReceiver"
+            android:enabled="true"
+            android:exported="true" />
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.androidx-startup">
+
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="com.mikepenz.iconics.animation.SpinProcessor"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="com.mikepenz.iconics.animation.BlinkAlphaProcessor"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="com.mikepenz.iconics.animation.BlinkScaleProcessor"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="com.mikepenz.iconics.typeface.library.community.material.Initializer"
+                android:value="androidx.startup" />
+
+            <meta-data
+                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+                android:value="androidx.startup" />
+        </provider>
+
+        <service
+            android:name="androidx.work.impl.background.systemalarm.SystemAlarmService"
+            android:enabled="@ref/0x7f050003"
+            android:exported="false"
+            android:directBootAware="false" />
+
+        <service
+            android:name="androidx.work.impl.background.systemjob.SystemJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:enabled="@ref/0x7f050005"
+            android:exported="true"
+            android:directBootAware="false" />
+
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:enabled="@ref/0x7f050004"
+            android:exported="false"
+            android:directBootAware="false" />
+
+        <receiver
+            android:name="androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:directBootAware="false" />
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryChargingProxy"
+            android:enabled="false"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+
+                <action
+                    android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$BatteryNotLowProxy"
+            android:enabled="false"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BATTERY_OKAY" />
+
+                <action
+                    android:name="android.intent.action.BATTERY_LOW" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$StorageNotLowProxy"
+            android:enabled="false"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.DEVICE_STORAGE_LOW" />
+
+                <action
+                    android:name="android.intent.action.DEVICE_STORAGE_OK" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxy$NetworkStateProxy"
+            android:enabled="false"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.net.conn.CONNECTIVITY_CHANGE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
+            android:enabled="false"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.TIME_SET" />
+
+                <action
+                    android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.background.systemalarm.ConstraintProxyUpdateReceiver"
+            android:enabled="@ref/0x7f050003"
+            android:exported="false"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.work.impl.background.systemalarm.UpdateProxies" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="androidx.work.impl.diagnostics.DiagnosticsReceiver"
+            android:permission="android.permission.DUMP"
+            android:enabled="true"
+            android:exported="true"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.work.diagnostics.REQUEST_DIAGNOSTICS" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name="androidx.room.MultiInstanceInvalidationService"
+            android:exported="false"
+            android:directBootAware="true" />
+
+        <receiver
+            android:name="org.altbeacon.beacon.startup.StartupBroadcastReceiver"
+            android:exported="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="android.intent.action.BOOT_COMPLETED" />
+
+                <action
+                    android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+
+                <action
+                    android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:label="beacon"
+            android:name="org.altbeacon.beacon.service.BeaconService"
+            android:enabled="true"
+            android:exported="false"
+            android:isolatedProcess="false"
+            android:foregroundServiceType="0x8" />
+
+        <service
+            android:name="org.altbeacon.beacon.BeaconIntentProcessor"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name="org.altbeacon.beacon.service.ScanJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false">
+
+            <meta-data
+                android:name="immediateScanJobId"
+                android:value="208352939" />
+
+            <meta-data
+                android:name="periodicScanJobId"
+                android:value="208352940" />
+        </service>
+
+        <service
+            android:name="org.altbeacon.bluetooth.BluetoothTestJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false">
+
+            <meta-data
+                android:name="jobId"
+                android:value="1799803768" />
+        </service>
+
+        <receiver
+            android:name="com.google.firebase.iid.FirebaseInstanceIdReceiver"
+            android:permission="com.google.android.c2dm.permission.SEND"
+            android:exported="true">
+
+            <intent-filter>
+
+                <action
+                    android:name="com.google.android.c2dm.intent.RECEIVE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="com.google.android.gms.cloudmessaging.FINISHED_AFTER_HANDLED"
+                android:value="true" />
+        </receiver>
+
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingService"
+            android:exported="false"
+            android:directBootAware="true">
+
+            <intent-filter
+                android:priority="-500">
+
+                <action
+                    android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.google.firebase.components.ComponentDiscoveryService"
+            android:exported="false"
+            android:directBootAware="true">
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingKtxRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsKtxRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.ktx.FirebaseCommonLegacyRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.FirebaseCommonKtxRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+
+            <meta-data
+                android:name="com.google.firebase.components:com.google.firebase.datatransport.TransportRegistrar"
+                android:value="com.google.firebase.components.ComponentRegistrar" />
+        </service>
+
+        <activity
+            android:theme="@ref/0x01030010"
+            android:name="com.google.android.gms.common.api.GoogleApiActivity"
+            android:exported="false" />
+
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.firebaseinitprovider"
+            android:initOrder="100"
+            android:directBootAware="true" />
+
+        <meta-data
+            android:name="com.google.android.gms.version"
+            android:value="@ref/0x7f0b000f" />
+
+        <service
+            android:name="androidx.car.app.CarAppMetadataHolderService"
+            android:enabled="false"
+            android:exported="false"
+            android:process="@string/0x36">
+
+            <meta-data
+                android:name="androidx.car.app.CarAppMetadataHolderService.CAR_HARDWARE_MANAGER"
+                android:value="androidx.car.app.hardware.ProjectedCarHardwareManager" />
+        </service>
+
+        <activity
+            android:theme="@ref/0x01030010"
+            android:name="androidx.car.app.CarAppPermissionActivity"
+            android:exported="false" />
+
+        <receiver
+            android:name="androidx.car.app.notification.CarAppNotificationBroadcastReceiver"
+            android:exported="false" />
+
+        <provider
+            android:name="io.sentry.android.core.SentryInitProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.SentryInitProvider" />
+
+        <provider
+            android:name="io.sentry.android.core.SentryPerformanceProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.SentryPerformanceProvider"
+            android:initOrder="200" />
+
+        <activity
+            android:name="androidx.compose.ui.tooling.PreviewActivity"
+            android:exported="true" />
+
+        <uses-library
+            android:name="androidx.window.extensions"
+            android:required="false" />
+
+        <uses-library
+            android:name="androidx.window.sidecar"
+            android:required="false" />
+
+        <provider
+            android:name="com.squareup.picasso.PicassoProvider"
+            android:exported="false"
+            android:authorities="io.homeassistant.companion.android.debug.com.squareup.picasso" />
+
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            android:exported="false">
+
+            <meta-data
+                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
+                android:value="cct" />
+        </service>
+
+        <service
+            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            android:permission="android.permission.DUMP"
+            android:enabled="true"
+            android:exported="true"
+            android:directBootAware="false">
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+            </intent-filter>
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.profileinstaller.action.SKIP_FILE" />
+            </intent-filter>
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+            </intent-filter>
+
+            <intent-filter>
+
+                <action
+                    android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

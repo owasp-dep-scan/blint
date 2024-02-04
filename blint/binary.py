@@ -24,7 +24,9 @@ def is_shared_library(parsed_obj):
     if parsed_obj.format == lief.EXE_FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
     elif parsed_obj.format == lief.EXE_FORMATS.PE:
-        return parsed_obj.header.has_characteristic(lief.PE.HEADER_CHARACTERISTICS.DLL)
+        return parsed_obj.header.has_characteristic(
+            lief.PE.HEADER_CHARACTERISTICS.DLL
+        )
     elif parsed_obj.format == lief.EXE_FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
     return False
@@ -35,6 +37,10 @@ def parse_notes(parsed_obj):
     notes = parsed_obj.notes
     if len(notes):
         for idx, note in enumerate(notes):
+            note_str = str(note)
+            build_id = ""
+            if "ID Hash" in note_str:
+                build_id = note_str.split("ID Hash:")[-1].strip()
             description = note.description
             description_str = " ".join(map(parse_desc, description[:16]))
             if len(description) > 16:
@@ -58,6 +64,8 @@ def parse_notes(parsed_obj):
                 version_str = "{:d}.{:d}.{:d}".format(
                     version[0], version[1], version[2]
                 )
+            if not version_str and type_str == "BUILD_ID" and build_id:
+                version_str = build_id
             if note.is_core:
                 note_details_str = note.details
             metadata["notes"].append(
@@ -70,6 +78,7 @@ def parse_notes(parsed_obj):
                     "ndk_build_number": ndk_build_number,
                     "abi": abi,
                     "version": version_str,
+                    "build_id": build_id,
                 }
             )
     return metadata["notes"]
@@ -137,7 +146,9 @@ def parse_strings(parsed_obj):
                 ) or secret_type:
                     strings_list.append(
                         {
-                            "value": decode_base64(s) if s.endswith("==") else s,
+                            "value": (
+                                decode_base64(s) if s.endswith("==") else s
+                            ),
                             "entropy": entropy,
                             "secret_type": secret_type,
                         }
@@ -190,7 +201,7 @@ def parse_symbols(symbols):
 def parse_interpreter(parsed_obj):
     try:
         return parsed_obj.interpreter
-    except lief.exception as e:
+    except lief.exception:
         return ""
 
 
@@ -274,9 +285,11 @@ def process_pe_resources(parsed_obj):
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
             "html": rm.html if rm.has_html else None,
-            "manifest": rm.manifest.replace("\\xef\\xbb\\xbf", "")
-            if rm.has_manifest
-            else None,
+            "manifest": (
+                rm.manifest.replace("\\xef\\xbb\\xbf", "")
+                if rm.has_manifest
+                else None
+            ),
             "version_info": str(rm.version) if rm.has_version else None,
         }
         return metadata
@@ -327,9 +340,9 @@ def parse_pe_authenticode(parsed_obj):
         authenticode["sha1_hash"] = parsed_obj.authentihash(
             lief.PE.ALGORITHMS.SHA_1
         ).hex(*sep)
-        authenticode["verification_flags"] = str(parsed_obj.verify_signature()).replace(
-            "VERIFICATION_FLAGS.", ""
-        )
+        authenticode["verification_flags"] = str(
+            parsed_obj.verify_signature()
+        ).replace("VERIFICATION_FLAGS.", "")
         if (
             parsed_obj.signatures
             and len(parsed_obj.signatures) > 0
@@ -364,7 +377,9 @@ def parse_pe_symbols(symbols):
                 try:
                     section_nb_str = symbol.section.name
                 except Exception:
-                    section_nb_str = "section<{:d}>".format(symbol.section_number)
+                    section_nb_str = "section<{:d}>".format(
+                        symbol.section_number
+                    )
             try:
                 if not exe_type:
                     try:
@@ -378,8 +393,12 @@ def parse_pe_symbols(symbols):
                             "value": symbol.value,
                             "id": section_nb_str,
                             "base_type": str(symbol.base_type).split(".")[-1],
-                            "complex_type": str(symbol.complex_type).split(".")[-1],
-                            "storage_class": str(symbol.storage_class).split(".")[-1],
+                            "complex_type": str(symbol.complex_type).split(".")[
+                                -1
+                            ],
+                            "storage_class": str(symbol.storage_class).split(
+                                "."
+                            )[-1],
                         }
                     )
             except Exception:
@@ -466,9 +485,11 @@ def parse_macho_symbols(symbols):
                 exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
                 {
-                    "name": "{}::{}".format(libname, symbol_name)
-                    if libname
-                    else symbol_name,
+                    "name": (
+                        "{}::{}".format(libname, symbol_name)
+                        if libname
+                        else symbol_name
+                    ),
                     "short_name": symbol_name,
                     "type": symbol.type,
                     "num_sections": symbol.numberof_sections,
@@ -521,14 +542,18 @@ def parse(exe_file):
             metadata["magic"] = ("{:<02x} " * 8).format(*identity[:8]).strip()
             metadata["class"] = str(header.identity_class).split(".")[-1]
             metadata["endianness"] = str(header.identity_data).split(".")[-1]
-            metadata["identity_version"] = str(header.identity_version).split(".")[-1]
-            metadata["identity_os_abi"] = str(header.identity_os_abi).split(".")[-1]
+            metadata["identity_version"] = str(header.identity_version).split(
+                "."
+            )[-1]
+            metadata["identity_os_abi"] = str(header.identity_os_abi).split(
+                "."
+            )[-1]
             metadata["identity_abi_version"] = header.identity_abi_version
             metadata["file_type"] = str(header.file_type).split(".")[-1]
             metadata["machine_type"] = str(header.machine_type).split(".")[-1]
-            metadata["object_file_version"] = str(header.object_file_version).split(
-                "."
-            )[-1]
+            metadata["object_file_version"] = str(
+                header.object_file_version
+            ).split(".")[-1]
             metadata["entrypoint"] = header.entrypoint
             metadata["processor_flag"] = str(header.processor_flag) + eflags_str
             metadata["name"] = parsed_obj.name
@@ -591,7 +616,9 @@ def parse(exe_file):
                     metadata["symbols_version"] = []
                     symbol_version_auxiliary_cache = {}
                     for entry in symbols_version:
-                        symbol_version_auxiliary = entry.symbol_version_auxiliary
+                        symbol_version_auxiliary = (
+                            entry.symbol_version_auxiliary
+                        )
                         if (
                             symbol_version_auxiliary
                             and not symbol_version_auxiliary_cache.get(
@@ -638,7 +665,9 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+                metadata["ctor_functions"] = parse_functions(
+                    parsed_obj.ctor_functions
+                )
             except lief.exception:
                 pass
         elif isinstance(parsed_obj, PE.Binary):
@@ -648,27 +677,29 @@ def parse(exe_file):
                 metadata["binary_type"] = "PE"
                 metadata["name"] = parsed_obj.name
                 metadata["is_pie"] = parsed_obj.is_pie
-                metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
+                metadata["is_reproducible_build"] = (
+                    parsed_obj.is_reproducible_build
+                )
                 metadata["virtual_size"] = parsed_obj.virtual_size
                 metadata["has_nx"] = parsed_obj.has_nx
                 dos_header = parsed_obj.dos_header
                 metadata["magic"] = str(dos_header.magic)
                 header = parsed_obj.header
                 optional_header = parsed_obj.optional_header
-                metadata[
-                    "used_bytes_in_the_last_page"
-                ] = dos_header.used_bytes_in_the_last_page
+                metadata["used_bytes_in_the_last_page"] = (
+                    dos_header.used_bytes_in_the_last_page
+                )
                 metadata["file_size_in_pages"] = dos_header.file_size_in_pages
                 metadata["num_relocation"] = dos_header.numberof_relocation
-                metadata[
-                    "header_size_in_paragraphs"
-                ] = dos_header.header_size_in_paragraphs
-                metadata[
-                    "minimum_extra_paragraphs"
-                ] = dos_header.minimum_extra_paragraphs
-                metadata[
-                    "maximum_extra_paragraphs"
-                ] = dos_header.maximum_extra_paragraphs
+                metadata["header_size_in_paragraphs"] = (
+                    dos_header.header_size_in_paragraphs
+                )
+                metadata["minimum_extra_paragraphs"] = (
+                    dos_header.minimum_extra_paragraphs
+                )
+                metadata["maximum_extra_paragraphs"] = (
+                    dos_header.maximum_extra_paragraphs
+                )
                 metadata["initial_relative_ss"] = dos_header.initial_relative_ss
                 metadata["initial_sp"] = dos_header.initial_sp
                 metadata["checksum"] = dos_header.checksum
@@ -684,7 +715,10 @@ def parse(exe_file):
                     dos_header.addressof_new_exeheader
                 )
                 metadata["characteristics"] = ", ".join(
-                    [str(chara).split(".")[-1] for chara in header.characteristics_list]
+                    [
+                        str(chara).split(".")[-1]
+                        for chara in header.characteristics_list
+                    ]
                 )
                 metadata["num_sections"] = header.numberof_sections
                 metadata["time_date_stamps"] = header.time_date_stamps
@@ -697,56 +731,80 @@ def parse(exe_file):
                         for chara in optional_header.dll_characteristics_lists
                     ]
                 )
-                metadata["subsystem"] = str(optional_header.subsystem).split(".")[-1]
+                metadata["subsystem"] = str(optional_header.subsystem).split(
+                    "."
+                )[-1]
                 metadata["is_gui"] = (
                     True if metadata["subsystem"] == "WINDOWS_GUI" else False
                 )
                 metadata["exe_type"] = (
-                    "PE32" if optional_header.magic == PE.PE_TYPE.PE32 else "PE64"
+                    "PE32"
+                    if optional_header.magic == PE.PE_TYPE.PE32
+                    else "PE64"
                 )
-                metadata["major_linker_version"] = optional_header.major_linker_version
-                metadata["minor_linker_version"] = optional_header.minor_linker_version
+                metadata["major_linker_version"] = (
+                    optional_header.major_linker_version
+                )
+                metadata["minor_linker_version"] = (
+                    optional_header.minor_linker_version
+                )
                 metadata["sizeof_code"] = optional_header.sizeof_code
-                metadata[
-                    "sizeof_initialized_data"
-                ] = optional_header.sizeof_initialized_data
-                metadata[
-                    "sizeof_uninitialized_data"
-                ] = optional_header.sizeof_uninitialized_data
+                metadata["sizeof_initialized_data"] = (
+                    optional_header.sizeof_initialized_data
+                )
+                metadata["sizeof_uninitialized_data"] = (
+                    optional_header.sizeof_uninitialized_data
+                )
                 metadata["addressof_entrypoint"] = address_fmt.format(
                     optional_header.addressof_entrypoint
                 )
                 metadata["baseof_code"] = optional_header.baseof_code
                 metadata["baseof_data"] = optional_header.baseof_data
                 metadata["imagebase"] = optional_header.imagebase
-                metadata["section_alignment"] = optional_header.section_alignment
+                metadata["section_alignment"] = (
+                    optional_header.section_alignment
+                )
                 metadata["file_alignment"] = optional_header.file_alignment
-                metadata[
-                    "major_operating_system_version"
-                ] = optional_header.major_operating_system_version
-                metadata[
-                    "minor_operating_system_version"
-                ] = optional_header.minor_operating_system_version
-                metadata["major_image_version"] = optional_header.major_image_version
-                metadata["minor_image_version"] = optional_header.minor_image_version
-                metadata[
-                    "major_subsystem_version"
-                ] = optional_header.major_subsystem_version
-                metadata[
-                    "minor_subsystem_version"
-                ] = optional_header.minor_subsystem_version
-                metadata["win32_version_value"] = optional_header.win32_version_value
+                metadata["major_operating_system_version"] = (
+                    optional_header.major_operating_system_version
+                )
+                metadata["minor_operating_system_version"] = (
+                    optional_header.minor_operating_system_version
+                )
+                metadata["major_image_version"] = (
+                    optional_header.major_image_version
+                )
+                metadata["minor_image_version"] = (
+                    optional_header.minor_image_version
+                )
+                metadata["major_subsystem_version"] = (
+                    optional_header.major_subsystem_version
+                )
+                metadata["minor_subsystem_version"] = (
+                    optional_header.minor_subsystem_version
+                )
+                metadata["win32_version_value"] = (
+                    optional_header.win32_version_value
+                )
                 metadata["sizeof_image"] = optional_header.sizeof_image
                 metadata["sizeof_headers"] = optional_header.sizeof_headers
                 metadata["checksum"] = optional_header.checksum
-                metadata["sizeof_stack_reserve"] = optional_header.sizeof_stack_reserve
-                metadata["sizeof_stack_commit"] = optional_header.sizeof_stack_commit
-                metadata["sizeof_heap_reserve"] = optional_header.sizeof_heap_reserve
-                metadata["sizeof_heap_commit"] = optional_header.sizeof_heap_commit
+                metadata["sizeof_stack_reserve"] = (
+                    optional_header.sizeof_stack_reserve
+                )
+                metadata["sizeof_stack_commit"] = (
+                    optional_header.sizeof_stack_commit
+                )
+                metadata["sizeof_heap_reserve"] = (
+                    optional_header.sizeof_heap_reserve
+                )
+                metadata["sizeof_heap_commit"] = (
+                    optional_header.sizeof_heap_commit
+                )
                 metadata["loader_flags"] = optional_header.loader_flags
-                metadata[
-                    "numberof_rva_and_size"
-                ] = optional_header.numberof_rva_and_size
+                metadata["numberof_rva_and_size"] = (
+                    optional_header.numberof_rva_and_size
+                )
             except lief.exception:
                 pass
             try:
@@ -774,8 +832,8 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["imports"], metadata["dynamic_entries"] = parse_pe_imports(
-                    parsed_obj.imports
+                metadata["imports"], metadata["dynamic_entries"] = (
+                    parse_pe_imports(parsed_obj.imports)
                 )
             except lief.exception:
                 pass
@@ -788,7 +846,9 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+                metadata["ctor_functions"] = parse_functions(
+                    parsed_obj.ctor_functions
+                )
             except lief.exception:
                 pass
             try:
@@ -818,17 +878,23 @@ def parse(exe_file):
             metadata["exe_type"] = "MachO"
             try:
                 version = (
-                    parsed_obj.version_min.version if parsed_obj.version_min else None
+                    parsed_obj.version_min.version
+                    if parsed_obj.version_min
+                    else None
                 )
-                sdk = parsed_obj.version_min.sdk if parsed_obj.version_min else None
+                sdk = (
+                    parsed_obj.version_min.sdk
+                    if parsed_obj.version_min
+                    else None
+                )
                 source_version = (
                     parsed_obj.source_version.version
                     if parsed_obj.source_version
                     else None
                 )
                 if source_version:
-                    metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(
-                        *source_version
+                    metadata["source_version"] = (
+                        "{:d}.{:d}.{:d}.{:d}.{:d}".format(*source_version)
                     )
                 if version:
                     metadata["version"] = "{:d}.{:d}.{:d}".format(*version)
@@ -839,9 +905,15 @@ def parse(exe_file):
             try:
                 build_version = parsed_obj.build_version
                 if build_version:
-                    metadata["platform"] = str(build_version.platform).split(".")[-1]
-                    metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
-                    metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
+                    metadata["platform"] = str(build_version.platform).split(
+                        "."
+                    )[-1]
+                    metadata["minos"] = "{:d}.{:d}.{:d}".format(
+                        *build_version.minos
+                    )
+                    metadata["sdk"] = "{:d}.{:d}.{:d}".format(
+                        *build_version.sdk
+                    )
                     tools = build_version.tools
                     if len(tools) > 0:
                         metadata["tools"] = []
@@ -934,7 +1006,9 @@ def parse(exe_file):
             except lief.exception:
                 pass
             try:
-                metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+                metadata["ctor_functions"] = parse_functions(
+                    parsed_obj.ctor_functions
+                )
             except lief.exception:
                 pass
             try:

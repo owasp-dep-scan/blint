@@ -1,0 +1,2 @@
+android.hardware.location implied: requested android.permission.ACCESS_COARSE_LOCATION permission, and requested android.permission.ACCESS_FINE_LOCATION permission
+android.hardware.wifi implied: requested android.permission.ACCESS_WIFI_STATE permission, and requested android.permission.CHANGE_WIFI_MULTICAST_STATE permission

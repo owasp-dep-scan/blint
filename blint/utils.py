@@ -2,7 +2,10 @@ import base64
 import math
 import os
 import re
+import shutil
 import string
+import zipfile
+from importlib.metadata import distribution
 from pathlib import Path
 
 from defusedxml.ElementTree import fromstring
@@ -1209,11 +1212,17 @@ secrets_regex = {
         re.compile(r"[0-9a-z.\\-_]+\\.elb\\.[0-9a-z.\\-_]+\\.amazonaws\\.com"),
         re.compile(r"[0-9a-z.\\-_]+\\.rds\\.amazonaws\\.com"),
         re.compile(r"[0-9a-z.\\-_]+\\.cache\\.amazonaws\\.com"),
-        re.compile(r"[0-9a-z.\\-_]+\\.s3-website[0-9a-z.\\-_]+\\.amazonaws\\.com"),
-        re.compile(r"[0-9a-z]+\\.execute-api\\.[0-9a-z.\\-_]+\\.amazonaws\\.com"),
+        re.compile(
+            r"[0-9a-z.\\-_]+\\.s3-website[0-9a-z.\\-_]+\\.amazonaws\\.com"
+        ),
+        re.compile(
+            r"[0-9a-z]+\\.execute-api\\.[0-9a-z.\\-_]+\\.amazonaws\\.com"
+        ),
     ],
     "github": [
-        re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")
+        re.compile(
+            r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})"""
+        )
     ],
     "slack": [re.compile(r"""xox[baprs]-([0-9a-zA-Z]{10,48})?""")],
     "EC": [re.compile(r"""-----BEGIN EC PRIVATE KEY-----""")],
@@ -1223,9 +1232,15 @@ secrets_regex = {
     "PGP": [re.compile(r"""-----BEGIN PGP PRIVATE KEY-----""")],
     "google": [
         re.compile(r"""AIza[0-9A-Za-z\\-_]{35}"""),
-        re.compile(r"""[sS][eE][cC][rR][eE][tT].*['|"][0-9a-zA-Z]{32,45}['|"]"""),
-        re.compile(r"""[sS][eE][cC][rR][eE][tT].*['|"][0-9a-zA-Z]{32,45}['|"]"""),
-        re.compile(r"""[0-9]+-[0-9A-Za-z_]{32}\\.apps\\.googleusercontent\\.com"""),
+        re.compile(
+            r"""[sS][eE][cC][rR][eE][tT].*['|"][0-9a-zA-Z]{32,45}['|"]"""
+        ),
+        re.compile(
+            r"""[sS][eE][cC][rR][eE][tT].*['|"][0-9a-zA-Z]{32,45}['|"]"""
+        ),
+        re.compile(
+            r"""[0-9]+-[0-9A-Za-z_]{32}\\.apps\\.googleusercontent\\.com"""
+        ),
     ],
     "heroku": [
         re.compile(
@@ -1233,15 +1248,21 @@ secrets_regex = {
         )
     ],
     "mailchimp": [
-        re.compile(r"""(?i)(mailchimp|mc)(.{0,20})?['"][0-9a-f]{32}-us[0-9]{1,2}['"]""")
+        re.compile(
+            r"""(?i)(mailchimp|mc)(.{0,20})?['"][0-9a-f]{32}-us[0-9]{1,2}['"]"""
+        )
     ],
-    "mailgun": [re.compile(r"""(?i)(mailgun|mg)(.{0,20})?['"][0-9a-z]{32}['"]""")],
+    "mailgun": [
+        re.compile(r"""(?i)(mailgun|mg)(.{0,20})?['"][0-9a-z]{32}['"]""")
+    ],
     "slack_webhook": [
         re.compile(
             r"""https://hooks.slack.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}"""
         )
     ],
-    "stripe": [re.compile(r"""(?i)stripe(.{0,20})?['"][s|k]k_live_[0-9a-zA-Z]{24}""")],
+    "stripe": [
+        re.compile(r"""(?i)stripe(.{0,20})?['"][s|k]k_live_[0-9a-zA-Z]{24}""")
+    ],
     "square": [
         re.compile(r"""sq0atp-[0-9A-Za-z\-_]{22}"""),
         re.compile(r"""sq0atp-[0-9A-Za-z\-_]{43}"""),
@@ -1266,7 +1287,9 @@ secrets_regex = {
         re.compile(r"eyJ[A-Za-z0-9_/+-]*\.[A-Za-z0-9._/+-]*"),
     ],
     "email": [
-        re.compile(r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+")
+        re.compile(
+            r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+"
+        )
     ],
     "ip": [
         re.compile(
@@ -1354,7 +1377,9 @@ def is_binary_string(content):
     """
     Method to check if the given content is a binary string
     """
-    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
+    textchars = bytearray(
+        {7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F}
+    )
     return bool(content.translate(None, textchars))
 
 
@@ -1421,6 +1446,36 @@ def find_exe_files(src):
     return result
 
 
+def find_android_files(path):
+    """
+    Method to find android app files
+
+    :param path: Project directory
+    :return: List of android files
+    """
+    app_extns = [".apk", ".aab"]
+    return find_files(path, app_extns)
+
+
+def find_files(path, extns):
+    """
+    Method to find files matching an extension
+    """
+    result = []
+    if os.path.isfile(path):
+        for ext in extns:
+            if path.endswith(ext):
+                result.append(path)
+    else:
+        for root, dirs, files in os.walk(path):
+            filter_ignored_dirs(dirs)
+            for file in files:
+                for ext in extns:
+                    if file.endswith(ext):
+                        result.append(os.path.join(root, file))
+    return result
+
+
 def bomstrip(manifest):
     """
     Function to delete UTF-8 BOM character in "string"
@@ -1445,7 +1500,7 @@ def parse_pe_manifest(manifest):
             for ele in child.iter():
                 attribs_dict[ele.tag.rpartition("}")[-1]] = ele.attrib
         return attribs_dict
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -1455,3 +1510,25 @@ def is_fuzzable_name(name_str):
             if n.lower() in name_str:
                 return True
         return False
+
+
+def unzip_unsafe(zf, to_dir):
+    """Method to unzip the file in an unsafe manne"""
+    with zipfile.ZipFile(zf, "r") as zip_ref:
+        zip_ref.extractall(to_dir)
+
+
+def check_command(cmd):
+    """
+    Method to check if command is available
+    :return True if command is available in PATH. False otherwise
+    """
+    cpath = shutil.which(cmd, mode=os.F_OK | os.X_OK)
+    return cpath is not None
+
+
+def get_version():
+    """
+    Returns the version of depscan
+    """
+    return distribution("blint").version

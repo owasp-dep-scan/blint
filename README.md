@@ -8,6 +8,7 @@ BLint is a Binary Linter to check the security properties, and capabilities in y
 
 Supported binary formats:
 
+- Android (apk, aab)
 - ELF (GNU, musl)
 - PE (exe, dll)
 - Mach-O (x64, arm64)
@@ -42,21 +43,42 @@ You can download single binary builds from the [blint-bin releases](https://gith
 
 ## Usage
 
-```bash
-usage: blint [-h] [-i SRC_DIR_IMAGE] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews]
+```shell
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner]
+             [--no-reviews] [--suggest-fuzzable]
+             {sbom} ...
 
-Linting tool for binary files powered by lief.
+Binary linter and SBOM generator.
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
   -o REPORTS_DIR, --reports REPORTS_DIR
-                        Reports directory
-  --no-error            Continue on error to prevent build from breaking
-  --no-banner           Do not display banner
-  --no-reviews          Do not perform method reviews
-  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary
+                        Reports directory. Defaults to reports.
+  --no-error            Continue on error to prevent build from breaking.
+  --no-banner           Do not display banner.
+  --no-reviews          Do not perform method reviews.
+  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
+
+sub-commands:
+  Additional sub-commands
+
+  {sbom}
+    sbom                Command to generate SBOM for supported binaries.
+```
+
+### SBOM sub-command
+
+```shell
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [--output-file SBOM_OUTPUT]
+
+options:
+  -h, --help            show this help message and exit
+  -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
+                        Source directories, container images or binary files. Defaults to current directory.
+  --output-file SBOM_OUTPUT
+                        SBOM output file. Defaults to bom.json in current directory.
 ```
 
 To test any binary including default commands
