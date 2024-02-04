@@ -30,7 +30,7 @@ NOTE: The presence of capabilities doesn't imply that the operations are always 
 
 ## Installation
 
-- Install python 3.8 or above
+- Install python 3.10, 3.11, or 3.12
 
 ```bash
 pip3 install blint
@@ -38,7 +38,7 @@ pip3 install blint
 
 ### Single binary releases
 
-You can download single binary builds from the [blint-bin releases](https://github.com/AppThreat/blint/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
+You can download single binary builds from the [blint-bin releases](https://github.com/OWASP-dep-scan/blint/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
 
 ## Usage
 
