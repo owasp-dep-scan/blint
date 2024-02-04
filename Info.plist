@@ -3,12 +3,12 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>English</string>
     <key>CFBundleIdentifier</key>
-    <string>io.appthreat.blint</string>
+    <string>io.owasp-dep-scan.blint</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>blint</string>
     <key>CFBundleVersion</key>
-    <string>1.0.35</string>
+    <string>2.0.0</string>
 </dict>
 </plist>

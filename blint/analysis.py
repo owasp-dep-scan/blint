@@ -23,8 +23,6 @@ from blint.utils import (find_exe_files, is_exe, is_fuzzable_name,
 try:
     import importlib.resources
 
-    # Defeat lazy module importers.
-    importlib.resources.open_text
     HAVE_RESOURCE_READER = True
 except ImportError:
     HAVE_RESOURCE_READER = False
@@ -32,8 +30,12 @@ except ImportError:
 review_files = []
 if HAVE_RESOURCE_READER:
     try:
-        review_methods_dir = importlib.resources.contents("blint.data.annotations")
-        review_files = [rf for rf in review_methods_dir if rf.endswith(".yml")]
+        review_files = (
+            resource.name
+            for resource
+            in importlib.resources.files("blint.data.annotations").iterdir()
+            if resource.is_file() and resource.name.endswith(".yml")
+        )
     except Exception:
         pass
 else:
@@ -63,7 +65,7 @@ def get_resource(package, resource):
         # If we're in the context of a module, we could also use
         # ``__loader__.get_resource_reader(__name__).open_resource(resource)``.
         # We use open_binary() because it is simple.
-        return importlib.resources.open_text(package, resource)
+        return importlib.resources.files(package).joinpath(resource).open('r', encoding='utf-8')
 
     # Fall back to __file__.
 

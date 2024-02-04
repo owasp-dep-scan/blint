@@ -1,15 +1,15 @@
-FROM almalinux:9.2-minimal
+FROM almalinux:9.3-minimal
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
-      org.opencontainers.image.source="https://github.com/AppThreat/blint" \
-      org.opencontainers.image.url="https://github.com/AppThreat/blint" \
-      org.opencontainers.image.version="1.0.35" \
+      org.opencontainers.image.source="https://github.com/OWASP-dep-scan/blint" \
+      org.opencontainers.image.url="https://github.com/OWASP-dep-scan/blint" \
+      org.opencontainers.image.version="2.0.0" \
       org.opencontainers.image.vendor="AppThreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="blint" \
       org.opencontainers.image.description="BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by lief." \
-      org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/appthreat/blint"
+      org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/OWASP-dep-scan/blint"
 
 ARG TARGETPLATFORM
 ARG JAVA_VERSION=22.3.r19-grl
