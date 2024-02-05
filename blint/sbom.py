@@ -14,17 +14,20 @@ from blint.cyclonedx.spec import (
     Phase,
     Tools,
     Type,
+    RefType,
 )
 from blint.logger import LOG
 from blint.utils import find_android_files, get_version
 
 
 def default_parent(src_dirs):
-    return Component(
-        type=Type.application,
-        name=os.path.basename(src_dirs[0]),
-        version="latest",
+    name = os.path.basename(src_dirs[0])
+    purl = f"pkg:generic/{name}@latest"
+    component = Component(
+        type=Type.application, name=name, version="latest", purl=purl
     )
+    component.bom_ref = RefType(purl)
+    return component
 
 
 def default_metadata(src_dirs):
@@ -53,6 +56,7 @@ def default_metadata(src_dirs):
 def generate(src_dirs, output_file):
     android_files = []
     components = []
+    dependencies = []
     sbom = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
         specVersion="1.5",
@@ -78,6 +82,7 @@ def generate(src_dirs, output_file):
             start=True,
         )
         for f in android_files:
+            dependencies_dict = {}
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
             parent_component, app_components = collect_app_metadata(f)
             if parent_component:
@@ -86,14 +91,39 @@ def generate(src_dirs, output_file):
                 sbom.metadata.component.components.append(parent_component)
             if app_components:
                 components += app_components
-    sbom.components = components
+            track_dependency(
+                dependencies_dict, parent_component, app_components
+            )
+            # Update the dependencies list
+            if dependencies_dict:
+                for k, v in dependencies_dict.items():
+                    dependencies.append({"ref": k, "dependsOn": list(v)})
+    # Populate the components
+    sbom.components = trim_components(components)
     # If we have only one parent component then promote it to metadata.component
-    if (
-        sbom.metadata.component.components
-        and len(sbom.metadata.component.components) == 1
-    ):
-        sbom.metadata.component = sbom.metadata.component.components[0]
-    LOG.debug("SBOM includes %d components", len(components))
+    if sbom.metadata.component.components:
+        if len(sbom.metadata.component.components) == 1:
+            sbom.metadata.component = sbom.metadata.component.components[0]
+        else:
+            # Fix the dangling tree
+            root_depends_on = []
+            for ac in sbom.metadata.component.components:
+                root_depends_on.append(ac.bom_ref.model_dump(mode="python"))
+            dependencies.append(
+                {
+                    "ref": sbom.metadata.component.bom_ref.model_dump(
+                        mode="python"
+                    ),
+                    "dependsOn": root_depends_on,
+                }
+            )
+    # Populate the dependencies
+    sbom.dependencies = dependencies
+    LOG.debug(
+        "SBOM includes %d components and %d dependencies",
+        len(components),
+        len(dependencies),
+    )
     with open(output_file, mode="w") as fp:
         fp.write(
             sbom.model_dump_json(
@@ -105,3 +135,42 @@ def generate(src_dirs, output_file):
         )
         LOG.debug("SBOM file generated successfully at %s", output_file)
     return True
+
+
+def track_dependency(dependencies_dict, parent_component, app_components):
+    if parent_component:
+        if not dependencies_dict.get(
+            parent_component.bom_ref.model_dump(mode="python")
+        ):
+            dependencies_dict[
+                parent_component.bom_ref.model_dump(mode="python")
+            ] = set()
+        for acomp in app_components:
+            if not dependencies_dict.get(
+                acomp.bom_ref.model_dump(mode="python")
+            ):
+                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = (
+                    set()
+                )
+            dependencies_dict[
+                parent_component.bom_ref.model_dump(mode="python")
+            ].add(acomp.bom_ref.model_dump(mode="python"))
+    else:
+        for acomp in app_components:
+            if not dependencies_dict.get(
+                acomp.bom_ref.model_dump(mode="python")
+            ):
+                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = (
+                    set()
+                )
+
+
+def trim_components(components):
+    added_dict = {}
+    ret = []
+    for comp in components:
+        if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
+            added_dict[comp.bom_ref.model_dump(mode="python")] = comp
+    for k in sorted(added_dict.keys()):
+        ret.append(added_dict[k])
+    return ret

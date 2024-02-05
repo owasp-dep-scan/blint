@@ -152,10 +152,18 @@ def collect_files_metadata(app_file):
                 if parts and len(parts) == 2:
                     group = parts[0]
                     name = parts[-1]
+                else:
+                    name = name.replace("_", "-")
+                    # Patch the group name
+                    if name.startswith("kotlinx-"):
+                        group = "org.jetbrains.kotlinx"
             with open(vf, encoding="utf-8") as fp:
                 version_data = fp.read().strip()
                 if name and version_data:
-                    purl = f"pkg:maven/{group}/{name}@{version_data}"
+                    if group:
+                        purl = f"pkg:maven/{group}/{name}@{version_data}"
+                    else:
+                        purl = f"pkg:maven/{name}@{version_data}"
                     component = Component(
                         type=Type.library,
                         group=group,
@@ -195,11 +203,10 @@ def collect_files_metadata(app_file):
             arch = ""
             functions = []
             # Extract architecture from file
-            # lib/arm64-v8a/libsentry-android.so
-            if rel_path.startswith("lib"):
-                parts = rel_path.split(os.sep)
-                if len(parts) == 3:
-                    arch = parts[1]
+            # apk: lib/arm64-v8a/libsentry-android.so
+            # aab: base/lib/armeabi-v7a/libsqlite3x.so
+            if "lib" in rel_path:
+                arch = rel_path.split(f"lib{os.sep}")[-1].split(os.sep)[0]
             # Retrieve the version number from notes
             for anote in so_metadata.get("notes", []):
                 if anote.get("version"):
