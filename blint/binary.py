@@ -1103,6 +1103,6 @@ def parse(exe_file):
                     }
             except Exception:
                 pass
-    except lief.exception as e:
+    except Exception as e:
         LOG.exception(e)
     return metadata
