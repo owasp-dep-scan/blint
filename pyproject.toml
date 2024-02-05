@@ -30,9 +30,9 @@ blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-lief = "^0.12.3"
-rich = "^13.4.1"
-PyYAML = "^6.0"
+lief = "^0.14.0"
+rich = "^13.7.0"
+PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
 pydantic = {version = "^2.6.0", extras = ["email"]}
 

@@ -21,13 +21,13 @@ def parse_desc(e):
 def is_shared_library(parsed_obj):
     if not parsed_obj:
         return False
-    if parsed_obj.format == lief.EXE_FORMATS.ELF:
+    if parsed_obj.format == lief.Binary.FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
-    elif parsed_obj.format == lief.EXE_FORMATS.PE:
+    elif parsed_obj.format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(
-            lief.PE.HEADER_CHARACTERISTICS.DLL
+            lief.PE.Header.CHARACTERISTICS.DLL
         )
-    elif parsed_obj.format == lief.EXE_FORMATS.MACHO:
+    elif parsed_obj.format == lief.Binary.FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
     return False
 
@@ -129,7 +129,7 @@ def parse_functions(functions):
                     }
                 )
         return func_list
-    except lief.exception:
+    except Exception:
         return []
 
 
@@ -155,7 +155,7 @@ def parse_strings(parsed_obj):
                         }
                     )
         return strings_list
-    except lief.exception:
+    except Exception:
         return []
 
 
@@ -197,14 +197,14 @@ def parse_symbols(symbols):
                 }
             )
         return symbols_list, exe_type
-    except lief.exception:
+    except Exception:
         return [], None
 
 
 def parse_interpreter(parsed_obj):
     try:
         return parsed_obj.interpreter
-    except lief.exception:
+    except Exception:
         return ""
 
 
@@ -224,7 +224,7 @@ def detect_exe_type(parsed_obj, metadata):
             ).lower()
         if metadata["relro"] in ("partial", "full"):
             return "genericbinary"
-    except lief.exception:
+    except Exception:
         return ""
 
 
@@ -271,7 +271,7 @@ def parse_pe_data(parsed_obj):
                     }
                 )
         return data_list
-    except lief.exception:
+    except Exception:
         return None
 
 
@@ -296,14 +296,14 @@ def process_pe_resources(parsed_obj):
             "version_info": str(rm.version) if rm.has_version else None,
         }
         return metadata
-    except lief.exception:
+    except Exception:
         return None
 
 
 def process_pe_signature(parsed_obj):
     try:
         signature_list = []
-        for idx, sig in enumerate(parsed_obj.signatures):
+        for _, sig in enumerate(parsed_obj.signatures):
             ci = sig.content_info
             signature_obj = {
                 "version": sig.version,
@@ -328,7 +328,7 @@ def process_pe_signature(parsed_obj):
             signature_obj["signers"] = signers_list
             signature_list.append(signature_obj)
         return signature_list
-    except lief.exception:
+    except Exception:
         return None
 
 
@@ -362,7 +362,7 @@ def parse_pe_authenticode(parsed_obj):
                     cert_signer_obj[tmp_key] = tmp_a[1].strip()
             authenticode["cert_signer"] = cert_signer_obj
         return authenticode
-    except lief.exception:
+    except Exception:
         return None
 
 
@@ -409,7 +409,7 @@ def parse_pe_symbols(symbols):
             except Exception:
                 pass
         return symbols_list, exe_type
-    except lief.exception:
+    except Exception:
         return [], None
 
 
@@ -434,7 +434,7 @@ def parse_pe_imports(imports):
                     )
         dll_list = [{"name": d, "tag": "NEEDED"} for d in list(dlls)]
         return imports_list, dll_list
-    except lief.exception:
+    except Exception:
         return []
 
 
@@ -460,7 +460,7 @@ def parse_pe_exports(exports):
                 metadata["fwd_function"] = fwd.function
             exports_list.append(metadata)
         return exports_list
-    except lief.exception:
+    except Exception:
         return []
 
 
@@ -504,7 +504,7 @@ def parse_macho_symbols(symbols):
                 }
             )
         return symbols_list, exe_type
-    except lief.exception:
+    except Exception:
         return [], None
 
 
@@ -582,7 +582,7 @@ def parse(exe_file):
             ).rsplit(".", maxsplit=1)[-1]
             metadata["entrypoint"] = header.entrypoint
             metadata["processor_flag"] = str(header.processor_flag) + eflags_str
-            metadata["name"] = parsed_obj.name
+            metadata["name"] = exe_file
             metadata["imagebase"] = parsed_obj.imagebase
             metadata["interpreter"] = parse_interpreter(parsed_obj)
             metadata["is_pie"] = parsed_obj.is_pie
@@ -663,13 +663,13 @@ def parse(exe_file):
                                     "value": entry.value,
                                 }
                             )
-            except lief.exception:
+            except Exception:
                 metadata["symbols_version"] = []
             try:
                 notes = parsed_obj.notes
                 if notes:
                     metadata["notes"] = parse_notes(parsed_obj)
-            except lief.exception:
+            except Exception:
                 pass
             metadata["strings"] = parse_strings(parsed_obj)
             try:
@@ -678,7 +678,7 @@ def parse(exe_file):
                 )
                 if exe_type:
                     metadata["exe_type"] = exe_type
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["dynamic_symbols"], exe_type = parse_symbols(
@@ -686,17 +686,17 @@ def parse(exe_file):
                 )
                 if exe_type:
                     metadata["exe_type"] = exe_type
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["functions"] = parse_functions(parsed_obj.functions)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["ctor_functions"] = parse_functions(
                     parsed_obj.ctor_functions
                 )
-            except lief.exception:
+            except Exception:
                 pass
         elif isinstance(parsed_obj, PE.Binary):
             # PE
@@ -833,23 +833,23 @@ def parse(exe_file):
                 metadata["numberof_rva_and_size"] = (
                     optional_header.numberof_rva_and_size
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["data_directories"] = parse_pe_data(parsed_obj)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["signatures"] = process_pe_signature(parsed_obj)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["resources"] = process_pe_resources(parsed_obj)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["static_symbols"], exe_type = parse_pe_symbols(
@@ -857,33 +857,33 @@ def parse(exe_file):
                 )
                 if exe_type:
                     metadata["exe_type"] = exe_type
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["imports"], metadata["dynamic_entries"] = (
                     parse_pe_imports(parsed_obj.imports)
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["functions"] = parse_functions(parsed_obj.functions)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["ctor_functions"] = parse_functions(
                     parsed_obj.ctor_functions
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["exception_functions"] = parse_functions(
                     parsed_obj.exception_functions
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 tls = parsed_obj.tls
@@ -894,7 +894,7 @@ def parse(exe_file):
                     metadata["tls_characteristics"] = tls.characteristics
                     metadata["tls_section_name"] = tls.section.name
                     metadata["tls_directory_type"] = str(tls.directory.type)
-            except lief.exception:
+            except Exception:
                 pass
         elif isinstance(parsed_obj, MachO.Binary):
             # MachO
@@ -928,7 +928,7 @@ def parse(exe_file):
                     metadata["version"] = "{:d}.{:d}.{:d}".format(*version)
                 if sdk:
                     metadata["sdk"] = "{:d}.{:d}.{:d}".format(*sdk)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 build_version = parsed_obj.build_version
@@ -955,7 +955,7 @@ def parse(exe_file):
                                     "version": "{}.{}.{}".format(*tool.version),
                                 }
                             )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 if parsed_obj.has_encryption_info:
@@ -966,27 +966,27 @@ def parse(exe_file):
                             "crypt_size": encryption_info.crypt_size,
                             "crypt_id": encryption_info.crypt_id,
                         }
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 sinfo = parsed_obj.sub_framework
                 if sinfo:
                     metadata["umbrella"] = sinfo.umbrella
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 cmd = parsed_obj.rpath
                 if cmd:
                     metadata["has_rpath"] = True
                     metadata["rpath"] = cmd.path
-            except lief.exception:
+            except Exception:
                 metadata["has_rpath"] = False
             try:
                 cmd = parsed_obj.uuid
                 if cmd:
                     uuid_str = " ".join(map(parse_uuid, cmd.uuid))
                     metadata["uuid"] = str(uuid_str)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 if parsed_obj.libraries:
@@ -1006,7 +1006,7 @@ def parse(exe_file):
                                 "compatibility_version": compatibility_version_str,
                             }
                         )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 header = parsed_obj.header
@@ -1030,7 +1030,7 @@ def parse(exe_file):
                 metadata["number_commands"] = header.nb_cmds
                 metadata["size_commands"] = header.sizeof_cmds
                 metadata["reserved"] = header.reserved
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 if parsed_obj.main_command:
@@ -1042,19 +1042,19 @@ def parse(exe_file):
                 metadata["has_thread_command"] = False
             try:
                 metadata["functions"] = parse_functions(parsed_obj.functions)
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["ctor_functions"] = parse_functions(
                     parsed_obj.ctor_functions
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["unwind_functions"] = parse_functions(
                     parsed_obj.unwind_functions
                 )
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 metadata["static_symbols"], exe_type = parse_macho_symbols(
@@ -1062,12 +1062,12 @@ def parse(exe_file):
                 )
                 if exe_type:
                     metadata["exe_type"] = exe_type
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 if parsed_obj.dylinker:
                     metadata["dylinker"] = parsed_obj.dylinker.name
-            except lief.exception:
+            except Exception:
                 pass
             try:
                 if parsed_obj.has_code_signature:
@@ -1101,7 +1101,7 @@ def parse(exe_file):
                         "data_size": str(data_in_code.data_size),
                         "size": str(data_in_code.size),
                     }
-            except lief.exception:
+            except Exception:
                 pass
     except lief.exception as e:
         LOG.exception(e)
