@@ -131,115 +131,50 @@ def apk_permissions(app_file):
     return None
 
 
-def collect_files_metadata(app_file):
-    """
-    Unzip the app and collect metadata
-    """
+def collect_version_files_metadata(app_file, app_temp_dir):
     file_components = []
-    app_temp_dir = tempfile.mkdtemp(prefix="blint_android_app")
-    unzip_unsafe(app_file, app_temp_dir)
     # Find and read all .version files
     version_files = find_files(app_temp_dir, [".version"])
-    if version_files:
-        for vf in version_files:
-            file_name = os.path.basename(vf).removesuffix(".version")
-            rel_path = os.path.relpath(vf, app_temp_dir)
-            group = ""
-            name = ""
-            if "_" in file_name:
-                parts = file_name.split("_")
-                name = file_name
-                if parts and len(parts) == 2:
-                    group = parts[0]
-                    name = parts[-1]
-                else:
-                    name = name.replace("_", "-")
-                    # Patch the group name
-                    if name.startswith("kotlinx-"):
-                        group = "org.jetbrains.kotlinx"
-            with open(vf, encoding="utf-8") as fp:
-                version_data = fp.read().strip()
-                if name and version_data:
-                    if group:
-                        purl = f"pkg:maven/{group}/{name}@{version_data}"
-                    else:
-                        purl = f"pkg:maven/{name}@{version_data}"
-                    component = Component(
-                        type=Type.library,
-                        group=group,
-                        name=name,
-                        version=version_data,
-                        purl=purl,
-                        scope=Scope.required,
-                        evidence=ComponentEvidence(
-                            identity=Identity(
-                                field=FieldModel.purl,
-                                confidence=1,
-                                methods=[
-                                    Method(
-                                        technique=Technique.manifest_analysis,
-                                        value=rel_path,
-                                        confidence=1,
-                                    )
-                                ],
-                            )
-                        ),
-                        properties=[
-                            Property(name="internal:srcFile", value=rel_path),
-                            Property(name="internal:appFile", value=app_file),
-                        ],
-                    )
-                    component.bom_ref = RefType(purl)
-                    file_components.append(component)
-    # Parse all .so files
-    so_files = find_files(app_temp_dir, [".so"])
-    if so_files:
-        for sof in so_files:
-            so_metadata = parse(sof)
-            name = os.path.basename(sof).removesuffix(".so").removeprefix("lib")
-            rel_path = os.path.relpath(sof, app_temp_dir)
-            group = ""
-            version = "latest"
-            arch = ""
-            functions = []
-            # Extract architecture from file
-            # apk: lib/arm64-v8a/libsentry-android.so
-            # aab: base/lib/armeabi-v7a/libsqlite3x.so
-            if "lib" in rel_path:
-                arch = rel_path.split(f"lib{os.sep}")[-1].split(os.sep)[0]
-            # Retrieve the version number from notes
-            for anote in so_metadata.get("notes", []):
-                if anote.get("version"):
-                    version = anote.get("version")
-                    break
-                elif anote.get("build_id"):
-                    version = anote.get("build_id")
-                    break
-            if so_metadata.get("functions"):
-                functions = [
-                    f.get("name")
-                    for f in so_metadata.get("functions")
-                    if f.get("name") and not f.get("name").startswith("_")
-                ]
-            purl = f"pkg:generic/{name}@{version}"
-            if arch:
-                purl = f"{purl}?arch={arch}"
+    for vf in version_files:
+        file_name = os.path.basename(vf).removesuffix(".version")
+        rel_path = os.path.relpath(vf, app_temp_dir)
+        group = ""
+        name = ""
+        version_data = ""
+        if "_" in file_name:
+            parts = file_name.split("_")
+            name = file_name
+            if parts and len(parts) == 2:
+                group = parts[0]
+                name = parts[-1]
+            else:
+                name = name.replace("_", "-")
+                # Patch the group name
+                if name.startswith("kotlinx-"):
+                    group = "org.jetbrains.kotlinx"
+        with open(vf, encoding="utf-8") as fp:
+            version_data = fp.read().strip()
+        if name and version_data:
+            if group:
+                purl = f"pkg:maven/{group}/{name}@{version_data}"
+            else:
+                purl = f"pkg:maven/{name}@{version_data}"
             component = Component(
                 type=Type.library,
                 group=group,
                 name=name,
-                version=version,
+                version=version_data,
                 purl=purl,
                 scope=Scope.required,
                 evidence=ComponentEvidence(
                     identity=Identity(
                         field=FieldModel.purl,
-                        confidence=0.5,
+                        confidence=1,
                         methods=[
                             Method(
-                                technique=Technique.binary_analysis,
+                                technique=Technique.manifest_analysis,
                                 value=rel_path,
-                                confidence=0.5,
+                                confidence=1,
                             )
                         ],
                     )
@@ -247,14 +182,90 @@ def collect_files_metadata(app_file):
                 properties=[
                     Property(name="internal:srcFile", value=rel_path),
                     Property(name="internal:appFile", value=app_file),
-                    Property(
-                        name="internal:functions",
-                        value=", ".join(set(functions)),
-                    ),
                 ],
             )
             component.bom_ref = RefType(purl)
             file_components.append(component)
+    return file_components
+
+
+def collect_so_files_metadata(app_file, app_temp_dir):
+    file_components = []
+    # Parse all .so files
+    so_files = find_files(app_temp_dir, [".so"])
+    for sof in so_files:
+        so_metadata = parse(sof)
+        name = os.path.basename(sof).removesuffix(".so").removeprefix("lib")
+        rel_path = os.path.relpath(sof, app_temp_dir)
+        group = ""
+        version = "latest"
+        arch = ""
+        functions = []
+        # Extract architecture from file
+        # apk: lib/arm64-v8a/libsentry-android.so
+        # aab: base/lib/armeabi-v7a/libsqlite3x.so
+        if "lib" in rel_path:
+            arch = rel_path.split(f"lib{os.sep}")[-1].split(os.sep)[0]
+        # Retrieve the version number from notes
+        for anote in so_metadata.get("notes", []):
+            if anote.get("version"):
+                version = anote.get("version")
+                break
+            elif anote.get("build_id"):
+                version = anote.get("build_id")
+                break
+        if so_metadata.get("functions"):
+            functions = [
+                f.get("name")
+                for f in so_metadata.get("functions")
+                if f.get("name") and not f.get("name").startswith("_")
+            ]
+        purl = f"pkg:generic/{name}@{version}"
+        if arch:
+            purl = f"{purl}?arch={arch}"
+        component = Component(
+            type=Type.library,
+            group=group,
+            name=name,
+            version=version,
+            purl=purl,
+            scope=Scope.required,
+            evidence=ComponentEvidence(
+                identity=Identity(
+                    field=FieldModel.purl,
+                    confidence=0.5,
+                    methods=[
+                        Method(
+                            technique=Technique.binary_analysis,
+                            value=rel_path,
+                            confidence=0.5,
+                        )
+                    ],
+                )
+            ),
+            properties=[
+                Property(name="internal:srcFile", value=rel_path),
+                Property(name="internal:appFile", value=app_file),
+                Property(
+                    name="internal:functions",
+                    value=", ".join(set(functions)),
+                ),
+            ],
+        )
+        component.bom_ref = RefType(purl)
+        file_components.append(component)
+    return file_components
+
+
+def collect_files_metadata(app_file):
+    """
+    Unzip the app and collect metadata
+    """
+    file_components = []
+    app_temp_dir = tempfile.mkdtemp(prefix="blint_android_app")
+    unzip_unsafe(app_file, app_temp_dir)
+    file_components += collect_version_files_metadata(app_file, app_temp_dir)
+    file_components += collect_so_files_metadata(app_file, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)
     return file_components
 
