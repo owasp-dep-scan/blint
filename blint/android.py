@@ -107,8 +107,8 @@ def apk_features(app_file):
     if cp and cp.returncode == 0:
         data = cp.stdout.strip()
         if "JAVA_TOOL_OPTIONS" in data:
-            parts = data.split(os.linesep)
-            if parts and len(parts) > 1:
+            parts = data.split("\n")
+            if parts and len(parts) > 0:
                 parts.pop(0)
             return "\n".join(parts)
     return None
@@ -124,8 +124,8 @@ def apk_permissions(app_file):
     if cp and cp.returncode == 0:
         data = cp.stdout.strip()
         if "JAVA_TOOL_OPTIONS" in data:
-            parts = data.split(os.linesep)
-            if parts and len(parts) > 1:
+            parts = data.split("\n")
+            if parts and len(parts) > 0:
                 parts.pop(0)
             return "\n".join(parts)
     return None
@@ -264,7 +264,7 @@ def parse_apk_summary(data):
     Parse output from apk summary
     """
     if data:
-        parts = data.strip().split(os.linesep)[-1].split("\t")
+        parts = data.strip().split("\n")[-1].split("\t")
         if parts:
             name = parts[0]
             version = parts[-1]
