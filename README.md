@@ -2,7 +2,7 @@
 
 ![blint logo](blint.png)
 
-BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF)
+BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF). Since version 2, blint can also generate Software Bill-of-Materials (SBOM) for supported binaries.
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)
 
@@ -34,7 +34,7 @@ NOTE: The presence of capabilities doesn't imply that the operations are always 
 - Install python 3.10, 3.11, or 3.12
 
 ```bash
-pip3 install blint
+pip install blint
 ```
 
 ### Single binary releases
@@ -99,6 +99,16 @@ Pass `--suggest-fuzzable` to get suggestions for fuzzing. A dictionary containin
 blint -i ~/ngrok -o /tmp/blint --suggest-fuzzable
 ```
 
+To generate SBOM in [CycloneDX format](https://cyclonedx.org/) for supported binaries, use the sbom sub-command.
+
+```shell
+blint sbom -i /path/to/apk -o bom.json
+```
+
+```shell
+blint sbom -i /directory/with/apk/aab -o bom.json
+```
+
 PowerShell example
 
 ![PowerShell](./docs/blint-powershell.jpg)
@@ -112,6 +122,8 @@ Blint produces the following json artifacts in the reports directory:
 - findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
 - reviews.json - Contains information from the capability reviews. Useful for further analysis
 - fuzzables.json - Contains a suggested list of methods for fuzzing
+
+sbom command generates CycloneDX json.
 
 ## References
 

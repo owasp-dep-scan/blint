@@ -11,10 +11,6 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="BLint is a Binary Linter and SBOM generator." \
       org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/owasp-dep-scan/blint"
 
-ARG TARGETPLATFORM
-ARG JAVA_VERSION=21.0.2-tem
-ARG ARCH_NAME=x86_64
-
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     ANDROID_HOME=/opt/android-sdk-linux \
     PYTHONUNBUFFERED=1 \
