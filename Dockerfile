@@ -21,7 +21,8 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     PYTHONIOENCODING="utf-8"
 ENV PATH=${PATH}:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
-RUN microdnf install -y python3.11 python3.11-devel python3.11-pip java-21-openjdk-headless which tar gzip zip unzip sudo ncurses \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip java-21-openjdk-headless make gcc \
+        which tar gzip zip unzip sudo ncurses \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
@@ -42,6 +43,7 @@ RUN cd /opt/blint \
     && poetry config virtualenvs.create false \
     && poetry install --no-cache --without dev \
     && chmod a-w -R /opt \
+    && microdnf remove make gcc -y \
     && microdnf clean all
 
 ENTRYPOINT [ "blint" ]
