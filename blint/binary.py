@@ -11,7 +11,7 @@ MIN_LENGTH = 80
 
 lief.logging.disable()
 
-address_fmt = "0x{:<10x}"
+ADDRESS_FMT = "0x{:<10x}"
 
 
 def parse_desc(e):
@@ -40,13 +40,13 @@ def parse_notes(parsed_obj):
             note_str = str(note)
             build_id = ""
             if "ID Hash" in note_str:
-                build_id = note_str.split("ID Hash:")[-1].strip()
+                build_id = note_str.rsplit("ID Hash:", maxsplit=1)[-1].strip()
             description = note.description
             description_str = " ".join(map(parse_desc, description[:16]))
             if len(description) > 16:
                 description_str += " ..."
             type_str = note.type_core if note.is_core else note.type
-            type_str = str(type_str).split(".")[-1]
+            type_str = str(type_str).rsplit(".", maxsplit=1)[-1]
             note_details = note.details
             note_details_str = ""
             sdk_version = ""
@@ -54,11 +54,11 @@ def parse_notes(parsed_obj):
             ndk_build_number = ""
             abi = ""
             version_str = ""
-            if type(note_details) == lief.ELF.AndroidNote:
+            if isinstance(note_details, lief.ELF.AndroidNote):
                 sdk_version = note_details.sdk_version
                 ndk_version = note_details.ndk_version
                 ndk_build_number = note_details.ndk_build_number
-            if type(note_details) == lief.ELF.NoteAbi:
+            if isinstance(note_details, lief.ELF.NoteAbi):
                 version = note_details.version
                 abi = str(note_details.abi)
                 version_str = "{:d}.{:d}.{:d}".format(
@@ -70,6 +70,7 @@ def parse_notes(parsed_obj):
                 note_details_str = note.details
             metadata["notes"].append(
                 {
+                    "index": idx,
                     "description": str(description_str),
                     "type": type_str,
                     "details": note_details_str,
@@ -124,7 +125,7 @@ def parse_functions(functions):
                     {
                         "index": idx,
                         "name": cleaned_name,
-                        "address": address_fmt.format(f.address),
+                        "address": ADDRESS_FMT.format(f.address),
                     }
                 )
         return func_list
@@ -180,10 +181,12 @@ def parse_symbols(symbols):
             symbols_list.append(
                 {
                     "name": symbol_name,
-                    "type": str(symbol.type).split(".")[-1],
+                    "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
                     "value": symbol.value,
-                    "visibility": str(symbol.visibility).split(".")[-1],
-                    "binding": str(symbol.binding).split(".")[-1],
+                    "visibility": str(symbol.visibility).rsplit(
+                        ".", maxsplit=1
+                    )[-1],
+                    "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
                     "is_imported": is_imported,
                     "is_exported": is_exported,
                     "information": symbol.information,
@@ -245,13 +248,13 @@ def parse_pe_data(parsed_obj):
             section_name = ""
             section_chars = ""
             section_entropy = ""
-            dir_type = str(directory.type).split(".")[-1]
+            dir_type = str(directory.type).rsplit(".", maxsplit=1)[-1]
             if not dir_type.startswith("?") and directory.size:
                 if directory.has_section:
                     if directory.section.has_characteristic:
                         section_chars = ", ".join(
                             [
-                                str(chara).split(".")[-1]
+                                str(chara).rsplit(".", maxsplit=1)[-1]
                                 for chara in directory.section.characteristics_lists
                             ]
                         )
@@ -351,12 +354,12 @@ def parse_pe_authenticode(parsed_obj):
             cert_signer_str = str(parsed_obj.signatures[0].signers[0].cert)
             cert_signer_obj = {}
             for p in cert_signer_str.split("\n"):
-                tmpA = p.split(" : ")
-                if len(tmpA) == 2:
-                    tmpKey = tmpA[0].strip().replace(" ", "_")
-                    if "version" in tmpKey:
-                        tmpKey = "version"
-                    cert_signer_obj[tmpKey] = tmpA[1].strip()
+                tmp_a = p.split(" : ")
+                if len(tmp_a) == 2:
+                    tmp_key = tmp_a[0].strip().replace(" ", "_")
+                    if "version" in tmp_key:
+                        tmp_key = "version"
+                    cert_signer_obj[tmp_key] = tmp_a[1].strip()
             authenticode["cert_signer"] = cert_signer_obj
         return authenticode
     except lief.exception:
@@ -372,7 +375,7 @@ def parse_pe_symbols(symbols):
             if symbol.section_number <= 0:
                 section_nb_str = str(
                     PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
-                ).split(".")[-1]
+                ).rsplit(".", maxsplit=1)[-1]
             else:
                 try:
                     section_nb_str = symbol.section.name
@@ -392,12 +395,14 @@ def parse_pe_symbols(symbols):
                             "name": symbol.name.replace("..", "::"),
                             "value": symbol.value,
                             "id": section_nb_str,
-                            "base_type": str(symbol.base_type).split(".")[-1],
-                            "complex_type": str(symbol.complex_type).split(".")[
-                                -1
-                            ],
-                            "storage_class": str(symbol.storage_class).split(
-                                "."
+                            "base_type": str(symbol.base_type).rsplit(
+                                ".", maxsplit=1
+                            )[-1],
+                            "complex_type": str(symbol.complex_type).rsplit(
+                                ".", maxsplit=1
+                            )[-1],
+                            "storage_class": str(symbol.storage_class).rsplit(
+                                ".", maxsplit=1
                             )[-1],
                         }
                     )
@@ -438,13 +443,14 @@ def parse_pe_exports(exports):
         LOG.debug("Parsing exports")
         exports_list = []
         entries = exports.entries
+        metadata = {}
         for entry in entries:
             extern = "[EXTERN]" if entry.is_extern else ""
             if entry.name:
                 metadata = {
                     "name": entry.name,
                     "ordinal": entry.ordinal,
-                    "address": address_fmt.format(entry.address),
+                    "address": ADDRESS_FMT.format(entry.address),
                     "extern": extern,
                 }
             fwd = entry.forward_information if entry.is_forwarded else None
@@ -473,7 +479,7 @@ def parse_macho_symbols(symbols):
             symbol_value = (
                 symbol.value
                 if symbol.value > 0 or not symbol.has_binding_info
-                else address_fmt.format(symbol.binding_info.address)
+                else ADDRESS_FMT.format(symbol.binding_info.address)
             )
 
             try:
@@ -521,7 +527,10 @@ def parse(exe_file):
             eflags_str = ""
             if header.machine_type == lief.ELF.ARCH.ARM:
                 eflags_str = " - ".join(
-                    [str(s).split(".")[-1] for s in header.arm_flags_list]
+                    [
+                        str(s).rsplit(".", maxsplit=1)[-1]
+                        for s in header.arm_flags_list
+                    ]
                 )
             if header.machine_type in [
                 lief.ELF.ARCH.MIPS,
@@ -529,31 +538,48 @@ def parse(exe_file):
                 lief.ELF.ARCH.MIPS_X,
             ]:
                 eflags_str = " - ".join(
-                    [str(s).split(".")[-1] for s in header.mips_flags_list]
+                    [
+                        str(s).rsplit(".", maxsplit=1)[-1]
+                        for s in header.mips_flags_list
+                    ]
                 )
             if header.machine_type == lief.ELF.ARCH.PPC64:
                 eflags_str = " - ".join(
-                    [str(s).split(".")[-1] for s in header.ppc64_flags_list]
+                    [
+                        str(s).rsplit(".", maxsplit=1)[-1]
+                        for s in header.ppc64_flags_list
+                    ]
                 )
             if header.machine_type == lief.ELF.ARCH.HEXAGON:
                 eflags_str = " - ".join(
-                    [str(s).split(".")[-1] for s in header.hexagon_flags_list]
+                    [
+                        str(s).rsplit(".", maxsplit=1)[-1]
+                        for s in header.hexagon_flags_list
+                    ]
                 )
             metadata["magic"] = ("{:<02x} " * 8).format(*identity[:8]).strip()
-            metadata["class"] = str(header.identity_class).split(".")[-1]
-            metadata["endianness"] = str(header.identity_data).split(".")[-1]
-            metadata["identity_version"] = str(header.identity_version).split(
-                "."
+            metadata["class"] = str(header.identity_class).rsplit(
+                ".", maxsplit=1
             )[-1]
-            metadata["identity_os_abi"] = str(header.identity_os_abi).split(
-                "."
+            metadata["endianness"] = str(header.identity_data).rsplit(
+                ".", maxsplit=1
+            )[-1]
+            metadata["identity_version"] = str(header.identity_version).rsplit(
+                ".", maxsplit=1
+            )[-1]
+            metadata["identity_os_abi"] = str(header.identity_os_abi).rsplit(
+                ".", maxsplit=1
             )[-1]
             metadata["identity_abi_version"] = header.identity_abi_version
-            metadata["file_type"] = str(header.file_type).split(".")[-1]
-            metadata["machine_type"] = str(header.machine_type).split(".")[-1]
+            metadata["file_type"] = str(header.file_type).rsplit(
+                ".", maxsplit=1
+            )[-1]
+            metadata["machine_type"] = str(header.machine_type).rsplit(
+                ".", maxsplit=1
+            )[-1]
             metadata["object_file_version"] = str(
                 header.object_file_version
-            ).split(".")[-1]
+            ).rsplit(".", maxsplit=1)[-1]
             metadata["entrypoint"] = header.entrypoint
             metadata["processor_flag"] = str(header.processor_flag) + eflags_str
             metadata["name"] = parsed_obj.name
@@ -603,7 +629,9 @@ def parse(exe_file):
                         metadata["dynamic_entries"].append(
                             {
                                 "name": entry.name,
-                                "tag": str(entry.tag).split(".")[-1],
+                                "tag": str(entry.tag).rsplit(".", maxsplit=1)[
+                                    -1
+                                ],
                                 "value": entry.value,
                             }
                         )
@@ -705,18 +733,18 @@ def parse(exe_file):
                 metadata["checksum"] = dos_header.checksum
                 metadata["initial_ip"] = dos_header.initial_ip
                 metadata["initial_relative_cs"] = dos_header.initial_relative_cs
-                metadata["address_relocation_table"] = address_fmt.format(
+                metadata["address_relocation_table"] = ADDRESS_FMT.format(
                     dos_header.addressof_relocation_table
                 )
                 metadata["overlay_number"] = dos_header.overlay_number
                 metadata["oem_id"] = dos_header.oem_id
                 metadata["oem_info"] = dos_header.oem_info
-                metadata["address_new_exeheader"] = address_fmt.format(
+                metadata["address_new_exeheader"] = ADDRESS_FMT.format(
                     dos_header.addressof_new_exeheader
                 )
                 metadata["characteristics"] = ", ".join(
                     [
-                        str(chara).split(".")[-1]
+                        str(chara).rsplit(".", maxsplit=1)[-1]
                         for chara in header.characteristics_list
                     ]
                 )
@@ -727,12 +755,12 @@ def parse(exe_file):
                 metadata["size_optional_header"] = header.sizeof_optional_header
                 metadata["dll_characteristics"] = ", ".join(
                     [
-                        str(chara).split(".")[-1]
+                        str(chara).rsplit(".", maxsplit=1)[-1]
                         for chara in optional_header.dll_characteristics_lists
                     ]
                 )
-                metadata["subsystem"] = str(optional_header.subsystem).split(
-                    "."
+                metadata["subsystem"] = str(optional_header.subsystem).rsplit(
+                    ".", maxsplit=1
                 )[-1]
                 metadata["is_gui"] = (
                     True if metadata["subsystem"] == "WINDOWS_GUI" else False
@@ -755,7 +783,7 @@ def parse(exe_file):
                 metadata["sizeof_uninitialized_data"] = (
                     optional_header.sizeof_uninitialized_data
                 )
-                metadata["addressof_entrypoint"] = address_fmt.format(
+                metadata["addressof_entrypoint"] = ADDRESS_FMT.format(
                     optional_header.addressof_entrypoint
                 )
                 metadata["baseof_code"] = optional_header.baseof_code
@@ -905,8 +933,8 @@ def parse(exe_file):
             try:
                 build_version = parsed_obj.build_version
                 if build_version:
-                    metadata["platform"] = str(build_version.platform).split(
-                        "."
+                    metadata["platform"] = str(build_version.platform).rsplit(
+                        ".", maxsplit=1
                     )[-1]
                     metadata["minos"] = "{:d}.{:d}.{:d}".format(
                         *build_version.minos
@@ -918,7 +946,9 @@ def parse(exe_file):
                     if len(tools) > 0:
                         metadata["tools"] = []
                         for tool in tools:
-                            tool_str = str(tool.tool).split(".")[-1]
+                            tool_str = str(tool.tool).rsplit(".", maxsplit=1)[
+                                -1
+                            ]
                             metadata["tools"].append(
                                 {
                                     "tool": tool_str,
@@ -981,12 +1011,21 @@ def parse(exe_file):
             try:
                 header = parsed_obj.header
                 flags_str = ", ".join(
-                    [str(s).split(".")[-1] for s in header.flags_list]
+                    [
+                        str(s).rsplit(".", maxsplit=1)[-1]
+                        for s in header.flags_list
+                    ]
                 )
-                metadata["magic"] = str(header.magic).split(".")[-1]
-                metadata["cpu_type"] = str(header.cpu_type).split(".")[-1]
+                metadata["magic"] = str(header.magic).rsplit(".", maxsplit=1)[
+                    -1
+                ]
+                metadata["cpu_type"] = str(header.cpu_type).rsplit(
+                    ".", maxsplit=1
+                )[-1]
                 metadata["cpu_subtype"] = header.cpu_subtype
-                metadata["file_type"] = str(header.file_type).split(".")[-1]
+                metadata["file_type"] = str(header.file_type).rsplit(
+                    ".", maxsplit=1
+                )[-1]
                 metadata["flags"] = flags_str
                 metadata["number_commands"] = header.nb_cmds
                 metadata["size_commands"] = header.sizeof_cmds

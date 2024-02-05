@@ -124,7 +124,7 @@ def generate(src_dirs, output_file):
         len(components),
         len(dependencies),
     )
-    with open(output_file, mode="w") as fp:
+    with open(output_file, mode="w", encoding="utf-8") as fp:
         fp.write(
             sbom.model_dump_json(
                 indent=2,
