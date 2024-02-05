@@ -703,7 +703,7 @@ def parse(exe_file):
             # Parse header
             try:
                 metadata["binary_type"] = "PE"
-                metadata["name"] = parsed_obj.name
+                metadata["name"] = exe_file
                 metadata["is_pie"] = parsed_obj.is_pie
                 metadata["is_reproducible_build"] = (
                     parsed_obj.is_reproducible_build
@@ -899,7 +899,7 @@ def parse(exe_file):
         elif isinstance(parsed_obj, MachO.Binary):
             # MachO
             metadata["binary_type"] = "MachO"
-            metadata["name"] = parsed_obj.name
+            metadata["name"] = exe_file
             metadata["imagebase"] = parsed_obj.imagebase
             metadata["is_pie"] = parsed_obj.is_pie
             metadata["has_nx"] = parsed_obj.has_nx
