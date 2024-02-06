@@ -17,8 +17,13 @@ from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import (find_exe_files, is_exe, is_fuzzable_name,
-                         is_ignored_file, parse_pe_manifest)
+from blint.utils import (
+    find_exe_files,
+    is_exe,
+    is_fuzzable_name,
+    is_ignored_file,
+    parse_pe_manifest,
+)
 
 try:
     import importlib.resources
@@ -32,15 +37,18 @@ if HAVE_RESOURCE_READER:
     try:
         review_files = (
             resource.name
-            for resource
-            in importlib.resources.files("blint.data.annotations").iterdir()
+            for resource in importlib.resources.files(
+                "blint.data.annotations"
+            ).iterdir()
             if resource.is_file() and resource.name.endswith(".yml")
         )
     except Exception:
         pass
 else:
     review_methods_dir = Path(__file__).parent / "data" / "annotations"
-    review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
+    review_files = [
+        p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")
+    ]
 
 rules_dict = {}
 review_exe_dict = defaultdict(list)
@@ -65,7 +73,11 @@ def get_resource(package, resource):
         # If we're in the context of a module, we could also use
         # ``__loader__.get_resource_reader(__name__).open_resource(resource)``.
         # We use open_binary() because it is simple.
-        return importlib.resources.files(package).joinpath(resource).open('r', encoding='utf-8')
+        return (
+            importlib.resources.files(package)
+            .joinpath(resource)
+            .open("r", encoding="utf-8")
+        )
 
     # Fall back to __file__.
 
@@ -243,7 +255,9 @@ def run_checks(f, metadata):
             if result is False or isinstance(result, str):
                 aresult = {**rule_obj, "filename": f}
                 if isinstance(result, str):
-                    aresult["title"] = "{} ({})".format(aresult["title"], result)
+                    aresult["title"] = "{} ({})".format(
+                        aresult["title"], result
+                    )
                 if metadata.get("name"):
                     aresult["exe_name"] = metadata.get("name")
                 aresult["exe_type"] = exe_type
@@ -268,9 +282,9 @@ def run_review_methods_symbols(review_methods_list, functions_list):
                 ):
                     continue
                 for afun in functions_list:
-                    if (apattern.lower() in afun.lower()) and not found_function.get(
-                        afun.lower()
-                    ):
+                    if (
+                        apattern.lower() in afun.lower()
+                    ) and not found_function.get(afun.lower()):
                         result = {
                             "pattern": apattern,
                             "function": afun,
@@ -324,21 +338,31 @@ def run_review(f, metadata):
                 run_review_methods_symbols(review_methods_list, functions_list)
             )
         if review_exe_list:
-            results.update(run_review_methods_symbols(review_exe_list, functions_list))
+            results.update(
+                run_review_methods_symbols(review_exe_list, functions_list)
+            )
     if review_symbols_list or review_exe_list:
-        symbols_list = [f.get("name", "") for f in metadata.get("dynamic_symbols", [])]
-        symbols_list += [f.get("name", "") for f in metadata.get("static_symbols", [])]
+        symbols_list = [
+            f.get("name", "") for f in metadata.get("dynamic_symbols", [])
+        ]
+        symbols_list += [
+            f.get("name", "") for f in metadata.get("static_symbols", [])
+        ]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         if review_symbols_list:
             results.update(
                 run_review_methods_symbols(review_symbols_list, symbols_list)
             )
         if review_exe_list:
-            results.update(run_review_methods_symbols(review_exe_list, symbols_list))
+            results.update(
+                run_review_methods_symbols(review_exe_list, symbols_list)
+            )
     if review_imports_list:
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
         LOG.debug(f"Reviewing {len(imports_list)} imports")
-        results.update(run_review_methods_symbols(review_imports_list, imports_list))
+        results.update(
+            run_review_methods_symbols(review_imports_list, imports_list)
+        )
     if review_entries_list:
         entries_list = [
             f.get("name", "")
@@ -346,7 +370,9 @@ def run_review(f, metadata):
             if f.get("tag") == "NEEDED"
         ]
         LOG.debug(f"Reviewing {len(entries_list)} dynamic entries")
-        results.update(run_review_methods_symbols(review_entries_list, entries_list))
+        results.update(
+            run_review_methods_symbols(review_entries_list, entries_list)
+        )
     return results
 
 
@@ -456,7 +482,11 @@ def start(args, src, reports_dir):
                 fuzzdata = run_prefuzz(f, metadata)
                 if fuzzdata:
                     fuzzables.append(
-                        {"filename": f, "exe_name": exe_name, "methods": fuzzdata}
+                        {
+                            "filename": f,
+                            "exe_name": exe_name,
+                            "methods": fuzzdata,
+                        }
                     )
             progress.advance(task)
     return findings, reviews, files, fuzzables
@@ -477,7 +507,8 @@ def print_findings_table(findings, files):
     for f in findings:
         severity = f.get("severity").upper()
         severity_fmt = "{}{}".format(
-            "[bright_red]" if severity in ("CRITICAL", "HIGH") else "", severity
+            "[bright_red]" if severity in ("CRITICAL", "HIGH") else "",
+            severity,
         )
         if len(files) > 1:
             table.add_row(
@@ -537,7 +568,9 @@ def report(args, src_dir, reports_dir, findings, reviews, files, fuzzables):
         findings_file = Path(reports_dir) / "findings.json"
         LOG.info(f"Findings written to {findings_file}")
         with open(findings_file, mode="w") as ffp:
-            json.dump({**common_metadata, "findings": findings}, ffp, indent=True)
+            json.dump(
+                {**common_metadata, "findings": findings}, ffp, indent=True
+            )
     if reviews:
         print_reviews_table(reviews, files)
         reviews_file = Path(reports_dir) / "reviews.json"
@@ -548,7 +581,9 @@ def report(args, src_dir, reports_dir, findings, reviews, files, fuzzables):
         fuzzables_file = Path(reports_dir) / "fuzzables.json"
         LOG.info(f"Fuzzables data written to {fuzzables_file}")
         with open(fuzzables_file, mode="w") as rfp:
-            json.dump({**common_metadata, "fuzzables": fuzzables}, rfp, indent=True)
+            json.dump(
+                {**common_metadata, "fuzzables": fuzzables}, rfp, indent=True
+            )
     else:
         LOG.debug("No suggestion available for fuzzing")
 

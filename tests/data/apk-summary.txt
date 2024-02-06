@@ -1,0 +1,1 @@
+io.homeassistant.companion.android.debug	1	2024.2.1-beta.0.0+20240202T181312Z-full

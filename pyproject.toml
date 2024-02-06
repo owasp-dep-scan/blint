@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "blint"
 version = "2.0.0"
-description = "Linter for binary files powered by lief"
+description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
 maintainers= ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "Apache-2.0"
@@ -30,10 +30,11 @@ blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-lief = "^0.12.3"
-rich = "^13.4.1"
-PyYAML = "^6.0"
+lief = "^0.14.0"
+rich = "^13.7.0"
+PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
+pydantic = {version = "^2.6.0", extras = ["email"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
@@ -43,7 +44,7 @@ pytest-cov = "^4.0.0"
 pyinstaller = "^6.3.0"
 
 [tool.black]
-line-length = 79
+line-length = 80
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -52,3 +53,8 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 addopts = "--verbose --cov-append --cov-report term --cov blint"
 
+[tool.flake8]
+ignore = "E203, E266, E501, W503, W605"
+max-line-length = 80
+max-complexity = 18
+select = "B,C,E,F,W,T4,B9"

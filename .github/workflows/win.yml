@@ -7,13 +7,17 @@ on:
 jobs:
   Blint-Build:
     runs-on: windows-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     steps:
     - uses: actions/checkout@v4
       with:
         path: blint
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.11'
     - name: Install poetry
       id: poetry
       run: |

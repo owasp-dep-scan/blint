@@ -2,52 +2,44 @@ FROM almalinux:9.3-minimal
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
-      org.opencontainers.image.source="https://github.com/OWASP-dep-scan/blint" \
-      org.opencontainers.image.url="https://github.com/OWASP-dep-scan/blint" \
-      org.opencontainers.image.version="2.0.0" \
+      org.opencontainers.image.source="https://github.com/owasp-dep-scan/blint" \
+      org.opencontainers.image.url="https://github.com/owasp-dep-scan/blint" \
+      org.opencontainers.image.version="2.0.x" \
       org.opencontainers.image.vendor="AppThreat" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.title="blint" \
-      org.opencontainers.image.description="BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by lief." \
-      org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/OWASP-dep-scan/blint"
+      org.opencontainers.image.description="BLint is a Binary Linter and SBOM generator." \
+      org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/owasp-dep-scan/blint"
 
-ARG TARGETPLATFORM
-ARG JAVA_VERSION=22.3.r19-grl
-ARG SBT_VERSION=1.9.0
-ARG MAVEN_VERSION=3.9.2
-ARG GRADLE_VERSION=8.1.1
-ARG ARCH_NAME=x86_64
-
-ENV GOPATH=/opt/app-root/go \
-    GO_VERSION=1.20.4 \
-    JAVA_VERSION=$JAVA_VERSION \
-    SBT_VERSION=$SBT_VERSION \
-    MAVEN_VERSION=$MAVEN_VERSION \
-    GRADLE_VERSION=$GRADLE_VERSION \
-    GRADLE_OPTS="-Dorg.gradle.daemon=false" \
-    JAVA_HOME="/opt/java/${JAVA_VERSION}" \
-    MAVEN_HOME="/opt/maven/${MAVEN_VERSION}" \
-    GRADLE_HOME="/opt/gradle/${GRADLE_VERSION}" \
-    SBT_HOME="/opt/sbt/${SBT_VERSION}" \
-    COMPOSER_ALLOW_SUPERUSER=1 \
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    ANDROID_HOME=/opt/android-sdk-linux \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8"
-ENV PATH=${PATH}:${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${GRADLE_HOME}/bin:${SBT_HOME}/bin:${GOPATH}/bin:/usr/local/go/bin:/usr/local/bin/:/root/.local/bin:
+ENV PATH=${PATH}:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
-COPY . /opt/blint
-
-RUN microdnf install -y python3.11 python3.11-devel python3.11-pip \
+RUN microdnf install -y python3.11 python3.11-devel python3.11-pip java-21-openjdk-headless make gcc \
+        which tar gzip zip unzip sudo ncurses \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install setuptools --upgrade \
-    && python3 -m pip install poetry
-
+    && python3 -m pip install poetry \
+    && microdnf install -y epel-release \
+    && mkdir -p ${ANDROID_HOME}/cmdline-tools \
+    && curl -L https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
+    && unzip ${ANDROID_HOME}/cmdline-tools/android_tools.zip -d ${ANDROID_HOME}/cmdline-tools/ \
+    && rm ${ANDROID_HOME}/cmdline-tools/android_tools.zip \
+    && mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
+    && yes | /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=/opt/android-sdk-linux \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platform-tools' --sdk_root=/opt/android-sdk-linux \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' --sdk_root=/opt/android-sdk-linux \
+    && /opt/android-sdk-linux/cmdline-tools/latest/bin/sdkmanager 'build-tools;34.0.0' --sdk_root=/opt/android-sdk-linux
+COPY . /opt/blint
 RUN cd /opt/blint \
     && poetry config virtualenvs.create false \
     && poetry install --no-cache --without dev \
     && chmod a-w -R /opt \
+    && microdnf remove make gcc -y \
     && microdnf clean all
-
 
 ENTRYPOINT [ "blint" ]
