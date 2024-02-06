@@ -132,7 +132,7 @@ def main():
             sbom_output = args.sbom_output
         else:
             sbom_output = os.path.join(os.getcwd(), "bom.json")
-        generate(src_dirs, sbom_output)
+        generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
         # Create reports directory

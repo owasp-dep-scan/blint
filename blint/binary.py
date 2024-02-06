@@ -1,7 +1,7 @@
 import sys
 
 import lief
-from lief import ELF, PE, MachO
+from lief import DEX, ELF, PE, MachO
 
 from blint.logger import LOG
 from blint.utils import calculate_entropy, check_secret, decode_base64
@@ -1104,6 +1104,25 @@ def parse(exe_file):
                     }
             except Exception:
                 pass
+    except Exception as e:
+        LOG.exception(e)
+    return metadata
+
+
+def parse_dex(dex_file):
+    """Parse dex files"""
+    metadata = {"file_path": dex_file}
+    try:
+        dexfile_obj = DEX.parse(dex_file)
+        metadata["version"] = dexfile_obj.version
+        metadata["header"] = dexfile_obj.header
+        metadata["classes"] = dexfile_obj.classes
+        metadata["fields"] = dexfile_obj.fields
+        metadata["methods"] = dexfile_obj.methods
+        metadata["strings"] = dexfile_obj.strings
+        metadata["types"] = dexfile_obj.types
+        metadata["prototypes"] = dexfile_obj.prototypes
+        metadata["map"] = dexfile_obj.map
     except Exception as e:
         LOG.exception(e)
     return metadata
