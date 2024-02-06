@@ -140,7 +140,6 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         rel_path = os.path.relpath(vf, app_temp_dir)
         group = ""
         name = ""
-        version_data = ""
         if "_" in file_name:
             parts = file_name.split("_")
             name = file_name
@@ -286,12 +285,12 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
             evidence=ComponentEvidence(
                 identity=Identity(
                     field=FieldModel.purl,
-                    confidence=0.5,
+                    confidence=0.2,
                     methods=[
                         Method(
                             technique=Technique.binary_analysis,
                             value=rel_path,
-                            confidence=0.5,
+                            confidence=0.2,
                         )
                     ],
                 )
@@ -300,42 +299,36 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
                 Property(name="internal:srcFile", value=rel_path),
                 Property(name="internal:appFile", value=app_file),
                 Property(
-                    name="internal:header",
-                    value=", ".join(dex_metadata.get("header")),
-                ),
-                Property(
                     name="internal:functions",
-                    value=", ".join(dex_metadata.get("methods")),
+                    value=", ".join(
+                        set(
+                            [
+                                f"""{m.name}({','.join([_clean_type(p.underlying_array_type) for p in m.prototype.parameters_type])}):{_clean_type(m.prototype.return_type.underlying_array_type)}"""
+                                for m in dex_metadata.get("methods")
+                            ]
+                        )
+                    ),
                 ),
                 Property(
                     name="internal:classes",
-                    value=", ".join(dex_metadata.get("classes")),
-                ),
-                Property(
-                    name="internal:fields",
-                    value=", ".join(dex_metadata.get("fields")),
-                ),
-                Property(
-                    name="internal:strings",
-                    value=", ".join(dex_metadata.get("strings")),
-                ),
-                Property(
-                    name="internal:types",
-                    value=", ".join(dex_metadata.get("types")),
-                ),
-                Property(
-                    name="internal:prototypes",
-                    value=", ".join(dex_metadata.get("prototypes")),
-                ),
-                Property(
-                    name="internal:map",
-                    value=", ".join(dex_metadata.get("map")),
+                    value=", ".join(
+                        set(
+                            [
+                                _clean_type(c.fullname)
+                                for c in dex_metadata.get("classes")
+                            ]
+                        )
+                    ),
                 ),
             ],
         )
         component.bom_ref = RefType(purl)
         file_components.append(component)
     return file_components
+
+
+def _clean_type(t):
+    return str(t).replace("/", ".").removeprefix("L").removesuffix(";")
 
 
 def collect_files_metadata(app_file, parent_component, deep_mode):

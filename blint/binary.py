@@ -94,19 +94,19 @@ def parse_relro(parsed_obj):
     now = False
     try:
         parsed_obj.get(lief.ELF.SEGMENT_TYPES.GNU_RELRO)
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         return "no"
     try:
         dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS)
         if dynamic_tags:
             bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in dynamic_tags
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         pass
     try:
         dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS_1)
         if dynamic_tags:
             now = lief.ELF.DYNAMIC_FLAGS_1.NOW in dynamic_tags
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         pass
     if bind_now or now:
         return "full"
@@ -597,19 +597,19 @@ def parse(exe_file):
                     if parsed_obj.get_symbol(section):
                         metadata["has_canary"] = True
                         break
-                except lief.not_found:
+                except lief.lief_errors.not_found:
                     metadata["has_canary"] = False
             # rpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RPATH):
                     metadata["has_rpath"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_rpath"] = False
             # runpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RUNPATH):
                     metadata["has_runpath"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_runpath"] = False
             static_symbols = parsed_obj.static_symbols
             if len(static_symbols):
@@ -762,9 +762,7 @@ def parse(exe_file):
                 metadata["subsystem"] = str(optional_header.subsystem).rsplit(
                     ".", maxsplit=1
                 )[-1]
-                metadata["is_gui"] = (
-                    True if metadata["subsystem"] == "WINDOWS_GUI" else False
-                )
+                metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
                 metadata["exe_type"] = (
                     "PE32"
                     if optional_header.magic == PE.PE_TYPE.PE32
@@ -1038,7 +1036,7 @@ def parse(exe_file):
                     metadata["has_main_command"] = True
                 if parsed_obj.thread_command:
                     metadata["has_thread_command"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_main"] = False
                 metadata["has_thread_command"] = False
             try:
@@ -1116,12 +1114,12 @@ def parse_dex(dex_file):
         dexfile_obj = DEX.parse(dex_file)
         metadata["version"] = dexfile_obj.version
         metadata["header"] = dexfile_obj.header
-        metadata["classes"] = dexfile_obj.classes
-        metadata["fields"] = dexfile_obj.fields
-        metadata["methods"] = dexfile_obj.methods
-        metadata["strings"] = dexfile_obj.strings
-        metadata["types"] = dexfile_obj.types
-        metadata["prototypes"] = dexfile_obj.prototypes
+        metadata["classes"] = [cls for cls in dexfile_obj.classes]
+        metadata["fields"] = [f for f in dexfile_obj.fields]
+        metadata["methods"] = [m for m in dexfile_obj.methods]
+        metadata["strings"] = list(dexfile_obj.strings)
+        metadata["types"] = [t for t in dexfile_obj.types]
+        metadata["prototypes"] = [p for p in dexfile_obj.prototypes]
         metadata["map"] = dexfile_obj.map
     except Exception as e:
         LOG.exception(e)
