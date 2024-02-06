@@ -860,9 +860,10 @@ def parse(exe_file):
             except Exception:
                 pass
             try:
-                metadata["imports"], metadata["dynamic_entries"] = (
-                    parse_pe_imports(parsed_obj.imports)
-                )
+                (
+                    metadata["imports"],
+                    metadata["dynamic_entries"],
+                ) = parse_pe_imports(parsed_obj.imports)
             except Exception:
                 pass
             try:
