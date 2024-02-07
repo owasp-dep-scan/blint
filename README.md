@@ -71,14 +71,16 @@ sub-commands:
 ### SBOM sub-command
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [--output-file SBOM_OUTPUT]
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep]
 
 options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
-  --output-file SBOM_OUTPUT
+  -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
                         SBOM output file. Defaults to bom.json in current directory.
+  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
+                        operation.
 ```
 
 To test any binary including default commands
@@ -107,6 +109,12 @@ blint sbom -i /path/to/apk -o bom.json
 
 ```shell
 blint sbom -i /directory/with/apk/aab -o bom.json
+```
+
+To parse all files including `.dex` files, pass `--deep` argument.
+
+```shell
+blint sbom -i /path/to/apk -o bom.json --deep
 ```
 
 PowerShell example

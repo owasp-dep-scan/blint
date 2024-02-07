@@ -91,6 +91,13 @@ def build_args():
         dest="sbom_output",
         help="SBOM output file. Defaults to bom.json in current directory.",
     )
+    sbom_parser.add_argument(
+        "--deep",
+        action="store_true",
+        default=False,
+        dest="deep_mode",
+        help="Enable deep mode to collect more used symbols and modules aggressively. Slow operation.",
+    )
     return parser.parse_args()
 
 
@@ -125,7 +132,7 @@ def main():
             sbom_output = args.sbom_output
         else:
             sbom_output = os.path.join(os.getcwd(), "bom.json")
-        generate(src_dirs, sbom_output)
+        generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
         # Create reports directory

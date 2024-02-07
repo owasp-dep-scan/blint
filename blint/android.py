@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 
-from blint.binary import parse
+from blint.binary import parse, parse_dex
 from blint.cyclonedx.spec import (
     Component,
     ComponentEvidence,
@@ -64,7 +64,7 @@ def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
         return None
 
 
-def collect_app_metadata(app_file):
+def collect_app_metadata(app_file, deep_mode):
     """
     Collect various metadata about an android app
     """
@@ -81,7 +81,7 @@ def collect_app_metadata(app_file):
             parent_component.properties.append(
                 Property(name="internal.appPermissions", value=permissions)
             )
-    components = collect_files_metadata(app_file)
+    components = collect_files_metadata(app_file, parent_component, deep_mode)
     return parent_component, components
 
 
@@ -140,7 +140,6 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         rel_path = os.path.relpath(vf, app_temp_dir)
         group = ""
         name = ""
-        version_data = ""
         if "_" in file_name:
             parts = file_name.split("_")
             name = file_name
@@ -257,7 +256,84 @@ def collect_so_files_metadata(app_file, app_temp_dir):
     return file_components
 
 
-def collect_files_metadata(app_file):
+def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
+    file_components = []
+    # Parse all .dex files
+    dex_files = find_files(app_temp_dir, [".dex"])
+    for adex in dex_files:
+        dex_metadata = parse_dex(adex)
+        name = os.path.basename(adex).removesuffix(".dex")
+        rel_path = os.path.relpath(adex, app_temp_dir)
+        group = (
+            parent_component.group
+            if parent_component and parent_component.group
+            else ""
+        )
+        version = (
+            parent_component.version
+            if parent_component and parent_component.version
+            else "latest"
+        )
+        purl = f"pkg:generic/{name}@{version}"
+        component = Component(
+            type=Type.file,
+            group=group,
+            name=name,
+            version=version,
+            purl=purl,
+            scope=Scope.required,
+            evidence=ComponentEvidence(
+                identity=Identity(
+                    field=FieldModel.purl,
+                    confidence=0.2,
+                    methods=[
+                        Method(
+                            technique=Technique.binary_analysis,
+                            value=rel_path,
+                            confidence=0.2,
+                        )
+                    ],
+                )
+            ),
+            properties=[
+                Property(name="internal:srcFile", value=rel_path),
+                Property(name="internal:appFile", value=app_file),
+                Property(
+                    name="internal:functions",
+                    value=", ".join(
+                        set(
+                            [
+                                f"""{m.name}({','.join([_clean_type(p.underlying_array_type) for p in m.prototype.parameters_type])}):{_clean_type(m.prototype.return_type.underlying_array_type)}"""
+                                for m in dex_metadata.get("methods")
+                            ]
+                        )
+                    ),
+                ),
+                Property(
+                    name="internal:classes",
+                    value=", ".join(
+                        set(
+                            sorted(
+                                [
+                                    _clean_type(c.fullname)
+                                    for c in dex_metadata.get("classes")
+                                ]
+                            )
+                        )
+                    ),
+                ),
+            ],
+        )
+        component.bom_ref = RefType(purl)
+        file_components.append(component)
+    return file_components
+
+
+def _clean_type(t):
+    return str(t).replace("/", ".").removeprefix("L").removesuffix(";")
+
+
+def collect_files_metadata(app_file, parent_component, deep_mode):
     """
     Unzip the app and collect metadata
     """
@@ -266,6 +342,10 @@ def collect_files_metadata(app_file):
     unzip_unsafe(app_file, app_temp_dir)
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     file_components += collect_so_files_metadata(app_file, app_temp_dir)
+    if deep_mode:
+        file_components += collect_dex_files_metadata(
+            app_file, parent_component, app_temp_dir
+        )
     shutil.rmtree(app_temp_dir, ignore_errors=True)
     return file_components
 

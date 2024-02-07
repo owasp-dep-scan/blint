@@ -53,7 +53,7 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs, output_file):
+def generate(src_dirs, output_file, deep_mode):
     android_files = []
     components = []
     dependencies = []
@@ -84,7 +84,9 @@ def generate(src_dirs, output_file):
         for f in android_files:
             dependencies_dict = {}
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
-            parent_component, app_components = collect_app_metadata(f)
+            parent_component, app_components = collect_app_metadata(
+                f, deep_mode
+            )
             if parent_component:
                 if not sbom.metadata.component.components:
                     sbom.metadata.component.components = []
