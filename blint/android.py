@@ -313,10 +313,12 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
                     name="internal:classes",
                     value=", ".join(
                         set(
-                            [
-                                _clean_type(c.fullname)
-                                for c in dex_metadata.get("classes")
-                            ]
+                            sorted(
+                                [
+                                    _clean_type(c.fullname)
+                                    for c in dex_metadata.get("classes")
+                                ]
+                            )
                         )
                     ),
                 ),
