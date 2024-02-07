@@ -1,7 +1,6 @@
 import sys
 
 import lief
-from lief import DEX, ELF, PE, MachO
 
 from blint.logger import DEBUG, LOG
 from blint.utils import calculate_entropy, check_secret, decode_base64
@@ -228,6 +227,7 @@ def detect_exe_type(parsed_obj, metadata):
             return "genericbinary"
     except Exception:
         return ""
+    return ""
 
 
 def guess_exe_type(symbol_name):
@@ -376,7 +376,7 @@ def parse_pe_symbols(symbols):
         for symbol in symbols:
             if symbol.section_number <= 0:
                 section_nb_str = str(
-                    PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
+                    lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
                 ).rsplit(".", maxsplit=1)[-1]
             else:
                 try:
@@ -522,7 +522,7 @@ def parse(exe_file):
         parsed_obj = lief.parse(exe_file)
         metadata["is_shared_library"] = is_shared_library(parsed_obj)
         # ELF Binary
-        if isinstance(parsed_obj, ELF.Binary):
+        if isinstance(parsed_obj, lief.ELF.Binary):
             metadata["binary_type"] = "ELF"
             header = parsed_obj.header
             identity = header.identity
@@ -620,13 +620,13 @@ def parse(exe_file):
             if len(dynamic_entries):
                 metadata["dynamic_entries"] = []
                 for entry in dynamic_entries:
-                    if entry.tag == ELF.DYNAMIC_TAGS.NULL:
+                    if entry.tag == lief.ELF.DYNAMIC_TAGS.NULL:
                         continue
                     if entry.tag in [
-                        ELF.DYNAMIC_TAGS.SONAME,
-                        ELF.DYNAMIC_TAGS.NEEDED,
-                        ELF.DYNAMIC_TAGS.RUNPATH,
-                        ELF.DYNAMIC_TAGS.RPATH,
+                        lief.ELF.DYNAMIC_TAGS.SONAME,
+                        lief.ELF.DYNAMIC_TAGS.NEEDED,
+                        lief.ELF.DYNAMIC_TAGS.RUNPATH,
+                        lief.ELF.DYNAMIC_TAGS.RPATH,
                     ]:
                         metadata["dynamic_entries"].append(
                             {
@@ -700,7 +700,7 @@ def parse(exe_file):
                 )
             except Exception:
                 pass
-        elif isinstance(parsed_obj, PE.Binary):
+        elif isinstance(parsed_obj, lief.PE.Binary):
             # PE
             # Parse header
             try:
@@ -767,7 +767,7 @@ def parse(exe_file):
                 metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
                 metadata["exe_type"] = (
                     "PE32"
-                    if optional_header.magic == PE.PE_TYPE.PE32
+                    if optional_header.magic == lief.PE.PE_TYPE.PE32
                     else "PE64"
                 )
                 metadata["major_linker_version"] = (
@@ -897,7 +897,7 @@ def parse(exe_file):
                     metadata["tls_directory_type"] = str(tls.directory.type)
             except Exception:
                 pass
-        elif isinstance(parsed_obj, MachO.Binary):
+        elif isinstance(parsed_obj, lief.MachO.Binary):
             # MachO
             metadata["binary_type"] = "MachO"
             metadata["name"] = exe_file
@@ -1086,7 +1086,7 @@ def parse(exe_file):
                     code_signature = parsed_obj.code_signature_dir
                     metadata["code_signature"] = {
                         "available": True if code_signature.size else False,
-                        "data": str(bytes(code_signature.data).hex()),
+                        "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
                     }
@@ -1098,7 +1098,7 @@ def parse(exe_file):
                 if parsed_obj.has_data_in_code:
                     data_in_code = parsed_obj.data_in_code
                     metadata["data_in_code"] = {
-                        "data": str(bytes(data_in_code.data).hex()),
+                        "data": str(data_in_code.data.hex()),
                         "data_size": str(data_in_code.data_size),
                         "size": str(data_in_code.size),
                     }
@@ -1113,15 +1113,15 @@ def parse_dex(dex_file):
     """Parse dex files"""
     metadata = {"file_path": dex_file}
     try:
-        dexfile_obj = DEX.parse(dex_file)
+        dexfile_obj = lief.DEX.parse(dex_file)
         metadata["version"] = dexfile_obj.version
         metadata["header"] = dexfile_obj.header
-        metadata["classes"] = [cls for cls in dexfile_obj.classes]
-        metadata["fields"] = [f for f in dexfile_obj.fields]
-        metadata["methods"] = [m for m in dexfile_obj.methods]
+        metadata["classes"] = list(dexfile_obj.classes)
+        metadata["fields"] = list(dexfile_obj.fields)
+        metadata["methods"] = list(dexfile_obj.methods)
         metadata["strings"] = list(dexfile_obj.strings)
-        metadata["types"] = [t for t in dexfile_obj.types]
-        metadata["prototypes"] = [p for p in dexfile_obj.prototypes]
+        metadata["types"] = list(dexfile_obj.types)
+        metadata["prototypes"] = list(dexfile_obj.prototypes)
         metadata["map"] = dexfile_obj.map
     except Exception as e:
         LOG.exception(e)
