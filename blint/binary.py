@@ -24,11 +24,11 @@ def is_shared_library(parsed_obj):
         return False
     if parsed_obj.format == lief.Binary.FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
-    elif parsed_obj.format == lief.Binary.FORMATS.PE:
+    if parsed_obj.format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(
             lief.PE.Header.CHARACTERISTICS.DLL
         )
-    elif parsed_obj.format == lief.Binary.FORMATS.MACHO:
+    if parsed_obj.format == lief.Binary.FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
     return False
 
@@ -111,8 +111,7 @@ def parse_relro(parsed_obj):
         pass
     if bind_now or now:
         return "full"
-    else:
-        return "partial"
+    return "partial"
 
 
 def parse_functions(functions):
@@ -1074,7 +1073,7 @@ def parse(exe_file):
                 if parsed_obj.has_code_signature:
                     code_signature = parsed_obj.code_signature
                     metadata["code_signature"] = {
-                        "available": True if code_signature.size else False,
+                        "available": code_signature.size > 0,
                         "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
@@ -1085,7 +1084,7 @@ def parse(exe_file):
                 ):
                     code_signature = parsed_obj.code_signature_dir
                     metadata["code_signature"] = {
-                        "available": True if code_signature.size else False,
+                        "available": code_signature.size > 0,
                         "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
