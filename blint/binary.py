@@ -3,13 +3,15 @@ import sys
 import lief
 from lief import DEX, ELF, PE, MachO
 
-from blint.logger import LOG
+from blint.logger import DEBUG, LOG
 from blint.utils import calculate_entropy, check_secret, decode_base64
 
 MIN_ENTROPY = 0.39
 MIN_LENGTH = 80
 
-lief.logging.disable()
+# Enable lief logging in debug mode
+if LOG.level != DEBUG:
+    lief.logging.disable()
 
 ADDRESS_FMT = "0x{:<10x}"
 
@@ -54,7 +56,7 @@ def parse_notes(parsed_obj):
             ndk_build_number = ""
             abi = ""
             version_str = ""
-            if isinstance(note_details, lief.ELF.AndroidNote):
+            if isinstance(note_details, lief.ELF.AndroidIdent):
                 sdk_version = note_details.sdk_version
                 ndk_version = note_details.ndk_version
                 ndk_build_number = note_details.ndk_build_number
@@ -71,7 +73,7 @@ def parse_notes(parsed_obj):
             metadata["notes"].append(
                 {
                     "index": idx,
-                    "description": str(description_str),
+                    "description": description_str,
                     "type": type_str,
                     "details": note_details_str,
                     "sdk_version": sdk_version,
@@ -715,7 +717,7 @@ def parse(exe_file):
                 header = parsed_obj.header
                 optional_header = parsed_obj.optional_header
                 metadata["used_bytes_in_the_last_page"] = (
-                    dos_header.used_bytes_in_the_last_page
+                    dos_header.used_bytes_in_last_page
                 )
                 metadata["file_size_in_pages"] = dos_header.file_size_in_pages
                 metadata["num_relocation"] = dos_header.numberof_relocation
@@ -1073,7 +1075,7 @@ def parse(exe_file):
                     code_signature = parsed_obj.code_signature
                     metadata["code_signature"] = {
                         "available": True if code_signature.size else False,
-                        "data": str(bytes(code_signature.data).hex()),
+                        "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
                     }
@@ -1081,7 +1083,7 @@ def parse(exe_file):
                     not parsed_obj.has_code_signature
                     and parsed_obj.has_code_signature_dir
                 ):
-                    code_signature = parsed_obj.has_code_signature_dir
+                    code_signature = parsed_obj.code_signature_dir
                     metadata["code_signature"] = {
                         "available": True if code_signature.size else False,
                         "data": str(bytes(code_signature.data).hex()),
