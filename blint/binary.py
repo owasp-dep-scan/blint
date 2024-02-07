@@ -9,7 +9,6 @@ from blint.utils import calculate_entropy, check_secret, decode_base64
 MIN_ENTROPY = 0.39
 MIN_LENGTH = 80
 
-lief.logging.disable()
 
 ADDRESS_FMT = "0x{:<10x}"
 
@@ -54,10 +53,6 @@ def parse_notes(parsed_obj):
             ndk_build_number = ""
             abi = ""
             version_str = ""
-            if isinstance(note_details, lief.ELF.AndroidNote):
-                sdk_version = note_details.sdk_version
-                ndk_version = note_details.ndk_version
-                ndk_build_number = note_details.ndk_build_number
             if isinstance(note_details, lief.ELF.NoteAbi):
                 version = note_details.version
                 abi = str(note_details.abi)
@@ -71,7 +66,7 @@ def parse_notes(parsed_obj):
             metadata["notes"].append(
                 {
                     "index": idx,
-                    "description": str(description_str),
+                    "description": description_str,
                     "type": type_str,
                     "details": note_details_str,
                     "sdk_version": sdk_version,
@@ -94,19 +89,19 @@ def parse_relro(parsed_obj):
     now = False
     try:
         parsed_obj.get(lief.ELF.SEGMENT_TYPES.GNU_RELRO)
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         return "no"
     try:
         dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS)
         if dynamic_tags:
             bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in dynamic_tags
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         pass
     try:
         dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS_1)
         if dynamic_tags:
             now = lief.ELF.DYNAMIC_FLAGS_1.NOW in dynamic_tags
-    except lief.not_found:
+    except lief.lief_errors.not_found:
         pass
     if bind_now or now:
         return "full"
@@ -597,19 +592,19 @@ def parse(exe_file):
                     if parsed_obj.get_symbol(section):
                         metadata["has_canary"] = True
                         break
-                except lief.not_found:
+                except lief.lief_errors.not_found:
                     metadata["has_canary"] = False
             # rpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RPATH):
                     metadata["has_rpath"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_rpath"] = False
             # runpath check
             try:
                 if parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RUNPATH):
                     metadata["has_runpath"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_runpath"] = False
             static_symbols = parsed_obj.static_symbols
             if len(static_symbols):
@@ -659,7 +654,7 @@ def parse(exe_file):
                             metadata["symbols_version"].append(
                                 {
                                     "name": symbol_version_auxiliary.name,
-                                    "hash": symbol_version_auxiliary.hash,
+                                    "hash": entry.symbol_version_auxiliary.hash,
                                     "value": entry.value,
                                 }
                             )
@@ -715,7 +710,7 @@ def parse(exe_file):
                 header = parsed_obj.header
                 optional_header = parsed_obj.optional_header
                 metadata["used_bytes_in_the_last_page"] = (
-                    dos_header.used_bytes_in_the_last_page
+                    dos_header.used_bytes_in_last_page
                 )
                 metadata["file_size_in_pages"] = dos_header.file_size_in_pages
                 metadata["num_relocation"] = dos_header.numberof_relocation
@@ -1037,7 +1032,7 @@ def parse(exe_file):
                     metadata["has_main_command"] = True
                 if parsed_obj.thread_command:
                     metadata["has_thread_command"] = True
-            except lief.not_found:
+            except lief.lief_errors.not_found:
                 metadata["has_main"] = False
                 metadata["has_thread_command"] = False
             try:
@@ -1074,7 +1069,7 @@ def parse(exe_file):
                     code_signature = parsed_obj.code_signature
                     metadata["code_signature"] = {
                         "available": True if code_signature.size else False,
-                        "data": str(bytes(code_signature.data).hex()),
+                        "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
                     }
@@ -1082,10 +1077,10 @@ def parse(exe_file):
                     not parsed_obj.has_code_signature
                     and parsed_obj.has_code_signature_dir
                 ):
-                    code_signature = parsed_obj.has_code_signature_dir
+                    code_signature = parsed_obj.code_signature_dir
                     metadata["code_signature"] = {
                         "available": True if code_signature.size else False,
-                        "data": str(bytes(code_signature.data).hex()),
+                        "data": str(code_signature.data.hex()),
                         "data_size": str(code_signature.data_size),
                         "size": str(code_signature.size),
                     }
