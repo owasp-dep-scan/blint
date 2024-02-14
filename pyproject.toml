@@ -51,14 +51,23 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-addopts = "--verbose --cov-append --cov-report term --cov blint"
-
-[tool.flake8]
-ignore = "E203, E266, E501, W503, W605"
-max-line-length = 80
-max-complexity = 18
-select = "B,C,E,F,W,T4,B9"
+#addopts = "--verbose --cov-append --cov-report term --cov blint"
 
 [tool.pylint]
 generated-members = ["lief"]
-disable = ["broad-exception-caught", "too-many-branches", "too-many-statements", "too-many-nested-blocks", "too-many-locals", "missing-function-docstring", "too-many-lines", "missing-module-docstring"]
+ignore-paths = ["blint/cyclonedx/*", "blint/checks.py"]
+ignore-long-lines = "[r|f]\""
+disable = ["missing-module-docstring", "logging-fstring-interpolation"]
+
+[tool.pylint.format]
+max-line-length = 80
+
+[tool.pylint.design]
+max-args = 6
+max-nested-blocks = 6
+
+[tool.pylint.logging]
+logging-format-style = "new"
+
+[tool.pylint.messages_control]
+disable = "W0718, C0103, C0209, C0302, W0613, E1205"

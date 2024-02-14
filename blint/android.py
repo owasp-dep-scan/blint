@@ -48,7 +48,7 @@ def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
     """
     try:
         LOG.debug('⚡︎ Executing "%s"', " ".join(args))
-        cp = subprocess.run(
+        return subprocess.run(
             args,
             stdout=stdout,
             stderr=subprocess.STDOUT,
@@ -58,8 +58,7 @@ def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
             encoding="utf-8",
             check=False,
         )
-        return cp
-    except Exception as e:
+    except subprocess.SubprocessError as e:
         LOG.exception(e)
         return None
 
@@ -71,13 +70,11 @@ def collect_app_metadata(app_file, deep_mode):
     parent_component = apk_summary(app_file)
     if parent_component:
         parent_component.properties = []
-        features = apk_features(app_file)
-        if features:
+        if features := apk_features(app_file):
             parent_component.properties.append(
                 Property(name="internal.appFeatures", value=features)
             )
-        permissions = apk_permissions(app_file)
-        if permissions:
+        if permissions := apk_permissions(app_file):
             parent_component.properties.append(
                 Property(name="internal.appPermissions", value=permissions)
             )
@@ -92,9 +89,7 @@ def apk_summary(app_file):
     if not app_file.endswith(".apk") or not APKANALYZER_CMD:
         return None
     cp = exec_tool([APKANALYZER_CMD, "apk", "summary", app_file])
-    if cp and cp.returncode == 0:
-        return parse_apk_summary(cp.stdout)
-    return None
+    return parse_apk_summary(cp.stdout) if cp and cp.returncode == 0 else None
 
 
 def apk_features(app_file):
@@ -132,6 +127,16 @@ def apk_permissions(app_file):
 
 
 def collect_version_files_metadata(app_file, app_temp_dir):
+    """
+    Collects metadata for version files in the given app temporary directory.
+
+    Args:
+        app_file (str): The path to the app file.
+        app_temp_dir (str): The path to the app temporary directory.
+
+    Returns:
+        list: A list of Component objects, each representing a version file.
+    """
     file_components = []
     # Find and read all .version files
     version_files = find_files(app_temp_dir, [".version"])
@@ -141,54 +146,87 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         group = ""
         name = ""
         if "_" in file_name:
-            parts = file_name.split("_")
-            name = file_name
-            if parts and len(parts) == 2:
-                group = parts[0]
-                name = parts[-1]
-            else:
-                name = name.replace("_", "-")
-                # Patch the group name
-                if name.startswith("kotlinx-"):
-                    group = "org.jetbrains.kotlinx"
+            group, name = parse_file_name(file_name, group)
         with open(vf, encoding="utf-8") as fp:
             version_data = fp.read().strip()
         if name and version_data:
-            if group:
-                purl = f"pkg:maven/{group}/{name}@{version_data}"
-            else:
-                purl = f"pkg:maven/{name}@{version_data}"
-            component = Component(
-                type=Type.library,
-                group=group,
-                name=name,
-                version=version_data,
-                purl=purl,
-                scope=Scope.required,
-                evidence=ComponentEvidence(
-                    identity=Identity(
-                        field=FieldModel.purl,
-                        confidence=1,
-                        methods=[
-                            Method(
-                                technique=Technique.manifest_analysis,
-                                value=rel_path,
-                                confidence=1,
-                            )
-                        ],
-                    )
-                ),
-                properties=[
-                    Property(name="internal:srcFile", value=rel_path),
-                    Property(name="internal:appFile", value=app_file),
-                ],
-            )
-            component.bom_ref = RefType(purl)
+            component = create_version_component(app_file, group, name,
+                                                 rel_path, version_data)
             file_components.append(component)
     return file_components
 
 
+def create_version_component(app_file, group, name, rel_path, version_data):
+    """
+    Creates a Component object with the provided metadata.
+
+    Args:
+        app_file (str): The path to the app file.
+        group (str): The group of the component.
+        name (str): The name of the component.
+        rel_path (str): The relative path of the component.
+        version_data (str): The version data of the component.
+
+    Returns:
+        Component: A Component object with the provided metadata.
+    """
+    if group:
+        purl = f"pkg:maven/{group}/{name}@{version_data}"
+    else:
+        purl = f"pkg:maven/{name}@{version_data}"
+    component = Component(
+        type=Type.library, group=group, name=name,
+        version=version_data, purl=purl, scope=Scope.required,
+        evidence=ComponentEvidence(
+            identity=Identity(field=FieldModel.purl, confidence=1, methods=[
+                Method(technique=Technique.manifest_analysis, value=rel_path,
+                       confidence=1, )], )),
+        properties=[
+            Property(name="internal:srcFile", value=rel_path),
+            Property(name="internal:appFile", value=app_file),
+        ],
+    )
+    component.bom_ref = RefType(purl)
+    return component
+
+
+def parse_file_name(file_name, group):
+    """
+    Parses the file name and returns the group and name components.
+
+    Args:
+        file_name (LiteralString | bytes): The file name to parse.
+        group (str): The default group value.
+
+    Returns:
+        tuple: A tuple containing two elements:
+            - group (str): The parsed group component.
+            - name (str): The parsed name component.
+    """
+    parts = str(file_name).split("_")
+    name = file_name
+    if parts and len(parts) == 2:
+        group = parts[0]
+        name = parts[-1]
+    else:
+        name = str(name).replace("_", "-")
+        # Patch the group name
+        if name.startswith("kotlinx-"):
+            group = "org.jetbrains.kotlinx"
+    return group, name
+
+
 def collect_so_files_metadata(app_file, app_temp_dir):
+    """
+    Collects metadata for shared object (`.so`) files.
+
+    Args:
+        app_file (str): The path to the app file.
+        app_temp_dir (str): The path to the app temporary directory.
+
+    Returns:
+        list: A list of Component objects.
+    """
     file_components = []
     # Parse all .so files
     so_files = find_files(app_temp_dir, [".so"])
@@ -210,7 +248,7 @@ def collect_so_files_metadata(app_file, app_temp_dir):
             if anote.get("version"):
                 version = anote.get("version")
                 break
-            elif anote.get("build_id"):
+            if anote.get("build_id"):
                 version = anote.get("build_id")
                 break
         if so_metadata.get("functions"):
@@ -257,6 +295,17 @@ def collect_so_files_metadata(app_file, app_temp_dir):
 
 
 def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
+    """
+    Collects metadata for DEX files in the given app temporary directory.
+
+    Args:
+        app_file (str): The path to the app file
+        parent_component (Component or None): The parent component, if available
+        app_temp_dir (str): The path to the app temporary directory
+
+    Returns:
+        list: A list of Component objects, each representing a DEX file.
+    """
     file_components = []
     # Parse all .dex files
     dex_files = find_files(app_temp_dir, [".dex"])
@@ -274,62 +323,91 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
             if parent_component and parent_component.version
             else "latest"
         )
-        purl = f"pkg:generic/{name}@{version}"
-        component = Component(
-            type=Type.file,
-            group=group,
-            name=name,
-            version=version,
-            purl=purl,
-            scope=Scope.required,
-            evidence=ComponentEvidence(
-                identity=Identity(
-                    field=FieldModel.purl,
-                    confidence=0.2,
-                    methods=[
-                        Method(
-                            technique=Technique.binary_analysis,
-                            value=rel_path,
-                            confidence=0.2,
-                        )
-                    ],
-                )
-            ),
-            properties=[
-                Property(name="internal:srcFile", value=rel_path),
-                Property(name="internal:appFile", value=app_file),
-                Property(
-                    name="internal:functions",
-                    value=", ".join(
-                        set(
-                            [
-                                f"""{m.name}({','.join([_clean_type(p.underlying_array_type) for p in m.prototype.parameters_type])}):{_clean_type(m.prototype.return_type.underlying_array_type)}"""
-                                for m in dex_metadata.get("methods")
-                            ]
-                        )
-                    ),
-                ),
-                Property(
-                    name="internal:classes",
-                    value=", ".join(
-                        set(
-                            sorted(
-                                [
-                                    _clean_type(c.fullname)
-                                    for c in dex_metadata.get("classes")
-                                ]
-                            )
-                        )
-                    ),
-                ),
-            ],
-        )
-        component.bom_ref = RefType(purl)
+        component = create_dex_component(app_file, dex_metadata, group, name,
+                                         rel_path, version)
         file_components.append(component)
     return file_components
 
 
+def create_dex_component(app_file, dex_metadata, group, name, rel_path,
+                         version):
+    """
+    Creates a Component object with the provided metadata for a DEX file.
+
+    Args:
+        app_file (str): The path to the app file.
+        dex_metadata (dict): The metadata of the DEX file.
+        group (str): The group of the component.
+        name (LiteralString | bytes): The name of the component.
+        purl (str): The Package URL (PURL) of the component.
+        rel_path (str | LiteralString |bytes): The relative path.
+        version (str): The version of the component.
+
+    Returns:
+        Component: A Component object representing the DEX file with metadata.
+    """
+    purl = f"pkg:generic/{name}@{version}"
+    return Component(
+        type=Type.file,
+        group=group,
+        name=name,
+        version=version,
+        purl=purl,
+        scope=Scope.required,
+        bom_ref=RefType(purl),
+        evidence=ComponentEvidence(
+            identity=Identity(
+                field=FieldModel.purl,
+                confidence=0.2,
+                methods=[
+                    Method(
+                        technique=Technique.binary_analysis,
+                        value=rel_path,
+                        confidence=0.2,
+                    )
+                ],
+            )
+        ),
+        properties=[
+            Property(name="internal:srcFile", value=rel_path),
+            Property(name="internal:appFile", value=app_file),
+            Property(
+                name="internal:functions",
+                value=", ".join(
+                    {
+                        f"""{m.name}({','.join([_clean_type(p.underlying_array_type) for p in m.prototype.parameters_type])}):{_clean_type(m.prototype.return_type.underlying_array_type)}"""
+                        for m in dex_metadata.get("methods")
+                    }
+                ),
+            ),
+            Property(
+                name="internal:classes",
+                value=", ".join(
+                    set(
+                        sorted(
+                            [
+                                _clean_type(c.fullname)
+                                for c in dex_metadata.get("classes")
+                            ]
+                        )
+                    )
+                ),
+            ),
+        ],
+    )
+
+
 def _clean_type(t):
+    """
+    Cleans the type string by replacing "/", removing the leading "L" and 
+    trailing ";".
+
+    Args:
+        t (str): The type string to clean.
+
+    Returns:
+        str: The cleaned type string.
+    """
     return str(t).replace("/", ".").removeprefix("L").removesuffix(";")
 
 
@@ -354,15 +432,13 @@ def parse_apk_summary(data):
     """
     Parse output from apk summary
     """
-    if data:
-        parts = data.strip().split("\n")[-1].split("\t")
-        if parts:
-            name = parts[0]
-            version = parts[-1]
-            purl = f"pkg:apk/{name}@{version}"
-            component = Component(
-                type=Type.application, name=name, version=version, purl=purl
-            )
-            component.bom_ref = RefType(purl)
-            return component
+    if data and (parts := data.strip().split("\n")[-1].split("\t")):
+        name = parts[0]
+        version = parts[-1]
+        purl = f"pkg:apk/{name}@{version}"
+        component = Component(
+            type=Type.application, name=name, version=version, purl=purl
+        )
+        component.bom_ref = RefType(purl)
+        return component
     return None

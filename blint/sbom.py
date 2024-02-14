@@ -21,6 +21,15 @@ from blint.utils import find_android_files, get_version
 
 
 def default_parent(src_dirs):
+    """
+    Creates a default parent Component object for the given source directories.
+
+    Args:
+        src_dirs (list): A list of source directories.
+
+    Returns:
+        Component: A Component object representing the default parent.
+    """
     name = os.path.basename(src_dirs[0])
     purl = f"pkg:generic/{name}@latest"
     component = Component(
@@ -31,6 +40,15 @@ def default_parent(src_dirs):
 
 
 def default_metadata(src_dirs):
+    """
+    Creates default metadata for SBOM generation.
+
+    Args:
+        src_dirs (list): A list of source directories.
+
+    Returns:
+        Metadata: A Metadata object for SBOM generation.
+    """
     metadata = Metadata()
     metadata.timestamp = datetime.now()
     metadata.component = default_parent(src_dirs)
@@ -54,6 +72,17 @@ def default_metadata(src_dirs):
 
 
 def generate(src_dirs, output_file, deep_mode):
+    """
+    Generates an SBOM for the given source directories.
+
+    Args:
+        src_dirs (list): A list of source directories.
+        output_file (str): The path to the output file.
+        deep_mode (bool): Flag indicating whether to perform deep analysis.
+
+    Returns:
+        bool: True if the SBOM generation is successful, False otherwise.
+    """
     android_files = []
     components = []
     dependencies = []
@@ -65,16 +94,15 @@ def generate(src_dirs, output_file, deep_mode):
     )
     sbom.metadata = default_metadata(src_dirs)
     for src in src_dirs:
-        files = find_android_files(src)
-        if files:
+        if files := find_android_files(src):
             android_files += files
     if not android_files:
         return False
     with Progress(
-        transient=True,
-        redirect_stderr=True,
-        redirect_stdout=True,
-        refresh_per_second=1,
+            transient=True,
+            redirect_stderr=True,
+            redirect_stdout=True,
+            refresh_per_second=1,
     ) as progress:
         task = progress.add_task(
             f"[green] Parsing {len(android_files)} android apps",
@@ -82,24 +110,28 @@ def generate(src_dirs, output_file, deep_mode):
             start=True,
         )
         for f in android_files:
-            dependencies_dict = {}
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
-            parent_component, app_components = collect_app_metadata(
-                f, deep_mode
+            components.extend(
+                process_android_file(
+                    components, deep_mode, dependencies, f, sbom)
             )
-            if parent_component:
-                if not sbom.metadata.component.components:
-                    sbom.metadata.component.components = []
-                sbom.metadata.component.components.append(parent_component)
-            if app_components:
-                components += app_components
-            track_dependency(
-                dependencies_dict, parent_component, app_components
-            )
-            # Update the dependencies list
-            if dependencies_dict:
-                for k, v in dependencies_dict.items():
-                    dependencies.append({"ref": k, "dependsOn": list(v)})
+    return create_sbom(components, dependencies, output_file, sbom)
+
+
+def create_sbom(components, dependencies, output_file, sbom):
+    """
+    Creates a Software Bill of Materials (SBOM) with the provided components,
+    dependencies, output file, and SBOM object.
+
+    Args:
+        components (list): A list of Component objects.
+        dependencies (list): A list of dependencies.
+        output_file (str): The path to the output file.
+        sbom: The SBOM object representing the SBOM.
+
+    Returns:
+        bool: True if the SBOM generation is successful, False otherwise.
+    """
     # Populate the components
     sbom.components = trim_components(components)
     # If we have only one parent component then promote it to metadata.component
@@ -107,39 +139,71 @@ def generate(src_dirs, output_file, deep_mode):
         if len(sbom.metadata.component.components) == 1:
             sbom.metadata.component = sbom.metadata.component.components[0]
         else:
-            # Fix the dangling tree
-            root_depends_on = []
-            for ac in sbom.metadata.component.components:
-                root_depends_on.append(ac.bom_ref.model_dump(mode="python"))
-            dependencies.append(
-                {
-                    "ref": sbom.metadata.component.bom_ref.model_dump(
-                        mode="python"
-                    ),
-                    "dependsOn": root_depends_on,
-                }
-            )
+            root_depends_on = [
+                ac.bom_ref.model_dump(mode="python")
+                for ac in
+                sbom.metadata.component.components
+            ]
+            dependencies.append({
+                "ref": sbom.metadata.component.bom_ref.model_dump(
+                    mode="python"), "dependsOn": root_depends_on, })
     # Populate the dependencies
     sbom.dependencies = dependencies
     LOG.debug(
-        "SBOM includes %d components and %d dependencies",
-        len(components),
-        len(dependencies),
-    )
+        f"SBOM includes {len(components)} components and {len(dependencies)} "
+        f"dependencies", )
     with open(output_file, mode="w", encoding="utf-8") as fp:
         fp.write(
             sbom.model_dump_json(
-                indent=2,
-                exclude_none=True,
-                exclude_defaults=True,
-                warnings=False,
-            )
+                indent=2, exclude_none=True, exclude_defaults=True,
+                warnings=False, )
         )
-        LOG.debug("SBOM file generated successfully at %s", output_file)
+        LOG.debug(f"SBOM file generated successfully at {output_file}")
     return True
 
 
+def process_android_file(components, deep_mode, dependencies, f, sbom):
+    """
+    Process an Android file and update the dependencies and components.
+
+    Args:
+        components (list): List of components to be processed.
+        deep_mode (bool): Flag indicating whether to process in deep mode.
+        dependencies (list): List of dependencies to be updated.
+        f (str): File to be processed.
+        sbom (obj): Software Bill of Materials object to be updated.
+
+    Returns:
+        list: Updated components list after processing.
+    """
+    dependencies_dict = {}
+    parent_component, app_components = collect_app_metadata(f, deep_mode)
+    if parent_component:
+        if not sbom.metadata.component.components:
+            sbom.metadata.component.components = []
+        sbom.metadata.component.components.append(parent_component)
+    if app_components:
+        components += app_components
+    track_dependency(dependencies_dict, parent_component, app_components)
+    # Update the dependencies list
+    if dependencies_dict:
+        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in
+                            dependencies_dict.items())
+    return components
+
+
 def track_dependency(dependencies_dict, parent_component, app_components):
+    """
+    Track dependencies between components and update the dependencies dict.
+
+    Args:
+        dependencies_dict (dict): The dictionary to store the dependencies.
+        parent_component (Component): The parent component.
+        app_components (list): The list of application components.
+
+    Returns:
+        None
+    """
     if parent_component:
         if not dependencies_dict.get(
             parent_component.bom_ref.model_dump(mode="python")
@@ -168,6 +232,15 @@ def track_dependency(dependencies_dict, parent_component, app_components):
 
 
 def trim_components(components):
+    """
+    Trims duplicate components from the input list and returns the result.
+
+    Args:
+        components (list): A list of components to be trimmed.
+
+    Returns:
+        list: A list of unique components after trimming duplicates.
+    """
     added_dict = {}
     ret = []
     for comp in components:

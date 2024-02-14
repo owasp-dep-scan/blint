@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import Enum
 
 
-class Schema(Enum):
+class Schema(Enum): # noqa
     field_0BSD = "0BSD"
     AAL = "AAL"
     Abstyles = "Abstyles"
