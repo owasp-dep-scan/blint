@@ -65,7 +65,7 @@ def parse_notes(parsed_obj):
     if isinstance(notes, lief.lief_errors):
         return data
     data.extend(extract_note_data(idx, note) for idx, note in enumerate(notes))
-    return cleanup_list_lief_errors(data)
+    return data
 
 
 def extract_note_data(idx, note):
@@ -86,33 +86,34 @@ def extract_note_data(idx, note):
     description_str = " ".join(map(integer_to_hex_str, description[:16]))
     if len(description) > 16:
         description_str += " ..."
-    type_str = note.type_core if note.is_core else note.type
+    type_str = note.type
     type_str = str(type_str).rsplit(".", maxsplit=1)[-1]
-    note_details = note.details
-    note_details_str = ""
+    note_details = ""
     sdk_version = ""
     ndk_version = ""
     ndk_build_number = ""
     abi = ""
     version_str = ""
-    if isinstance(note_details, lief.ELF.AndroidIdent):
-        sdk_version = note_details.sdk_version
-        ndk_version = note_details.ndk_version
-        ndk_build_number = note_details.ndk_build_number
-    if isinstance(note_details, lief.ELF.NoteAbi):
-        version = note_details.version
-        abi = str(note_details.abi)
-        version_str = f"{version[0]}.{version[1]}.{version[2]}"
+    if type_str == "ANDROID_IDENT":
+        sdk_version = note.sdk_version
+        ndk_version = note.ndk_version
+        ndk_build_number = note.ndk_build_number
+    elif type_str.startswith("GNU_ABI_TAG"):
+        version = [str(i) for i in note.version]
+        version_str = ".".join(version)
+    else:
+        with contextlib.suppress(AttributeError):
+            note_details = note.details
+            version = note_details.version
+            abi = str(note_details.abi)
+            version_str = f"{version[0]}.{version[1]}.{version[2]}"
     if not version_str and type_str == "BUILD_ID" and build_id:
         version_str = build_id
-    if note.is_core:
-        note_details_str = note.details
-    return cleanup_dict_lief_errors(
-        {
+    return {
             "index": idx,
             "description": description_str,
             "type": type_str,
-            "details": note_details_str,
+            "details": note_details,
             "sdk_version": sdk_version,
             "ndk_version": ndk_version,
             "ndk_build_number": ndk_build_number,
@@ -120,7 +121,6 @@ def extract_note_data(idx, note):
             "version": version_str,
             "build_id": build_id,
         }
-    )
 
 
 def integer_to_hex_str(e):
@@ -374,19 +374,24 @@ def process_pe_resources(parsed_obj):
     rm = parsed_obj.resources_manager
     if not rm or isinstance(rm, lief.lief_errors):
         return {}
-    return {
-        "has_accelerator": rm.has_accelerator,
-        "has_dialogs": rm.has_dialogs,
-        "has_html": rm.has_html,
-        "has_icons": rm.has_icons,
-        "has_manifest": rm.has_manifest,
-        "has_string_table": rm.has_string_table,
-        "has_version": rm.has_version,
-        "html": rm.html if rm.has_html else None,
-        "manifest": (
-            rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
-        "version_info": str(rm.version) if rm.has_version else None,
-    }
+    resources = {}
+    try:
+        resources = {
+            "has_accelerator": rm.has_accelerator,
+            "has_dialogs": rm.has_dialogs,
+            "has_html": rm.has_html,
+            "has_icons": rm.has_icons,
+            "has_manifest": rm.has_manifest,
+            "has_string_table": rm.has_string_table,
+            "has_version": rm.has_version,
+            "manifest": (
+                rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
+            "version_info": str(rm.version) if rm.has_version else None
+        }
+        resources["html"] = rm.html if rm.has_html else None
+    except (AttributeError, UnicodeError):
+        return resources
+    return resources
 
 
 def process_pe_signature(parsed_obj):
@@ -898,20 +903,14 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
         metadata["resources"] = process_pe_resources(parsed_obj)
-        metadata["static_symbols"], exe_type = parse_pe_symbols(
-            parsed_obj.symbols
-        )
+        metadata["static_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
-        (metadata["imports"], metadata["dynamic_entries"],) = parse_pe_imports(
-            parsed_obj.imports
-        )
+        (metadata["imports"], metadata["dynamic_entries"],) = parse_pe_imports(parsed_obj.imports)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
-        metadata["exception_functions"] = parse_functions(
-            parsed_obj.exception_functions
-        )
+        metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
             metadata["tls_address_index"] = tls.addressof_index
@@ -922,6 +921,7 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
             metadata["tls_directory_type"] = str(tls.directory.type)
     except (AttributeError, IndexError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)}: {e} while parsing {exe_file} PE metadata.")
+        raise
     return metadata
 
 
@@ -937,7 +937,7 @@ def add_pe_header_data(metadata, parsed_obj):
     """
     dos_header = parsed_obj.dos_header
     if dos_header and not isinstance(dos_header, lief.lief_errors):
-        with contextlib.suppress(IndexError, TypeError):
+        try:
             metadata["magic"] = str(dos_header.magic)
             header = parsed_obj.header
             metadata["used_bytes_in_the_last_page"] = dos_header.used_bytes_in_last_page
@@ -968,6 +968,8 @@ def add_pe_header_data(metadata, parsed_obj):
             metadata["pointer_symbol_table"] = header.pointerto_symbol_table
             metadata["num_symbols"] = header.numberof_symbols
             metadata["size_optional_header"] = header.sizeof_optional_header
+        except (IndexError, TypeError) as e:
+            LOG.debug(f"Caught {type(e)}: {e} while parsing PE header metadata.")
     optional_header = parsed_obj.optional_header
     if optional_header and not isinstance(optional_header, lief.lief_errors):
         metadata = add_pe_optional_headers(metadata, optional_header)
@@ -989,20 +991,15 @@ def add_pe_optional_headers(metadata, optional_header):
             [str(chara).rsplit(".", maxsplit=1)[-1] for chara in
              optional_header.dll_characteristics_lists]
         )
-        metadata["subsystem"] = str(optional_header.subsystem).rsplit(
-            ".", maxsplit=1
-        )[-1]
+        metadata["subsystem"] = str(optional_header.subsystem).rsplit(".", maxsplit=1)[-1]
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
-        metadata["exe_type"] = (
-            "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64")
+        metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
         metadata["major_linker_version"] = optional_header.major_linker_version
         metadata["minor_linker_version"] = optional_header.minor_linker_version
         metadata["sizeof_code"] = optional_header.sizeof_code
         metadata["sizeof_initialized_data"] = optional_header.sizeof_initialized_data
         metadata["sizeof_uninitialized_data"] = optional_header.sizeof_uninitialized_data
-        metadata["addressof_entrypoint"] = ADDRESS_FMT.format(
-            optional_header.addressof_entrypoint
-        )
+        metadata["addressof_entrypoint"] = ADDRESS_FMT.format(optional_header.addressof_entrypoint)
         metadata["baseof_code"] = optional_header.baseof_code
         metadata["baseof_data"] = optional_header.baseof_data
         metadata["imagebase"] = optional_header.imagebase
