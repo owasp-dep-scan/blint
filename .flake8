@@ -1,5 +1,6 @@
-[tool.flake8]
+[flake8]
 ignore = E203, E266, E501, W503, W605
-max-line-length = 80
+exclude = blint/cyclonedx/spec.py
+max-line-length = 99
 max-complexity = 18
 select = "B,C,E,F,W,T4,B9"

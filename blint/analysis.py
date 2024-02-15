@@ -19,7 +19,7 @@ from rich.terminal_theme import MONOKAI
 from blint.binary import parse
 from blint.logger import LOG, console
 from blint.utils import (is_fuzzable_name, print_findings_table, )
-from blint.checks import (check_nx, check_pie, # pylint: disable=unused-import
+from blint.checks import (check_nx, check_pie,  # noqa, pylint: disable=unused-import
                           check_relro, check_canary, check_rpath,
                           check_virtual_size, check_authenticode,
                           check_dll_characteristics, check_codesign,
@@ -34,7 +34,7 @@ except ImportError:
 
 review_files = []
 if HAVE_RESOURCE_READER:
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(NameError, FileNotFoundError):
         review_files = (
             resource.name
             for resource in importlib.resources.files(
@@ -96,7 +96,7 @@ def get_resource(package, resource):
         # you may have a security vulnerability!
         resource_path = os.path.join(package_path, resource)
 
-        return open(resource_path, encoding="utf-8")
+        return open(resource_path, "r", encoding="utf-8")
 
     # Could not resolve package path from __file__.
     LOG.warning(f"Unable to load resource: {package}:{resource}")
@@ -105,43 +105,44 @@ def get_resource(package, resource):
 
 # Load the rules
 with get_resource("blint.data", "rules.yml") as fp:
-    raw_data = fp.read().split("---")
-    for tmp_data in raw_data:
-        if not tmp_data:
-            continue
-        rules_list = yaml.safe_load(tmp_data)
-        for rule in rules_list:
-            rules_dict[rule.get("id")] = rule
+    raw_rules = fp.read().split("---")
+for tmp_data in raw_rules:
+    if not tmp_data:
+        continue
+    rules_list = yaml.safe_load(tmp_data)
+    for rule in rules_list:
+        rules_dict[rule.get("id")] = rule
 
 # Load the default review methods
 for review_methods_file in review_files:
+    raw_annotations = []
     if DEBUG_MODE:
         LOG.debug(f"Loading review file {review_methods_file}")
     with get_resource("blint.data.annotations", review_methods_file) as fp:
-        raw_data = fp.read().split("---")
-        for tmp_data in raw_data:
-            if not tmp_data:
-                continue
-            methods_reviews_groups = yaml.safe_load(tmp_data)
-            exe_type_list = methods_reviews_groups.get("exe_type")
-            if isinstance(exe_type_list, str):
-                exe_type_list = [exe_type_list]
-            all_rules = methods_reviews_groups.get("rules")
-            method_rules_dict = {}
-            for rule in all_rules:
-                method_rules_dict[rule.get("id")] = rule
-                review_rules_cache[rule.get("id")] = rule
-            for etype in exe_type_list:
-                if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
-                    review_methods_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
-                    review_exe_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
-                    review_symbols_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
-                    review_imports_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
-                    review_entries_dict[etype].append(method_rules_dict)
+        raw_annotations = fp.read().split("---")
+    for tmp_data in raw_annotations:
+        if not tmp_data:
+            continue
+        methods_reviews_groups = yaml.safe_load(tmp_data)
+        exe_type_list = methods_reviews_groups.get("exe_type")
+        if isinstance(exe_type_list, str):
+            exe_type_list = [exe_type_list]
+        all_rules = methods_reviews_groups.get("rules")
+        method_rules_dict = {}
+        for rule in all_rules:
+            method_rules_dict[rule.get("id")] = rule
+            review_rules_cache[rule.get("id")] = rule
+        for etype in exe_type_list:
+            if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                review_methods_dict[etype].append(method_rules_dict)
+            elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                review_exe_dict[etype].append(method_rules_dict)
+            elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                review_symbols_dict[etype].append(method_rules_dict)
+            elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                review_imports_dict[etype].append(method_rules_dict)
+            elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                review_entries_dict[etype].append(method_rules_dict)
 
 
 def run_checks(f, metadata):
@@ -474,11 +475,11 @@ class ReviewRunner:
         self._gen_review_lists(exe_type)
         # Check if reviews are available for this exe type
         if (
-                self.review_methods_list or
-                self.review_exe_list or
-                self.review_symbols_list or
-                self.review_imports_list or
-                self.review_entries_list
+                self.review_methods_list
+                or self.review_exe_list
+                or self.review_symbols_list
+                or self.review_imports_list
+                or self.review_entries_list
         ):
             return self._review_lists(metadata)
         return {}
@@ -634,8 +635,7 @@ class ReviewRunner:
                     continue
                 patterns = rule_obj.get("patterns")
                 for apattern in patterns:
-                    if (found_pattern[apattern] > EVIDENCE_LIMIT or found_cid[
-                            cid] > EVIDENCE_LIMIT):
+                    if found_pattern[apattern] > EVIDENCE_LIMIT or found_cid[cid] > EVIDENCE_LIMIT:
                         continue
                     for afun in functions_list:
                         if ((apattern.lower() in afun.lower()) and not

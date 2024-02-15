@@ -1,3 +1,4 @@
+# pylint: disable=missing-function-docstring,unused-argument
 from blint.utils import parse_pe_manifest
 
 
@@ -61,8 +62,7 @@ def check_dll_characteristics(f, metadata, rule_obj):  # noqa
 def check_codesign(f, metadata, rule_obj): # noqa
     if metadata.get("code_signature"):
         code_signature = metadata.get("code_signature")
-        return (not code_signature or
-                code_signature.get("available") is not False)
+        return not code_signature or code_signature.get("available") is not False
     return True
 
 

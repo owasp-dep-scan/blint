@@ -9,11 +9,12 @@ import zipfile
 from importlib.metadata import distribution
 from pathlib import Path
 
+import lief
 from defusedxml.ElementTree import fromstring
-from lief import lief_errors
 from rich import box
 from rich.table import Table
-from blint.logger import console
+
+from blint.logger import console, LOG
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
@@ -371,7 +372,7 @@ secrets_regex = {
     ],
     "slack_webhook": [
         re.compile(
-            r"""https://hooks.slack.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}"""
+            r"https://hooks.slack.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}"
         )
     ],
     "stripe": [
@@ -426,7 +427,8 @@ def is_base64(s):
     try:
         decoded = base64.b64decode(s)
         return s.endswith("==") or base64.b64encode(decoded) == s.encode()
-    except (binascii.Error, TypeError, UnicodeError):
+    except (binascii.Error, TypeError, UnicodeError) as e:
+        LOG.debug(f"Caught {type(e)}: {e} while checking if {s} is base64")
         return False
 
 
@@ -598,8 +600,11 @@ def is_exe(src):
     """
     if os.path.isfile(src):
         try:
-            return is_binary_string(open(src, "rb").read(1024))
-        except (AttributeError, TypeError, PermissionError):
+            with open(src, "rb") as f:
+                data = f.read(1024)
+            return is_binary_string(data)
+        except (TypeError, OverflowError, ValueError, OSError) as e:
+            LOG.debug(f"Caught {type(e)} while reading file: {src}")
             return False
     return False
 
@@ -703,7 +708,8 @@ def parse_pe_manifest(manifest):
             for ele in child.iter():
                 attribs_dict[ele.tag.rpartition("}")[-1]] = ele.attrib
         return attribs_dict
-    except (TypeError, AttributeError, IndexError):
+    except (TypeError, AttributeError, IndexError) as e:
+        LOG.debug(f"Caught {type(e)}: {e} while parsing PE manifest.")
         return {}
 
 
@@ -711,9 +717,7 @@ def is_fuzzable_name(name_str):
     """
     This function checks if a given name string is fuzzable.
     """
-    if name_str:
-        return any(n.lower() in name_str for n in fuzzable_names)
-    return ""
+    return any(n.lower() in name_str for n in fuzzable_names) if name_str else False
 
 
 def print_findings_table(findings, files):
@@ -810,7 +814,7 @@ def cleanup_dict_lief_errors(old_dict):
     """
     new_dict = {}
     for key, value in old_dict.items():
-        if isinstance(value, lief_errors):
+        if isinstance(value, lief.lief_errors):
             continue
         if isinstance(value, dict):
             entry = cleanup_dict_lief_errors(value)
@@ -832,7 +836,7 @@ def cleanup_list_lief_errors(d):
     """
     new_lst = []
     for dl in d:
-        if isinstance(dl, lief_errors):
+        if isinstance(dl, lief.lief_errors):
             continue
         if isinstance(dl, dict):
             entry = cleanup_dict_lief_errors(dl)

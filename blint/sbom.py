@@ -242,10 +242,7 @@ def trim_components(components):
         list: A list of unique components after trimming duplicates.
     """
     added_dict = {}
-    ret = []
     for comp in components:
         if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
             added_dict[comp.bom_ref.model_dump(mode="python")] = comp
-    for k in sorted(added_dict.keys()):
-        ret.append(added_dict[k])
-    return ret
+    return [added_dict[k] for k in sorted(added_dict.keys())]
