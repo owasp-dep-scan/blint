@@ -358,14 +358,13 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         Component: A Component object representing the DEX file with metadata.
     """
     purl = f"pkg:generic/{name}@{version}"
-    return Component(
+    comp = Component(
         type=Type.file,
         group=group,
         name=name,
         version=version,
         purl=purl,
         scope=Scope.required,
-        bom_ref=RefType(purl),
         evidence=ComponentEvidence(
             identity=Identity(
                 field=FieldModel.purl,
@@ -403,6 +402,8 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
             ),
         ],
     )
+    comp.bom_ref = RefType(purl)
+    return comp
 
 
 def _clean_type(t):
