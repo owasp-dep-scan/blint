@@ -5,10 +5,12 @@ import argparse
 import os
 import sys
 
-from blint.analysis import report, start
 from blint.sbom import generate
+from blint.logger import LOG
+from blint.analysis import AnalysisRunner, report
+from blint.utils import gen_file_list
 
-blint_logo = """
+BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
 ██╔══██╗██║     ██║████╗  ██║╚══██╔══╝
 ██████╔╝██║     ██║██╔██╗ ██║   ██║
@@ -32,12 +34,14 @@ def build_args():
         dest="src_dir_image",
         action="extend",
         nargs="+",
-        help="Source directories, container images or binary files. Defaults to current directory.",
+        help="Source directories, container images or binary files. Defaults "
+             "to current directory.",
     )
     parser.add_argument(
         "-o",
         "--reports",
         dest="reports_dir",
+        default=os.path.join(os.getcwd(), "reports"),
         help="Reports directory. Defaults to reports.",
     )
     parser.add_argument(
@@ -83,7 +87,8 @@ def build_args():
         dest="src_dir_image",
         action="extend",
         nargs="+",
-        help="Source directories, container images or binary files. Defaults to current directory.",
+        help="Source directories, container images or binary files. Defaults "
+             "to current directory.",
     )
     sbom_parser.add_argument(
         "-o",
@@ -96,36 +101,67 @@ def build_args():
         action="store_true",
         default=False,
         dest="deep_mode",
-        help="Enable deep mode to collect more used symbols and modules aggressively. Slow operation.",
+        help="Enable deep mode to collect more used symbols and modules "
+             "aggressively. Slow operation.",
     )
     return parser.parse_args()
 
 
 def parse_input(src):
+    """Parses the input source.
+
+    This function takes the input source as a list and parses it to extract the
+    path. It returns the parsed path as a list.
+
+    Args:
+        src: A list containing the input source.
+
+    Returns:
+        list: A list containing the parsed path.
+    """
     path = src[0]
     result = path.split("\n")
     result.pop()
     return result
 
 
-def main():
+def handle_args():
+    """Handles the command-line arguments.
+
+    This function parses the command-line arguments and returns the parsed
+    arguments, reports directory, and source directory.
+
+    Returns:
+        tuple: A tuple containing the parsed arguments, reports directory, and
+               source directory.
+    """
     args = build_args()
     if not args.no_banner:
-        print(blint_logo)
+        print(BLINT_LOGO)
+    if not args.src_dir_image:
+        args.src_dir_image = [os.getcwd()]
     if not os.getenv("CI"):
         src_dirs = args.src_dir_image
     else:
         src_dirs = parse_input(args.src_dir_image)
-    if not src_dirs:
-        src_dirs = [os.getcwd()]
-    if args.reports_dir:
-        reports_dir = args.reports_dir
-    else:
-        reports_dir = os.path.join(os.getcwd(), "reports")
+
+    # Create reports directory
+    reports_dir = args.reports_dir
+
+    if not os.path.exists(reports_dir):
+        os.makedirs(reports_dir)
+
     for src in src_dirs:
         if not os.path.exists(src):
-            print(f"{src} is an invalid file or directory!")
-            return
+            LOG.error(f"{src} is an invalid file or directory!")
+            sys.exit(1)
+    return args, reports_dir, src_dirs
+
+
+def main():
+    """Main function of the blint tool"""
+    args, reports_dir, src_dirs = handle_args()
+
     # SBOM command
     if args.subcommand_name == "sbom":
         if args.sbom_output:
@@ -135,14 +171,14 @@ def main():
         generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
-        # Create reports directory
-        if reports_dir and not os.path.exists(reports_dir):
-            os.makedirs(reports_dir)
-        findings, reviews, files, fuzzables = start(args, src_dirs, reports_dir)
-        report(args, src_dirs, reports_dir, findings, reviews, files, fuzzables)
+        files = gen_file_list(src_dirs)
+        analyzer = AnalysisRunner()
+        findings, reviews, fuzzables = analyzer.start(args, files, reports_dir)
+        report(src_dirs, reports_dir, findings, reviews, files, fuzzables)
+
         if os.getenv("CI") and not args.noerror:
             for f in findings:
-                if f["severity"] == "critical":
+                if f['severity'] == 'critical':
                     sys.exit(1)
 
 

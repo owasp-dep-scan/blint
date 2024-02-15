@@ -2,8 +2,7 @@
 name = "blint"
 version = "2.0.0"
 description = "Linter and SBOM generator for binary files."
-authors = ["Prabhu Subramanian <prabhu@appthreat.com>"]
-maintainers= ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
+authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/OWASP-dep-scan/blint"
@@ -44,7 +43,7 @@ pytest-cov = "^4.0.0"
 pyinstaller = "^6.3.0"
 
 [tool.black]
-line-length = 80
+line-length = 99
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -53,12 +52,17 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 addopts = "--verbose --cov-append --cov-report term --cov blint"
 
-[tool.flake8]
-ignore = "E203, E266, E501, W503, W605"
-max-line-length = 80
-max-complexity = 18
-select = "B,C,E,F,W,T4,B9"
-
 [tool.pylint]
 generated-members = ["lief"]
-disable = ["broad-exception-caught", "too-many-branches", "too-many-statements", "too-many-nested-blocks", "too-many-locals", "missing-function-docstring", "too-many-lines", "missing-module-docstring"]
+ignore-paths = ["blint/cyclonedx/*"]
+# Let's not fuss about long strings
+ignore-long-lines = "[r|f]\""
+disable = ["missing-module-docstring", "logging-fstring-interpolation"]
+
+[tool.pylint.format]
+max-line-length = 99
+
+[tool.pylint.design]
+max-args = 6
+max-nested-blocks = 6
+
