@@ -9,7 +9,6 @@ from blint.utils import (
     calculate_entropy,
     check_secret,
     cleanup_dict_lief_errors,
-    cleanup_list_lief_errors,
     decode_base64
 )
 
@@ -110,17 +109,17 @@ def extract_note_data(idx, note):
     if not version_str and type_str == "BUILD_ID" and build_id:
         version_str = build_id
     return {
-            "index": idx,
-            "description": description_str,
-            "type": type_str,
-            "details": note_details,
-            "sdk_version": sdk_version,
-            "ndk_version": ndk_version,
-            "ndk_build_number": ndk_build_number,
-            "abi": abi,
-            "version": version_str,
-            "build_id": build_id,
-        }
+        "index": idx,
+        "description": description_str,
+        "type": type_str,
+        "details": note_details,
+        "sdk_version": sdk_version,
+        "ndk_version": ndk_version,
+        "ndk_build_number": ndk_build_number,
+        "abi": abi,
+        "version": version_str,
+        "build_id": build_id,
+    }
 
 
 def integer_to_hex_str(e):
@@ -182,7 +181,7 @@ def parse_functions(functions):
                         "address": ADDRESS_FMT.format(f.address),
                     }
                 )
-    return cleanup_list_lief_errors(func_list)
+    return func_list
 
 
 def parse_strings(parsed_obj):
@@ -216,7 +215,7 @@ def parse_strings(parsed_obj):
                         )
             except (AttributeError, TypeError):
                 continue
-    return cleanup_list_lief_errors(strings_list)
+    return strings_list
 
 
 def parse_symbols(symbols):
@@ -265,7 +264,7 @@ def parse_symbols(symbols):
             )
         except (AttributeError, IndexError, TypeError):
             continue
-    return cleanup_list_lief_errors(symbols_list), exe_type
+    return symbols_list, exe_type
 
 
 def detect_exe_type(parsed_obj, metadata):
@@ -431,7 +430,7 @@ def process_pe_signature(parsed_obj):
                 signers_list.append(signer_obj)
             signature_obj["signers"] = signers_list
             signature_list.append(signature_obj)
-    return cleanup_list_lief_errors(signature_list)
+    return signature_list
 
 
 def parse_pe_authenticode(parsed_obj):
