@@ -1,23 +1,32 @@
 import os
 import uuid
 from datetime import datetime
+from typing import Any, Dict
 
 from rich.progress import Progress
 
 from blint.android import collect_app_metadata
+from blint.binary import parse
 from blint.cyclonedx.spec import (
     BomFormat,
     Component,
+    ComponentEvidence,
     CycloneDX,
+    FieldModel,
+    Identity,
     Lifecycles,
     Metadata,
+    Method,
     Phase,
+    Property,
+    RefType,
+    Scope,
+    Technique,
     Tools,
     Type,
-    RefType,
 )
 from blint.logger import LOG
-from blint.utils import find_android_files, get_version
+from blint.utils import find_android_files, gen_file_list, get_version
 
 
 def default_parent(src_dirs):
@@ -30,11 +39,9 @@ def default_parent(src_dirs):
     Returns:
         Component: A Component object representing the default parent.
     """
-    name = os.path.basename(src_dirs[0])
+    name = os.path.basename(src_dirs[0] if isinstance(src_dirs, list) else src_dirs)
     purl = f"pkg:generic/{name}@latest"
-    component = Component(
-        type=Type.application, name=name, version="latest", purl=purl
-    )
+    component = Component(type=Type.application, name=name, version="latest", purl=purl)
     component.bom_ref = RefType(purl)
     return component
 
@@ -93,28 +100,29 @@ def generate(src_dirs, output_file, deep_mode):
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )
     sbom.metadata = default_metadata(src_dirs)
+    exe_files = gen_file_list(src_dirs)
     for src in src_dirs:
         if files := find_android_files(src):
             android_files += files
-    if not android_files:
+    if not android_files and not exe_files:
         return False
     with Progress(
-            transient=True,
-            redirect_stderr=True,
-            redirect_stdout=True,
-            refresh_per_second=1,
+        transient=True,
+        redirect_stderr=True,
+        redirect_stdout=True,
+        refresh_per_second=1,
     ) as progress:
         task = progress.add_task(
             f"[green] Parsing {len(android_files)} android apps",
             total=len(android_files),
             start=True,
         )
+        for exe in exe_files:
+            progress.update(task, description=f"Processing [bold]{exe}[/bold]")
+            components.extend(process_exe_file(components, deep_mode, dependencies, exe, sbom))
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
-            components.extend(
-                process_android_file(
-                    components, deep_mode, dependencies, f, sbom)
-            )
+            components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
     return create_sbom(components, dependencies, output_file, sbom)
 
 
@@ -140,29 +148,76 @@ def create_sbom(components, dependencies, output_file, sbom):
             sbom.metadata.component = sbom.metadata.component.components[0]
         else:
             root_depends_on = [
-                ac.bom_ref.model_dump(mode="python")
-                for ac in
-                sbom.metadata.component.components
+                ac.bom_ref.model_dump(mode="python") for ac in sbom.metadata.component.components
             ]
-            dependencies.append({
-                "ref": sbom.metadata.component.bom_ref.model_dump(
-                    mode="python"), "dependsOn": root_depends_on, })
+            dependencies.append(
+                {
+                    "ref": sbom.metadata.component.bom_ref.model_dump(mode="python"),
+                    "dependsOn": root_depends_on,
+                }
+            )
     # Populate the dependencies
     sbom.dependencies = dependencies
     LOG.debug(
-        f"SBOM includes {len(components)} components and {len(dependencies)} "
-        f"dependencies", )
+        f"SBOM includes {len(components)} components and {len(dependencies)} dependencies",
+    )
     with open(output_file, mode="w", encoding="utf-8") as fp:
         fp.write(
             sbom.model_dump_json(
-                indent=2, exclude_none=True, exclude_defaults=True,
-                warnings=False, )
+                indent=2,
+                exclude_none=True,
+                exclude_defaults=True,
+                warnings=False,
+            )
         )
         LOG.debug(f"SBOM file generated successfully at {output_file}")
     return True
 
 
-def process_android_file(components, deep_mode, dependencies, f, sbom):
+def process_exe_file(components, deep_mode, dependencies, exe, sbom):
+    dependencies_dict = {}
+    parent_component: Component = default_parent(exe)
+    metadata: Dict[str, Any] = parse(exe, deep_mode)
+    lib_components: list[Component] = []
+    if metadata.get("dynamic_entries"):
+        for entry in metadata["dynamic_entries"]:
+            purl = f"pkg:generic/{entry['name']}"
+            comp = Component(
+                type=Type.library,
+                name=entry["name"],
+                purl=purl,
+                evidence=ComponentEvidence(
+                    identity=Identity(
+                        field=FieldModel.purl,
+                        confidence=0.5,
+                        methods=[
+                            Method(
+                                technique=Technique.binary_analysis,
+                                value=exe,
+                                confidence=0.5,
+                            )
+                        ],
+                    )
+                ),
+                properties=[
+                    Property(name="internal:srcFile", value=exe),
+                ],
+            )
+            if entry.get("tag") == "NEEDED":
+                comp.scope = Scope.required
+            comp.bom_ref = RefType(purl)
+            lib_components.append(comp)
+    if lib_components:
+        components += lib_components
+        track_dependency(dependencies_dict, parent_component, lib_components)
+    if dependencies_dict:
+        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
+    return components
+
+
+def process_android_file(
+    components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: object
+) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
 
@@ -184,15 +239,16 @@ def process_android_file(components, deep_mode, dependencies, f, sbom):
         sbom.metadata.component.components.append(parent_component)
     if app_components:
         components += app_components
-    track_dependency(dependencies_dict, parent_component, app_components)
+        track_dependency(dependencies_dict, parent_component, app_components)
     # Update the dependencies list
     if dependencies_dict:
-        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in
-                            dependencies_dict.items())
+        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
     return components
 
 
-def track_dependency(dependencies_dict, parent_component, app_components):
+def track_dependency(
+    dependencies_dict: dict, parent_component: Component, app_components: list[Component]
+) -> None:
     """
     Track dependencies between components and update the dependencies dict.
 
@@ -205,33 +261,21 @@ def track_dependency(dependencies_dict, parent_component, app_components):
         None
     """
     if parent_component:
-        if not dependencies_dict.get(
-            parent_component.bom_ref.model_dump(mode="python")
-        ):
-            dependencies_dict[
-                parent_component.bom_ref.model_dump(mode="python")
-            ] = set()
+        if not dependencies_dict.get(parent_component.bom_ref.model_dump(mode="python")):
+            dependencies_dict[parent_component.bom_ref.model_dump(mode="python")] = set()
         for acomp in app_components:
-            if not dependencies_dict.get(
+            if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
+                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = set()
+            dependencies_dict[parent_component.bom_ref.model_dump(mode="python")].add(
                 acomp.bom_ref.model_dump(mode="python")
-            ):
-                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = (
-                    set()
-                )
-            dependencies_dict[
-                parent_component.bom_ref.model_dump(mode="python")
-            ].add(acomp.bom_ref.model_dump(mode="python"))
+            )
     else:
         for acomp in app_components:
-            if not dependencies_dict.get(
-                acomp.bom_ref.model_dump(mode="python")
-            ):
-                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = (
-                    set()
-                )
+            if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
+                dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = set()
 
 
-def trim_components(components):
+def trim_components(components: list[Component]) -> list[Component]:
     """
     Trims duplicate components from the input list and returns the result.
 
@@ -241,7 +285,7 @@ def trim_components(components):
     Returns:
         list: A list of unique components after trimming duplicates.
     """
-    added_dict = {}
+    added_dict: dict[str, Component] = {}
     for comp in components:
         if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
             added_dict[comp.bom_ref.model_dump(mode="python")] = comp

@@ -5,12 +5,7 @@ import sys
 import lief
 
 from blint.logger import DEBUG, LOG
-from blint.utils import (
-    calculate_entropy,
-    check_secret,
-    cleanup_dict_lief_errors,
-    decode_base64
-)
+from blint.utils import calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
 
 MIN_ENTROPY = 0.39
 MIN_LENGTH = 80
@@ -37,9 +32,7 @@ def is_shared_library(parsed_obj):
     if parsed_obj.format == lief.Binary.FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
     if parsed_obj.format == lief.Binary.FORMATS.PE:
-        return parsed_obj.header.has_characteristic(
-            lief.PE.Header.CHARACTERISTICS.DLL
-        )
+        return parsed_obj.header.has_characteristic(lief.PE.Header.CHARACTERISTICS.DLL)
     if parsed_obj.format == lief.Binary.FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
     return False
@@ -77,8 +70,10 @@ def extract_note_data(idx, note):
     Returns:
         dict: A dictionary containing the extracted metadata
     """
-    note_str = str(note)
+    note_str = ""
     build_id = ""
+    if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
+        note_str = str(note)
     if "ID Hash" in note_str:
         build_id = note_str.rsplit("ID Hash:", maxsplit=1)[-1].strip()
     description = note.description
@@ -178,7 +173,7 @@ def parse_functions(functions):
                     {
                         "index": idx,
                         "name": cleaned_name,
-                        "address": ADDRESS_FMT.format(f.address),
+                        "address": ADDRESS_FMT.format(f.address).strip(),
                     }
                 )
     return func_list
@@ -249,9 +244,7 @@ def parse_symbols(symbols):
                     "name": symbol_name,
                     "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
                     "value": symbol.value,
-                    "visibility": str(symbol.visibility).rsplit(
-                        ".", maxsplit=1
-                    )[-1],
+                    "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
                     "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
                     "is_imported": is_imported,
                     "is_exported": is_exported,
@@ -283,14 +276,13 @@ def detect_exe_type(parsed_obj, metadata):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         if (
-                parsed_obj.has_section(".note.gnu.build-id")
-                or "musl" in metadata.get("interpreter")
-                or "ld-linux" in metadata.get("interpreter")
+            parsed_obj.has_section(".note.gnu.build-id")
+            or "musl" in metadata.get("interpreter")
+            or "ld-linux" in metadata.get("interpreter")
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
-            return (f'{metadata.get("machine_type")}-'
-                    f'{metadata.get("file_type")}').lower()
+            return (f'{metadata.get("machine_type")}-{metadata.get("file_type")}').lower()
         if metadata["relro"] in ("partial", "full"):
             return "genericbinary"
     return ""
@@ -340,8 +332,10 @@ def parse_pe_data(parsed_obj):
             if directory.has_section:
                 if directory.section.has_characteristic:
                     section_chars = ", ".join(
-                        [str(chara).rsplit(".", maxsplit=1)[-1] for chara in
-                            directory.section.characteristics_lists]
+                        [
+                            str(chara).rsplit(".", maxsplit=1)[-1]
+                            for chara in directory.section.characteristics_lists
+                        ]
                     )
                 section_name = directory.section.name
                 section_entropy = directory.section.entropy
@@ -383,9 +377,8 @@ def process_pe_resources(parsed_obj):
             "has_manifest": rm.has_manifest,
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
-            "manifest": (
-                rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
-            "version_info": str(rm.version) if rm.has_version else None
+            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
+            "version_info": str(rm.version) if rm.has_version else None,
         }
         resources["html"] = rm.html if rm.has_html else None
     except (AttributeError, UnicodeError):
@@ -453,7 +446,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
             "verification_flags": str(parsed_obj.verify_signature()).replace(
                 "VERIFICATION_FLAGS.", ""
-            )
+            ),
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -491,9 +484,9 @@ def parse_pe_symbols(symbols):
     for symbol in symbols:
         try:
             if symbol.section_number <= 0:
-                section_nb_str = str(
-                    lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)
-                ).rsplit(".", maxsplit=1)[-1]
+                section_nb_str = str(lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)).rsplit(
+                    ".", maxsplit=1
+                )[-1]
             elif symbol.section.name:
                 section_nb_str = symbol.section.name
             else:
@@ -512,8 +505,7 @@ def parse_pe_symbols(symbols):
                         "id": section_nb_str,
                         "base_type": str(symbol.base_type).rsplit(".", maxsplit=1)[-1],
                         "complex_type": str(symbol.complex_type).rsplit(".", maxsplit=1)[-1],
-                        "storage_class": str(symbol.storage_class).rsplit(
-                            ".", maxsplit=1)[-1],
+                        "storage_class": str(symbol.storage_class).rsplit(".", maxsplit=1)[-1],
                     }
                 )
         except (IndexError, AttributeError, ValueError) as e:
@@ -624,10 +616,9 @@ def parse_macho_symbols(symbols):
             if symbol.has_binding_info and symbol.binding_info.has_library:
                 libname = symbol.binding_info.library.name
             symbol_value = (
-                symbol.value if symbol.value > 0 or not symbol.has_binding_info else
-                ADDRESS_FMT.format(
-                    symbol.binding_info.address
-                )
+                symbol.value
+                if symbol.value > 0 or not symbol.has_binding_info
+                else ADDRESS_FMT.format(symbol.binding_info.address)
             )
             symbol_name = symbol.demangled_name
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
@@ -650,7 +641,9 @@ def parse_macho_symbols(symbols):
     return symbols_list, exe_type
 
 
-def parse(exe_file):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def parse(
+    exe_file, deep_mode=True
+):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
 
@@ -666,7 +659,6 @@ def parse(exe_file):  # pylint: disable=too-many-locals,too-many-branches,too-ma
             metadata = add_elf_metadata(exe_file, metadata, parsed_obj)
         elif isinstance(parsed_obj, lief.PE.Binary):
             # PE
-            # Parse header
             metadata = add_pe_metadata(exe_file, metadata, parsed_obj)
         elif isinstance(parsed_obj, lief.MachO.Binary):
             metadata = add_mach0_metadata(exe_file, metadata, parsed_obj)
@@ -727,14 +719,10 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
-    metadata["static_symbols"], exe_type = parse_symbols(
-        parsed_obj.static_symbols
-    )
+    metadata["static_symbols"], exe_type = parse_symbols(parsed_obj.static_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
-    metadata["dynamic_symbols"], exe_type = parse_symbols(
-        parsed_obj.dynamic_symbols
-    )
+    metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["functions"] = parse_functions(parsed_obj.functions)
@@ -760,18 +748,14 @@ def add_elf_header(header, metadata):
         eflags_str = determine_elf_flags(header)
         metadata["class"] = str(header.identity_class).rsplit(".", maxsplit=1)[-1]
         metadata["endianness"] = str(header.identity_data).rsplit(".", maxsplit=1)[-1]
-        metadata["identity_version"] = str(
-            header.identity_version
-        ).rsplit(".", maxsplit=1)[-1]
-        metadata["identity_os_abi"] = str(
-            header.identity_os_abi
-        ).rsplit(".", maxsplit=1)[-1]
+        metadata["identity_version"] = str(header.identity_version).rsplit(".", maxsplit=1)[-1]
+        metadata["identity_os_abi"] = str(header.identity_os_abi).rsplit(".", maxsplit=1)[-1]
         metadata["identity_abi_version"] = header.identity_abi_version
         metadata["file_type"] = str(header.file_type).rsplit(".", maxsplit=1)[-1]
         metadata["machine_type"] = str(header.machine_type).rsplit(".", maxsplit=1)[-1]
-        metadata["object_file_version"] = str(
-            header.object_file_version
-        ).rsplit(".", maxsplit=1)[-1]
+        metadata["object_file_version"] = str(header.object_file_version).rsplit(".", maxsplit=1)[
+            -1
+        ]
         metadata["entrypoint"] = header.entrypoint
         metadata["processor_flag"] = str(header.processor_flag) + eflags_str
     except (AttributeError, TypeError, ValueError) as e:
@@ -796,9 +780,9 @@ def add_elf_symbols(metadata, parsed_obj):
             symbol_version_auxiliary_cache = {}
             for entry in symbols_version:
                 symbol_version_auxiliary = entry.symbol_version_auxiliary
-                if (symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
+                if symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
                     symbol_version_auxiliary.name
-                )):
+                ):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
                         {
@@ -829,8 +813,12 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     for entry in dynamic_entries:
         if entry.tag == lief.ELF.DYNAMIC_TAGS.NULL:
             continue
-        if entry.tag in [lief.ELF.DYNAMIC_TAGS.SONAME, lief.ELF.DYNAMIC_TAGS.NEEDED,
-                         lief.ELF.DYNAMIC_TAGS.RUNPATH, lief.ELF.DYNAMIC_TAGS.RPATH, ]:
+        if entry.tag in [
+            lief.ELF.DYNAMIC_TAGS.SONAME,
+            lief.ELF.DYNAMIC_TAGS.NEEDED,
+            lief.ELF.DYNAMIC_TAGS.RUNPATH,
+            lief.ELF.DYNAMIC_TAGS.RPATH,
+        ]:
             metadata["dynamic_entries"].append(
                 {
                     "name": entry.name,
@@ -857,8 +845,11 @@ def determine_elf_flags(header):
         eflags_str = " - ".join(
             [str(s).rsplit(".", maxsplit=1)[-1] for s in header.arm_flags_list]
         )
-    if header.machine_type in [lief.ELF.ARCH.MIPS, lief.ELF.ARCH.MIPS_RS3_LE,
-                               lief.ELF.ARCH.MIPS_X, ]:
+    if header.machine_type in [
+        lief.ELF.ARCH.MIPS,
+        lief.ELF.ARCH.MIPS_RS3_LE,
+        lief.ELF.ARCH.MIPS_X,
+    ]:
         eflags_str = " - ".join(
             [str(s).rsplit(".", maxsplit=1)[-1] for s in header.mips_flags_list]
         )
@@ -905,7 +896,10 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["static_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
-        (metadata["imports"], metadata["dynamic_entries"],) = parse_pe_imports(parsed_obj.imports)
+        (
+            metadata["imports"],
+            metadata["dynamic_entries"],
+        ) = parse_pe_imports(parsed_obj.imports)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -987,8 +981,10 @@ def add_pe_optional_headers(metadata, optional_header):
     """
     with contextlib.suppress(IndexError, TypeError):
         metadata["dll_characteristics"] = ", ".join(
-            [str(chara).rsplit(".", maxsplit=1)[-1] for chara in
-             optional_header.dll_characteristics_lists]
+            [
+                str(chara).rsplit(".", maxsplit=1)[-1]
+                for chara in optional_header.dll_characteristics_lists
+            ]
         )
         metadata["subsystem"] = str(optional_header.subsystem).rsplit(".", maxsplit=1)[-1]
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
@@ -1004,10 +1000,8 @@ def add_pe_optional_headers(metadata, optional_header):
         metadata["imagebase"] = optional_header.imagebase
         metadata["section_alignment"] = optional_header.section_alignment
         metadata["file_alignment"] = optional_header.file_alignment
-        metadata["major_operating_system_version"] = (
-            optional_header.major_operating_system_version)
-        metadata["minor_operating_system_version"] = (
-            optional_header.minor_operating_system_version)
+        metadata["major_operating_system_version"] = optional_header.major_operating_system_version
+        metadata["minor_operating_system_version"] = optional_header.minor_operating_system_version
         metadata["major_image_version"] = optional_header.major_image_version
         metadata["minor_image_version"] = optional_header.minor_image_version
         metadata["major_subsystem_version"] = optional_header.major_subsystem_version
@@ -1083,9 +1077,7 @@ def add_mach0_commands(metadata, parsed_obj):
     metadata["has_main"] = False
     metadata["has_thread_command"] = False
     if parsed_obj.main_command:
-        metadata["has_main_command"] = not isinstance(
-            parsed_obj.main_command, lief.lief_errors
-        )
+        metadata["has_main_command"] = not isinstance(parsed_obj.main_command, lief.lief_errors)
     if parsed_obj.thread_command:
         metadata["has_thread_command"] = not isinstance(
             parsed_obj.thread_command, lief.lief_errors
@@ -1106,9 +1098,9 @@ def add_mach0_versions(exe_file, metadata, parsed_obj):
         The updated metadata dictionary.
     """
     try:
-        version = (parsed_obj.version_min.version if parsed_obj.version_min else "")
-        sdk = (parsed_obj.version_min.sdk if parsed_obj.version_min else "")
-        source_version = (parsed_obj.source_version.version if parsed_obj.source_version else "")
+        version = parsed_obj.version_min.version if parsed_obj.version_min else ""
+        sdk = parsed_obj.version_min.sdk if parsed_obj.version_min else ""
+        source_version = parsed_obj.source_version.version if parsed_obj.source_version else ""
         if source_version:
             metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(*source_version)
         if version:
@@ -1144,7 +1136,8 @@ def add_mach0_build_metadata(exe_file, metadata, parsed_obj):
                 tool_str = str(tool.tool).rsplit(".", maxsplit=1)[-1]
                 metadata["tools"].append(
                     {
-                        "tool": tool_str, "version": "{}.{}.{}".format(*tool.version),
+                        "tool": tool_str,
+                        "version": "{}.{}.{}".format(*tool.version),
                     }
                 )
     except (AttributeError, IndexError, TypeError) as e:
@@ -1168,12 +1161,8 @@ def add_mach0_libraries(exe_file, metadata, parsed_obj):
         if not parsed_obj.libraries:
             return metadata
         for library in parsed_obj.libraries:
-            current_version_str = "{:d}.{:d}.{:d}".format(
-                *library.current_version
-            )
-            compat_version_str = "{:d}.{:d}.{:d}".format(
-                *library.compatibility_version
-            )
+            current_version_str = "{:d}.{:d}.{:d}".format(*library.current_version)
+            compat_version_str = "{:d}.{:d}.{:d}".format(*library.compatibility_version)
             metadata["libraries"].append(
                 {
                     "name": library.name,
@@ -1226,12 +1215,8 @@ def add_mach0_functions(metadata, parsed_obj):
     """
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
-    metadata["unwind_functions"] = parse_functions(
-        parsed_obj.unwind_functions
-    )
-    metadata["static_symbols"], exe_type = parse_macho_symbols(
-        parsed_obj.symbols
-    )
+    metadata["unwind_functions"] = parse_functions(parsed_obj.unwind_functions)
+    metadata["static_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     if parsed_obj.dylinker:
