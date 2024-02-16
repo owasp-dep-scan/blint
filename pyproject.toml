@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.0.0"
+version = "2.0.0-beta.2"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "Apache-2.0"
@@ -65,4 +65,3 @@ max-line-length = 99
 [tool.pylint.design]
 max-args = 6
 max-nested-blocks = 6
-

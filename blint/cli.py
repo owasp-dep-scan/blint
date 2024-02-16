@@ -173,7 +173,9 @@ def main():
     else:
         files = gen_file_list(src_dirs)
         analyzer = AnalysisRunner()
-        findings, reviews, fuzzables = analyzer.start(args, files, reports_dir)
+        findings, reviews, fuzzables = analyzer.start(
+            files, reports_dir, args.no_reviews, args.suggest_fuzzable
+        )
         report(src_dirs, reports_dir, findings, reviews, files, fuzzables)
 
         if os.getenv("CI") and not args.noerror:

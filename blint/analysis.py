@@ -370,7 +370,7 @@ class AnalysisRunner:
         self.task = None
         self.reviewer = None
 
-    def start(self, args, files, reports_dir):
+    def start(self, files, reports_dir, no_reviews=False, suggest_fuzzables=True):
         """Starts the analysis process for the given source files.
 
         This function takes the command-line arguments and the reports
@@ -380,27 +380,29 @@ class AnalysisRunner:
 
         Args:
             files (list): The list of source files to be analyzed.
-            args: The command-line arguments.
-            reports_dir: The directory where the reports will be stored.
+            reports_dir (str): The directory where the reports will be stored.
+            no_reviews (bool): Whether to perform reviews or not.
+            suggest_fuzzables (bool): Whether to suggest fuzzable targets or not.
 
         Returns:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
         with self.progress:
             self.task = self.progress.add_task(
-                f"[green] Blinting {len(files)} binaries",
+                f"[green] BLinting {len(files)} binaries",
                 total=len(files), start=True, )
             for f in files:
-                self._process_files(f, args, reports_dir)
+                self._process_files(f, reports_dir, no_reviews, suggest_fuzzables)
         return self.findings, self.reviews, self.fuzzables
 
-    def _process_files(self, f, args, reports_dir):
+    def _process_files(self, f, reports_dir, no_reviews, suggest_fuzzables):
         """Processes the given file and generates findings.
 
         Args:
-            f: The file to be processed.
-            args: The command-line arguments.
-            reports_dir: The directory where the reports will be stored.
+            f (str): The file to be processed.
+            reports_dir (str): The directory where the reports will be stored.
+            no_reviews (bool): Whether to perform reviews or not.
+            suggest_fuzzables (bool): Whether to suggest fuzzable targets or not.
 
         """
         self.progress.update(
@@ -419,10 +421,10 @@ class AnalysisRunner:
         if finding := run_checks(f, metadata):
             self.findings += finding
         # Perform symbol reviews
-        if not args.no_reviews:
+        if no_reviews:
             self.do_review(exe_name, f, metadata)
         # Suggest fuzzable targets
-        if args.suggest_fuzzable and (fuzzdata := run_prefuzz(metadata)):
+        if suggest_fuzzables and (fuzzdata := run_prefuzz(metadata)):
             self.fuzzables.append(
                 {
                     "filename": f,
