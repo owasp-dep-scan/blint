@@ -177,7 +177,7 @@ def create_sbom(components, dependencies, output_file, sbom):
 def process_exe_file(components, deep_mode, dependencies, exe, sbom):
     dependencies_dict = {}
     parent_component: Component = default_parent(exe)
-    metadata: Dict[str, Any] = parse(exe, deep_mode)
+    metadata: Dict[str, Any] = parse(exe)
     lib_components: list[Component] = []
     if metadata.get("dynamic_entries"):
         for entry in metadata["dynamic_entries"]:

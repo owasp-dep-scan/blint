@@ -238,23 +238,24 @@ def parse_symbols(symbols):
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
-            exe_type = guess_exe_type(symbol_name)
-            symbols_list.append(
-                {
-                    "name": symbol_name,
-                    "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
-                    "value": symbol.value,
-                    "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
-                    "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
-                    "is_imported": is_imported,
-                    "is_exported": is_exported,
-                    "information": symbol.information,
-                    "is_function": symbol.is_function,
-                    "is_static": symbol.is_static,
-                    "is_variable": symbol.is_variable,
-                    "version": str(symbol_version),
-                }
-            )
+            if symbol_name:
+                exe_type = guess_exe_type(symbol_name)
+                symbols_list.append(
+                    {
+                        "name": symbol_name,
+                        "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
+                        "value": symbol.value,
+                        "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
+                        "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
+                        "is_imported": is_imported,
+                        "is_exported": is_exported,
+                        "information": symbol.information,
+                        "is_function": symbol.is_function,
+                        "is_static": symbol.is_static,
+                        "is_variable": symbol.is_variable,
+                        "version": str(symbol_version),
+                    }
+                )
         except (AttributeError, IndexError, TypeError):
             continue
     return symbols_list, exe_type
@@ -282,7 +283,7 @@ def detect_exe_type(parsed_obj, metadata):
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
-            return (f'{metadata.get("machine_type")}-{metadata.get("file_type")}').lower()
+            return f'{metadata.get("machine_type")}-{metadata.get("file_type")}'.lower()
         if metadata["relro"] in ("partial", "full"):
             return "genericbinary"
     return ""
@@ -379,8 +380,8 @@ def process_pe_resources(parsed_obj):
             "has_version": rm.has_version,
             "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
             "version_info": str(rm.version) if rm.has_version else None,
+            "html": rm.html if rm.has_html else None,
         }
-        resources["html"] = rm.html if rm.has_html else None
     except (AttributeError, UnicodeError):
         return resources
     return resources
@@ -641,9 +642,7 @@ def parse_macho_symbols(symbols):
     return symbols_list, exe_type
 
 
-def parse(
-    exe_file, deep_mode=True
-):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def parse(exe_file):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
 
