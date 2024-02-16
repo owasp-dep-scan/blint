@@ -78,7 +78,7 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs, output_file, deep_mode):
+def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
     """
     Generates an SBOM for the given source directories.
 
@@ -133,7 +133,9 @@ def generate(src_dirs, output_file, deep_mode):
     return create_sbom(components, dependencies, output_file, sbom)
 
 
-def create_sbom(components, dependencies, output_file, sbom):
+def create_sbom(
+    components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX
+) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
     dependencies, output file, and SBOM object.
@@ -181,48 +183,40 @@ def create_sbom(components, dependencies, output_file, sbom):
     return True
 
 
-def process_exe_file(components, deep_mode, dependencies, exe, sbom):
+def process_exe_file(
+    components: list[Component],
+    deep_mode: bool,
+    dependencies: list[dict],
+    exe: str,
+    sbom: CycloneDX,
+) -> list[Component]:
     dependencies_dict = {}
     parent_component: Component = default_parent(exe)
     metadata: Dict[str, Any] = parse(exe)
-    parent_component.properties = [
-        Property(
-            name="internal:binary_type",
-            value=metadata.get("binary_type", ""),
-        ),
-        Property(
-            name="internal:magic",
-            value=metadata.get("magic", ""),
-        ),
-        Property(
-            name="internal:class",
-            value=metadata.get("class", ""),
-        ),
-        Property(
-            name="internal:machine_type",
-            value=metadata.get("machine_type", ""),
-        ),
-        Property(
-            name="internal:interpreter",
-            value=metadata.get("interpreter", ""),
-        ),
-        Property(
-            name="internal:is_pie",
-            value=str(metadata.get("is_pie", "")).lower(),
-        ),
-        Property(
-            name="internal:has_nx",
-            value=str(metadata.get("has_nx", "")).lower(),
-        ),
-        Property(
-            name="internal:relro",
-            value="" + metadata.get("relro", ""),
-        ),
-        Property(
-            name="internal:static",
-            value=str(metadata.get("static", "")).lower(),
-        ),
-    ]
+    parent_component.properties = []
+    for prop in (
+        "binary_type",
+        "magic",
+        "class",
+        "platform",
+        "minos",
+        "interpreter",
+        "dylinker",
+        "machine_type",
+        "sdk",
+        "uuid",
+        "cpu_type",
+        "flags",
+        "relro",
+        "is_pie",
+        "has_nx",
+        "static",
+    ):
+        if metadata.get(prop):
+            value = str(metadata.get(prop))
+            if isinstance(metadata.get(prop), bool):
+                value = value.lower()
+            parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
     if deep_mode:
         parent_component.properties += [
             Property(
@@ -238,9 +232,42 @@ def process_exe_file(components, deep_mode, dependencies, exe, sbom):
         sbom.metadata.component.components = []
     sbom.metadata.component.components.append(parent_component)
     lib_components: list[Component] = []
+    if metadata.get("libraries"):
+        for entry in metadata.get("libraries"):
+            name = os.path.basename(entry["name"])
+            purl = f"pkg:file/{name}@{entry['version']}"
+            if entry.get("compatibility_version"):
+                purl = f"{purl}?compatibility_version={entry['compatibility_version']}"
+            comp = Component(
+                type=Type.library,
+                name=name,
+                version=entry["version"],
+                purl=purl,
+                evidence=ComponentEvidence(
+                    identity=Identity(
+                        field=FieldModel.purl,
+                        confidence=0.8,
+                        methods=[
+                            Method(
+                                technique=Technique.binary_analysis,
+                                value=exe,
+                                confidence=0.8,
+                            )
+                        ],
+                    )
+                ),
+                properties=[
+                    Property(name="internal:srcFile", value=exe),
+                    Property(name="internal:libPath", value=entry["name"]),
+                ],
+            )
+            if entry.get("tag") == "NEEDED":
+                comp.scope = Scope.required
+            comp.bom_ref = RefType(purl)
+            lib_components.append(comp)
     if metadata.get("dynamic_entries"):
         for entry in metadata["dynamic_entries"]:
-            purl = f"pkg:generic/{entry['name']}"
+            purl = f"pkg:file/{entry['name']}"
             comp = Component(
                 type=Type.library,
                 name=entry["name"],
@@ -275,7 +302,7 @@ def process_exe_file(components, deep_mode, dependencies, exe, sbom):
 
 
 def process_android_file(
-    components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: object
+    components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: CycloneDX
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
