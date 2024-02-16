@@ -112,14 +112,21 @@ def generate(src_dirs, output_file, deep_mode):
         redirect_stdout=True,
         refresh_per_second=1,
     ) as progress:
-        task = progress.add_task(
-            f"[green] Parsing {len(android_files)} android apps",
-            total=len(android_files),
-            start=True,
-        )
+        if exe_files:
+            task = progress.add_task(
+                f"[green] Parsing {len(exe_files)} binaries",
+                total=len(exe_files),
+                start=True,
+            )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]")
             components.extend(process_exe_file(components, deep_mode, dependencies, exe, sbom))
+        if android_files:
+            task = progress.add_task(
+                f"[green] Parsing {len(android_files)} android apps",
+                total=len(android_files),
+                start=True,
+            )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
             components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
