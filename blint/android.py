@@ -22,12 +22,14 @@ from blint.utils import check_command, find_files, unzip_unsafe
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
-if not APKANALYZER_CMD and ANDROID_HOME and (
+if (
+    not APKANALYZER_CMD
+    and ANDROID_HOME
+    and (
         os.path.exists(os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"))
-):
-    APKANALYZER_CMD = os.path.join(
-        ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"
     )
+):
+    APKANALYZER_CMD = os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")
 elif check_command("apkanalyzer"):
     APKANALYZER_CMD = "apkanalyzer"
 
@@ -50,7 +52,8 @@ def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
             env=os.environ.copy(),
             shell=sys.platform == "win32",
             encoding="utf-8",
-            check=False, )
+            check=False,
+        )
     except subprocess.SubprocessError as e:
         LOG.exception(e)
         return None
@@ -145,9 +148,7 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         with open(vf, encoding="utf-8") as fp:
             version_data = fp.read().strip()
         if name and version_data:
-            component = create_version_component(
-                app_file, group, name, rel_path, version_data
-            )
+            component = create_version_component(app_file, group, name, rel_path, version_data)
             file_components.append(component)
     return file_components
 
@@ -179,12 +180,21 @@ def create_version_component(app_file, group, name, rel_path, version_data):
         scope=Scope.required,
         evidence=ComponentEvidence(
             identity=Identity(
-                field=FieldModel.purl, confidence=1, methods=[Method(
-                    technique=Technique.manifest_analysis, value=rel_path, confidence=1, )], )
+                field=FieldModel.purl,
+                confidence=1,
+                methods=[
+                    Method(
+                        technique=Technique.manifest_analysis,
+                        value=rel_path,
+                        confidence=1,
+                    )
+                ],
+            )
         ),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
-            Property(name="internal:appFile", value=app_file), ],
+            Property(name="internal:appFile", value=app_file),
+        ],
     )
     component.bom_ref = RefType(purl)
     return component
@@ -260,7 +270,8 @@ def parse_so_file(app_file, app_temp_dir, sof):
     # Retrieve the version number from notes
     version = get_so_version(so_metadata.get("notes", []))
     functions = [
-        f.get("name") for f in so_metadata.get("functions", [])
+        f.get("name")
+        for f in so_metadata.get("functions", [])
         if f.get("name") and not f.get("name").startswith("_")
     ]
     purl = f"pkg:generic/{name}@{version}"
@@ -278,14 +289,21 @@ def parse_so_file(app_file, app_temp_dir, sof):
                 field=FieldModel.purl,
                 confidence=0.5,
                 methods=[
-                    Method(technique=Technique.binary_analysis, value=rel_path, confidence=0.5, )
+                    Method(
+                        technique=Technique.binary_analysis,
+                        value=rel_path,
+                        confidence=0.5,
+                    )
                 ],
             )
         ),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
-            Property(name="internal:functions", value=", ".join(set(functions)), ),
+            Property(
+                name="internal:functions",
+                value=", ".join(set(functions)),
+            ),
         ],
     )
     component.bom_ref = RefType(purl)
@@ -331,13 +349,11 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
         dex_metadata = parse_dex(adex)
         name = os.path.basename(adex).removesuffix(".dex")
         rel_path = os.path.relpath(adex, app_temp_dir)
-        group = (parent_component.group if parent_component and parent_component.group else "")
+        group = parent_component.group if parent_component and parent_component.group else ""
         version = (
-            parent_component.version if parent_component and parent_component.version else
-            "latest")
-        component = create_dex_component(
-            app_file, dex_metadata, group, name, rel_path, version
+            parent_component.version if parent_component and parent_component.version else "latest"
         )
+        component = create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         file_components.append(component)
     return file_components
 
@@ -393,11 +409,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
             Property(
                 name="internal:classes",
                 value=", ".join(
-                    set(
-                        sorted(
-                            [_clean_type(c.fullname) for c in dex_metadata.get("classes")]
-                        )
-                    )
+                    set(sorted([_clean_type(c.fullname) for c in dex_metadata.get("classes")]))
                 ),
             ),
         ],
@@ -430,9 +442,7 @@ def collect_files_metadata(app_file, parent_component, deep_mode):
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     file_components += collect_so_files_metadata(app_file, app_temp_dir)
     if deep_mode:
-        file_components += collect_dex_files_metadata(
-            app_file, parent_component, app_temp_dir
-        )
+        file_components += collect_dex_files_metadata(app_file, parent_component, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)
     return file_components
 
@@ -445,9 +455,7 @@ def parse_apk_summary(data):
         name = parts[0]
         version = parts[-1]
         purl = f"pkg:apk/{name}@{version}"
-        component = Component(
-            type=Type.application, name=name, version=version, purl=purl
-        )
+        component = Component(type=Type.application, name=name, version=version, purl=purl)
         component.bom_ref = RefType(purl)
         return component
     return None

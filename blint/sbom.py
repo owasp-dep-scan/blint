@@ -185,6 +185,58 @@ def process_exe_file(components, deep_mode, dependencies, exe, sbom):
     dependencies_dict = {}
     parent_component: Component = default_parent(exe)
     metadata: Dict[str, Any] = parse(exe)
+    parent_component.properties = [
+        Property(
+            name="internal:binary_type",
+            value=metadata.get("binary_type", ""),
+        ),
+        Property(
+            name="internal:magic",
+            value=metadata.get("magic", ""),
+        ),
+        Property(
+            name="internal:class",
+            value=metadata.get("class", ""),
+        ),
+        Property(
+            name="internal:machine_type",
+            value=metadata.get("machine_type", ""),
+        ),
+        Property(
+            name="internal:interpreter",
+            value=metadata.get("interpreter", ""),
+        ),
+        Property(
+            name="internal:is_pie",
+            value=str(metadata.get("is_pie", "")).lower(),
+        ),
+        Property(
+            name="internal:has_nx",
+            value=str(metadata.get("has_nx", "")).lower(),
+        ),
+        Property(
+            name="internal:relro",
+            value="" + metadata.get("relro", ""),
+        ),
+        Property(
+            name="internal:static",
+            value=str(metadata.get("static", "")).lower(),
+        ),
+    ]
+    if deep_mode:
+        parent_component.properties += [
+            Property(
+                name="internal:functions",
+                value="~~".join([f["name"] for f in metadata.get("functions", [])]),
+            ),
+            Property(
+                name="internal:symtab_symbols",
+                value="~~".join([f["name"] for f in metadata.get("symtab_symbols", [])]),
+            ),
+        ]
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    sbom.metadata.component.components.append(parent_component)
     lib_components: list[Component] = []
     if metadata.get("dynamic_entries"):
         for entry in metadata["dynamic_entries"]:

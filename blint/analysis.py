@@ -545,7 +545,7 @@ class ReviewRunner:
         symbols_list = [f.get("name", "") for f in
                         metadata.get("dynamic_symbols", [])]
         symbols_list += [f.get("name", "") for f in
-                         metadata.get("static_symbols", [])]
+                         metadata.get("symtab_symbols", [])]
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         if self.review_symbols_list:
             self.run_review_methods_symbols(
@@ -565,11 +565,11 @@ class ReviewRunner:
                           metadata.get("functions", [])]
         if metadata.get("magic", "").startswith("PE"):
             functions_list += [f.get("name", "") for f in
-                               metadata.get("static_symbols", [])]
+                               metadata.get("symtab_symbols", [])]
         # If there are no function but static symbols use that instead
-        if not functions_list and metadata.get("static_symbols"):
+        if not functions_list and metadata.get("symtab_symbols"):
             functions_list = [f.get("name", "") for f in
-                              metadata.get("static_symbols", [])]
+                              metadata.get("symtab_symbols", [])]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         if self.review_methods_list:
             self.run_review_methods_symbols(

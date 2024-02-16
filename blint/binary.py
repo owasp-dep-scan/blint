@@ -718,7 +718,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
-    metadata["static_symbols"], exe_type = parse_symbols(parsed_obj.static_symbols)
+    metadata["symtab_symbols"], exe_type = parse_symbols(parsed_obj.static_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -892,7 +892,7 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
         metadata["resources"] = process_pe_resources(parsed_obj)
-        metadata["static_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
+        metadata["symtab_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
         (
@@ -1215,7 +1215,7 @@ def add_mach0_functions(metadata, parsed_obj):
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["unwind_functions"] = parse_functions(parsed_obj.unwind_functions)
-    metadata["static_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
+    metadata["symtab_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     if parsed_obj.dylinker:
