@@ -211,6 +211,14 @@ def process_exe_file(
         "is_pie",
         "has_nx",
         "static",
+        "characteristics",
+        "dll_characteristics",
+        "subsystem",
+        "is_gui",
+        "major_linker_version",
+        "minor_linker_version",
+        "major_operating_system_version",
+        "minor_operating_system_version",
     ):
         if metadata.get(prop):
             value = str(metadata.get(prop))
@@ -226,6 +234,10 @@ def process_exe_file(
             Property(
                 name="internal:symtab_symbols",
                 value="~~".join([f["name"] for f in metadata.get("symtab_symbols", [])]),
+            ),
+            Property(
+                name="internal:imports",
+                value="~~".join([f["name"] for f in metadata.get("imports", [])]),
             ),
         ]
     if not sbom.metadata.component.components:
