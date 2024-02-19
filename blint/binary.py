@@ -77,9 +77,11 @@ def extract_note_data(idx, note):
     if "ID Hash" in note_str:
         build_id = note_str.rsplit("ID Hash:", maxsplit=1)[-1].strip()
     description = note.description
-    description_str = " ".join(map(integer_to_hex_str, description[:16]))
-    if len(description) > 16:
+    description_str = " ".join(map(integer_to_hex_str, description[:64]))
+    if len(description) > 64:
         description_str += " ..."
+    if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
+        build_id = description_str.replace(" ", "")
     type_str = note.type
     type_str = str(type_str).rsplit(".", maxsplit=1)[-1]
     note_details = ""
@@ -101,7 +103,7 @@ def extract_note_data(idx, note):
             version = note_details.version
             abi = str(note_details.abi)
             version_str = f"{version[0]}.{version[1]}.{version[2]}"
-    if not version_str and type_str == "BUILD_ID" and build_id:
+    if not version_str and build_id:
         version_str = build_id
     return {
         "index": idx,

@@ -283,6 +283,10 @@ def process_exe_file(
                 value = value.lower()
             if value:
                 parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
+    if metadata.get("notes"):
+        for note in metadata.get("notes"):
+            if note.get("version"):
+                parent_component.properties.append(Property(name=f"internal:{note.get('type')}", value=note.get('version')))
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         # Attempt to detect library components from the symbols version block
