@@ -5,9 +5,9 @@ import argparse
 import os
 import sys
 
-from blint.sbom import generate
-from blint.logger import LOG
 from blint.analysis import AnalysisRunner, report
+from blint.logger import LOG
+from blint.sbom import generate
 from blint.utils import gen_file_list
 
 BLINT_LOGO = """
@@ -148,9 +148,6 @@ def handle_args():
     # Create reports directory
     reports_dir = args.reports_dir
 
-    if not os.path.exists(reports_dir):
-        os.makedirs(reports_dir)
-
     for src in src_dirs:
         if not os.path.exists(src):
             LOG.error(f"{src} is an invalid file or directory!")
@@ -171,6 +168,8 @@ def main():
         generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
+        if not os.path.exists(reports_dir):
+            os.makedirs(reports_dir)
         files = gen_file_list(src_dirs)
         analyzer = AnalysisRunner()
         findings, reviews, fuzzables = analyzer.start(
