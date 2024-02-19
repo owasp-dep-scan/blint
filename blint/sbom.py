@@ -107,10 +107,10 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
     if not android_files and not exe_files:
         return False
     with Progress(
-        transient=True,
-        redirect_stderr=True,
-        redirect_stdout=True,
-        refresh_per_second=1,
+            transient=True,
+            redirect_stderr=True,
+            redirect_stdout=True,
+            refresh_per_second=1,
     ) as progress:
         if exe_files:
             task = progress.add_task(
@@ -134,7 +134,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
 
 
 def create_sbom(
-    components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX
+        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -184,41 +184,41 @@ def create_sbom(
 
 
 def process_exe_file(
-    components: list[Component],
-    deep_mode: bool,
-    dependencies: list[dict],
-    exe: str,
-    sbom: CycloneDX,
+        components: list[Component],
+        deep_mode: bool,
+        dependencies: list[dict],
+        exe: str,
+        sbom: CycloneDX,
 ) -> list[Component]:
     dependencies_dict = {}
     parent_component: Component = default_parent(exe)
     metadata: Dict[str, Any] = parse(exe)
     parent_component.properties = []
     for prop in (
-        "binary_type",
-        "magic",
-        "class",
-        "platform",
-        "minos",
-        "interpreter",
-        "dylinker",
-        "machine_type",
-        "sdk",
-        "uuid",
-        "cpu_type",
-        "flags",
-        "relro",
-        "is_pie",
-        "has_nx",
-        "static",
-        "characteristics",
-        "dll_characteristics",
-        "subsystem",
-        "is_gui",
-        "major_linker_version",
-        "minor_linker_version",
-        "major_operating_system_version",
-        "minor_operating_system_version",
+            "binary_type",
+            "magic",
+            "class",
+            "platform",
+            "minos",
+            "interpreter",
+            "dylinker",
+            "machine_type",
+            "sdk",
+            "uuid",
+            "cpu_type",
+            "flags",
+            "relro",
+            "is_pie",
+            "has_nx",
+            "static",
+            "characteristics",
+            "dll_characteristics",
+            "subsystem",
+            "is_gui",
+            "major_linker_version",
+            "minor_linker_version",
+            "major_operating_system_version",
+            "minor_operating_system_version",
     ):
         if metadata.get(prop):
             value = str(metadata.get(prop))
@@ -314,7 +314,7 @@ def process_exe_file(
 
 
 def process_android_file(
-    components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: CycloneDX
+        components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: CycloneDX
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
@@ -345,7 +345,7 @@ def process_android_file(
 
 
 def track_dependency(
-    dependencies_dict: dict, parent_component: Component, app_components: list[Component]
+        dependencies_dict: dict, parent_component: Component, app_components: list[Component]
 ) -> None:
     """
     Track dependencies between components and update the dependencies dict.

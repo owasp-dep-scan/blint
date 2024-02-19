@@ -23,11 +23,11 @@ from blint.utils import check_command, find_files, unzip_unsafe
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
 if (
-    not APKANALYZER_CMD
-    and ANDROID_HOME
-    and (
+        not APKANALYZER_CMD
+        and ANDROID_HOME
+        and (
         os.path.exists(os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"))
-    )
+)
 ):
     APKANALYZER_CMD = os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")
 elif check_command("apkanalyzer"):
@@ -300,10 +300,7 @@ def parse_so_file(app_file, app_temp_dir, sof):
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
-            Property(
-                name="internal:functions",
-                value=", ".join(set(functions)),
-            ),
+            Property(name="internal:functions", value=", ".join(set(functions))),
         ],
     )
     component.bom_ref = RefType(purl)

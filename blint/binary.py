@@ -277,9 +277,9 @@ def detect_exe_type(parsed_obj, metadata):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         if (
-            parsed_obj.has_section(".note.gnu.build-id")
-            or "musl" in metadata.get("interpreter")
-            or "ld-linux" in metadata.get("interpreter")
+                parsed_obj.has_section(".note.gnu.build-id")
+                or "musl" in metadata.get("interpreter")
+                or "ld-linux" in metadata.get("interpreter")
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -711,6 +711,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
         metadata["has_runpath"] = False
     elif runpath:
         metadata["has_runpath"] = True
+    # This is getting renamed to symtab_symbols in lief 0.15.0
     static_symbols = parsed_obj.static_symbols
     metadata["static"] = bool(static_symbols and not isinstance(static_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
@@ -718,7 +719,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
-    metadata["symtab_symbols"], exe_type = parse_symbols(parsed_obj.static_symbols)
+    metadata["symtab_symbols"], exe_type = parse_symbols(static_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -780,7 +781,7 @@ def add_elf_symbols(metadata, parsed_obj):
             for entry in symbols_version:
                 symbol_version_auxiliary = entry.symbol_version_auxiliary
                 if symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
-                    symbol_version_auxiliary.name
+                        symbol_version_auxiliary.name
                 ):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
