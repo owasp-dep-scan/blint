@@ -36,7 +36,7 @@ def default_parent(src_dirs: list[str]) -> Component:
     """
     if not src_dirs:
         raise ValueError("No source directories provided")
-    name = src_dirs[0]
+    name = os.path.basename(src_dirs[0])
     purl = f"pkg:generic/{name}@latest"
     component = Component(type=Type.application, name=name, version="latest", purl=purl)
     component.bom_ref = RefType(purl)
