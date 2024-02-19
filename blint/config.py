@@ -1245,3 +1245,5 @@ secrets_regex = {
         )
     ],
 }
+
+SYMBOL_DELIMITER = "~~"

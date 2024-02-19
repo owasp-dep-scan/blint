@@ -7,6 +7,7 @@ from rich.progress import Progress
 
 from blint.android import collect_app_metadata
 from blint.binary import parse
+from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     BomFormat,
     Component,
@@ -181,6 +182,49 @@ def create_sbom(
     return True
 
 
+def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
+    """
+    Creates a list of Component objects from symbols version.
+    This style of detection is quite imprecise since the version is just a min specifier.
+
+    Args:
+        symbols_version (list[dict]): A list of symbols version.
+
+    Returns:
+        list[Component]: list of components
+    """
+    lib_components: list[Component] = []
+    for symbol in symbols_version:
+        group = ""
+        name = symbol["name"]
+        version = "latest"
+        if "_" in name:
+            tmp_a = name.split("_")
+            if len(tmp_a) == 2:
+                version = tmp_a[-1]
+                name = tmp_a[0].lower()
+                if name.startswith("glib"):
+                    name = name.removeprefix("g")
+                    group = "gnu"
+        purl = f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+        if symbol.get("hash"):
+            purl = f"{purl}?hash={symbol.get('hash')}"
+        comp = Component(
+            type=Type.library,
+            group=group,
+            name=name,
+            version=version,
+            purl=purl,
+            evidence=create_component_evidence(symbol["name"], 0.5),
+            properties=[
+                Property(name="internal:symbol_version", value=symbol["name"])
+            ]
+        )
+        comp.bom_ref = RefType(purl)
+        lib_components.append(comp)
+    return lib_components
+
+
 def process_exe_file(
         components: list[Component],
         deep_mode: bool,
@@ -206,6 +250,7 @@ def process_exe_file(
     parent_component: Component = default_parent([exe])
     metadata: Dict[str, Any] = parse(exe)
     parent_component.properties = []
+    lib_components: list[Component] = []
     for prop in (
             "binary_type",
             "magic",
@@ -236,26 +281,41 @@ def process_exe_file(
             value = str(metadata.get(prop))
             if isinstance(metadata.get(prop), bool):
                 value = value.lower()
-            parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
+            if value:
+                parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
     if deep_mode:
+        symbols_version: list[dict] = metadata.get("symbols_version", [])
+        # Attempt to detect library components from the symbols version block
+        # If this is unsuccessful then store the information as a property
+        lib_components += components_from_symbols_version(symbols_version)
+        if not lib_components:
+            parent_component.properties += [
+                Property(
+                    name="internal:symbols_version",
+                    value=", ".join([f["name"] for f in symbols_version]),
+                )
+            ]
         parent_component.properties += [
             Property(
                 name="internal:functions",
-                value="~~".join([f["name"] for f in metadata.get("functions", [])]),
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("functions", [])]),
             ),
             Property(
                 name="internal:symtab_symbols",
-                value="~~".join([f["name"] for f in metadata.get("symtab_symbols", [])]),
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("symtab_symbols", [])]),
             ),
             Property(
                 name="internal:imports",
-                value="~~".join([f["name"] for f in metadata.get("imports", [])]),
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("imports", [])]),
+            ),
+            Property(
+                name="internal:dynamic_symbols",
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("dynamic_symbols", [])]),
             ),
         ]
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     sbom.metadata.component.components.append(parent_component)
-    lib_components: list[Component] = []
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
             comp = create_library_component(entry, exe)
