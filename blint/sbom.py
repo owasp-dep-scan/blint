@@ -127,11 +127,11 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]")
             components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
-    return create_sbom(components, dependencies, output_file, sbom)
+    return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
 
 def create_sbom(
-        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX
+        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX, deep_mode: bool
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -142,6 +142,7 @@ def create_sbom(
         dependencies (list): A list of dependencies.
         output_file (str): The path to the output file.
         sbom: The SBOM object representing the SBOM.
+        deep_mode (bool): Flag indicating whether to perform deep analysis.
 
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
@@ -170,7 +171,7 @@ def create_sbom(
     with open(output_file, mode="w", encoding="utf-8") as fp:
         fp.write(
             sbom.model_dump_json(
-                indent=2,
+                indent=None if deep_mode else 2,
                 exclude_none=True,
                 exclude_defaults=True,
                 warnings=False,

@@ -213,6 +213,15 @@ def parse_strings(parsed_obj):
     return strings_list
 
 
+def ignorable_symbol(symbol_name: str | None) -> bool:
+    if not symbol_name:
+        return True
+    for pref in ("$f64.", "__"):
+        if symbol_name.startswith(pref):
+            return True
+    return False
+
+
 def parse_symbols(symbols):
     """
     Parse symbols from a list of symbols.
@@ -238,7 +247,7 @@ def parse_symbols(symbols):
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
-            if symbol_name:
+            if not ignorable_symbol(symbol_name):
                 exe_type = guess_exe_type(symbol_name)
                 symbols_list.append(
                     {
