@@ -286,7 +286,8 @@ def process_exe_file(
     if metadata.get("notes"):
         for note in metadata.get("notes"):
             if note.get("version"):
-                parent_component.properties.append(Property(name=f"internal:{note.get('type')}", value=note.get('version')))
+                parent_component.properties.append(
+                    Property(name=f"internal:{note.get('type')}", value=note.get('version')))
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         # Attempt to detect library components from the symbols version block
@@ -302,7 +303,8 @@ def process_exe_file(
         parent_component.properties += [
             Property(
                 name="internal:functions",
-                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("functions", [])]),
+                value=SYMBOL_DELIMITER.join(
+                    [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]),
             ),
             Property(
                 name="internal:symtab_symbols",
