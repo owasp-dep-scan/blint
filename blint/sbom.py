@@ -117,7 +117,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
                 start=True,
             )
         for exe in exe_files:
-            progress.update(task, description=f"Processing [bold]{exe}[/bold]")
+            progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
             components.extend(process_exe_file(components, deep_mode, dependencies, exe, sbom))
         if android_files:
             task = progress.add_task(
@@ -126,7 +126,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
                 start=True,
             )
         for f in android_files:
-            progress.update(task, description=f"Processing [bold]{f}[/bold]")
+            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
     return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
