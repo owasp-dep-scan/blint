@@ -7,18 +7,13 @@ import tempfile
 from blint.binary import parse, parse_dex
 from blint.cyclonedx.spec import (
     Component,
-    ComponentEvidence,
-    FieldModel,
-    Identity,
-    Method,
     Property,
     RefType,
     Scope,
-    Technique,
     Type,
 )
 from blint.logger import LOG
-from blint.utils import check_command, find_files, unzip_unsafe
+from blint.utils import check_command, create_component_evidence, find_files, unzip_unsafe
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
@@ -178,19 +173,7 @@ def create_version_component(app_file, group, name, rel_path, version_data):
         version=version_data,
         purl=purl,
         scope=Scope.required,
-        evidence=ComponentEvidence(
-            identity=Identity(
-                field=FieldModel.purl,
-                confidence=1,
-                methods=[
-                    Method(
-                        technique=Technique.manifest_analysis,
-                        value=rel_path,
-                        confidence=1,
-                    )
-                ],
-            )
-        ),
+        evidence=create_component_evidence(rel_path, 1.0),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
@@ -284,19 +267,7 @@ def parse_so_file(app_file, app_temp_dir, sof):
         version=version,
         purl=purl,
         scope=Scope.required,
-        evidence=ComponentEvidence(
-            identity=Identity(
-                field=FieldModel.purl,
-                confidence=0.5,
-                methods=[
-                    Method(
-                        technique=Technique.binary_analysis,
-                        value=rel_path,
-                        confidence=0.5,
-                    )
-                ],
-            )
-        ),
+        evidence=create_component_evidence(str(rel_path), 0.5),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
@@ -378,19 +349,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         version=version,
         purl=purl,
         scope=Scope.required,
-        evidence=ComponentEvidence(
-            identity=Identity(
-                field=FieldModel.purl,
-                confidence=0.2,
-                methods=[
-                    Method(
-                        technique=Technique.binary_analysis,
-                        value=rel_path,
-                        confidence=0.2,
-                    )
-                ],
-            )
-        ),
+        evidence=create_component_evidence(rel_path, 0.2),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),

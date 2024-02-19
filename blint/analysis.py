@@ -11,14 +11,12 @@ from itertools import islice
 from pathlib import Path
 
 import yaml
-from rich import box
 from rich.progress import Progress
-from rich.table import Table
 from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
 from blint.logger import LOG, console
-from blint.utils import (is_fuzzable_name, print_findings_table, )
+from blint.utils import (create_findings_table, is_fuzzable_name, print_findings_table, )
 from blint.checks import (check_nx, check_pie,  # noqa, pylint: disable=unused-import
                           check_relro, check_canary, check_rpath,
                           check_virtual_size, check_authenticode,
@@ -279,15 +277,7 @@ def print_reviews_table(reviews, files):
         files: A list of file names associated with the reviews.
 
     """
-    table = Table(
-        title="BLint Capability Review",
-        box=box.DOUBLE_EDGE,
-        header_style="bold magenta",
-        show_lines=True,
-    )
-    table.add_column("ID")
-    if len(files) > 1:
-        table.add_column("Binary")
+    table = create_findings_table(files, "BLint Capability Review")
     table.add_column("Capabilities")
     table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:

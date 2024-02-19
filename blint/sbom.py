@@ -10,36 +10,33 @@ from blint.binary import parse
 from blint.cyclonedx.spec import (
     BomFormat,
     Component,
-    ComponentEvidence,
     CycloneDX,
-    FieldModel,
-    Identity,
     Lifecycles,
     Metadata,
-    Method,
     Phase,
     Property,
     RefType,
     Scope,
-    Technique,
     Tools,
     Type,
 )
 from blint.logger import LOG
-from blint.utils import find_android_files, gen_file_list, get_version
+from blint.utils import create_component_evidence, find_android_files, gen_file_list, get_version
 
 
-def default_parent(src_dirs):
+def default_parent(src_dirs: list[str]) -> Component:
     """
     Creates a default parent Component object for the given source directories.
 
     Args:
-        src_dirs (list): A list of source directories.
+        src_dirs (list[str]): A list of source directories.
 
     Returns:
         Component: A Component object representing the default parent.
     """
-    name = os.path.basename(src_dirs[0] if isinstance(src_dirs, list) else src_dirs)
+    if not src_dirs:
+        raise ValueError("No source directories provided")
+    name = src_dirs[0]
     purl = f"pkg:generic/{name}@latest"
     component = Component(type=Type.application, name=name, version="latest", purl=purl)
     component.bom_ref = RefType(purl)
@@ -190,8 +187,22 @@ def process_exe_file(
         exe: str,
         sbom: CycloneDX,
 ) -> list[Component]:
+    """
+    Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
+
+    Args:
+        components: The list of existing components.
+        deep_mode: A flag indicating whether to include deep analysis of the executable.
+        dependencies: The list of dependencies.
+        exe: The path to the executable file.
+        sbom: The CycloneDX SBOM object.
+
+    Returns:
+        list[Component]: The updated list of components.
+
+    """
     dependencies_dict = {}
-    parent_component: Component = default_parent(exe)
+    parent_component: Component = default_parent([exe])
     metadata: Dict[str, Any] = parse(exe)
     parent_component.properties = []
     for prop in (
@@ -246,64 +257,11 @@ def process_exe_file(
     lib_components: list[Component] = []
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
-            name = os.path.basename(entry["name"])
-            purl = f"pkg:file/{name}@{entry['version']}"
-            if entry.get("compatibility_version"):
-                purl = f"{purl}?compatibility_version={entry['compatibility_version']}"
-            comp = Component(
-                type=Type.library,
-                name=name,
-                version=entry["version"],
-                purl=purl,
-                evidence=ComponentEvidence(
-                    identity=Identity(
-                        field=FieldModel.purl,
-                        confidence=0.8,
-                        methods=[
-                            Method(
-                                technique=Technique.binary_analysis,
-                                value=exe,
-                                confidence=0.8,
-                            )
-                        ],
-                    )
-                ),
-                properties=[
-                    Property(name="internal:srcFile", value=exe),
-                    Property(name="internal:libPath", value=entry["name"]),
-                ],
-            )
-            if entry.get("tag") == "NEEDED":
-                comp.scope = Scope.required
-            comp.bom_ref = RefType(purl)
+            comp = create_library_component(entry, exe)
             lib_components.append(comp)
     if metadata.get("dynamic_entries"):
         for entry in metadata["dynamic_entries"]:
-            purl = f"pkg:file/{entry['name']}"
-            comp = Component(
-                type=Type.library,
-                name=entry["name"],
-                purl=purl,
-                evidence=ComponentEvidence(
-                    identity=Identity(
-                        field=FieldModel.purl,
-                        confidence=0.5,
-                        methods=[
-                            Method(
-                                technique=Technique.binary_analysis,
-                                value=exe,
-                                confidence=0.5,
-                            )
-                        ],
-                    )
-                ),
-                properties=[
-                    Property(name="internal:srcFile", value=exe),
-                ],
-            )
-            if entry.get("tag") == "NEEDED":
-                comp.scope = Scope.required
-            comp.bom_ref = RefType(purl)
+            comp = create_dynamic_component(entry, exe)
             lib_components.append(comp)
     if lib_components:
         components += lib_components
@@ -311,6 +269,65 @@ def process_exe_file(
     if dependencies_dict:
         dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
     return components
+
+
+def create_library_component(entry: Dict, exe: str) -> Component:
+    """
+    Processes a library entry and creates a component object.
+
+    Args:
+        entry: The entry containing the library information.
+        exe: The executable associated with the library.
+
+    Returns:
+        Component: The created component object.
+    """
+    name = os.path.basename(entry["name"])
+    purl = f"pkg:file/{name}@{entry['version']}"
+    if entry.get("compatibility_version"):
+        purl = f"{purl}?compatibility_version={entry['compatibility_version']}"
+    comp = Component(
+        type=Type.library,
+        name=name,
+        version=entry["version"],
+        purl=purl,
+        evidence=create_component_evidence(exe, 0.8),
+        properties=[
+            Property(name="internal:srcFile", value=exe),
+            Property(name="internal:libPath", value=entry["name"]),
+        ],
+    )
+    if entry.get("tag") == "NEEDED":
+        comp.scope = Scope.required
+    comp.bom_ref = RefType(purl)
+    return comp
+
+
+def create_dynamic_component(entry: Dict, exe: str) -> Component:
+    """
+    Creates a dynamic component object based on the entry information.
+
+    Args:
+        entry: The entry containing the component information.
+        exe: The executable associated with the component.
+
+    Returns:
+        Component: The created dynamic component object.
+    """
+    purl = f"pkg:file/{entry['name']}"
+    comp = Component(
+        type=Type.library,
+        name=entry["name"],
+        purl=purl,
+        evidence=create_component_evidence(exe, 0.5),
+        properties=[
+            Property(name="internal:srcFile", value=exe),
+        ],
+    )
+    if entry.get("tag") == "NEEDED":
+        comp.scope = Scope.required
+    comp.bom_ref = RefType(purl)
+    return comp
 
 
 def process_android_file(
