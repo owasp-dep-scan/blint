@@ -5,6 +5,7 @@ import sys
 import tempfile
 
 from blint.binary import parse, parse_dex
+from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     Component,
     Property,
@@ -271,7 +272,7 @@ def parse_so_file(app_file, app_temp_dir, sof):
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
-            Property(name="internal:functions", value=", ".join(set(functions))),
+            Property(name="internal:functions", value=SYMBOL_DELIMITER.join(set(functions))),
         ],
     )
     component.bom_ref = RefType(purl)
@@ -355,7 +356,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
             Property(name="internal:appFile", value=app_file),
             Property(
                 name="internal:functions",
-                value=", ".join(
+                value=SYMBOL_DELIMITER.join(
                     {
                         f"""{m.name}({','.join([_clean_type(p.underlying_array_type) for p in m.prototype.parameters_type])}):{_clean_type(m.prototype.return_type.underlying_array_type)}"""
                         for m in dex_metadata.get("methods")
@@ -364,7 +365,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
             ),
             Property(
                 name="internal:classes",
-                value=", ".join(
+                value=SYMBOL_DELIMITER.join(
                     set(sorted([_clean_type(c.fullname) for c in dex_metadata.get("classes")]))
                 ),
             ),
