@@ -7,6 +7,7 @@ from rich.progress import Progress
 
 from blint.android import collect_app_metadata
 from blint.binary import parse
+from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     BomFormat,
     Component,
@@ -36,7 +37,7 @@ def default_parent(src_dirs: list[str]) -> Component:
     """
     if not src_dirs:
         raise ValueError("No source directories provided")
-    name = src_dirs[0]
+    name = os.path.basename(src_dirs[0])
     purl = f"pkg:generic/{name}@latest"
     component = Component(type=Type.application, name=name, version="latest", purl=purl)
     component.bom_ref = RefType(purl)
@@ -116,7 +117,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
                 start=True,
             )
         for exe in exe_files:
-            progress.update(task, description=f"Processing [bold]{exe}[/bold]")
+            progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
             components.extend(process_exe_file(components, deep_mode, dependencies, exe, sbom))
         if android_files:
             task = progress.add_task(
@@ -125,13 +126,13 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
                 start=True,
             )
         for f in android_files:
-            progress.update(task, description=f"Processing [bold]{f}[/bold]")
+            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
-    return create_sbom(components, dependencies, output_file, sbom)
+    return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
 
 def create_sbom(
-        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX
+        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX, deep_mode: bool
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -142,6 +143,7 @@ def create_sbom(
         dependencies (list): A list of dependencies.
         output_file (str): The path to the output file.
         sbom: The SBOM object representing the SBOM.
+        deep_mode (bool): Flag indicating whether to perform deep analysis.
 
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
@@ -170,7 +172,7 @@ def create_sbom(
     with open(output_file, mode="w", encoding="utf-8") as fp:
         fp.write(
             sbom.model_dump_json(
-                indent=2,
+                indent=None if deep_mode else 2,
                 exclude_none=True,
                 exclude_defaults=True,
                 warnings=False,
@@ -178,6 +180,49 @@ def create_sbom(
         )
         LOG.debug(f"SBOM file generated successfully at {output_file}")
     return True
+
+
+def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
+    """
+    Creates a list of Component objects from symbols version.
+    This style of detection is quite imprecise since the version is just a min specifier.
+
+    Args:
+        symbols_version (list[dict]): A list of symbols version.
+
+    Returns:
+        list[Component]: list of components
+    """
+    lib_components: list[Component] = []
+    for symbol in symbols_version:
+        group = ""
+        name = symbol["name"]
+        version = "latest"
+        if "_" in name:
+            tmp_a = name.split("_")
+            if len(tmp_a) == 2:
+                version = tmp_a[-1]
+                name = tmp_a[0].lower()
+                if name.startswith("glib"):
+                    name = name.removeprefix("g")
+                    group = "gnu"
+        purl = f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+        if symbol.get("hash"):
+            purl = f"{purl}?hash={symbol.get('hash')}"
+        comp = Component(
+            type=Type.library,
+            group=group,
+            name=name,
+            version=version,
+            purl=purl,
+            evidence=create_component_evidence(symbol["name"], 0.5),
+            properties=[
+                Property(name="internal:symbol_version", value=symbol["name"])
+            ]
+        )
+        comp.bom_ref = RefType(purl)
+        lib_components.append(comp)
+    return lib_components
 
 
 def process_exe_file(
@@ -205,6 +250,7 @@ def process_exe_file(
     parent_component: Component = default_parent([exe])
     metadata: Dict[str, Any] = parse(exe)
     parent_component.properties = []
+    lib_components: list[Component] = []
     for prop in (
             "binary_type",
             "magic",
@@ -235,26 +281,47 @@ def process_exe_file(
             value = str(metadata.get(prop))
             if isinstance(metadata.get(prop), bool):
                 value = value.lower()
-            parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
+            if value:
+                parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
+    if metadata.get("notes"):
+        for note in metadata.get("notes"):
+            if note.get("version"):
+                parent_component.properties.append(
+                    Property(name=f"internal:{note.get('type')}", value=note.get('version')))
     if deep_mode:
+        symbols_version: list[dict] = metadata.get("symbols_version", [])
+        # Attempt to detect library components from the symbols version block
+        # If this is unsuccessful then store the information as a property
+        lib_components += components_from_symbols_version(symbols_version)
+        if not lib_components:
+            parent_component.properties += [
+                Property(
+                    name="internal:symbols_version",
+                    value=", ".join([f["name"] for f in symbols_version]),
+                )
+            ]
         parent_component.properties += [
             Property(
                 name="internal:functions",
-                value="~~".join([f["name"] for f in metadata.get("functions", [])]),
+                value=SYMBOL_DELIMITER.join(
+                    [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]),
             ),
             Property(
                 name="internal:symtab_symbols",
-                value="~~".join([f["name"] for f in metadata.get("symtab_symbols", [])]),
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("symtab_symbols", [])]),
             ),
             Property(
                 name="internal:imports",
-                value="~~".join([f["name"] for f in metadata.get("imports", [])]),
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("imports", [])]),
+            ),
+            Property(
+                name="internal:dynamic_symbols",
+                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("dynamic_symbols", [])]),
             ),
         ]
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     sbom.metadata.component.components.append(parent_component)
-    lib_components: list[Component] = []
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
             comp = create_library_component(entry, exe)

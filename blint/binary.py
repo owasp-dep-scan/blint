@@ -77,9 +77,11 @@ def extract_note_data(idx, note):
     if "ID Hash" in note_str:
         build_id = note_str.rsplit("ID Hash:", maxsplit=1)[-1].strip()
     description = note.description
-    description_str = " ".join(map(integer_to_hex_str, description[:16]))
-    if len(description) > 16:
+    description_str = " ".join(map(integer_to_hex_str, description[:64]))
+    if len(description) > 64:
         description_str += " ..."
+    if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
+        build_id = description_str.replace(" ", "")
     type_str = note.type
     type_str = str(type_str).rsplit(".", maxsplit=1)[-1]
     note_details = ""
@@ -101,7 +103,7 @@ def extract_note_data(idx, note):
             version = note_details.version
             abi = str(note_details.abi)
             version_str = f"{version[0]}.{version[1]}.{version[2]}"
-    if not version_str and type_str == "BUILD_ID" and build_id:
+    if not version_str and build_id:
         version_str = build_id
     return {
         "index": idx,
@@ -213,6 +215,15 @@ def parse_strings(parsed_obj):
     return strings_list
 
 
+def ignorable_symbol(symbol_name: str | None) -> bool:
+    if not symbol_name:
+        return True
+    for pref in ("$f64.", "__"):
+        if symbol_name.startswith(pref):
+            return True
+    return False
+
+
 def parse_symbols(symbols):
     """
     Parse symbols from a list of symbols.
@@ -238,7 +249,7 @@ def parse_symbols(symbols):
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
-            if symbol_name:
+            if not ignorable_symbol(symbol_name):
                 exe_type = guess_exe_type(symbol_name)
                 symbols_list.append(
                     {
