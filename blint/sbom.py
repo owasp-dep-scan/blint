@@ -57,7 +57,7 @@ def default_metadata(src_dirs):
     metadata = Metadata()
     metadata.timestamp = datetime.now()
     metadata.component = default_parent(src_dirs)
-    metadata.tools = [
+    metadata.tools = (
         Tools(
             components=[
                 Component(
@@ -71,7 +71,7 @@ def default_metadata(src_dirs):
                 )
             ]
         )
-    ]
+    )
     metadata.lifecycles = [Lifecycles(phase=Phase.post_build)]
     return metadata
 
