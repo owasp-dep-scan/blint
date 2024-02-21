@@ -293,32 +293,45 @@ def process_exe_file(
         # Attempt to detect library components from the symbols version block
         # If this is unsuccessful then store the information as a property
         lib_components += components_from_symbols_version(symbols_version)
-        if not lib_components:
+        if not lib_components and symbols_version:
             parent_component.properties += [
                 Property(
                     name="internal:symbols_version",
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             ]
-        parent_component.properties += [
-            Property(
-                name="internal:functions",
-                value=SYMBOL_DELIMITER.join(
-                    [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]),
-            ),
-            Property(
-                name="internal:symtab_symbols",
-                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("symtab_symbols", [])]),
-            ),
-            Property(
-                name="internal:imports",
-                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("imports", [])]),
-            ),
-            Property(
-                name="internal:dynamic_symbols",
-                value=SYMBOL_DELIMITER.join([f["name"] for f in metadata.get("dynamic_symbols", [])]),
-            ),
-        ]
+        internal_functions = [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]
+        if internal_functions:
+            parent_component.properties += [
+                Property(
+                    name="internal:functions",
+                    value=SYMBOL_DELIMITER.join(internal_functions),
+                )
+            ]
+        symtab_symbols = [f["name"] for f in metadata.get("symtab_symbols", [])]
+        if symtab_symbols:
+            parent_component.properties += [
+                Property(
+                    name="internal:symtab_symbols",
+                    value=SYMBOL_DELIMITER.join(symtab_symbols),
+                )
+            ]
+        all_imports = [f["name"] for f in metadata.get("imports", [])]
+        if all_imports:
+            parent_component.properties += [
+                Property(
+                    name="internal:imports",
+                    value=SYMBOL_DELIMITER.join(all_imports),
+                )
+            ]
+        dynamic_symbols = [f["name"] for f in metadata.get("dynamic_symbols", [])]
+        if dynamic_symbols:
+            parent_component.properties += [
+                Property(
+                    name="internal:dynamic_symbols",
+                    value=SYMBOL_DELIMITER.join(dynamic_symbols),
+                )
+            ]
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     sbom.metadata.component.components.append(parent_component)

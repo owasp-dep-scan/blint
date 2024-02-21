@@ -143,6 +143,11 @@ def collect_version_files_metadata(app_file, app_temp_dir):
             group, name = parse_file_name(file_name, group)
         with open(vf, encoding="utf-8") as fp:
             version_data = fp.read().strip()
+            # Sometimes the version data could be dynamic. Eg:
+            #   task ':lifecycle:lifecycle-viewmodel:writeVersionFile' property 'version'"
+            # These can be treated as dynamic
+            if version_data and version_data.startswith("task"):
+                version_data = "dynamic"
         if name and version_data:
             component = create_version_component(app_file, group, name, rel_path, version_data)
             file_components.append(component)
@@ -167,6 +172,10 @@ def create_version_component(app_file, group, name, rel_path, version_data):
         purl = f"pkg:maven/{group}/{name}@{version_data}"
     else:
         purl = f"pkg:maven/{name}@{version_data}"
+    confidence = 1.0
+    # Adjust the confidence based on the version data
+    if version_data in ("latest", "dynamic"):
+        confidence = 0.2
     component = Component(
         type=Type.library,
         group=group,
@@ -174,7 +183,7 @@ def create_version_component(app_file, group, name, rel_path, version_data):
         version=version_data,
         purl=purl,
         scope=Scope.required,
-        evidence=create_component_evidence(rel_path, 1.0),
+        evidence=create_component_evidence(rel_path, confidence),
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
