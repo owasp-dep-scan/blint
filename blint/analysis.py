@@ -343,7 +343,7 @@ def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
     if not findings and not reviews:
         LOG.info(f":white_heavy_check_mark: No issues found in {src_dir}!")
     # Try console output as html
-    if findings or reviews:
+    else:
         html_file = Path(reports_dir) / "blint-output.html"
         console.save_html(html_file, theme=MONOKAI)
         LOG.info(f"HTML report written to {html_file}")
