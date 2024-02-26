@@ -1,0 +1,42 @@
+android.permission.BLUETOOTH_ADMIN' maxSdkVersion='30
+android.permission.CALL_PHONE
+android.permission.FOREGROUND_SERVICE
+android.permission.SYSTEM_ALERT_WINDOW
+io.homeassistant.companion.android.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+android.permission.READ_EXTERNAL_STORAGE' maxSdkVersion='28
+android.permission.RECEIVE_BOOT_COMPLETED
+android.permission.NFC
+android.permission.BLUETOOTH' maxSdkVersion='30
+android.permission.BLUETOOTH_ADVERTISE
+android.permission.ACCESS_FINE_LOCATION
+android.permission.ACCESS_NOTIFICATION_POLICY
+android.permission.ACCESS_COARSE_LOCATION
+android.permission.ACCESS_NETWORK_STATE
+android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+android.permission.WAKE_LOCK
+android.permission.ACCESS_WIFI_STATE
+android.permission.USE_FINGERPRINT
+com.google.android.gms.permission.CAR_FUEL
+android.permission.POST_NOTIFICATIONS
+com.google.android.c2dm.permission.RECEIVE
+com.google.android.gms.permission.CAR_MILEAGE
+android.permission.PACKAGE_USAGE_STATS
+android.permission.BLUETOOTH_SCAN
+android.permission.ACCESS_BACKGROUND_LOCATION
+android.permission.QUERY_ALL_PACKAGES
+android.permission.CHANGE_WIFI_MULTICAST_STATE
+android.permission.VIBRATE
+android.permission.RECORD_AUDIO
+com.android.alarm.permission.SET_ALARM
+android.permission.FOREGROUND_SERVICE_LOCATION
+android.permission.SCHEDULE_EXACT_ALARM
+android.permission.INTERNET
+android.permission.USE_BIOMETRIC
+android.permission.ACTIVITY_RECOGNITION
+android.permission.CAMERA
+android.permission.MODIFY_AUDIO_SETTINGS
+android.permission.WRITE_EXTERNAL_STORAGE' maxSdkVersion='28
+android.permission.BLUETOOTH_CONNECT
+android.permission.READ_PHONE_STATE
+android.permission.WRITE_SETTINGS
+com.google.android.gms.permission.ACTIVITY_RECOGNITION

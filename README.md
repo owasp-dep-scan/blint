@@ -2,12 +2,13 @@
 
 ![blint logo](blint.png)
 
-BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF)
+BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF). Since version 2, blint can also generate Software Bill-of-Materials (SBOM) for supported binaries.
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)
 
 Supported binary formats:
 
+- Android (apk, aab)
 - ELF (GNU, musl)
 - PE (exe, dll)
 - Mach-O (x64, arm64)
@@ -30,33 +31,56 @@ NOTE: The presence of capabilities doesn't imply that the operations are always 
 
 ## Installation
 
-- Install python 3.8 or above
+- Install python 3.10, 3.11, or 3.12
 
 ```bash
-pip3 install blint
+pip install blint
 ```
 
 ### Single binary releases
 
-You can download single binary builds from the [blint-bin releases](https://github.com/AppThreat/blint/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
+You can download single binary builds from the [blint-bin releases](https://github.com/OWASP-dep-scan/blint/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
 
 ## Usage
 
-```bash
-usage: blint [-h] [-i SRC_DIR_IMAGE] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews]
+```shell
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner]
+             [--no-reviews] [--suggest-fuzzable]
+             {sbom} ...
 
-Linting tool for binary files powered by lief.
+Binary linter and SBOM generator.
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
   -o REPORTS_DIR, --reports REPORTS_DIR
-                        Reports directory
-  --no-error            Continue on error to prevent build from breaking
-  --no-banner           Do not display banner
-  --no-reviews          Do not perform method reviews
-  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary
+                        Reports directory. Defaults to reports.
+  --no-error            Continue on error to prevent build from breaking.
+  --no-banner           Do not display banner.
+  --no-reviews          Do not perform method reviews.
+  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
+
+sub-commands:
+  Additional sub-commands
+
+  {sbom}
+    sbom                Command to generate SBOM for supported binaries.
+```
+
+### SBOM sub-command
+
+```shell
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep]
+
+options:
+  -h, --help            show this help message and exit
+  -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
+                        Source directories, container images or binary files. Defaults to current directory.
+  -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
+                        SBOM output file. Defaults to bom.json in current directory.
+  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
+                        operation.
 ```
 
 To test any binary including default commands
@@ -77,6 +101,22 @@ Pass `--suggest-fuzzable` to get suggestions for fuzzing. A dictionary containin
 blint -i ~/ngrok -o /tmp/blint --suggest-fuzzable
 ```
 
+To generate SBOM in [CycloneDX format](https://cyclonedx.org/) for supported binaries, use the sbom sub-command.
+
+```shell
+blint sbom -i /path/to/apk -o bom.json
+```
+
+```shell
+blint sbom -i /directory/with/apk/aab -o bom.json
+```
+
+To parse all files including `.dex` files, pass `--deep` argument.
+
+```shell
+blint sbom -i /path/to/apk -o bom.json --deep
+```
+
 PowerShell example
 
 ![PowerShell](./docs/blint-powershell.jpg)
@@ -90,6 +130,8 @@ Blint produces the following json artifacts in the reports directory:
 - findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
 - reviews.json - Contains information from the capability reviews. Useful for further analysis
 - fuzzables.json - Contains a suggested list of methods for fuzzing
+
+sbom command generates CycloneDX json.
 
 ## References
 
