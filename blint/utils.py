@@ -13,6 +13,7 @@ import lief
 from defusedxml.ElementTree import fromstring
 from rich import box
 from rich.table import Table
+
 from blint.config import (
     ignore_directories,
     ignore_files,
@@ -21,7 +22,6 @@ from blint.config import (
     secrets_regex
 )
 from blint.cyclonedx.spec import ComponentEvidence, FieldModel, Identity, Method, Technique
-
 from blint.logger import console, LOG
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
@@ -502,3 +502,8 @@ def create_component_evidence(method_value: str, confidence: float) -> Component
             ],
         )
     )
+
+
+def camel_to_snake(name: str) -> str:
+    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()

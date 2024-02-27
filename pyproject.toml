@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.0.2"
+version = "2.0.3"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "MIT"
