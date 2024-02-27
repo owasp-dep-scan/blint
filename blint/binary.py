@@ -748,9 +748,8 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["functions"] = parse_functions(parsed_obj.functions)
-
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
-
+    metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
     return metadata
 
 
@@ -886,11 +885,11 @@ def determine_elf_flags(header):
     return eflags_str
 
 
-def parse_pe_overlay(parsed_obj: lief.PE.Binary) -> dict[str, dict]:
+def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     """
-    Parse the PE overlay section to extract dependencies
+    Parse the overlay section to extract dotnet dependencies
     Args:
-        parsed_obj (lief.PE.Binary): The parsed object representing the PE binary.
+        parsed_obj (lief.Binary): The parsed object representing the PE binary.
 
     Returns:
         dict: Dict representing the deps.json if available.
@@ -902,6 +901,7 @@ def parse_pe_overlay(parsed_obj: lief.PE.Binary) -> dict[str, dict]:
                        .replace("\0", "")
                        .replace("\n", "")
                        .replace("  ", ""))
+        print (overlay_str)
         if overlay_str.find('{"runtimeTarget') > -1:
             start_index = overlay_str.find('{"runtimeTarget')
             end_index = overlay_str.rfind('}}}')
@@ -964,9 +964,9 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
         # Detect if this PE might be dotnet
         for i, dd in enumerate(parsed_obj.data_directories):
-            if i == 14 and type(dd) == "CLR_RUNTIME_HEADER":
+            if i == 14 and isinstance(dd, lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER):
                 metadata["is_dotnet"] = True
-        metadata["pe_dependencies"] = parse_pe_overlay(parsed_obj)
+        metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
             metadata["tls_address_index"] = tls.addressof_index
