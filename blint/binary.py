@@ -898,9 +898,10 @@ def parse_pe_overlay(parsed_obj: lief.PE.Binary) -> dict[str, dict]:
     deps = {}
     if hasattr(parsed_obj, "overlay"):
         overlay = parsed_obj.overlay
-        overlay_str = codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace").replace("\0",
-                                                                                                            "").replace(
-            "\n", "").replace("  ", "")
+        overlay_str = (codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace")
+                       .replace("\0", "")
+                       .replace("\n", "")
+                       .replace("  ", ""))
         if overlay_str.find('{"runtimeTarget') > -1:
             start_index = overlay_str.find('{"runtimeTarget')
             end_index = overlay_str.rfind('}}}')
