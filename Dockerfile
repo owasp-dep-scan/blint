@@ -1,4 +1,4 @@
-FROM almalinux:9.3-minimal
+FROM ghcr.io/appthreat/base-lang:main
 
 LABEL maintainer="appthreat" \
       org.opencontainers.image.authors="Team AppThreat <cloud@appthreat.com>" \
@@ -11,14 +11,12 @@ LABEL maintainer="appthreat" \
       org.opencontainers.image.description="BLint is a Binary Linter and SBOM generator." \
       org.opencontainers.docker.cmd="docker run --rm -it -v /tmp:/tmp -v $(pwd):/app:rw -w /app -t ghcr.io/owasp-dep-scan/blint"
 
-ENV COMPOSER_ALLOW_SUPERUSER=1 \
-    ANDROID_HOME=/opt/android-sdk-linux \
+ENV ANDROID_HOME=/opt/android-sdk-linux \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING="utf-8"
 ENV PATH=${PATH}:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
-RUN microdnf install -y python3.11 python3.11-devel python3.11-pip java-21-openjdk-headless make gcc \
-        which tar gzip zip unzip sudo ncurses \
+RUN microdnf install -y make gcc ncurses \
     && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \

@@ -141,3 +141,9 @@ sbom command generates CycloneDX json.
 ## Discord support
 
 The developers could be reached via the [discord](https://discord.gg/DCNxzaeUpd) channel.
+
+## Sponsorship wishlist
+
+If you love blint, you should consider [donating](https://owasp.org/donate?reponame=www-project-dep-scan&title=OWASP+dep-scan) to our project. In addition, consider donating to the below projects which make blint possible.
+
+- [LIEF](https://github.com/sponsors/lief-project/)

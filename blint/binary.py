@@ -1,5 +1,7 @@
 # pylint: disable=too-many-lines,consider-using-f-string
+import codecs
 import contextlib
+import json
 import sys
 
 import lief
@@ -380,6 +382,13 @@ def process_pe_resources(parsed_obj):
     if not rm or isinstance(rm, lief.lief_errors):
         return {}
     resources = {}
+    version_metadata = {}
+    version_info: lief.PE.ResourceVersion = rm.version if rm.has_version else None
+    if version_info and version_info.has_string_file_info:
+        string_file_info: lief.PE.ResourceStringFileInfo = version_info.string_file_info
+        for lc_item in string_file_info.langcode_items:
+            if lc_item.items:
+                version_metadata.update(lc_item.items)
     try:
         resources = {
             "has_accelerator": rm.has_accelerator,
@@ -393,6 +402,8 @@ def process_pe_resources(parsed_obj):
             "version_info": str(rm.version) if rm.has_version else None,
             "html": rm.html if rm.has_html else None,
         }
+        if version_metadata:
+            resources["version_metadata"] = version_metadata
     except (AttributeError, UnicodeError):
         return resources
     return resources
@@ -875,6 +886,35 @@ def determine_elf_flags(header):
     return eflags_str
 
 
+def parse_pe_overlay(parsed_obj: lief.PE.Binary) -> dict[str, dict]:
+    """
+    Parse the PE overlay section to extract dependencies
+    Args:
+        parsed_obj (lief.PE.Binary): The parsed object representing the PE binary.
+
+    Returns:
+        dict: Dict representing the deps.json if available.
+    """
+    deps = {}
+    if hasattr(parsed_obj, "overlay"):
+        overlay = parsed_obj.overlay
+        overlay_str = codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace").replace("\0",
+                                                                                                            "").replace(
+            "\n", "").replace("  ", "")
+        if overlay_str.find('{"runtimeTarget') > -1:
+            start_index = overlay_str.find('{"runtimeTarget')
+            end_index = overlay_str.rfind('}}}')
+            if end_index > -1:
+                overlay_str = overlay_str[start_index:end_index + 3]
+                try:
+                    # If all is good, deps should have runtimeTarget, compilationOptions, targets, and libraries
+                    # Use libraries to construct BOM components and targets for the dependency tree
+                    deps = json.loads(overlay_str)
+                except json.DecodeError:
+                    pass
+    return deps
+
+
 def add_pe_metadata(exe_file, metadata, parsed_obj):
     """Adds PE metadata to the given metadata dictionary.
 
@@ -911,10 +951,21 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
             metadata["imports"],
             metadata["dynamic_entries"],
         ) = parse_pe_imports(parsed_obj.imports)
+        # Attempt to detect if this PE is a driver
+        if metadata["dynamic_entries"]:
+            for e in metadata["dynamic_entries"]:
+                if e["name"] == "ntoskrnl.exe":
+                    metadata["is_driver"] = True
+                    break
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
+        # Detect if this PE might be dotnet
+        for i, dd in enumerate(parsed_obj.data_directories):
+            if i == 14 and type(dd) == "CLR_RUNTIME_HEADER":
+                metadata["is_dotnet"] = True
+        metadata["pe_dependencies"] = parse_pe_overlay(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
             metadata["tls_address_index"] = tls.addressof_index
@@ -997,6 +1048,9 @@ def add_pe_optional_headers(metadata, optional_header):
                 for chara in optional_header.dll_characteristics_lists
             ]
         )
+        # Detect if this binary is a driver
+        if "WDM_DRIVER" in metadata["dll_characteristics"]:
+            metadata["is_driver"] = True
         metadata["subsystem"] = str(optional_header.subsystem).rsplit(".", maxsplit=1)[-1]
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
         metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
