@@ -356,9 +356,9 @@ def process_exe_file(
         for entry in metadata["dynamic_entries"]:
             comp = create_dynamic_component(entry, exe)
             lib_components.append(comp)
-    # Convert libraries and targets from PE binaries
-    if metadata.get("pe_dependencies"):
-        pe_components = process_pe_dependencies(metadata.get("pe_dependencies"), dependencies_dict)
+    # Convert libraries and targets from dotnet binaries
+    if metadata.get("dotnet_dependencies"):
+        pe_components = process_dotnet_dependencies(metadata.get("dotnet_dependencies"), dependencies_dict)
         lib_components += pe_components
     if lib_components:
         components += lib_components
@@ -411,10 +411,11 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
     Returns:
         Component: The created dynamic component object.
     """
-    purl = f"pkg:file/{entry['name']}"
+    name = entry.get("name", "").removeprefix("$ORIGIN/")
+    purl = f"pkg:file/{name}"
     comp = Component(
         type=Type.library,
-        name=entry["name"],
+        name=name,
         purl=purl,
         evidence=create_component_evidence(exe, 0.5),
         properties=[
@@ -458,19 +459,19 @@ def process_android_file(
     return components
 
 
-def process_pe_dependencies(pe_deps: dict[str, dict], dependencies_dict: dict[str, set]) -> list[Component]:
+def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]) -> list[Component]:
     """
-    Process the dependencies metadata extracted for PE binaries
+    Process the dotnet dependencies metadata extracted for binary overlays
 
     Args:
-        pe_deps (dict[str, dict]): PE dependencies metadata
+        dotnet_deps (dict[str, dict]): PE dependencies metadata
         dependencies_dict (dict[str, set]): Existing dependencies dictionary
 
     Returns:
         list: New component list
     """
     components = []
-    libraries = pe_deps.get("libraries", {})
+    libraries = dotnet_deps.get("libraries", {})
     # k: 'Microsoft.CodeAnalysis.Analyzers/3.3.4'
     # v: {'type': 'package', 'serviceable': True, 'sha512': 'sha512-AxkxcPR+rheX0SmvpLVIGLhOUXAKG56a64kV9VQZ4y9gR9ZmPXnqZvHJnmwLSwzrEP6junUF11vuc+aqo5r68g==', 'path': 'microsoft.codeanalysis.analyzers/3.3.4', 'hashPath': 'microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512'}
     for k, v in libraries.items():
@@ -498,7 +499,7 @@ def process_pe_dependencies(pe_deps: dict[str, dict], dependencies_dict: dict[st
             comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)],
         comp.bom_ref = RefType(purl)
         components.append(comp)
-    targets: dict[str, dict[str, dict]] = pe_deps.get("targets", {})
+    targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
     for tk, tv in targets.items():
         for k, v in tv.items():
             tmp_a = k.split("/")
