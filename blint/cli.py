@@ -167,12 +167,13 @@ def main():
             sbom_output = args.sbom_output
         else:
             sbom_output = os.path.join(os.getcwd(), "bom.json")
-        if not os.path.exists(os.path.dirname(sbom_output)):
-            os.makedirs(os.path.dirname(sbom_output))
+        sbom_output_dir = os.path.dirname(sbom_output)
+        if sbom_output_dir and not os.path.exists(sbom_output_dir):
+            os.makedirs(sbom_output_dir)
         generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
-        if not os.path.exists(reports_dir):
+        if reports_dir and not os.path.exists(reports_dir):
             os.makedirs(reports_dir)
         files = gen_file_list(src_dirs)
         analyzer = AnalysisRunner()
