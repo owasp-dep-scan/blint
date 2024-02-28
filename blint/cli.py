@@ -119,10 +119,12 @@ def parse_input(src):
     Returns:
         list: A list containing the parsed path.
     """
-    path = src[0]
-    result = path.split("\n")
-    result.pop()
-    return result
+    if isinstance(src, list):
+        path = src[0]
+        result = path.split("\n")
+        result = [res for res in result if os.path.exists(res)]
+        return result
+    return [src]
 
 
 def handle_args():
