@@ -1,0 +1,39 @@
+name: binary tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display Python version
+      run: python -c "import sys; print(sys.version)"
+    - name: Install poetry
+      run: |
+        python3 -m pip install poetry
+        poetry install
+    - name: Test binaries
+      run: |
+        mkdir -p bintests
+        cd bintests
+        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai.exe
+        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai
+        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai-osx-arm64
+        cd ..
+        poetry run blint sbom -i bintests -o reports --deep
+      env:
+        PYTHONPATH: "."
+        SCAN_DEBUG_MODE: "debug"
