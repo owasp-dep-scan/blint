@@ -33,7 +33,6 @@ jobs:
         wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai
         wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai-osx-arm64
         cd ..
-        poetry run blint sbom -i $(pwd)/bintests -o $(pwd)/reports --deep
+        poetry run blint sbom -i bintests -o reports/bom.json --deep
       env:
-        PYTHONPATH: "."
         SCAN_DEBUG_MODE: "debug"
