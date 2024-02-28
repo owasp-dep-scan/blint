@@ -906,17 +906,19 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     deps = {}
     if hasattr(parsed_obj, "overlay"):
         overlay = parsed_obj.overlay
-        overlay_str = (codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace")
-                       .replace("\0", "")
-                       .replace("\n", "")
-                       .replace("  ", ""))
+        overlay_str = (
+            codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace")
+            .replace("\0", "")
+            .replace("\n", "")
+            .replace("  ", "")
+        )
         if overlay_str.find('{"runtimeTarget') > -1:
             start_index = overlay_str.find('{"runtimeTarget')
-            end_index = overlay_str.rfind('}}}')
+            end_index = overlay_str.rfind("}}}")
             if end_index > -1:
-                overlay_str = overlay_str[start_index:end_index + 3]
+                overlay_str = overlay_str[start_index: end_index + 3]
                 try:
-                    # If all is good, deps should have runtimeTarget, compilationOptions, targets, and libraries
+                    # deps should have runtimeTarget, compilationOptions, targets, and libraries
                     # Use libraries to construct BOM components and targets for the dependency tree
                     deps = json.loads(overlay_str)
                 except json.JSONDecodeError:
@@ -924,7 +926,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
-def add_pe_metadata(exe_file, metadata, parsed_obj):
+def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     """Adds PE metadata to the given metadata dictionary.
 
     Args:
@@ -972,7 +974,7 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
         # Detect if this PE might be dotnet
         for i, dd in enumerate(parsed_obj.data_directories):
-            if i == 14 and type(dd) == "CLR_RUNTIME_HEADER":
+            if i == 14 and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value:
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         tls = parsed_obj.tls
