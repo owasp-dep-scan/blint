@@ -218,6 +218,15 @@ def parse_strings(parsed_obj):
 
 
 def ignorable_symbol(symbol_name: str | None) -> bool:
+    """
+    Determines if a symbol is ignorable.
+
+    Args:
+        symbol_name (str): The name of the symbol to check.
+
+    Returns:
+        bool: True if the symbol is ignorable, False otherwise.
+    """
     if not symbol_name:
         return True
     for pref in ("$f64.", "__"):
@@ -901,7 +910,6 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
                        .replace("\0", "")
                        .replace("\n", "")
                        .replace("  ", ""))
-        print (overlay_str)
         if overlay_str.find('{"runtimeTarget') > -1:
             start_index = overlay_str.find('{"runtimeTarget')
             end_index = overlay_str.rfind('}}}')
@@ -911,7 +919,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
                     # If all is good, deps should have runtimeTarget, compilationOptions, targets, and libraries
                     # Use libraries to construct BOM components and targets for the dependency tree
                     deps = json.loads(overlay_str)
-                except json.DecodeError:
+                except json.JSONDecodeError:
                     pass
     return deps
 
@@ -964,7 +972,7 @@ def add_pe_metadata(exe_file, metadata, parsed_obj):
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
         # Detect if this PE might be dotnet
         for i, dd in enumerate(parsed_obj.data_directories):
-            if i == 14 and isinstance(dd, lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER):
+            if i == 14 and type(dd) == "CLR_RUNTIME_HEADER":
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         tls = parsed_obj.tls
