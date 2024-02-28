@@ -413,7 +413,7 @@ class AnalysisRunner:
                                              f"-metadata.json")
         LOG.debug(f"Metadata written to {metadata_file}")
         with open(metadata_file, mode="w", encoding="utf-8") as ffp:
-            json.dump(metadata, ffp, indent=True)
+            json.dump(metadata, ffp, default=json_serializer)
         self.progress.update(
             self.task,
             description=f"Checking [bold]{f}[/bold] against rules")
