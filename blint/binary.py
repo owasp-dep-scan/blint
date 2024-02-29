@@ -909,6 +909,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
         overlay_str = (
             codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace")
             .replace("\0", "")
+            .replace("\r\n", "")
             .replace("\n", "")
             .replace("  ", "")
         )
