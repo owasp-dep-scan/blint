@@ -15,13 +15,13 @@ from rich.progress import Progress
 from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
-from blint.logger import LOG, console
-from blint.utils import (create_findings_table, is_fuzzable_name, print_findings_table, )
 from blint.checks import (check_nx, check_pie,  # noqa, pylint: disable=unused-import
                           check_relro, check_canary, check_rpath,
                           check_virtual_size, check_authenticode,
                           check_dll_characteristics, check_codesign,
                           check_trust_info)
+from blint.logger import LOG, console
+from blint.utils import (create_findings_table, is_fuzzable_name, print_findings_table)
 
 try:
     import importlib.resources  # pylint: disable=ungrouped-imports
@@ -299,6 +299,13 @@ def print_reviews_table(reviews, files):
     console.print(table)
 
 
+def json_serializer(obj):
+    if isinstance(obj, bytes):
+        return obj.decode('utf-8')
+
+    return obj
+
+
 def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
     """Generates a report based on the analysis results.
 
@@ -322,20 +329,20 @@ def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
         LOG.info(f"Findings written to {findings_file}")
         with open(findings_file, mode="w", encoding="utf-8") as ffp:
             json.dump(
-                {**common_metadata, "findings": findings}, ffp, indent=True
+                {**common_metadata, "findings": findings}, ffp, default=json_serializer
             )
     if reviews:
         print_reviews_table(reviews, files)
         reviews_file = Path(reports_dir) / "reviews.json"
         LOG.info(f"Review written to {reviews_file}")
         with open(reviews_file, mode="w", encoding="utf-8") as rfp:
-            json.dump({**common_metadata, "reviews": reviews}, rfp, indent=True)
+            json.dump({**common_metadata, "reviews": reviews}, rfp, default=json_serializer)
     if fuzzables:
         fuzzables_file = Path(reports_dir) / "fuzzables.json"
         LOG.info(f"Fuzzables data written to {fuzzables_file}")
         with open(fuzzables_file, mode="w", encoding="utf-8") as rfp:
             json.dump(
-                {**common_metadata, "fuzzables": fuzzables}, rfp, indent=True
+                {**common_metadata, "fuzzables": fuzzables}, rfp, default=json_serializer
             )
     else:
         LOG.debug("No suggestion available for fuzzing")
@@ -351,6 +358,7 @@ def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
 
 class AnalysisRunner:
     """Class to analyze binaries."""
+
     def __init__(self):
         self.findings = []
         self.reviews = []
@@ -405,7 +413,7 @@ class AnalysisRunner:
                                              f"-metadata.json")
         LOG.debug(f"Metadata written to {metadata_file}")
         with open(metadata_file, mode="w", encoding="utf-8") as ffp:
-            json.dump(metadata, ffp, indent=True)
+            json.dump(metadata, ffp, default=json_serializer)
         self.progress.update(
             self.task,
             description=f"Checking [bold]{f}[/bold] against rules")

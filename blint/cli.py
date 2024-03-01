@@ -119,10 +119,12 @@ def parse_input(src):
     Returns:
         list: A list containing the parsed path.
     """
-    path = src[0]
-    result = path.split("\n")
-    result.pop()
-    return result
+    if isinstance(src, list):
+        path = src[0]
+        result = path.split("\n")
+        result = [res for res in result if os.path.exists(res)]
+        return result
+    return [src]
 
 
 def handle_args():
@@ -165,10 +167,13 @@ def main():
             sbom_output = args.sbom_output
         else:
             sbom_output = os.path.join(os.getcwd(), "bom.json")
+        sbom_output_dir = os.path.dirname(sbom_output)
+        if sbom_output_dir and not os.path.exists(sbom_output_dir):
+            os.makedirs(sbom_output_dir)
         generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
-        if not os.path.exists(reports_dir):
+        if reports_dir and not os.path.exists(reports_dir):
             os.makedirs(reports_dir)
         files = gen_file_list(src_dirs)
         analyzer = AnalysisRunner()

@@ -1,3 +1,4 @@
+import base64
 import os
 import uuid
 from datetime import datetime
@@ -12,6 +13,8 @@ from blint.cyclonedx.spec import (
     BomFormat,
     Component,
     CycloneDX,
+    Hash,
+    HashAlg,
     Lifecycles,
     Metadata,
     Phase,
@@ -22,7 +25,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import create_component_evidence, find_android_files, gen_file_list, get_version
+from blint.utils import camel_to_snake, create_component_evidence, find_android_files, gen_file_list, get_version
 
 
 def default_parent(src_dirs: list[str]) -> Component:
@@ -246,9 +249,9 @@ def process_exe_file(
         list[Component]: The updated list of components.
 
     """
-    dependencies_dict = {}
-    parent_component: Component = default_parent([exe])
+    dependencies_dict: dict[str, set] = {}
     metadata: Dict[str, Any] = parse(exe)
+    parent_component: Component = default_parent([exe])
     parent_component.properties = []
     lib_components: list[Component] = []
     for prop in (
@@ -266,12 +269,15 @@ def process_exe_file(
             "flags",
             "relro",
             "is_pie",
+            "is_reproducible_build",
             "has_nx",
             "static",
             "characteristics",
             "dll_characteristics",
             "subsystem",
             "is_gui",
+            "is_driver",
+            "is_dotnet",
             "major_linker_version",
             "minor_linker_version",
             "major_operating_system_version",
@@ -288,6 +294,13 @@ def process_exe_file(
             if note.get("version"):
                 parent_component.properties.append(
                     Property(name=f"internal:{note.get('type')}", value=note.get('version')))
+    # For PE binaries, resources could have a dict called version_metadata with interesting properties
+    if metadata.get("resources"):
+        version_metadata = metadata.get("resources").get("version_metadata")
+        if version_metadata and isinstance(version_metadata, dict):
+            for vk, vv in version_metadata.items():
+                parent_component.properties.append(
+                    Property(name=f"internal:{camel_to_snake(vk)}", value=vv))
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         # Attempt to detect library components from the symbols version block
@@ -343,6 +356,10 @@ def process_exe_file(
         for entry in metadata["dynamic_entries"]:
             comp = create_dynamic_component(entry, exe)
             lib_components.append(comp)
+    # Convert libraries and targets from dotnet binaries
+    if metadata.get("dotnet_dependencies"):
+        pe_components = process_dotnet_dependencies(metadata.get("dotnet_dependencies"), dependencies_dict)
+        lib_components += pe_components
     if lib_components:
         components += lib_components
         track_dependency(dependencies_dict, parent_component, lib_components)
@@ -394,10 +411,11 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
     Returns:
         Component: The created dynamic component object.
     """
-    purl = f"pkg:file/{entry['name']}"
+    name = entry.get("name", "").removeprefix("$ORIGIN/")
+    purl = f"pkg:file/{name}"
     comp = Component(
         type=Type.library,
-        name=entry["name"],
+        name=name,
         purl=purl,
         evidence=create_component_evidence(exe, 0.5),
         properties=[
@@ -438,6 +456,60 @@ def process_android_file(
     # Update the dependencies list
     if dependencies_dict:
         dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
+    return components
+
+
+def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]) -> list[Component]:
+    """
+    Process the dotnet dependencies metadata extracted for binary overlays
+
+    Args:
+        dotnet_deps (dict[str, dict]): PE dependencies metadata
+        dependencies_dict (dict[str, set]): Existing dependencies dictionary
+
+    Returns:
+        list: New component list
+    """
+    components = []
+    libraries = dotnet_deps.get("libraries", {})
+    # k: 'Microsoft.CodeAnalysis.Analyzers/3.3.4'
+    # v: {'type': 'package', 'serviceable': True, 'sha512': 'sha512-AxkxcPR+rheX0SmvpLVIGLhOUXAKG56a64kV9VQZ4y9gR9ZmPXnqZvHJnmwLSwzrEP6junUF11vuc+aqo5r68g==', 'path': 'microsoft.codeanalysis.analyzers/3.3.4', 'hashPath': 'microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512'}
+    for k, v in libraries.items():
+        tmp_a = k.split("/")
+        purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
+        hash_content = ""
+        try:
+            hash_content = str(base64.b64decode(v.get("sha512", "").removeprefix("sha512-"), validate=True), "utf-8")
+        except Exception:
+            pass
+        comp = Component(
+            type=Type.application if v.get("type") == "project" else Type.library,
+            name=tmp_a[0],
+            version=tmp_a[1],
+            purl=purl,
+            scope=Scope.required,
+            properties=[
+                Property(name="internal:serviceable", value=str(v.get("serviceable")).lower()),
+                Property(name="internal:hash_path", value=v.get("hashPath")),
+            ],
+        )
+        if v.get("path"):
+            comp.evidence = create_component_evidence(v.get("path"), 1.0),
+        if hash_content:
+            comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)],
+        comp.bom_ref = RefType(purl)
+        components.append(comp)
+    targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
+    for tk, tv in targets.items():
+        for k, v in tv.items():
+            tmp_a = k.split("/")
+            purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
+            depends_on = []
+            for adep_name, adep_version in v.get("dependencies", {}).items():
+                depends_on.append(f"pkg:nuget/{adep_name}@{adep_version}")
+            if not dependencies_dict.get(purl):
+                dependencies_dict[purl] = set()
+            dependencies_dict[purl].update(depends_on)
     return components
 
 
