@@ -33,6 +33,7 @@ ignore_files = [
     ".gz",
     ".tar",
     ".tar.gz",
+    ".tar.xz",
     ".tar",
     ".log",
     ".tmp",
@@ -71,6 +72,7 @@ ignore_files = [
     ".nib",
     ".nupkg",
     ".pak",
+    ".xml"
 ]
 strings_allowlist = {
     "()",
