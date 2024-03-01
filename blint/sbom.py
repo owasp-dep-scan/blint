@@ -94,6 +94,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
     android_files = []
     components = []
     dependencies = []
+    dependencies_dict = {}
     sbom = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
         specVersion="1.5",
@@ -121,7 +122,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components.extend(process_exe_file(components, deep_mode, dependencies, exe, sbom))
+            components.extend(process_exe_file(dependencies_dict, components, deep_mode, exe, sbom))
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -130,7 +131,9 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components.extend(process_android_file(components, deep_mode, dependencies, f, sbom))
+            components.extend(process_android_file(dependencies_dict, components, deep_mode, f, sbom))
+    if dependencies_dict:
+        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
     return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
 
@@ -229,10 +232,17 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
     return lib_components
 
 
+def _add_to_parent_component(metadata_components: list[Component], parent_component: Component):
+    for mc in metadata_components:
+        if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(mode="python"):
+            return
+    metadata_components.append(parent_component)
+
+
 def process_exe_file(
+        dependencies_dict: dict[str, set],
         components: list[Component],
         deep_mode: bool,
-        dependencies: list[dict],
         exe: str,
         sbom: CycloneDX,
 ) -> list[Component]:
@@ -240,9 +250,9 @@ def process_exe_file(
     Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
 
     Args:
+        dependencies_dict (dict[str, set]): A dictionary of dependencies.
         components: The list of existing components.
         deep_mode: A flag indicating whether to include deep analysis of the executable.
-        dependencies: The list of dependencies.
         exe: The path to the executable file.
         sbom: The CycloneDX SBOM object.
 
@@ -250,7 +260,6 @@ def process_exe_file(
         list[Component]: The updated list of components.
 
     """
-    dependencies_dict: dict[str, set] = {}
     metadata: Dict[str, Any] = parse(exe)
     parent_component: Component = default_parent([exe])
     parent_component.properties = []
@@ -348,7 +357,7 @@ def process_exe_file(
             ]
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
-    sbom.metadata.component.components.append(parent_component)
+    _add_to_parent_component(sbom.metadata.component.components, parent_component)
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
             comp = create_library_component(entry, exe)
@@ -364,8 +373,7 @@ def process_exe_file(
     if lib_components:
         components += lib_components
         track_dependency(dependencies_dict, parent_component, lib_components)
-    if dependencies_dict:
-        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
+
     return components
 
 
@@ -430,33 +438,30 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
 
 
 def process_android_file(
-        components: list[Component], deep_mode: bool, dependencies: list[dict], f: str, sbom: CycloneDX
+        dependencies_dict: dict[str, set], components: list[Component], deep_mode: bool,
+        f: str, sbom: CycloneDX
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
 
     Args:
+        dependencies_dict (dict[str, set]): Existing dependencies dictionary.
         components (list): List of components to be processed.
         deep_mode (bool): Flag indicating whether to process in deep mode.
-        dependencies (list): List of dependencies to be updated.
         f (str): File to be processed.
         sbom (obj): Software Bill of Materials object to be updated.
 
     Returns:
         list: Updated components list after processing.
     """
-    dependencies_dict = {}
     parent_component, app_components = collect_app_metadata(f, deep_mode)
     if parent_component:
         if not sbom.metadata.component.components:
             sbom.metadata.component.components = []
-        sbom.metadata.component.components.append(parent_component)
+        _add_to_parent_component(sbom.metadata.component.components, parent_component)
     if app_components:
         components += app_components
         track_dependency(dependencies_dict, parent_component, app_components)
-    # Update the dependencies list
-    if dependencies_dict:
-        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
     return components
 
 
@@ -489,13 +494,12 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
             version=tmp_a[1],
             purl=purl,
             scope=Scope.required,
+            evidence=create_component_evidence(v.get("path"), 1.0) if v.get("path") else {},
             properties=[
                 Property(name="internal:serviceable", value=str(v.get("serviceable")).lower()),
                 Property(name="internal:hash_path", value=v.get("hashPath")),
             ],
         )
-        if v.get("path"):
-            comp.evidence = create_component_evidence(v.get("path"), 1.0),
         if hash_content:
             comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)],
         comp.bom_ref = RefType(purl)
@@ -515,13 +519,13 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
 
 
 def track_dependency(
-        dependencies_dict: dict, parent_component: Component, app_components: list[Component]
+        dependencies_dict: dict[str, set], parent_component: Component, app_components: list[Component]
 ) -> None:
     """
     Track dependencies between components and update the dependencies dict.
 
     Args:
-        dependencies_dict (dict): The dictionary to store the dependencies.
+        dependencies_dict (dict[str, set]): The dictionary to store the dependencies.
         parent_component (Component): The parent component.
         app_components (list): The list of application components.
 
