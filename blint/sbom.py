@@ -179,6 +179,7 @@ def create_sbom(
                 exclude_none=True,
                 exclude_defaults=True,
                 warnings=False,
+                by_alias=True
             )
         )
         LOG.debug(f"SBOM file generated successfully at {output_file}")
