@@ -759,6 +759,8 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
+    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
+
     return metadata
 
 
@@ -927,6 +929,47 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
+def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, str], dict[str, str]):
+    """
+    Parse the go build info section to extract go dependencies
+    Args:
+        parsed_obj (lief.Binary): The parsed object representing the binary.
+
+    Returns:
+        tuple(dict[str, str], dict[str, str]): Tuple representing the dependencies and formulation.
+    """
+    formulation = {}
+    deps = {}
+    if parsed_obj.has_section(".go.buildinfo"):
+        build_info: lief.Section = parsed_obj.get_section(".go.buildinfo")
+        if build_info.size:
+            build_info_str = (
+                codecs.decode(build_info.content.tobytes(), encoding="utf-8", errors="replace")
+                .replace("\0", "")
+                .replace("\uFFFD", "")
+                .replace("\t", " ")
+            ).strip()
+            build_info_str = build_info_str.encode('ascii', 'ignore').decode('ascii')
+            lines = build_info_str.split("\n")
+            for line in lines:
+                if line.startswith("Go buildinf:"):
+                    tmp_a = line.split("Go buildinf:")
+                    formulation["go_version"] = tmp_a[-1].split("\x19")[0].split(" ")[-1]
+                if "path " in line:
+                    tmp_a = line.split("path ")
+                    formulation["path"] = tmp_a[-1]
+                if line.startswith("mod "):
+                    tmp_a = line.split("mod ")
+                    formulation["module"] = tmp_a[-1]
+                if line.startswith("dep "):
+                    tmp_a = line.removeprefix("dep ").split(" ")
+                    deps[tmp_a[0]] = tmp_a[1]
+                if line.startswith("build "):
+                    tmp_a = line.removeprefix("build ").split("=")
+                    formulation[tmp_a[0].replace("-", "")] = tmp_a[1]
+    return deps, formulation
+
+
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     """Adds PE metadata to the given metadata dictionary.
 
@@ -978,6 +1021,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
             if i == 14 and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value:
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
+        metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
             metadata["tls_address_index"] = tls.addressof_index
@@ -1138,6 +1182,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     metadata = add_mach0_commands(metadata, parsed_obj)
     metadata = add_mach0_functions(metadata, parsed_obj)
     metadata = add_mach0_signature(exe_file, metadata, parsed_obj)
+    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     return metadata
 
 
