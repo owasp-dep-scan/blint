@@ -117,6 +117,18 @@ To parse all files including `.dex` files, pass `--deep` argument.
 blint sbom -i /path/to/apk -o bom.json --deep
 ```
 
+The following binaries are supported:
+
+- Android (apk/aab)
+- Dotnet executable binaries
+- Go binaries
+
+```shell
+blint sbom -i /path/to/go binaries -o bom.json --deep
+```
+
+For all other binaries, the symbols will be collected and represented as properties with `internal` prefix for the parent component. Child components and dependencies would be missing.
+
 PowerShell example
 
 ![PowerShell](./docs/blint-powershell.jpg)
