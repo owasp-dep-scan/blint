@@ -1,5 +1,6 @@
 import base64
 import os
+import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Dict
@@ -542,8 +543,11 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     """
     components = []
     # Key is the name and value is the version
+    # We need to construct a purl by pretending the module name is the name with no namespace
+    # This would make this compatible with cdxgen and depscan
+    # See https://github.com/CycloneDX/cdxgen/issues/897
     for k, v in go_deps.items():
-        purl = f"pkg:golang/{k}@{v}"
+        purl = f"pkg:golang/{urllib.parse.quote_plus(k)}@{v}"
         comp = Component(
             type=Type.library,
             name=k,
