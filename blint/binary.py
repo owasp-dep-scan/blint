@@ -929,7 +929,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
-def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, str], dict[str, str]):
+def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, dict[str, str]], dict[str, str]):
     """
     Parse the go build info section to extract go dependencies
     Args:
@@ -940,7 +940,13 @@ def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, str], dict[str, st
     """
     formulation = {}
     deps = {}
-    build_info: lief.Section = parsed_obj.get_section(".go.buildinfo")
+    build_info_str: str = ""
+    # Look for specific buildinfo sections for ELF and MachO binaries
+    build_info: lief.Section = None
+    if isinstance(parsed_obj, lief.ELF.Binary):
+        build_info = parsed_obj.get_section(".go.buildinfo")
+    elif isinstance(parsed_obj, lief.MachO.Binary):
+        build_info = parsed_obj.get_section("__go_buildinfo")
     if build_info and build_info.size:
         build_info_str = (
             codecs.decode(build_info.content.tobytes(), encoding="utf-8", errors="replace")
@@ -949,23 +955,30 @@ def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, str], dict[str, st
             .replace("\t", " ")
         ).strip()
         build_info_str = build_info_str.encode('ascii', 'ignore').decode('ascii')
-        lines = build_info_str.split("\n")
-        for line in lines:
-            if line.startswith("Go buildinf:"):
-                tmp_a = line.split("Go buildinf:")
-                formulation["go_version"] = tmp_a[-1].split("\x19")[0].split(" ")[-1]
-            if "path " in line:
-                tmp_a = line.split("path ")
-                formulation["path"] = tmp_a[-1]
-            if line.startswith("mod "):
-                tmp_a = line.split("mod ")
-                formulation["module"] = tmp_a[-1]
-            if line.startswith("dep "):
-                tmp_a = line.removeprefix("dep ").split(" ")
-                deps[tmp_a[0]] = tmp_a[1]
-            if line.startswith("build "):
-                tmp_a = line.removeprefix("build ").split("=")
-                formulation[tmp_a[0].replace("-", "")] = tmp_a[1]
+    elif isinstance(parsed_obj, lief.PE.Binary):
+        # For PE binaries look for .data section
+        s: lief.PE.Section = parsed_obj.get_section(".data")
+        build_info_str = codecs.decode(s.content.tobytes()[:int(s.size / 32)], encoding="ascii",
+                                       errors="replace").replace("\0", "").replace("\uFFFD", "").replace("\t", " ")
+    lines = build_info_str.split("\n")
+    for line in lines:
+        if line.startswith("Go buildinf:"):
+            tmp_a = line.split("Go buildinf:")
+            formulation["go_version"] = tmp_a[-1].split("\x19")[0].split(" ")[-1]
+        if "path " in line:
+            tmp_a = line.split("path ")
+            formulation["path"] = tmp_a[-1]
+        if line.startswith("mod "):
+            tmp_a = line.split("mod ")
+            formulation["module"] = tmp_a[-1]
+        if line.startswith("dep "):
+            tmp_a = line.removeprefix("dep ").split(" ")
+            deps[tmp_a[0]] = {"version": tmp_a[1],
+                              "hash": tmp_a[2] if len(tmp_a) == 3 and tmp_a[2].startswith("h1:") else None}
+        if line.startswith("build "):
+            tmp_a = line.removeprefix("build ").split("=")
+            formulation[tmp_a[0].replace("-", "")] = tmp_a[1]
+
     return deps, formulation
 
 
