@@ -1,4 +1,5 @@
 import base64
+import codecs
 import os
 import urllib.parse
 import uuid
@@ -547,15 +548,24 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     # This would make this compatible with cdxgen and depscan
     # See https://github.com/CycloneDX/cdxgen/issues/897
     for k, v in go_deps.items():
-        purl = f"pkg:golang/{urllib.parse.quote_plus(k)}@{v}"
+        purl = f"""pkg:golang/{urllib.parse.quote_plus(k)}@{v.get("version")}"""
         comp = Component(
             type=Type.library,
             name=k,
-            version=v,
+            version=v.get("version"),
             purl=purl,
             scope=Scope.required,
             evidence=create_component_evidence(k, 1.0)
         )
+        hash_content = ""
+        if v.get("hash"):
+            try:
+                hash_content = codecs.encode(base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
+                                             encoding="hex")
+            except Exception as e:
+                hash_content = str(v.get("hash").removeprefix("h1:"))
+        if hash_content:
+            comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
         comp.bom_ref = RefType(purl)
         components.append(comp)
     return components
