@@ -566,7 +566,7 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
                 hash_content = str(v.get("hash").removeprefix("h1:"))
         if hash_content:
             comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
-        comp.bom_ref = RefType(purl)
+        comp.bom_ref = RefType(f"""pkg:golang/{k}@{v.get("version")}""")
         components.append(comp)
     return components
 

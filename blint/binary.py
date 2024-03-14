@@ -229,7 +229,7 @@ def ignorable_symbol(symbol_name: str | None) -> bool:
     """
     if not symbol_name:
         return True
-    for pref in ("$f64.", "__"):
+    for pref in ("_$f", "$f64.", "__"):
         if symbol_name.startswith(pref):
             return True
     return False
@@ -656,18 +656,19 @@ def parse_macho_symbols(symbols):
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
             symbol_name = symbol_name.replace("..", "::")
-            if not exe_type:
-                exe_type = guess_exe_type(symbol_name)
-            symbols_list.append(
-                {
-                    "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
-                    "short_name": symbol_name,
-                    "type": symbol.type,
-                    "num_sections": symbol.numberof_sections,
-                    "description": symbol.description,
-                    "value": symbol_value,
-                }
-            )
+            if not ignorable_symbol(symbol_name):
+                if not exe_type:
+                    exe_type = guess_exe_type(symbol_name)
+                symbols_list.append(
+                    {
+                        "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
+                        "short_name": symbol_name,
+                        "type": symbol.type,
+                        "num_sections": symbol.numberof_sections,
+                        "description": symbol.description,
+                        "value": symbol_value,
+                    }
+                )
         except (AttributeError, TypeError):
             continue
     return symbols_list, exe_type
