@@ -1,4 +1,5 @@
 import base64
+import binascii
 import codecs
 import os
 import urllib.parse
@@ -499,9 +500,10 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
         purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
         hash_content = ""
         try:
-            hash_content = str(base64.b64decode(v.get("sha512", "").removeprefix("sha512-"), validate=True), "utf-8")
-        except Exception:
-            pass
+            hash_content = codecs.encode(base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
+                                         encoding="hex")
+        except binascii.Error:
+            hash_content = str(v.get("hash").removeprefix("sha512-"))
         comp = Component(
             type=Type.application if v.get("type") == "project" else Type.library,
             name=tmp_a[0],
@@ -519,7 +521,7 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
         comp.bom_ref = RefType(purl)
         components.append(comp)
     targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
-    for tk, tv in targets.items():
+    for _, tv in targets.items():
         for k, v in tv.items():
             tmp_a = k.split("/")
             purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
@@ -534,7 +536,7 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
 
 def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     """
-    Process the dotnet dependencies metadata extracted for binary overlays
+    Process the go dependencies metadata extracted for binary overlays
 
     Args:
         go_deps (dict[str, str]): dependencies metadata
@@ -562,7 +564,7 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
             try:
                 hash_content = codecs.encode(base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
                                              encoding="hex")
-            except Exception as e:
+            except binascii.Error:
                 hash_content = str(v.get("hash").removeprefix("h1:"))
         if hash_content:
             comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
