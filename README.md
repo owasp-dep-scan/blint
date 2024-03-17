@@ -1,8 +1,7 @@
 # BLint
 
-![blint logo](blint.png)
-
-BLint is a Binary Linter to check the security properties, and capabilities in your executables. It is powered by [lief](https://github.com/lief-project/LIEF). Since version 2, blint can also generate Software Bill-of-Materials (SBOM) for supported binaries.
+![blint logo]
+BLint is a Binary Linter that checks the security properties and capabilities of your executables. It is powered by [lief](https://github.com/lief-project/LIEF). Since version 2, blint can also generate Software Bill-of-Materials (SBOM) for supported binaries.
 
 [![BLint Demo](https://asciinema.org/a/438138.png)](https://asciinema.org/a/438138)
 
@@ -13,15 +12,13 @@ Supported binary formats:
 - PE (exe, dll)
 - Mach-O (x64, arm64)
 
-You can run blint on Linux, Windows and Mac against any of these binary formats.
+You can run blint on Linux, Windows, and Mac against any of these binary formats.
 
 ## Motivation
 
-Nowadays, vendors distribute statically linked binaries produced by golang or rust or dotnet tooling. Users are used to running antivirus and anti-malware scans while using these binaries in their local devices. Blint augments these scans by listing the technical capabilities of a binary. For example, whether the binary could use network connections, or can perform file system operations and so on.
-
-The binary is first parsed using lief framework to identify the various properties such as functions, static, and dynamic symbols present. Thanks to YAML based [annotations](./blint/data/annotations) data, this information could be matched against capabilities and presented visually using a rich table.
-
-NOTE: The presence of capabilities doesn't imply that the operations are always performed by the binary. Use the output of this tool to get an idea about a binary. Also, this tool is not suitable to review malware and other heavily obfuscated binaries for obvious reasons.
+Nowadays, vendors distribute statically linked binaries produced by Golang, Rust, or Dotnet tooling. Users are used to running antivirus and anti-malware scans while using these binaries in their local devices. Blint augments these scans by listing the technical capabilities of a binary. For example, whether the binary could use network connections or can perform file system operations and so on.
+The binary is first parsed using the lief framework to identify the various properties, such as functions and the presence of symtab and dynamic symbols. Thanks to YAML-based annotation data, this information can be matched against capabilities and presented visually using a rich table.
+NOTE: The presence of capabilities doesn't imply that the binary always performs the operations. Use the output of this tool to get an idea about a binary. Also, this tool is not suitable for reviewing malware and other heavily obfuscated binaries for obvious reasons.
 
 ## Use cases
 
@@ -39,7 +36,7 @@ pip install blint
 
 ### Single binary releases
 
-You can download single binary builds from the [blint-bin releases](https://github.com/OWASP-dep-scan/blint/releases). These executables should work with requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
+You can download single binary builds from the [blint-bin releases](https://github.com/OWASP-dep-scan/blint/releases). These executables should work without requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
 
 ## Usage
 
@@ -83,7 +80,7 @@ options:
                         operation.
 ```
 
-To test any binary including default commands
+To test any binary, including default commands
 
 ```bash
 blint -i /bin/netstat -o /tmp/blint
@@ -111,11 +108,23 @@ blint sbom -i /path/to/apk -o bom.json
 blint sbom -i /directory/with/apk/aab -o bom.json
 ```
 
-To parse all files including `.dex` files, pass `--deep` argument.
+To parse all files, including `.dex` files, pass `--deep` argument.
 
 ```shell
 blint sbom -i /path/to/apk -o bom.json --deep
 ```
+
+The following binaries are supported:
+
+- Android (apk/aab)
+- Dotnet executable binaries
+- Go binaries
+
+```shell
+blint sbom -i /path/to/go-binaries -o bom.json --deep
+```
+
+For all other binaries, the symbols will be collected and represented as properties with `internal` prefixes for the parent component. Child components and dependencies would be missing.
 
 PowerShell example
 
@@ -127,7 +136,7 @@ Blint produces the following json artifacts in the reports directory:
 
 - blint-output.html - HTML output from the console logs
 - exename-metadata.json - Raw metadata about the parsed binary. Includes symbols, functions, and signature information
-- findings.json - Contains information from the security properties audit. Useful for CI/CD based integration
+- findings.json - Contains information from the security properties audit. Useful for CI/CD integrations
 - reviews.json - Contains information from the capability reviews. Useful for further analysis
 - fuzzables.json - Contains a suggested list of methods for fuzzing
 
@@ -140,10 +149,10 @@ sbom command generates CycloneDX json.
 
 ## Discord support
 
-The developers could be reached via the [discord](https://discord.gg/DCNxzaeUpd) channel.
+The developers can be reached via the [Discord](https://discord.gg/DCNxzaeUpd) channel.
 
 ## Sponsorship wishlist
 
-If you love blint, you should consider [donating](https://owasp.org/donate?reponame=www-project-dep-scan&title=OWASP+dep-scan) to our project. In addition, consider donating to the below projects which make blint possible.
+If you love blint, you should consider [donating](https://owasp.org/donate?reponame=www-project-dep-scan&title=OWASP+dep-scan) to our project. In addition, consider donating to the below projects, which make blint possible.
 
 - [LIEF](https://github.com/sponsors/lief-project/)

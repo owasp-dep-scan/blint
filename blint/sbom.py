@@ -1,5 +1,8 @@
 import base64
+import binascii
+import codecs
 import os
+import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Dict
@@ -317,44 +320,44 @@ def process_exe_file(
         # If this is unsuccessful then store the information as a property
         lib_components += components_from_symbols_version(symbols_version)
         if not lib_components and symbols_version:
-            parent_component.properties += [
+            parent_component.properties.append(
                 Property(
                     name="internal:symbols_version",
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
-            ]
+            )
         internal_functions = [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]
         if internal_functions:
-            parent_component.properties += [
+            parent_component.properties.append(
                 Property(
                     name="internal:functions",
                     value=SYMBOL_DELIMITER.join(internal_functions),
                 )
-            ]
+            )
         symtab_symbols = [f["name"] for f in metadata.get("symtab_symbols", [])]
         if symtab_symbols:
-            parent_component.properties += [
+            parent_component.properties.append(
                 Property(
                     name="internal:symtab_symbols",
                     value=SYMBOL_DELIMITER.join(symtab_symbols),
                 )
-            ]
+            )
         all_imports = [f["name"] for f in metadata.get("imports", [])]
         if all_imports:
-            parent_component.properties += [
+            parent_component.properties.append(
                 Property(
                     name="internal:imports",
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
-            ]
+            )
         dynamic_symbols = [f["name"] for f in metadata.get("dynamic_symbols", [])]
         if dynamic_symbols:
-            parent_component.properties += [
+            parent_component.properties.append(
                 Property(
                     name="internal:dynamic_symbols",
                     value=SYMBOL_DELIMITER.join(dynamic_symbols),
                 )
-            ]
+            )
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     _add_to_parent_component(sbom.metadata.component.components, parent_component)
@@ -370,6 +373,18 @@ def process_exe_file(
     if metadata.get("dotnet_dependencies"):
         pe_components = process_dotnet_dependencies(metadata.get("dotnet_dependencies"), dependencies_dict)
         lib_components += pe_components
+    # Convert go dependencies
+    if metadata.get("go_dependencies"):
+        go_components = process_go_dependencies(metadata.get("go_dependencies"))
+        lib_components += go_components
+    # Convert go formulation section
+    for k, v in metadata.get("go_formulation", {}).items():
+        parent_component.properties.append(
+            Property(
+                name=f"internal:{camel_to_snake(k)}",
+                value=str(v).strip(),
+            )
+        )
     if lib_components:
         components += lib_components
         track_dependency(dependencies_dict, parent_component, lib_components)
@@ -485,9 +500,10 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
         purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
         hash_content = ""
         try:
-            hash_content = str(base64.b64decode(v.get("sha512", "").removeprefix("sha512-"), validate=True), "utf-8")
-        except Exception:
-            pass
+            hash_content = codecs.encode(base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
+                                         encoding="hex")
+        except binascii.Error:
+            hash_content = str(v.get("hash").removeprefix("sha512-"))
         comp = Component(
             type=Type.application if v.get("type") == "project" else Type.library,
             name=tmp_a[0],
@@ -505,7 +521,7 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
         comp.bom_ref = RefType(purl)
         components.append(comp)
     targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
-    for tk, tv in targets.items():
+    for _, tv in targets.items():
         for k, v in tv.items():
             tmp_a = k.split("/")
             purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
@@ -515,6 +531,45 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
             if not dependencies_dict.get(purl):
                 dependencies_dict[purl] = set()
             dependencies_dict[purl].update(depends_on)
+    return components
+
+
+def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
+    """
+    Process the go dependencies metadata extracted for binary overlays
+
+    Args:
+        go_deps (dict[str, str]): dependencies metadata
+
+    Returns:
+        list: New component list
+    """
+    components = []
+    # Key is the name and value is the version
+    # We need to construct a purl by pretending the module name is the name with no namespace
+    # This would make this compatible with cdxgen and depscan
+    # See https://github.com/CycloneDX/cdxgen/issues/897
+    for k, v in go_deps.items():
+        purl = f"""pkg:golang/{urllib.parse.quote_plus(k)}@{v.get("version")}"""
+        comp = Component(
+            type=Type.library,
+            name=k,
+            version=v.get("version"),
+            purl=purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(k, 1.0)
+        )
+        hash_content = ""
+        if v.get("hash"):
+            try:
+                hash_content = codecs.encode(base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
+                                             encoding="hex")
+            except binascii.Error:
+                hash_content = str(v.get("hash").removeprefix("h1:"))
+        if hash_content:
+            comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
+        comp.bom_ref = RefType(f"""pkg:golang/{k}@{v.get("version")}""")
+        components.append(comp)
     return components
 
 
