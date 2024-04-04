@@ -4,6 +4,7 @@ import codecs
 import os
 import urllib.parse
 import uuid
+import sys
 from datetime import datetime
 from typing import Any, Dict
 
@@ -82,13 +83,13 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
+def generate(src_dirs: list[str], output: str, deep_mode: bool) -> bool:
     """
     Generates an SBOM for the given source directories.
 
     Args:
         src_dirs (list): A list of source directories.
-        output_file (str): The path to the output file.
+        output (str): The path to the output file or json for stdout.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
 
     Returns:
@@ -137,11 +138,11 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             components.extend(process_android_file(dependencies_dict, components, deep_mode, f, sbom))
     if dependencies_dict:
         dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
-    return create_sbom(components, dependencies, output_file, sbom, deep_mode)
+    return create_sbom(components, dependencies, output, sbom, deep_mode)
 
 
 def create_sbom(
-        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX, deep_mode: bool
+        components: list[Component], dependencies: list[dict], output: str, sbom: CycloneDX, deep_mode: bool
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -150,7 +151,7 @@ def create_sbom(
     Args:
         components (list): A list of Component objects.
         dependencies (list): A list of dependencies.
-        output_file (str): The path to the output file.
+        output (str): The path to the output file or json for stdout.
         sbom: The SBOM object representing the SBOM.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
 
@@ -178,18 +179,23 @@ def create_sbom(
     LOG.debug(
         f"SBOM includes {len(components)} components and {len(dependencies)} dependencies",
     )
-    with open(output_file, mode="w", encoding="utf-8") as fp:
-        fp.write(
-            sbom.model_dump_json(
-                indent=None if deep_mode else 2,
-                exclude_none=True,
-                exclude_defaults=True,
-                warnings=False,
-                by_alias=True
-            )
-        )
-        LOG.debug(f"SBOM file generated successfully at {output_file}")
-    return True
+    sbom_content = sbom.model_dump_json(
+                        indent=None if deep_mode else 2,
+                        exclude_none=True,
+                        exclude_defaults=True,
+                        warnings=False,
+                        by_alias=True
+                   )
+    if not output == "json":
+        with open(output, mode="w", encoding="utf-8") as fp:
+            fp.write(sbom_content)
+            LOG.debug(f"SBOM file generated successfully at {output}")
+        return True
+    else:
+        # Write the JSON output directly to stdout
+        sys.stdout.write(sbom_content)
+        LOG.debug(f"SBOM json output printed successfully to stdout")
+        return True
 
 
 def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:

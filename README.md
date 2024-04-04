@@ -74,8 +74,8 @@ options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
-  -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
-                        SBOM output file. Defaults to bom.json in current directory.
+  -o SBOM_OUTPUT, --output SBOM_OUTPUT
+                        SBOM output to file or stdout. Use json for stdout, file name or file path for file. Defaults to bom.json file in current directory.
   --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
                         operation.
 ```
@@ -105,6 +105,10 @@ blint sbom -i /path/to/apk -o bom.json
 ```
 
 ```shell
+blint sbom -i /path/to/apk -o json
+```
+
+```shell
 blint sbom -i /directory/with/apk/aab -o bom.json
 ```
 
@@ -122,6 +126,10 @@ The following binaries are supported:
 
 ```shell
 blint sbom -i /path/to/go-binaries -o bom.json --deep
+```
+
+```shell
+blint sbom -i /path/to/go-binaries -o json --deep
 ```
 
 For all other binaries, the symbols will be collected and represented as properties with `internal` prefixes for the parent component. Child components and dependencies would be missing.
