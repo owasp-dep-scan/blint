@@ -104,6 +104,13 @@ def build_args():
         help="Enable deep mode to collect more used symbols and modules "
              "aggressively. Slow operation.",
     )
+    sbom_parser.add_argument(
+        "--no-banner",
+        action="store_true",
+        default=False,
+        dest="no_banner",
+        help="Do not display banner.",
+    )
     return parser.parse_args()
 
 
