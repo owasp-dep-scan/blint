@@ -92,7 +92,7 @@ def build_args():
     )
     sbom_parser.add_argument(
         "-o",
-        "--output",
+        "--output-file",
         dest="sbom_output",
         help="SBOM output stdout or file. Use ""json"" for stdout or filename for file. Defaults to bom.json file in current directory.",
     )

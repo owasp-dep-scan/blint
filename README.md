@@ -68,16 +68,21 @@ sub-commands:
 ### SBOM sub-command
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep]
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT]
+                  [--deep] [--no-banner]
 
 options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
-                        Source directories, container images or binary files. Defaults to current directory.
-  -o SBOM_OUTPUT, --output SBOM_OUTPUT
-                        SBOM output to file or stdout. Use json for stdout, file name or file path for file. Defaults to bom.json file in current directory.
-  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
-                        operation.
+                        Source directories, container images or binary files.
+                        Defaults to current directory.
+  -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
+                        SBOM output stdout or file. Use json for stdout or
+                        filename for file. Defaults to bom.json file in
+                        current directory.
+  --deep                Enable deep mode to collect more used symbols and
+                        modules aggressively. Slow operation.
+  --no-banner           Do not display banner.
 ```
 
 To test any binary, including default commands
