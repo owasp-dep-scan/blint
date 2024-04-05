@@ -4,6 +4,7 @@ import codecs
 import os
 import urllib.parse
 import uuid
+import sys
 from datetime import datetime
 from typing import Any, Dict
 
@@ -192,7 +193,7 @@ def create_sbom(
         return True
     else:
         # Write the JSON output directly to stdout
-        LOG(sbom_content)
+        sys.stdout.write(sbom_content)
         return True
 
 
