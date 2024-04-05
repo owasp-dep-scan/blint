@@ -28,7 +28,6 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.logger import console
 from blint.utils import camel_to_snake, create_component_evidence, find_android_files, gen_file_list, get_version
 
 
@@ -193,7 +192,7 @@ def create_sbom(
         return True
     else:
         # Write the JSON output directly to stdout
-        console(sbom_content)
+        LOG(sbom_content)
         return True
 
 
