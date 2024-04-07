@@ -175,20 +175,29 @@ def create_sbom(
             )
     # Populate the dependencies
     sbom.dependencies = dependencies
-    LOG.debug(
-        f"SBOM includes {len(components)} components and {len(dependencies)} dependencies",
-    )
-    with open(output_file, mode="w", encoding="utf-8") as fp:
-        fp.write(
-            sbom.model_dump_json(
-                indent=None if deep_mode else 2,
-                exclude_none=True,
-                exclude_defaults=True,
-                warnings=False,
-                by_alias=True
-            )
+    if isinstance(output_file, str):
+        LOG.debug(
+            f"SBOM includes {len(components)} components and {len(dependencies)} dependencies",
         )
-        LOG.debug(f"SBOM file generated successfully at {output_file}")
+        with open(output_file, mode="w", encoding="utf-8") as fp:
+            fp.write(
+                sbom.model_dump_json(
+                    indent=None if deep_mode else 2,
+                    exclude_none=True,
+                    exclude_defaults=True,
+                    warnings=False,
+                    by_alias=True
+                )
+            )
+            LOG.debug(f"SBOM file generated successfully at {output_file}")
+    else:
+        output_file.write(sbom.model_dump_json(
+            indent=2,
+            exclude_none=True,
+            exclude_defaults=True,
+            warnings=False,
+            by_alias=True
+        ))
     return True
 
 
