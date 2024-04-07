@@ -146,7 +146,7 @@ def handle_args():
                source directory.
     """
     args = build_args()
-    if not args.no_banner and not args.stdout_mode:
+    if not args.no_banner and args.subcommand_name != "sbom":
         print(BLINT_LOGO)
     if not args.src_dir_image:
         args.src_dir_image = [os.getcwd()]
