@@ -78,6 +78,7 @@ options:
                         SBOM output file. Defaults to bom.json in current directory.
   --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
                         operation.
+  --stdout              Print the SBOM to stdout instead of a file.
 ```
 
 To test any binary, including default commands
