@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import logging
 import os
 import sys
 
@@ -104,6 +105,13 @@ def build_args():
         help="Enable deep mode to collect more used symbols and modules "
              "aggressively. Slow operation.",
     )
+    sbom_parser.add_argument(
+        "--stdout",
+        action="store_true",
+        default=False,
+        dest="stdout_mode",
+        help="Print the SBOM to stdout instead of a file.",
+    )
     return parser.parse_args()
 
 
@@ -138,7 +146,7 @@ def handle_args():
                source directory.
     """
     args = build_args()
-    if not args.no_banner:
+    if not args.no_banner and args.subcommand_name != "sbom":
         print(BLINT_LOGO)
     if not args.src_dir_image:
         args.src_dir_image = [os.getcwd()]
@@ -163,13 +171,17 @@ def main():
 
     # SBOM command
     if args.subcommand_name == "sbom":
-        if args.sbom_output:
-            sbom_output = args.sbom_output
+        if args.stdout_mode:
+            sbom_output = sys.stdout
+            LOG.setLevel(logging.ERROR)
         else:
-            sbom_output = os.path.join(os.getcwd(), "bom.json")
-        sbom_output_dir = os.path.dirname(sbom_output)
-        if sbom_output_dir and not os.path.exists(sbom_output_dir):
-            os.makedirs(sbom_output_dir)
+            if args.sbom_output:
+                sbom_output = args.sbom_output
+            else:
+                sbom_output = os.path.join(os.getcwd(), "bom.json")
+            sbom_output_dir = os.path.dirname(sbom_output)
+            if sbom_output_dir and not os.path.exists(sbom_output_dir):
+                os.makedirs(sbom_output_dir)
         generate(src_dirs, sbom_output, args.deep_mode)
     # Default case
     else:
