@@ -2,7 +2,6 @@ import base64
 import binascii
 import codecs
 import os
-import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Dict
