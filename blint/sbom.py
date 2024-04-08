@@ -525,7 +525,7 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
             ],
         )
         if hash_content:
-            comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)],
+            comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)]
         comp.bom_ref = RefType(purl)
         components.append(comp)
     targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
