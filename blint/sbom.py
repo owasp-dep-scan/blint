@@ -2,7 +2,6 @@ import base64
 import binascii
 import codecs
 import os
-import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Dict
@@ -526,7 +525,7 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
             ],
         )
         if hash_content:
-            comp.hashes = Hash(alg=HashAlg.SHA_512, content=hash_content),
+            comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)],
         comp.bom_ref = RefType(purl)
         components.append(comp)
     targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
@@ -559,7 +558,9 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     # This would make this compatible with cdxgen and depscan
     # See https://github.com/CycloneDX/cdxgen/issues/897
     for k, v in go_deps.items():
-        purl = f"""pkg:golang/{urllib.parse.quote_plus(k)}@{v.get("version")}"""
+        # See #83
+        # purl specification uses namespace hack for go to make this identifier use slash
+        purl = f"""pkg:golang/{k.lower()}@{v.get("version")}"""
         comp = Component(
             type=Type.library,
             name=k,
@@ -576,7 +577,7 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
             except binascii.Error:
                 hash_content = str(v.get("hash").removeprefix("h1:"))
         if hash_content:
-            comp.hashes = Hash(alg=HashAlg.SHA_256, content=hash_content)
+            comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
         comp.bom_ref = RefType(f"""pkg:golang/{k}@{v.get("version")}""")
         components.append(comp)
     return components
