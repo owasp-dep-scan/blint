@@ -3,6 +3,7 @@ import codecs
 import contextlib
 import json
 import sys
+import zlib
 
 import lief
 
@@ -761,6 +762,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
+    metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
 
     return metadata
 
@@ -983,6 +985,27 @@ def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, dict[str, str]], d
     return deps, formulation
 
 
+def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
+    """
+    Parse the rust build info section of binaries that are cargo-auditable to extract rust dependencies
+    Args:
+        parsed_obj (lief.Binary): The parsed object representing the binary.
+
+    Returns:
+        list: List representing the dependencies.
+    """
+    deps = {}
+    audit_data_section = next(filter(lambda section: section.name == ".dep-v0", parsed_obj.sections))
+    json_string = zlib.decompress(audit_data_section.content)
+    audit_data = json.loads(json_string)
+
+    if audit_data and audit_data["packages"]:
+        packages = audit_data["packages"]
+        deps = [x for x in packages if 'root' not in x]
+
+    return deps
+
+
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     """Adds PE metadata to the given metadata dictionary.
 
@@ -1035,6 +1058,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
+        metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
             metadata["tls_address_index"] = tls.addressof_index
@@ -1196,6 +1220,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     metadata = add_mach0_functions(metadata, parsed_obj)
     metadata = add_mach0_signature(exe_file, metadata, parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
+    metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
     return metadata
 
 
