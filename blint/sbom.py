@@ -393,6 +393,10 @@ def process_exe_file(
                 value=str(v).strip(),
             )
         )
+    # Convert rust dependencies
+    if metadata.get("rust_dependencies"):
+        rust_components = process_rust_dependencies(metadata.get("rust_dependencies"))
+        lib_components += rust_components
     if lib_components:
         components += lib_components
         track_dependency(dependencies_dict, parent_component, lib_components)
@@ -579,6 +583,32 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
         if hash_content:
             comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
         comp.bom_ref = RefType(f"""pkg:golang/{k}@{v.get("version")}""")
+        components.append(comp)
+    return components
+
+
+def process_rust_dependencies(rust_deps: list) -> list[Component]:
+    """
+    Process the rust dependencies metadata extracted for binary overlays
+
+    Args:
+        rust_deps (list): dependencies metadata
+
+    Returns:
+        list: New component list
+    """
+    components = []
+    for dependency in rust_deps:
+        purl = f"""pkg:cargo/{dependency["name"]}@{dependency["version"]}"""
+        comp = Component(
+            type=Type.library,
+            name=dependency["name"],
+            version=dependency["version"],
+            purl=purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(dependency["name"], 1.0)
+        )
+        comp.bom_ref = RefType(purl)
         components.append(comp)
     return components
 
