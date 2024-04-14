@@ -60,7 +60,7 @@ def default_metadata(src_dirs):
         Metadata: A Metadata object for SBOM generation.
     """
     metadata = Metadata()
-    metadata.timestamp = datetime.now()
+    metadata.timestamp = f'{datetime.now().isoformat(timespec="seconds")}Z'
     metadata.component = default_parent(src_dirs)
     metadata.tools = (
         Tools(
