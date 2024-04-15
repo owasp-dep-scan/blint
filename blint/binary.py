@@ -1005,7 +1005,7 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
             if audit_data and audit_data["packages"]:
                 packages = audit_data["packages"]
                 deps = [x for x in packages if 'root' not in x]
-    except:
+    except json.JSONDecodeError:
         pass
 
     return deps
