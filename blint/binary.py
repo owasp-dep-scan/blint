@@ -995,14 +995,18 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
         list: List representing the dependencies.
     """
     deps = []
-    audit_data_section = next(filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None)
-    if audit_data_section is not None:
-        json_string = zlib.decompress(audit_data_section.content)
-        audit_data = json.loads(json_string)
 
-        if audit_data and audit_data["packages"]:
-            packages = audit_data["packages"]
-            deps = [x for x in packages if 'root' not in x]
+    try:
+        audit_data_section = next(filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None)
+        if audit_data_section is not None and audit_data_section.content:
+            json_string = zlib.decompress(audit_data_section.content)
+            audit_data = json.loads(json_string)
+
+            if audit_data and audit_data["packages"]:
+                packages = audit_data["packages"]
+                deps = [x for x in packages if 'root' not in x]
+    except:
+        pass
 
     return deps
 
