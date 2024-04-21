@@ -395,7 +395,7 @@ def process_exe_file(
         )
     # Convert rust dependencies
     if metadata.get("rust_dependencies"):
-        rust_components = process_rust_dependencies(metadata.get("rust_dependencies"))
+        rust_components = process_rust_dependencies(metadata.get("rust_dependencies"), dependencies_dict)
         lib_components += rust_components
     if lib_components:
         components += lib_components
@@ -587,7 +587,7 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     return components
 
 
-def process_rust_dependencies(rust_deps: list) -> list[Component]:
+def process_rust_dependencies(rust_deps: list, dependencies_dict: dict[str, set]) -> list[Component]:
     """
     Process the rust dependencies metadata extracted for binary overlays
 
@@ -598,18 +598,28 @@ def process_rust_dependencies(rust_deps: list) -> list[Component]:
         list: New component list
     """
     components = []
+    idx_to_purl = {}
+    for idx, dep in enumerate(rust_deps):
+        idx_to_purl[idx] = f"""pkg:cargo/{dep["name"]}@{dep["version"]}"""
     for dependency in rust_deps:
         purl = f"""pkg:cargo/{dependency["name"]}@{dependency["version"]}"""
+        purl_qualifer = f"""?repository={dependency.get("source")}""" if dependency.get("source", "") != "crates.io" else ""
         comp = Component(
             type=Type.library,
             name=dependency["name"],
             version=dependency["version"],
-            purl=purl,
+            purl=f"{purl}{purl_qualifer}",
             scope=Scope.required,
-            evidence=create_component_evidence(dependency["name"], 1.0)
+            evidence=create_component_evidence(dependency["name"], 0.8)
         )
         comp.bom_ref = RefType(purl)
         components.append(comp)
+        if not dependencies_dict.get(purl):
+            dependencies_dict[purl] = set()
+        # Recover the dependency tree
+        if dependency.get("dependencies"):
+            for adep in dependency.get("dependencies"):
+                dependencies_dict[purl].add(idx_to_purl[adep])
     return components
 
 
