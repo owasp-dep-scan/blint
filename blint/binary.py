@@ -3,6 +3,7 @@ import codecs
 import contextlib
 import json
 import sys
+from typing import Tuple
 import zlib
 
 import lief
@@ -218,24 +219,6 @@ def parse_strings(parsed_obj):
     return strings_list
 
 
-def ignorable_symbol(symbol_name: str | None) -> bool:
-    """
-    Determines if a symbol is ignorable.
-
-    Args:
-        symbol_name (str): The name of the symbol to check.
-
-    Returns:
-        bool: True if the symbol is ignorable, False otherwise.
-    """
-    if not symbol_name:
-        return True
-    for pref in ("_$f", "$f64.", "__"):
-        if symbol_name.startswith(pref):
-            return True
-    return False
-
-
 def parse_symbols(symbols):
     """
     Parse symbols from a list of symbols.
@@ -261,24 +244,23 @@ def parse_symbols(symbols):
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
-            if not ignorable_symbol(symbol_name):
-                exe_type = guess_exe_type(symbol_name)
-                symbols_list.append(
-                    {
-                        "name": symbol_name,
-                        "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
-                        "value": symbol.value,
-                        "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
-                        "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
-                        "is_imported": is_imported,
-                        "is_exported": is_exported,
-                        "information": symbol.information,
-                        "is_function": symbol.is_function,
-                        "is_static": symbol.is_static,
-                        "is_variable": symbol.is_variable,
-                        "version": str(symbol_version),
-                    }
-                )
+            exe_type = guess_exe_type(symbol_name)
+            symbols_list.append(
+                {
+                    "name": symbol_name,
+                    "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
+                    "value": symbol.value,
+                    "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
+                    "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
+                    "is_imported": is_imported,
+                    "is_exported": is_exported,
+                    "information": symbol.information,
+                    "is_function": symbol.is_function,
+                    "is_static": symbol.is_static,
+                    "is_variable": symbol.is_variable,
+                    "version": str(symbol_version),
+                }
+            )
         except (AttributeError, IndexError, TypeError):
             continue
     return symbols_list, exe_type
@@ -657,19 +639,18 @@ def parse_macho_symbols(symbols):
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
                 symbol_name = symbol.name
             symbol_name = symbol_name.replace("..", "::")
-            if not ignorable_symbol(symbol_name):
-                if not exe_type:
-                    exe_type = guess_exe_type(symbol_name)
-                symbols_list.append(
-                    {
-                        "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
-                        "short_name": symbol_name,
-                        "type": symbol.type,
-                        "num_sections": symbol.numberof_sections,
-                        "description": symbol.description,
-                        "value": symbol_value,
-                    }
-                )
+            if not exe_type:
+                exe_type = guess_exe_type(symbol_name)
+            symbols_list.append(
+                {
+                    "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
+                    "short_name": symbol_name,
+                    "type": symbol.type,
+                    "num_sections": symbol.numberof_sections,
+                    "description": symbol.description,
+                    "value": symbol_value,
+                }
+            )
         except (AttributeError, TypeError):
             continue
     return symbols_list, exe_type
@@ -932,7 +913,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
-def parse_go_buildinfo(parsed_obj: lief.Binary) -> (dict[str, dict[str, str]], dict[str, str]):
+def parse_go_buildinfo(parsed_obj: lief.Binary) -> Tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
     Parse the go build info section to extract go dependencies
     Args:

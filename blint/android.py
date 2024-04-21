@@ -18,13 +18,7 @@ from blint.utils import check_command, create_component_evidence, find_files, un
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
-if (
-        not APKANALYZER_CMD
-        and ANDROID_HOME
-        and (
-        os.path.exists(os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"))
-)
-):
+if not APKANALYZER_CMD and ANDROID_HOME and os.path.exists(os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")):
     APKANALYZER_CMD = os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")
 elif check_command("apkanalyzer"):
     APKANALYZER_CMD = "apkanalyzer"
