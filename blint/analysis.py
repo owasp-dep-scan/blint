@@ -1,6 +1,5 @@
 import contextlib
 import importlib  # noqa
-import orjson
 import os
 import re
 import sys
@@ -10,12 +9,13 @@ from datetime import datetime
 from itertools import islice
 from pathlib import Path
 
+import orjson
 import yaml
 from rich.progress import Progress
 from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
-from blint.checks import (check_nx, check_pie,  # noqa, pylint: disable=unused-import
+from blint.checks import (check_nx, check_pie,
                           check_relro, check_canary, check_rpath,
                           check_virtual_size, check_authenticode,
                           check_dll_characteristics, check_codesign,
@@ -327,20 +327,23 @@ def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
         print_findings_table(findings, files)
         findings_file = Path(reports_dir) / "findings.json"
         LOG.info(f"Findings written to {findings_file}")
-        output = orjson.dumps({**common_metadata, "findings": findings}).decode("utf-8", "ignore")
+        output = orjson.dumps({**common_metadata, "findings": findings}, default=json_serializer).decode("utf-8",
+                                                                                                         "ignore")
         with open(findings_file, mode="w", encoding="utf-8") as ffp:
             ffp.write(output)
     if reviews:
         print_reviews_table(reviews, files)
         reviews_file = Path(reports_dir) / "reviews.json"
         LOG.info(f"Review written to {reviews_file}")
-        output = orjson.dumps({**common_metadata, "reviews": reviews}).decode("utf-8", "ignore")
+        output = orjson.dumps({**common_metadata, "reviews": reviews}, default=json_serializer).decode("utf-8",
+                                                                                                       "ignore")
         with open(reviews_file, mode="w", encoding="utf-8") as rfp:
             rfp.write(output)
     if fuzzables:
         fuzzables_file = Path(reports_dir) / "fuzzables.json"
         LOG.info(f"Fuzzables data written to {fuzzables_file}")
-        output = orjson.dumps({**common_metadata, "fuzzables": fuzzables}).decode("utf-8", "ignore")
+        output = orjson.dumps({**common_metadata, "fuzzables": fuzzables}, default=json_serializer).decode("utf-8",
+                                                                                                           "ignore")
         with open(fuzzables_file, mode="w", encoding="utf-8") as rfp:
             rfp.write(output)
     else:
@@ -411,7 +414,7 @@ class AnalysisRunner:
         metadata_file = (Path(reports_dir) / f"{os.path.basename(exe_name)}"
                                              f"-metadata.json")
         LOG.debug(f"Metadata written to {metadata_file}")
-        output = orjson.dumps(metadata).decode("utf-8", "ignore")
+        output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
         with open(metadata_file, mode="w", encoding="utf-8") as ffp:
             ffp.write(output)
         self.progress.update(
@@ -639,8 +642,7 @@ class ReviewRunner:
                     if found_pattern[apattern] > EVIDENCE_LIMIT or found_cid[cid] > EVIDENCE_LIMIT:
                         continue
                     for afun in functions_list:
-                        if ((apattern.lower() in afun.lower()) and not
-                                found_function.get(afun.lower())):
+                        if apattern.lower() in afun.lower() and not found_function.get(afun.lower()):
                             result = {"pattern": apattern, "function": afun, }
                             results[cid].append(result)
                             found_cid[cid] += 1
