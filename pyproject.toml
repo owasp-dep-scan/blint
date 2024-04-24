@@ -55,7 +55,7 @@ build-backend = "poetry.core.masonry.api"
 addopts = "--verbose --cov-append --cov-report term --cov blint"
 
 [tool.pylint]
-generated-members = ["lief"]
+generated-members = ["lief", "orjson"]
 ignore-paths = ["blint/cyclonedx/*"]
 # Let's not fuss about long strings
 ignore-long-lines = "[r|f]\""
