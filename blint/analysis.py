@@ -1,6 +1,6 @@
 import contextlib
 import importlib  # noqa
-import json
+import orjson
 import os
 import re
 import sys
@@ -327,23 +327,22 @@ def report(src_dir, reports_dir, findings, reviews, files, fuzzables):
         print_findings_table(findings, files)
         findings_file = Path(reports_dir) / "findings.json"
         LOG.info(f"Findings written to {findings_file}")
+        output = orjson.dumps({**common_metadata, "findings": findings}).decode("utf-8", "ignore")
         with open(findings_file, mode="w", encoding="utf-8") as ffp:
-            json.dump(
-                {**common_metadata, "findings": findings}, ffp, default=json_serializer
-            )
+            ffp.write(output)
     if reviews:
         print_reviews_table(reviews, files)
         reviews_file = Path(reports_dir) / "reviews.json"
         LOG.info(f"Review written to {reviews_file}")
+        output = orjson.dumps({**common_metadata, "reviews": reviews}).decode("utf-8", "ignore")
         with open(reviews_file, mode="w", encoding="utf-8") as rfp:
-            json.dump({**common_metadata, "reviews": reviews}, rfp, default=json_serializer)
+            rfp.write(output)
     if fuzzables:
         fuzzables_file = Path(reports_dir) / "fuzzables.json"
         LOG.info(f"Fuzzables data written to {fuzzables_file}")
+        output = orjson.dumps({**common_metadata, "fuzzables": fuzzables}).decode("utf-8", "ignore")
         with open(fuzzables_file, mode="w", encoding="utf-8") as rfp:
-            json.dump(
-                {**common_metadata, "fuzzables": fuzzables}, rfp, default=json_serializer
-            )
+            rfp.write(output)
     else:
         LOG.debug("No suggestion available for fuzzing")
 
@@ -412,8 +411,9 @@ class AnalysisRunner:
         metadata_file = (Path(reports_dir) / f"{os.path.basename(exe_name)}"
                                              f"-metadata.json")
         LOG.debug(f"Metadata written to {metadata_file}")
+        output = orjson.dumps(metadata).decode("utf-8", "ignore")
         with open(metadata_file, mode="w", encoding="utf-8") as ffp:
-            json.dump(metadata, ffp, default=json_serializer)
+            ffp.write(output)
         self.progress.update(
             self.task,
             description=f"Checking [bold]{f}[/bold] against rules")
