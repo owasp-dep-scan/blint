@@ -1,7 +1,7 @@
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
-import json
+import orjson
 import sys
 from typing import Tuple
 import zlib
@@ -907,8 +907,8 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
                 try:
                     # deps should have runtimeTarget, compilationOptions, targets, and libraries
                     # Use libraries to construct BOM components and targets for the dependency tree
-                    deps = json.loads(overlay_str)
-                except json.JSONDecodeError:
+                    deps = orjson.loads(overlay_str)
+                except orjson.JSONDecodeError:
                     pass
     return deps
 
@@ -981,12 +981,12 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
         audit_data_section = next(filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None)
         if audit_data_section is not None and audit_data_section.content:
             json_string = zlib.decompress(audit_data_section.content)
-            audit_data = json.loads(json_string)
+            audit_data = orjson.loads(json_string)
 
             if audit_data and audit_data["packages"]:
                 packages = audit_data["packages"]
                 deps = [x for x in packages if 'root' not in x]
-    except json.JSONDecodeError:
+    except orjson.JSONDecodeError:
         pass
 
     return deps

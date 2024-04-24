@@ -34,6 +34,7 @@ rich = "^13.7.0"
 PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
 pydantic = {version = "^2.6.0", extras = ["email"]}
+orjson = "^3.10.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
