@@ -146,7 +146,7 @@ sbom command generates CycloneDX json.
 
 ## References
 
-- [lief examples](https://github.com/lief-project/LIEF/tree/master/examples/python)
+- [lief examples](https://github.com/lief-project/LIEF/tree/master/examples)
 - [checksec](https://github.com/Wenzel/checksec.py)
 
 ## Discord support
