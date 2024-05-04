@@ -521,12 +521,14 @@ def parse_pe_symbols(symbols):
     symbols_list = []
     exe_type = ""
     for symbol in symbols:
+        if not symbol:
+            continue
         try:
             if symbol.section_number <= 0:
                 section_nb_str = str(lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)).rsplit(
                     ".", maxsplit=1
                 )[-1]
-            elif symbol.section.name:
+            elif symbol.section and symbol.section.name:
                 section_nb_str = symbol.section.name
             else:
                 section_nb_str = "section<{:d}>".format(symbol.section_number)
@@ -549,6 +551,8 @@ def parse_pe_symbols(symbols):
                 )
         except (IndexError, AttributeError, ValueError) as e:
             LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol}.")
+        except RuntimeError:
+            pass
     return symbols_list, exe_type
 
 
