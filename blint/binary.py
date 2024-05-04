@@ -1,13 +1,14 @@
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
-import orjson
 import sys
 from typing import Tuple
 import zlib
+import orjson
 
 import lief
-
+from symbolic._lowlevel import ffi, lib
+from symbolic.utils import encode_str, decode_str, rustcall
 from blint.logger import DEBUG, LOG
 from blint.utils import calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
 
@@ -19,6 +20,19 @@ if LOG.level != DEBUG:
     lief.logging.disable()
 
 ADDRESS_FMT = "0x{:<10x}"
+
+
+def demangle_symbolic_name(symbol, lang=None, no_args=False):
+    """Demangles a symbol."""
+    try:
+        func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
+        lang_str = encode_str(lang) if lang else ffi.NULL
+
+        demangled = rustcall(func, encode_str(symbol), lang_str)
+        demangled_symbol = decode_str(demangled, free=True)
+        return demangled_symbol
+    except AttributeError:
+        return symbol
 
 
 def is_shared_library(parsed_obj):
@@ -243,7 +257,9 @@ def parse_symbols(symbols):
                 is_exported = True
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors):
-                symbol_name = symbol.name
+                symbol_name = demangle_symbolic_name(symbol.name)
+            else:
+                symbol_name = demangle_symbolic_name(symbol_name)
             exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
                 {
@@ -637,8 +653,9 @@ def parse_macho_symbols(symbols):
             )
             symbol_name = symbol.demangled_name
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
-                symbol_name = symbol.name
-            symbol_name = symbol_name.replace("..", "::")
+                symbol_name = demangle_symbolic_name(symbol.name)
+            else:
+                symbol_name = demangle_symbolic_name(symbol_name)
             if not exe_type:
                 exe_type = guess_exe_type(symbol_name)
             symbols_list.append(
