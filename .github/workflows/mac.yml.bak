@@ -44,7 +44,7 @@ jobs:
         poetry install
     - name: Binary darwin build
       run: |
-        poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --collect-submodules symbolic --osx-bundle-identifier ${PRODUCT_IDENTIFIER} --target-architecture x86_64 --codesign-identity ${CODESIGN_ID} --osx-entitlements-file Entitlements.plist --icon ./blint.icns
+        poetry run pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --collect-all blint --osx-bundle-identifier ${PRODUCT_IDENTIFIER} --target-architecture x86_64 --codesign-identity ${CODESIGN_ID} --osx-entitlements-file Entitlements.plist --icon ./blint.icns
         ./dist/blint -i dist/blint -o /tmp/reports
       env:
         CODESIGN_ID: ${{ secrets.CODESIGN_ID }}

@@ -7,10 +7,16 @@ import zlib
 import orjson
 
 import lief
-from symbolic._lowlevel import ffi, lib
-from symbolic.utils import encode_str, decode_str, rustcall
+
 from blint.logger import DEBUG, LOG
 from blint.utils import calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
+
+SYMBOLIC_FOUND = True
+try:
+    from symbolic._lowlevel import ffi, lib
+    from symbolic.utils import encode_str, decode_str, rustcall
+except OSError:
+    SYMBOLIC_FOUND = False
 
 MIN_ENTROPY = 0.39
 MIN_LENGTH = 80
@@ -24,6 +30,8 @@ ADDRESS_FMT = "0x{:<10x}"
 
 def demangle_symbolic_name(symbol, lang=None, no_args=False):
     """Demangles a symbol."""
+    if not SYMBOLIC_FOUND:
+        return symbol
     try:
         func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
         lang_str = encode_str(lang) if lang else ffi.NULL

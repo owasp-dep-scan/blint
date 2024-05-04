@@ -24,7 +24,7 @@ jobs:
         cp upx-4.0.2-amd64_linux/upx /usr/local/bin/
     - name: Binary musl build
       run: |
-        ~/.local/bin/poetry run pyinstaller cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint-musl --collect-all blint --collect-submodules symbolic --upx-dir /usr/local/bin/
+        ~/.local/bin/poetry run pyinstaller cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint-musl --collect-all blint --upx-dir /usr/local/bin/
         ./dist/blint-musl -i dist/blint-musl -o /tmp/reports
       env:
         PYTHONIOENCODING: utf-8
