@@ -49,7 +49,7 @@ jobs:
         rm ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
         tar -xvf ripgrep-14.1.0-x86_64-apple-darwin.tar.gz
         rm ripgrep-14.1.0-x86_64-apple-darwin.tar.gz
-        tar -xvf ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
+        unzip ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
         rm ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
         cd ..
         poetry run blint sbom -i bintests -o reports/bom.json --deep
