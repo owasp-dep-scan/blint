@@ -30,7 +30,7 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
 
         demangled = rustcall(func, encode_str(symbol), lang_str)
         demangled_symbol = decode_str(demangled, free=True)
-        return demangled_symbol
+        return demangled_symbol.strip()
     except AttributeError:
         return symbol
 

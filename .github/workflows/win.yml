@@ -30,7 +30,7 @@ jobs:
     - name: Binary windows build
       run: |
         cd blint
-        pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --add-data="blint/data;blint/data" --add-data="blint/data/annotations;blint/data/annotations" --collect-submodules blint --disable-windowed-traceback -i blint.ico --version-file=file_version_info.txt --noupx
+        pyinstaller blint/cli.py --noconfirm --log-level=WARN --nowindow --onefile --name blint --add-data="blint/data;blint/data" --add-data="blint/data/annotations;blint/data/annotations" --collect-submodules blint --collect-submodules symbolic --disable-windowed-traceback -i blint.ico --version-file=file_version_info.txt --noupx
         (Get-FileHash .\dist\blint.exe).hash | Out-File -FilePath .\dist\blint.exe.sha256
         set PYTHONIOENCODING=UTF-8
         .\dist\blint.exe -i .\dist\blint.exe -o reports --no-banner

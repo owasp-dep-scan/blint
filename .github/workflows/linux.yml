@@ -37,6 +37,7 @@ jobs:
           --add-data="blint/data:blint/data" \
           --add-data="blint/data/annotations:blint/data/annotations" \
           --collect-submodules blint \
+          --collect-submodules symbolic \
           --noupx
         ./dist/blint -i dist/blint -o /tmp/reports
         sha256sum ./dist/blint > ./dist/blint.sha256
