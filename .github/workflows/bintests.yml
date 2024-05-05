@@ -58,3 +58,4 @@ jobs:
         poetry run blint sbom -i rusttests -o reports/bom.json --deep
       env:
         SCAN_DEBUG_MODE: "debug"
+      shell: bash
