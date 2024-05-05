@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.1.3"
+version = "2.1.4"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "MIT"
@@ -35,6 +35,7 @@ PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
 pydantic = {version = "^2.6.0", extras = ["email"]}
 orjson = "^3.10.1"
+symbolic = "10.2.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
@@ -56,7 +57,7 @@ addopts = "--verbose --cov-append --cov-report term --cov blint"
 
 [tool.pylint]
 generated-members = ["lief", "orjson"]
-ignore-paths = ["blint/cyclonedx/*"]
+ignore-paths = ["blint/cyclonedx/*", "tests/*"]
 # Let's not fuss about long strings
 ignore-long-lines = "[r|f]\""
 disable = ["missing-module-docstring", "logging-fstring-interpolation"]
