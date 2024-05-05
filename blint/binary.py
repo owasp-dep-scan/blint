@@ -29,16 +29,27 @@ ADDRESS_FMT = "0x{:<10x}"
 
 
 def demangle_symbolic_name(symbol, lang=None, no_args=False):
-    """Demangles a symbol."""
+    """Demangles symbol using llvm demangle falling back to some heuristics."""
     if not SYMBOLIC_FOUND:
         return symbol
     try:
         func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
         lang_str = encode_str(lang) if lang else ffi.NULL
-
         demangled = rustcall(func, encode_str(symbol), lang_str)
-        demangled_symbol = decode_str(demangled, free=True)
-        return demangled_symbol.strip()
+        demangled_symbol = decode_str(demangled, free=True).strip()
+        # demangling didn't work
+        if symbol and symbol == demangled_symbol:
+            for ign in ("__imp_anon.", "anon."):
+                if symbol.startswith(ign):
+                    return "anonymous"
+            if symbol.startswith("GCC_except_table"):
+                return "GCC_except_table"
+            if symbol.startswith("@feat.00"):
+                return "SAFESEH"
+            if symbol.startswith("__imp_") or symbol.startswith(".rdata$") or symbol.startswith(".refptr."):
+                symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
+            return symbol.replace("..", "::")
+        return demangled_symbol
     except AttributeError:
         return symbol
 
@@ -196,7 +207,7 @@ def parse_functions(functions):
         LOG.debug("Parsing functions")
         for idx, f in enumerate(functions):
             if f.name and f.address:
-                cleaned_name = f.name.replace("..", "::")
+                cleaned_name = demangle_symbolic_name(f.name)
                 func_list.append(
                     {
                         "index": idx,
@@ -541,7 +552,7 @@ def parse_pe_symbols(symbols):
             if symbol.name:
                 symbols_list.append(
                     {
-                        "name": symbol.name.replace("..", "::"),
+                        "name": demangle_symbolic_name(symbol.name),
                         "value": symbol.value,
                         "id": section_nb_str,
                         "base_type": str(symbol.base_type).rsplit(".", maxsplit=1)[-1],
@@ -586,8 +597,8 @@ def parse_pe_imports(imports):
                     dlls.add(import_.name)
                     imports_list.append(
                         {
-                            "name": f"{import_.name}::{entry.name}",
-                            "short_name": entry.name,
+                            "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
+                            "short_name": demangle_symbolic_name(entry.name),
                             "data": entry.data,
                             "iat_value": entry.iat_value,
                             "hint": entry.hint,
@@ -621,7 +632,7 @@ def parse_pe_exports(exports):
         extern = "[EXTERN]" if entry.is_extern else ""
         if entry.name:
             metadata = {
-                "name": entry.name,
+                "name": demangle_symbolic_name(entry.name),
                 "ordinal": entry.ordinal,
                 "address": ADDRESS_FMT.format(entry.address),
                 "extern": extern,
@@ -831,7 +842,7 @@ def add_elf_symbols(metadata, parsed_obj):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
                         {
-                            "name": symbol_version_auxiliary.name,
+                            "name": demangle_symbolic_name(symbol_version_auxiliary.name),
                             "hash": symbol_version_auxiliary.hash,
                             "value": entry.value,
                         }
@@ -866,7 +877,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
         ]:
             metadata["dynamic_entries"].append(
                 {
-                    "name": entry.name,
+                    "name": demangle_symbolic_name(entry.name),
                     "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
                     "value": entry.value,
                 }
