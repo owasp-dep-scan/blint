@@ -57,7 +57,7 @@ addopts = "--verbose --cov-append --cov-report term --cov blint"
 
 [tool.pylint]
 generated-members = ["lief", "orjson"]
-ignore-paths = ["blint/cyclonedx/*"]
+ignore-paths = ["blint/cyclonedx/*", "tests/*"]
 # Let's not fuss about long strings
 ignore-long-lines = "[r|f]\""
 disable = ["missing-module-docstring", "logging-fstring-interpolation"]
