@@ -30,22 +30,22 @@ jobs:
       run: |
         mkdir -p bintests gobintests rusttests
         cd bintests
-        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai.exe
-        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai
-        wget -q https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai-osx-arm64
+        curl -LO https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai.exe
+        curl -LO https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai
+        curl -LO https://github.com/owasp-dep-scan/dosai/releases/download/v0.1.1/Dosai-osx-arm64
         cd ..
         cd gobintests
-        wget -q https://github.com/containerd/containerd/releases/download/v1.7.14/containerd-1.7.14-linux-amd64.tar.gz
-        wget -q https://github.com/containerd/nerdctl/releases/download/v1.7.4/nerdctl-1.7.4-windows-amd64.tar.gz
+        curl -LO https://github.com/containerd/containerd/releases/download/v1.7.14/containerd-1.7.14-linux-amd64.tar.gz
+        curl -LO https://github.com/containerd/nerdctl/releases/download/v1.7.4/nerdctl-1.7.4-windows-amd64.tar.gz
         tar -xvf containerd-1.7.14-linux-amd64.tar.gz
         tar -xvf nerdctl-1.7.4-windows-amd64.tar.gz
         rm containerd-1.7.14-linux-amd64.tar.gz
         rm nerdctl-1.7.4-windows-amd64.tar.gz
         cd ..
         cd rusttests
-        wget -q https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
-        wget -q https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-apple-darwin.tar.gz
-        wget -q https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
+        curl -LO https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
+        curl -LO https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-apple-darwin.tar.gz
+        curl -LO https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
         tar -xvf ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
         rm ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz
         tar -xvf ripgrep-14.1.0-x86_64-apple-darwin.tar.gz
