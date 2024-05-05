@@ -15,6 +15,7 @@ from rich.progress import Progress
 from rich.terminal_theme import MONOKAI
 
 from blint.binary import parse
+# pylint: disable-next=unused-import
 from blint.checks import (check_nx, check_pie,
                           check_relro, check_canary, check_rpath,
                           check_virtual_size, check_authenticode,
@@ -300,6 +301,7 @@ def print_reviews_table(reviews, files):
 
 
 def json_serializer(obj):
+    """JSON serializer to help serialize problematic types such as bytes"""
     if isinstance(obj, bytes):
         return obj.decode('utf-8')
 
