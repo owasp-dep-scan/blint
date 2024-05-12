@@ -334,7 +334,7 @@ def process_exe_file(
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             )
-        internal_functions = [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]
+        internal_functions = [f["name"] for f in metadata.get("functions", []) if f["name"]]
         if internal_functions:
             parent_component.properties.append(
                 Property(
@@ -342,7 +342,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(internal_functions),
                 )
             )
-        symtab_symbols = [f["name"] for f in metadata.get("symtab_symbols", [])]
+        symtab_symbols = [f["name"] for f in metadata.get("symtab_symbols", []) if f["name"]]
         if symtab_symbols:
             parent_component.properties.append(
                 Property(
@@ -358,7 +358,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
             )
-        dynamic_symbols = [f["name"] for f in metadata.get("dynamic_symbols", [])]
+        dynamic_symbols = [f["name"] for f in metadata.get("dynamic_symbols", []) if f["name"]]
         if dynamic_symbols:
             parent_component.properties.append(
                 Property(
