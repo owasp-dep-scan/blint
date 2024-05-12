@@ -54,6 +54,8 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
                 symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
             return (
                 symbol.replace("..", "::")
+                .replace("$SP$", "@")
+                .replace("$BP$", "*")
                 .replace("$LT$", "<")
                 .replace("$u5b$", "[")
                 .replace("$u7b$", "{")
@@ -63,6 +65,9 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
                 .replace("$u7d$", "}")
                 .replace("$GT$", ">")
                 .replace("$RF$", "&")
+                .replace("$LP$", "(")
+                .replace("$RP$", ")")
+                .replace("$C$", ",")
                 .replace("$u27$", "'")
             )
         return demangled_symbol
