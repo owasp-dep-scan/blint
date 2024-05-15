@@ -29,7 +29,7 @@ ADDRESS_FMT = "0x{:<10x}"
 
 
 def demangle_symbolic_name(symbol, lang=None, no_args=False):
-    """Demangles symbol using llvm demangle falling back to some heuristics."""
+    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
     if not SYMBOLIC_FOUND:
         return symbol
     try:
