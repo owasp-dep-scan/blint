@@ -31,6 +31,7 @@ CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 # Known files compressed with ar
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
+
 def is_base64(s):
     """
     Checks if the given string is a valid Base64 encoded string.

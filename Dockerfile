@@ -17,7 +17,7 @@ ENV ANDROID_HOME=/opt/android-sdk-linux \
 ENV PATH=${PATH}:/usr/local/bin/:/root/.local/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/tools:${ANDROID_HOME}/tools/bin:${ANDROID_HOME}/platform-tools:
 
 RUN microdnf install -y make gcc ncurses \
-    && alternatives --install /usr/bin/python3 python /usr/bin/python3.11 1 \
+    && alternatives --install /usr/bin/python3 python /usr/bin/python3.12 1 \
     && python3 --version \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install setuptools --upgrade \
