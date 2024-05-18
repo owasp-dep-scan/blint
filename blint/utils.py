@@ -282,12 +282,12 @@ def find_files(path, extns):
     """
     result = []
     if os.path.isfile(path):
-        result.extend(path for ext in extns if path.endswith(ext))
+        result += [path for ext in extns if path.endswith(ext)]
     else:
         for root, dirs, files in os.walk(path):
             filter_ignored_dirs(dirs)
             for file in files:
-                result.extend(os.path.join(root, file) for ext in extns if file.endswith(ext))
+                result += [os.path.join(root, file) for ext in extns if file.endswith(ext)]
     return result
 
 

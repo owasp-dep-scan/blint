@@ -131,9 +131,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components.extend(
-                process_exe_file(dependencies_dict, deep_mode, exe, sbom)
-            )
+            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom)
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -142,11 +140,9 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components.extend(
-                process_android_file(dependencies_dict, deep_mode, f, sbom)
-            )
+            components += process_android_file(dependencies_dict, deep_mode, f, sbom)
     if dependencies_dict:
-        dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
+        dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
     return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
 

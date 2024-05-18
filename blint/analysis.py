@@ -446,7 +446,7 @@ class AnalysisRunner:
         self.reviewer.run_review(metadata)
         if self.reviewer.results:
             review = self.reviewer.process_review(f, exe_name)
-            self.reviews.extend(review)
+            self.reviews += review
 
 
 class ReviewRunner:

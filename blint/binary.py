@@ -119,7 +119,7 @@ def parse_notes(parsed_obj):
     notes = parsed_obj.notes
     if isinstance(notes, lief.lief_errors):
         return data
-    data.extend(extract_note_data(idx, note) for idx, note in enumerate(notes))
+    data += [extract_note_data(idx, note) for idx, note in enumerate(notes)]
     return data
 
 
