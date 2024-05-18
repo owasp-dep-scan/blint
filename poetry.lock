@@ -23,6 +23,21 @@ files = [
 ]
 
 [[package]]
+name = "ar"
+version = "0.8"
+description = "Access ar archive files (.a)!"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "ar-0.8-py3-none-any.whl", hash = "sha256:6ef917e875baef27cb931ad310c4087a204d31b23ee78d0a3707c7a160bd24b6"},
+    {file = "ar-0.8.tar.gz", hash = "sha256:5871651a9ef25988f559720bf72e3546b154f85c695997066cef9e0b162bfe83"},
+]
+
+[package.extras]
+dev = ["mypy", "pylint"]
+test = ["pytest (>=7.4.4,<7.5.0)"]
+
+[[package]]
 name = "astroid"
 version = "3.1.0"
 description = "An abstract syntax tree for Python with inference support."
@@ -1042,4 +1057,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "96908721ddde9d5f733fb8bbef1159327fab88c43e7626b3f64661f1b16c543c"
+content-hash = "4796e93410e581156e64c0ba3987d46f68b3640927badaef74bee4c50572e594"

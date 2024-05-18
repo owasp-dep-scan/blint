@@ -43,6 +43,9 @@ def default_parent(src_dirs: list[str]) -> Component:
     if not src_dirs:
         raise ValueError("No source directories provided")
     name = os.path.basename(src_dirs[0])
+    # Extract the name from the .rlib files
+    if name.endswith(".rlib"):
+        name = name.split("-")[0].removeprefix("lib")
     purl = f"pkg:generic/{name}@latest"
     component = Component(type=Type.application, name=name, version="latest", purl=purl)
     component.bom_ref = RefType(purl)
@@ -334,7 +337,7 @@ def process_exe_file(
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             )
-        internal_functions = [f["name"] for f in metadata.get("functions", []) if not f["name"].startswith("__")]
+        internal_functions = sorted(set([f["name"] for f in metadata.get("functions", []) if f["name"]]))
         if internal_functions:
             parent_component.properties.append(
                 Property(
@@ -342,7 +345,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(internal_functions),
                 )
             )
-        symtab_symbols = [f["name"] for f in metadata.get("symtab_symbols", [])]
+        symtab_symbols = sorted(set([f["name"] for f in metadata.get("symtab_symbols", []) if f["name"]]))
         if symtab_symbols:
             parent_component.properties.append(
                 Property(
@@ -350,7 +353,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(symtab_symbols),
                 )
             )
-        all_imports = [f["name"] for f in metadata.get("imports", [])]
+        all_imports = sorted(set([f["name"] for f in metadata.get("imports", [])]))
         if all_imports:
             parent_component.properties.append(
                 Property(
@@ -358,7 +361,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
             )
-        dynamic_symbols = [f["name"] for f in metadata.get("dynamic_symbols", [])]
+        dynamic_symbols = sorted(set([f["name"] for f in metadata.get("dynamic_symbols", []) if f["name"]]))
         if dynamic_symbols:
             parent_component.properties.append(
                 Property(
