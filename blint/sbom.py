@@ -27,7 +27,13 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import camel_to_snake, create_component_evidence, find_android_files, gen_file_list, get_version
+from blint.utils import (
+    camel_to_snake,
+    create_component_evidence,
+    find_android_files,
+    gen_file_list,
+    get_version,
+)
 
 
 def default_parent(src_dirs: list[str]) -> Component:
@@ -65,20 +71,18 @@ def default_metadata(src_dirs):
     metadata = Metadata()
     metadata.timestamp = f'{datetime.now().isoformat(timespec="seconds")}Z'
     metadata.component = default_parent(src_dirs)
-    metadata.tools = (
-        Tools(
-            components=[
-                Component(
-                    type=Type.application,
-                    author="OWASP Foundation",
-                    publisher="OWASP Foundation",
-                    group="owasp-dep-scan",
-                    name="blint",
-                    version=get_version(),
-                    purl=f"pkg:pypi/blint@{get_version()}",
-                )
-            ]
-        )
+    metadata.tools = Tools(
+        components=[
+            Component(
+                type=Type.application,
+                author="OWASP Foundation",
+                publisher="OWASP Foundation",
+                group="owasp-dep-scan",
+                name="blint",
+                version=get_version(),
+                purl=f"pkg:pypi/blint@{get_version()}",
+            )
+        ]
     )
     metadata.lifecycles = [Lifecycles(phase=Phase.post_build)]
     return metadata
@@ -114,10 +118,10 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
     if not android_files and not exe_files:
         return False
     with Progress(
-            transient=True,
-            redirect_stderr=True,
-            redirect_stdout=True,
-            refresh_per_second=1,
+        transient=True,
+        redirect_stderr=True,
+        redirect_stdout=True,
+        refresh_per_second=1,
     ) as progress:
         if exe_files:
             task = progress.add_task(
@@ -127,7 +131,9 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components.extend(process_exe_file(dependencies_dict, components, deep_mode, exe, sbom))
+            components.extend(
+                process_exe_file(dependencies_dict, components, deep_mode, exe, sbom)
+            )
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -136,14 +142,20 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components.extend(process_android_file(dependencies_dict, components, deep_mode, f, sbom))
+            components.extend(
+                process_android_file(dependencies_dict, components, deep_mode, f, sbom)
+            )
     if dependencies_dict:
         dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
     return create_sbom(components, dependencies, output_file, sbom, deep_mode)
 
 
 def create_sbom(
-        components: list[Component], dependencies: list[dict], output_file: str, sbom: CycloneDX, deep_mode: bool
+    components: list[Component],
+    dependencies: list[dict],
+    output_file: str,
+    sbom: CycloneDX,
+    deep_mode: bool,
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -188,18 +200,16 @@ def create_sbom(
                     exclude_none=True,
                     exclude_defaults=True,
                     warnings=False,
-                    by_alias=True
+                    by_alias=True,
                 )
             )
             LOG.debug(f"SBOM file generated successfully at {output_file}")
     else:
-        output_file.write(sbom.model_dump_json(
-            indent=2,
-            exclude_none=True,
-            exclude_defaults=True,
-            warnings=False,
-            by_alias=True
-        ))
+        output_file.write(
+            sbom.model_dump_json(
+                indent=2, exclude_none=True, exclude_defaults=True, warnings=False, by_alias=True
+            )
+        )
     return True
 
 
@@ -227,7 +237,9 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
                 if name.startswith("glib"):
                     name = name.removeprefix("g")
                     group = "gnu"
-        purl = f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+        purl = (
+            f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+        )
         if symbol.get("hash"):
             purl = f"{purl}?hash={symbol.get('hash')}"
         comp = Component(
@@ -237,9 +249,7 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
             version=version,
             purl=purl,
             evidence=create_component_evidence(symbol["name"], 0.5),
-            properties=[
-                Property(name="internal:symbol_version", value=symbol["name"])
-            ]
+            properties=[Property(name="internal:symbol_version", value=symbol["name"])],
         )
         comp.bom_ref = RefType(purl)
         lib_components.append(comp)
@@ -248,17 +258,19 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
 
 def _add_to_parent_component(metadata_components: list[Component], parent_component: Component):
     for mc in metadata_components:
-        if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(mode="python"):
+        if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
+            mode="python"
+        ):
             return
     metadata_components.append(parent_component)
 
 
 def process_exe_file(
-        dependencies_dict: dict[str, set],
-        components: list[Component],
-        deep_mode: bool,
-        exe: str,
-        sbom: CycloneDX,
+    dependencies_dict: dict[str, set],
+    components: list[Component],
+    deep_mode: bool,
+    exe: str,
+    sbom: CycloneDX,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
@@ -279,33 +291,33 @@ def process_exe_file(
     parent_component.properties = []
     lib_components: list[Component] = []
     for prop in (
-            "binary_type",
-            "magic",
-            "class",
-            "platform",
-            "minos",
-            "interpreter",
-            "dylinker",
-            "machine_type",
-            "sdk",
-            "uuid",
-            "cpu_type",
-            "flags",
-            "relro",
-            "is_pie",
-            "is_reproducible_build",
-            "has_nx",
-            "static",
-            "characteristics",
-            "dll_characteristics",
-            "subsystem",
-            "is_gui",
-            "is_driver",
-            "is_dotnet",
-            "major_linker_version",
-            "minor_linker_version",
-            "major_operating_system_version",
-            "minor_operating_system_version",
+        "binary_type",
+        "magic",
+        "class",
+        "platform",
+        "minos",
+        "interpreter",
+        "dylinker",
+        "machine_type",
+        "sdk",
+        "uuid",
+        "cpu_type",
+        "flags",
+        "relro",
+        "is_pie",
+        "is_reproducible_build",
+        "has_nx",
+        "static",
+        "characteristics",
+        "dll_characteristics",
+        "subsystem",
+        "is_gui",
+        "is_driver",
+        "is_dotnet",
+        "major_linker_version",
+        "minor_linker_version",
+        "major_operating_system_version",
+        "minor_operating_system_version",
     ):
         if metadata.get(prop):
             value = str(metadata.get(prop))
@@ -317,14 +329,16 @@ def process_exe_file(
         for note in metadata.get("notes"):
             if note.get("version"):
                 parent_component.properties.append(
-                    Property(name=f"internal:{note.get('type')}", value=note.get('version')))
-    # For PE binaries, resources could have a dict called version_metadata with interesting properties
+                    Property(name=f"internal:{note.get('type')}", value=note.get("version"))
+                )
+    # For PE, resources could have a dict called version_metadata with interesting properties
     if metadata.get("resources"):
         version_metadata = metadata.get("resources").get("version_metadata")
         if version_metadata and isinstance(version_metadata, dict):
             for vk, vv in version_metadata.items():
                 parent_component.properties.append(
-                    Property(name=f"internal:{camel_to_snake(vk)}", value=vv))
+                    Property(name=f"internal:{camel_to_snake(vk)}", value=vv)
+                )
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         # Attempt to detect library components from the symbols version block
@@ -337,7 +351,9 @@ def process_exe_file(
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             )
-        internal_functions = sorted(set([f["name"] for f in metadata.get("functions", []) if f["name"]]))
+        internal_functions = sorted(
+            {f["name"] for f in metadata.get("functions", []) if f["name"]}
+        )
         if internal_functions:
             parent_component.properties.append(
                 Property(
@@ -345,7 +361,9 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(internal_functions),
                 )
             )
-        symtab_symbols = sorted(set([f["name"] for f in metadata.get("symtab_symbols", []) if f["name"]]))
+        symtab_symbols = sorted(
+            {f["name"] for f in metadata.get("symtab_symbols", []) if f["name"]}
+        )
         if symtab_symbols:
             parent_component.properties.append(
                 Property(
@@ -353,7 +371,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(symtab_symbols),
                 )
             )
-        all_imports = sorted(set([f["name"] for f in metadata.get("imports", [])]))
+        all_imports = sorted({f["name"] for f in metadata.get("imports", [])})
         if all_imports:
             parent_component.properties.append(
                 Property(
@@ -361,7 +379,9 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
             )
-        dynamic_symbols = sorted(set([f["name"] for f in metadata.get("dynamic_symbols", []) if f["name"]]))
+        dynamic_symbols = sorted(
+            {f["name"] for f in metadata.get("dynamic_symbols", []) if f["name"]}
+        )
         if dynamic_symbols:
             parent_component.properties.append(
                 Property(
@@ -382,7 +402,9 @@ def process_exe_file(
             lib_components.append(comp)
     # Convert libraries and targets from dotnet binaries
     if metadata.get("dotnet_dependencies"):
-        pe_components = process_dotnet_dependencies(metadata.get("dotnet_dependencies"), dependencies_dict)
+        pe_components = process_dotnet_dependencies(
+            metadata.get("dotnet_dependencies"), dependencies_dict
+        )
         lib_components += pe_components
     # Convert go dependencies
     if metadata.get("go_dependencies"):
@@ -398,13 +420,14 @@ def process_exe_file(
         )
     # Convert rust dependencies
     if metadata.get("rust_dependencies"):
-        rust_components = process_rust_dependencies(metadata.get("rust_dependencies"), dependencies_dict)
+        rust_components = process_rust_dependencies(
+            metadata.get("rust_dependencies"), dependencies_dict
+        )
         lib_components += rust_components
     if lib_components:
-        components += lib_components
         track_dependency(dependencies_dict, parent_component, lib_components)
 
-    return components
+    return lib_components
 
 
 def create_library_component(entry: Dict, exe: str) -> Component:
@@ -468,8 +491,11 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
 
 
 def process_android_file(
-        dependencies_dict: dict[str, set], components: list[Component], deep_mode: bool,
-        f: str, sbom: CycloneDX
+    dependencies_dict: dict[str, set],
+    components: list[Component],
+    deep_mode: bool,
+    f: str,
+    sbom: CycloneDX,
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
@@ -490,12 +516,13 @@ def process_android_file(
             sbom.metadata.component.components = []
         _add_to_parent_component(sbom.metadata.component.components, parent_component)
     if app_components:
-        components += app_components
         track_dependency(dependencies_dict, parent_component, app_components)
-    return components
+    return app_components
 
 
-def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]) -> list[Component]:
+def process_dotnet_dependencies(
+    dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]
+) -> list[Component]:
     """
     Process the dotnet dependencies metadata extracted for binary overlays
 
@@ -509,14 +536,20 @@ def process_dotnet_dependencies(dotnet_deps: dict[str, dict], dependencies_dict:
     components = []
     libraries = dotnet_deps.get("libraries", {})
     # k: 'Microsoft.CodeAnalysis.Analyzers/3.3.4'
-    # v: {'type': 'package', 'serviceable': True, 'sha512': 'sha512-AxkxcPR+rheX0SmvpLVIGLhOUXAKG56a64kV9VQZ4y9gR9ZmPXnqZvHJnmwLSwzrEP6junUF11vuc+aqo5r68g==', 'path': 'microsoft.codeanalysis.analyzers/3.3.4', 'hashPath': 'microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512'}
+    # v: {'type': 'package', 'serviceable': True,
+    #      'sha512': 'sha512-AxkxcPR+rheX0SmvpLVIGLhOUXAKG5vuc+aqo5r68g==',
+    #      'path': 'microsoft.codeanalysis.analyzers/3.3.4',
+    #      'hashPath': 'microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512'
+    #    }
     for k, v in libraries.items():
         tmp_a = k.split("/")
         purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
         hash_content = ""
         try:
-            hash_content = codecs.encode(base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
-                                         encoding="hex")
+            hash_content = codecs.encode(
+                base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
+                encoding="hex",
+            )
         except binascii.Error:
             hash_content = str(v.get("hash").removeprefix("sha512-"))
         comp = Component(
@@ -574,13 +607,15 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
             version=v.get("version"),
             purl=purl,
             scope=Scope.required,
-            evidence=create_component_evidence(k, 1.0)
+            evidence=create_component_evidence(k, 1.0),
         )
         hash_content = ""
         if v.get("hash"):
             try:
-                hash_content = codecs.encode(base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
-                                             encoding="hex")
+                hash_content = codecs.encode(
+                    base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
+                    encoding="hex",
+                )
             except binascii.Error:
                 hash_content = str(v.get("hash").removeprefix("h1:"))
         if hash_content:
@@ -590,7 +625,9 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
     return components
 
 
-def process_rust_dependencies(rust_deps: list, dependencies_dict: dict[str, set]) -> list[Component]:
+def process_rust_dependencies(
+    rust_deps: list, dependencies_dict: dict[str, set]
+) -> list[Component]:
     """
     Process the rust dependencies metadata extracted for binary overlays
 
@@ -606,14 +643,18 @@ def process_rust_dependencies(rust_deps: list, dependencies_dict: dict[str, set]
         idx_to_purl[idx] = f"""pkg:cargo/{dep["name"]}@{dep["version"]}"""
     for dependency in rust_deps:
         purl = f"""pkg:cargo/{dependency["name"]}@{dependency["version"]}"""
-        purl_qualifer = f"""?repository={dependency.get("source")}""" if dependency.get("source", "") != "crates.io" else ""
+        purl_qualifer = (
+            f"""?repository={dependency.get("source")}"""
+            if dependency.get("source", "") != "crates.io"
+            else ""
+        )
         comp = Component(
             type=Type.library,
             name=dependency["name"],
             version=dependency["version"],
             purl=f"{purl}{purl_qualifer}",
             scope=Scope.required,
-            evidence=create_component_evidence(dependency["name"], 0.8)
+            evidence=create_component_evidence(dependency["name"], 0.8),
         )
         comp.bom_ref = RefType(purl)
         components.append(comp)
@@ -627,7 +668,7 @@ def process_rust_dependencies(rust_deps: list, dependencies_dict: dict[str, set]
 
 
 def track_dependency(
-        dependencies_dict: dict[str, set], parent_component: Component, app_components: list[Component]
+    dependencies_dict: dict[str, set], parent_component: Component, app_components: list[Component]
 ) -> None:
     """
     Track dependencies between components and update the dependencies dict.
