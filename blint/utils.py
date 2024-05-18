@@ -28,6 +28,8 @@ from blint.logger import console, LOG
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
+# Known files compressed with ar
+KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
 def is_base64(s):
     """
@@ -253,8 +255,8 @@ def find_exe_files(src):
             if is_ignored_file(file):
                 continue
             full_path = os.path.join(root, file)
-            for known_ar_extn in (".a", ".rlib", ".lib"):
-                if full_path.endswith(known_ar_extn):
+            for ar_extn in KNOWN_AR_EXTNS:
+                if full_path.endswith(ar_extn):
                     result += extract_ar(full_path)
                     continue
             if is_exe(full_path):
@@ -410,8 +412,8 @@ def gen_file_list(src: list[str]) -> list[str]:
             if is_ignored_file(s):
                 continue
             full_path = os.path.abspath(s)
-            for known_ar_extn in (".a", ".rlib", ".lib"):
-                if full_path.endswith(known_ar_extn):
+            for ar_extn in KNOWN_AR_EXTNS:
+                if full_path.endswith(ar_extn):
                     files += extract_ar(full_path)
                     continue
             if is_exe(full_path):
