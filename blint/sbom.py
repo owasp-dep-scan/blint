@@ -132,7 +132,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
             components.extend(
-                process_exe_file(dependencies_dict, components, deep_mode, exe, sbom)
+                process_exe_file(dependencies_dict, deep_mode, exe, sbom)
             )
         if android_files:
             task = progress.add_task(
@@ -143,7 +143,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components.extend(
-                process_android_file(dependencies_dict, components, deep_mode, f, sbom)
+                process_android_file(dependencies_dict, deep_mode, f, sbom)
             )
     if dependencies_dict:
         dependencies.extend({"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items())
@@ -267,7 +267,6 @@ def _add_to_parent_component(metadata_components: list[Component], parent_compon
 
 def process_exe_file(
     dependencies_dict: dict[str, set],
-    components: list[Component],
     deep_mode: bool,
     exe: str,
     sbom: CycloneDX,
@@ -277,7 +276,6 @@ def process_exe_file(
 
     Args:
         dependencies_dict (dict[str, set]): A dictionary of dependencies.
-        components: The list of existing components.
         deep_mode: A flag indicating whether to include deep analysis of the executable.
         exe: The path to the executable file.
         sbom: The CycloneDX SBOM object.
@@ -492,7 +490,6 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
 
 def process_android_file(
     dependencies_dict: dict[str, set],
-    components: list[Component],
     deep_mode: bool,
     f: str,
     sbom: CycloneDX,
@@ -502,7 +499,6 @@ def process_android_file(
 
     Args:
         dependencies_dict (dict[str, set]): Existing dependencies dictionary.
-        components (list): List of components to be processed.
         deep_mode (bool): Flag indicating whether to process in deep mode.
         f (str): File to be processed.
         sbom (obj): Software Bill of Materials object to be updated.
