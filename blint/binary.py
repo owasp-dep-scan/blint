@@ -39,7 +39,7 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
         demangled_symbol = decode_str(demangled, free=True).strip()
         # demangling didn't work
         if symbol and symbol == demangled_symbol:
-            for ign in ("__imp_anon.", "anon."):
+            for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
                 if symbol.startswith(ign):
                     return "anonymous"
             if symbol.startswith("GCC_except_table"):
@@ -52,7 +52,7 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
                 or symbol.startswith(".refptr.")
             ):
                 symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
-            return (
+            demangled_symbol = (
                 symbol.replace("..", "::")
                 .replace("$SP$", "@")
                 .replace("$BP$", "*")
@@ -70,6 +70,11 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
                 .replace("$C$", ",")
                 .replace("$u27$", "'")
             )
+        # In case of rust symbols, try and trim the hash part from the end of the symbols
+        if demangled_symbol.count("::") > 3:
+            last_part = demangled_symbol.split("::")[-1]
+            if len(last_part) == 17:
+                demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
         return demangled_symbol
     except AttributeError:
         return symbol
