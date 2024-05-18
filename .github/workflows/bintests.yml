@@ -53,9 +53,9 @@ jobs:
         unzip ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
         rm ripgrep-14.1.0-x86_64-pc-windows-gnu.zip
         cd ..
-        poetry run blint sbom -i bintests -o reports/bom.json --deep
-        poetry run blint sbom -i gobintests -o reports/bom.json --deep
-        poetry run blint sbom -i rusttests -o reports/bom.json --deep
+        poetry run blint sbom -i bintests -o reports/bom-bin.json --deep
+        poetry run blint sbom -i gobintests -o reports/bom-go.json --deep
+        poetry run blint sbom -i rusttests -o reports/bom-rust.json --deep
       env:
         SCAN_DEBUG_MODE: "debug"
       shell: bash
