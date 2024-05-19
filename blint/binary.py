@@ -29,7 +29,7 @@ ADDRESS_FMT = "0x{:<10x}"
 
 
 def demangle_symbolic_name(symbol, lang=None, no_args=False):
-    """Demangles symbol using llvm demangle falling back to some heuristics."""
+    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
     if not SYMBOLIC_FOUND:
         return symbol
     try:
@@ -39,16 +39,42 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
         demangled_symbol = decode_str(demangled, free=True).strip()
         # demangling didn't work
         if symbol and symbol == demangled_symbol:
-            for ign in ("__imp_anon.", "anon."):
+            for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
                 if symbol.startswith(ign):
                     return "anonymous"
             if symbol.startswith("GCC_except_table"):
                 return "GCC_except_table"
             if symbol.startswith("@feat.00"):
                 return "SAFESEH"
-            if symbol.startswith("__imp_") or symbol.startswith(".rdata$") or symbol.startswith(".refptr."):
+            if (
+                symbol.startswith("__imp_")
+                or symbol.startswith(".rdata$")
+                or symbol.startswith(".refptr.")
+            ):
                 symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
-            return symbol.replace("..", "::")
+            demangled_symbol = (
+                symbol.replace("..", "::")
+                .replace("$SP$", "@")
+                .replace("$BP$", "*")
+                .replace("$LT$", "<")
+                .replace("$u5b$", "[")
+                .replace("$u7b$", "{")
+                .replace("$u3b$", ";")
+                .replace("$u20$", " ")
+                .replace("$u5d$", "]")
+                .replace("$u7d$", "}")
+                .replace("$GT$", ">")
+                .replace("$RF$", "&")
+                .replace("$LP$", "(")
+                .replace("$RP$", ")")
+                .replace("$C$", ",")
+                .replace("$u27$", "'")
+            )
+        # In case of rust symbols, try and trim the hash part from the end of the symbols
+        if demangled_symbol.count("::") > 3:
+            last_part = demangled_symbol.split("::")[-1]
+            if len(last_part) == 17:
+                demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
         return demangled_symbol
     except AttributeError:
         return symbol
@@ -93,7 +119,7 @@ def parse_notes(parsed_obj):
     notes = parsed_obj.notes
     if isinstance(notes, lief.lief_errors):
         return data
-    data.extend(extract_note_data(idx, note) for idx, note in enumerate(notes))
+    data += [extract_note_data(idx, note) for idx, note in enumerate(notes)]
     return data
 
 
@@ -317,9 +343,9 @@ def detect_exe_type(parsed_obj, metadata):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         if (
-                parsed_obj.has_section(".note.gnu.build-id")
-                or "musl" in metadata.get("interpreter")
-                or "ld-linux" in metadata.get("interpreter")
+            parsed_obj.has_section(".note.gnu.build-id")
+            or "musl" in metadata.get("interpreter")
+            or "ld-linux" in metadata.get("interpreter")
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -837,7 +863,7 @@ def add_elf_symbols(metadata, parsed_obj):
             for entry in symbols_version:
                 symbol_version_auxiliary = entry.symbol_version_auxiliary
                 if symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
-                        symbol_version_auxiliary.name
+                    symbol_version_auxiliary.name
                 ):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
@@ -943,7 +969,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
             start_index = overlay_str.find('{"runtimeTarget')
             end_index = overlay_str.rfind("}}}")
             if end_index > -1:
-                overlay_str = overlay_str[start_index: end_index + 3]
+                overlay_str = overlay_str[start_index : end_index + 3]
                 try:
                     # deps should have runtimeTarget, compilationOptions, targets, and libraries
                     # Use libraries to construct BOM components and targets for the dependency tree
@@ -953,7 +979,9 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
-def parse_go_buildinfo(parsed_obj: lief.Binary) -> Tuple[dict[str, dict[str, str]], dict[str, str]]:
+def parse_go_buildinfo(
+    parsed_obj: lief.Binary,
+) -> Tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
     Parse the go build info section to extract go dependencies
     Args:
@@ -978,12 +1006,18 @@ def parse_go_buildinfo(parsed_obj: lief.Binary) -> Tuple[dict[str, dict[str, str
             .replace("\uFFFD", "")
             .replace("\t", " ")
         ).strip()
-        build_info_str = build_info_str.encode('ascii', 'ignore').decode('ascii')
+        build_info_str = build_info_str.encode("ascii", "ignore").decode("ascii")
     elif isinstance(parsed_obj, lief.PE.Binary):
         # For PE binaries look for .data section
         s: lief.PE.Section = parsed_obj.get_section(".data")
-        build_info_str = codecs.decode(s.content.tobytes()[:int(s.size / 32)], encoding="ascii",
-                                       errors="replace").replace("\0", "").replace("\uFFFD", "").replace("\t", " ")
+        build_info_str = (
+            codecs.decode(
+                s.content.tobytes()[: int(s.size / 32)], encoding="ascii", errors="replace"
+            )
+            .replace("\0", "")
+            .replace("\uFFFD", "")
+            .replace("\t", " ")
+        )
     lines = build_info_str.split("\n")
     for line in lines:
         if line.startswith("Go buildinf:"):
@@ -997,8 +1031,10 @@ def parse_go_buildinfo(parsed_obj: lief.Binary) -> Tuple[dict[str, dict[str, str
             formulation["module"] = tmp_a[-1]
         if line.startswith("dep "):
             tmp_a = line.removeprefix("dep ").split(" ")
-            deps[tmp_a[0]] = {"version": tmp_a[1],
-                              "hash": tmp_a[2] if len(tmp_a) == 3 and tmp_a[2].startswith("h1:") else None}
+            deps[tmp_a[0]] = {
+                "version": tmp_a[1],
+                "hash": tmp_a[2] if len(tmp_a) == 3 and tmp_a[2].startswith("h1:") else None,
+            }
         if line.startswith("build "):
             tmp_a = line.removeprefix("build ").split("=")
             formulation[tmp_a[0].replace("-", "")] = tmp_a[1]
@@ -1018,14 +1054,16 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
     deps = []
 
     try:
-        audit_data_section = next(filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None)
+        audit_data_section = next(
+            filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None
+        )
         if audit_data_section is not None and audit_data_section.content:
             json_string = zlib.decompress(audit_data_section.content)
             audit_data = orjson.loads(json_string)
 
             if audit_data and audit_data["packages"]:
                 packages = audit_data["packages"]
-                deps = [x for x in packages if 'root' not in x]
+                deps = [x for x in packages if "root" not in x]
     except orjson.JSONDecodeError:
         pass
 

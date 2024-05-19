@@ -5,10 +5,12 @@ import os
 import re
 import shutil
 import string
+import tempfile
 import zipfile
 from importlib.metadata import distribution
 from pathlib import Path
 
+from ar import Archive
 import lief
 from defusedxml.ElementTree import fromstring
 from rich import box
@@ -25,6 +27,9 @@ from blint.cyclonedx.spec import ComponentEvidence, FieldModel, Identity, Method
 from blint.logger import console, LOG
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
+
+# Known files compressed with ar
+KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
 
 def is_base64(s):
@@ -251,6 +256,10 @@ def find_exe_files(src):
             if is_ignored_file(file):
                 continue
             full_path = os.path.join(root, file)
+            for ar_extn in KNOWN_AR_EXTNS:
+                if full_path.endswith(ar_extn):
+                    result += extract_ar(full_path)
+                    continue
             if is_exe(full_path):
                 result.append(full_path)
     return result
@@ -273,12 +282,12 @@ def find_files(path, extns):
     """
     result = []
     if os.path.isfile(path):
-        result.extend(path for ext in extns if path.endswith(ext))
+        result += [path for ext in extns if path.endswith(ext)]
     else:
         for root, dirs, files in os.walk(path):
             filter_ignored_dirs(dirs)
             for file in files:
-                result.extend(os.path.join(root, file) for ext in extns if file.endswith(ext))
+                result += [os.path.join(root, file) for ext in extns if file.endswith(ext)]
     return result
 
 
@@ -404,6 +413,10 @@ def gen_file_list(src: list[str]) -> list[str]:
             if is_ignored_file(s):
                 continue
             full_path = os.path.abspath(s)
+            for ar_extn in KNOWN_AR_EXTNS:
+                if full_path.endswith(ar_extn):
+                    files += extract_ar(full_path)
+                    continue
             if is_exe(full_path):
                 files.append(full_path)
     return files
@@ -508,3 +521,23 @@ def camel_to_snake(name: str) -> str:
     """Convert camelCase to snake_case"""
     name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+
+
+def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
+    """
+    Extract the given ar compressed files to the directory specified by to_dir.
+    Returns the list of extracted files
+    """
+    if not to_dir:
+        to_dir = tempfile.mkdtemp(prefix="ar-temp-")
+    files_list = []
+    with open(ar_file, 'rb') as fp:
+        with Archive(fp) as archive:
+            for entry in archive:
+                # This workarounds a bug in ar that returns multiple names
+                file_name = entry.name.split("\n")[0].removesuffix("/")
+                afile = os.path.join(to_dir, file_name)
+                with open(afile, 'wb') as output:
+                    output.write(archive.open(entry, 'rb').read())
+                    files_list.append(afile)
+    return files_list

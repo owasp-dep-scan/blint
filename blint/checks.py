@@ -10,20 +10,20 @@ def check_pie(f, metadata, rule_obj):  # noqa
     return metadata.get("is_pie") is not False
 
 
-def check_relro(f, metadata, rule_obj): # noqa
+def check_relro(f, metadata, rule_obj):  # noqa
     return metadata.get("relro") != "no"
 
 
-def check_canary(f, metadata, rule_obj): # noqa
+def check_canary(f, metadata, rule_obj):  # noqa
     return metadata.get("has_canary") is not False
 
 
-def check_rpath(f, metadata, rule_obj): # noqa
+def check_rpath(f, metadata, rule_obj):  # noqa
     # Do not recommend setting rpath or runpath
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
 
 
-def check_virtual_size(f, metadata, rule_obj): # noqa
+def check_virtual_size(f, metadata, rule_obj):  # noqa
     if metadata.get("virtual_size"):
         virtual_size = metadata.get("virtual_size") / 1024 / 1024
         size_limit = 30
@@ -36,37 +36,36 @@ def check_virtual_size(f, metadata, rule_obj): # noqa
     return True
 
 
-def check_authenticode(f, metadata, rule_obj): # noqa
+def check_authenticode(f, metadata, rule_obj):  # noqa
     if metadata.get("authenticode"):
         authenticode_obj = metadata.get("authenticode")
         vf = authenticode_obj.get("verification_flags", "").lower()
-        return False if vf != "ok" else bool(
-            authenticode_obj.get("cert_signer"))
+        return False if vf != "ok" else bool(authenticode_obj.get("cert_signer"))
     return True
 
 
 def check_dll_characteristics(f, metadata, rule_obj):  # noqa
     res = []
     if metadata.get("dll_characteristics"):
-        res.extend(
+        res += [
             c
             for c in rule_obj.get("mandatory_values", [])
             if c not in metadata.get("dll_characteristics")
-        )
+        ]
     if res:
         res = ", ".join(res)
 
     return res or True
 
 
-def check_codesign(f, metadata, rule_obj): # noqa
+def check_codesign(f, metadata, rule_obj):  # noqa
     if metadata.get("code_signature"):
         code_signature = metadata.get("code_signature")
         return not code_signature or code_signature.get("available") is not False
     return True
 
 
-def check_trust_info(f, metadata, rule_obj): # noqa
+def check_trust_info(f, metadata, rule_obj):  # noqa
     if metadata.get("resources"):
         if manifest := metadata.get("resources").get("manifest"):
             attribs_dict = parse_pe_manifest(manifest)
