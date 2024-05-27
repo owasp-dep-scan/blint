@@ -112,6 +112,14 @@ def build_args():
         dest="stdout_mode",
         help="Print the SBOM to stdout instead of a file.",
     )
+    sbom_parser.add_argument(
+        "--exports-prefix",
+        default=[],
+        action="extend",
+        nargs="+",
+        dest="exports_prefix",
+        help="prefixes for the exports to be included in the SBOM.",
+    )
     return parser.parse_args()
 
 
@@ -182,7 +190,7 @@ def main():
             sbom_output_dir = os.path.dirname(sbom_output)
             if sbom_output_dir and not os.path.exists(sbom_output_dir):
                 os.makedirs(sbom_output_dir)
-        generate(src_dirs, sbom_output, args.deep_mode)
+        generate(src_dirs, sbom_output, args.deep_mode, args.exports_prefix)
     # Default case
     else:
         if reports_dir and not os.path.exists(reports_dir):
