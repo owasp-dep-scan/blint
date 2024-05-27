@@ -376,14 +376,14 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(symtab_symbols),
                 )
             )
-        symtab_export_symbols = sorted(
+        exported_symtab_symbols = sorted(
             {f["name"] for f in metadata.get("symtab_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
         )
-        if symtab_export_symbols:
+        if exported_symtab_symbols:
             parent_component.properties.append(
                 Property(
                     name="internal:exported_symtab_symbols",
-                    value=SYMBOL_DELIMITER.join(symtab_export_symbols),
+                    value=SYMBOL_DELIMITER.join(exported_symtab_symbols),
                 )
             )
         all_imports = sorted({f["name"] for f in metadata.get("imports", []) if not any(f["name"].startswith(p) for p in export_prefixes)})
