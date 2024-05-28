@@ -71,7 +71,7 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
                 .replace("$u27$", "'")
             )
         # In case of rust symbols, try and trim the hash part from the end of the symbols
-        if demangled_symbol.count("::") > 3:
+        if demangled_symbol.count("::") > 2:
             last_part = demangled_symbol.split("::")[-1]
             if len(last_part) == 17:
                 demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
