@@ -88,7 +88,7 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
+def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_prefixes: list[str]) -> bool:
     """
     Generates an SBOM for the given source directories.
 
@@ -131,7 +131,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool) -> bool:
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom)
+            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom, export_prefixes)
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -266,6 +266,7 @@ def process_exe_file(
     deep_mode: bool,
     exe: str,
     sbom: CycloneDX,
+    export_prefixes: list[str] = None,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
@@ -346,7 +347,7 @@ def process_exe_file(
                 )
             )
         internal_functions = sorted(
-            {f["name"] for f in metadata.get("functions", []) if f["name"]}
+            {f["name"] for f in metadata.get("functions", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if internal_functions:
             parent_component.properties.append(
@@ -355,8 +356,18 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(internal_functions),
                 )
             )
+        export_functions = sorted(
+            {f["name"] for f in metadata.get("functions", []) if any(f["name"].startswith(p) for p in export_prefixes)}
+        )
+        if export_functions:
+            parent_component.properties.append(
+                Property(
+                    name="internal:export_functions",
+                    value=SYMBOL_DELIMITER.join(export_functions),
+                )
+            )
         symtab_symbols = sorted(
-            {f["name"] for f in metadata.get("symtab_symbols", []) if f["name"]}
+            {f["name"] for f in metadata.get("symtab_symbols", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if symtab_symbols:
             parent_component.properties.append(
@@ -365,7 +376,17 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(symtab_symbols),
                 )
             )
-        all_imports = sorted({f["name"] for f in metadata.get("imports", [])})
+        exported_symtab_symbols = sorted(
+            {f["name"] for f in metadata.get("symtab_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
+        )
+        if exported_symtab_symbols:
+            parent_component.properties.append(
+                Property(
+                    name="internal:exported_symtab_symbols",
+                    value=SYMBOL_DELIMITER.join(exported_symtab_symbols),
+                )
+            )
+        all_imports = sorted({f["name"] for f in metadata.get("imports", []) if not any(f["name"].startswith(p) for p in export_prefixes)})
         if all_imports:
             parent_component.properties.append(
                 Property(
@@ -373,14 +394,32 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
             )
+        all_exports = sorted({f["name"] for f in metadata.get("imports", []) if any(f["name"].startswith(p) for p in export_prefixes)})
+        if all_imports:
+            parent_component.properties.append(
+                Property(
+                    name="internal:exports",
+                    value=SYMBOL_DELIMITER.join(all_exports),
+                )
+            )
         dynamic_symbols = sorted(
-            {f["name"] for f in metadata.get("dynamic_symbols", []) if f["name"]}
+            {f["name"] for f in metadata.get("dynamic_symbols", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if dynamic_symbols:
             parent_component.properties.append(
                 Property(
                     name="internal:dynamic_symbols",
                     value=SYMBOL_DELIMITER.join(dynamic_symbols),
+                )
+            )
+        exported_dynamic_symbols = sorted(
+            {f["name"] for f in metadata.get("dynamic_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
+        )
+        if exported_dynamic_symbols:
+            parent_component.properties.append(
+                Property(
+                    name="internal:exported_dynamic_symbols",
+                    value=SYMBOL_DELIMITER.join(exported_dynamic_symbols),
                 )
             )
     if not sbom.metadata.component.components:
