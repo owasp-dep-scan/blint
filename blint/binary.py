@@ -1010,14 +1010,15 @@ def parse_go_buildinfo(
     elif isinstance(parsed_obj, lief.PE.Binary):
         # For PE binaries look for .data section
         s: lief.PE.Section = parsed_obj.get_section(".data")
-        build_info_str = (
-            codecs.decode(
-                s.content.tobytes()[: int(s.size / 32)], encoding="ascii", errors="replace"
+        if s:
+            build_info_str = (
+                codecs.decode(
+                    s.content.tobytes()[: int(s.size / 32)], encoding="ascii", errors="replace"
+                )
+                .replace("\0", "")
+                .replace("\uFFFD", "")
+                .replace("\t", " ")
             )
-            .replace("\0", "")
-            .replace("\uFFFD", "")
-            .replace("\t", " ")
-        )
     lines = build_info_str.split("\n")
     for line in lines:
         if line.startswith("Go buildinf:"):
