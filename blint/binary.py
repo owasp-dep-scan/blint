@@ -1010,7 +1010,7 @@ def parse_go_buildinfo(
     elif isinstance(parsed_obj, lief.PE.Binary):
         # For PE binaries look for .data section
         s: lief.PE.Section = parsed_obj.get_section(".data")
-        if s:
+        if s and not isinstance(s, lief.lief_errors):
             build_info_str = (
                 codecs.decode(
                     s.content.tobytes()[: int(s.size / 32)], encoding="ascii", errors="replace"
