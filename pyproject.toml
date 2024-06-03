@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.1.7"
+version = "2.1.8"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "MIT"
@@ -29,12 +29,12 @@ blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
-lief = "^0.14.0"
-rich = "^13.7.0"
+lief = "^0.14.1"
+rich = "^13.7.1"
 PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
 pydantic = {version = "^2.6.0", extras = ["email"]}
-orjson = "^3.10.1"
+orjson = "^3.10.3"
 symbolic = "10.2.1"
 ar = "^0.9.1"
 

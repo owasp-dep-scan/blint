@@ -1045,7 +1045,7 @@ def parse_go_buildinfo(
 
 def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
     """
-    Parse the rust build info section of binaries that are cargo-auditable to extract rust dependencies
+    Parse the rust build info section that are cargo-auditable to extract rust dependencies
     Args:
         parsed_obj (lief.Binary): The parsed object representing the binary.
 
