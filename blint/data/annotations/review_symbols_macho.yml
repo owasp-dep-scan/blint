@@ -611,3 +611,31 @@ rules:
       - SecPolicyGetTypeID
       - SecPolicyCreateWithProperties
       - SecPolicyCopyProperties
+  - id: IMAGE_SNAP_API
+    title: Image Snap API functions used
+    summary: Capture Images from iSight and other video sources
+    description: |
+      ImageSnap is a Public Domain command-line tool that lets you capture still images from an iSight or other video source.
+    patterns:
+      - ImageSnap defaultVideoDevice
+      - ImageSnap saveSingleSnapshotFrom
+      - ImageSnap setUpSessionWithDevice
+      - ImageSnap getReadyToTakePicture
+      - ImageSnap takeSnapshotWithFilename
+      - ImageSnap captureSession
+      - ImageSnap captureDeviceInput
+      - ImageSnap captureStillImageOutput
+      - ImageSnap currentImageBuffer
+      - ImageSnap videoConnection
+  - id: AVFOUNDATION_API
+    title: AVFoundation functions used
+    summary: Work with audiovisual assets, control device cameras, process audio, and configure system audio interactions
+    description: |
+      AVFoundation combines several major technology areas that together encompass a wide range of tasks for inspecting, playing, capturing, and processing audiovisual media on Apple platforms.
+    patterns:
+      - AVFoundation::_
+      - AVCaptureSession
+      - AVMediaTypeMuxed
+      - AVMediaTypeVideo
+      - AVVideoCodecJPEG
+      - AVVideoCodecKey

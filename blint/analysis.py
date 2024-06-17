@@ -425,7 +425,7 @@ class AnalysisRunner:
         if finding := run_checks(f, metadata):
             self.findings += finding
         # Perform symbol reviews
-        if no_reviews:
+        if not no_reviews:
             self.do_review(exe_name, f, metadata)
         # Suggest fuzzable targets
         if suggest_fuzzables and (fuzzdata := run_prefuzz(metadata)):
