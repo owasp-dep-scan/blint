@@ -130,6 +130,15 @@ rules:
       - syscall.Sysinfo
       - syscall.UnixCredentials
       - syscall.Unmount
+      - runtime/syscall_windows.go
+      - runtime/cgocall.go
+  - id: WIN_SIGNAL_METHODS
+    title: Windows Signal functions used
+    summary: Can disable Windows Error Reporting
+    description: |
+      Module signal_windows contains methods to disable Error Reporting.
+    patterns:
+      - runtime/signal_windows.go
   - id: NET_METHODS
     title: Net functions used
     summary: Uses Network to send and receive data
