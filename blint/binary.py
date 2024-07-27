@@ -1107,9 +1107,6 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     metadata["is_driver"] = True
                     break
         rdata_section = parsed_obj.get_section(".rdata")
-        text_section = parsed_obj.get_section(".text")
-        if not rdata_section and text_section:
-            rdata_section = text_section
         if (not metadata["symtab_symbols"] or metadata["exe_type"] != "gobinary") and rdata_section:
             add_pe_rdata_symbols(metadata, rdata_section)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
