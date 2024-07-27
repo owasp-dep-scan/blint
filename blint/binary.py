@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
+import re
 import sys
 from typing import Tuple
 import zlib
@@ -520,7 +521,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
             "sha512_hash": parsed_obj.authentihash_sha512.hex(*sep),
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
-            "verification_flags": str(parsed_obj.verify_signature()).removeprefix("lief._lief.PE.VERIFICATION_FLAGS."),
+            "verification_flags": str(parsed_obj.verify_signature()).split(".")[-1],
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -1112,12 +1113,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     metadata["is_driver"] = True
                     break
         rdata_section = parsed_obj.get_section(".rdata")
-        if metadata["exe_type"] != "gobinary" and rdata_section and rdata_section.content:
-            str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="backslashreplace")
-            for block in str_content.split(" "):
-                if "runtime." in block or "internal/" in block or ".go" in block:
-                    metadata["exe_type"] = "gobinary"
-                    break
+        if (not metadata["symtab_symbols"] or metadata["exe_type"] != "gobinary") and rdata_section:
+            add_pe_rdata_symbols(metadata, rdata_section)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -1244,6 +1241,38 @@ def add_pe_optional_headers(metadata, optional_header):
         metadata["sizeof_heap_commit"] = optional_header.sizeof_heap_commit
         metadata["loader_flags"] = optional_header.loader_flags
         metadata["numberof_rva_and_size"] = optional_header.numberof_rva_and_size
+    return metadata
+
+
+def add_pe_rdata_symbols(metadata, rdata_section):
+    """Adds PE rdata symbols to the metadata dictionary.
+
+    Args:
+        metadata: The dictionary to store the metadata.
+        rdata_section: .rdata section of the PE binary.
+
+    Returns:
+        The updated metadata dictionary.
+    """
+    if not rdata_section or not rdata_section.content:
+        return metadata
+    rdata_symbols = set()
+    str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
+    for block in str_content.split(" "):
+        if "runtime." in block or "internal/" in block or ".go" in block:
+            metadata["exe_type"] = "gobinary"
+            for asym in block.split("\x00"):
+                if re.match(r".*\.(go|s|dll)$", asym):
+                    rdata_symbols.add(asym)
+    if not metadata["symtab_symbols"]:
+        metadata["symtab_symbols"] = []
+    metadata["symtab_symbols"] += [
+        {
+            "name": s,
+            "type": "FILE",
+            "is_imported": True
+        } for s in sorted(rdata_symbols)
+    ]
     return metadata
 
 
