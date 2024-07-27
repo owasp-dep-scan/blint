@@ -560,11 +560,7 @@ def parse_pe_symbols(symbols):
         if not symbol:
             continue
         try:
-            if symbol.section_number <= 0:
-                section_nb_str = str(lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)).rsplit(
-                    ".", maxsplit=1
-                )[-1]
-            elif symbol.section and symbol.section.name:
+            if symbol.section and symbol.section.name:
                 section_nb_str = symbol.section.name
             else:
                 section_nb_str = "section<{:d}>".format(symbol.section_number)
