@@ -585,9 +585,7 @@ def parse_pe_symbols(symbols):
                         "storage_class": str(symbol.storage_class).rsplit(".", maxsplit=1)[-1],
                     }
                 )
-        except (IndexError, AttributeError, ValueError) as e:
-            LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol}.")
-        except RuntimeError:
+        except (IndexError, AttributeError, ValueError, RuntimeError):
             pass
     return symbols_list, exe_type
 
@@ -922,7 +920,7 @@ def determine_elf_flags(header):
         A string representing the ELF flags.
     """
     eflags_str = ""
-    if header.machine_type == lief.ELF.ARCH.ARM:
+    if header.machine_type == lief.ELF.ARCH.ARM and hasattr(header, "arm_flags_list"):
         eflags_str = " - ".join(
             [str(s).rsplit(".", maxsplit=1)[-1] for s in header.arm_flags_list]
         )
