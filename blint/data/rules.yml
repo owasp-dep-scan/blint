@@ -162,6 +162,7 @@
     - PE32
     - PE64
     - dotnetbinary
+    - gobinary
 - id: CHECK_CODESIGN
   title: Missing Code Signing
   description: |

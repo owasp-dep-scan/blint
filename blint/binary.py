@@ -1111,6 +1111,13 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                 if e["name"] == "ntoskrnl.exe":
                     metadata["is_driver"] = True
                     break
+        rdata_section = parsed_obj.get_section(".rdata")
+        if metadata["exe_type"] != "gobinary" and rdata_section and rdata_section.content:
+            str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="backslashreplace")
+            for block in str_content.split(" "):
+                if "runtime." in block or "internal/" in block or ".go" in block:
+                    metadata["exe_type"] = "gobinary"
+                    break
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
