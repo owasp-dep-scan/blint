@@ -93,11 +93,11 @@ def is_shared_library(parsed_obj):
     if not parsed_obj:
         return False
     if parsed_obj.format == lief.Binary.FORMATS.ELF:
-        return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
+        return parsed_obj.header.file_type == lief.ELF.Header.FILE_TYPE.DYN
     if parsed_obj.format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(lief.PE.Header.CHARACTERISTICS.DLL)
     if parsed_obj.format == lief.Binary.FORMATS.MACHO:
-        return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
+        return parsed_obj.header.file_type == lief.MachO.Header.FILE_TYPE.DYLIB
     return False
 
 
@@ -205,16 +205,16 @@ def parse_relro(parsed_obj):
     Returns:
         str: The RELRO protection level of the binary object.
     """
-    test_stmt = parsed_obj.get(lief.ELF.SEGMENT_TYPES.GNU_RELRO)
+    test_stmt = parsed_obj.get(lief.ELF.Segment.TYPE.GNU_RELRO)
     if isinstance(test_stmt, lief.lief_errors):
         return "no"
-    dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS)
+    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG)
     bind_now, now = False, False
     if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
-        bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in dynamic_tags
-    dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS_1)
+        bind_now = lief.ELF.DynamicEntry.TAG.BIND_NOW in dynamic_tags
+    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG.FLAGS_1)
     if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
-        now = lief.ELF.DYNAMIC_FLAGS_1.NOW in dynamic_tags
+        now = lief.ELF.DynamicEntryFlags.FLAG.NOW in dynamic_tags
     return "full" if bind_now or now else "partial"
 
 
@@ -520,9 +520,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
             "sha512_hash": parsed_obj.authentihash_sha512.hex(*sep),
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
-            "verification_flags": str(parsed_obj.verify_signature()).replace(
-                "VERIFICATION_FLAGS.", ""
-            ),
+            "verification_flags": str(parsed_obj.verify_signature()).removeprefix("lief._lief.PE.VERIFICATION_FLAGS."),
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -780,26 +778,26 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
                 metadata["has_canary"] = True
                 break
     # rpath check
-    rpath = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RPATH)
+    rpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RPATH)
     if isinstance(rpath, lief.lief_errors):
         metadata["has_rpath"] = False
     elif rpath:
         metadata["has_rpath"] = True
     # runpath check
-    runpath = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RUNPATH)
+    runpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RUNPATH)
     if isinstance(runpath, lief.lief_errors):
         metadata["has_runpath"] = False
     elif runpath:
         metadata["has_runpath"] = True
     # This is getting renamed to symtab_symbols in lief 0.15.0
-    static_symbols = parsed_obj.static_symbols
-    metadata["static"] = bool(static_symbols and not isinstance(static_symbols, lief.lief_errors))
+    symtab_symbols = parsed_obj.symtab_symbols
+    metadata["static"] = bool(symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
     metadata = add_elf_dynamic_entries(dynamic_entries, metadata)
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
-    metadata["symtab_symbols"], exe_type = parse_symbols(static_symbols)
+    metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -893,13 +891,13 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     if isinstance(dynamic_entries, lief.lief_errors):
         return metadata
     for entry in dynamic_entries:
-        if entry.tag == lief.ELF.DYNAMIC_TAGS.NULL:
+        if entry.tag == lief.ELF.DynamicEntry.TAG.NULL:
             continue
         if entry.tag in [
-            lief.ELF.DYNAMIC_TAGS.SONAME,
-            lief.ELF.DYNAMIC_TAGS.NEEDED,
-            lief.ELF.DYNAMIC_TAGS.RUNPATH,
-            lief.ELF.DYNAMIC_TAGS.RPATH,
+            lief.ELF.DynamicEntry.TAG.SONAME,
+            lief.ELF.DynamicEntry.TAG.NEEDED,
+            lief.ELF.DynamicEntry.TAG.RUNPATH,
+            lief.ELF.DynamicEntry.TAG.RPATH,
         ]:
             metadata["dynamic_entries"].append(
                 {
@@ -994,7 +992,7 @@ def parse_go_buildinfo(
     deps = {}
     build_info_str: str = ""
     # Look for specific buildinfo sections for ELF and MachO binaries
-    build_info: lief.Section = None
+    build_info: lief.Section | None = None
     if isinstance(parsed_obj, lief.ELF.Binary):
         build_info = parsed_obj.get_section(".go.buildinfo")
     elif isinstance(parsed_obj, lief.MachO.Binary):
