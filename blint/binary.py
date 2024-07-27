@@ -1287,7 +1287,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_commands(metadata, parsed_obj):
+def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
     """Extracts MachO commands metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -1305,7 +1305,6 @@ def add_mach0_commands(metadata, parsed_obj):
         metadata["has_thread_command"] = not isinstance(
             parsed_obj.thread_command, lief.lief_errors
         )
-
     return metadata
 
 
@@ -1414,6 +1413,7 @@ def add_mach0_header_data(exe_file, metadata, parsed_obj):
         header = parsed_obj.header
         flags_str = ", ".join([str(s).rsplit(".", maxsplit=1)[-1] for s in header.flags_list])
         metadata["magic"] = str(header.magic).rsplit(".", maxsplit=1)[-1]
+        metadata["is_neural_model"] = header.magic == lief.MachO.MACHO_TYPES.NEURAL_MODEL
         metadata["cpu_type"] = str(header.cpu_type).rsplit(".", maxsplit=1)[-1]
         metadata["cpu_subtype"] = header.cpu_subtype
         metadata["file_type"] = str(header.file_type).rsplit(".", maxsplit=1)[-1]
