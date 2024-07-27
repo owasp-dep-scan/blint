@@ -209,12 +209,12 @@ def parse_relro(parsed_obj):
     test_stmt = parsed_obj.get(lief.ELF.Segment.TYPE.GNU_RELRO)
     if isinstance(test_stmt, lief.lief_errors):
         return "no"
-    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG)
+    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG.FLAGS)
     bind_now, now = False, False
-    if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
-        bind_now = lief.ELF.DynamicEntry.TAG.BIND_NOW in dynamic_tags
+    if dynamic_tags and isinstance(dynamic_tags, lief.ELF.DynamicEntryFlags):
+        bind_now = lief.ELF.DynamicEntryFlags.FLAG.BIND_NOW in dynamic_tags
     dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG.FLAGS_1)
-    if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
+    if dynamic_tags and isinstance(dynamic_tags, lief.ELF.DynamicEntryFlags):
         now = lief.ELF.DynamicEntryFlags.FLAG.NOW in dynamic_tags
     return "full" if bind_now or now else "partial"
 
