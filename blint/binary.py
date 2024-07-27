@@ -452,7 +452,7 @@ def process_pe_resources(parsed_obj):
             "has_manifest": rm.has_manifest,
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
-            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
+            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "").removeprefix("\ufeff") if rm.has_manifest else None),
             "version_info": str(rm.version) if rm.has_version else None,
             "html": rm.html if rm.has_html else None,
         }
@@ -1107,6 +1107,9 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     metadata["is_driver"] = True
                     break
         rdata_section = parsed_obj.get_section(".rdata")
+        text_section = parsed_obj.get_section(".text")
+        if not rdata_section and text_section:
+            rdata_section = text_section
         if (not metadata["symtab_symbols"] or metadata["exe_type"] != "gobinary") and rdata_section:
             add_pe_rdata_symbols(metadata, rdata_section)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
@@ -1253,7 +1256,7 @@ def add_pe_rdata_symbols(metadata, rdata_section):
     rdata_symbols = set()
     str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
     for block in str_content.split(" "):
-        if "runtime." in block or "internal/" in block or ".go" in block:
+        if "runtime." in block or "internal/" in block or ".go" in block or ".dll" in block:
             metadata["exe_type"] = "gobinary"
             for asym in block.split("\x00"):
                 if re.match(r".*\.(go|s|dll)$", asym):
