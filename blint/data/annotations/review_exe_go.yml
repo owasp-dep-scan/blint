@@ -85,6 +85,10 @@ rules:
       - syscall.ForkExecPipe
       - execabs.Command
       - execabs.CommandContext
+      - os/exec_windows.go
+      - os/executable.go
+      - os/executable_windows.go
+      - os/proc.go
   - id: SYSCALL_METHODS
     title: Syscall functions used
     summary: Can perform system-level operations
@@ -132,6 +136,23 @@ rules:
       - syscall.Unmount
       - runtime/syscall_windows.go
       - runtime/cgocall.go
+      - w32/functions_windows.go
+      - windows/security_windows.go
+      - windows/dll_windows.go
+      - windows/syscall.go
+      - windows/syscall_windows.go
+      - windows/zsyscall_windows.go
+      - runtime/mem_windows.go
+      - runtime/memclr_amd64.s
+      - runtime/memmove_amd64.s
+      - runtime/netpoll.go
+      - runtime/netpoll_windows.go
+      - runtime/os_windows.go
+      - runtime/proc.go
+      - syscall/dll_windows.go
+      - syscall/syscall.go
+      - syscall/syscall_windows.go
+      - syscall/zsyscall_windows.go
   - id: WIN_SIGNAL_METHODS
     title: Windows Signal functions used
     summary: Can disable Windows Error Reporting
@@ -139,6 +160,11 @@ rules:
       Module signal_windows contains methods to disable Error Reporting.
     patterns:
       - runtime/signal_windows.go
+      - runtime/sigqueue.go
+      - runtime/symtab.go
+      - runtime/sys_windows_amd64.s
+      - runtime/sys_x86.go
+      - runtime/syscall_windows.go
   - id: NET_METHODS
     title: Net functions used
     summary: Uses Network to send and receive data
@@ -197,6 +223,13 @@ rules:
       - net.ReadMsgUnix
       - net.ListenUnix
       - net.AcceptUnix
+      - net/hook_windows.go
+      - net/interface.go
+      - net/ip.go
+      - net/lookup.go
+      - net/net.go
+      - net/netip/leaf_alts.go
+      - net/netip/netip.go
   - id: HTTP_METHODS
     title: HTTP server functions used
     summary: Can run an HTTP server
@@ -232,6 +265,14 @@ rules:
       - github.com/lucas-clemente/quic-go
       - github.com/gorilla/websocket
       - github.com/gorilla/mux
+  - id: MEM_METHODS
+    title: HTTP server functions used
+    summary: Can run an HTTP server
+    description: |
+      Package http provides HTTP client and server implementations.
+    patterns:
+      - http.ListenAndServe
+
   - id: HTTP_CLIENT_METHODS
     title: HTTP client functions used
     summary: Invokes HTTP service
@@ -346,6 +387,20 @@ rules:
       - crypto/md4
       - crypto/md5
       - crypto/sha1
+  - id: CRYPTO_MODULES
+    title: Cryptographic modules used
+    summary: Uses Crypto Module
+    description: |
+      Standard go crypto modules used.
+    patterns:
+      - crypto/aes/asm_amd64.s
+      - crypto/aes/block.go
+      - crypto/aes/cipher.go
+      - crypto/aes/cipher_asm.go
+      - crypto/cipher/cbc.go
+      - crypto/crypto.go
+      - crypto/subtle/xor.go
+      - crypto/subtle/xor_amd64.s
   - id: SSH_METHODS
     title: ssh library used
     summary: Can perform SSH operations
@@ -406,6 +461,9 @@ rules:
       This implementation is designed to minimize heap allocations and avoid unnecessary packing and unpacking as much as possible.
     patterns:
       - golang.org/x/net/dns/dnsmessage
+      - net/addrselect.go
+      - net/dnsclient_unix.go
+      - dnsmessage/message.go
   - id: C_C_LIB
     title: Command and Control Framework used
     summary: Can Attack Devices
