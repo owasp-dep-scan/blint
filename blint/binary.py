@@ -480,10 +480,10 @@ def process_pe_signature(parsed_obj):
             ci = sig.content_info
             signature_obj = {
                 "version": sig.version,
-                "digest_algorithm": str(sig.digest_algorithm),
+                "digest_algorithm": str(sig.digest_algorithm).rsplit(".", maxsplit=1)[-1],
                 "content_info": {
                     "content_type": lief.PE.oid_to_string(ci.content_type),
-                    "digest_algorithm": str(ci.digest_algorithm),
+                    "digest_algorithm": str(ci.digest_algorithm).rsplit(".", maxsplit=1)[-1],
                     "digest": ci.digest.hex(),
                 },
             }
@@ -493,8 +493,8 @@ def process_pe_signature(parsed_obj):
                     "version": signer.version,
                     "serial_number": signer.serial_number.hex(),
                     "issuer": str(signer.issuer),
-                    "digest_algorithm": str(signer.digest_algorithm),
-                    "encryption_algorithm": str(signer.encryption_algorithm),
+                    "digest_algorithm": str(signer.digest_algorithm).rsplit(".", maxsplit=1)[-1],
+                    "encryption_algorithm": str(signer.encryption_algorithm).rsplit(".", maxsplit=1)[-1],
                     "encrypted_digest": signer.encrypted_digest.hex(),
                 }
                 signers_list.append(signer_obj)
@@ -521,7 +521,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
             "sha512_hash": parsed_obj.authentihash_sha512.hex(*sep),
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
-            "verification_flags": str(parsed_obj.verify_signature()).split(".")[-1],
+            "verification_flags": str(parsed_obj.verify_signature()).rsplit(".", maxsplit=1)[-1],
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -533,7 +533,10 @@ def parse_pe_authenticode(parsed_obj):
                         tmp_key = tmp_a[0].strip().replace(" ", "_")
                         if "version" in tmp_key:
                             tmp_key = "version"
-                        cert_signer_obj[tmp_key] = tmp_a[1].strip()
+                        value = tmp_a[1].strip()
+                        if value == "???":
+                            value = "N/A"
+                        cert_signer_obj[tmp_key] = value
                 authenticode["cert_signer"] = cert_signer_obj
         return authenticode
     except (AttributeError, IndexError, KeyError, TypeError) as e:
@@ -1257,7 +1260,8 @@ def add_pe_rdata_symbols(metadata, rdata_section):
     str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
     for block in str_content.split(" "):
         if "runtime." in block or "internal/" in block or ".go" in block or ".dll" in block:
-            metadata["exe_type"] = "gobinary"
+            if ".go" in block:
+                metadata["exe_type"] = "gobinary"
             for asym in block.split("\x00"):
                 if re.match(r".*\.(go|s|dll)$", asym):
                     rdata_symbols.add(asym)
