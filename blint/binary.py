@@ -1091,6 +1091,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
         metadata["virtual_size"] = parsed_obj.virtual_size
         metadata["has_nx"] = parsed_obj.has_nx
+        metadata["imphash_pefile"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.PEFILE)
+        metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
@@ -1244,7 +1246,7 @@ def add_pe_optional_headers(metadata, optional_header):
     return metadata
 
 
-def add_pe_rdata_symbols(metadata, rdata_section):
+def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
     """Adds PE rdata symbols to the metadata dictionary.
 
     Args:
