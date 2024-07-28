@@ -40,6 +40,87 @@ rules:
       - CreateSocketHandle
       - CreateThread
       - CreateThreadpool
+  - id: PROCESS_STATUS_API
+    title: Process status api used
+    summary: Queries about processes and device drivers
+    description: |
+      The process status application programming interface (PSAPI) is a helper library that makes it easier for you to obtain information about processes and device drivers.
+    patterns:
+      - EmptyWorkingSet
+      - EnumDeviceDrivers
+      - EnumPageFiles
+      - EnumProcesses
+      - EnumProcessModules
+      - EnumProcessModulesEx
+      - GetDeviceDriverBaseName
+      - GetDeviceDriverFileName
+      - GetMappedFileName
+      - GetModuleBaseName
+      - GetModuleFileNameEx
+      - GetModuleInformation
+      - GetPerformanceInfo
+      - GetProcessImageFileName
+      - GetProcessMemoryInfo
+      - GetWsChanges
+      - GetWsChangesEx
+      - InitializeProcessForWsWatch
+      - QueryWorkingSet
+      - QueryWorkingSetEx
+  - id: WER_API
+    title: Windows Error Reporting api used
+    summary: Manipulates Windows Error Reporting
+    description: |
+      The error reporting feature enables users to notify Microsoft of application faults, kernel faults, unresponsive applications, and other application specific problems. Developers can register with Windows Desktop Application Program to get information about the problems customers are experiencing with their applications and help customers fix these problems. Developers can also use Application Recovery and Restart to ensure that customers do not lose data when their application crashes and allow users to quickly return to their tasks.
+    patterns:
+      - AddERExcludedApplication
+      - WerAddExcludedApplication
+      - WerRegisterAdditionalProcess
+      - WerRegisterAppLocalDump
+      - WerRegisterExcludedMemoryBlock
+      - WerRegisterFile
+      - WerRegisterMemoryBlock
+      - WerRegisterRuntimeExceptionModule
+      - WerRemoveExcludedApplication
+      - WerReportCloseHandle
+      - WerReportSubmit
+      - WerStoreGetFirstReportKey
+      - WerStoreGetNextReportKey
+      - WerStoreQueryReportMetadataV2
+      - WerUnregister
+  - id: MEMORY_API
+    title: Windows Memory api used
+    summary: Manipulates System Memory
+    description: |
+      Windows Memory API.
+    patterns:
+      - AllocateUserPhysical
+      - CreateFileMapping
+      - CreateMemoryResourceNotification
+      - DiscardVirtualMemory
+      - FreeUserPhysicalPages
+      - GetMemoryErrorHandlingCapabilities
+      - GetProcessWorkingSetSize
+      - GetWriteWatch
+      - MapUserPhysicalPages
+      - MapViewOfFile
+      - OfferVirtualMemory
+      - OpenFileMapping
+      - PrefetchVirtualMemory
+      - QueryMemoryResourceNotification
+      - QueryVirtualMemoryInformation
+      - ReadProcessMemory
+      - ReclaimVirtualMemory
+      - RegisterBadMemoryNotification
+      - ResetWriteWatch
+      - SetProcessWorkingSet
+      - SetSystemFileCacheSize
+      - UnmapViewOfFile
+      - UnregisterBadMemoryNotification
+      - VirtualAlloc
+      - VirtualFree
+      - VirtualProtect
+      - VirtualQuery
+      - WriteProcessMemory
   - id: CRYPT_XML_API
     title: Security sensitive crypt xml functions used
     summary: Uses Crypt XML API
@@ -882,22 +963,73 @@ rules:
       - AppendMenu
       - BlockInput
       - BroadcastSystemMessage
+      - CalculatePopupWindowPosition
+      - CallWindowProc
+      - ChangeClipboardChain
+      - ChangeDisplaySettings
+      - ChangeWindowMessageFilter
+      - CheckMenuItem
+      - ChildWindowFromPoint
+      - ClipCursor
+      - CloseTouchInputHandle
+      - CloseWindow
+      - CreateAcceleratorTable
+      - CreateDesktop
+      - CreateDialog
       - CloseDesktop
       - CreateMenu
+      - CreatePopupMenu
+      - CreateWindow
       - EmptyClipboard
+      - EnableWindow
+      - EnumDisplayMonitors
+      - EnumDisplayDevices
+      - EnumDesktopWindows
+      - EnumDesktops
+      - EnumChildWindows
+      - GetCurrentProcessId
+      - GetProcessWindowStation
+      - GetEnvironmentStrings
+      - GetThreadDesktop
+      - GetUserObjectInformation
+      - SetProcessWindowStation
+      - SetThreadDesktop
+      - SetUserObjectInformation
+      - SwitchDesktop
       - FindWindow
+      - GetActiveWindow
+      - GetAltTabInfo
+      - GetCapture
+      - GetClipboardData
+      - GetClipboardFormat
+      - GetLastActivePopup
+      - GetLastInputInfo
+      - GetMenu
+      - GetMonitorInfo
+      - GetOpenClipboardWindow
+      - GetSystemMetrics
+      - GetSystemMenu
+      - GetTopWindow
+      - GetTouchInputInfo
       - LockWorkStation
       - OpenClipboard
       - OpenInputDesktop
-      - PeekMessageA
-      - PeekMessageW
-      - CreateDialogA
-      - CreateDialogW
-      - CreateWindowA
-      - CreateWindowW
-      - CreateWindowExA
-      - CreateWindowExW
-      - CreateWindowStation
+      - PeekMessage
+  - id: WIN_LOADER_API
+    title: Win Loader api functions used
+    summary: Loads dll dynamically
+    description: |
+      Windows Loader API functions.
+    patterns:
+      - AddDllDirectory
+      - DisableThreadLibraryCalls
+      - EnumResourceLanguages
+      - FreeLibrary
+      - GetModuleFileName
+      - GetModuleHandle
+      - GetProcAddress
+      - RemoveDllDirectory
+      - SetDefaultDllDirectories
   - id: WIN_LOGON_API
     title: Win Logon api functions used
     summary: Performs Winlogon calls
