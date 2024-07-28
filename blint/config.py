@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+import os
 import re
 
 # Default ignore list
@@ -1235,3 +1236,60 @@ secrets_regex = {
 }
 
 SYMBOL_DELIMITER = "~~"
+
+
+def get_float_from_env(name, default):
+    """
+    Retrieves a value from an environment variable and converts it to a
+    float. If the value cannot be converted to a float, it returns the
+    default value provided.
+
+    :param name:
+    :param default:
+    :return:
+    """
+    value = os.getenv(name.upper(), default)
+    try:
+        value = float(value)
+    except ValueError:
+        value = default
+    return value
+
+
+def get_int_from_env(name, default):
+    """
+    Retrieves a value from an environment variable and converts it to an
+    integer. If the value cannot be converted to an integer, it returns the
+    default value provided.
+
+    :param name:
+    :param default:
+    """
+    return int(get_float_from_env(name, default))
+
+
+PII_WORDS = (
+    "FirstName",
+    "LastName",
+    "Phone",
+    "Manager",
+    "City",
+    "Location",
+    "Gender",
+    "Country",
+    "Email",
+    "State",
+    "PostCode",
+    "ZipCode",
+    "SSN",
+    "MobilePhone",
+    "Photo",
+    "HomePhone",
+    "Address",
+    "Card",
+    "PinCode",
+    "OTP",
+    "Calendar",
+    "AgentStatus",
+    "LastLoginTime"
+)

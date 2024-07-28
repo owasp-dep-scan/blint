@@ -9,8 +9,9 @@ import orjson
 
 import lief
 
+from blint.config import PII_WORDS, get_float_from_env, get_int_from_env
 from blint.logger import DEBUG, LOG
-from blint.utils import calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
+from blint.utils import camel_to_snake, calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
 
 SYMBOLIC_FOUND = True
 try:
@@ -19,8 +20,8 @@ try:
 except OSError:
     SYMBOLIC_FOUND = False
 
-MIN_ENTROPY = 0.39
-MIN_LENGTH = 80
+MIN_ENTROPY = get_float_from_env("SECRET_MIN_ENTROPY", 0.39)
+MIN_LENGTH = get_int_from_env("SECRET_MIN_LENGTH", 80)
 
 # Enable lief logging in debug mode
 if LOG.level != DEBUG:
@@ -1259,6 +1260,13 @@ def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
     if not rdata_section or not rdata_section.content:
         return metadata
     rdata_symbols = set()
+    pii_symbols = []
+    for pii in PII_WORDS:
+        for vari in (f"get{pii}", f"get_{camel_to_snake(pii)}"):
+            if rdata_section.search_all(vari):
+                pii_symbols.append(
+                    {"name": vari.lower(), "type": "FUNCTION", "is_function": True, "is_imported": False})
+                continue
     str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
     for block in str_content.split(" "):
         if "runtime." in block or "internal/" in block or ".go" in block or ".dll" in block:
@@ -1273,9 +1281,11 @@ def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
         {
             "name": s,
             "type": "FILE",
+            "is_function": False,
             "is_imported": True
         } for s in sorted(rdata_symbols)
     ]
+    metadata["pii_symbols"] = pii_symbols
     return metadata
 
 
