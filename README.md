@@ -121,6 +121,7 @@ The following binaries are supported:
 - Android (apk/aab)
 - Dotnet executable binaries
 - Go binaries
+- Rust binaries
 
 ```shell
 blint sbom -i /path/to/go-binaries -o bom.json --deep

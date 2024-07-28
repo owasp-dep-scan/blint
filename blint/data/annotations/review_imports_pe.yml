@@ -6,6 +6,7 @@ url:
 exe_type:
   - PE32
   - PE64
+  - gobinary
 binary_type: PE
 rules:
   - id: WIN32_PROCESS_API

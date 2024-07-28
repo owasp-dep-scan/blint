@@ -185,6 +185,8 @@ def main():
         else:
             if args.sbom_output:
                 sbom_output = args.sbom_output
+                if os.path.isdir(sbom_output):
+                    sbom_output = os.path.join(sbom_output, "bom.json")
             else:
                 sbom_output = os.path.join(os.getcwd(), "bom.json")
             sbom_output_dir = os.path.dirname(sbom_output)

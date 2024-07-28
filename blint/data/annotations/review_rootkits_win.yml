@@ -3,6 +3,8 @@ text: Review for Windows rootkits
 group: METHOD_REVIEWS
 exe_type:
   - x86_64-executable
+  - PE32
+  - PE64
 rules:
   - id: BANSHEE
     title: Detect Banshee
@@ -174,5 +176,3 @@ rules:
       - ProcessSignature.SignerType
       - PsRoutinesList
       - ShellcodeInformation
-
-

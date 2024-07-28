@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
+import re
 import sys
 from typing import Tuple
 import zlib
@@ -8,8 +9,9 @@ import orjson
 
 import lief
 
+from blint.config import PII_WORDS, get_float_from_env, get_int_from_env
 from blint.logger import DEBUG, LOG
-from blint.utils import calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
+from blint.utils import camel_to_snake, calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
 
 SYMBOLIC_FOUND = True
 try:
@@ -18,8 +20,8 @@ try:
 except OSError:
     SYMBOLIC_FOUND = False
 
-MIN_ENTROPY = 0.39
-MIN_LENGTH = 80
+MIN_ENTROPY = get_float_from_env("SECRET_MIN_ENTROPY", 0.39)
+MIN_LENGTH = get_int_from_env("SECRET_MIN_LENGTH", 80)
 
 # Enable lief logging in debug mode
 if LOG.level != DEBUG:
@@ -93,11 +95,11 @@ def is_shared_library(parsed_obj):
     if not parsed_obj:
         return False
     if parsed_obj.format == lief.Binary.FORMATS.ELF:
-        return parsed_obj.header.file_type == lief.ELF.E_TYPE.DYNAMIC
+        return parsed_obj.header.file_type == lief.ELF.Header.FILE_TYPE.DYN
     if parsed_obj.format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(lief.PE.Header.CHARACTERISTICS.DLL)
     if parsed_obj.format == lief.Binary.FORMATS.MACHO:
-        return parsed_obj.header.file_type == lief.MachO.FILE_TYPES.DYLIB
+        return parsed_obj.header.file_type == lief.MachO.Header.FILE_TYPE.DYLIB
     return False
 
 
@@ -205,16 +207,16 @@ def parse_relro(parsed_obj):
     Returns:
         str: The RELRO protection level of the binary object.
     """
-    test_stmt = parsed_obj.get(lief.ELF.SEGMENT_TYPES.GNU_RELRO)
+    test_stmt = parsed_obj.get(lief.ELF.Segment.TYPE.GNU_RELRO)
     if isinstance(test_stmt, lief.lief_errors):
         return "no"
-    dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS)
+    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG.FLAGS)
     bind_now, now = False, False
-    if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
-        bind_now = lief.ELF.DYNAMIC_FLAGS.BIND_NOW in dynamic_tags
-    dynamic_tags = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.FLAGS_1)
-    if dynamic_tags and not isinstance(dynamic_tags, lief.lief_errors):
-        now = lief.ELF.DYNAMIC_FLAGS_1.NOW in dynamic_tags
+    if dynamic_tags and isinstance(dynamic_tags, lief.ELF.DynamicEntryFlags):
+        bind_now = lief.ELF.DynamicEntryFlags.FLAG.BIND_NOW in dynamic_tags
+    dynamic_tags = parsed_obj.get(lief.ELF.DynamicEntry.TAG.FLAGS_1)
+    if dynamic_tags and isinstance(dynamic_tags, lief.ELF.DynamicEntryFlags):
+        now = lief.ELF.DynamicEntryFlags.FLAG.NOW in dynamic_tags
     return "full" if bind_now or now else "partial"
 
 
@@ -451,7 +453,7 @@ def process_pe_resources(parsed_obj):
             "has_manifest": rm.has_manifest,
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
-            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "") if rm.has_manifest else None),
+            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "").removeprefix("\ufeff") if rm.has_manifest else None),
             "version_info": str(rm.version) if rm.has_version else None,
             "html": rm.html if rm.has_html else None,
         }
@@ -479,10 +481,10 @@ def process_pe_signature(parsed_obj):
             ci = sig.content_info
             signature_obj = {
                 "version": sig.version,
-                "digest_algorithm": str(sig.digest_algorithm),
+                "digest_algorithm": str(sig.digest_algorithm).rsplit(".", maxsplit=1)[-1],
                 "content_info": {
                     "content_type": lief.PE.oid_to_string(ci.content_type),
-                    "digest_algorithm": str(ci.digest_algorithm),
+                    "digest_algorithm": str(ci.digest_algorithm).rsplit(".", maxsplit=1)[-1],
                     "digest": ci.digest.hex(),
                 },
             }
@@ -492,8 +494,8 @@ def process_pe_signature(parsed_obj):
                     "version": signer.version,
                     "serial_number": signer.serial_number.hex(),
                     "issuer": str(signer.issuer),
-                    "digest_algorithm": str(signer.digest_algorithm),
-                    "encryption_algorithm": str(signer.encryption_algorithm),
+                    "digest_algorithm": str(signer.digest_algorithm).rsplit(".", maxsplit=1)[-1],
+                    "encryption_algorithm": str(signer.encryption_algorithm).rsplit(".", maxsplit=1)[-1],
                     "encrypted_digest": signer.encrypted_digest.hex(),
                 }
                 signers_list.append(signer_obj)
@@ -520,9 +522,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
             "sha512_hash": parsed_obj.authentihash_sha512.hex(*sep),
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
-            "verification_flags": str(parsed_obj.verify_signature()).replace(
-                "VERIFICATION_FLAGS.", ""
-            ),
+            "verification_flags": str(parsed_obj.verify_signature()).rsplit(".", maxsplit=1)[-1],
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -534,7 +534,10 @@ def parse_pe_authenticode(parsed_obj):
                         tmp_key = tmp_a[0].strip().replace(" ", "_")
                         if "version" in tmp_key:
                             tmp_key = "version"
-                        cert_signer_obj[tmp_key] = tmp_a[1].strip()
+                        value = tmp_a[1].strip()
+                        if value == "???":
+                            value = "N/A"
+                        cert_signer_obj[tmp_key] = value
                 authenticode["cert_signer"] = cert_signer_obj
         return authenticode
     except (AttributeError, IndexError, KeyError, TypeError) as e:
@@ -561,11 +564,7 @@ def parse_pe_symbols(symbols):
         if not symbol:
             continue
         try:
-            if symbol.section_number <= 0:
-                section_nb_str = str(lief.PE.SYMBOL_SECTION_NUMBER(symbol.section_number)).rsplit(
-                    ".", maxsplit=1
-                )[-1]
-            elif symbol.section and symbol.section.name:
+            if symbol.section and symbol.section.name:
                 section_nb_str = symbol.section.name
             else:
                 section_nb_str = "section<{:d}>".format(symbol.section_number)
@@ -586,9 +585,7 @@ def parse_pe_symbols(symbols):
                         "storage_class": str(symbol.storage_class).rsplit(".", maxsplit=1)[-1],
                     }
                 )
-        except (IndexError, AttributeError, ValueError) as e:
-            LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol}.")
-        except RuntimeError:
+        except (IndexError, AttributeError, ValueError, RuntimeError):
             pass
     return symbols_list, exe_type
 
@@ -780,26 +777,26 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
                 metadata["has_canary"] = True
                 break
     # rpath check
-    rpath = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RPATH)
+    rpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RPATH)
     if isinstance(rpath, lief.lief_errors):
         metadata["has_rpath"] = False
     elif rpath:
         metadata["has_rpath"] = True
     # runpath check
-    runpath = parsed_obj.get(lief.ELF.DYNAMIC_TAGS.RUNPATH)
+    runpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RUNPATH)
     if isinstance(runpath, lief.lief_errors):
         metadata["has_runpath"] = False
     elif runpath:
         metadata["has_runpath"] = True
     # This is getting renamed to symtab_symbols in lief 0.15.0
-    static_symbols = parsed_obj.static_symbols
-    metadata["static"] = bool(static_symbols and not isinstance(static_symbols, lief.lief_errors))
+    symtab_symbols = parsed_obj.symtab_symbols
+    metadata["static"] = bool(symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
     metadata = add_elf_dynamic_entries(dynamic_entries, metadata)
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
-    metadata["symtab_symbols"], exe_type = parse_symbols(static_symbols)
+    metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -893,13 +890,13 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     if isinstance(dynamic_entries, lief.lief_errors):
         return metadata
     for entry in dynamic_entries:
-        if entry.tag == lief.ELF.DYNAMIC_TAGS.NULL:
+        if entry.tag == lief.ELF.DynamicEntry.TAG.NULL:
             continue
         if entry.tag in [
-            lief.ELF.DYNAMIC_TAGS.SONAME,
-            lief.ELF.DYNAMIC_TAGS.NEEDED,
-            lief.ELF.DYNAMIC_TAGS.RUNPATH,
-            lief.ELF.DYNAMIC_TAGS.RPATH,
+            lief.ELF.DynamicEntry.TAG.SONAME,
+            lief.ELF.DynamicEntry.TAG.NEEDED,
+            lief.ELF.DynamicEntry.TAG.RUNPATH,
+            lief.ELF.DynamicEntry.TAG.RPATH,
         ]:
             metadata["dynamic_entries"].append(
                 {
@@ -923,7 +920,7 @@ def determine_elf_flags(header):
         A string representing the ELF flags.
     """
     eflags_str = ""
-    if header.machine_type == lief.ELF.ARCH.ARM:
+    if header.machine_type == lief.ELF.ARCH.ARM and hasattr(header, "arm_flags_list"):
         eflags_str = " - ".join(
             [str(s).rsplit(".", maxsplit=1)[-1] for s in header.arm_flags_list]
         )
@@ -994,7 +991,7 @@ def parse_go_buildinfo(
     deps = {}
     build_info_str: str = ""
     # Look for specific buildinfo sections for ELF and MachO binaries
-    build_info: lief.Section = None
+    build_info: lief.Section | None = None
     if isinstance(parsed_obj, lief.ELF.Binary):
         build_info = parsed_obj.get_section(".go.buildinfo")
     elif isinstance(parsed_obj, lief.MachO.Binary):
@@ -1095,6 +1092,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
         metadata["virtual_size"] = parsed_obj.virtual_size
         metadata["has_nx"] = parsed_obj.has_nx
+        metadata["imphash_pefile"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.PEFILE)
+        metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
@@ -1113,6 +1112,12 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                 if e["name"] == "ntoskrnl.exe":
                     metadata["is_driver"] = True
                     break
+        rdata_section = parsed_obj.get_section(".rdata")
+        text_section = parsed_obj.get_section(".text")
+        if not rdata_section and text_section:
+            rdata_section = text_section
+        if (not metadata["symtab_symbols"] or metadata["exe_type"] != "gobinary") and rdata_section:
+            add_pe_rdata_symbols(metadata, rdata_section)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -1242,6 +1247,48 @@ def add_pe_optional_headers(metadata, optional_header):
     return metadata
 
 
+def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
+    """Adds PE rdata symbols to the metadata dictionary.
+
+    Args:
+        metadata: The dictionary to store the metadata.
+        rdata_section: .rdata section of the PE binary.
+
+    Returns:
+        The updated metadata dictionary.
+    """
+    if not rdata_section or not rdata_section.content:
+        return metadata
+    rdata_symbols = set()
+    pii_symbols = []
+    for pii in PII_WORDS:
+        for vari in (f"get{pii}", f"get_{camel_to_snake(pii)}"):
+            if rdata_section.search_all(vari):
+                pii_symbols.append(
+                    {"name": vari.lower(), "type": "FUNCTION", "is_function": True, "is_imported": False})
+                continue
+    str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
+    for block in str_content.split(" "):
+        if "runtime." in block or "internal/" in block or ".go" in block or ".dll" in block:
+            if ".go" in block:
+                metadata["exe_type"] = "gobinary"
+            for asym in block.split("\x00"):
+                if re.match(r".*\.(go|s|dll)$", asym):
+                    rdata_symbols.add(asym)
+    if not metadata["symtab_symbols"]:
+        metadata["symtab_symbols"] = []
+    metadata["symtab_symbols"] += [
+        {
+            "name": s,
+            "type": "FILE",
+            "is_function": False,
+            "is_imported": True
+        } for s in sorted(rdata_symbols)
+    ]
+    metadata["pii_symbols"] = pii_symbols
+    return metadata
+
+
 def add_mach0_metadata(exe_file, metadata, parsed_obj):
     """Adds MachO metadata to the given metadata dictionary.
 
@@ -1289,7 +1336,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_commands(metadata, parsed_obj):
+def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
     """Extracts MachO commands metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -1307,7 +1354,6 @@ def add_mach0_commands(metadata, parsed_obj):
         metadata["has_thread_command"] = not isinstance(
             parsed_obj.thread_command, lief.lief_errors
         )
-
     return metadata
 
 
@@ -1416,6 +1462,7 @@ def add_mach0_header_data(exe_file, metadata, parsed_obj):
         header = parsed_obj.header
         flags_str = ", ".join([str(s).rsplit(".", maxsplit=1)[-1] for s in header.flags_list])
         metadata["magic"] = str(header.magic).rsplit(".", maxsplit=1)[-1]
+        metadata["is_neural_model"] = header.magic == lief.MachO.MACHO_TYPES.NEURAL_MODEL
         metadata["cpu_type"] = str(header.cpu_type).rsplit(".", maxsplit=1)[-1]
         metadata["cpu_subtype"] = header.cpu_subtype
         metadata["file_type"] = str(header.file_type).rsplit(".", maxsplit=1)[-1]

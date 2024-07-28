@@ -21,6 +21,7 @@ from blint.checks import (check_nx, check_pie,
                           check_virtual_size, check_authenticode,
                           check_dll_characteristics, check_codesign,
                           check_trust_info)
+from blint.config import PII_WORDS, get_int_from_env
 from blint.logger import LOG, console
 from blint.utils import (create_findings_table, is_fuzzable_name, print_findings_table)
 
@@ -53,13 +54,18 @@ review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
 review_entries_dict = defaultdict(list)
-review_rules_cache = {}
+review_rules_cache = {"PII_READ": {
+    "title": "Detect PII Read Operations",
+    "summary": "Can Retrieve Sensitive PII data",
+    "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
+    "patterns": PII_WORDS
+}}
 
 # Debug mode
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 
 # No of evidences per category
-EVIDENCE_LIMIT = 5
+EVIDENCE_LIMIT = get_int_from_env("EVIDENCE_LIMIT", 5)
 
 
 def get_resource(package, resource):
@@ -509,6 +515,7 @@ class ReviewRunner:
             self._review_imports(metadata)
         if self.review_entries_list:
             self._review_entries(metadata)
+        self._review_pii(metadata)
         return self.results
 
     def _review_imports(self, metadata):
@@ -538,6 +545,22 @@ class ReviewRunner:
                         f.get("tag") == "NEEDED"]
         LOG.debug(f"Reviewing {len(entries_list)} dynamic entries")
         self.run_review_methods_symbols(self.review_entries_list, entries_list)
+
+    def _review_pii(self, metadata):
+        """
+        Reviews pii symbols.
+
+        Args:
+            metadata (dict): The metadata to review.
+
+        Returns:
+            dict: The results of the review.
+        """
+        entries_list = [f.get("name", "") for f in metadata.get("pii_symbols", [])]
+        results = defaultdict(list)
+        for e in entries_list[0:EVIDENCE_LIMIT]:
+            results["PII_READ"].append({"pattern": e, "function": e})
+        self.results |= results
 
     def _review_symbols_exe(self, metadata):
         """
