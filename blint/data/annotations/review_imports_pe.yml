@@ -32,6 +32,7 @@ rules:
       - OpenThreadToken
       - SetProcessMitigationPolicy
       - SetThreadToken
+      - SetThreadContext
       - SetProcessShutdownParameters
       - OpenSemaphore
       - VirtualAllocEx
