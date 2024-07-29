@@ -4,6 +4,7 @@ group: SYMBOL_REVIEWS
 exe_type:
   - gobinary
   - x86_64-executable
+  - x86_64-exec
   - genericbinary
 rules:
   - id: HOOKA

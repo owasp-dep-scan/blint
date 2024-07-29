@@ -4,6 +4,7 @@ group: EXE_REVIEWS
 exe_type:
   - gobinary
   - x86_64-executable
+  - x86_64-exec
 rules:
   - id: FILE_IOUTIL
     title: IO util functions used

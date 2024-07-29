@@ -13,6 +13,7 @@
   exe_types:
     - genericbinary
     - x86_64-executable
+    - x86_64-exec
     - gobinary
     - PE32
     - PE64
@@ -34,6 +35,7 @@
   exe_types:
     - genericbinary
     - x86_64-executable
+    - x86_64-exec
     - gobinary
     - PE32
     - PE64
@@ -61,6 +63,7 @@
   exe_types:
     - genericbinary
     - x86_64-executable
+    - x86_64-exec
     - gobinary
     - mips-executable
 - id: CHECK_CANARY
@@ -79,6 +82,7 @@
   exe_types:
     - genericbinary
     - x86_64-executable
+    - x86_64-exec
     - dotnetbinary
     - mips-executable
 - id: CHECK_RPATH
@@ -123,6 +127,7 @@
     - gobinary
     - dotnetbinary
     - x86_64-executable
+    - x86_64-exec
 - id: CHECK_AUTHENTICODE
   title: Missing Authenticode
   description: |
@@ -138,6 +143,7 @@
     - gobinary
     - dotnetbinary
     - x86_64-executable
+    - x86_64-exec
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |
@@ -174,6 +180,7 @@
     - genericbinary
     - gobinary
     - x86_64-executable
+    - x86_64-exec
 - id: CHECK_TRUST_INFO
   title: Requires Elevated Execution
   description: |

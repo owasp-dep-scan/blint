@@ -1230,7 +1230,7 @@ secrets_regex = {
     "email": [re.compile(r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+.[a-zA-Z0-9.-]+")],
     "ip": [
         re.compile(
-            r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]).){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+            r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]).){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(:[0-9]+)?$"
         )
     ],
 }
@@ -1268,6 +1268,7 @@ def get_int_from_env(name, default):
     return int(get_float_from_env(name, default))
 
 
+# PII related symbols
 PII_WORDS = (
     "FirstName",
     "LastName",
@@ -1292,4 +1293,44 @@ PII_WORDS = (
     "Calendar",
     "AgentStatus",
     "LastLoginTime"
+)
+
+# Some symbols to look for in a first-stage payload
+FIRST_STAGE_WORDS = (
+    "System.ServiceProcess",
+    "System.IO.Compression",
+    "System.Reflection.Emit",
+    "ICryptoTransform",
+    "LoadAssembly",
+    "GetEncodedData",
+    "add_AssemblyResolve",
+    "CreateDecryptor",
+    "GetExecutingAssembly",
+    "GetModules",
+    "get_IsFamilyOrAssembly",
+    "/proc/%d/cmdline",
+    "/proc/%s/exe",
+    "/proc/self/exe",
+    "/proc/net/route",
+    "/etc/resolv.conf",
+    "/usr/lib/systemd/systemd",
+    "/usr/compress/bin/",
+    "/usr/libexec/openssh/sftp-server",
+    "/usr/sbin/reboot",
+    "/usr/bin/reboot",
+    "/usr/sbin/shutdown",
+    "/usr/bin/shutdown",
+    "/usr/sbin/poweroff",
+    "/usr/bin/poweroff",
+    "/usr/sbin/halt",
+    "/usr/bin/halt",
+    "virtualboxemulunit",
+    "virtualboximportunit",
+    "virtualboxunit",
+    "qvirtualboxglobalsunit",
+    "Uvirtualboxdisasm",
+    "loaderx86.dll",
+    "ZwProtectVirtualMemory",
+    "shlwapi.dll",
+    "DeleteCriticalSection"
 )

@@ -4,6 +4,7 @@ group: SYMBOL_REVIEWS
 exe_type:
     - genericbinary
     - x86_64-executable
+    - x86_64-exec
     - gobinary
     - PE32
     - PE64
@@ -29,7 +30,6 @@ rules:
       - MeltFile
       - SysmonUnload
       - _RtlAdjustPrivilege
-
   - id: PUPY
     title: Pupy Post-Exploitation Framework
     summary: Detect Erasing of Evidence of Exploitation
@@ -129,9 +129,20 @@ rules:
       - pupycompile
       - pupygen
       - run_pupy
-
-
-
-
-
-
+  - id: RAW_NET_ACCESS
+    title: Raw Network API
+    summary: Detect use of Network API
+    description: |
+      Low-level network and dns API functions are used to prevent detection.
+    patterns:
+      - opennameservers.c
+      - closenameservers.c
+      - read_etc_hosts_r.c
+      - dnslookup.c
+      - __read_etc_hosts_r
+      - __open_nameservers
+      - getRandomIP
+      - __libc_connect
+      - __GI_gethostbyname2_r
+      - gethostbyname.c
+      - connect.c
