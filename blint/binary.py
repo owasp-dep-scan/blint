@@ -270,7 +270,7 @@ def parse_strings(parsed_obj):
                     if (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH)) or secret_type:
                         strings_list.append(
                             {
-                                "value": (decode_base64(s) if s.endswith("==") else s),
+                                "value": decode_base64(s) if s.endswith("==") else s,
                                 "entropy": entropy,
                                 "secret_type": secret_type,
                             }

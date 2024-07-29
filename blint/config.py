@@ -1230,7 +1230,7 @@ secrets_regex = {
     "email": [re.compile(r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+.[a-zA-Z0-9.-]+")],
     "ip": [
         re.compile(
-            r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]).){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+            r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]).){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(:[0-9]+)?$"
         )
     ],
 }
@@ -1311,6 +1311,8 @@ FIRST_STAGE_WORDS = (
     "/proc/%d/cmdline",
     "/proc/%s/exe",
     "/proc/self/exe",
+    "/proc/net/route",
+    "/etc/resolv.conf",
     "/usr/lib/systemd/systemd",
     "/usr/compress/bin/",
     "/usr/libexec/openssh/sftp-server",

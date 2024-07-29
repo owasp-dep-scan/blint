@@ -3,6 +3,7 @@ text: Review for Windows rootkits
 group: METHOD_REVIEWS
 exe_type:
   - x86_64-executable
+  - x86_64-exec
   - PE32
   - PE64
 rules:
@@ -67,7 +68,6 @@ rules:
       - BeIsStringNull
       - BeIsStringTerminated
       - BeUnSupportedFunction
-
   - id: NIDHOGG
     title: Detect Nidhogg
     summary: Provides Tools for Gaining Privileged Access and Injecting Malicious Code
