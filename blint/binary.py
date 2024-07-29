@@ -9,7 +9,7 @@ import orjson
 
 import lief
 
-from blint.config import PII_WORDS, get_float_from_env, get_int_from_env
+from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_float_from_env, get_int_from_env
 from blint.logger import DEBUG, LOG
 from blint.utils import camel_to_snake, calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
 
@@ -788,7 +788,6 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
         metadata["has_runpath"] = False
     elif runpath:
         metadata["has_runpath"] = True
-    # This is getting renamed to symtab_symbols in lief 0.15.0
     symtab_symbols = parsed_obj.symtab_symbols
     metadata["static"] = bool(symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
@@ -797,6 +796,10 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
     metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
+    rdata_section = parsed_obj.get_section(".rodata")
+    text_section = parsed_obj.get_section(".text")
+    if not metadata["symtab_symbols"]:
+        add_elf_rdata_symbols(metadata, rdata_section, text_section)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -1114,10 +1117,16 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     break
         rdata_section = parsed_obj.get_section(".rdata")
         text_section = parsed_obj.get_section(".text")
-        if not rdata_section and text_section:
-            rdata_section = text_section
-        if (not metadata["symtab_symbols"] or metadata["exe_type"] != "gobinary") and rdata_section:
-            add_pe_rdata_symbols(metadata, rdata_section)
+        # If there are no .rdata and .text section, then attempt to look for two alphanumeric sections
+        if not rdata_section and not text_section:
+            for section in parsed_obj.sections:
+                if str(section.name).removeprefix(".").isalnum():
+                    if not rdata_section:
+                        rdata_section = section
+                    else:
+                        text_section = section
+        if rdata_section or text_section:
+            add_pe_rdata_symbols(metadata, rdata_section, text_section)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -1247,33 +1256,39 @@ def add_pe_optional_headers(metadata, optional_header):
     return metadata
 
 
-def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
+def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section: lief.PE.Section):
     """Adds PE rdata symbols to the metadata dictionary.
 
     Args:
         metadata: The dictionary to store the metadata.
         rdata_section: .rdata section of the PE binary.
+        text_section: .text section of the PE binary.
 
     Returns:
         The updated metadata dictionary.
     """
-    if not rdata_section or not rdata_section.content:
-        return metadata
+    file_extns_from_rdata = r".*\.(go|s|dll|exe|pdb)"
     rdata_symbols = set()
     pii_symbols = []
+    first_stage_symbols = []
     for pii in PII_WORDS:
-        for vari in (f"get{pii}", f"get_{camel_to_snake(pii)}"):
-            if rdata_section.search_all(vari):
+        for vari in (f"get{pii}", f"get_{pii}", f"get_{camel_to_snake(pii)}", f"Get{pii}"):
+            if rdata_section.search_all(vari) or text_section.search_all(vari):
                 pii_symbols.append(
                     {"name": vari.lower(), "type": "FUNCTION", "is_function": True, "is_imported": False})
                 continue
-    str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8", errors="ignore")
+    for sw in FIRST_STAGE_WORDS:
+        if rdata_section.search_all(sw) or text_section.search_all(sw):
+            first_stage_symbols.append(
+                {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
+    str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8",
+                                errors="ignore") if rdata_section and rdata_section.content else ""
     for block in str_content.split(" "):
-        if "runtime." in block or "internal/" in block or ".go" in block or ".dll" in block:
+        if "runtime." in block or "internal/" in block or re.match(file_extns_from_rdata, block):
             if ".go" in block:
                 metadata["exe_type"] = "gobinary"
             for asym in block.split("\x00"):
-                if re.match(r".*\.(go|s|dll)$", asym):
+                if re.match(file_extns_from_rdata + "$", asym):
                     rdata_symbols.add(asym)
     if not metadata["symtab_symbols"]:
         metadata["symtab_symbols"] = []
@@ -1285,7 +1300,33 @@ def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section):
             "is_imported": True
         } for s in sorted(rdata_symbols)
     ]
-    metadata["pii_symbols"] = pii_symbols
+    if pii_symbols:
+        metadata["pii_symbols"] = pii_symbols
+    if first_stage_symbols:
+        metadata["first_stage_symbols"] = first_stage_symbols
+    return metadata
+
+
+def add_elf_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section: lief.PE.Section):
+    """Adds ELF rdata symbols to the metadata dictionary.
+
+    Args:
+        metadata: The dictionary to store the metadata.
+        rdata_section: .data section of the ELF binary.
+        text_section: .text section of the ELF binary.
+
+    Returns:
+        The updated metadata dictionary.
+    """
+    if not rdata_section or not rdata_section.content:
+        return metadata
+    first_stage_symbols = []
+    for sw in FIRST_STAGE_WORDS:
+        if rdata_section.search_all(sw) or text_section.search_all(sw):
+            first_stage_symbols.append(
+                {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
+    if first_stage_symbols:
+        metadata["first_stage_symbols"] = first_stage_symbols
     return metadata
 
 

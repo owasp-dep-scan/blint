@@ -41,6 +41,11 @@ rules:
       - CreateSocketHandle
       - CreateThread
       - CreateThreadpool
+      - GetCurrentThread
+      - GetThreadLocale
+      - ExitProcess
+      - FreeLibrary
+      - ExitThread
   - id: PROCESS_STATUS_API
     title: Process status api used
     summary: Queries about processes and device drivers
@@ -464,6 +469,8 @@ rules:
       - CreateHardLink
       - BackupEventLog
       - CreateFileMapping
+      - SetFileAttributes
+      - SetFilePointer
   - id: WIN_BCRYPT_API
     title: Win bcrypt api functions used
     summary: Can Encrypt Files
@@ -1973,6 +1980,14 @@ rules:
     description: |
       Shell Windows API allows applications to access functions provided by the operating system shell, and to change and enhance it.
     patterns:
+      - DllInstall
+      - GetProcessReference
+      - ParseURLA
+      - ParseURLW
+      - PathFindFileName
+      - PathFindOnPath
+      - PathIsSystemFolder
+      - PathIsUNCServerShare
       - FindExecutableA
       - FindExecutableW
       - InitNetworkAddressControl
@@ -1994,6 +2009,30 @@ rules:
       - GetManagedApplications
       - InstallApplication
       - UninstallApplication
+      - SHCreateThread
+      - SHCreateStreamOnFile
+      - SHOpenRegStream
+      - SHRegCreateUSKey
+      - SHQueryValueEx
+      - SHQueryInfoKey
+      - UrlCreateFromPath
+      - PathMatchSpec
+      - SHBindToFolderIDListParent
+      - SHBrowseForFolder
+      - SHCreateDefaultContextMenu
+      - SHCreateShellItem
+      - SHFormatDrive
+      - SHGetDesktopFolder
+      - SHGetFolderPath
+      - SHGetFolderPathAndSubDir
+      - SHGetKnownFolder
+      - SHGetSpecialFolderLocation
+      - SHILCreateFromPath
+      - SHPathPrepareForWrite
+      - SHSetKnownFolderPath
+      - SignalFileOpen
+      - Win32DeleteFile
+      - shlwapi.dll
   - id: KERNEL_API
     title: Kernel api functions used
     summary: Manipulates Windows Kernel & Drivers

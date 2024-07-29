@@ -21,7 +21,7 @@ from blint.checks import (check_nx, check_pie,
                           check_virtual_size, check_authenticode,
                           check_dll_characteristics, check_codesign,
                           check_trust_info)
-from blint.config import PII_WORDS, get_int_from_env
+from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env
 from blint.logger import LOG, console
 from blint.utils import (create_findings_table, is_fuzzable_name, print_findings_table)
 
@@ -54,12 +54,20 @@ review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
 review_entries_dict = defaultdict(list)
-review_rules_cache = {"PII_READ": {
-    "title": "Detect PII Read Operations",
-    "summary": "Can Retrieve Sensitive PII data",
-    "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
-    "patterns": PII_WORDS
-}}
+review_rules_cache = {
+    "PII_READ": {
+        "title": "Detect PII Read Operations",
+        "summary": "Can Retrieve Sensitive PII data",
+        "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
+        "patterns": PII_WORDS
+    },
+    "LOADER_SYMBOLS": {
+        "title": "Detect Initial Loader",
+        "summary": "Behaves like a loader",
+        "description": "The binary behaves like a loader by downloading and executing additional payloads.",
+        "patterns": FIRST_STAGE_WORDS
+    },
+}
 
 # Debug mode
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
@@ -309,7 +317,10 @@ def print_reviews_table(reviews, files):
 def json_serializer(obj):
     """JSON serializer to help serialize problematic types such as bytes"""
     if isinstance(obj, bytes):
-        return obj.decode('utf-8')
+        try:
+            return obj.decode('utf-8')
+        except UnicodeDecodeError:
+            return ""
 
     return obj
 
@@ -494,7 +505,7 @@ class ReviewRunner:
                 or self.review_entries_list
         ):
             return self._review_lists(metadata)
-        return {}
+        return self._review_loader_symbols(metadata)
 
     def _review_lists(self, metadata):
         """
@@ -516,6 +527,7 @@ class ReviewRunner:
         if self.review_entries_list:
             self._review_entries(metadata)
         self._review_pii(metadata)
+        self._review_loader_symbols(metadata)
         return self.results
 
     def _review_imports(self, metadata):
@@ -560,6 +572,22 @@ class ReviewRunner:
         results = defaultdict(list)
         for e in entries_list[0:EVIDENCE_LIMIT]:
             results["PII_READ"].append({"pattern": e, "function": e})
+        self.results |= results
+
+    def _review_loader_symbols(self, metadata):
+        """
+        Reviews loader symbols.
+
+        Args:
+            metadata (dict): The metadata to review.
+
+        Returns:
+            dict: The results of the review.
+        """
+        entries_list = [f.get("name", "") for f in metadata.get("first_stage_symbols", [])]
+        results = defaultdict(list)
+        for e in entries_list[0:EVIDENCE_LIMIT]:
+            results["LOADER_SYMBOLS"].append({"pattern": e, "function": e})
         self.results |= results
 
     def _review_symbols_exe(self, metadata):

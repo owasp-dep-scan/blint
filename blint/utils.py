@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ar import Archive
 import lief
-from defusedxml.ElementTree import fromstring
+from defusedxml.ElementTree import fromstring, ParseError
 from rich import box
 from rich.table import Table
 
@@ -322,7 +322,7 @@ def parse_pe_manifest(manifest):
             for ele in child.iter():
                 attribs_dict[ele.tag.rpartition("}")[-1]] = ele.attrib
         return attribs_dict
-    except (TypeError, AttributeError, IndexError) as e:
+    except (TypeError, AttributeError, IndexError, ParseError) as e:
         LOG.debug(f"Caught {type(e)}: {e} while parsing PE manifest.")
         return {}
 
