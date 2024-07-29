@@ -1273,12 +1273,12 @@ def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section:
     first_stage_symbols = []
     for pii in PII_WORDS:
         for vari in (f"get{pii}", f"get_{pii}", f"get_{camel_to_snake(pii)}", f"Get{pii}"):
-            if rdata_section.search_all(vari) or text_section.search_all(vari):
+            if (rdata_section and rdata_section.search_all(vari)) or (text_section and text_section.search_all(vari)):
                 pii_symbols.append(
                     {"name": vari.lower(), "type": "FUNCTION", "is_function": True, "is_imported": False})
                 continue
     for sw in FIRST_STAGE_WORDS:
-        if rdata_section.search_all(sw) or text_section.search_all(sw):
+        if (rdata_section and rdata_section.search_all(sw)) or (text_section and text_section.search_all(sw)):
             first_stage_symbols.append(
                 {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
     str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8",
@@ -1318,11 +1318,9 @@ def add_elf_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section
     Returns:
         The updated metadata dictionary.
     """
-    if not rdata_section or not rdata_section.content:
-        return metadata
     first_stage_symbols = []
     for sw in FIRST_STAGE_WORDS:
-        if rdata_section.search_all(sw) or text_section.search_all(sw):
+        if (rdata_section and rdata_section.search_all(sw)) or (text_section and text_section.search_all(sw)):
             first_stage_symbols.append(
                 {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
     if first_stage_symbols:
