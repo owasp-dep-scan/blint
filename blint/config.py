@@ -1279,7 +1279,8 @@ PII_WORDS = (
     "Gender",
     "Country",
     "Email",
-    "State",
+    "Town",
+    "County",
     "PostCode",
     "ZipCode",
     "SSN",
@@ -1292,7 +1293,8 @@ PII_WORDS = (
     "OTP",
     "Calendar",
     "AgentStatus",
-    "LastLoginTime"
+    "LastLoginTime",
+    "BankAccount"
 )
 
 # Some symbols to look for in a first-stage payload
@@ -1324,6 +1326,8 @@ FIRST_STAGE_WORDS = (
     "/usr/bin/poweroff",
     "/usr/sbin/halt",
     "/usr/bin/halt",
+    "/proc/self/auxv",
+    "/sys/kernel/mm/",
     "virtualboxemulunit",
     "virtualboximportunit",
     "virtualboxunit",

@@ -54,6 +54,7 @@ rules:
       - os.CreateTemp
       - os.NewFile
       - os.DirFS
+      - golang/src/os/file
   - id: OS_METHODS
     title: OS functions used
     summary: Can Execute OS commands
@@ -90,6 +91,10 @@ rules:
       - os/executable.go
       - os/executable_windows.go
       - os/proc.go
+      - golang/src/io/pipe.go
+      - golang/src/runtime/cgo
+      - golang/src/runtime/fds_unix.go
+      - golang/src/runtime/internal/syscall/
   - id: SYSCALL_METHODS
     title: Syscall functions used
     summary: Can perform system-level operations
@@ -154,6 +159,7 @@ rules:
       - syscall/syscall.go
       - syscall/syscall_windows.go
       - syscall/zsyscall_windows.go
+      - runtime/mem.go
   - id: WIN_SIGNAL_METHODS
     title: Windows Signal functions used
     summary: Can disable Windows Error Reporting
@@ -166,6 +172,15 @@ rules:
       - runtime/sys_windows_amd64.s
       - runtime/sys_x86.go
       - runtime/syscall_windows.go
+  - id: OS_SIGNAL_METHODS
+    title: OS Signal module used
+    summary: Can trap OS signals
+    description: |
+      Package signal implements access to incoming signals. The functions in this package allow a program to change the way Go programs handle signals.
+    patterns:
+      - runtime/signal_amd64.go
+      - runtime/signal_linux_amd64.go
+      - runtime/signal_unix.go
   - id: NET_METHODS
     title: Net functions used
     summary: Uses Network to send and receive data
@@ -231,6 +246,7 @@ rules:
       - net/net.go
       - net/netip/leaf_alts.go
       - net/netip/netip.go
+      - golang/src/net/
   - id: HTTP_METHODS
     title: HTTP server functions used
     summary: Can run an HTTP server
@@ -267,13 +283,15 @@ rules:
       - github.com/gorilla/websocket
       - github.com/gorilla/mux
   - id: MEM_METHODS
-    title: HTTP server functions used
-    summary: Can run an HTTP server
+    title: Memory module used
+    summary: Manipulates System Memory
     description: |
-      Package http provides HTTP client and server implementations.
+      Memory module used.
     patterns:
-      - http.ListenAndServe
-
+      - runtime/mem.go
+      - runtime/mem_linux.go
+      - runtime/memclr_amd64.s
+      - runtime/mcheckmark.go
   - id: HTTP_CLIENT_METHODS
     title: HTTP client functions used
     summary: Invokes HTTP service
@@ -361,6 +379,7 @@ rules:
       - zip.CreateRaw
       - archive/tar
       - github.com/ulikunitz/xz
+      - golang/src/compress
   - id: GIT_METHODS
     title: Git library used
     summary: Can perform Git Read and Write operations
@@ -402,6 +421,8 @@ rules:
       - crypto/crypto.go
       - crypto/subtle/xor.go
       - crypto/subtle/xor_amd64.s
+      - golang.org/x/crypto
+      - golang/src/crypto
   - id: SSH_METHODS
     title: ssh library used
     summary: Can perform SSH operations
@@ -513,3 +534,24 @@ rules:
       - x509.internal.macos.SecPolicyCopyProperties
       - x509.internal.macos.SecTrustSettingsCopyCertificates
       - x509.internal.macos.SecTrustSettingsCopyTrustSettings
+  - id: MASSCAN_MODULE
+    title: Detect Masscan module
+    summary: Can Perform port scans
+    description: |
+      Masscan is an Internet-scale port scanner. It can scan the entire Internet in under 5 minutes, transmitting 10 million packets per second, from a single machine.
+    patterns:
+      - massTool/mass.go
+      - masscan.go
+      - masscan.NewScanner
+      - masscan.SetParamTargets
+      - masscan.SetParamPorts
+      - masscan.SetParamWait
+      - masscan.Run
+  - id: FTP_MODULE
+    title: Detect FTP module
+    summary: Can Perform FTP operations
+    description: |
+      Known FTP modules are used.
+    patterns:
+      - ftp.go
+      - github.com/jlaffaye/ftp
