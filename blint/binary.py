@@ -11,7 +11,13 @@ import lief
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_float_from_env, get_int_from_env
 from blint.logger import DEBUG, LOG
-from blint.utils import camel_to_snake, calculate_entropy, check_secret, cleanup_dict_lief_errors, decode_base64
+from blint.utils import (
+    camel_to_snake,
+    calculate_entropy,
+    check_secret,
+    cleanup_dict_lief_errors,
+    decode_base64,
+)
 
 SYMBOLIC_FOUND = True
 try:
@@ -453,7 +459,11 @@ def process_pe_resources(parsed_obj):
             "has_manifest": rm.has_manifest,
             "has_string_table": rm.has_string_table,
             "has_version": rm.has_version,
-            "manifest": (rm.manifest.replace("\\xef\\xbb\\xbf", "").removeprefix("\ufeff") if rm.has_manifest else None),
+            "manifest": (
+                rm.manifest.replace("\\xef\\xbb\\xbf", "").removeprefix("\ufeff")
+                if rm.has_manifest
+                else None
+            ),
             "version_info": str(rm.version) if rm.has_version else None,
             "html": rm.html if rm.has_html else None,
         }
@@ -495,7 +505,9 @@ def process_pe_signature(parsed_obj):
                     "serial_number": signer.serial_number.hex(),
                     "issuer": str(signer.issuer),
                     "digest_algorithm": str(signer.digest_algorithm).rsplit(".", maxsplit=1)[-1],
-                    "encryption_algorithm": str(signer.encryption_algorithm).rsplit(".", maxsplit=1)[-1],
+                    "encryption_algorithm": str(signer.encryption_algorithm).rsplit(
+                        ".", maxsplit=1
+                    )[-1],
                     "encrypted_digest": signer.encrypted_digest.hex(),
                 }
                 signers_list.append(signer_obj)
@@ -535,7 +547,10 @@ def parse_pe_authenticode(parsed_obj):
                         if "version" in tmp_key:
                             tmp_key = "version"
                         value = tmp_a[1].strip()
-                        if value == "???":
+                        if value in (
+                            "???",
+                            "???, ???",
+                        ):
                             value = "N/A"
                         cert_signer_obj[tmp_key] = value
                 authenticode["cert_signer"] = cert_signer_obj
@@ -798,8 +813,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
     rdata_section = parsed_obj.get_section(".rodata")
     text_section = parsed_obj.get_section(".text")
-    if not metadata["symtab_symbols"]:
-        add_elf_rdata_symbols(metadata, rdata_section, text_section)
+    add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
     if exe_type:
         metadata["exe_type"] = exe_type
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
@@ -1126,7 +1140,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     else:
                         text_section = section
         if rdata_section or text_section:
-            add_pe_rdata_symbols(metadata, rdata_section, text_section)
+            add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -1180,13 +1194,13 @@ def add_pe_header_data(metadata, parsed_obj):
             metadata["initial_relative_cs"] = dos_header.initial_relative_cs
             metadata["address_relocation_table"] = ADDRESS_FMT.format(
                 dos_header.addressof_relocation_table
-            )
+            ).strip()
             metadata["overlay_number"] = dos_header.overlay_number
             metadata["oem_id"] = dos_header.oem_id
             metadata["oem_info"] = dos_header.oem_info
             metadata["address_new_exeheader"] = ADDRESS_FMT.format(
                 dos_header.addressof_new_exeheader
-            )
+            ).strip()
             metadata["characteristics"] = ", ".join(
                 [str(chara).rsplit(".", maxsplit=1)[-1] for chara in header.characteristics_list]
             )
@@ -1231,7 +1245,9 @@ def add_pe_optional_headers(metadata, optional_header):
         metadata["sizeof_code"] = optional_header.sizeof_code
         metadata["sizeof_initialized_data"] = optional_header.sizeof_initialized_data
         metadata["sizeof_uninitialized_data"] = optional_header.sizeof_uninitialized_data
-        metadata["addressof_entrypoint"] = ADDRESS_FMT.format(optional_header.addressof_entrypoint)
+        metadata["addressof_entrypoint"] = ADDRESS_FMT.format(
+            optional_header.addressof_entrypoint
+        ).strip()
         metadata["baseof_code"] = optional_header.baseof_code
         metadata["baseof_data"] = optional_header.baseof_data
         metadata["imagebase"] = optional_header.imagebase
@@ -1256,13 +1272,14 @@ def add_pe_optional_headers(metadata, optional_header):
     return metadata
 
 
-def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section: lief.PE.Section):
-    """Adds PE rdata symbols to the metadata dictionary.
+def add_rdata_symbols(metadata, rdata_section, text_section, sections):
+    """Adds rdata symbols to the metadata dictionary.
 
     Args:
         metadata: The dictionary to store the metadata.
-        rdata_section: .rdata section of the PE binary.
-        text_section: .text section of the PE binary.
+        rdata_section: .rdata section of the binary.
+        text_section: .text section of the binary.
+        sections: All sections for advanced analysis
 
     Returns:
         The updated metadata dictionary.
@@ -1273,56 +1290,53 @@ def add_pe_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section:
     first_stage_symbols = []
     for pii in PII_WORDS:
         for vari in (f"get{pii}", f"get_{pii}", f"get_{camel_to_snake(pii)}", f"Get{pii}"):
-            if (rdata_section and rdata_section.search_all(vari)) or (text_section and text_section.search_all(vari)):
+            if (rdata_section and rdata_section.search_all(vari)) or (
+                text_section and text_section.search_all(vari)
+            ):
                 pii_symbols.append(
-                    {"name": vari.lower(), "type": "FUNCTION", "is_function": True, "is_imported": False})
+                    {
+                        "name": vari.lower(),
+                        "type": "FUNCTION",
+                        "is_function": True,
+                        "is_imported": False,
+                    }
+                )
                 continue
     for sw in FIRST_STAGE_WORDS:
-        if (rdata_section and rdata_section.search_all(sw)) or (text_section and text_section.search_all(sw)):
+        if (rdata_section and rdata_section.search_all(sw)) or (
+            text_section and text_section.search_all(sw)
+        ):
             first_stage_symbols.append(
-                {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
-    str_content = codecs.decode(rdata_section.content.tobytes("A"), encoding="utf-8",
-                                errors="ignore") if rdata_section and rdata_section.content else ""
-    for block in str_content.split(" "):
-        if "runtime." in block or "internal/" in block or re.match(file_extns_from_rdata, block):
-            if ".go" in block:
-                metadata["exe_type"] = "gobinary"
-            for asym in block.split("\x00"):
-                if re.match(file_extns_from_rdata + "$", asym):
-                    rdata_symbols.add(asym)
+                {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True}
+            )
+    # rdata and rodata can be technically anywhere
+    # go binaries could have them under .gopclntab and .gosymtab for example
+    # We attempt to search for symbols in every section.
+    data_sections = []
+    for section in sections:
+        if str(section.name).removeprefix(".").isalnum():
+            data_sections.append(section)
+    for section in data_sections:
+        str_content = (
+            codecs.decode(section.content.tobytes("A"), encoding="utf-8", errors="ignore")
+            if section and section.content
+            else ""
+        )
+        for block in str_content.split(" "):
+            if "runtime." in block or "internal/" in block or re.match(file_extns_from_rdata, block):
+                if ".go" in block:
+                    metadata["exe_type"] = "gobinary"
+                for asym in block.split("\x00"):
+                    if re.match(file_extns_from_rdata + "$", asym):
+                        rdata_symbols.add(asym)
     if not metadata["symtab_symbols"]:
         metadata["symtab_symbols"] = []
     metadata["symtab_symbols"] += [
-        {
-            "name": s,
-            "type": "FILE",
-            "is_function": False,
-            "is_imported": True
-        } for s in sorted(rdata_symbols)
+        {"name": s, "type": "FILE", "is_function": False, "is_imported": True}
+        for s in sorted(rdata_symbols)
     ]
     if pii_symbols:
         metadata["pii_symbols"] = pii_symbols
-    if first_stage_symbols:
-        metadata["first_stage_symbols"] = first_stage_symbols
-    return metadata
-
-
-def add_elf_rdata_symbols(metadata, rdata_section: lief.PE.Section, text_section: lief.PE.Section):
-    """Adds ELF rdata symbols to the metadata dictionary.
-
-    Args:
-        metadata: The dictionary to store the metadata.
-        rdata_section: .data section of the ELF binary.
-        text_section: .text section of the ELF binary.
-
-    Returns:
-        The updated metadata dictionary.
-    """
-    first_stage_symbols = []
-    for sw in FIRST_STAGE_WORDS:
-        if (rdata_section and rdata_section.search_all(sw)) or (text_section and text_section.search_all(sw)):
-            first_stage_symbols.append(
-                {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True})
     if first_stage_symbols:
         metadata["first_stage_symbols"] = first_stage_symbols
     return metadata
