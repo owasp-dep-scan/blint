@@ -907,7 +907,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     if isinstance(dynamic_entries, lief.lief_errors):
         return metadata
     for entry in dynamic_entries:
-        if not hasattr(entry, 'name'):
+        if entry.tag == lief.ELF.DynamicEntry.TAG.NULL:
             continue
         if entry.tag in [
             lief.ELF.DynamicEntry.TAG.SONAME,
@@ -915,16 +915,24 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
             lief.ELF.DynamicEntry.TAG.RUNPATH,
             lief.ELF.DynamicEntry.TAG.RPATH,
         ]:
-            metadata["dynamic_entries"].append(
-                {
-                    "name": demangle_symbolic_name(entry.name),
-                    "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
-                    "value": entry.value,
-                }
-            )
-            # Detect dotnet binary
-            if "netcoredeps" in entry.name:
-                metadata["exe_type"] = "dotnetbinary"
+            if hasattr(entry, 'name'):
+                metadata["dynamic_entries"].append(
+                    {
+                        "name": demangle_symbolic_name(entry.name),
+                        "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
+                        "value": entry.value,
+                    }
+                )
+                if "netcoredeps" in entry.name:
+                    metadata["exe_type"] = "dotnetbinary"
+            elif hasattr(entry, 'runpath'):
+                metadata["dynamic_entries"].append(
+                    {
+                        "runpath": demangle_symbolic_name(entry.runpath),
+                        "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
+                        "value": entry.value,
+                    }
+                )
     return metadata
 
 
