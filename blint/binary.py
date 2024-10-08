@@ -907,7 +907,6 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     if isinstance(dynamic_entries, lief.lief_errors):
         return metadata
     for entry in dynamic_entries:
-        # if entry.tag == lief.ELF.DynamicEntry.TAG.NULL:
         if not hasattr(entry, 'name'):
             continue
         if entry.tag in [
