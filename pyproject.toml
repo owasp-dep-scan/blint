@@ -70,3 +70,5 @@ max-line-length = 99
 [tool.pylint.design]
 max-args = 6
 max-nested-blocks = 6
+
+[tool.setuptools_scm]
