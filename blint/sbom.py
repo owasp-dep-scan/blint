@@ -106,7 +106,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_pref
     dependencies_dict = {}
     sbom = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
-        specVersion="1.5",
+        specVersion="1.6",
         version=1,
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )

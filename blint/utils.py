@@ -10,8 +10,8 @@ import zipfile
 from importlib.metadata import distribution
 from pathlib import Path
 
-from ar import Archive
 import lief
+from ar import Archive
 from defusedxml.ElementTree import fromstring, ParseError
 from rich import box
 from rich.table import Table
@@ -23,7 +23,7 @@ from blint.config import (
     fuzzable_names,
     secrets_regex
 )
-from blint.cyclonedx.spec import ComponentEvidence, FieldModel, Identity, Method, Technique
+from blint.cyclonedx.spec import ComponentEvidence, FieldModel, ComponentIdentityEvidence, Method, Technique
 from blint.logger import console, LOG
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
@@ -503,7 +503,7 @@ def create_component_evidence(method_value: str, confidence: float) -> Component
         ComponentEvidence: The created component evidence.
     """
     return ComponentEvidence(
-        identity=Identity(
+        identity=ComponentIdentityEvidence(
             field=FieldModel.purl,
             confidence=confidence,
             methods=[
