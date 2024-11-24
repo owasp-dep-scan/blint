@@ -31,7 +31,6 @@ CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 # Known files compressed with ar
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
-
 def is_base64(s):
     """
     Checks if the given string is a valid Base64 encoded string.
@@ -273,6 +272,17 @@ def find_android_files(path):
     :return: List of android files
     """
     app_extns = [".apk", ".aab"]
+    return find_files(path, app_extns)
+
+
+def find_bom_files(path):
+    """
+    Method to find BOM files
+
+    :param path: Project directory
+    :return: List of bom files
+    """
+    app_extns = ["bom.json", ".cdx.json"]
     return find_files(path, app_extns)
 
 

@@ -69,17 +69,21 @@ sub-commands:
 ### SBOM sub-command
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep]
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]]
+                  [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]]
 
 options:
   -h, --help            show this help message and exit
   -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
   -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
-                        SBOM output file. Defaults to bom.json in current directory.
-  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow
-                        operation.
+                        SBOM output file. Defaults to bom-post-build.cdx.json in current directory.
+  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow operation.
   --stdout              Print the SBOM to stdout instead of a file.
+  --exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]
+                        prefixes for the exports to be included in the SBOM.
+  --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
+                        Directories containing pre-build and build BOMs. Use to improve the precision.
 ```
 
 To test any binary, including default commands
