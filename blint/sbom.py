@@ -249,7 +249,7 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
         comp = Component(
             type=Type.library,
             group=group,
-            name=name.replace(".dll", "") if pkg_type == "nuget" else name,
+            name=name,
             version=version,
             purl=purl,
             evidence=create_component_evidence(symbol["name"], 0.5),
