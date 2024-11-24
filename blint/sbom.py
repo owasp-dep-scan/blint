@@ -52,8 +52,11 @@ def default_parent(src_dirs: list[str]) -> Component:
     # Extract the name from the .rlib files
     if name.endswith(".rlib"):
         name = name.split("-")[0].removeprefix("lib")
-    purl = f"pkg:generic/{name}@latest"
-    component = Component(type=Type.application, name=name, version="latest", purl=purl)
+    pkg_type = "nuget" if name.endswith(".dll") else "generic"
+    if pkg_type == "nuget":
+        name = name.replace(".dll", "")
+    purl = f"pkg:{pkg_type}/{name}"
+    component = Component(type=Type.application, name=name, version=None, purl=purl)
     component.bom_ref = RefType(purl)
     return component
 
@@ -224,7 +227,8 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
     for symbol in symbols_version:
         group = ""
         name = symbol["name"]
-        version = "latest"
+        version = None
+        pkg_type = "nuget" if name.endswith(".dll") else "generic"
         if "_" in name:
             tmp_a = name.split("_")
             if len(tmp_a) == 2:
@@ -233,15 +237,19 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
                 if name.startswith("glib"):
                     name = name.removeprefix("g")
                     group = "gnu"
+        if pkg_type == "nuget":
+            name = name.replace(".dll", "")
         purl = (
-            f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+            f"pkg:{pkg_type}/{group}/{name}" if group else f"pkg:{pkg_type}/{name}"
         )
+        if version:
+            purl = f"{purl}@{version}"
         if symbol.get("hash"):
             purl = f"{purl}?hash={symbol.get('hash')}"
         comp = Component(
             type=Type.library,
             group=group,
-            name=name,
+            name=name.replace(".dll", "") if pkg_type == "nuget" else name,
             version=version,
             purl=purl,
             evidence=create_component_evidence(symbol["name"], 0.5),
