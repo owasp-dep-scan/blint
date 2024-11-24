@@ -106,12 +106,11 @@ def strip_apk_data(data):
     Returns:
         str: The stripped data.
     """
+    parts = data.split("\n")
     if "JAVA_TOOL_OPTIONS" in data:
-        parts = data.split("\n")
         if parts and len(parts) > 0:
             parts.pop(0)
-        return "\n".join(parts)
-    return ""
+    return "\n".join(parts)
 
 
 def collect_version_files_metadata(app_file, app_temp_dir):
@@ -162,11 +161,12 @@ def create_version_component(app_file, group, name, rel_path, version_data):
     Returns:
         Component: A Component object with the provided metadata.
     """
-    if group:
-        purl = f"pkg:maven/{group}/{name}@{version_data}"
-    else:
-        purl = f"pkg:maven/{name}@{version_data}"
     confidence = 1.0
+    if group:
+        purl = f"pkg:maven/{group}/{name}@{version_data}?type=jar"
+    else:
+        purl = f"pkg:maven/{name}@{version_data}?type=jar"
+        confidence = 0.2
     # Adjust the confidence based on the version data
     if version_data in ("latest", "dynamic"):
         confidence = 0.2
