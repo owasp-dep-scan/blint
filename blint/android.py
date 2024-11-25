@@ -414,7 +414,7 @@ def parse_apk_summary(data):
     if data and (parts := data.strip().split("\n")[-1].split("\t")):
         name = parts[0]
         version = parts[-1]
-        purl = f"pkg:apk/{name}@{version}"
+        purl = f"pkg:android/{name}@{version}"
         component = Component(type=Type.application, name=name, version=version, purl=purl)
         component.bom_ref = RefType(purl)
         return component
