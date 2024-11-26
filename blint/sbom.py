@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict
 
+import orjson
 from rich.progress import Progress
 
 from blint.android import collect_app_metadata
@@ -31,17 +32,19 @@ from blint.utils import (
     camel_to_snake,
     create_component_evidence,
     find_android_files,
+    find_bom_files,
     gen_file_list,
     get_version,
 )
 
 
-def default_parent(src_dirs: list[str]) -> Component:
+def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
     """
     Creates a default parent Component object for the given source directories.
 
     Args:
         src_dirs (list[str]): A list of source directories.
+        symbols_purl_map (dict): containing symbol name as the key and purl as the value
 
     Returns:
         Component: A Component object representing the default parent.
@@ -49,11 +52,21 @@ def default_parent(src_dirs: list[str]) -> Component:
     if not src_dirs:
         raise ValueError("No source directories provided")
     name = os.path.basename(src_dirs[0])
+    version = None
     # Extract the name from the .rlib files
     if name.endswith(".rlib"):
         name = name.split("-")[0].removeprefix("lib")
-    purl = f"pkg:generic/{name}@latest"
-    component = Component(type=Type.application, name=name, version="latest", purl=purl)
+    pkg_type = "nuget" if name.endswith(".dll") else "generic"
+    if pkg_type == "nuget":
+        name = name.replace(".dll", "")
+    purl = f"pkg:{pkg_type}/{name}"
+    pkg_type = Type.application
+    if symbols_purl_map and symbols_purl_map.get(purl):
+        purl = symbols_purl_map.get(purl)
+        pkg_type = Type.library
+        if "@" in purl:
+            version = purl.split("@")[-1]
+    component = Component(type=pkg_type, name=name, version=version, purl=purl)
     component.bom_ref = RefType(purl)
     return component
 
@@ -88,7 +101,7 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_prefixes: list[str]) -> bool:
+def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_prefixes: list[str], src_dir_boms: list[str]) -> bool:
     """
     Generates an SBOM for the given source directories.
 
@@ -96,10 +109,14 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_pref
         src_dirs (list): A list of source directories.
         output_file (str): The path to the output file.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
-
+        export_prefixes (list): Prefixes to determine exported symbols.
+        src_dir_boms (list): Directory containing pre-build and build sboms.
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
     """
+    symbols_purl_map = {}
+    if src_dir_boms:
+        symbols_purl_map = populate_purl_lookup(src_dir_boms)
     android_files = []
     components = []
     dependencies = []
@@ -131,7 +148,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_pref
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom, export_prefixes)
+            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom, export_prefixes, symbols_purl_map)
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -143,7 +160,7 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_pref
             components += process_android_file(dependencies_dict, deep_mode, f, sbom)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
-    return create_sbom(components, dependencies, output_file, sbom, deep_mode)
+    return create_sbom(components, dependencies, output_file, sbom, deep_mode, symbols_purl_map)
 
 
 def create_sbom(
@@ -152,6 +169,7 @@ def create_sbom(
     output_file: str,
     sbom: CycloneDX,
     deep_mode: bool,
+    symbols_purl_map: dict
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -163,6 +181,7 @@ def create_sbom(
         output_file (str): The path to the output file.
         sbom: The SBOM object representing the SBOM.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
+        symbols_purl_map (dict): containing symbol name as the key and purl as the value
 
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
@@ -187,7 +206,7 @@ def create_sbom(
     sbom.dependencies = dependencies
     if isinstance(output_file, str):
         LOG.debug(
-            f"SBOM includes {len(components)} components and {len(dependencies)} dependencies",
+            f"SBOM includes {len(sbom.components)} components and {len(sbom.dependencies)} dependencies",
         )
         with open(output_file, mode="w", encoding="utf-8") as fp:
             fp.write(
@@ -224,7 +243,8 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
     for symbol in symbols_version:
         group = ""
         name = symbol["name"]
-        version = "latest"
+        version = None
+        pkg_type = "nuget" if name.endswith(".dll") else "generic"
         if "_" in name:
             tmp_a = name.split("_")
             if len(tmp_a) == 2:
@@ -233,9 +253,13 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
                 if name.startswith("glib"):
                     name = name.removeprefix("g")
                     group = "gnu"
+        if pkg_type == "nuget":
+            name = name.replace(".dll", "")
         purl = (
-            f"pkg:generic/{group}/{name}@{version}" if group else f"pkg:generic/{name}@{version}"
+            f"pkg:{pkg_type}/{group}/{name}" if group else f"pkg:{pkg_type}/{name}"
         )
+        if version:
+            purl = f"{purl}@{version}"
         if symbol.get("hash"):
             purl = f"{purl}?hash={symbol.get('hash')}"
         comp = Component(
@@ -267,6 +291,7 @@ def process_exe_file(
     exe: str,
     sbom: CycloneDX,
     export_prefixes: list[str] = None,
+    symbols_purl_map: dict = None,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
@@ -276,13 +301,15 @@ def process_exe_file(
         deep_mode: A flag indicating whether to include deep analysis of the executable.
         exe: The path to the executable file.
         sbom: The CycloneDX SBOM object.
+        export_prefixes (list): Prefixes to determine exported symbols.
+        symbols_purl_map (dict): containing symbol name as the key and purl as the value
 
     Returns:
         list[Component]: The updated list of components.
 
     """
     metadata: Dict[str, Any] = parse(exe)
-    parent_component: Component = default_parent([exe])
+    parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
     lib_components: list[Component] = []
     for prop in (
@@ -424,7 +451,12 @@ def process_exe_file(
             )
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
-    _add_to_parent_component(sbom.metadata.component.components, parent_component)
+    # Automatically promote application dependencies to the parent
+    if parent_component.type == Type.application:
+        _add_to_parent_component(sbom.metadata.component.components, parent_component)
+    # Library dependencies such as .dll could be moved to lib_components
+    elif parent_component.type == Type.library:
+        lib_components.append(parent_component)
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
             comp = create_library_component(entry, exe)
@@ -459,7 +491,6 @@ def process_exe_file(
         lib_components += rust_components
     if lib_components:
         track_dependency(dependencies_dict, parent_component, lib_components)
-
     return lib_components
 
 
@@ -718,9 +749,11 @@ def track_dependency(
         for acomp in app_components:
             if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
                 dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = set()
-            dependencies_dict[parent_component.bom_ref.model_dump(mode="python")].add(
-                acomp.bom_ref.model_dump(mode="python")
-            )
+            # Prevent self loops
+            if parent_component.bom_ref.model_dump(mode="python") != acomp.bom_ref.model_dump(mode="python"):
+                dependencies_dict[parent_component.bom_ref.model_dump(mode="python")].add(
+                    acomp.bom_ref.model_dump(mode="python")
+                )
     else:
         for acomp in app_components:
             if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
@@ -742,3 +775,32 @@ def trim_components(components: list[Component]) -> list[Component]:
         if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
             added_dict[comp.bom_ref.model_dump(mode="python")] = comp
     return [added_dict[k] for k in sorted(added_dict.keys())]
+
+
+def populate_purl_lookup(src_dir_boms: list[str]):
+    """
+    Create a purl lookup cache by parsing the various BOMs in the given source directory.
+
+    Args:
+        src_dir_boms (list): Directory containing pre-build and build sboms.
+
+    Returns:
+        dict: containing symbol name as the key and purl as the value
+    """
+    symbols_purl_map = {}
+    for adir in src_dir_boms:
+        if files := find_bom_files(adir):
+            for f in files:
+                with open(f) as fp:
+                    try:
+                        bom_obj = orjson.loads(fp.read())
+                        # Ignore non-compatible bom files
+                        if not bom_obj or not bom_obj.get("metadata", {}).get("lifecycles") or not bom_obj.get("components"):
+                            continue
+                        for comp in bom_obj["components"]:
+                            # For nuget, store the unversioned purl as a lookup key
+                            if comp and comp["purl"].startswith("pkg:nuget") and "@" in comp["purl"]:
+                                symbols_purl_map[comp["purl"].split("@")[0]] = comp["purl"]
+                    except orjson.JSONDecodeError:
+                        pass
+    return symbols_purl_map

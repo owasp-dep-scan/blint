@@ -106,12 +106,11 @@ def strip_apk_data(data):
     Returns:
         str: The stripped data.
     """
+    parts = data.split("\n")
     if "JAVA_TOOL_OPTIONS" in data:
-        parts = data.split("\n")
         if parts and len(parts) > 0:
             parts.pop(0)
-        return "\n".join(parts)
-    return ""
+    return "\n".join(parts)
 
 
 def collect_version_files_metadata(app_file, app_temp_dir):
@@ -162,13 +161,14 @@ def create_version_component(app_file, group, name, rel_path, version_data):
     Returns:
         Component: A Component object with the provided metadata.
     """
-    if group:
-        purl = f"pkg:maven/{group}/{name}@{version_data}"
-    else:
-        purl = f"pkg:maven/{name}@{version_data}"
     confidence = 1.0
+    if group:
+        purl = f"pkg:maven/{group}/{name}@{version_data}?type=jar"
+    else:
+        purl = f"pkg:maven/{name}@{version_data}?type=jar"
+        confidence = 0.2
     # Adjust the confidence based on the version data
-    if version_data in ("latest", "dynamic"):
+    if not version_data or version_data in ("latest", "dynamic"):
         confidence = 0.2
     component = Component(
         type=Type.library,
@@ -261,7 +261,9 @@ def parse_so_file(app_file, app_temp_dir, sof):
         for f in so_metadata.get("functions", [])
         if f.get("name") and not f.get("name").startswith("_")
     ]
-    purl = f"pkg:generic/{name}@{version}"
+    purl = f"pkg:android/{name}"
+    if version:
+        purl = f"{purl}@{version}"
     if arch:
         purl = f"{purl}?arch={arch}"
     component = Component(
@@ -282,16 +284,16 @@ def parse_so_file(app_file, app_temp_dir, sof):
     return component
 
 
-def get_so_version(so_metadata_notes):
+def get_so_version(so_metadata_notes) -> str | None:
     """Returns the version of the shared object (SO) file.
 
     Args:
         so_metadata_notes: The metadata notes of the SO file.
 
     Returns:
-        str: The version of the SO file.
+        str | None: The version of the SO file or None.
     """
-    version = "latest"
+    version = None
     for anote in so_metadata_notes:
         if anote.get("version"):
             version = anote.get("version")
@@ -323,7 +325,7 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
         rel_path = os.path.relpath(adex, app_temp_dir)
         group = parent_component.group if parent_component and parent_component.group else ""
         version = (
-            parent_component.version if parent_component and parent_component.version else "latest"
+            parent_component.version if parent_component and parent_component.version else None
         )
         component = create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         file_components.append(component)
@@ -340,12 +342,14 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         group (str): The group of the component.
         name (LiteralString | bytes): The name of the component.
         rel_path (str | LiteralString |bytes): The relative path.
-        version (str): The version of the component.
+        version (str | None): The version of the component.
 
     Returns:
         Component: A Component object representing the DEX file with metadata.
     """
-    purl = f"pkg:generic/{name}@{version}"
+    purl = f"pkg:android/{name}"
+    if version:
+        purl = f"{purl}@{version}"
     comp = Component(
         type=Type.file,
         group=group,
@@ -414,7 +418,7 @@ def parse_apk_summary(data):
     if data and (parts := data.strip().split("\n")[-1].split("\t")):
         name = parts[0]
         version = parts[-1]
-        purl = f"pkg:apk/{name}@{version}"
+        purl = f"pkg:android/{name}@{version}"
         component = Component(type=Type.application, name=name, version=version, purl=purl)
         component.bom_ref = RefType(purl)
         return component

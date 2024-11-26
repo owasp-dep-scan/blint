@@ -95,7 +95,7 @@ def build_args():
         "-o",
         "--output-file",
         dest="sbom_output",
-        help="SBOM output file. Defaults to bom.json in current directory.",
+        help="SBOM output file. Defaults to bom-post-build.cdx.json in current directory.",
     )
     sbom_parser.add_argument(
         "--deep",
@@ -119,6 +119,13 @@ def build_args():
         nargs="+",
         dest="exports_prefix",
         help="prefixes for the exports to be included in the SBOM.",
+    )
+    sbom_parser.add_argument(
+        "--bom-src",
+        dest="src_dir_boms",
+        action="extend",
+        nargs="+",
+        help="Directories containing pre-build and build BOMs. Use to improve the precision.",
     )
     return parser.parse_args()
 
@@ -186,13 +193,13 @@ def main():
             if args.sbom_output:
                 sbom_output = args.sbom_output
                 if os.path.isdir(sbom_output):
-                    sbom_output = os.path.join(sbom_output, "bom.json")
+                    sbom_output = os.path.join(sbom_output, "bom-post-build.cdx.json")
             else:
-                sbom_output = os.path.join(os.getcwd(), "bom.json")
+                sbom_output = os.path.join(os.getcwd(), "bom-post-build.cdx.json")
             sbom_output_dir = os.path.dirname(sbom_output)
             if sbom_output_dir and not os.path.exists(sbom_output_dir):
                 os.makedirs(sbom_output_dir)
-        generate(src_dirs, sbom_output, args.deep_mode, args.exports_prefix)
+        generate(src_dirs, sbom_output, args.deep_mode, args.exports_prefix, args.src_dir_boms)
     # Default case
     else:
         if reports_dir and not os.path.exists(reports_dir):
