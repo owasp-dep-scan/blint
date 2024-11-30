@@ -179,11 +179,7 @@ def handle_args():
             sys.exit(1)
     return args, reports_dir, src_dirs
 
-
-def main():
-    """Main function of the blint tool"""
-    args, reports_dir, src_dirs = handle_args()
-
+def run_blint(args, reports_dir, src_dirs):
     # SBOM command
     if args.subcommand_name == "sbom":
         if args.stdout_mode:
@@ -214,8 +210,13 @@ def main():
         if os.getenv("CI") and not args.noerror:
             for f in findings:
                 if f['severity'] == 'critical':
-                    sys.exit(1)
+                    sys.exit(1)    
 
+def main():
+    """Main function of the blint tool"""
+    args, reports_dir, src_dirs = handle_args()
+
+    run_blint(args, reports_dir, src_dirs)
 
 if __name__ == "__main__":
     main()
