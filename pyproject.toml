@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.3.1"
+version = "2.2.3"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "MIT"
@@ -30,7 +30,7 @@ blint = 'blint.cli:main'
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.14"
-lief = {version="0.16.0.dev0", source="lief-dev"}
+lief = "~0.15.1"
 rich = "^13.7.1"
 PyYAML = "^6.0.1"
 defusedxml = "^0.7.1"
@@ -46,12 +46,6 @@ flake8 = "^7.1.0"
 pylint = "^3.2.6"
 pytest-cov = "^4.1.0"
 pyinstaller = "^6.9.0"
-
-
-[[tool.poetry.source]]
-name = "lief-dev"
-url = "https://lief.s3-website.fr-par.scw.cloud/latest"
-priority = "supplemental"
 
 [tool.black]
 line-length = 99
@@ -76,5 +70,3 @@ max-line-length = 99
 [tool.pylint.design]
 max-args = 6
 max-nested-blocks = 6
-
-[tool.setuptools_scm]
