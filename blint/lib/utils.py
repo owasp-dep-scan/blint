@@ -9,13 +9,17 @@ import tempfile
 import zipfile
 from importlib.metadata import distribution
 from pathlib import Path
+from typing import Dict
 
 import lief
 from ar import Archive
+from custom_json_diff.lib.utils import file_write
 from defusedxml.ElementTree import fromstring, ParseError
+from orjson import orjson
 from rich import box
 from rich.table import Table
 
+from blint.analysis import json_serializer
 from blint.config import (
     ignore_directories,
     ignore_files,
@@ -551,3 +555,12 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                     output.write(archive.open(entry, 'rb').read())
                     files_list.append(afile)
     return files_list
+
+
+def export_metadata(directory: str, metadata: Dict, mtype: str):
+    """
+    Exports metadata to file.
+    """
+    outfile = str(Path(directory) / f"{mtype.lower()}.json")
+    output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
+    file_write(outfile, output, success_msg=f"{mtype} written to {outfile}", log=LOG)
