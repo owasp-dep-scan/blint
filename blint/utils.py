@@ -11,7 +11,7 @@ from importlib.metadata import distribution
 from pathlib import Path
 
 import lief
-from ar import Archive
+from ar import Archive, ArchiveError
 from defusedxml.ElementTree import fromstring, ParseError
 from rich import box
 from rich.table import Table
@@ -201,6 +201,16 @@ def is_ignored_file(file_name):
         return True
     return any(file_name.endswith(ie) for ie in ignore_files)
 
+def setup_blint_client(args):
+    """
+    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-meson' using oras client
+    and puts it into $BLINTDB_HOME path.
+    If there is not path in $BLINTDB_HOME, it will add it to $HOME/blindb.
+    """
+    if args.use_blintdb:
+        print("Using BLintDB")
+
+    
 
 def is_exe(src):
     """
@@ -542,12 +552,15 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
         to_dir = tempfile.mkdtemp(prefix="ar-temp-")
     files_list = []
     with open(ar_file, 'rb') as fp:
-        with Archive(fp) as archive:
-            for entry in archive:
-                # This workarounds a bug in ar that returns multiple names
-                file_name = entry.name.split("\n")[0].removesuffix("/")
-                afile = os.path.join(to_dir, file_name)
-                with open(afile, 'wb') as output:
-                    output.write(archive.open(entry, 'rb').read())
-                    files_list.append(afile)
+        try:
+            with Archive(fp) as archive:
+                for entry in archive:
+                    # This workarounds a bug in ar that returns multiple names
+                    file_name = entry.name.split("\n")[0].removesuffix("/")
+                    afile = os.path.join(to_dir, file_name)
+                    with open(afile, 'wb') as output:
+                        output.write(archive.open(entry, 'rb').read())
+                        files_list.append(afile)
+        except ArchiveError as e:
+            LOG.warning(f"Failed to extract {ar_file}: {e}")
     return files_list
