@@ -9,7 +9,7 @@ import sys
 from blint.analysis import AnalysisRunner, report
 from blint.logger import LOG
 from blint.sbom import generate
-from blint.utils import gen_file_list
+from blint.utils import gen_file_list, blintdb_setup
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
@@ -90,6 +90,20 @@ def build_args():
         nargs="+",
         help="Source directories, container images or binary files. Defaults "
              "to current directory.",
+    )
+    # TODO: what to do should this be default?
+    sbom_parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=True,
+        dest="use_blintdb",
+        help="Use blintdb for symbol resolution.",
+    )
+    # TODO: Please suggest if this location is good
+    sbom_parser.add_argument(
+        "--blintdb-home",
+        dest="blintdb_home",
+        help="Path to blintdb. Defaults to $HOME/blintdb.",
     )
     sbom_parser.add_argument(
         "-o",
@@ -180,9 +194,11 @@ def handle_args():
     return args, reports_dir, src_dirs
 
 
-def main():
+def main():  # sourcery skip: extract-method
     """Main function of the blint tool"""
     args, reports_dir, src_dirs = handle_args()
+
+    blintdb_setup(args)
 
     # SBOM command
     if args.subcommand_name == "sbom":
