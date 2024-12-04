@@ -9,7 +9,7 @@ from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
 from blint.config import BlintOptions
 from blint.logger import LOG
 from blint.lib.sbom import generate
-from blint.lib.utils import gen_file_list
+from blint.lib.utils import gen_file_list, blintdb_setup
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
@@ -104,6 +104,34 @@ def build_parser():
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
+    # TODO: what to do should this be default?
+    sbom_parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=True,
+        dest="use_blintdb",
+        help="Use blintdb for symbol resolution.",
+    )
+    # TODO: Please suggest if this location is good
+    sbom_parser.add_argument(
+        "--blintdb-home",
+        dest="blintdb_home",
+        help="Path to blintdb. Defaults to $HOME/blintdb.",
+    )
+    # TODO: what to do should this be default?
+    sbom_parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=True,
+        dest="use_blintdb",
+        help="Use blintdb for symbol resolution.",
+    )
+    # TODO: Please suggest if this location is good
+    sbom_parser.add_argument(
+        "--blintdb-home",
+        dest="blintdb_home",
+        help="Path to blintdb. Defaults to $HOME/blintdb.",
+    )
     sbom_parser.add_argument(
         "-o",
         "--output-file",
@@ -191,9 +219,11 @@ def handle_args():
     return blint_options
 
 
-def main():
+def main():  # sourcery skip: extract-method
     """Main function of the blint tool"""
     blint_options = handle_args()
+
+    blintdb_setup(blint_options)
 
     # SBOM command
     if blint_options.sbom_mode:

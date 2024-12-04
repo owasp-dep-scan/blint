@@ -35,6 +35,7 @@ from blint.lib.utils import (
     find_bom_files,
     get_version,
 )
+from blint.db import get_bnames_ename
 
 
 def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
@@ -349,6 +350,7 @@ def process_exe_file(
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             )
+        
         internal_functions = sorted(
             {f["name"] for f in metadata.get("functions", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
         )
@@ -415,6 +417,7 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(dynamic_symbols),
                 )
             )
+        
         exported_dynamic_symbols = sorted(
             {f["name"] for f in metadata.get("dynamic_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
         )
@@ -425,6 +428,27 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(exported_dynamic_symbols),
                 )
             )
+        if os.environ.get("USE_BLINTDB", "") in ["1", "true"]:
+            # Here goes the function to call the voting logic
+            # we iterate through each symbol and try to find a match in the database
+            binaries_detected = set()
+            for symbol in metadata.get("dynamic_symbols", []):
+                symbol_name = symbol.get("name")
+                bin_name = get_bnames_ename(symbol_name)
+                binaries_detected.update(bin_name)
+                # TODO: remove this
+                print(bin_name)
+
+            # TODO: Confirm with prabhu and caroline 
+            # adds the components in a similar way to dynamic entries
+            for binary in binaries_detected:
+                entry ={
+                    "name": binary,
+                    "tag": "NEEDED",
+                }
+                comp = create_dynamic_component(entry, exe)
+                lib_components.append(comp)
+
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     # Automatically promote application dependencies to the parent

@@ -26,15 +26,24 @@ from blint.config import (
     ignore_files,
     strings_allowlist,
     fuzzable_names,
-    secrets_regex
+    secrets_regex,
 )
-from blint.cyclonedx.spec import ComponentEvidence, FieldModel, ComponentIdentityEvidence, Method, Technique
+from blint.cyclonedx.spec import (
+    ComponentEvidence,
+    FieldModel,
+    ComponentIdentityEvidence,
+    Method,
+    Technique,
+)
 from blint.logger import console, LOG
+
+import oras.client
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
 # Known files compressed with ar
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
+
 
 def is_base64(s):
     """
@@ -206,16 +215,38 @@ def is_ignored_file(file_name):
         return True
     return any(file_name.endswith(ie) for ie in ignore_files)
 
-def setup_blint_client(args):
+
+def blintdb_setup(args):
     """
     This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-meson' using oras client
-    and puts it into $BLINTDB_HOME path.
-    If there is not path in $BLINTDB_HOME, it will add it to $HOME/blindb.
+    and puts it into $BLINTDB_LOC path.
+    If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     """
-    if args.use_blintdb:
-        print("Using BLintDB")
+    if not args.use_blintdb:
+        LOG.debug("Skipping blintdb setup")
+        return
 
-    
+    os.environ['USE_BLINTDB'] = "true"
+    # TODO: test with ghcr.io/appthreat/blintdb-vdb
+
+    if args.blintdb_home:
+        blintdb_home = args.blintdb_home
+    else:
+        blintdb_home = os.path.join(os.getenv("HOME"), "blintdb")
+        os.environ['BLINTDB_LOC'] = os.path.join(blintdb_home, "blint.db")
+    if not os.path.exists(blintdb_home):
+        os.makedirs(blintdb_home)
+    LOG.debug(f"Downloading blintdb to {blintdb_home}")
+    oras_client = oras.client.OrasClient()
+    oras_client.pull(
+        target="ghcr.io/appthreat/blintdb-meson:v0.1",
+        outdir=blintdb_home,
+        allowed_media_type=[],
+        overwrite=True,
+    )
+    # TODO: remove this print
+    print("")
+
 
 def is_exe(src):
     """
@@ -544,8 +575,8 @@ def create_component_evidence(method_value: str, confidence: float) -> Component
 
 def camel_to_snake(name: str) -> str:
     """Convert camelCase to snake_case"""
-    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
@@ -556,15 +587,15 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
     if not to_dir:
         to_dir = tempfile.mkdtemp(prefix="ar-temp-")
     files_list = []
-    with open(ar_file, 'rb') as fp:
+    with open(ar_file, "rb") as fp:
         try:
             with Archive(fp) as archive:
                 for entry in archive:
                     # This workarounds a bug in ar that returns multiple names
                     file_name = entry.name.split("\n")[0].removesuffix("/")
                     afile = os.path.join(to_dir, file_name)
-                    with open(afile, 'wb') as output:
-                        output.write(archive.open(entry, 'rb').read())
+                    with open(afile, "wb") as output:
+                        output.write(archive.open(entry, "rb").read())
                         files_list.append(afile)
         except ArchiveError as e:
             LOG.warning(f"Failed to extract {ar_file}: {e}")
