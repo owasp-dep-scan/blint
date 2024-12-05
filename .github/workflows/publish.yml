@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/*
       - release/*
     tags:
       - 'v*'
@@ -88,4 +87,3 @@ jobs:
       - name: Release PyPI
         if: startsWith(github.ref, 'refs/tags/')
         uses: pypa/gh-action-pypi-publish@release/v1
-
