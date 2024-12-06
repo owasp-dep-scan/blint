@@ -91,7 +91,7 @@ def build_args():
         help="Source directories, container images or binary files. Defaults "
              "to current directory.",
     )
-    # TODO: what to do should this be default?
+    # blintdb arguments
     sbom_parser.add_argument(
         "--use-blintdb",
         action="store_true",
@@ -99,12 +99,12 @@ def build_args():
         dest="use_blintdb",
         help="Use blintdb for symbol resolution.",
     )
-    # TODO: Please suggest if this location is good
     sbom_parser.add_argument(
         "--blintdb-home",
         dest="blintdb_home",
         help="Path to blintdb. Defaults to $HOME/blintdb.",
     )
+
     sbom_parser.add_argument(
         "-o",
         "--output-file",
@@ -194,7 +194,7 @@ def handle_args():
     return args, reports_dir, src_dirs
 
 
-def main():  # sourcery skip: extract-method
+def main():
     """Main function of the blint tool"""
     args, reports_dir, src_dirs = handle_args()
 
