@@ -7,7 +7,7 @@ import tempfile
 from blint.lib.binary import parse, parse_dex
 from custom_json_diff.lib.utils import file_read
 
-from blint.binary import parse, parse_dex
+from blint.lib.binary import parse, parse_dex
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     Component,

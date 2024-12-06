@@ -38,7 +38,7 @@ pydantic = {version = "^2.8.2", extras = ["email"]}
 orjson = "^3.10.6"
 symbolic = "10.2.1"
 ar = "^0.9.1"
-custom-json-diff = "~2.1.4"
+custom-json-diff = "~2.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"

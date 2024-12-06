@@ -29,7 +29,12 @@ from blint.lib.checks import (
 )
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env
 from blint.logger import LOG, console
-from blint.lib.utils import create_findings_table, is_fuzzable_name, print_findings_table
+from blint.lib.utils import (
+    create_findings_table,
+    is_fuzzable_name,
+    print_findings_table,
+    export_metadata
+)
 
 try:
     import importlib.resources  # pylint: disable=ungrouped-imports

@@ -176,7 +176,6 @@ def create_sbom(
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
     """
-    # Populate the components
     output_dir = os.path.split(output_file)[0]
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
