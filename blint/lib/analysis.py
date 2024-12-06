@@ -319,22 +319,20 @@ def print_reviews_table(reviews, files):
     console.print(table)
 
 
-def report(blint_options, findings, reviews, fuzzables):
+def report(blint_options, exe_files, findings, reviews, fuzzables):
     """Generates a report based on the analysis results.
 
     Args:
-        src_dir: The source directory.
-        reports_dir: The directory to save the reports.
+        blint_options: A BlintOptions object containing settings.
+        exe_files: A list of file names associated with the findings and reviews.
         findings: A list of dictionaries representing the findings.
         reviews: A list of dictionaries representing the reviews.
-        files: A list of file names associated with the findings and reviews.
         fuzzables: A list of fuzzable methods.
 
     """
     if not findings and not reviews:
         LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
         return
-    
     if not os.path.exists(blint_options.reports_dir):
         os.makedirs(blint_options.reports_dir)
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
@@ -343,10 +341,10 @@ def report(blint_options, findings, reviews, fuzzables):
         "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
     }
     if findings:
-        print_findings_table(findings, blint_options.files)
+        print_findings_table(findings, exe_files)
         export_metadata(blint_options.reports_dir, {**common_metadata, "findings": findings}, "Findings")
     if reviews:
-        print_reviews_table(reviews, blint_options.files)
+        print_reviews_table(reviews, exe_files)
         export_metadata(blint_options.reports_dir, {**common_metadata, "reviews": reviews}, "Reviews")
     if fuzzables:
         export_metadata(blint_options.reports_dir, {**common_metadata, "fuzzables": fuzzables}, "Fuzzables")
