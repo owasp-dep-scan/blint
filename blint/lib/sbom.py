@@ -35,7 +35,7 @@ from blint.lib.utils import (
     find_bom_files,
     get_version,
 )
-from blint.db import get_bnames_ename
+from blint.db import detect_binaries_utilized, get_bnames_ename
 
 
 def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
@@ -431,13 +431,26 @@ def process_exe_file(
         if os.environ.get("USE_BLINTDB", "") in ["1", "true"]:
             # Here goes the function to call the voting logic
             # we iterate through each symbol and try to find a match in the database
-            binaries_detected = set()
-            for symbol in metadata.get("dynamic_symbols", []):
-                symbol_name = symbol.get("name")
-                bin_name = get_bnames_ename(symbol_name)
-                binaries_detected.update(bin_name)
-                # TODO: remove this
-                print(bin_name)
+
+            # Voting Alogrithm Start
+            # TODO: try out different versions and find the best
+            # dynamic_symbols, symtab_symbols, functions
+            dynamic_symbols_list = metadata.get("dynamic_symbols", [])
+            binaries_detected = detect_binaries_utilized(dynamic_symbols_list)
+            # symtab_symbols_list = metadata.get("symtab_symbols", [])
+            # binaries_detected = detect_binaries_utilized(symtab_symbols_list)
+            # function_list = metadata.get("functions", [])
+            # binaries_detected = detect_binaries_utilized(function_list)
+            
+
+            # Naive Aglorithm
+            # binaries_detected = set()
+            # for symbol in metadata.get("dynamic_symbols", []):
+            #     symbol_name = symbol.get("name")
+            #     bin_name = get_bnames_ename(symbol_name)
+            #     binaries_detected.update(bin_name)
+            #     # TODO: remove this
+            #     print(bin_name)
 
             # TODO: Confirm with prabhu and caroline 
             # adds the components in a similar way to dynamic entries

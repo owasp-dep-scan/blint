@@ -218,7 +218,7 @@ def is_ignored_file(file_name):
 
 def blintdb_setup(args):
     """
-    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-meson' using oras client
+    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg' using oras client
     and puts it into $BLINTDB_LOC path.
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     """
@@ -226,6 +226,7 @@ def blintdb_setup(args):
         LOG.debug("Skipping blintdb setup")
         return
 
+    # TODO: remove this the users sets it not us
     os.environ['USE_BLINTDB'] = "true"
     # TODO: test with ghcr.io/appthreat/blintdb-vdb
 
@@ -238,12 +239,14 @@ def blintdb_setup(args):
         os.makedirs(blintdb_home)
     LOG.debug(f"Downloading blintdb to {blintdb_home}")
     oras_client = oras.client.OrasClient()
-    oras_client.pull(
-        target="ghcr.io/appthreat/blintdb-meson:v0.1",
-        outdir=blintdb_home,
-        allowed_media_type=[],
-        overwrite=True,
-    )
+
+    # TODO: dont pull if already there
+    # oras_client.pull(
+    #     target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
+    #     outdir=blintdb_home,
+    #     allowed_media_type=[],
+    #     overwrite=True,
+    # )
     # TODO: remove this print
     print("")
 
