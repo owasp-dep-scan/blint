@@ -7,6 +7,8 @@ import os
 import sys
 
 from blint.lib.analysis import AnalysisRunner, report
+from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
+from blint.config import BlintOptions
 from blint.logger import LOG
 from blint.lib.sbom import generate
 from blint.lib.utils import gen_file_list
@@ -25,6 +27,11 @@ def build_args():
     """
     Constructs command line arguments for the blint tool
     """
+    parser = build_parser()
+    return parser.parse_args()
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         prog="blint",
         description="Binary linter and SBOM generator.",
@@ -88,8 +95,7 @@ def build_args():
         dest="src_dir_image",
         action="extend",
         nargs="+",
-        help="Source directories, container images or binary files. Defaults "
-             "to current directory.",
+        help="Source directories, container images or binary files. Defaults to current directory.",
     )
     sbom_parser.add_argument(
         "-o",
@@ -127,7 +133,8 @@ def build_args():
         nargs="+",
         help="Directories containing pre-build and build BOMs. Use to improve the precision.",
     )
-    return parser.parse_args()
+    
+    return parser
 
 
 def parse_input(src):
@@ -153,68 +160,40 @@ def parse_input(src):
 def handle_args():
     """Handles the command-line arguments.
 
-    This function parses the command-line arguments and returns the parsed
-    arguments, reports directory, and source directory.
+    This function parses the command-line arguments and returns a BlintOptions object
 
     Returns:
-        tuple: A tuple containing the parsed arguments, reports directory, and
-               source directory.
+        BlintOptions: A class containing the parsed command-line arguments
     """
     args = build_args()
     if not args.no_banner and args.subcommand_name != "sbom":
         print(BLINT_LOGO)
-    if not args.src_dir_image:
-        args.src_dir_image = [os.getcwd()]
-    if not os.getenv("CI"):
-        src_dirs = args.src_dir_image
-    else:
-        src_dirs = parse_input(args.src_dir_image)
-
-    # Create reports directory
-    reports_dir = args.reports_dir
-
-    for src in src_dirs:
-        if not os.path.exists(src):
-            LOG.error(f"{src} is an invalid file or directory!")
-            sys.exit(1)
-    return args, reports_dir, src_dirs
+    blint_options = BlintOptions(
+        deep_mode=args.deep_mode,
+        exports_prefix=args.exports_prefix,
+        fuzzy=args.suggest_fuzzable,
+        no_error=args.noerror,
+        no_reviews=args.no_reviews,
+        reports_dir=args.reports_dir,
+        sbom_mode=args.sbom_mode,
+        sbom_output=args.sbom_output,
+        src_dir_boms=args.src_dir_boms,
+        src_dir_image=args.src_dir_image,
+        stdout_mode=args.stdout_mode
+    )
+    return blint_options
 
 
 def main():
     """Main function of the blint tool"""
-    args, reports_dir, src_dirs = handle_args()
+    blint_options = handle_args()
 
     # SBOM command
-    if args.subcommand_name == "sbom":
-        if args.stdout_mode:
-            sbom_output = sys.stdout
-            LOG.setLevel(logging.ERROR)
-        else:
-            if args.sbom_output:
-                sbom_output = args.sbom_output
-                if os.path.isdir(sbom_output):
-                    sbom_output = os.path.join(sbom_output, "bom-post-build.cdx.json")
-            else:
-                sbom_output = os.path.join(os.getcwd(), "bom-post-build.cdx.json")
-            sbom_output_dir = os.path.dirname(sbom_output)
-            if sbom_output_dir and not os.path.exists(sbom_output_dir):
-                os.makedirs(sbom_output_dir)
-        generate(src_dirs, sbom_output, args.deep_mode, args.exports_prefix, args.src_dir_boms)
+    if blint_options.sbom_mode:
+        run_sbom_mode(blint_options)
     # Default case
     else:
-        if reports_dir and not os.path.exists(reports_dir):
-            os.makedirs(reports_dir)
-        files = gen_file_list(src_dirs)
-        analyzer = AnalysisRunner()
-        findings, reviews, fuzzables = analyzer.start(
-            files, reports_dir, args.no_reviews, args.suggest_fuzzable
-        )
-        report(src_dirs, reports_dir, findings, reviews, files, fuzzables)
-
-        if os.getenv("CI") and not args.noerror:
-            for f in findings:
-                if f['severity'] == 'critical':
-                    sys.exit(1)
+        run_default_mode(blint_options)
 
 
 if __name__ == "__main__":

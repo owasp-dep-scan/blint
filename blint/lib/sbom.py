@@ -32,9 +32,7 @@ from blint.logger import LOG
 from blint.lib.utils import (
     camel_to_snake,
     create_component_evidence,
-    find_android_files,
     find_bom_files,
-    gen_file_list,
     get_version,
 )
 
@@ -102,23 +100,20 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_prefixes: list[str], src_dir_boms: list[str]) -> bool:
+def generate(blint_options, exe_files, android_files) -> bool:
     """
     Generates an SBOM for the given source directories.
 
     Args:
-        src_dirs (list): A list of source directories.
-        output_file (str): The path to the output file.
-        deep_mode (bool): Flag indicating whether to perform deep analysis.
-        export_prefixes (list): Prefixes to determine exported symbols.
-        src_dir_boms (list): Directory containing pre-build and build sboms.
+        blint_options (BlintOptions): A BlintOptions object containing the SBOM generation options.
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
     """
+    if not android_files and not exe_files:
+        return False
     symbols_purl_map = {}
-    if src_dir_boms:
-        symbols_purl_map = populate_purl_lookup(src_dir_boms)
-    android_files = []
+    if blint_options.src_dir_boms:
+        symbols_purl_map = populate_purl_lookup(blint_options.src_dir_boms)
     components = []
     dependencies = []
     dependencies_dict = {}
@@ -128,40 +123,34 @@ def generate(src_dirs: list[str], output_file: str, deep_mode: bool, export_pref
         version=1,
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )
-    sbom.metadata = default_metadata(src_dirs)
-    exe_files = gen_file_list(src_dirs)
-    for src in src_dirs:
-        if files := find_android_files(src):
-            android_files += files
-    if not android_files and not exe_files:
-        return False
+    sbom.metadata = default_metadata(blint_options.src_dir_image)
     with Progress(
         transient=True,
         redirect_stderr=True,
         redirect_stdout=True,
         refresh_per_second=1,
     ) as progress:
-        if exe_files:
+        if blint_options.exe_files:
             task = progress.add_task(
-                f"[green] Parsing {len(exe_files)} binaries",
-                total=len(exe_files),
+                f"[green] Parsing {len(blint_options.exe_files)} binaries",
+                total=len(blint_options.exe_files),
                 start=True,
             )
-        for exe in exe_files:
+        for exe in blint_options.exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components += process_exe_file(dependencies_dict, deep_mode, exe, sbom, export_prefixes, symbols_purl_map)
-        if android_files:
+            components += process_exe_file(dependencies_dict, blint_options.deep_mode, exe, sbom, blint_options.export_prefixes, symbols_purl_map)
+        if blint_options.android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
                 total=len(android_files),
                 start=True,
             )
-        for f in android_files:
+        for f in blint_options.android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components += process_android_file(dependencies_dict, deep_mode, f, sbom)
+            components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
-    return create_sbom(components, dependencies, output_file, sbom, deep_mode, symbols_purl_map)
+    return create_sbom(components, dependencies, blint_options.sbom_output, sbom, blint_options.deep_mode, symbols_purl_map)
 
 
 def create_sbom(
@@ -187,6 +176,10 @@ def create_sbom(
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
     """
+    # Populate the components
+    output_dir = os.path.split(output_file)[0]
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     # Populate the components
     sbom.components = trim_components(components)
     # If we have only one parent component then promote it to metadata.component
