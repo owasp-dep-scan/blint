@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 import orjson
+from custom_json_diff.lib.utils import file_read, file_write
 from rich.progress import Progress
 
 from blint.lib.android import collect_app_metadata
@@ -204,28 +205,11 @@ def create_sbom(
             )
     # Populate the dependencies
     sbom.dependencies = dependencies
-    if isinstance(output_file, str):
-        LOG.debug(
-            f"SBOM includes {len(sbom.components)} components and {len(sbom.dependencies)} dependencies",
-        )
-        with open(output_file, mode="w", encoding="utf-8") as fp:
-            fp.write(
-                sbom.model_dump_json(
-                    indent=None if deep_mode else 2,
-                    exclude_none=True,
-                    exclude_defaults=True,
-                    warnings=False,
-                    by_alias=True,
-                )
-            )
-            LOG.debug(f"SBOM file generated successfully at {output_file}")
-    else:
-        output_file.write(
-            sbom.model_dump_json(
-                indent=2, exclude_none=True, exclude_defaults=True, warnings=False, by_alias=True
-            )
-        )
-    return True
+    LOG.debug(f"SBOM includes {len(sbom.components)} components and {len(sbom.dependencies)} dependencies")
+    file_write(output_file, sbom.model_dump_json(
+        indent=None if deep_mode else 2, exclude_none=True, exclude_defaults=True, warnings=False,
+        by_alias=True), log=LOG)
+    return os.path.exists(output_file)
 
 
 def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
@@ -791,16 +775,16 @@ def populate_purl_lookup(src_dir_boms: list[str]):
     for adir in src_dir_boms:
         if files := find_bom_files(adir):
             for f in files:
-                with open(f) as fp:
-                    try:
-                        bom_obj = orjson.loads(fp.read())
-                        # Ignore non-compatible bom files
-                        if not bom_obj or not bom_obj.get("metadata", {}).get("lifecycles") or not bom_obj.get("components"):
-                            continue
-                        for comp in bom_obj["components"]:
-                            # For nuget, store the unversioned purl as a lookup key
-                            if comp and comp["purl"].startswith("pkg:nuget") and "@" in comp["purl"]:
-                                symbols_purl_map[comp["purl"].split("@")[0]] = comp["purl"]
-                    except orjson.JSONDecodeError:
-                        pass
+                fdata = file_read(f)
+                try:
+                    bom_obj = orjson.loads(fdata)
+                    # Ignore non-compatible bom files
+                    if not bom_obj or not bom_obj.get("metadata", {}).get("lifecycles") or not bom_obj.get("components"):
+                        continue
+                    for comp in bom_obj["components"]:
+                        # For nuget, store the unversioned purl as a lookup key
+                        if comp and comp["purl"].startswith("pkg:nuget") and "@" in comp["purl"]:
+                            symbols_purl_map[comp["purl"].split("@")[0]] = comp["purl"]
+                except orjson.JSONDecodeError:
+                    LOG.debug(f"Unable to parse {f}")
     return symbols_purl_map
