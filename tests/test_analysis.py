@@ -1,7 +1,8 @@
 import orjson
 from pathlib import Path
 
-from blint.analysis import ReviewRunner, run_checks
+from blint.analysis import run_checks
+from blint.lib.runners import ReviewRunner
 
 
 def test_gobinary():

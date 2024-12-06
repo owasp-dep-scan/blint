@@ -1,6 +1,10 @@
 # pylint: disable=too-many-lines
+import sys
+from dataclasses import dataclass, field
 import os
 import re
+from typing import List
+
 
 # Default ignore list
 ignore_directories = [
@@ -1267,6 +1271,56 @@ def get_int_from_env(name, default):
     """
     return int(get_float_from_env(name, default))
 
+
+@dataclass
+class BlintOptions:
+    """
+    A data class representing the command-line options for the blint tool.
+
+    Attributes:
+        deep_mode (bool): Flag indicating whether to perform deep analysis.
+        exports_prefix (list): Prefixes to determine exported symbols.
+        fuzzy (bool): Flag indicating whether to perform fuzzy analysis.
+        no_error (bool): Flag indicating whether to suppress error messages.
+        no_reviews (bool): Flag indicating whether to perform symbol reviews.
+        reports_dir (str): The path to the reports directory.
+        sbom_mode (bool): Flag indicating whether to perform SBOM analysis.
+        src_dir_image (list): A list of source directories.
+        sbom_output (str): The path to the output file.
+        deep_mode (bool): Flag indicating whether to perform deep analysis.
+        export_prefixes (list): Prefixes to determine exported symbols.
+        src_dir_boms (list): Directory containing pre-build and build sboms.
+    """
+    deep_mode: bool = False
+    exports_prefix: List = field(default_factory=list)
+    fuzzy: bool = False
+    no_error: bool = False
+    no_reviews: bool = False
+    reports_dir: str = ""
+    sbom_mode: bool = False
+    sbom_output: str = ""
+    sbom_output_dir: str = ""
+    src_dir_boms: List = field(default_factory=list)
+    src_dir_image: List = field(default_factory=list)
+    stdout_mode: bool = False
+    
+    def __post_init__(self):
+        if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
+            self.sources = [os.getcwd()]
+        if not self.reports_dir:
+            self.reports_dir = os.getcwd()
+        if self.sbom_mode:
+            if self.stdout_mode:
+                self.sbom_output = sys.stdout
+            elif not self.sbom_output:
+                self.sbom_output = os.path.join(self.reports_dir, "bom-post-build.cdx.json")
+                self.sbom_output_dir = os.path.join(self.reports_dir)
+            elif os.path.isdir(self.sbom_output):
+                self.sbom_output_dir = self.sbom_output
+                self.sbom_output = os.path.join(self.sbom_output, "bom-post-build.cdx.json")
+            else:
+                self.sbom_output_dir = os.path.dirname(self.sbom_output)
+        
 
 # PII related symbols
 PII_WORDS = (
