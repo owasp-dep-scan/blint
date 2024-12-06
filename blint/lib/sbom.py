@@ -428,31 +428,12 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(exported_dynamic_symbols),
                 )
             )
+        # If USER_BLINTDB is "1" or "true", then match components with database
         if os.environ.get("USE_BLINTDB", "") in ["1", "true"]:
-            # Here goes the function to call the voting logic
+            # utilize voting logic along with blitndb
             # we iterate through each symbol and try to find a match in the database
-
-            # Voting Alogrithm Start
-            # TODO: try out different versions and find the best
-            # dynamic_symbols, symtab_symbols, functions
             dynamic_symbols_list = metadata.get("dynamic_symbols", [])
             binaries_detected = detect_binaries_utilized(dynamic_symbols_list)
-            # symtab_symbols_list = metadata.get("symtab_symbols", [])
-            # binaries_detected = detect_binaries_utilized(symtab_symbols_list)
-            # function_list = metadata.get("functions", [])
-            # binaries_detected = detect_binaries_utilized(function_list)
-            
-
-            # Naive Aglorithm
-            # binaries_detected = set()
-            # for symbol in metadata.get("dynamic_symbols", []):
-            #     symbol_name = symbol.get("name")
-            #     bin_name = get_bnames_ename(symbol_name)
-            #     binaries_detected.update(bin_name)
-            #     # TODO: remove this
-            #     print(bin_name)
-
-            # TODO: Confirm with prabhu and caroline 
             # adds the components in a similar way to dynamic entries
             for binary in binaries_detected:
                 entry ={
@@ -461,7 +442,6 @@ def process_exe_file(
                 }
                 comp = create_dynamic_component(entry, exe)
                 lib_components.append(comp)
-
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     # Automatically promote application dependencies to the parent

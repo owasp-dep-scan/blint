@@ -118,7 +118,7 @@ def build_parser():
         dest="blintdb_home",
         help="Path to blintdb. Defaults to $HOME/blintdb.",
     )
-    # TODO: what to do should this be default?
+    # blintdb arguments
     sbom_parser.add_argument(
         "--use-blintdb",
         action="store_true",
@@ -126,12 +126,12 @@ def build_parser():
         dest="use_blintdb",
         help="Use blintdb for symbol resolution.",
     )
-    # TODO: Please suggest if this location is good
     sbom_parser.add_argument(
         "--blintdb-home",
         dest="blintdb_home",
         help="Path to blintdb. Defaults to $HOME/blintdb.",
     )
+
     sbom_parser.add_argument(
         "-o",
         "--output-file",
@@ -219,7 +219,7 @@ def handle_args():
     return blint_options
 
 
-def main():  # sourcery skip: extract-method
+def main():
     """Main function of the blint tool"""
     blint_options = handle_args()
 

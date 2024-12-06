@@ -12,15 +12,20 @@ from rich.progress import Progress
 import concurrent
 
 def get_bnames_ename(symbols_name):
+    """
+    Older algorithm with many false positives
+    """
     bin_name = []
     eid = get_export_id(symbols_name)
     bid_list = get_bid_using_fid(eid)
     if bid_list:
-        # TODO: voting algorithm goes here
         bin_name.extend(get_bname(bid) for bid in bid_list)
     return bin_name
 
 def return_binaries_detected(eid):
+    """
+    New scoring algorithm
+    """
     binaries_detected_dict = {}
     bid_list = get_bid_using_fid(eid)
     if not bid_list:
@@ -53,15 +58,9 @@ def detect_binaries_utilized(sybmols_list) -> set:
                     bin_detected_dict[fname] += score
                 else:
                     bin_detected_dict[fname] = score
-            # TODO: remove these
-            # print(f"completed for: {single_eid}")
 
-    # create a 
+    # create a set() and remove false positives
     binary_detected = {bname for bname, score in bin_detected_dict.items() if score > 1}
-
-    # TODO: remove
-    for b in binary_detected:
-        print(f"{b}: {bin_detected_dict[b]}")
     
     return binary_detected
 
