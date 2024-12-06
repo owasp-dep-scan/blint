@@ -34,6 +34,14 @@ def build_parser():
         prog="blint",
         description="Binary linter and SBOM generator.",
     )
+    parser.set_defaults(
+        deep_mode=False,
+        sbom_output="",
+        stdout_mode=False,
+        exports_prefix=[],
+        src_dir_boms=[],
+        sbom_mode=False
+    )
     parser.add_argument(
         "-i",
         "--src",
