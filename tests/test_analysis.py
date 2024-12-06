@@ -1,7 +1,7 @@
 import orjson
 from pathlib import Path
 
-from blint.analysis import run_checks
+from blint.lib.analysis import run_checks
 from blint.lib.runners import ReviewRunner
 
 

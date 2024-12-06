@@ -6,7 +6,7 @@ import tempfile
 
 from custom_json_diff.lib.utils import file_read
 
-from blint.binary import parse, parse_dex
+from blint.lib.binary import parse, parse_dex
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     Component,
@@ -16,7 +16,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import check_command, create_component_evidence, find_files, unzip_unsafe
+from blint.lib.utils import check_command, create_component_evidence, find_files, unzip_unsafe
 
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")

@@ -13,7 +13,7 @@ import yaml
 from rich.terminal_theme import MONOKAI
 
 # pylint: disable-next=unused-import
-from blint.checks import (
+from blint.lib.checks import (
     check_nx,
     check_pie,
     check_relro,
@@ -27,7 +27,7 @@ from blint.checks import (
 )
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env
 from blint.logger import LOG, console
-from blint.utils import (
+from blint.lib.utils import (
     create_findings_table,
     is_fuzzable_name,
     print_findings_table,

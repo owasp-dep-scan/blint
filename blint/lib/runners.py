@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 
 from rich.progress import Progress
-from blint.analysis import (
+from blint.lib.analysis import (
     EVIDENCE_LIMIT,
     report,
     review_entries_dict, review_exe_dict,
@@ -13,10 +13,10 @@ from blint.analysis import (
     review_rules_cache, review_symbols_dict, run_checks,
     run_prefuzz
 )
-from blint.binary import parse
+from blint.lib.binary import parse
 from blint.logger import LOG
-from blint.sbom import generate
-from blint.utils import export_metadata, find_android_files, gen_file_list
+from blint.lib.sbom import generate
+from blint.lib.utils import export_metadata, find_android_files, gen_file_list
 
 
 def run_sbom_mode(blint_options):

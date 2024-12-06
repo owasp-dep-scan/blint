@@ -10,8 +10,8 @@ import orjson
 from custom_json_diff.lib.utils import file_read, file_write
 from rich.progress import Progress
 
-from blint.android import collect_app_metadata
-from blint.binary import parse
+from blint.lib.android import collect_app_metadata
+from blint.lib.binary import parse
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     BomFormat,
@@ -29,7 +29,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import (
+from blint.lib.utils import (
     camel_to_snake,
     create_component_evidence,
     find_bom_files,
@@ -176,7 +176,6 @@ def create_sbom(
     Returns:
         bool: True if the SBOM generation is successful, False otherwise.
     """
-    # Populate the components
     output_dir = os.path.split(output_file)[0]
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

@@ -2,16 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import logging
 import os
-import sys
 
-from blint.analysis import report
-from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
+from blint.lib.runners import run_default_mode, run_sbom_mode
 from blint.config import BlintOptions
-from blint.logger import LOG
-from blint.sbom import generate
-from blint.utils import gen_file_list
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
