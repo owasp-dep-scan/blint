@@ -134,16 +134,15 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         name = ""
         if "_" in file_name:
             group, name = parse_file_name(file_name, group)
-        with open(vf, encoding="utf-8") as fp:
-            version_data = fp.read().strip()
-            # Sometimes the version data could be dynamic. Eg:
-            #   task ':lifecycle:lifecycle-viewmodel:writeVersionFile' property 'version'"
-            # These can be treated as dynamic
-            if version_data and version_data.startswith("task"):
+        # Sometimes the version data could be dynamic. Eg:
+        #   task ':lifecycle:lifecycle-viewmodel:writeVersionFile' property 'version'"
+        # These can be treated as dynamic
+        if version_data := file_read(vf, False, log=LOG).strip():
+            if version_data.startswith("task"):
                 version_data = "dynamic"
-        if name and version_data:
-            component = create_version_component(app_file, group, name, rel_path, version_data)
-            file_components.append(component)
+            if name:
+                component = create_version_component(app_file, group, name, rel_path, version_data)
+                file_components.append(component)
     return file_components
 
 
