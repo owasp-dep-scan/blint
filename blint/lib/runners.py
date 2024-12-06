@@ -61,7 +61,7 @@ class AnalysisRunner:
         self.task = None
         self.reviewer = None
 
-    def start(self, blint_options):
+    def start(self, blint_options, exe_files):
         """Starts the analysis process for the given source files.
 
         This function takes the command-line arguments and the reports
@@ -80,11 +80,11 @@ class AnalysisRunner:
         """
         with self.progress:
             self.task = self.progress.add_task(
-                f"[green] BLinting {len(blint_options.files)} binaries",
-                total=len(blint_options.files),
+                f"[green] BLinting {len(exe_files)} binaries",
+                total=len(exe_files),
                 start=True,
             )
-            for f in blint_options.files:
+            for f in exe_files:
                 self._process_files(f, blint_options)
         return self.findings, self.reviews, self.fuzzables
 
