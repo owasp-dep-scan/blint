@@ -4,7 +4,9 @@ import subprocess
 import sys
 import tempfile
 
-from blint.binary import parse, parse_dex
+from custom_json_diff.lib.utils import file_read
+
+from blint.lib.binary import parse, parse_dex
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     Component,
@@ -14,7 +16,8 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import check_command, create_component_evidence, find_files, unzip_unsafe
+from blint.lib.utils import check_command, create_component_evidence, find_files, unzip_unsafe
+
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
@@ -134,16 +137,15 @@ def collect_version_files_metadata(app_file, app_temp_dir):
         name = ""
         if "_" in file_name:
             group, name = parse_file_name(file_name, group)
-        with open(vf, encoding="utf-8") as fp:
-            version_data = fp.read().strip()
-            # Sometimes the version data could be dynamic. Eg:
-            #   task ':lifecycle:lifecycle-viewmodel:writeVersionFile' property 'version'"
-            # These can be treated as dynamic
-            if version_data and version_data.startswith("task"):
+        # Sometimes the version data could be dynamic. Eg:
+        #   task ':lifecycle:lifecycle-viewmodel:writeVersionFile' property 'version'"
+        # These can be treated as dynamic
+        if version_data := file_read(vf, False, log=LOG).strip():
+            if version_data.startswith("task"):
                 version_data = "dynamic"
-        if name and version_data:
-            component = create_version_component(app_file, group, name, rel_path, version_data)
-            file_components.append(component)
+            if name:
+                component = create_version_component(app_file, group, name, rel_path, version_data)
+                file_components.append(component)
     return file_components
 
 
