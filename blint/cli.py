@@ -139,26 +139,6 @@ def build_parser():
     return parser
 
 
-def parse_input(src):
-    """Parses the input source.
-
-    This function takes the input source as a list and parses it to extract the
-    path. It returns the parsed path as a list.
-
-    Args:
-        src: A list containing the input source.
-
-    Returns:
-        list: A list containing the parsed path.
-    """
-    if isinstance(src, list):
-        path = src[0]
-        result = path.split("\n")
-        result = [res for res in result if os.path.exists(res)]
-        return result
-    return [src]
-
-
 def handle_args():
     """Handles the command-line arguments.
 

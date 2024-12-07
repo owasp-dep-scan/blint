@@ -576,5 +576,4 @@ def json_serializer(obj):
             return obj.decode("utf-8")
         except UnicodeDecodeError:
             return ""
-
     return obj

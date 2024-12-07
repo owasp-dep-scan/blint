@@ -10,6 +10,8 @@ from itertools import islice
 from pathlib import Path
 
 import yaml
+from custom_json_diff.lib.utils import file_write
+from orjson import orjson
 from rich.terminal_theme import MONOKAI
 
 # pylint: disable-next=unused-import
@@ -30,7 +32,7 @@ from blint.logger import LOG, console
 from blint.lib.utils import (
     create_findings_table,
     is_fuzzable_name,
-    print_findings_table,
+    json_serializer, print_findings_table,
     export_metadata
 )
 
@@ -340,12 +342,24 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
     }
     if findings:
         print_findings_table(findings, exe_files)
-        export_metadata(blint_options.reports_dir, {**common_metadata, "findings": findings}, "Findings")
+        output = orjson.dumps(
+            {**common_metadata, "findings": findings}, default=json_serializer
+        ).decode("utf-8", "ignore")
+        file_write(f"{Path(blint_options.reports_dir)/'findings.json'}", output, log=LOG)
+        # export_metadata(blint_options.reports_dir, {**common_metadata, "findings": findings}, "Findings")
     if reviews:
         print_reviews_table(reviews, exe_files)
-        export_metadata(blint_options.reports_dir, {**common_metadata, "reviews": reviews}, "Reviews")
+        output = orjson.dumps(
+            {**common_metadata, "reviews": reviews}, default=json_serializer
+        ).decode("utf-8", "ignore")
+        file_write(f"{Path(blint_options.reports_dir)/'reviews.json'}", output, log=LOG)
+        # export_metadata(blint_options.reports_dir, {**common_metadata, "reviews": reviews}, "Reviews")
     if fuzzables:
-        export_metadata(blint_options.reports_dir, {**common_metadata, "fuzzables": fuzzables}, "Fuzzables")
+        output = orjson.dumps(
+            {**common_metadata, "fuzzables": fuzzables}, default=json_serializer
+        ).decode("utf-8", "ignore")
+        file_write(f"{Path(blint_options.reports_dir)/'fuzzables.json'}", output, log=LOG)
+        # export_metadata(blint_options.reports_dir, {**common_metadata, "fuzzables": fuzzables}, "Fuzzables")
     else:
         LOG.debug("No suggestion available for fuzzing")
     # Try console output as html

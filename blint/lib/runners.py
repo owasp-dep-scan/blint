@@ -3,7 +3,10 @@ import os
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
 
+from custom_json_diff.lib.utils import file_write
+from orjson import orjson
 from rich.progress import Progress
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
@@ -16,7 +19,7 @@ from blint.lib.analysis import (
 from blint.lib.binary import parse
 from blint.logger import LOG
 from blint.lib.sbom import generate
-from blint.lib.utils import export_metadata, find_android_files, gen_file_list
+from blint.lib.utils import export_metadata, find_android_files, gen_file_list, json_serializer
 
 
 def run_sbom_mode(blint_options):
@@ -102,7 +105,11 @@ class AnalysisRunner:
         metadata = parse(f)
         exe_name = metadata.get("name", "")
         # Store raw metadata
-        export_metadata(blint_options.reports_dir, metadata, f"{os.path.basename(exe_name)}-metadata")
+        metadata_file = Path(blint_options.reports_dir) / f"{os.path.basename(exe_name)}" f"-metadata.json"
+        LOG.debug(f"Metadata written to {metadata_file}")
+        output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
+        file_write(metadata_file, output, log=LOG)
+        # export_metadata(blint_options.reports_dir, metadata, f"{os.path.basename(exe_name)}-metadata")
         self.progress.update(self.task, description=f"Checking [bold]{f}[/bold] against rules")
         if finding := run_checks(f, metadata):
             self.findings += finding
