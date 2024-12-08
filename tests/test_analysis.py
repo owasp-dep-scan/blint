@@ -1,12 +1,11 @@
 import orjson
 from pathlib import Path
 
-from blint.analysis import ReviewRunner, run_checks
+from blint.lib.analysis import ReviewRunner, run_checks
 
 
 def test_gobinary():
     test_go_file = Path(__file__).parent / "data" / "ngrok-elf.json"
-    # test_go_file = Path('C:\\Users\\user\\PycharmProjects\\blint\\tests\\data\\ngrok-elf.json')
     with open(test_go_file) as fp:
         file_content = fp.read()
     metadata = orjson.loads(file_content)
@@ -21,7 +20,6 @@ def test_gobinary():
 
 def test_genericbinary():
     test_gnu_file = Path(__file__).parent / "data" / "netstat-elf.json"
-    # test_gnu_file = Path('data/netstat-elf.json')
     with open(test_gnu_file) as fp:
         file_content = fp.read()
     metadata = orjson.loads(file_content)
