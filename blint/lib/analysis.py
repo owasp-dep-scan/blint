@@ -14,10 +14,10 @@ import yaml
 from rich.progress import Progress
 from rich.terminal_theme import MONOKAI
 
-from blint.binary import parse
+from blint.lib.binary import parse
 
 # pylint: disable-next=unused-import
-from blint.checks import (
+from blint.lib.checks import (
     check_nx,
     check_pie,
     check_relro,
@@ -31,7 +31,7 @@ from blint.checks import (
 )
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env
 from blint.logger import LOG, console
-from blint.utils import create_findings_table, is_fuzzable_name, print_findings_table
+from blint.lib.utils import create_findings_table, is_fuzzable_name, print_findings_table
 
 try:
     import importlib.resources  # pylint: disable=ungrouped-imports

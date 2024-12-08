@@ -2,7 +2,7 @@ import os
 import pytest
 import sys
 
-from blint.binary import demangle_symbolic_name, parse
+from blint.lib.binary import demangle_symbolic_name, parse
 
 
 def test_parse():

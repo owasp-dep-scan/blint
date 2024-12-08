@@ -9,8 +9,8 @@ from typing import Any, Dict
 import orjson
 from rich.progress import Progress
 
-from blint.android import collect_app_metadata
-from blint.binary import parse
+from blint.lib.android import collect_app_metadata
+from blint.lib.binary import parse
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
     BomFormat,
@@ -28,7 +28,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.logger import LOG
-from blint.utils import (
+from blint.lib.utils import (
     camel_to_snake,
     create_component_evidence,
     find_android_files,

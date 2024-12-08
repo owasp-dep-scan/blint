@@ -11,7 +11,7 @@ import lief
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_float_from_env, get_int_from_env
 from blint.logger import DEBUG, LOG
-from blint.utils import (
+from blint.lib.utils import (
     camel_to_snake,
     calculate_entropy,
     check_secret,

@@ -6,10 +6,10 @@ import logging
 import os
 import sys
 
-from blint.analysis import AnalysisRunner, report
+from blint.lib.analysis import AnalysisRunner, report
 from blint.logger import LOG
-from blint.sbom import generate
-from blint.utils import gen_file_list
+from blint.lib.sbom import generate
+from blint.lib.utils import gen_file_list
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗

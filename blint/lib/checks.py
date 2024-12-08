@@ -1,5 +1,5 @@
 # pylint: disable=missing-function-docstring,unused-argument
-from blint.utils import parse_pe_manifest
+from blint.lib.utils import parse_pe_manifest
 
 
 def check_nx(f, metadata, rule_obj):  # noqa
