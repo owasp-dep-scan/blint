@@ -95,6 +95,7 @@ def build_parser():
     sbom_parser = subparsers.add_parser(
         "sbom", help="Command to generate SBOM for supported binaries."
     )
+    sbom_parser.set_defaults(sbom_mode=True)
     sbom_parser.add_argument(
         "-i",
         "--src",
