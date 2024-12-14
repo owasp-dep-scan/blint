@@ -130,22 +130,22 @@ def generate(blint_options, exe_files, android_files) -> bool:
         redirect_stdout=True,
         refresh_per_second=1,
     ) as progress:
-        if blint_options.exe_files:
+        if exe_files:
             task = progress.add_task(
-                f"[green] Parsing {len(blint_options.exe_files)} binaries",
-                total=len(blint_options.exe_files),
+                f"[green] Parsing {len(exe_files)} binaries",
+                total=len(exe_files),
                 start=True,
             )
-        for exe in blint_options.exe_files:
+        for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components += process_exe_file(dependencies_dict, blint_options.deep_mode, exe, sbom, blint_options.export_prefixes, symbols_purl_map)
-        if blint_options.android_files:
+            components += process_exe_file(dependencies_dict, blint_options.deep_mode, exe, sbom, blint_options.exports_prefix, symbols_purl_map)
+        if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
                 total=len(android_files),
                 start=True,
             )
-        for f in blint_options.android_files:
+        for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
     if dependencies_dict:
