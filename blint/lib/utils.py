@@ -5,14 +5,19 @@ import os
 import re
 import shutil
 import string
+import sys
 import tempfile
 import zipfile
+from dataclasses import field
 from importlib.metadata import distribution
 from pathlib import Path
+from typing import Dict, List
 
 import lief
 from ar import Archive
+from custom_json_diff.lib.utils import file_write
 from defusedxml.ElementTree import fromstring, ParseError
+from orjson import orjson
 from rich import box
 from rich.table import Table
 
@@ -551,3 +556,25 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                     output.write(archive.open(entry, 'rb').read())
                     files_list.append(afile)
     return files_list
+
+
+def export_metadata(directory: str, metadata: Dict, mtype: str):
+    """
+    Exports metadata to file.
+    """
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    outfile = str(Path(directory) / f"{mtype.lower()}.json")
+    output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
+    file_write(outfile, output, success_msg=f"{mtype} written to {outfile}", log=LOG)
+
+
+def json_serializer(obj):
+    """JSON serializer to help serialize problematic types such as bytes"""
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+
+    return obj
