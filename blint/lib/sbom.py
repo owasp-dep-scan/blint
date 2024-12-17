@@ -432,7 +432,9 @@ def process_exe_file(
         if os.environ.get("USE_BLINTDB", "") in ["1", "true"]:
             # utilize voting logic along with blitndb
             # we iterate through each symbol and try to find a match in the database
-            dynamic_symbols_list = metadata.get("dynamic_symbols", [])
+            print("Utilizing blint_db")
+            # TODO: utilize both symtab_symbols and dynamic_symbols
+            dynamic_symbols_list = metadata.get("symtab_symbols", [])
             binaries_detected = detect_binaries_utilized(dynamic_symbols_list)
             # adds the components in a similar way to dynamic entries
             for binary in binaries_detected:
