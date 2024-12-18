@@ -224,7 +224,7 @@ def blintdb_setup(args):
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
     """
     if not os.getenv("USE_BLINTDB") or not args.use_blintdb :
-        LOG.debug(f"skipping blintdb setup {os.getenv("USE_BLINTDB")}")
+        LOG.debug(f"skipping blintdb setup {os.getenv('USE_BLINTDB')}")
         return
 
     if args.blintdb_home:
