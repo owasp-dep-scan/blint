@@ -133,7 +133,7 @@ def detect_binaries_utilized(sybmols_list) -> set:
 
 def return_binaries_detected(eid):
     """
-    Current scoring algorithm
+    Current scoring algorithm. Unbatched
     """
     binaries_detected_dict = {}
     bid_list = get_bid_using_fid(eid)
