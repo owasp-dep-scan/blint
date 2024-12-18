@@ -118,19 +118,6 @@ def build_parser():
         dest="blintdb_home",
         help="Path to blintdb. Defaults to $HOME/blintdb.",
     )
-    # blintdb arguments
-    sbom_parser.add_argument(
-        "--use-blintdb",
-        action="store_true",
-        default=True,
-        dest="use_blintdb",
-        help="Use blintdb for symbol resolution.",
-    )
-    sbom_parser.add_argument(
-        "--blintdb-home",
-        dest="blintdb_home",
-        help="Path to blintdb. Defaults to $HOME/blintdb.",
-    )
 
     sbom_parser.add_argument(
         "-o",
@@ -214,7 +201,8 @@ def handle_args():
         sbom_output=args.sbom_output,
         src_dir_boms=args.src_dir_boms,
         src_dir_image=args.src_dir_image,
-        stdout_mode=args.stdout_mode
+        stdout_mode=args.stdout_mode,
+        use_blintdb=args.use_blintdb
     )
     return blint_options
 

@@ -98,6 +98,39 @@ def get_bname(bid):
     return res[0][0] if res else None
 
 
+# def detect_binaries_utilized(sybmols_list) -> set:
+#     """ Simple Voting algorithm
+#     for a given symbols. e.g. XRenderAddGlyphs
+#     we count the number of binaries associated to this function
+#     e.g. which is one in this example XRenderAddGlyphs
+#     is associated with 'libXrender-0.9.10/libxrender.so'.
+#     so one is added to score, we want all the detections to have a score greater than 1.
+#     """
+#     bin_detected_dict = {}
+
+#     # eid_list = [get_export_id(symbol['name']) for symbol in sybmols_list]
+#     eid_list = [symbol["name"] for symbol in sybmols_list]
+#     # creates a 2D array with batch_len, batch_len eids are processed in a single query
+#     batch_len = 1000
+#     eid_2d_list = [eid_list[i : i + batch_len] for i in range(0, len(eid_list), batch_len)]
+
+#     LOG.debug(f"Created {len(eid_2d_list)} processes created")
+#     # for eid in eid_list:
+#     with concurrent.futures.ProcessPoolExecutor(max_workers=13) as executor:
+#         for _, single_binaries_detected_dict in zip(
+#             eid_2d_list, executor.map(return_batch_binaries_detected, eid_2d_list)
+#         ):
+#             for fname, score in single_binaries_detected_dict.items():
+#                 if fname in bin_detected_dict:
+#                     bin_detected_dict[fname] += score
+#                 else:
+#                     bin_detected_dict[fname] = score
+#     # create a set() and remove false positives
+#     binary_detected = {bname for bname, score in bin_detected_dict.items() if score > 1}
+
+#     LOG.debug(f"Output for binary_detected: {binary_detected}")
+#     return binary_detected
+
 def detect_binaries_utilized(sybmols_list) -> set:
     """ Simple Voting algorithm
     for a given symbols. e.g. XRenderAddGlyphs
@@ -114,13 +147,15 @@ def detect_binaries_utilized(sybmols_list) -> set:
     batch_len = 1000
     eid_2d_list = [eid_list[i : i + batch_len] for i in range(0, len(eid_list), batch_len)]
 
-    if DEBUG_MODE:
-        LOG.debug(f"Created {len(eid_2d_list)} processes created")
+    LOG.debug(f"Created {len(eid_2d_list)} processes created")
     # for eid in eid_list:
     with concurrent.futures.ProcessPoolExecutor(max_workers=13) as executor:
-        for _, single_binaries_detected_dict in zip(
-            eid_2d_list, executor.map(return_batch_binaries_detected, eid_2d_list)
-        ):
+        futures_bin_detected = {
+            executor.submit(return_batch_binaries_detected, it_eid_list): it_eid_list 
+            for it_eid_list in eid_2d_list
+            }
+        for future in concurrent.futures.as_completed(futures_bin_detected):
+            single_binaries_detected_dict = future.result()
             for fname, score in single_binaries_detected_dict.items():
                 if fname in bin_detected_dict:
                     bin_detected_dict[fname] += score
@@ -128,8 +163,9 @@ def detect_binaries_utilized(sybmols_list) -> set:
                     bin_detected_dict[fname] = score
     # create a set() and remove false positives
     binary_detected = {bname for bname, score in bin_detected_dict.items() if score > 1}
-    return binary_detected
 
+    LOG.debug(f"Output for binary_detected: {len(binary_detected)}")
+    return binary_detected
 
 def return_binaries_detected(eid):
     """

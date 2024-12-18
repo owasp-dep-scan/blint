@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import lief
-from ar import Archive
+from ar import Archive, ArchiveError
 from custom_json_diff.lib.utils import file_write
 from defusedxml.ElementTree import fromstring, ParseError
 from orjson import orjson
@@ -223,13 +223,14 @@ def blintdb_setup(args):
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
     """
-    if not args.use_blintdb:
-        LOG.debug("skipping blintdb setup")
+    if not os.getenv("USE_BLINTDB") or not args.use_blintdb :
+        LOG.debug(f"skipping blintdb setup {os.getenv("USE_BLINTDB")}")
         return
 
     if args.blintdb_home:
         blintdb_home = args.blintdb_home
     else:
+        LOG.debug("Creating BLINTDB_LOC os environment")
         blintdb_home = os.path.join(os.getenv("HOME"), "blintdb")
         os.environ['BLINTDB_LOC'] = os.path.join(blintdb_home, "blint.db")
     
