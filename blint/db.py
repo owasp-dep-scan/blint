@@ -149,7 +149,7 @@ def detect_binaries_utilized(sybmols_list) -> set:
 
     LOG.debug(f"Created {len(eid_2d_list)} processes created")
     # for eid in eid_list:
-    with concurrent.futures.ProcessPoolExecutor(max_workers=13) as executor:
+    with concurrent.futures.ProcessPoolExecutor() as executor:
         futures_bin_detected = {
             executor.submit(return_batch_binaries_detected, it_eid_list): it_eid_list 
             for it_eid_list in eid_2d_list
