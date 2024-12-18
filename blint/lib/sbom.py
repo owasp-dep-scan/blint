@@ -35,7 +35,7 @@ from blint.lib.utils import (
     find_bom_files,
     get_version,
 )
-from blint.db import detect_binaries_utilized, get_bnames_ename
+from blint.db import detect_binaries_utilized
 
 
 def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
