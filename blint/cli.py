@@ -86,6 +86,20 @@ def build_parser():
         dest="suggest_fuzzable",
         help="Suggest functions and symbols for fuzzing based on a dictionary.",
     )
+    # TODO: what to do should this be default?
+    parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=True,
+        dest="use_blintdb",
+        help="Use blintdb for symbol resolution.",
+    )
+    # TODO: Please suggest if this location is good
+    parser.add_argument(
+        "--blintdb-home",
+        dest="blintdb_home",
+        help="Path to blintdb. Defaults to $HOME/blintdb.",
+    )
     # sbom commmand
     subparsers = parser.add_subparsers(
         title="sub-commands",
@@ -104,20 +118,7 @@ def build_parser():
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
-    # TODO: what to do should this be default?
-    sbom_parser.add_argument(
-        "--use-blintdb",
-        action="store_true",
-        default=True,
-        dest="use_blintdb",
-        help="Use blintdb for symbol resolution.",
-    )
-    # TODO: Please suggest if this location is good
-    sbom_parser.add_argument(
-        "--blintdb-home",
-        dest="blintdb_home",
-        help="Path to blintdb. Defaults to $HOME/blintdb.",
-    )
+    
 
     sbom_parser.add_argument(
         "-o",
