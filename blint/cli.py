@@ -9,7 +9,7 @@ from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
 from blint.config import BlintOptions
 from blint.logger import LOG
 from blint.lib.sbom import generate
-from blint.lib.utils import gen_file_list
+from blint.lib.utils import gen_file_list, blintdb_setup
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
@@ -86,6 +86,20 @@ def build_parser():
         dest="suggest_fuzzable",
         help="Suggest functions and symbols for fuzzing based on a dictionary.",
     )
+    # TODO: what to do should this be default?
+    parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=True,
+        dest="use_blintdb",
+        help="Use blintdb for symbol resolution.",
+    )
+    # TODO: Please suggest if this location is good
+    parser.add_argument(
+        "--blintdb-home",
+        dest="blintdb_home",
+        help="Path to blintdb. Defaults to $HOME/blintdb.",
+    )
     # sbom commmand
     subparsers = parser.add_subparsers(
         title="sub-commands",
@@ -104,6 +118,8 @@ def build_parser():
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
+    
+
     sbom_parser.add_argument(
         "-o",
         "--output-file",
@@ -186,7 +202,8 @@ def handle_args():
         sbom_output=args.sbom_output,
         src_dir_boms=args.src_dir_boms,
         src_dir_image=args.src_dir_image,
-        stdout_mode=args.stdout_mode
+        stdout_mode=args.stdout_mode,
+        use_blintdb=args.use_blintdb
     )
     return blint_options
 
@@ -194,6 +211,8 @@ def handle_args():
 def main():
     """Main function of the blint tool"""
     blint_options = handle_args()
+
+    blintdb_setup(blint_options)
 
     # SBOM command
     if blint_options.sbom_mode:

@@ -39,6 +39,7 @@ orjson = "^3.10.6"
 symbolic = "10.2.1"
 ar = "^0.9.1"
 custom-json-diff = "~2.1.4"
+oras = "^0.2.24"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"
