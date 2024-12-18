@@ -224,7 +224,7 @@ def blintdb_setup(args):
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
     """
     if not args.use_blintdb:
-        LOG.debug("Skipping blintdb setup")
+        LOG.debug("skipping blintdb setup")
         return
 
     if args.blintdb_home:
@@ -232,6 +232,7 @@ def blintdb_setup(args):
     else:
         blintdb_home = os.path.join(os.getenv("HOME"), "blintdb")
         os.environ['BLINTDB_LOC'] = os.path.join(blintdb_home, "blint.db")
+    
     if not os.path.exists(blintdb_home):
         os.makedirs(blintdb_home)
     LOG.debug(f"Downloading blintdb to {blintdb_home}")
@@ -241,7 +242,7 @@ def blintdb_setup(args):
         target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
         outdir=blintdb_home,
         allowed_media_type=[],
-        overwrite=True,
+        overwrite=False,
     )
 
 
