@@ -27,6 +27,7 @@ from blint.config import (
     strings_allowlist,
     fuzzable_names,
     secrets_regex,
+    BLINTDB_HOME
 )
 from blint.cyclonedx.spec import (
     ComponentEvidence,
@@ -224,27 +225,21 @@ def blintdb_setup(args):
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
     """
     if not os.getenv("USE_BLINTDB") or not args.use_blintdb :
-        LOG.debug(f"skipping blintdb setup {os.getenv('USE_BLINTDB')}")
+        LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
         return
 
-    if args.blintdb_home:
-        blintdb_home = args.blintdb_home
-    else:
-        LOG.debug("Creating BLINTDB_LOC os environment")
-        blintdb_home = os.path.join(os.getenv("HOME"), "blintdb")
-        os.environ['BLINTDB_LOC'] = os.path.join(blintdb_home, "blint.db")
-    
-    if not os.path.exists(blintdb_home):
-        os.makedirs(blintdb_home)
-    LOG.debug(f"Downloading blintdb to {blintdb_home}")
-    oras_client = oras.client.OrasClient()
+    if not os.path.exists(BLINTDB_HOME):
+        os.makedirs(BLINTDB_HOME)
 
+    oras_client = oras.client.OrasClient()
     oras_client.pull(
         target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
-        outdir=blintdb_home,
+        outdir=BLINTDB_HOME,
         allowed_media_type=[],
         overwrite=False,
     )
+
+    LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
 
 
 def is_exe(src):
