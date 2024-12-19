@@ -434,7 +434,7 @@ def process_exe_file(
             # utilize voting logic along with blitndb
             # we iterate through each symbol and try to find a match in the database
 
-            LOG.debug("utilizing blint_db")
+            LOG.debug("Utilizing blint_db")
             symtab_symbols_list = metadata.get("symtab_symbols", [])
             symtab_binaries_detected = detect_binaries_utilized(symtab_symbols_list)
             dynamic_symbols_list = metadata.get("dynamic_symbols", [])
