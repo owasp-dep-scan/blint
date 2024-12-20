@@ -27,7 +27,7 @@ from blint.config import (
     strings_allowlist,
     fuzzable_names,
     secrets_regex,
-    BLINTDB_HOME
+    BLINTDB_HOME, BLINTDB_LOC
 )
 from blint.cyclonedx.spec import (
     ComponentEvidence,
@@ -37,8 +37,11 @@ from blint.cyclonedx.spec import (
     Technique,
 )
 from blint.logger import console, LOG
+# This is different from generic ConnectionError
+from requests.exceptions import ConnectionError as RequestConnectionError
 
 import oras.client
+
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
@@ -223,21 +226,29 @@ def blintdb_setup(args):
     and puts it into $BLINTDB_LOC path.
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
-    """
-    if not os.getenv("USE_BLINTDB") or not args.use_blintdb :
+    """    
+    if not os.getenv("USE_BLINTDB") and not args.use_blintdb :
         LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
         return
 
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
-
-    oras_client = oras.client.OrasClient()
-    oras_client.pull(
-        target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
-        outdir=BLINTDB_HOME,
-        allowed_media_type=[],
-        overwrite=False,
-    )
+    try:
+        oras_client = oras.client.OrasClient()
+        oras_client.pull(
+            target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
+            outdir=BLINTDB_HOME,
+            allowed_media_type=[],
+            overwrite=False,
+        )
+    except RequestConnectionError as e:
+        LOG.error(type(e).__name__)
+        LOG.error(f"BLINTDB Download failed: {e}")
+    
+    if not os.path.exists(BLINTDB_LOC):
+        # We check if the database has been installed
+        # cannot protect if the database disk image is malformed
+        os.environ["USE_BLINTDB"] = "false"
 
     LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
 
