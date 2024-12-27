@@ -17,6 +17,8 @@ def return_batch_binaries_detected(symbols_list):
     Current scoring algorithm along with batching
     """
     binaries_detected_dict = {}
+    if type(symbols_list) != list:
+        raise TypeError(f"Incorrect type symbols_lists should be List not {type(symbols_list)}")
 
     # Errors not being caught here
     output_list = get_bid_using_ename_batch(symbols_list)
@@ -51,6 +53,9 @@ def get_bid_using_ename_batch(batch_export_name):
         sqlite3.Error: If there are any database connection or query execution issues.
     """
     BLINTDB_LOC = os.getenv("BLINTDB_LOC")
+
+    
+
     with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
         with closing(connection.cursor()) as c:
             place_holders = "?, " * (len(batch_export_name) - 1) + "?"
