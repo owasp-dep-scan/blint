@@ -8,7 +8,7 @@ from blint.db import return_batch_binaries_detected, get_bid_using_ename_batch, 
 # BLINTDB_LOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_blintdb.db")
 # os.environ["BLINTDB_LOC"] = BLINTDB_LOC
 
-@pytest.mark.parametrize("symbols_list,mock_output,expected_result", [
+@pytest.mark.parametrize("symbols_list, mock_output, expected_result", [
     # Happy path: single symbol with single binary
     (
         ["symbol1"], 
@@ -54,7 +54,7 @@ def test_return_batch_binaries_detected_invalid_input(symbols_list):
 
 
 
-@pytest.mark.parametrize("test_id,batch_export_name,mock_cursor_execute,expected_result", [
+@pytest.mark.parametrize("test_id, batch_export_name, mock_cursor_execute, expected_result", [
     # Happy path: single export name with single binary
     ("single_export_single_binary", 
      ["export1"], 
@@ -80,26 +80,24 @@ def test_return_batch_binaries_detected_invalid_input(symbols_list):
      [(1, "binary1,binary2,binary3")])
 ])
 def test_get_bid_using_ename_batch(test_id, batch_export_name, mock_cursor_execute, expected_result):
-    
-    # Arrange
     with patch.dict(os.environ, {"BLINTDB_LOC": "/mock/db/path"}), \
-         patch('sqlite3.connect') as mock_connect, \
-         patch('sqlite3.Cursor.execute') as mock_execute, \
-         patch('sqlite3.Cursor.fetchall', return_value=mock_cursor_execute):
-        
+         patch('sqlite3.connect') as mock_connect:
+
         mock_connection = MagicMock()
         mock_connect.return_value.__enter__.return_value = mock_connection
         
-        
-        # Act
-        result = get_bid_using_ename_batch(batch_export_name)
-        
-        # Assert
-        assert result == expected_result
-        if batch_export_name:
-            mock_execute.assert_called_once()
+        mock_cursor = MagicMock()  # Create a mock cursor
+        mock_cursor.fetchall.return_value = mock_cursor_execute  # Set its fetchall return value
+        mock_connection.cursor.return_value = mock_cursor  # Make the connection return the mock cursor
 
-@pytest.mark.parametrize("test_id,batch_export_name", [
+        result = get_bid_using_ename_batch(batch_export_name)
+        print(result.return_value, result)
+        assert expected_result == result.return_value
+        if batch_export_name:
+            mock_connection.cursor.assert_called_once()  # Assert cursor was called
+            mock_cursor.execute.assert_called_once()  # Assert execute was called on the mock cursor
+
+@pytest.mark.parametrize("test_id, batch_export_name", [
     # Error case: None input
     ("none_input", None),
     
@@ -123,7 +121,7 @@ def test_get_bid_using_ename_batch_db_error():
             get_bid_using_ename_batch(["export1"])
 
 
-@pytest.mark.parametrize("test_id,bid,mock_cursor_execute,expected_result", [
+@pytest.mark.parametrize("test_id, bid, mock_cursor_execute, expected_result", [
     # Happy path: existing binary ID
     ("existing_binary_id", 
      1, 
@@ -160,7 +158,7 @@ def test_get_bname(test_id, bid, mock_cursor_execute, expected_result):
         assert result == expected_result
         mock_execute.assert_called_once_with("SELECT bname from Binaries where bid=?", (bid,))
 
-@pytest.mark.parametrize("test_id,bid", [
+@pytest.mark.parametrize("test_id, bid", [
     # Error case: None input
     ("none_input", None),
     
@@ -189,7 +187,7 @@ import concurrent.futures
 
 from blint.db import detect_binaries_utilized
 
-@pytest.mark.parametrize("test_id,symbols_list,mock_batch_results,expected_result", [
+@pytest.mark.parametrize("test_id, symbols_list, mock_batch_results, expected_result", [
     # Happy path: single symbol with multiple detections
     ("single_symbol_multiple_detections", 
      [{"name": "symbol1"}], 
@@ -231,7 +229,7 @@ def test_detect_binaries_utilized(test_id, symbols_list, mock_batch_results, exp
         # Assert
         assert result == expected_result
 
-@pytest.mark.parametrize("test_id,symbols_list", [
+@pytest.mark.parametrize("test_id, symbols_list", [
     # Error case: None input
     ("none_input", None),
     
