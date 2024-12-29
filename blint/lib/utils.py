@@ -244,7 +244,6 @@ def blintdb_setup(args):
         )
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except RequestConnectionError as e:
-        LOG.error(type(e).__name__)
         LOG.error(f"BLINTDB Download failed: {e}")
     
     if not os.path.exists(BLINTDB_LOC):
