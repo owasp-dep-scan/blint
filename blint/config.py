@@ -1404,5 +1404,5 @@ os.environ["BLINTDB_LOC"] = BLINTDB_LOC
 
 BLINTDB_CONTAINER_URL = "ghcr.io/appthreat/blintdb-vcpkg:v0.1"
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
-if BLINTDB_REFRESH:
+if BLINTDB_REFRESH in ["true", "True", "1"]:
     BLINTDB_REFRESH = True
