@@ -27,7 +27,7 @@ from blint.config import (
     strings_allowlist,
     fuzzable_names,
     secrets_regex,
-    BLINTDB_HOME, BLINTDB_LOC
+    BLINTDB_HOME, BLINTDB_LOC, BLINTDB_CONTAINER_URL, BLINTDB_REFRESH
 )
 from blint.cyclonedx.spec import (
     ComponentEvidence,
@@ -235,12 +235,14 @@ def blintdb_setup(args):
         os.makedirs(BLINTDB_HOME)
     try:
         oras_client = oras.client.OrasClient()
+        overwrite_value = os.environ
         oras_client.pull(
-            target="ghcr.io/appthreat/blintdb-vcpkg:v0.1",
+            target=BLINTDB_CONTAINER_URL,
             outdir=BLINTDB_HOME,
             allowed_media_type=[],
-            overwrite=False,
+            overwrite=BLINTDB_REFRESH,
         )
+        LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except RequestConnectionError as e:
         LOG.error(type(e).__name__)
         LOG.error(f"BLINTDB Download failed: {e}")
@@ -250,7 +252,7 @@ def blintdb_setup(args):
         # cannot protect if the database disk image is malformed
         os.environ["USE_BLINTDB"] = "false"
 
-    LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
+    
 
 
 def is_exe(src):

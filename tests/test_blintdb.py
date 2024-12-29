@@ -2,7 +2,7 @@ import pytest
 import os
 import sqlite3
 import concurrent.futures
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, Mock
 from blint.db import return_batch_binaries_detected, get_bid_using_ename_batch, get_bname, detect_binaries_utilized
 
 # BLINTDB_LOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_blintdb.db")
@@ -83,19 +83,15 @@ def test_get_bid_using_ename_batch(test_id, batch_export_name, mock_cursor_execu
     with patch.dict(os.environ, {"BLINTDB_LOC": "/mock/db/path"}), \
          patch('sqlite3.connect') as mock_connect:
 
-        mock_connection = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_connection
+        mock_connection = MagicMock(currentarg="mock_connection")
+        mock_connect.return_value = mock_connection
         
-        mock_cursor = MagicMock()  # Create a mock cursor
-        mock_cursor.fetchall.return_value = mock_cursor_execute  # Set its fetchall return value
-        mock_connection.cursor.return_value = mock_cursor  # Make the connection return the mock cursor
+        mock_cursor = MagicMock(currentarg="mock_cursor")
+        mock_cursor.fetchall.return_value = mock_cursor_execute
+        mock_connection.cursor.return_value = mock_cursor
 
         result = get_bid_using_ename_batch(batch_export_name)
-        print(result.return_value, result)
-        assert expected_result == result.return_value
-        if batch_export_name:
-            mock_connection.cursor.assert_called_once()  # Assert cursor was called
-            mock_cursor.execute.assert_called_once()  # Assert execute was called on the mock cursor
+        assert result == expected_result
 
 @pytest.mark.parametrize("test_id, batch_export_name", [
     # Error case: None input
@@ -144,19 +140,20 @@ def test_get_bname(test_id, bid, mock_cursor_execute, expected_result):
     
     # Arrange
     with patch.dict(os.environ, {"BLINTDB_LOC": "/mock/db/path"}), \
-         patch('sqlite3.connect') as mock_connect, \
-         patch('sqlite3.Cursor.execute') as mock_execute, \
-         patch('sqlite3.Cursor.fetchall', return_value=mock_cursor_execute):
+         patch('sqlite3.connect') as mock_connect:
         
         mock_connection = MagicMock()
-        mock_connect.return_value.__enter__.return_value = mock_connection
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_connection
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = mock_cursor_execute
         
         # Act
         result = get_bname(bid)
         
         # Assert
         assert result == expected_result
-        mock_execute.assert_called_once_with("SELECT bname from Binaries where bid=?", (bid,))
+        mock_cursor.execute.assert_called_once_with("SELECT bname from Binaries where bid=?", (bid,))
 
 @pytest.mark.parametrize("test_id, bid", [
     # Error case: None input
@@ -220,8 +217,8 @@ def test_detect_binaries_utilized(test_id, symbols_list, mock_batch_results, exp
         
         # Mock the executor and futures
         mock_future = MagicMock()
-        mock_future.result.side_effect = mock_batch_results
-        mock_executor.return_value.__enter__.return_value.submit.return_value = mock_future
+        mock_future.result.return_value = mock_batch_results
+        mock_executor.submit.return_value = mock_future
         
         # Act
         result = detect_binaries_utilized(symbols_list)
