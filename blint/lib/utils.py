@@ -251,9 +251,6 @@ def blintdb_setup(args):
         # cannot protect if the database disk image is malformed
         os.environ["USE_BLINTDB"] = "false"
 
-    
-
-
 def is_exe(src):
     """
     Detect if the source is a binary file
