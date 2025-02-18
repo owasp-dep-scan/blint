@@ -41,6 +41,7 @@ ar = "^0.9.1"
 custom-json-diff = "~2.1.4"
 oras = "^0.2.24"
 appdirs = "^1.4.4"
+apsw = "^3.49.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"

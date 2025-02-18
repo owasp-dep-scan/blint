@@ -1,16 +1,30 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-
 import concurrent
 import concurrent.futures
 import os
-import sqlite3
+import sys
 from contextlib import closing
+
+import apsw
 
 from blint.logger import LOG
 
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
+db_conn: apsw.Connection = None
+DB_FILE_SEP = "///" if sys.platform == "win32" else "//"
+
+def get(db_file: str = os.getenv("BLINTDB_LOC"), read_only=True) -> apsw.Connection:
+    if not os.path.exists(db_file):
+        return
+    if not db_file.startswith("file:") and db_file != ":memory:":
+        db_file = f"file:{DB_FILE_SEP}{os.path.abspath(db_file)}"
+    global db_conn
+    ro_flags = apsw.SQLITE_OPEN_URI | apsw.SQLITE_OPEN_NOFOLLOW | apsw.SQLITE_OPEN_READONLY
+    db_conn = apsw.Connection(db_file, flags=flags)
+    return db_conn
+
 
 def return_batch_binaries_detected(symbols_list):
     """
@@ -50,21 +64,18 @@ def get_bid_using_ename_batch(batch_export_name):
         list: A list of tuples containing export IDs and their corresponding concatenated binary IDs.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-
-    
-
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            place_holders = "?, " * (len(batch_export_name) - 1) + "?"
-            if len(batch_export_name) > 0:
-                output_string = f"SELECT eid, group_concat(bid) from BinariesExports where eid IN (SELECT rowid from Exports where infunc IN ({place_holders})) group by eid"
-                # print(output_string)
-                c.execute(output_string, batch_export_name)
-            res = c.fetchall()
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        place_holders = "?, " * (len(batch_export_name) - 1) + "?"
+        if len(batch_export_name) > 0:
+            output_string = f"SELECT eid, group_concat(bid) from BinariesExports where eid IN (SELECT rowid from Exports where infunc IN ({place_holders})) group by eid"
+            # print(output_string)
+            c.execute(output_string, batch_export_name)
+        res = c.fetchall()
     return res
 
 
@@ -80,14 +91,14 @@ def get_bname(bid):
         str or None: The name of the binary if found, otherwise None.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            c.execute("SELECT bname from Binaries where bid=?", (bid,))
-            res = c.fetchall()
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        c.execute("SELECT bname from Binaries where bid=?", (bid,))
+        res = c.fetchall()
     return res[0][0] if res else None
 
 
@@ -138,14 +149,14 @@ def get_export_id(export_name):
         int or None: The export ID if found, otherwise None.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            c.execute("SELECT rowid from Exports where infunc=?", (export_name,))
-            res = c.fetchall()
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        c.execute("SELECT rowid from Exports where infunc=?", (export_name,))
+        res = c.fetchall()
     return res[0][0] if res else None
 
 
@@ -161,14 +172,14 @@ def get_bid_using_fid(eid):
         list or None: A list of binary IDs if found, otherwise None.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            c.execute("SELECT bid from BinariesExports where eid=?", (eid,))
-            res = c.fetchall()
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        c.execute("SELECT bid from BinariesExports where eid=?", (eid,))
+        res = c.fetchall()
     return map(lambda x: x[0], res) if res else None
 
 
@@ -184,21 +195,21 @@ def get_pname(bid):
         str or None: The name of the project associated with the binary if found, otherwise None.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            c.execute("SELECT pid from Binaries where bid=?", (bid,))
-            res = c.fetchall()
-            if not res:
-                return None
-            pid = res[0][0]
-            c.execute("SELECT pname from Projects where pid=?", (pid,))
-            res = c.fetchall()
-            if not res:
-                return None
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        c.execute("SELECT pid from Binaries where bid=?", (bid,))
+        res = c.fetchall()
+        if not res:
+            return None
+        pid = res[0][0]
+        c.execute("SELECT pname from Projects where pid=?", (pid,))
+        res = c.fetchall()
+        if not res:
+            return None
     return res[0][0]
 
 
@@ -214,19 +225,19 @@ def get_pname_bname(bname):
         str or None: The name of the project associated with the binary name if found, otherwise None.
 
     Raises:
-        sqlite3.Error: If there are any database connection or query execution issues.
+        apsw.Error: If there are any database connection or query execution issues.
     """
-    BLINTDB_LOC = os.getenv("BLINTDB_LOC")
-    with closing(sqlite3.connect(BLINTDB_LOC)) as connection:
-        with closing(connection.cursor()) as c:
-            c.execute("SELECT pid from Binaries where bname=?", (bname,))
-            res = c.fetchall()
-            if not res:
-                return None
-            pid = res[0][0]
-            c.execute("SELECT pname from Projects where pid=?", (pid,))
-            res = c.fetchall()
-            if not res:
-                return None
-        connection.commit()
+    connection = get()
+    if not connection:
+        return None
+    with closing(connection.cursor()) as c:
+        c.execute("SELECT pid from Binaries where bname=?", (bname,))
+        res = c.fetchall()
+        if not res:
+            return None
+        pid = res[0][0]
+        c.execute("SELECT pname from Projects where pid=?", (pid,))
+        res = c.fetchall()
+        if not res:
+            return None
     return res[0][0]
