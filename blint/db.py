@@ -22,7 +22,7 @@ def get(db_file: str = os.getenv("BLINTDB_LOC"), read_only=True) -> apsw.Connect
         db_file = f"file:{DB_FILE_SEP}{os.path.abspath(db_file)}"
     global db_conn
     ro_flags = apsw.SQLITE_OPEN_URI | apsw.SQLITE_OPEN_NOFOLLOW | apsw.SQLITE_OPEN_READONLY
-    db_conn = apsw.Connection(db_file, flags=flags)
+    db_conn = apsw.Connection(db_file, flags=ro_flags)
     return db_conn
 
 
