@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import lief
-from ar import Archive
+from ar import Archive, ArchiveError
 from custom_json_diff.lib.utils import file_write
 from defusedxml.ElementTree import fromstring, ParseError
 from orjson import orjson
@@ -26,15 +26,28 @@ from blint.config import (
     ignore_files,
     strings_allowlist,
     fuzzable_names,
-    secrets_regex
+    secrets_regex,
+    BLINTDB_HOME, BLINTDB_LOC, BLINTDB_CONTAINER_URL, BLINTDB_REFRESH
 )
-from blint.cyclonedx.spec import ComponentEvidence, FieldModel, ComponentIdentityEvidence, Method, Technique
+from blint.cyclonedx.spec import (
+    ComponentEvidence,
+    FieldModel,
+    ComponentIdentityEvidence,
+    Method,
+    Technique,
+)
 from blint.logger import console, LOG
+# This is different from generic ConnectionError
+from requests.exceptions import ConnectionError as RequestConnectionError
+
+import oras.client
+
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
 # Known files compressed with ar
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
+
 
 def is_base64(s):
     """
@@ -206,6 +219,37 @@ def is_ignored_file(file_name):
         return True
     return any(file_name.endswith(ie) for ie in ignore_files)
 
+
+def blintdb_setup(args):
+    """
+    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg' using oras client
+    and puts it into $BLINTDB_LOC path.
+    If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
+    $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
+    """    
+    if not os.getenv("USE_BLINTDB") and not args.use_blintdb :
+        LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
+        return
+
+    if not os.path.exists(BLINTDB_HOME):
+        os.makedirs(BLINTDB_HOME)
+    try:
+        oras_client = oras.client.OrasClient()
+        overwrite_value = os.environ
+        oras_client.pull(
+            target=BLINTDB_CONTAINER_URL,
+            outdir=BLINTDB_HOME,
+            allowed_media_type=[],
+            overwrite=BLINTDB_REFRESH,
+        )
+        LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
+    except RequestConnectionError as e:
+        LOG.error(f"BLINTDB Download failed: {e}")
+    
+    if not os.path.exists(BLINTDB_LOC):
+        # We check if the database has been installed
+        # cannot protect if the database disk image is malformed
+        os.environ["USE_BLINTDB"] = "false"
 
 def is_exe(src):
     """
@@ -534,8 +578,8 @@ def create_component_evidence(method_value: str, confidence: float) -> Component
 
 def camel_to_snake(name: str) -> str:
     """Convert camelCase to snake_case"""
-    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
@@ -546,15 +590,18 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
     if not to_dir:
         to_dir = tempfile.mkdtemp(prefix="ar-temp-")
     files_list = []
-    with open(ar_file, 'rb') as fp:
-        with Archive(fp) as archive:
-            for entry in archive:
-                # This workarounds a bug in ar that returns multiple names
-                file_name = entry.name.split("\n")[0].removesuffix("/")
-                afile = os.path.join(to_dir, file_name)
-                with open(afile, 'wb') as output:
-                    output.write(archive.open(entry, 'rb').read())
-                    files_list.append(afile)
+    with open(ar_file, "rb") as fp:
+        try:
+            with Archive(fp) as archive:
+                for entry in archive:
+                    # This workarounds a bug in ar that returns multiple names
+                    file_name = entry.name.split("\n")[0].removesuffix("/")
+                    afile = os.path.join(to_dir, file_name)
+                    with open(afile, "wb") as output:
+                        output.write(archive.open(entry, "rb").read())
+                        files_list.append(afile)
+        except ArchiveError as e:
+            LOG.warning(f"Failed to extract {ar_file}: {e}")
     return files_list
 
 

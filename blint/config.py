@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import os
 import re
 from typing import List
+from appdirs import user_data_dir
 
 
 # Default ignore list
@@ -1290,6 +1291,7 @@ class BlintOptions:
         deep_mode (bool): Flag indicating whether to perform deep analysis.
         export_prefixes (list): Prefixes to determine exported symbols.
         src_dir_boms (list): Directory containing pre-build and build sboms.
+        use_blintdb (bool): Flag indicating whether or not to utilize blint-db
     """
     deep_mode: bool = False
     exports_prefix: List = field(default_factory=list)
@@ -1303,6 +1305,7 @@ class BlintOptions:
     src_dir_boms: List = field(default_factory=list)
     src_dir_image: List = field(default_factory=list)
     stdout_mode: bool = False
+    use_blintdb: bool = False
     
     def __post_init__(self):
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
@@ -1392,3 +1395,14 @@ FIRST_STAGE_WORDS = (
     "shlwapi.dll",
     "DeleteCriticalSection"
 )
+
+# Setting blintdb
+BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
+BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
+os.environ["BLINTDB_HOME"] = BLINTDB_HOME
+os.environ["BLINTDB_LOC"] = BLINTDB_LOC
+
+BLINTDB_CONTAINER_URL = "ghcr.io/appthreat/blintdb-vcpkg:v0.1"
+BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
+if BLINTDB_REFRESH in ["true", "True", "1"]:
+    BLINTDB_REFRESH = True
