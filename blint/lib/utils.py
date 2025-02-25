@@ -227,7 +227,7 @@ def blintdb_setup(args):
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
     """    
-    if not os.getenv("USE_BLINTDB") and not args.use_blintdb :
+    if not os.getenv("USE_BLINTDB") and not args.use_blintdb:
         LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
         return
 
@@ -235,7 +235,6 @@ def blintdb_setup(args):
         os.makedirs(BLINTDB_HOME)
     try:
         oras_client = oras.client.OrasClient()
-        overwrite_value = os.environ
         oras_client.pull(
             target=BLINTDB_CONTAINER_URL,
             outdir=BLINTDB_HOME,
@@ -250,6 +249,7 @@ def blintdb_setup(args):
         # We check if the database has been installed
         # cannot protect if the database disk image is malformed
         os.environ["USE_BLINTDB"] = "false"
+
 
 def is_exe(src):
     """

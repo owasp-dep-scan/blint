@@ -5,11 +5,8 @@ import argparse
 import os
 
 from blint.lib.runners import run_default_mode, run_sbom_mode
-from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
 from blint.config import BlintOptions
-from blint.logger import LOG
-from blint.lib.sbom import generate
-from blint.lib.utils import gen_file_list, blintdb_setup
+from blint.lib.utils import blintdb_setup
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗

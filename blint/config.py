@@ -1399,8 +1399,6 @@ FIRST_STAGE_WORDS = (
 # Setting blintdb
 BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
-os.environ["BLINTDB_HOME"] = BLINTDB_HOME
-os.environ["BLINTDB_LOC"] = BLINTDB_LOC
 
 BLINTDB_CONTAINER_URL = "ghcr.io/appthreat/blintdb-vcpkg:v0.1"
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
