@@ -88,7 +88,7 @@ def build_parser():
         action="store_true",
         default=False,
         dest="use_blintdb",
-        help="Use blintdb for symbol resolution.",
+        help="Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
     # sbom commmand
     subparsers = parser.add_subparsers(
@@ -108,8 +108,6 @@ def build_parser():
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
-    
-
     sbom_parser.add_argument(
         "-o",
         "--output-file",

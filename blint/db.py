@@ -9,13 +9,15 @@ from contextlib import closing
 
 import apsw
 
+from blint.config import BLINTDB_LOC
 from blint.logger import LOG
 
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 db_conn: apsw.Connection = None
 DB_FILE_SEP = "///" if sys.platform == "win32" else "//"
 
-def get(db_file: str = os.getenv("BLINTDB_LOC"), read_only=True) -> apsw.Connection:
+
+def get(db_file: str = BLINTDB_LOC, read_only=True) -> apsw.Connection:
     if not os.path.exists(db_file):
         return
     if not db_file.startswith("file:") and db_file != ":memory:":
@@ -102,7 +104,7 @@ def get_bname(bid):
     return res[0][0] if res else None
 
 
-def detect_binaries_utilized(sybmols_list) -> set:
+def detect_binaries_utilized(symbols_list) -> set:
     """Simple Voting algorithm
     for a given symbols. e.g. XRenderAddGlyphs
     we count the number of binaries associated to this function
@@ -112,12 +114,11 @@ def detect_binaries_utilized(sybmols_list) -> set:
     """
     bin_detected_dict = {}
 
-    eid_list = [symbol["name"] for symbol in sybmols_list]
+    eid_list = [symbol["name"] for symbol in symbols_list]
     # creates a 2D array with batch_len, batch_len eids are processed in a single query
     batch_len = 1000
-    eid_2d_list = [eid_list[i : i + batch_len] for i in range(0, len(eid_list), batch_len)]
+    eid_2d_list = [eid_list[i: i + batch_len] for i in range(0, len(eid_list), batch_len)]
 
-    LOG.debug(f"Created {len(eid_2d_list)} processes created")
     # for eid in eid_list:
     with concurrent.futures.ProcessPoolExecutor() as executor:
         futures_bin_detected = {
@@ -136,6 +137,7 @@ def detect_binaries_utilized(sybmols_list) -> set:
 
     LOG.debug(f"Output for binary_detected: {len(binary_detected)}")
     return binary_detected
+
 
 def get_export_id(export_name):
     """Retrieves the export ID for a given export name from a SQLite database. The function performs a lookup to fetch the corresponding export identifier.

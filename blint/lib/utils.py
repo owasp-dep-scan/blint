@@ -27,7 +27,7 @@ from blint.config import (
     strings_allowlist,
     fuzzable_names,
     secrets_regex,
-    BLINTDB_HOME, BLINTDB_LOC, BLINTDB_CONTAINER_URL, BLINTDB_REFRESH
+    BLINTDB_HOME, BLINTDB_LOC, BLINTDB_IMAGE_URL, BLINTDB_REFRESH
 )
 from blint.cyclonedx.spec import (
     ComponentEvidence,
@@ -197,10 +197,6 @@ def is_binary_string(content):
     """
     Method to check if the given content is a binary string
     """
-    # text_chars = bytearray(
-    #     {7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
-    # return bool(
-    #     content.translate(bytes.maketrans(b"", text_chars)))
     textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
     return bool(content.translate(None, textchars))
 
@@ -230,25 +226,21 @@ def blintdb_setup(args):
     if not os.getenv("USE_BLINTDB") and not args.use_blintdb:
         LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
         return
-
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
+    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH:
+        return
     try:
         oras_client = oras.client.OrasClient()
         oras_client.pull(
-            target=BLINTDB_CONTAINER_URL,
+            target=BLINTDB_IMAGE_URL,
             outdir=BLINTDB_HOME,
             allowed_media_type=[],
-            overwrite=BLINTDB_REFRESH,
+            overwrite=True,
         )
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except RequestConnectionError as e:
-        LOG.error(f"BLINTDB Download failed: {e}")
-    
-    if not os.path.exists(BLINTDB_LOC):
-        # We check if the database has been installed
-        # cannot protect if the database disk image is malformed
-        os.environ["USE_BLINTDB"] = "false"
+        LOG.error(f"Blintdb Download failed: {e}")
 
 
 def is_exe(src):
