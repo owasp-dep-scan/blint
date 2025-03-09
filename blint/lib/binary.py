@@ -3,6 +3,7 @@ import codecs
 import contextlib
 import re
 import sys
+import warnings
 from typing import Tuple
 import zlib
 import orjson
@@ -55,9 +56,9 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
             if symbol.startswith("@feat.00"):
                 return "SAFESEH"
             if (
-                symbol.startswith("__imp_")
-                or symbol.startswith(".rdata$")
-                or symbol.startswith(".refptr.")
+                    symbol.startswith("__imp_")
+                    or symbol.startswith(".rdata$")
+                    or symbol.startswith(".refptr.")
             ):
                 symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
             demangled_symbol = (
@@ -351,9 +352,9 @@ def detect_exe_type(parsed_obj, metadata):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
         if (
-            parsed_obj.has_section(".note.gnu.build-id")
-            or "musl" in metadata.get("interpreter")
-            or "ld-linux" in metadata.get("interpreter")
+                parsed_obj.has_section(".note.gnu.build-id")
+                or "musl" in metadata.get("interpreter")
+                or "ld-linux" in metadata.get("interpreter")
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -548,8 +549,8 @@ def parse_pe_authenticode(parsed_obj):
                             tmp_key = "version"
                         value = tmp_a[1].strip()
                         if value in (
-                            "???",
-                            "???, ???",
+                                "???",
+                                "???, ???",
                         ):
                             value = "N/A"
                         cert_signer_obj[tmp_key] = value
@@ -719,16 +720,17 @@ def parse_macho_symbols(symbols):
                 symbol_name = demangle_symbolic_name(symbol_name)
             if not exe_type:
                 exe_type = guess_exe_type(symbol_name)
-            symbols_list.append(
-                {
-                    "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
-                    "short_name": symbol_name,
-                    "type": symbol.type,
-                    "num_sections": symbol.numberof_sections,
-                    "description": symbol.description,
-                    "value": symbol_value,
-                }
-            )
+            with warnings.catch_warnings(action="ignore"):
+                symbols_list.append(
+                    {
+                        "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
+                        "short_name": symbol_name,
+                        "type": symbol.type,
+                        "num_sections": symbol.numberof_sections,
+                        "description": symbol.description,
+                        "value": symbol_value,
+                    }
+                )
         except (AttributeError, TypeError):
             continue
     return symbols_list, exe_type
@@ -877,7 +879,7 @@ def add_elf_symbols(metadata, parsed_obj):
             for entry in symbols_version:
                 symbol_version_auxiliary = entry.symbol_version_auxiliary
                 if symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
-                    symbol_version_auxiliary.name
+                        symbol_version_auxiliary.name
                 ):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
@@ -1000,7 +1002,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
             start_index = overlay_str.find('{"runtimeTarget')
             end_index = overlay_str.rfind("}}}")
             if end_index > -1:
-                overlay_str = overlay_str[start_index : end_index + 3]
+                overlay_str = overlay_str[start_index: end_index + 3]
                 try:
                     # deps should have runtimeTarget, compilationOptions, targets, and libraries
                     # Use libraries to construct BOM components and targets for the dependency tree
@@ -1011,7 +1013,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
 
 
 def parse_go_buildinfo(
-    parsed_obj: lief.Binary,
+        parsed_obj: lief.Binary,
 ) -> Tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
     Parse the go build info section to extract go dependencies
@@ -1308,7 +1310,7 @@ def add_rdata_symbols(metadata, rdata_section, text_section, sections):
     for pii in PII_WORDS:
         for vari in (f"get{pii}", f"get_{pii}", f"get_{camel_to_snake(pii)}", f"Get{pii}"):
             if (rdata_section and rdata_section.search_all(vari)) or (
-                text_section and text_section.search_all(vari)
+                    text_section and text_section.search_all(vari)
             ):
                 pii_symbols.append(
                     {
@@ -1321,7 +1323,7 @@ def add_rdata_symbols(metadata, rdata_section, text_section, sections):
                 continue
     for sw in FIRST_STAGE_WORDS:
         if (rdata_section and rdata_section.search_all(sw)) or (
-            text_section and text_section.search_all(sw)
+                text_section and text_section.search_all(sw)
         ):
             first_stage_symbols.append(
                 {"name": sw, "type": "FUNCTION", "is_function": True, "is_imported": True}

@@ -42,22 +42,21 @@ You can download single binary builds from the [blint-bin releases](https://gith
 ## Usage
 
 ```shell
-usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner]
-             [--no-reviews] [--suggest-fuzzable]
-             {sbom} ...
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--suggest-fuzzable] [--use-blintdb] {sbom} ...
 
 Binary linter and SBOM generator.
 
 options:
   -h, --help            show this help message and exit
-  -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
+  -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, container images or binary files. Defaults to current directory.
-  -o REPORTS_DIR, --reports REPORTS_DIR
+  -o, --reports REPORTS_DIR
                         Reports directory. Defaults to reports.
   --no-error            Continue on error to prevent build from breaking.
   --no-banner           Do not display banner.
   --no-reviews          Do not perform method reviews.
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
+  --use-blintdb         Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
 
 sub-commands:
   Additional sub-commands

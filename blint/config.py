@@ -1289,7 +1289,6 @@ class BlintOptions:
         src_dir_image (list): A list of source directories.
         sbom_output (str): The path to the output file.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
-        export_prefixes (list): Prefixes to determine exported symbols.
         src_dir_boms (list): Directory containing pre-build and build sboms.
         use_blintdb (bool): Flag indicating whether or not to utilize blint-db
     """
@@ -1400,7 +1399,7 @@ FIRST_STAGE_WORDS = (
 BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
 
-BLINTDB_CONTAINER_URL = "ghcr.io/appthreat/blintdb-vcpkg:v0.1"
+BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL", "ghcr.io/appthreat/blintdb-meson-arm64:v1")
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
 if BLINTDB_REFRESH in ["true", "True", "1"]:
     BLINTDB_REFRESH = True
