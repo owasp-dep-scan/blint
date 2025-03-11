@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "blint"
-version = "2.3.2"
+version = "2.4.0"
 description = "Linter and SBOM generator for binary files."
 authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
 license = "MIT"
@@ -41,6 +41,7 @@ ar = "^0.9.1"
 custom-json-diff = "^2.1.5"
 appdirs = "^1.4.4"
 apsw = "^3.49.1.0"
+packageurl-python = "^0.16.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"

@@ -5,13 +5,11 @@ import os
 import re
 import shutil
 import string
-import sys
 import tempfile
 import zipfile
-from dataclasses import field
 from importlib.metadata import distribution
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 import lief
 from ar import Archive, ArchiveError
@@ -41,7 +39,9 @@ from blint.logger import console, LOG
 from requests.exceptions import ConnectionError as RequestConnectionError
 
 import oras.client
+from oras.logger import setup_logger
 
+setup_logger(quiet=True, debug=False)
 
 CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 
@@ -222,22 +222,28 @@ def blintdb_setup(args):
     and puts it into $BLINTDB_LOC path.
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
-    """    
-    if not os.getenv("USE_BLINTDB") and not args.use_blintdb:
+    """
+    if not os.getenv("USE_BLINTDB") and not args.use_blintdb and not args.db_mode:
         LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
         return
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
-    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH:
+    # Should we refresh the database
+    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH and (
+            not args.image_url or args.image_url == BLINTDB_IMAGE_URL):
+        LOG.debug(f"blintdb is present at {BLINTDB_LOC}. Skipping refresh.")
         return
     try:
         oras_client = oras.client.OrasClient()
+        target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
+        LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
         oras_client.pull(
-            target=BLINTDB_IMAGE_URL,
+            target=target_url,
             outdir=BLINTDB_HOME,
             allowed_media_type=[],
             overwrite=True,
         )
+        os.environ["USE_BLINTDB"] = "true"
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except RequestConnectionError as e:
         LOG.error(f"Blintdb Download failed: {e}")
@@ -542,13 +548,15 @@ def cleanup_list_lief_errors(d):
     return new_lst
 
 
-def create_component_evidence(method_value: str, confidence: float) -> ComponentEvidence:
+def create_component_evidence(method_value: str, confidence: float,
+                              evidence_metadata: dict = None) -> ComponentEvidence:
     """
     Creates component evidence based on the provided method value.
 
     Args:
         method_value: The value of the method used for analysis.
         confidence: The confidence interval.
+        evidence_metadata: Extra metadata for evidence purposes.
 
     Returns:
         ComponentEvidence: The created component evidence.

@@ -63,6 +63,7 @@ sub-commands:
 
   {sbom}
     sbom                Command to generate SBOM for supported binaries.
+    db                  Command to manage the pre-compiled database.
 ```
 
 ### SBOM sub-command
@@ -83,6 +84,18 @@ options:
                         prefixes for the exports to be included in the SBOM.
   --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
                         Directories containing pre-build and build BOMs. Use to improve the precision.
+```
+
+### DB sub-command
+
+```shell
+usage: blint db [-h] [--download] [--image-url IMAGE_URL]
+
+options:
+  -h, --help            show this help message and exit
+  --download            Download the pre-compiled database to the /Volumes/Work/blintdb/ directory. Use the environment variable `BLINTDB_HOME` to override.
+  --image-url IMAGE_URL
+                        Blintdb image url. Defaults to ghcr.io/appthreat/blintdb-vcpkg-arm64:v1. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.
 ```
 
 To test any binary, including default commands
@@ -119,12 +132,20 @@ To parse all files, including `.dex` files, pass `--deep` argument.
 blint sbom -i /path/to/apk -o bom.json --deep
 ```
 
+Component identification for C/C++ binaries could be improved with [blintdb](https://github.com/AppThreat/blint-db). To download the pre-compiled database (SQLite format), first run the `db` command followed by the `sbom` command.
+
+```shell
+blint db
+blint sbom -i /path/to/binary -o bom.json --deep
+```
+
 The following binaries are supported:
 
 - Android (apk/aab)
 - Dotnet executable binaries
 - Go binaries
 - Rust binaries
+- c/c++ binaries (WIP)
 
 ```shell
 blint sbom -i /path/to/go-binaries -o bom.json --deep

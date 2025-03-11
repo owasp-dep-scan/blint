@@ -2,10 +2,13 @@
 import sys
 from dataclasses import dataclass, field
 import os
+import platform
 import re
 from typing import List
 from appdirs import user_data_dir
 
+ARCH = platform.machine()
+SYSTEM = platform.system().lower()
 
 # Default ignore list
 ignore_directories = [
@@ -1285,7 +1288,9 @@ class BlintOptions:
         no_error (bool): Flag indicating whether to suppress error messages.
         no_reviews (bool): Flag indicating whether to perform symbol reviews.
         reports_dir (str): The path to the reports directory.
-        sbom_mode (bool): Flag indicating whether to perform SBOM analysis.
+        sbom_mode (bool): Flag for the sbom sub-command.
+        db_mode (bool): Flag for the db sub-command.
+        image_url (str): blintdb download url. Must be OCI compatible.
         src_dir_image (list): A list of source directories.
         sbom_output (str): The path to the output file.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
@@ -1299,13 +1304,15 @@ class BlintOptions:
     no_reviews: bool = False
     reports_dir: str = ""
     sbom_mode: bool = False
+    db_mode: bool = False
+    image_url: str = ""
     sbom_output: str = ""
     sbom_output_dir: str = ""
     src_dir_boms: List = field(default_factory=list)
     src_dir_image: List = field(default_factory=list)
     stdout_mode: bool = False
     use_blintdb: bool = False
-    
+
     def __post_init__(self):
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
             self.sources = [os.getcwd()]
@@ -1322,7 +1329,7 @@ class BlintOptions:
                 self.sbom_output = os.path.join(self.sbom_output, "bom-post-build.cdx.json")
             else:
                 self.sbom_output_dir = os.path.dirname(self.sbom_output)
-        
+
 
 # PII related symbols
 PII_WORDS = (
@@ -1399,7 +1406,11 @@ FIRST_STAGE_WORDS = (
 BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
 
-BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL", "ghcr.io/appthreat/blintdb-meson-arm64:v1")
+BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL",
+                              "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1" if SYSTEM == "darwin" else "ghcr.io/appthreat/blintdb-vcpkg:v1")
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
 if BLINTDB_REFRESH in ["true", "True", "1"]:
     BLINTDB_REFRESH = True
+
+SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
+MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
