@@ -553,6 +553,7 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
         Component: The created dynamic component object.
     """
     group = None
+    version = None
     name = entry.get("name", "").removeprefix("$ORIGIN/") if entry.get("name") else None
     purl = entry.get("purl", f"pkg:file/{name}")
     if not name and purl:
@@ -560,6 +561,7 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
             purl_obj = PackageURL.from_string(purl)
             name = purl_obj.name
             group = purl_obj.namespace
+            version = purl_obj.version
         except Exception:
             pass
     properties = [
@@ -569,6 +571,7 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
         type=Type.library,
         group=group,
         name=name,
+        version=version,
         purl=purl,
         evidence=create_component_evidence(exe, 0.5, evidence_metadata),
     )
