@@ -436,14 +436,14 @@ def process_exe_file(
 
             LOG.debug("Utilizing blint_db")
             symtab_symbols_list = metadata.get("symtab_symbols", [])
-            symtab_binaries_detected = detect_binaries_utilized(symtab_symbols_list)
             dynamic_symbols_list = metadata.get("dynamic_symbols", [])
+            symtab_binaries_detected = detect_binaries_utilized(symtab_symbols_list)
             binaries_detected = detect_binaries_utilized(dynamic_symbols_list)
 
             binaries_detected = binaries_detected.union(symtab_binaries_detected)
             # adds the components in a similar way to dynamic entries
             for binary in binaries_detected:
-                entry ={
+                entry = {
                     "name": binary,
                     "tag": "NEEDED",
                 }

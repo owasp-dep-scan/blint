@@ -63,6 +63,7 @@ sub-commands:
 
   {sbom}
     sbom                Command to generate SBOM for supported binaries.
+    db                  Command to manage the pre-compiled database.
 ```
 
 ### SBOM sub-command
@@ -83,6 +84,18 @@ options:
                         prefixes for the exports to be included in the SBOM.
   --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
                         Directories containing pre-build and build BOMs. Use to improve the precision.
+```
+
+### DB sub-command
+
+```shell
+usage: blint db [-h] [--download] [--image-url IMAGE_URL]
+
+options:
+  -h, --help            show this help message and exit
+  --download            Download the pre-compiled database to the /Volumes/Work/blintdb/ directory. Use the environment variable `BLINTDB_HOME` to override.
+  --image-url IMAGE_URL
+                        Blintdb image url. Defaults to ghcr.io/appthreat/blintdb-vcpkg-arm64:v1. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.
 ```
 
 To test any binary, including default commands

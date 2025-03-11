@@ -5,7 +5,7 @@ import argparse
 import os
 
 from blint.lib.runners import run_default_mode, run_sbom_mode
-from blint.config import BlintOptions
+from blint.config import BlintOptions, BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC
 from blint.lib.utils import blintdb_setup
 
 BLINT_LOGO = """
@@ -37,7 +37,8 @@ def build_parser():
         stdout_mode=False,
         exports_prefix=[],
         src_dir_boms=[],
-        sbom_mode=False
+        sbom_mode=False,
+        db_mode=False,
     )
     parser.add_argument(
         "-i",
@@ -86,9 +87,9 @@ def build_parser():
     parser.add_argument(
         "--use-blintdb",
         action="store_true",
-        default=False,
+        default=os.path.exists(BLINTDB_LOC),
         dest="use_blintdb",
-        help="Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+        help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
     # sbom commmand
     subparsers = parser.add_subparsers(
@@ -144,7 +145,23 @@ def build_parser():
         nargs="+",
         help="Directories containing pre-build and build BOMs. Use to improve the precision.",
     )
-    
+    db_parser = subparsers.add_parser(
+        "db", help="Command to manage the pre-compiled database."
+    )
+    db_parser.set_defaults(db_mode=True)
+    db_parser.add_argument(
+        "--download",
+        action="store_true",
+        default=True,
+        dest="download_mode",
+        help=f"Download the pre-compiled database to the {BLINTDB_HOME} directory. Use the environment variable `BLINTDB_HOME` to override.",
+    )
+    db_parser.add_argument(
+        "--image-url",
+        dest="image_url",
+        default=BLINTDB_IMAGE_URL,
+        help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
+    )
     return parser
 
 
@@ -187,6 +204,8 @@ def handle_args():
         no_reviews=args.no_reviews,
         reports_dir=args.reports_dir,
         sbom_mode=args.sbom_mode,
+        db_mode=args.db_mode,
+        image_url=args.image_url if args.db_mode else None,
         sbom_output=args.sbom_output,
         src_dir_boms=args.src_dir_boms,
         src_dir_image=args.src_dir_image,
@@ -205,6 +224,8 @@ def main():
     # SBOM command
     if blint_options.sbom_mode:
         run_sbom_mode(blint_options)
+    elif blint_options.db_mode:
+        return
     # Default case
     else:
         run_default_mode(blint_options)
