@@ -33,7 +33,10 @@ def return_batch_binaries_detected(symbols_list):
     """
     Current scoring algorithm along with batching
     """
+    # Detected binaries and their score
     binaries_detected_dict = {}
+    # The export ids that led to the match
+    binaries_eid_dict = {}
     if not isinstance(symbols_list, list):
         raise TypeError(f"Incorrect type symbols_lists should be List not {type(symbols_list)}")
 
@@ -49,11 +52,12 @@ def return_batch_binaries_detected(symbols_list):
             matching_binaries = find_binary_from_db(bid)
             if matching_binaries:
                 for (bname, pname, purl) in matching_binaries:
+                    binaries_eid_dict[purl] = eid_list
                     if purl in binaries_detected_dict:
                         binaries_detected_dict[purl] += score
                     else:
                         binaries_detected_dict[purl] = score
-    return binaries_detected_dict
+    return binaries_detected_dict, binaries_eid_dict
 
 
 def get_bid_using_ename_batch(batch_export_name):
@@ -78,7 +82,6 @@ def get_bid_using_ename_batch(batch_export_name):
         place_holders = "?, " * (len(batch_export_name) - 1) + "?"
         if len(batch_export_name) > 0:
             output_string = f"SELECT eid, group_concat(bid) from BinariesExports where eid IN (SELECT rowid from Exports where infunc IN ({place_holders})) group by eid"
-            # print(output_string)
             c.execute(output_string, batch_export_name)
         res = c.fetchall()
     return res
@@ -108,7 +111,7 @@ def find_binary_from_db(bid):
     return frozenset(res.fetchall())
 
 
-def detect_binaries_utilized(symbols_list) -> set:
+def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
     """Simple Voting algorithm
     for a given symbols. e.g. XRenderAddGlyphs
     we count the number of binaries associated to this function
@@ -117,7 +120,7 @@ def detect_binaries_utilized(symbols_list) -> set:
     so one is added to score, we want all the detections to have a score greater than MIN_MATCH_SCORE.
     """
     bin_detected_dict = {}
-
+    binaries_eid_dict = {}
     eid_list = [symbol["name"] for symbol in symbols_list]
     LOG.debug(f"Attempting to find the binaries for {len(eid_list)} symbols. This might take a while ...")
     # creates a 2D array with SYMBOLS_LOOKUP_BATCH_LEN, SYMBOLS_LOOKUP_BATCH_LEN eids are processed in a single query
@@ -130,7 +133,7 @@ def detect_binaries_utilized(symbols_list) -> set:
             for it_eid_list in eid_2d_list
         }
         for future in concurrent.futures.as_completed(futures_bin_detected):
-            single_binaries_detected_dict = future.result()
+            single_binaries_detected_dict, binaries_eid_dict = future.result()
             for purl, score in single_binaries_detected_dict.items():
                 if purl in bin_detected_dict:
                     bin_detected_dict[purl] += score
@@ -138,6 +141,9 @@ def detect_binaries_utilized(symbols_list) -> set:
                     bin_detected_dict[purl] = score
     # create a set() and remove false positives
     binary_detected = {purl for purl, score in bin_detected_dict.items() if score > MIN_MATCH_SCORE}
-
+    binary_evidence_eids = {}
+    for purl, eids in binaries_eid_dict.items():
+        if purl in binary_detected:
+            binary_evidence_eids[purl] = eids
     LOG.debug(f"Output for binary_detected: {len(binary_detected)}")
-    return binary_detected
+    return binary_detected, binary_evidence_eids

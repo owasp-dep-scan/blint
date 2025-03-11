@@ -159,6 +159,7 @@ def build_parser():
     db_parser.add_argument(
         "--image-url",
         dest="image_url",
+        choices=["ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1", "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1"],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
     )

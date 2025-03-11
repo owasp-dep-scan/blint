@@ -229,7 +229,8 @@ def blintdb_setup(args):
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
     # Should we refresh the database
-    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH and (not args.image_url or args.image_url == BLINTDB_IMAGE_URL):
+    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH and (
+            not args.image_url or args.image_url == BLINTDB_IMAGE_URL):
         LOG.debug(f"blintdb is present at {BLINTDB_LOC}. Skipping refresh.")
         return
     try:
@@ -547,13 +548,15 @@ def cleanup_list_lief_errors(d):
     return new_lst
 
 
-def create_component_evidence(method_value: str, confidence: float) -> ComponentEvidence:
+def create_component_evidence(method_value: str, confidence: float,
+                              evidence_metadata: dict = None) -> ComponentEvidence:
     """
     Creates component evidence based on the provided method value.
 
     Args:
         method_value: The value of the method used for analysis.
         confidence: The confidence interval.
+        evidence_metadata: Extra metadata for evidence purposes.
 
     Returns:
         ComponentEvidence: The created component evidence.

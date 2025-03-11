@@ -12,7 +12,7 @@ from rich.progress import Progress
 
 from blint.lib.android import collect_app_metadata
 from blint.lib.binary import parse
-from blint.config import SYMBOL_DELIMITER
+from blint.config import SYMBOL_DELIMITER, BlintOptions
 from blint.cyclonedx.spec import (
     BomFormat,
     Component,
@@ -36,6 +36,8 @@ from blint.lib.utils import (
     get_version,
 )
 from blint.db import detect_binaries_utilized
+
+from packageurl import PackageURL
 
 
 def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
@@ -101,7 +103,7 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(blint_options, exe_files, android_files) -> bool:
+def generate(blint_options: BlintOptions, exe_files, android_files) -> bool:
     """
     Generates an SBOM for the given source directories.
 
@@ -126,10 +128,10 @@ def generate(blint_options, exe_files, android_files) -> bool:
     )
     sbom.metadata = default_metadata(blint_options.src_dir_image)
     with Progress(
-        transient=True,
-        redirect_stderr=True,
-        redirect_stdout=True,
-        refresh_per_second=1,
+            transient=True,
+            redirect_stderr=True,
+            redirect_stdout=True,
+            refresh_per_second=1,
     ) as progress:
         if exe_files:
             task = progress.add_task(
@@ -139,7 +141,8 @@ def generate(blint_options, exe_files, android_files) -> bool:
             )
         for exe in exe_files:
             progress.update(task, description=f"Processing [bold]{exe}[/bold]", advance=1)
-            components += process_exe_file(dependencies_dict, blint_options.deep_mode, exe, sbom, blint_options.exports_prefix, symbols_purl_map)
+            components += process_exe_file(dependencies_dict, blint_options.deep_mode, exe, sbom,
+                                           blint_options.exports_prefix, symbols_purl_map, blint_options.use_blintdb)
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -151,16 +154,17 @@ def generate(blint_options, exe_files, android_files) -> bool:
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
-    return create_sbom(components, dependencies, blint_options.sbom_output, sbom, blint_options.deep_mode, symbols_purl_map)
+    return create_sbom(components, dependencies, blint_options.sbom_output, sbom, blint_options.deep_mode,
+                       symbols_purl_map)
 
 
 def create_sbom(
-    components: list[Component],
-    dependencies: list[dict],
-    output_file: str,
-    sbom: CycloneDX,
-    deep_mode: bool,
-    symbols_purl_map: dict
+        components: list[Component],
+        dependencies: list[dict],
+        output_file: str,
+        sbom: CycloneDX,
+        deep_mode: bool,
+        symbols_purl_map: dict
 ) -> bool:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
@@ -256,19 +260,20 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
 def _add_to_parent_component(metadata_components: list[Component], parent_component: Component):
     for mc in metadata_components:
         if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
-            mode="python"
+                mode="python"
         ):
             return
     metadata_components.append(parent_component)
 
 
 def process_exe_file(
-    dependencies_dict: dict[str, set],
-    deep_mode: bool,
-    exe: str,
-    sbom: CycloneDX,
-    export_prefixes: list[str] = None,
-    symbols_purl_map: dict = None,
+        dependencies_dict: dict[str, set],
+        deep_mode: bool,
+        exe: str,
+        sbom: CycloneDX,
+        export_prefixes: list[str] = None,
+        symbols_purl_map: dict = None,
+        use_blintdb: bool = False
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
@@ -280,6 +285,7 @@ def process_exe_file(
         sbom: The CycloneDX SBOM object.
         export_prefixes (list): Prefixes to determine exported symbols.
         symbols_purl_map (dict): containing symbol name as the key and purl as the value
+        use_blintdb (bool): should blintdb be used to improve component identification
 
     Returns:
         list[Component]: The updated list of components.
@@ -290,33 +296,33 @@ def process_exe_file(
     parent_component.properties = []
     lib_components: list[Component] = []
     for prop in (
-        "binary_type",
-        "magic",
-        "class",
-        "platform",
-        "minos",
-        "interpreter",
-        "dylinker",
-        "machine_type",
-        "sdk",
-        "uuid",
-        "cpu_type",
-        "flags",
-        "relro",
-        "is_pie",
-        "is_reproducible_build",
-        "has_nx",
-        "static",
-        "characteristics",
-        "dll_characteristics",
-        "subsystem",
-        "is_gui",
-        "is_driver",
-        "is_dotnet",
-        "major_linker_version",
-        "minor_linker_version",
-        "major_operating_system_version",
-        "minor_operating_system_version",
+            "binary_type",
+            "magic",
+            "class",
+            "platform",
+            "minos",
+            "interpreter",
+            "dylinker",
+            "machine_type",
+            "sdk",
+            "uuid",
+            "cpu_type",
+            "flags",
+            "relro",
+            "is_pie",
+            "is_reproducible_build",
+            "has_nx",
+            "static",
+            "characteristics",
+            "dll_characteristics",
+            "subsystem",
+            "is_gui",
+            "is_driver",
+            "is_dotnet",
+            "major_linker_version",
+            "minor_linker_version",
+            "major_operating_system_version",
+            "minor_operating_system_version",
     ):
         if metadata.get(prop):
             value = str(metadata.get(prop))
@@ -350,9 +356,10 @@ def process_exe_file(
                     value=", ".join([f["name"] for f in symbols_version]),
                 )
             )
-        
+
         internal_functions = sorted(
-            {f["name"] for f in metadata.get("functions", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
+            {f["name"] for f in metadata.get("functions", []) if
+             not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if internal_functions:
             parent_component.properties.append(
@@ -372,7 +379,8 @@ def process_exe_file(
                 )
             )
         symtab_symbols = sorted(
-            {f["name"] for f in metadata.get("symtab_symbols", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
+            {f["name"] for f in metadata.get("symtab_symbols", []) if
+             f and not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if symtab_symbols:
             parent_component.properties.append(
@@ -382,7 +390,8 @@ def process_exe_file(
                 )
             )
         exported_symtab_symbols = sorted(
-            {f["name"] for f in metadata.get("symtab_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
+            {f["name"] for f in metadata.get("symtab_symbols", []) if
+             f and any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if exported_symtab_symbols:
             parent_component.properties.append(
@@ -391,7 +400,8 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(exported_symtab_symbols),
                 )
             )
-        all_imports = sorted({f["name"] for f in metadata.get("imports", []) if not any(f["name"].startswith(p) for p in export_prefixes)})
+        all_imports = sorted({f["name"] for f in metadata.get("imports", []) if
+                              f and not any(f["name"].startswith(p) for p in export_prefixes)})
         if all_imports:
             parent_component.properties.append(
                 Property(
@@ -399,7 +409,8 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(all_imports),
                 )
             )
-        all_exports = sorted({f["name"] for f in metadata.get("imports", []) if any(f["name"].startswith(p) for p in export_prefixes)})
+        all_exports = sorted(
+            {f["name"] for f in metadata.get("imports", []) if any(f["name"].startswith(p) for p in export_prefixes)})
         if all_imports:
             parent_component.properties.append(
                 Property(
@@ -408,7 +419,8 @@ def process_exe_file(
                 )
             )
         dynamic_symbols = sorted(
-            {f["name"] for f in metadata.get("dynamic_symbols", []) if not any(f["name"].startswith(p) for p in export_prefixes)}
+            {f["name"] for f in metadata.get("dynamic_symbols", []) if
+             f and not any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if dynamic_symbols:
             parent_component.properties.append(
@@ -417,9 +429,10 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(dynamic_symbols),
                 )
             )
-        
+
         exported_dynamic_symbols = sorted(
-            {f["name"] for f in metadata.get("dynamic_symbols", []) if any(f["name"].startswith(p) for p in export_prefixes)}
+            {f["name"] for f in metadata.get("dynamic_symbols", []) if
+             f and any(f["name"].startswith(p) for p in export_prefixes)}
         )
         if exported_dynamic_symbols:
             parent_component.properties.append(
@@ -428,26 +441,26 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(exported_dynamic_symbols),
                 )
             )
-        
-        # If USER_BLINTDB is "1" or "true", then match components with database
-        if os.environ.get("USE_BLINTDB", "") in ["1", "true"]:
+
+        # Should we use the blintdb to improve precision
+        if use_blintdb:
             # utilize voting logic along with blitndb
             # we iterate through each symbol and try to find a match in the database
 
             LOG.debug("Utilizing blint_db")
             symtab_symbols_list = metadata.get("symtab_symbols", [])
             dynamic_symbols_list = metadata.get("dynamic_symbols", [])
-            symtab_binaries_detected = detect_binaries_utilized(symtab_symbols_list)
-            binaries_detected = detect_binaries_utilized(dynamic_symbols_list)
-
+            symtab_binaries_detected, binary_evidence_eids = detect_binaries_utilized(symtab_symbols_list)
+            binaries_detected, dynamic_binary_evidence_eids = detect_binaries_utilized(dynamic_symbols_list)
             binaries_detected = binaries_detected.union(symtab_binaries_detected)
+            binary_evidence_eids.update(dynamic_binary_evidence_eids)
             # adds the components in a similar way to dynamic entries
-            for binary in binaries_detected:
+            for binary_purl in binaries_detected:
                 entry = {
-                    "name": binary,
+                    "purl": binary_purl,
                     "tag": "NEEDED",
                 }
-                comp = create_dynamic_component(entry, exe)
+                comp = create_dynamic_component(entry, exe, {"export_ids": binary_evidence_eids.get(binary_purl)})
                 lib_components.append(comp)
 
     if not sbom.metadata.component.components:
@@ -527,28 +540,42 @@ def create_library_component(entry: Dict, exe: str) -> Component:
     return comp
 
 
-def create_dynamic_component(entry: Dict, exe: str) -> Component:
+def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = None) -> Component:
     """
     Creates a dynamic component object based on the entry information.
 
     Args:
         entry: The entry containing the component information.
         exe: The executable associated with the component.
+        evidence_metadata: Extra metadata for evidence purposes.
 
     Returns:
         Component: The created dynamic component object.
     """
-    name = entry.get("name", "").removeprefix("$ORIGIN/")
-    purl = f"pkg:file/{name}"
+    group = None
+    name = entry.get("name", "").removeprefix("$ORIGIN/") if entry.get("name") else None
+    purl = entry.get("purl", f"pkg:file/{name}")
+    if not name and purl:
+        try:
+            purl_obj = PackageURL.from_string(purl)
+            name = purl_obj.name
+            group = purl_obj.namespace
+        except Exception:
+            pass
+    properties = [
+        Property(name="internal:srcFile", value=exe),
+    ]
     comp = Component(
         type=Type.library,
+        group=group,
         name=name,
         purl=purl,
-        evidence=create_component_evidence(exe, 0.5),
-        properties=[
-            Property(name="internal:srcFile", value=exe),
-        ],
+        evidence=create_component_evidence(exe, 0.5, evidence_metadata),
     )
+    if evidence_metadata:
+        for k, v in evidence_metadata.items():
+            properties.append(Property(name=f"internal:{k}", value=", ".join(str(v)) if isinstance(v, list) else str(v)))
+    comp.properties = properties
     if entry.get("tag") == "NEEDED":
         comp.scope = Scope.required
     comp.bom_ref = RefType(purl)
@@ -556,10 +583,10 @@ def create_dynamic_component(entry: Dict, exe: str) -> Component:
 
 
 def process_android_file(
-    dependencies_dict: dict[str, set],
-    deep_mode: bool,
-    f: str,
-    sbom: CycloneDX,
+        dependencies_dict: dict[str, set],
+        deep_mode: bool,
+        f: str,
+        sbom: CycloneDX,
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
@@ -584,7 +611,7 @@ def process_android_file(
 
 
 def process_dotnet_dependencies(
-    dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]
+        dotnet_deps: dict[str, dict], dependencies_dict: dict[str, set]
 ) -> list[Component]:
     """
     Process the dotnet dependencies metadata extracted for binary overlays
@@ -689,7 +716,7 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
 
 
 def process_rust_dependencies(
-    rust_deps: list, dependencies_dict: dict[str, set]
+        rust_deps: list, dependencies_dict: dict[str, set]
 ) -> list[Component]:
     """
     Process the rust dependencies metadata extracted for binary overlays
@@ -731,7 +758,7 @@ def process_rust_dependencies(
 
 
 def track_dependency(
-    dependencies_dict: dict[str, set], parent_component: Component, app_components: list[Component]
+        dependencies_dict: dict[str, set], parent_component: Component, app_components: list[Component]
 ) -> None:
     """
     Track dependencies between components and update the dependencies dict.
@@ -796,7 +823,8 @@ def populate_purl_lookup(src_dir_boms: list[str]):
                 try:
                     bom_obj = orjson.loads(fdata)
                     # Ignore non-compatible bom files
-                    if not bom_obj or not bom_obj.get("metadata", {}).get("lifecycles") or not bom_obj.get("components"):
+                    if not bom_obj or not bom_obj.get("metadata", {}).get("lifecycles") or not bom_obj.get(
+                            "components"):
                         continue
                     for comp in bom_obj["components"]:
                         # For nuget, store the unversioned purl as a lookup key

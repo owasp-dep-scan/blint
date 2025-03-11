@@ -7,7 +7,6 @@ import re
 from typing import List
 from appdirs import user_data_dir
 
-
 ARCH = platform.machine()
 SYSTEM = platform.system().lower()
 
@@ -1313,7 +1312,7 @@ class BlintOptions:
     src_dir_image: List = field(default_factory=list)
     stdout_mode: bool = False
     use_blintdb: bool = False
-    
+
     def __post_init__(self):
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
             self.sources = [os.getcwd()]
@@ -1330,7 +1329,7 @@ class BlintOptions:
                 self.sbom_output = os.path.join(self.sbom_output, "bom-post-build.cdx.json")
             else:
                 self.sbom_output_dir = os.path.dirname(self.sbom_output)
-        
+
 
 # PII related symbols
 PII_WORDS = (
@@ -1407,10 +1406,11 @@ FIRST_STAGE_WORDS = (
 BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
 
-BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL", "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1" if SYSTEM == "darwin" else "ghcr.io/appthreat/blintdb-vcpkg:v1")
+BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL",
+                              "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1" if SYSTEM == "darwin" else "ghcr.io/appthreat/blintdb-vcpkg:v1")
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
 if BLINTDB_REFRESH in ["true", "True", "1"]:
     BLINTDB_REFRESH = True
 
-SYMBOLS_LOOKUP_BATCH_LEN = 32000
-MIN_MATCH_SCORE = 1
+SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
+MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
