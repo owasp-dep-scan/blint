@@ -132,12 +132,20 @@ To parse all files, including `.dex` files, pass `--deep` argument.
 blint sbom -i /path/to/apk -o bom.json --deep
 ```
 
+Component identification for C/C++ binaries could be improved with [blintdb](https://github.com/AppThreat/blint-db). To download the pre-compiled database (SQLite format), first run the `db` command followed by the `sbom` command.
+
+```shell
+blint db
+blint sbom -i /path/to/binary -o bom.json --deep
+```
+
 The following binaries are supported:
 
 - Android (apk/aab)
 - Dotnet executable binaries
 - Go binaries
 - Rust binaries
+- c/c++ binaries (WIP)
 
 ```shell
 blint sbom -i /path/to/go-binaries -o bom.json --deep
