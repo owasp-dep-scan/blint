@@ -145,5 +145,4 @@ def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
     for purl, eids in binaries_eid_dict.items():
         if purl in binary_detected:
             binary_evidence_eids[purl] = eids
-    LOG.debug(f"Output for binary_detected: {len(binary_detected)}")
     return binary_detected, binary_evidence_eids

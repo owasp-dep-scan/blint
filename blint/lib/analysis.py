@@ -134,33 +134,31 @@ for tmp_data in raw_rules:
 # Load the default review methods
 for review_methods_file in review_files:
     raw_annotations = []
-    if DEBUG_MODE:
-        LOG.debug(f"Loading review file {review_methods_file}")
     with get_resource("blint.data.annotations", review_methods_file) as fp:
         raw_annotations = fp.read().split("---")
-    for tmp_data in raw_annotations:
-        if not tmp_data:
-            continue
-        methods_reviews_groups = yaml.safe_load(tmp_data)
-        exe_type_list = methods_reviews_groups.get("exe_type")
-        if isinstance(exe_type_list, str):
-            exe_type_list = [exe_type_list]
-        all_rules = methods_reviews_groups.get("rules")
-        method_rules_dict = {}
-        for rule in all_rules:
-            method_rules_dict[rule.get("id")] = rule
-            review_rules_cache[rule.get("id")] = rule
-        for etype in exe_type_list:
-            if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
-                review_methods_dict[etype].append(method_rules_dict)
-            elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
-                review_exe_dict[etype].append(method_rules_dict)
-            elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
-                review_symbols_dict[etype].append(method_rules_dict)
-            elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
-                review_imports_dict[etype].append(method_rules_dict)
-            elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
-                review_entries_dict[etype].append(method_rules_dict)
+        for tmp_data in raw_annotations:
+            if not tmp_data:
+                continue
+            methods_reviews_groups = yaml.safe_load(tmp_data)
+            exe_type_list = methods_reviews_groups.get("exe_type")
+            if isinstance(exe_type_list, str):
+                exe_type_list = [exe_type_list]
+            all_rules = methods_reviews_groups.get("rules")
+            method_rules_dict = {}
+            for rule in all_rules:
+                method_rules_dict[rule.get("id")] = rule
+                review_rules_cache[rule.get("id")] = rule
+            for etype in exe_type_list:
+                if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                    review_methods_dict[etype].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                    review_exe_dict[etype].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                    review_symbols_dict[etype].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                    review_imports_dict[etype].append(method_rules_dict)
+                elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                    review_entries_dict[etype].append(method_rules_dict)
 
 
 def run_checks(f, metadata):

@@ -456,6 +456,10 @@ def process_exe_file(
             binaries_detected, dynamic_binary_evidence_eids = detect_binaries_utilized(dynamic_symbols_list)
             binaries_detected = binaries_detected.union(symtab_binaries_detected)
             binary_evidence_eids.update(dynamic_binary_evidence_eids)
+            if binaries_detected:
+                LOG.debug(f"Found {len(binaries_detected)} possible binary matches for {exe}.")
+            else:
+                LOG.debug(f"Unable to identify a match for {exe}.")
             # adds the components in a similar way to dynamic entries
             for binary_purl in binaries_detected:
                 entry = {
