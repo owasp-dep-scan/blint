@@ -1289,6 +1289,7 @@ class BlintOptions:
         no_reviews (bool): Flag indicating whether to perform symbol reviews.
         reports_dir (str): The path to the reports directory.
         sbom_mode (bool): Flag for the sbom sub-command.
+        quiet_mode (bool): Flag to disable all logging and progress bars.
         db_mode (bool): Flag for the db sub-command.
         image_url (str): blintdb download url. Must be OCI compatible.
         src_dir_image (list): A list of source directories.
@@ -1304,6 +1305,7 @@ class BlintOptions:
     no_reviews: bool = False
     reports_dir: str = ""
     sbom_mode: bool = False
+    quiet_mode: bool = False
     db_mode: bool = False
     image_url: str = ""
     sbom_output: str = ""

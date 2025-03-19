@@ -7,6 +7,7 @@ import os
 from blint.lib.runners import run_default_mode, run_sbom_mode
 from blint.config import BlintOptions, BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC
 from blint.lib.utils import blintdb_setup
+from blint.logger import LOG
 
 BLINT_LOGO = """
 ██████╗ ██╗     ██╗███╗   ██╗████████╗
@@ -39,6 +40,7 @@ def build_parser():
         src_dir_boms=[],
         sbom_mode=False,
         db_mode=False,
+        quiet_mode=False,
     )
     parser.add_argument(
         "-i",
@@ -91,6 +93,14 @@ def build_parser():
         dest="use_blintdb",
         help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        dest="quiet_mode",
+        help="Disable logging and progress bars.",
+    )
     # sbom commmand
     subparsers = parser.add_subparsers(
         title="sub-commands",
@@ -131,6 +141,14 @@ def build_parser():
         help="Print the SBOM to stdout instead of a file.",
     )
     sbom_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        dest="quiet_mode",
+        help="Disable logging and progress bars.",
+    )
+    sbom_parser.add_argument(
         "--exports-prefix",
         default=[],
         action="extend",
@@ -159,7 +177,8 @@ def build_parser():
     db_parser.add_argument(
         "--image-url",
         dest="image_url",
-        choices=["ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1", "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1"],
+        choices=["ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1", "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
+                 "ghcr.io/appthreat/blintdb-meson:v1"],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
     )
@@ -205,6 +224,7 @@ def handle_args():
         no_reviews=args.no_reviews,
         reports_dir=args.reports_dir,
         sbom_mode=args.sbom_mode,
+        quiet_mode=args.quiet_mode,
         db_mode=args.db_mode,
         image_url=args.image_url if args.db_mode else None,
         sbom_output=args.sbom_output,
@@ -219,7 +239,8 @@ def handle_args():
 def main():
     """Main function of the blint tool"""
     blint_options = handle_args()
-
+    if blint_options.quiet_mode:
+        LOG.disabled = True
     blintdb_setup(blint_options)
 
     # SBOM command

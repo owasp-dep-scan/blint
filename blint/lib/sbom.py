@@ -132,6 +132,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> bool:
             redirect_stderr=True,
             redirect_stdout=True,
             refresh_per_second=1,
+            disable=blint_options.quiet_mode
     ) as progress:
         if exe_files:
             task = progress.add_task(
@@ -577,7 +578,8 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
     )
     if evidence_metadata:
         for k, v in evidence_metadata.items():
-            properties.append(Property(name=f"internal:{k}", value=", ".join(str(v)) if isinstance(v, list) else str(v)))
+            properties.append(
+                Property(name=f"internal:{k}", value=", ".join(str(v)) if isinstance(v, list) else str(v)))
     comp.properties = properties
     if entry.get("tag") == "NEEDED":
         comp.scope = Scope.required
