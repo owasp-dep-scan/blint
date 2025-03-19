@@ -53,7 +53,7 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Compon
     """
     if not src_dirs:
         raise ValueError("No source directories provided")
-    name = os.path.basename(src_dirs[0])
+    name = os.path.basename(src_dirs[0]) or os.path.dirname(src_dirs[0])
     version = None
     # Extract the name from the .rlib files
     if name.endswith(".rlib"):
@@ -467,8 +467,8 @@ def process_exe_file(
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
-    # Automatically promote application dependencies to the parent
-    if parent_component.type == Type.application:
+    # Automatically promote application dependencies to the parent. Filter out any components with empty properties, as these are unparseable blobs.
+    if parent_component.type == Type.application and len(parent_component.properties):
         _add_to_parent_component(sbom.metadata.component.components, parent_component)
     # Library dependencies such as .dll could be moved to lib_components
     elif parent_component.type == Type.library:
