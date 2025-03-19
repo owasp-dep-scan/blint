@@ -124,7 +124,7 @@ def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
     bin_detected_dict = {}
     binaries_eid_dict = {}
     eid_list = [symbol["name"] for symbol in symbols_list]
-    LOG.debug(f"Attempting to find the binaries for {len(eid_list)} symbols. This might take a while ...")
+    LOG.debug(f"Attempting to find the binaries for {len(eid_list)} symbols.")
     # creates a 2D array with SYMBOLS_LOOKUP_BATCH_LEN, SYMBOLS_LOOKUP_BATCH_LEN eids are processed in a single query
     eid_2d_list = [eid_list[i: i + SYMBOLS_LOOKUP_BATCH_LEN] for i in range(0, len(eid_list), SYMBOLS_LOOKUP_BATCH_LEN)]
 
