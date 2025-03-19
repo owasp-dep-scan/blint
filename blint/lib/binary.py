@@ -808,7 +808,9 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     symtab_symbols = parsed_obj.symtab_symbols
     metadata["static"] = bool(symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
-    metadata = add_elf_dynamic_entries(dynamic_entries, metadata)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        metadata = add_elf_dynamic_entries(dynamic_entries, metadata)
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["strings"] = parse_strings(parsed_obj)
