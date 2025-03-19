@@ -103,14 +103,14 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(blint_options: BlintOptions, exe_files, android_files) -> bool:
+def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX:
     """
     Generates an SBOM for the given source directories.
 
     Args:
         blint_options (BlintOptions): A BlintOptions object containing the SBOM generation options.
     Returns:
-        bool: True if the SBOM generation is successful, False otherwise.
+        CycloneDX: Generated CycloneDX SBOM
     """
     if not android_files and not exe_files:
         return False
@@ -155,6 +155,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> bool:
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
+    # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
     return create_sbom(components, dependencies, blint_options.sbom_output, sbom, blint_options.deep_mode,
                        symbols_purl_map)
 
@@ -166,7 +167,7 @@ def create_sbom(
         sbom: CycloneDX,
         deep_mode: bool,
         symbols_purl_map: dict
-) -> bool:
+) -> CycloneDX:
     """
     Creates a Software Bill of Materials (SBOM) with the provided components,
     dependencies, output file, and SBOM object.
@@ -174,13 +175,13 @@ def create_sbom(
     Args:
         components (list): A list of Component objects.
         dependencies (list): A list of dependencies.
-        output_file (str): The path to the output file.
-        sbom: The SBOM object representing the SBOM.
+        output_file (str): The path to the output BOM file.
+        sbom (CycloneDX): The SBOM object representing the SBOM.
         deep_mode (bool): Flag indicating whether to perform deep analysis.
         symbols_purl_map (dict): containing symbol name as the key and purl as the value
 
     Returns:
-        bool: True if the SBOM generation is successful, False otherwise.
+        CycloneDX: CycloneDX object with trimmed components and dependencies
     """
     output_dir = os.path.split(output_file)[0]
     if not os.path.exists(output_dir):
@@ -207,7 +208,7 @@ def create_sbom(
     file_write(output_file, sbom.model_dump_json(
         indent=None if deep_mode else 2, exclude_none=True, exclude_defaults=True, warnings=False,
         by_alias=True), log=LOG)
-    return os.path.exists(output_file)
+    return sbom
 
 
 def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:

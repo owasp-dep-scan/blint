@@ -5,6 +5,9 @@ import sys
 from collections import defaultdict
 
 from rich.progress import Progress
+
+from blint.config import BlintOptions
+from blint.cyclonedx.spec import CycloneDX
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
     report,
@@ -19,7 +22,16 @@ from blint.lib.sbom import generate
 from blint.lib.utils import export_metadata, find_android_files, gen_file_list
 
 
-def run_sbom_mode(blint_options):
+def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
+    """
+    Generates an SBOM for the given source directories. Binary files including android apk files are collected
+    automatically.
+
+    Args:
+        blint_options (BlintOptions): A BlintOptions object containing the SBOM generation options.
+    Returns:
+        CycloneDX: Generated CycloneDX SBOM
+    """
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
@@ -30,15 +42,15 @@ def run_sbom_mode(blint_options):
     for src in blint_options.src_dir_image:
         if files := find_android_files(src):
             android_files += files
-    generate(blint_options, exe_files, android_files)
+    return generate(blint_options, exe_files, android_files)
 
 
-def run_default_mode(blint_options):
+def run_default_mode(blint_options: BlintOptions) -> None:
     exe_files = gen_file_list(blint_options.src_dir_image)
     analyzer = AnalysisRunner()
     findings, reviews, fuzzables = analyzer.start(blint_options, exe_files)
     report(blint_options, exe_files, findings, reviews, fuzzables)
-    
+
     if os.getenv("CI") and not blint_options.no_error:
         for f in findings:
             if f['severity'] == 'critical':
@@ -162,11 +174,11 @@ class ReviewRunner:
         self._gen_review_lists(exe_type)
         # Check if reviews are available for this exe type
         if (
-            self.review_methods_list
-            or self.review_exe_list
-            or self.review_symbols_list
-            or self.review_imports_list
-            or self.review_entries_list
+                self.review_methods_list
+                or self.review_exe_list
+                or self.review_symbols_list
+                or self.review_imports_list
+                or self.review_entries_list
         ):
             return self._review_lists(metadata)
         return self._review_loader_symbols(metadata)
@@ -360,7 +372,7 @@ class ReviewRunner:
                         continue
                     for afun in functions_list:
                         if apattern.lower() in afun.lower() and not found_function.get(
-                            afun.lower()
+                                afun.lower()
                         ):
                             result = {
                                 "pattern": apattern,
