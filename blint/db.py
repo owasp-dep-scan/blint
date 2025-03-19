@@ -119,6 +119,8 @@ def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
     is associated with 'libXrender-0.9.10/libxrender.so'.
     so one is added to score, we want all the detections to have a score greater than MIN_MATCH_SCORE.
     """
+    if not symbols_list:
+        return set(), {}
     bin_detected_dict = {}
     binaries_eid_dict = {}
     eid_list = [symbol["name"] for symbol in symbols_list]

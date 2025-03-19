@@ -452,22 +452,23 @@ def process_exe_file(
             LOG.debug("Utilizing blint_db")
             symtab_symbols_list = metadata.get("symtab_symbols", [])
             dynamic_symbols_list = metadata.get("dynamic_symbols", [])
-            symtab_binaries_detected, binary_evidence_eids = detect_binaries_utilized(symtab_symbols_list)
-            binaries_detected, dynamic_binary_evidence_eids = detect_binaries_utilized(dynamic_symbols_list)
-            binaries_detected = binaries_detected.union(symtab_binaries_detected)
-            binary_evidence_eids.update(dynamic_binary_evidence_eids)
-            if binaries_detected:
-                LOG.debug(f"Found {len(binaries_detected)} possible binary matches for {exe}.")
-            else:
-                LOG.debug(f"Unable to identify a match for {exe}.")
-            # adds the components in a similar way to dynamic entries
-            for binary_purl in binaries_detected:
-                entry = {
-                    "purl": binary_purl,
-                    "tag": "NEEDED",
-                }
-                comp = create_dynamic_component(entry, exe, {"export_ids": binary_evidence_eids.get(binary_purl)})
-                lib_components.append(comp)
+            if symtab_symbols_list or dynamic_symbols_list:
+                symtab_binaries_detected, binary_evidence_eids = detect_binaries_utilized(symtab_symbols_list)
+                binaries_detected, dynamic_binary_evidence_eids = detect_binaries_utilized(dynamic_symbols_list)
+                binaries_detected = binaries_detected.union(symtab_binaries_detected)
+                binary_evidence_eids.update(dynamic_binary_evidence_eids)
+                if binaries_detected:
+                    LOG.debug(f"Found {len(binaries_detected)} possible binary matches for {exe}.")
+                else:
+                    LOG.debug(f"Unable to identify a match for {exe}.")
+                # adds the components in a similar way to dynamic entries
+                for binary_purl in binaries_detected:
+                    entry = {
+                        "purl": binary_purl,
+                        "tag": "NEEDED",
+                    }
+                    comp = create_dynamic_component(entry, exe, {"export_ids": binary_evidence_eids.get(binary_purl)})
+                    lib_components.append(comp)
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
