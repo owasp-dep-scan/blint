@@ -588,7 +588,7 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
     Returns the list of extracted files
     """
     if not to_dir:
-        to_dir = tempfile.mkdtemp(prefix="ar-temp-")
+        to_dir = tempfile.mkdtemp(prefix="ar-temp-", dir=os.getenv("BLINT_TEMP_DIR"))
     files_list = []
     with open(ar_file, "rb") as fp:
         try:
