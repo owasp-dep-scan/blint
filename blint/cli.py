@@ -177,7 +177,8 @@ def build_parser():
     db_parser.add_argument(
         "--image-url",
         dest="image_url",
-        choices=["ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
+        choices=["ghcr.io/appthreat/blintdb-vcpkg-arm64:v1",
+                 "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
                  "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
                  "ghcr.io/appthreat/blintdb-meson:v1",
                  "ghcr.io/appthreat/blintdb-meson-arm64:v1"
