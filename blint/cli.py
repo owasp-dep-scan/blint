@@ -180,9 +180,11 @@ def build_parser():
         choices=["ghcr.io/appthreat/blintdb-vcpkg:v1",
                  "ghcr.io/appthreat/blintdb-vcpkg-arm64:v1",
                  "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
+                 "ghcr.io/appthreat/blintdb-vcpkg-musl:v1",
                  "ghcr.io/appthreat/blintdb-meson:v1",
                  "ghcr.io/appthreat/blintdb-meson-arm64:v1",
-                 "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1"
+                 "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
+                 "ghcr.io/appthreat/blintdb-meson-musl:v1",
                  ],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
