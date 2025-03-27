@@ -28,7 +28,7 @@ jobs:
         python3 -m pip install setuptools pyinstaller poetry
         cd blint
         poetry config virtualenvs.create false
-        poetry install --all-groups --no-cache
+        poetry install --all-groups --all-extras --no-cache
     - name: Binary gnu build
       run: |
         cd blint
@@ -40,6 +40,7 @@ jobs:
           --add-data="blint/data/annotations:blint/data/annotations" \
           --collect-submodules blint \
           --collect-submodules symbolic \
+          --collect-submodules oras \
           --noupx
         ./dist/blint -i dist/blint -o /tmp/reports
         sha256sum ./dist/blint > ./dist/blint.sha256
