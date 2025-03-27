@@ -35,7 +35,7 @@ jobs:
     - name: Install poetry
       run: |
         python3 -m pip install poetry
-        poetry install
+        poetry install --all-groups --all-extras
     - name: Test with pytest
       run: |
         poetry run pytest --cov=blint tests

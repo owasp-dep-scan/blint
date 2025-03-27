@@ -35,8 +35,6 @@ from blint.cyclonedx.spec import (
     Technique,
 )
 from blint.logger import console, LOG
-# This is different from generic ConnectionError
-from requests.exceptions import ConnectionError as RequestConnectionError
 
 import oras.client
 from oras.logger import setup_logger
@@ -245,7 +243,7 @@ def blintdb_setup(args):
         )
         os.environ["USE_BLINTDB"] = "true"
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
-    except RequestConnectionError as e:
+    except Exception as e:
         LOG.error(f"Blintdb Download failed: {e}")
 
 

@@ -1,8 +1,24 @@
-[tool.poetry]
+[project]
 name = "blint"
 version = "2.4.0"
 description = "Linter and SBOM generator for binary files."
-authors = ["Prabhu Subramanian <prabhu@appthreat.com>", "Caroline Russell <caroline@appthreat.dev>"]
+authors = [
+    {name= "Team AppThreat", email = "cloud@appthreat.com"},
+]
+dependencies = [
+    "lief>=0.16.4",
+    "rich>=13.9.4",
+    "PyYAML>=6.0.2",
+    "defusedxml>=0.7.1",
+    "pydantic[email]>=2.10.6",
+    "orjson>=3.10.15",
+    "symbolic==10.2.1",
+    "ar>=0.9.1",
+    "custom-json-diff>=2.1.5",
+    "appdirs>=1.4.4",
+    "apsw>=3.49.1.0",
+    "packageurl-python>=0.16.0"
+]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/owasp-dep-scan/blint"
@@ -20,46 +36,33 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
+requires-python = ">=3.10,<3.14"
 include = ["blint/data/*.yml"]
 
-[tool.poetry.urls]
+[project.urls]
 "CI" = "https://github.com/owasp-dep-scan/blint/actions"
 
-[tool.poetry.scripts]
+[project.scripts]
 blint = 'blint.cli:main'
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.14"
-lief = "^0.16.4"
-rich = "^13.9.4"
-PyYAML = "^6.0.2"
-defusedxml = "^0.7.1"
-pydantic = {extras = ["email"], version = "^2.10.6"}
-orjson = "^3.10.15"
-symbolic = "10.2.1"
-ar = "^0.9.1"
-custom-json-diff = "^2.1.5"
-appdirs = "^1.4.4"
-apsw = "^3.49.1.0"
-packageurl-python = "^0.16.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.4"
-black = "^25.1.0"
-flake8 = "^7.1.2"
-pylint = "^3.3.4"
-pytest-cov = "^6.0.0"
-pyinstaller = "^6.12.0"
-
-
-[tool.poetry.group.db.dependencies]
-oras = "^0.2.25"
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "black>=25.1.0",
+    "flake8>=7.1.2",
+    "pylint>=3.3.4",
+    "pytest-cov>=6.0.0",
+    "pyinstaller>=6.12.0"
+]
+db = [
+    "oras>=0.2.25"
+]
 
 [tool.black]
 line-length = 99
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core>=2.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
