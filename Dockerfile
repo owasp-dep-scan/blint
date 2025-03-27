@@ -35,7 +35,7 @@ RUN microdnf install -y make gcc ncurses \
 COPY . /opt/blint
 RUN cd /opt/blint \
     && poetry config virtualenvs.create false \
-    && poetry install --no-cache --without dev \
+    && poetry install --no-cache --all-groups --all-extras \
     && chmod a-w -R /opt \
     && microdnf remove make gcc -y \
     && microdnf clean all

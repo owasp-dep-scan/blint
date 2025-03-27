@@ -72,7 +72,7 @@ jobs:
         id: prep
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          poetry install --no-cache --without dev
+          poetry install --no-cache --all-groups --all-extras
           toml_version=$(echo "v"$(poetry version -s))
           if [[ $toml_version != $(echo $GITHUB_REF | cut -d / -f 3) ]]; then
             echo "TOML version does not match tag."
