@@ -1766,17 +1766,18 @@ type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.deve
 
 [[package]]
 name = "symbolic"
-version = "12.14.1"
+version = "10.2.1"
 description = "A python library for dealing with symbol files and more."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.6"
 groups = ["main"]
 files = [
-    {file = "symbolic-12.14.1-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:8500320a80d8138026db3ff28a11d697eb0922fc51b1e50c8a206e79f4b39745"},
-    {file = "symbolic-12.14.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:0b2816167383d4fcb11a2224459edaacfe092aa885168bd7e81e0564c7bf5829"},
-    {file = "symbolic-12.14.1-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:6b5242319206d9f8165123990984f9300a3a1f75ccaee8b7da0ef28da4d99258"},
-    {file = "symbolic-12.14.1-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:f13625d3923db47c464db12f3b78d40d6ff9d2be07d1e099d881d00be343b234"},
-    {file = "symbolic-12.14.1.zip", hash = "sha256:f313d9c1c4e47bc4f9a2eac3914386230fd7b4b99bf56ea763c24251bbc293bd"},
+    {file = "symbolic-10.2.1-py2.py3-none-macosx_10_15_x86_64.whl", hash = "sha256:927ae7c4b83ef8eeb6f9f1ce63781ce330d341a560ff2b44fdf694d1cd5f9d42"},
+    {file = "symbolic-10.2.1-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:ba102381ff9fa6ef1364a568e3ae892b3123cfd6e335ef914865834d6296955b"},
+    {file = "symbolic-10.2.1-py2.py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:09ba5ef92f8263bfb4be36ff03852ca63bf64a5b1ea9c54927b106cab8fa0298"},
+    {file = "symbolic-10.2.1-py2.py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:cbf45530f49e647c727210a83b189c572685dbe7f4ecdd13f02f0747a3a63adc"},
+    {file = "symbolic-10.2.1-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9e6914087ad228cbda1047c6b52343627437d02f1cd8d7e1161942fe89c4c29b"},
+    {file = "symbolic-10.2.1.zip", hash = "sha256:4257b40f5ba9b6af98e507d30996ad490c6d964dfb2072ebac3d6783a859b170"},
 ]
 
 [package.dependencies]
@@ -1903,4 +1904,4 @@ dev = ["black", "flake8", "pyinstaller", "pylint", "pytest", "pytest-cov"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "e420620f359d44e051be9de8fc1567490af9ce225ddfb20ea73ec8f783f71e54"
+content-hash = "bc2c699ecaa9f026c4dfd3943fcad4f247aba39c9d1e021d956229b5a99b6a9e"
