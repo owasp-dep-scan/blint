@@ -28,7 +28,7 @@ jobs:
         python3 -m pip install setuptools pyinstaller poetry
         cd blint
         poetry config virtualenvs.create false
-        poetry install --no-cache
+        poetry install --all-groups --no-cache
     - name: Binary gnu build
       run: |
         cd blint
