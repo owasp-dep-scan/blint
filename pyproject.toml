@@ -1,6 +1,6 @@
 [project]
 name = "blint"
-version = "2.4.1"
+version = "2.4.2"
 description = "Linter and SBOM generator for binary files."
 authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},

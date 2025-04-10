@@ -239,7 +239,6 @@ def parse_functions(functions):
     """
     func_list = []
     with contextlib.suppress(AttributeError, TypeError):
-        LOG.debug("Parsing functions")
         for idx, f in enumerate(functions):
             if f.name and f.address:
                 cleaned_name = demangle_symbolic_name(f.name)
@@ -265,7 +264,6 @@ def parse_strings(parsed_obj):
     """
     strings_list = []
     with contextlib.suppress(AttributeError):
-        LOG.debug("Parsing strings")
         strings = parsed_obj.strings
         if isinstance(strings, lief.lief_errors):
             return strings_list
@@ -299,7 +297,6 @@ def parse_symbols(symbols):
     """
     symbols_list = []
     exe_type = ""
-    LOG.debug("Parsing symbols")
     for symbol in symbols:
         try:
             symbol_version = symbol.symbol_version if symbol.has_version else ""
@@ -395,7 +392,6 @@ def parse_pe_data(parsed_obj):
         list[dict]: A list of dictionaries, each representing a data directory.
     """
     data_list = []
-    LOG.debug("Parsing data dictionaries")
     data_directories = parsed_obj.data_directories
     if not data_directories or isinstance(data_directories, lief.lief_errors):
         return data_list
@@ -439,7 +435,6 @@ def process_pe_resources(parsed_obj):
     Returns:
         dict: A dictionary containing metadata about the resources
     """
-    LOG.debug("Parsing PE resources")
     rm = parsed_obj.resources_manager
     if not rm or isinstance(rm, lief.lief_errors):
         return {}
@@ -528,7 +523,6 @@ def parse_pe_authenticode(parsed_obj):
         dict: A dictionary containing the Authenticode information
     """
     try:
-        LOG.debug("Parsing authentihash")
         sep = ":" if sys.version_info.minor > 7 else ()
         authenticode = {
             "md5_hash": parsed_obj.authentihash_md5.hex(*sep),
@@ -573,7 +567,6 @@ def parse_pe_symbols(symbols):
             - symbols_list (list): A list of symbol dictionaries
             - exe_type (str): The determined executable type.
     """
-    LOG.debug("Parsing symbols")
     symbols_list = []
     exe_type = ""
     for symbol in symbols:
@@ -618,7 +611,6 @@ def parse_pe_imports(imports):
             - imports_list (list[dict])
             - dll_list (list[dict])
     """
-    LOG.debug("Parsing imports")
     imports_list = []
     dlls = set()
     if not imports or isinstance(imports, lief.lief_errors):
@@ -660,7 +652,6 @@ def parse_pe_exports(exports):
         list[dict]: A list of exported symbol dictionaries.
 
     """
-    LOG.debug("Parsing exports")
     exports_list = []
     if not exports or isinstance(exports, lief.lief_errors):
         return exports_list
@@ -698,7 +689,6 @@ def parse_macho_symbols(symbols):
             - symbols_list (list): A list of symbol dictionaries.
             - exe_type (str): The determined executable type.
     """
-    LOG.debug("Parsing symbols")
     symbols_list = []
     exe_type = ""
     if not symbols or isinstance(symbols, lief.lief_errors):
