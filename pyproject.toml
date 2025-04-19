@@ -6,7 +6,7 @@ authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
 ]
 dependencies = [
-    "lief>=0.16.4",
+    "lief>=0.16.5",
     "rich>=14.0.0",
     "PyYAML>=6.0.2",
     "defusedxml>=0.7.1",
