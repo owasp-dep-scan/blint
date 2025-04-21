@@ -67,7 +67,7 @@ ignore_files = [
     ".nib",
     ".nupkg",
     ".pak",
-    ".xml"
+    ".xml",
 ]
 strings_allowlist = {
     "()",
@@ -1175,7 +1175,9 @@ secrets_regex = {
         re.compile(r'(?:\s|=|:|"|^)AP[\dABCDEF][a-zA-Z0-9]{8,}'),
     ],
     "aws": [
-        re.compile(r"(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"),
+        re.compile(
+            r"(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"
+        ),
         re.compile(r"""(?i)aws(.{0,20})?['"][0-9a-zA-Z/+]{40}['"]"""),
         re.compile(
             r"""amzn.mws.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
@@ -1190,7 +1192,8 @@ secrets_regex = {
         re.compile(r"[0-9a-z]+.execute-api.[0-9a-z.\-_]+.amazonaws.com"),
     ],
     "github": [
-        re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")],
+        re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")
+    ],
     "slack": [re.compile(r"""xox[baprs]-([0-9a-zA-Z]{10,48})?""")],
     "EC": [re.compile(r"""-----BEGIN EC PRIVATE KEY-----""")],
     "DSA": [re.compile(r"""-----BEGIN DSA PRIVATE KEY-----""")],
@@ -1226,7 +1229,9 @@ secrets_regex = {
     "dynatrace": [re.compile(r"""dt0[a-zA-Z][0-9]{2}\.[A-Z0-9]{24}\.[A-Z0-9]{64}""")],
     "url": [
         re.compile(r"""(http(s)?|s3)://"""),
-        re.compile(r"""[a-zA-Z]{3,10}://[^/\s:@]{3,20}:[^/\s:@]{3,20}@.{1,100}["'\s]"""),
+        re.compile(
+            r"""[a-zA-Z]{3,10}://[^/\s:@]{3,20}:[^/\s:@]{3,20}@.{1,100}["'\s]"""
+        ),
         re.compile(
             r"(ftp|jdbc:mysql)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"
         ),
@@ -1298,6 +1303,7 @@ class BlintOptions:
         src_dir_boms (list): Directory containing pre-build and build sboms.
         use_blintdb (bool): Flag indicating whether or not to utilize blint-db
     """
+
     deep_mode: bool = False
     exports_prefix: List = field(default_factory=list)
     fuzzy: bool = False
@@ -1324,11 +1330,15 @@ class BlintOptions:
             if self.stdout_mode:
                 self.sbom_output = sys.stdout
             elif not self.sbom_output:
-                self.sbom_output = os.path.join(self.reports_dir, "bom-post-build.cdx.json")
+                self.sbom_output = os.path.join(
+                    self.reports_dir, "bom-post-build.cdx.json"
+                )
                 self.sbom_output_dir = os.path.join(self.reports_dir)
             elif os.path.isdir(self.sbom_output):
                 self.sbom_output_dir = self.sbom_output
-                self.sbom_output = os.path.join(self.sbom_output, "bom-post-build.cdx.json")
+                self.sbom_output = os.path.join(
+                    self.sbom_output, "bom-post-build.cdx.json"
+                )
             else:
                 self.sbom_output_dir = os.path.dirname(self.sbom_output)
 
@@ -1359,7 +1369,7 @@ PII_WORDS = (
     "Calendar",
     "AgentStatus",
     "LastLoginTime",
-    "BankAccount"
+    "BankAccount",
 )
 
 # Some symbols to look for in a first-stage payload
@@ -1401,15 +1411,26 @@ FIRST_STAGE_WORDS = (
     "loaderx86.dll",
     "ZwProtectVirtualMemory",
     "shlwapi.dll",
-    "DeleteCriticalSection"
+    "DeleteCriticalSection",
 )
 
 # Setting blintdb
-BLINTDB_HOME = os.getenv("BLINTDB_HOME", user_data_dir("blintdb"))
+BLINTDB_HOME = os.getenv("BLINTDB_HOME")
+if not BLINTDB_HOME:
+    if os.getenv("RUNNER_TEMP"):
+        BLINTDB_HOME = os.path.join(os.environ["RUNNER_TEMP"], "blintdb")
+    else:
+        BLINTDB_HOME = user_data_dir("blintdb")
+os.makedirs(BLINTDB_HOME, exist_ok=True)
+
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
 
-BLINTDB_IMAGE_URL = os.getenv("BLINTDB_IMAGE_URL",
-                              "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1" if SYSTEM == "darwin" else "ghcr.io/appthreat/blintdb-vcpkg:v1")
+BLINTDB_IMAGE_URL = os.getenv(
+    "BLINTDB_IMAGE_URL",
+    "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1"
+    if SYSTEM == "darwin"
+    else "ghcr.io/appthreat/blintdb-vcpkg:v1",
+)
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
 if BLINTDB_REFRESH in ["true", "True", "1"]:
     BLINTDB_REFRESH = True
