@@ -937,6 +937,7 @@ def populate_purl_lookup(src_dir_boms: list[str]):
                         # For nuget, store the unversioned purl as a lookup key
                         if (
                             comp
+                            and comp.get("purl")
                             and comp["purl"].startswith("pkg:nuget")
                             and "@" in comp["purl"]
                         ):
