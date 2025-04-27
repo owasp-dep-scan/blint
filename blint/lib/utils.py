@@ -279,7 +279,7 @@ def filter_ignored_dirs(dirs):
         list: Filtered list of directories
     """
     return [
-        dirs.remove(d) for d in list(dirs) if d.lower() in ignore_directories or d.startswith(".")
+        dirs.remove(d) for d in list(dirs) if d.lower() in ignore_directories
     ]
 
 
