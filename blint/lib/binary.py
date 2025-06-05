@@ -1295,7 +1295,7 @@ def add_rdata_symbols(metadata, rdata_section, text_section, sections):
     Returns:
         The updated metadata dictionary.
     """
-    file_extns_from_rdata = r".*\.(go|s|dll|exe|pdb)"
+    file_extns_from_rdata = r".*\.(go|s|dll|exe|pdb)(\s|$)"
     rdata_symbols = set()
     pii_symbols = []
     first_stage_symbols = []
