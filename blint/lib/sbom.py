@@ -2,6 +2,7 @@ import base64
 import binascii
 import codecs
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import Any, Dict
@@ -202,9 +203,7 @@ def create_sbom(
     Returns:
         CycloneDX: CycloneDX object with trimmed components and dependencies
     """
-    output_dir = os.path.split(output_file)[0]
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    
     # Populate the components
     sbom.components = trim_components(components)
     # If we have only one parent component then promote it to metadata.component
@@ -227,17 +226,25 @@ def create_sbom(
     LOG.debug(
         f"SBOM includes {len(sbom.components)} components and {len(sbom.dependencies)} dependencies"
     )
-    file_write(
-        output_file,
-        sbom.model_dump_json(
-            indent=None if deep_mode else 2,
-            exclude_none=True,
-            exclude_defaults=True,
-            warnings=False,
-            by_alias=True,
-        ),
-        log=LOG,
-    )
+    if output_file is sys.stdout:
+        print(sbom.model_dump_json(indent=2, exclude_none=True, exclude_defaults=True, warnings=False, by_alias=True))
+    else:
+        output_dir = os.path.split(output_file)[0]
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+    
+        file_write(
+            output_file,
+            sbom.model_dump_json(
+                indent=None if deep_mode else 2,
+                exclude_none=True,
+                exclude_defaults=True,
+                warnings=False,
+                by_alias=True,
+            ),
+            log=LOG,
+        )
     return sbom
 
 
