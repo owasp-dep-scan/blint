@@ -229,13 +229,12 @@ def create_sbom(
     if output_file is sys.stdout:
         print(sbom.model_dump_json(indent=2, exclude_none=True, exclude_defaults=True, warnings=False, by_alias=True))
     else:
-        output_dir = os.path.split(output_file)[0]
-        if not os.path.exists(output_dir):
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir)
-
     
         file_write(
-            output_file,
+            os.path.join(output_dir, output_file),
             sbom.model_dump_json(
                 indent=None if deep_mode else 2,
                 exclude_none=True,
