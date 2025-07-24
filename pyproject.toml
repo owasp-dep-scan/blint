@@ -55,6 +55,13 @@ dev = [
     "pytest-cov>=6.1.1",
     "pyinstaller>=6.12.0"
 ]
+ml = [
+    "safetensors >= 0.5.3",
+    "gguf >= 0.17.1",
+    "torch >= 2.7.1",
+    "numpy >= 1.21,<2.3   ; python_version < '3.11'",
+    "numpy >= 2.3.1 ; python_version >= '3.11'"
+]
 
 [tool.black]
 line-length = 99
