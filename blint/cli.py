@@ -47,7 +47,7 @@ def build_parser():
         "--src",
         dest="src_dir_image",
         action="extend",
-        default=os.getcwd(),
+        default=[os.getcwd()],
         nargs="+",
         help="Source directories, container images or binary files. Defaults "
              "to current directory.",
@@ -117,6 +117,7 @@ def build_parser():
         "--src",
         dest="src_dir_image",
         action="extend",
+        default=[os.getcwd()],
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
