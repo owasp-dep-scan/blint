@@ -36,6 +36,7 @@ jobs:
       run: |
         python3 -m pip install poetry
         poetry install --all-groups --all-extras
+        poetry add --editable .
     - name: Test with pytest
       run: |
         poetry run pytest --cov=blint tests
