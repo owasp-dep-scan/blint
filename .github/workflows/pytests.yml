@@ -45,6 +45,7 @@ jobs:
         poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         poetry run flake8 . --count --exit-zero --statistics
+        poetry build --no-cache
     - name: Generate SBOM with cdxgen
       run: |
         npm install -g @cyclonedx/cdxgen
