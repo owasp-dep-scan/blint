@@ -180,7 +180,7 @@ jobs:
         # Usage
         # run_with_timeout 360 your_command_here
         time (
-          run_with_timeout ${SUBSHELL_TIMEOUT} poetry run blint -i bintests -o reports ;
+          run_with_timeout ${SUBSHELL_TIMEOUT} poetry run blint -i ${SCAN_PATH_SRC} -o reports ;
         ) ; # end test
     - name: Upload build artifact
       id: upload
