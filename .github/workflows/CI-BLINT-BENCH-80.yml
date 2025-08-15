@@ -1,0 +1,187 @@
+---
+name: CI-BLINT-BENCH-80
+run-name: Prototype benchmarking tests ${{ github.ref_name }}
+#
+# Jobs included:
+# - TEST-80: Tests Continuous Integration workflow for GHI 80 Benchmarking of various common bin locations.
+#
+# Required Secrets:
+# NONE
+#
+# WORK IN PROGRESS
+# search for "TODO" in file for more details on what is still un-implemented
+
+on:  # yamllint disable-line rule:truthy
+  push:
+    branches: ["CI-blint-bench-80", "main"]  # matches any branch while testing
+  pull_request:
+  workflow_dispatch:
+
+# Declare default permissions as none.
+permissions: {}
+
+# benchmarking is expensive, so limit the concurancy
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  #define cargo args like in cron
+  CARGO_ARGS: --no-default-features --features stdlib,importlib,encodings,ssl,jit
+  # Define Python versions at the top level -- Expected format: X.Y (e.g., 3.13)
+  PYTHON_DEFAULT: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
+  PYTHON_OLD_MIN: "${{ vars.PYTHON_OLD_MIN || '3.10' }}"  # For Oldest Python versions
+  PYTHON_OLD_EXTRA: "${{ vars.PYTHON_OLD_EXTRA || '3.11' }}"  # For Older Python versions (Extra coverage)
+  PYTHON_EXPERIMENTAL: "${{ vars.PYTHON_EXPERIMENTAL || '3.13' }}"  # For future Python versions
+  # define how mush time before assuming the test has hung in seconds (parsed by sleep)
+  SUBSHELL_TIMEOUT: 3600
+
+jobs:
+  TEST-80:
+    permissions:
+      actions: read
+      contents: read
+      statuses: write
+      packages: none
+      pull-requests: read
+      security-events: none
+    runs-on: ${{ matrix.os }}
+    if: ${{ !cancelled() }}
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      max-parallel: 4
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["${{ vars.PYTHON_OLD_MIN }}", "${{ vars.PYTHON_OLD_EXTRA }}", "${{ vars.PYTHON_DEFAULT }}", "${{ vars.PYTHON_EXPERIMENTAL }}"]
+        experimental: [true]
+        target-path: ["/usr/bin", "/usr/lib", "/usr/sbin"] # TODO: add other FHS paths and github runner toolchains etc.
+        include:
+          - os: ubuntu-latest
+            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            experimental: false
+          - os: macos-15
+            python-version: "${{ vars.PYTHON_EXPERIMENTAL }}"
+            experimental: true
+          - os: windows-latest
+            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            experimental: true
+          - os: macos-14
+            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            experimental: false
+          - os: windows-2025
+            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            experimental: true
+    outputs:
+      bench_testing_status: ${{ steps.bench_testing.outcome }}
+    steps:
+    - name: pre-checkout repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        persist-credentials: false
+        ref: ${{ github.ref || 'HEAD' }}
+    - id: output_target_path
+      name: "Bootstrap Target Path"
+      shell: bash
+      run: |
+        printf "%s\n" "::group::bootstrap-scan-paths"
+        if [[ ${{ runner.os }} != 'Windows' ]] ; then
+          printf "scan-path=%s\n" "${{ matrix.target-path }}" >> "$GITHUB_OUTPUT"
+          printf "SCAN_PATH_SRC=%s\n" "${{ matrix.target-path }}" >> "$GITHUB_ENV"
+        else
+          # For Windows: Convert backslashes to forward slashes
+          scan_path_src="${{ matrix.target-path }}"
+          printf "scan-path=%s\n" "${scan_path_src//\\//}" >> "$GITHUB_OUTPUT"
+          printf "SCAN_PATH_SRC=%s\n" "${scan_path_src//\\//}" >> "$GITHUB_ENV"
+        fi
+        printf "%s\n" "::endgroup::"
+    - id: build-python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: ${{ matrix.python-version }}
+    - id: output_python
+      name: "bootstrap Python"
+      shell: bash
+      run: |
+        printf "%s\n" "::group::bootstrap-python-env"
+        if [[ ${{ runner.os }} != 'Windows' ]] ; then
+          printf "python-path=%s\n" "${{ steps.build-python.outputs.python-path }}" >> "$GITHUB_OUTPUT"
+          printf "PYTHON=%s\n" "${{ steps.build-python.outputs.python-path }}" >> "$GITHUB_ENV"
+        else
+          # For Windows: Convert backslashes to forward slashes
+          python_path="${{ steps.build-python.outputs.python-path }}"
+          printf "python-path=%s\n" "${python_path//\\//}" >> "$GITHUB_OUTPUT"
+          printf "PYTHON=%s\n" "${python_path//\\//}" >> "$GITHUB_ENV"
+        fi
+        printf "python-version=%s\n" "${{ steps.build-python.outputs.python-version }}" >> "$GITHUB_OUTPUT"
+        printf "PYTHON_VERSION=%s\n" "${{ steps.build-python.outputs.python-version }}" >> "$GITHUB_ENV"
+        printf "%s\n" "::endgroup::"
+    - name: "Prepare Artifact Name"
+      id: output_artifact_name
+      if: ${{ !cancelled() }}
+      env:
+        OS: ${{ runner.os }}
+        BUILD_SHA: ${{ github.ref || 'HEAD' }}
+      shell: bash
+      run: |
+        if [[ "${OS}" != "Windows" ]] ; then
+          printf "artifact-name=%s\n" blint-benchmark-${BUILD_SHA}-part-$(uuidgen) >> "$GITHUB_OUTPUT"
+        else
+          printf "artifact-name=%s" blint-benchmark-${BUILD_SHA}-part- >> "$GITHUB_OUTPUT"
+          printf "%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n" $RANDOM $RANDOM $RANDOM $(($RANDOM & 0x0fff | 0x4000)) $(($RANDOM & 0x3fff | 0x8000)) $RANDOM $RANDOM $RANDOM >> "$GITHUB_OUTPUT"
+        fi
+    - name: Display Python version
+      shell: bash
+      run: |
+        "${PYTHON}" -c "import sys; print(sys.version)"
+    - name: Install poetry
+      run: |
+        "${PYTHON}" -m pip install poetry
+        poetry install --all-groups --all-extras
+    - id: bench_testing
+      name: 'Test binaries for Python ${{ steps.output_python.outputs.python-version }} on ${{ runner.os }}'
+      env:
+        CONTEXT_PHRASE: 'for Python ${{ steps.output_python.outputs.python-version }} on ${{ runner.os }}'
+        SCAN_DEBUG_MODE: "debug"
+      shell: bash
+      run: |
+        # TODO: clean this up
+        # Custom timeout function (Rustpython/RustPython#GH-5974 - because ulimit is restricted and windows can't ulimit at all)
+        run_with_timeout() {
+            local timeout=$1
+            shift
+            "$@" &
+            local pid=$!
+            ( sleep "$timeout" && kill -HUP "$pid" 2>/dev/null ) & disown
+            # Send HUP signal after timeout
+            wait "$pid"
+            local status=$?
+            if [ $status -eq 0 ]; then
+                printf "::debug::%s\n" "Command completed successfully."
+                true ; # force success result
+            elif [ $status -eq 143 ]; then
+                printf "::warning title='Timeout'::%s\n" "The command \`$@\` ${CONTEXT_PHRASE} was terminated due to timeout."
+                false ;
+            else
+                printf "%s\n" "The command failed with status $status ${CONTEXT_PHRASE}."
+                false ;
+            fi ;
+        }
+
+        export -f run_with_timeout ;
+        # Usage
+        # run_with_timeout 360 your_command_here
+        time (
+          run_with_timeout ${SUBSHELL_TIMEOUT} poetry run blint -i bintests -o reports ;
+        ) ; # end test
+    - name: Upload build artifact
+      id: upload
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        path: reports
+        name: ${{ steps.output_artifact_name.outputs.artifact-name }}
+        if-no-files-found: error
+        compression-level: 3
+        overwrite: true
