@@ -26,8 +26,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  #define cargo args like in cron
-  CARGO_ARGS: --no-default-features --features stdlib,importlib,encodings,ssl,jit
   # Define Python versions at the top level -- Expected format: X.Y (e.g., 3.13)
   PYTHON_DEFAULT: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
   PYTHON_OLD_MIN: "${{ vars.PYTHON_OLD_MIN || '3.10' }}"  # For Oldest Python versions
@@ -56,20 +54,24 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python-version: ["${{ vars.PYTHON_OLD_MIN }}", "${{ vars.PYTHON_OLD_EXTRA }}", "${{ vars.PYTHON_DEFAULT }}", "${{ vars.PYTHON_EXPERIMENTAL }}"]
         experimental: [true]
-        target-path: ["/usr/bin", "/usr/lib", "/usr/sbin"] # TODO: add other FHS paths and github runner toolchains etc.
+        target-path: ["/usr/bin", "/usr/lib", "/usr/sbin"]
         include:
           - os: ubuntu-latest
             python-version: "${{ vars.PYTHON_DEFAULT }}"
             experimental: false
+            target-path: "/usr/bin"
           - os: macos-15
             python-version: "${{ vars.PYTHON_EXPERIMENTAL }}"
             experimental: true
+            target-path: "/usr/libexec"
           - os: windows-latest
             python-version: "${{ vars.PYTHON_DEFAULT }}"
             experimental: true
+            target-path: "$PATH"
           - os: macos-14
             python-version: "${{ vars.PYTHON_DEFAULT }}"
-            experimental: false
+            experimental: true
+            target-path: "/usr/lib"
           - os: windows-2025
             python-version: "${{ vars.PYTHON_DEFAULT }}"
             experimental: true
@@ -80,7 +82,6 @@ jobs:
       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         persist-credentials: false
-        ref: ${{ github.ref || 'HEAD' }}
     - id: output_target_path
       name: "Bootstrap Target Path"
       shell: bash
