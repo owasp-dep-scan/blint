@@ -118,18 +118,24 @@ jobs:
         printf "python-version=%s\n" "${{ steps.build-python.outputs.python-version }}" >> "$GITHUB_OUTPUT"
         printf "PYTHON_VERSION=%s\n" "${{ steps.build-python.outputs.python-version }}" >> "$GITHUB_ENV"
         printf "%s\n" "::endgroup::"
+    - name: "Calculate Commit SHA"
+      id: output_sha
+      shell: bash
+      run: |
+        printf "sha=%s\n" $(git rev-parse --verify HEAD) >> "$GITHUB_OUTPUT"
+        printf "BLINT_SHA=%s\n" $(git rev-parse --verify HEAD) >> "$GITHUB_ENV"
     - name: "Prepare Artifact Name"
       id: output_artifact_name
       if: ${{ !cancelled() }}
       env:
         OS: ${{ runner.os }}
-        BUILD_SHA: ${{ github.ref || 'HEAD' }}
+        BLINT_SHA: ${{ steps.output_sha.outputs.sha }}
       shell: bash
       run: |
         if [[ "${OS}" != "Windows" ]] ; then
-          printf "artifact-name=%s\n" blint-benchmark-${BUILD_SHA}-part-$(uuidgen) >> "$GITHUB_OUTPUT"
+          printf "artifact-name=%s\n" blint-benchmark-${BLINT_SHA}-part-$(uuidgen) >> "$GITHUB_OUTPUT"
         else
-          printf "artifact-name=%s" blint-benchmark-${BUILD_SHA}-part- >> "$GITHUB_OUTPUT"
+          printf "artifact-name=%s" blint-benchmark-${BLINT_SHA}-part- >> "$GITHUB_OUTPUT"
           printf "%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n" $RANDOM $RANDOM $RANDOM $(($RANDOM & 0x0fff | 0x4000)) $(($RANDOM & 0x3fff | 0x8000)) $RANDOM $RANDOM $RANDOM >> "$GITHUB_OUTPUT"
         fi
     - name: Display Python version
