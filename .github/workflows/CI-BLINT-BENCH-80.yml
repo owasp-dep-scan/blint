@@ -8,8 +8,13 @@ run-name: Prototype benchmarking tests ${{ github.ref_name }}
 # Required Secrets:
 # NONE
 #
-# WORK IN PROGRESS
-# search for "TODO" in file for more details on what is still un-implemented
+# Optional Workflow Variables:
+# - PYTHON_DEFAULT
+# - PYTHON_OLD_MIN
+# - PYTHON_EXPERIMENTAL
+
+# tip: use GitHub vars to override (e.g., zero code change to update)
+# hint: vars are either input via dispatch or set in repository settings
 
 on:  # yamllint disable-line rule:truthy
   push:
@@ -31,7 +36,7 @@ env:
   PYTHON_OLD_MIN: "${{ vars.PYTHON_OLD_MIN || '3.10' }}"  # For Oldest Python versions
   PYTHON_OLD_EXTRA: "${{ vars.PYTHON_OLD_EXTRA || '3.11' }}"  # For Older Python versions (Extra coverage)
   PYTHON_EXPERIMENTAL: "${{ vars.PYTHON_EXPERIMENTAL || '3.13' }}"  # For future Python versions
-  # define how mush time before assuming the test has hung in seconds (parsed by sleep)
+  # define how much time before assuming the test has hung in seconds (parsed by sleep)
   SUBSHELL_TIMEOUT: 3600
 
 jobs:
@@ -52,28 +57,28 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["${{ vars.PYTHON_OLD_MIN }}", "${{ vars.PYTHON_OLD_EXTRA }}", "${{ vars.PYTHON_DEFAULT }}", "${{ vars.PYTHON_EXPERIMENTAL }}"]
+        python-version: ["${{ vars.PYTHON_OLD_MIN || '3.10' }}", "${{ vars.PYTHON_OLD_EXTRA || '3.11' }}", "${{ vars.PYTHON_DEFAULT || '3.12' }}", "${{ vars.PYTHON_EXPERIMENTAL || '3.13' }}"]
         experimental: [true]
         target-path: ["/usr/bin", "/usr/lib", "/usr/sbin"]
         include:
           - os: ubuntu-latest
-            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            python-version: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
             experimental: false
             target-path: "/usr/bin"
           - os: macos-15
-            python-version: "${{ vars.PYTHON_EXPERIMENTAL }}"
+            python-version: "${{ vars.PYTHON_EXPERIMENTAL || '3.13' }}"
             experimental: true
             target-path: "/usr/libexec"
           - os: windows-latest
-            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            python-version: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
             experimental: true
             target-path: "$PATH"
           - os: macos-14
-            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            python-version: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
             experimental: true
             target-path: "/usr/lib"
           - os: windows-2025
-            python-version: "${{ vars.PYTHON_DEFAULT }}"
+            python-version: "${{ vars.PYTHON_DEFAULT || '3.12' }}"
             experimental: true
     outputs:
       bench_testing_status: ${{ steps.bench_testing.outcome }}
