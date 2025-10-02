@@ -47,6 +47,65 @@ CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
 
+SYMBOLIC_FOUND = True
+try:
+    from symbolic._lowlevel import ffi, lib
+    from symbolic.utils import encode_str, decode_str, rustcall
+except OSError:
+    SYMBOLIC_FOUND = False
+
+def demangle_symbolic_name(symbol, lang=None, no_args=False):
+    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
+    if not SYMBOLIC_FOUND:
+        return symbol
+    try:
+        func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
+        lang_str = encode_str(lang) if lang else ffi.NULL
+        demangled = rustcall(func, encode_str(symbol), lang_str)
+        demangled_symbol = decode_str(demangled, free=True).strip()
+        # demangling didn't work
+        if symbol and symbol == demangled_symbol:
+            for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
+                if symbol.startswith(ign):
+                    return "anonymous"
+            if symbol.startswith("GCC_except_table"):
+                return "GCC_except_table"
+            if symbol.startswith("@feat.00"):
+                return "SAFESEH"
+            if (
+                    symbol.startswith("__imp_")
+                    or symbol.startswith(".rdata$")
+                    or symbol.startswith(".refptr.")
+            ):
+                symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
+            demangled_symbol = (
+                symbol.replace("..", "::")
+                .replace("$SP$", "@")
+                .replace("$BP$", "*")
+                .replace("$LT$", "<")
+                .replace("$u5b$", "[")
+                .replace("$u7b$", "{")
+                .replace("$u3b$", ";")
+                .replace("$u20$", " ")
+                .replace("$u5d$", "]")
+                .replace("$u7d$", "}")
+                .replace("$GT$", ">")
+                .replace("$RF$", "&")
+                .replace("$LP$", "(")
+                .replace("$RP$", ")")
+                .replace("$C$", ",")
+                .replace("$u27$", "'")
+            )
+        # In case of rust symbols, try and trim the hash part from the end of the symbols
+        if demangled_symbol.count("::") > 2:
+            last_part = demangled_symbol.split("::")[-1]
+            if len(last_part) == 17:
+                demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
+        return demangled_symbol
+    except AttributeError:
+        return symbol
+
+
 def is_base64(s):
     """
     Checks if the given string is a valid Base64 encoded string.
@@ -611,7 +670,7 @@ def export_metadata(directory: str, metadata: Dict, mtype: str):
         os.makedirs(directory)
     outfile = str(Path(directory) / f"{mtype.lower()}.json")
     output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
-    file_write(outfile, output, success_msg=f"{mtype} written to {outfile}", log=LOG)
+    file_write(outfile, output, success_msg="", log=LOG)
 
 
 def json_serializer(obj):

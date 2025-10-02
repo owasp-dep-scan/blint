@@ -12,8 +12,6 @@ from pathlib import Path
 import yaml
 from rich.terminal_theme import MONOKAI
 
-from blint.lib.binary import parse
-
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
     check_nx,
@@ -351,4 +349,4 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
     # Try console output as html
     html_file = Path(blint_options.reports_dir) / "blint-output.html"
     console.save_html(html_file, theme=MONOKAI)
-    LOG.info(f"HTML report written to {html_file}")
+    LOG.debug(f"HTML report written to {html_file}")

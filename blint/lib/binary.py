@@ -18,14 +18,9 @@ from blint.lib.utils import (
     check_secret,
     cleanup_dict_lief_errors,
     decode_base64,
+    demangle_symbolic_name,
 )
-
-SYMBOLIC_FOUND = True
-try:
-    from symbolic._lowlevel import ffi, lib
-    from symbolic.utils import encode_str, decode_str, rustcall
-except OSError:
-    SYMBOLIC_FOUND = False
+from blint.lib.disassembler import disassemble_functions
 
 MIN_ENTROPY = get_float_from_env("SECRET_MIN_ENTROPY", 0.39)
 MIN_LENGTH = get_int_from_env("SECRET_MIN_LENGTH", 80)
@@ -35,58 +30,6 @@ if LOG.level != DEBUG:
     lief.logging.disable()
 
 ADDRESS_FMT = "0x{:<10x}"
-
-
-def demangle_symbolic_name(symbol, lang=None, no_args=False):
-    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
-    if not SYMBOLIC_FOUND:
-        return symbol
-    try:
-        func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
-        lang_str = encode_str(lang) if lang else ffi.NULL
-        demangled = rustcall(func, encode_str(symbol), lang_str)
-        demangled_symbol = decode_str(demangled, free=True).strip()
-        # demangling didn't work
-        if symbol and symbol == demangled_symbol:
-            for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
-                if symbol.startswith(ign):
-                    return "anonymous"
-            if symbol.startswith("GCC_except_table"):
-                return "GCC_except_table"
-            if symbol.startswith("@feat.00"):
-                return "SAFESEH"
-            if (
-                    symbol.startswith("__imp_")
-                    or symbol.startswith(".rdata$")
-                    or symbol.startswith(".refptr.")
-            ):
-                symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
-            demangled_symbol = (
-                symbol.replace("..", "::")
-                .replace("$SP$", "@")
-                .replace("$BP$", "*")
-                .replace("$LT$", "<")
-                .replace("$u5b$", "[")
-                .replace("$u7b$", "{")
-                .replace("$u3b$", ";")
-                .replace("$u20$", " ")
-                .replace("$u5d$", "]")
-                .replace("$u7d$", "}")
-                .replace("$GT$", ">")
-                .replace("$RF$", "&")
-                .replace("$LP$", "(")
-                .replace("$RP$", ")")
-                .replace("$C$", ",")
-                .replace("$u27$", "'")
-            )
-        # In case of rust symbols, try and trim the hash part from the end of the symbols
-        if demangled_symbol.count("::") > 2:
-            last_part = demangled_symbol.split("::")[-1]
-            if len(last_part) == 17:
-                demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
-        return demangled_symbol
-    except AttributeError:
-        return symbol
 
 
 def is_shared_library(parsed_obj):
@@ -440,12 +383,15 @@ def process_pe_resources(parsed_obj):
         return {}
     resources = {}
     version_metadata = {}
-    version_info: lief.PE.ResourceVersion = rm.version if rm.has_version else None
-    if version_info and version_info.has_string_file_info:
+    version_info = rm.version if rm.has_version else None
+    if isinstance(version_info, list) and len(version_info):
+        version_info = version_info[0]
+    if version_info and hasattr(version_info, "string_file_info"):
         string_file_info: lief.PE.ResourceStringFileInfo = version_info.string_file_info
-        for lc_item in string_file_info.langcode_items:
-            if lc_item.items:
-                version_metadata.update(lc_item.items)
+        for lc_item in string_file_info.children:
+            if lc_item.entries:
+                for e in lc_item.entries:
+                    version_metadata[e.key] = e.value
     try:
         resources = {
             "has_accelerator": rm.has_accelerator,
@@ -726,7 +672,7 @@ def parse_macho_symbols(symbols):
     return symbols_list, exe_type
 
 
-def parse(exe_file):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
 
@@ -745,6 +691,9 @@ def parse(exe_file):  # pylint: disable=too-many-locals,too-many-branches,too-ma
             metadata = add_pe_metadata(exe_file, metadata, parsed_obj)
         elif isinstance(parsed_obj, lief.MachO.Binary):
             metadata = add_mach0_metadata(exe_file, metadata, parsed_obj)
+        metadata["import_dependencies"] = analyze_import_deps(metadata)
+        if disassemble:
+            metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)
@@ -1094,6 +1043,144 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
         pass
 
     return deps
+
+
+def analyze_import_deps(metadata):
+    """
+    Analyzes the import dependencies from the metadata dictionary.
+
+    Args:
+        metadata (dict): The metadata dictionary containing parsed binary info.
+
+    Returns:
+        dict: A dictionary representing the import dependency graph.
+              Structure:
+              {
+                "libraries": {
+                  "lib_name": {
+                    "type": "imported", // or "main_binary"
+                    "imported_symbols": ["func1", "func2", ...],
+                    "imported_from": ["other_lib1", "other_lib2", ...]
+                  },
+                  ...
+                },
+                "dependencies": [
+                  {
+                    "from": "main_binary",
+                    "to": "lib_name",
+                    "symbols": ["func1", "func2"]
+                  },
+                  ...
+                ]
+              }
+    """
+    LOG.debug("Analyzing import dependencies...")
+    dep_graph = {"libraries": {}, "dependencies": []}
+    main_binary_name = metadata.get("name")
+    dep_graph["libraries"][main_binary_name] = {
+        "type": "main_binary",
+        "imported_symbols": [],
+        "imported_from": []
+    }
+    binary_type = metadata.get("binary_type")
+    if binary_type == "PE":
+        for imp_entry in metadata.get("imports", []):
+            full_name = imp_entry.get("name", "")
+            if "::" in full_name:
+                lib_name, func_name = full_name.split("::", 1)
+            else:
+                continue
+            if lib_name not in dep_graph["libraries"]:
+                dep_graph["libraries"][lib_name] = {
+                    "type": "imported",
+                    "imported_symbols": [],
+                    "imported_from": []
+                }
+
+            if func_name not in dep_graph["libraries"][lib_name]["imported_symbols"]:
+                dep_graph["libraries"][lib_name]["imported_symbols"].append(func_name)
+            dep_exists = False
+            for dep in dep_graph["dependencies"]:
+                if dep["from"] == main_binary_name and dep["to"] == lib_name:
+                    if func_name not in dep["symbols"]:
+                        dep["symbols"].append(func_name)
+                    dep_exists = True
+                    break
+            if not dep_exists:
+                dep_graph["dependencies"].append({
+                    "from": main_binary_name,
+                    "to": lib_name,
+                    "symbols": [func_name]
+                })
+
+            if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
+                dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+    else:
+        all_potential_imports = metadata.get("symtab_symbols", []) + metadata.get("dynamic_symbols", [])
+        needed_libs = set()
+        if binary_type == "MachO":
+             needed_libs.update([lib.get("name") for lib in metadata.get("libraries", []) if lib.get("name")])
+        else:
+             needed_libs.update([entry["name"] for entry in metadata.get("imports", []) if entry.get("tag") == "NEEDED"])
+        for sym_entry in all_potential_imports:
+            if sym_entry.get("is_imported", False):
+                full_name = sym_entry.get("name", "")
+                if not full_name:
+                    continue
+                func_name = full_name
+                if "::" in full_name:
+                    lib_name, func_name = full_name.split("::", 1)
+                else:
+                    if binary_type == "MachO" and "::" in full_name:
+                        last_colon_pos = full_name.rindex("::")
+                        lib_part_with_path = full_name[:last_colon_pos]
+                        func_name = full_name[last_colon_pos+2:]
+                        lib_name_from_path = lib_part_with_path.split("/")[-1].split("::")[0] if "::" in lib_part_with_path.split("/")[-1] else lib_part_with_path.split("/")[-1]
+                        if lib_name_from_path in needed_libs:
+                             lib_name = lib_name_from_path
+                        elif needed_libs:
+                             lib_name = next(iter(needed_libs))
+                        else:
+                             LOG.debug(f"MachO Symbol {full_name} has no clear library in path or NEEDED list.")
+                             continue
+                    elif needed_libs:
+                         lib_name = next(iter(needed_libs))
+                    elif ".go" in full_name or ".s" in full_name or "internal" in full_name:
+                         lib_name = full_name
+                    else:
+                         LOG.debug(f"Symbol {full_name} is imported but no library info found.")
+                         continue
+                if not lib_name:
+                     continue
+
+                if lib_name not in dep_graph["libraries"]:
+                    dep_graph["libraries"][lib_name] = {
+                        "type": "imported",
+                        "imported_symbols": [],
+                        "imported_from": []
+                    }
+
+                if func_name not in dep_graph["libraries"][lib_name]["imported_symbols"] and func_name != lib_name:
+                    dep_graph["libraries"][lib_name]["imported_symbols"].append(func_name)
+
+                dep_exists = False
+                for dep in dep_graph["dependencies"]:
+                    if dep["from"] == main_binary_name and dep["to"] == lib_name:
+                        if func_name not in dep["symbols"]:
+                            dep["symbols"].append(func_name)
+                        dep_exists = True
+                        break
+                if not dep_exists:
+                    dep_graph["dependencies"].append({
+                        "from": main_binary_name,
+                        "to": lib_name,
+                        "symbols": [func_name]
+                    })
+
+                if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
+                    dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+    LOG.debug(f"Generated import dependency graph with {len(dep_graph['dependencies'])} dependencies.")
+    return dep_graph
 
 
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):

@@ -35,6 +35,12 @@ NOTE: The presence of capabilities doesn't imply that the binary always performs
 pip install blint
 ```
 
+For disassembly support, install the extended group which includes [nyxstone](https://github.com/emproof-com/nyxstone).
+
+```bash
+pip install blint[extended]
+```
+
 ### Single binary releases
 
 You can download single binary builds from the [blint-bin releases](https://github.com/OWASP-dep-scan/blint/releases). These executables should work without requiring python to be installed. The macOS .pkg file is signed with a valid developer account.
@@ -57,6 +63,8 @@ options:
   --no-reviews          Do not perform method reviews.
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
   --use-blintdb         Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
+  --disassemble         Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.
+  -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
   Additional sub-commands

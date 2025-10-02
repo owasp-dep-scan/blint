@@ -56,6 +56,7 @@ ignore_files = [
     ".nib",
     ".pak",
     ".xml",
+    ".DS_Store",
 ]
 strings_allowlist = {
     "()",
@@ -1308,6 +1309,7 @@ class BlintOptions:
     src_dir_image: List = field(default_factory=list)
     stdout_mode: bool = False
     use_blintdb: bool = False
+    disassemble: bool = False
 
     def __post_init__(self):
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
@@ -1319,13 +1321,13 @@ class BlintOptions:
                 self.sbom_output = sys.stdout
             elif not self.sbom_output:
                 self.sbom_output = os.path.join(
-                    self.reports_dir, "bom-post-build.cdx.json"
+                    self.reports_dir, "sbom-binary-postbuild.cdx.json"
                 )
                 self.sbom_output_dir = os.path.join(self.reports_dir)
             elif os.path.isdir(self.sbom_output):
                 self.sbom_output_dir = self.sbom_output
                 self.sbom_output = os.path.join(
-                    self.sbom_output, "bom-post-build.cdx.json"
+                    self.sbom_output, "sbom-binary-postbuild.cdx.json"
                 )
             else:
                 self.sbom_output_dir = os.path.dirname(self.sbom_output)
@@ -1425,3 +1427,28 @@ if BLINTDB_REFRESH in ["true", "True", "1"]:
 
 SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
 MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
+
+CRYPTO_INDICATORS = [
+                    'aesenc', 'aesenclast', 'aesdec', 'aesdeclast', 'aesimc', 'aeskeygenassist',
+                    'sha1rnds4', 'sha1nexte', 'sha1msg1', 'sha1msg2', 'sha256rnds2', 'sha256msg1', 'sha256msg2',
+                    'aes', 'sha1', 'sha2', 'sm3', 'sm4',
+                    'sha1c', 'sha1p', 'sha1m', 'sha256h', 'sha256h2', 'sha256su0', 'sha256su1',
+                    'npxor', 'vpxor', 'vpxord', 'vpxorq',
+                    'pshufb', 'vpshufb',
+                    'pclmulqdq', 'vpclmulqdq',
+                    'movdqa', 'movdqu', 'vmovdqa', 'vmovdqu',
+                    'padd', 'psub', 'pmul',
+                    'psll', 'psrl', 'psra',
+                    'vpaddd', 'vpsubd', 'vpmulld',
+                ]
+
+
+GPU_INDICATORS = [
+                    'glbind', 'glvertex', 'glcolor', 'glbegin', 'glend', 'glenable', 'gldisable', 'glget', 'glset', 'glload', 'glsave', 'gluniform', 'gluseprogram', 'glattachshader', 'gldraw', 'glclear', 'glviewport', 'glmatrix', 'glpushmatrix', 'glpopmatrix',
+                    'cuda', 'cuinit', 'cucontext', 'cudriver', 'cugpu', 'cudevice', 'cumem', 'cuptr', 'cukernel', 'culaunch', 'cugrid', 'cublock', 'cuthread', 'cufree', 'cucopy',
+                    'clgetplatform', 'clgetdevice', 'clcreatecontext', 'clcreatecommandqueue', 'clcreateshared', 'clcreatekernel', 'clsetkernelarg', 'clenqueuendrange', 'clfinish', 'clrelease', 'clbuildprogram',
+                    'd3d', 'd3d11', 'd3d12', 'create', 'device', 'swapchain', 'rendertarget', 'shaders', 'ps_', 'vs_', 'gs_', 'cs_', 'hs_', 'ds_',
+                    'vk', 'vkcreate', 'vkdestroy', 'vkallocate', 'vkfree', 'vkqueue', 'vksubmit', 'vkwait', 'vkacquire', 'vkpresent', 'vkcmd', 'vkbegin', 'vkend', 'vkbind', 'vkdraw', 'vkdispatch', 'vkcopy', 'vkblit', 'vkclear', 'vkfill', 'vkupdate',
+                    'mtl', 'metal', 'mtldevice', 'mtlcommand', 'mtlrender', 'mtlcompute', 'mtlbuffer', 'mtltexture', 'mtlfunction', 'mtllibrary', 'mtlencoder', 'mtlpass',
+                    'gpu', 'compute', 'shader', 'vertex', 'fragment', 'pixel', 'kernel', 'workgroup', 'local', 'global', 'buffer', 'texture', 'surface',
+                ]

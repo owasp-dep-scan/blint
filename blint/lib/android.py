@@ -4,7 +4,6 @@ import subprocess
 import sys
 import tempfile
 
-from blint.lib.binary import parse, parse_dex
 from custom_json_diff.lib.utils import file_read
 
 from blint.lib.binary import parse, parse_dex

@@ -111,7 +111,7 @@ class AnalysisRunner:
 
         """
         self.progress.update(self.task, description=f"Processing [bold]{f}[/bold]")
-        metadata = parse(f)
+        metadata = parse(f, blint_options.disassemble)
         exe_name = metadata.get("name", "")
         # Store raw metadata
         export_metadata(blint_options.reports_dir, metadata, f"{os.path.basename(exe_name)}-metadata")

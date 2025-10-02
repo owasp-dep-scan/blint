@@ -16,6 +16,20 @@ jobs:
       fail-fast: false
     steps:
     - uses: actions/checkout@v4
+    - name: Linux packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install zlib1g-dev libzstd-dev llvm-18 llvm-18-dev
+      if: runner.os == 'Linux'
+    - name: Packages
+      run: |
+        brew install llvm@18
+        echo /opt/homebrew/opt/llvm@18/bin >> $GITHUB_PATH
+      if: runner.os == 'macOS'
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: 1.69.0
+      if: runner.os == 'Windows'
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -25,7 +39,24 @@ jobs:
     - name: Install poetry
       run: |
         python3 -m pip install poetry
+    - name: Install all
+      run: |        
         poetry install --all-groups --all-extras
+      if: runner.os == 'Linux'
+      env:
+        NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
+    - name: Install all
+      run: |        
+        poetry install --all-groups --all-extras
+      if: runner.os == 'macOS'
+      env:
+        NYXSTONE_LLVM_PREFIX: /opt/homebrew/opt/llvm@18
+        LDFLAGS: "-L/opt/homebrew/lib"
+        CPPFLAGS: "-I/opt/homebrew/include"
+    - name: Install all
+      run: |        
+        poetry install --without=extended
+      if: runner.os == 'Windows'
     - name: Test binaries
       run: |
         mkdir -p bintests gobintests rusttests
