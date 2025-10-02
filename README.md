@@ -13,7 +13,7 @@ Supported binary formats:
 - PE (exe, dll)
 - Mach-O (x64, arm64)
 
-You can run blint on Linux, Windows, and Mac against any of these binary formats.
+You can run blint on Linux and Mac against any of these binary formats.
 
 ## Motivation
 
@@ -181,10 +181,6 @@ sbom command generates CycloneDX json.
 
 - [lief examples](https://github.com/lief-project/LIEF/tree/master/examples)
 - [checksec](https://github.com/Wenzel/checksec.py)
-
-## Discord support
-
-The developers can be reached via the [Discord](https://discord.gg/DCNxzaeUpd) channel.
 
 ## Sponsorship wishlist
 
