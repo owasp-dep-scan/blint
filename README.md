@@ -35,7 +35,7 @@ NOTE: The presence of capabilities doesn't imply that the binary always performs
 pip install blint
 ```
 
-For disassembly support, install the extended group which includes [nyxstone](https://github.com/emproof-com/nyxstone).
+For [disassembly](./docs/DISASSEMBLE.md) support, install the extended group which includes [nyxstone](https://github.com/emproof-com/nyxstone).
 
 ```bash
 pip install blint[extended]

@@ -14,49 +14,9 @@ SYSTEM = platform.system().lower()
 ignore_directories = [
     ".git",
     ".svn",
-    "backup",
-    "docs",
-    "reports",
-    "examples",
-    "tutorials",
-    "samples",
-    "migrations",
-    "db_migrations",
-    "stubs",
-    "mock",
-    "mocks",
 ]
 ignore_files = [
-    ".pyc",
-    ".gz",
-    ".tar",
-    ".tar.gz",
-    ".tar.xz",
-    ".tar",
-    ".log",
-    ".tmp",
-    ".d.ts",
-    ".min.js",
-    ".min.css",
-    ".eslintrc.js",
-    ".babelrc.js",
-    ".spec.js",
-    ".spec.ts",
-    ".component.spec.js",
-    ".component.spec.ts",
-    ".data.js",
-    ".data.ts",
-    ".bundle.js",
-    ".snap",
-    ".pb.go",
-    ".tests.py",
-    ".vdb",
-    ".txt",
-    ".strings",
-    ".nib",
-    ".pak",
-    ".xml",
-    ".DS_Store",
+    ".ds_store",
 ]
 strings_allowlist = {
     "()",
@@ -1428,6 +1388,8 @@ if BLINTDB_REFRESH in ["true", "True", "1"]:
 SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
 MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
 
+SYSCALL_INDICATORS = ['syscall', 'int 0x80', 'sysenter', 'svc #', 'smc #', 'ecall']
+SECURITY_INDICATORS = ['endbr64', 'endbr32', 'setssbsy', 'clrssbsy', 'enqcmd', 'enqpad', 'hint #0x7e', 'hint #0x7f', 'pacibsp', 'paciasp', 'autibsp', 'autiasp', 'pacib1', 'pacibz', 'paciasp', 'paciasz', 'autib1', 'autibz', 'autiasp', 'autiaz', 'gmi', 'irg', 'subg', 'addg', 'ldg', 'stg', 'stzg', 'st2g', 'st3g', 'st4g']
 CRYPTO_INDICATORS = [
                     'aesenc', 'aesenclast', 'aesdec', 'aesdeclast', 'aesimc', 'aeskeygenassist',
                     'sha1rnds4', 'sha1nexte', 'sha1msg1', 'sha1msg2', 'sha256rnds2', 'sha256msg1', 'sha256msg2',
@@ -1441,8 +1403,6 @@ CRYPTO_INDICATORS = [
                     'psll', 'psrl', 'psra',
                     'vpaddd', 'vpsubd', 'vpmulld',
                 ]
-
-
 GPU_INDICATORS = [
                     'glbind', 'glvertex', 'glcolor', 'glbegin', 'glend', 'glenable', 'gldisable', 'glget', 'glset', 'glload', 'glsave', 'gluniform', 'gluseprogram', 'glattachshader', 'gldraw', 'glclear', 'glviewport', 'glmatrix', 'glpushmatrix', 'glpopmatrix',
                     'cuda', 'cuinit', 'cucontext', 'cudriver', 'cugpu', 'cudevice', 'cumem', 'cuptr', 'cukernel', 'culaunch', 'cugrid', 'cublock', 'cuthread', 'cufree', 'cucopy',
