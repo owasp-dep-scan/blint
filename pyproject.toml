@@ -1,6 +1,6 @@
 [project]
 name = "blint"
-version = "2.4.2"
+version = "3.0.0"
 description = "Linter and SBOM generator for binary files."
 authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
@@ -58,6 +58,9 @@ dev = [
 
 [tool.black]
 line-length = 99
+
+[tool.poetry.group.extended.dependencies]
+nyxstone = "^0.1.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0"]

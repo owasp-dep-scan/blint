@@ -47,7 +47,7 @@ def build_parser():
         "--src",
         dest="src_dir_image",
         action="extend",
-        default=[os.getcwd()],
+        default=[],
         nargs="+",
         help="Source directories, container images or binary files. Defaults "
              "to current directory.",
@@ -93,6 +93,13 @@ def build_parser():
         default=os.path.exists(BLINTDB_LOC),
         dest="use_blintdb",
         help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+    )
+    parser.add_argument(
+        "--disassemble",
+        action="store_true",
+        default=False,
+        dest="disassemble",
+        help="Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.",
     )
     parser.add_argument(
         "-q",
@@ -240,7 +247,8 @@ def handle_args():
         src_dir_boms=args.src_dir_boms,
         src_dir_image=args.src_dir_image,
         stdout_mode=args.stdout_mode,
-        use_blintdb=args.use_blintdb
+        use_blintdb=args.use_blintdb,
+        disassemble=args.disassemble,
     )
     return blint_options
 

@@ -13,7 +13,7 @@ Supported binary formats:
 - PE (exe, dll)
 - Mach-O (x64, arm64)
 
-You can run blint on Linux, Windows, and Mac against any of these binary formats.
+You can run blint on Linux and Mac against any of these binary formats.
 
 ## Motivation
 
@@ -33,6 +33,12 @@ NOTE: The presence of capabilities doesn't imply that the binary always performs
 
 ```bash
 pip install blint
+```
+
+For disassembly support, install the extended group which includes [nyxstone](https://github.com/emproof-com/nyxstone).
+
+```bash
+pip install blint[extended]
 ```
 
 ### Single binary releases
@@ -57,6 +63,8 @@ options:
   --no-reviews          Do not perform method reviews.
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
   --use-blintdb         Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
+  --disassemble         Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.
+  -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
   Additional sub-commands
@@ -173,10 +181,6 @@ sbom command generates CycloneDX json.
 
 - [lief examples](https://github.com/lief-project/LIEF/tree/master/examples)
 - [checksec](https://github.com/Wenzel/checksec.py)
-
-## Discord support
-
-The developers can be reached via the [Discord](https://discord.gg/DCNxzaeUpd) channel.
 
 ## Sponsorship wishlist
 

@@ -64,6 +64,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install zlib1g-dev libzstd-dev llvm-18 llvm-18-dev
 
       - name: Install dependencies
         run: |
@@ -80,12 +84,14 @@ jobs:
             echo "TOML version does not match tag."
             exit 1
           fi
-
+        env:
+          NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
       - name: Build dist
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           poetry build --no-cache
-
+        env:
+          NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
       - name: Release PyPI
         if: startsWith(github.ref, 'refs/tags/')
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -93,8 +99,7 @@ jobs:
       - name: Generate SBOM with cdxgen
         run: |
           npm install -g @cyclonedx/cdxgen
-          cdxgen -t python -o bom.json $(pwd) --profile research -p
-
+          cdxgen -t python -o bom.json $(pwd) -p
       - name: Upload bom to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
