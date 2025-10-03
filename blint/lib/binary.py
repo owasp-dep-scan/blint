@@ -1077,6 +1077,8 @@ def analyze_import_deps(metadata):
     LOG.debug("Analyzing import dependencies...")
     dep_graph = {"libraries": {}, "dependencies": []}
     main_binary_name = metadata.get("name")
+    if not main_binary_name:
+        return {}
     dep_graph["libraries"][main_binary_name] = {
         "type": "main_binary",
         "imported_symbols": [],
@@ -1148,7 +1150,8 @@ def analyze_import_deps(metadata):
                     elif ".go" in full_name or ".s" in full_name or "internal" in full_name:
                          lib_name = full_name
                     else:
-                         LOG.debug(f"Symbol {full_name} is imported but no library info found.")
+                         if main_binary_name not in full_name:
+                            LOG.debug(f"Symbol {full_name} is imported but no library info found.")
                          continue
                 if not lib_name:
                      continue
