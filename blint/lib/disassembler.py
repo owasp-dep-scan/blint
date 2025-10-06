@@ -1,7 +1,10 @@
 from blint.logger import LOG
 import lief
 import hashlib
+import re
 from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS
+
+OPERAND_DELIMITERS_PATTERN = re.compile(r'[\s\+\-\*\[\]\(\),]+')
 
 ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'adc', 'sbb']
 CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
@@ -19,6 +22,7 @@ COMMON_REGS_8l = {'al', 'bl', 'cl', 'dl', 'sil', 'dil', 'bpl', 'spl',
 COMMON_REGS_8h = {'ah', 'bh', 'ch', 'dh'}
 
 ALL_REGS = COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h
+SORTED_ALL_REGS = sorted(ALL_REGS, key=len, reverse=True)
 
 try:
     from nyxstone import Nyxstone
@@ -125,9 +129,12 @@ def _get_disasm_range(func_addr, sec_obj, parsed_obj, section_func_map):
 
 def extract_regs_from_operand(op):
     found_regs = set()
-    for reg in ALL_REGS:
-         if reg in op:
-             found_regs.add(reg)
+    if not op:
+        return found_regs
+    potential_tokens = filter(None, OPERAND_DELIMITERS_PATTERN.split(op.lower()))
+    for token in potential_tokens:
+        if token in SORTED_ALL_REGS:
+            found_regs.add(token)
     return found_regs
 
 def _extract_register_usage(instr_assembly):
@@ -137,28 +144,42 @@ def _extract_register_usage(instr_assembly):
     """
     regs_read = set()
     regs_written = set()
-
     if not instr_assembly:
         return list(regs_read), list(regs_written)
+    first_space_idx = instr_assembly.find(' ')
+    if first_space_idx == -1:
+        mnemonic = instr_assembly.strip().lower().rstrip(':')
+        operands = []
+    else:
+        mnemonic_part = instr_assembly[:first_space_idx].strip().lower().rstrip(':')
+        operands_part = instr_assembly[first_space_idx + 1:].strip()
+        if mnemonic_part.endswith(':'):
+             mnemonic = mnemonic_part[:-1]
+        else:
+             mnemonic = mnemonic_part
+        comma_idx = operands_part.find(',')
+        if comma_idx != -1:
+            op1 = operands_part[:comma_idx].strip()
+            op2 = operands_part[comma_idx + 1:].strip()
+            operands = [op1, op2]
+        else:
+            operands = [operands_part] if operands_part else []
 
-    parts = instr_assembly.strip().split()
-    if not parts:
-        return list(regs_read), list(regs_written)
-
-    mnemonic = parts[0].lower().rstrip(':')
-    operands = [op.rstrip(',').lower() for op in parts[1:]]
+    num_operands = len(operands)
+    if num_operands > 0:
+        operands = [op.rstrip(',') for op in operands]
     if mnemonic in ['mov', 'movzx', 'movsx', 'movsxd', 'lea']:
-        if len(operands) >= 2:
-            dst_ops = operands[0]
-            src_ops = operands[1]
+        if num_operands >= 2:
+            dst_ops = operands[0].lower()
+            src_ops = operands[1].lower()
             dst_regs = extract_regs_from_operand(dst_ops)
             src_regs = extract_regs_from_operand(src_ops)
             regs_written.update(dst_regs)
             regs_read.update(src_regs)
     elif mnemonic in ['add', 'sub', 'imul', 'and', 'or', 'xor', 'cmp', 'test']:
-        if len(operands) >= 2:
-            dst_ops = operands[0]
-            src_ops = operands[1]
+        if num_operands >= 2:
+            dst_ops = operands[0].lower()
+            src_ops = operands[1].lower()
             dst_regs = extract_regs_from_operand(dst_ops)
             src_regs = extract_regs_from_operand(src_ops)
             regs_read.update(dst_regs)
@@ -166,14 +187,14 @@ def _extract_register_usage(instr_assembly):
             if mnemonic not in ['cmp', 'test']:
                 regs_written.update(dst_regs)
     elif mnemonic in ['inc', 'dec', 'not', 'neg']:
-        if operands:
-            op_regs = extract_regs_from_operand(operands[0])
+        if num_operands >= 1:
+            op_regs = extract_regs_from_operand(operands[0].lower())
             regs_read.update(op_regs)
             regs_written.update(op_regs)
     elif mnemonic == 'lea':
-        if len(operands) >= 2:
-            dst_ops = operands[0]
-            src_ops = operands[1]
+        if num_operands >= 2:
+            dst_ops = operands[0].lower()
+            src_ops = operands[1].lower()
             dst_regs = extract_regs_from_operand(dst_ops)
             src_regs = extract_regs_from_operand(src_ops)
             regs_written.update(dst_regs)
@@ -182,8 +203,8 @@ def _extract_register_usage(instr_assembly):
         stack_regs = {'rsp'}
         regs_read.update(stack_regs)
         regs_written.update(stack_regs)
-        if operands:
-            op_regs = extract_regs_from_operand(operands[0])
+        if num_operands >= 1:
+            op_regs = extract_regs_from_operand(operands[0].lower())
             if mnemonic == 'push':
                 regs_read.update(op_regs)
             else:
@@ -191,29 +212,36 @@ def _extract_register_usage(instr_assembly):
     elif mnemonic == 'call':
         cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
         regs_written.update(cc_regs)
-        if operands and operands[0].startswith('0x'):
-            pass
-        elif operands:
-            op_regs = extract_regs_from_operand(operands[0])
-            regs_read.update(op_regs)
+        if num_operands >= 1:
+            op = operands[0].lower()
+            if op.startswith('0x'):
+                pass
+            elif op.isdigit() or (op.startswith(('+', '-')) and op[1:].isdigit()):
+                 pass
+            else:
+                op_regs = extract_regs_from_operand(op)
+                regs_read.update(op_regs)
     elif mnemonic == 'ret':
         cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
         regs_read.update(cc_regs)
     elif mnemonic.startswith('j'):
-        if operands and operands[0].startswith('0x'):
-            pass
-        elif operands:
-            op_regs = extract_regs_from_operand(operands[0])
-            regs_read.update(op_regs)
+        if num_operands >= 1:
+            op = operands[0].lower()
+            if op.startswith('0x'):
+                pass
+            elif op.isdigit() or (op.startswith(('+', '-')) and op[1:].isdigit()):
+                 pass
+            else:
+                op_regs = extract_regs_from_operand(op)
+                regs_read.update(op_regs)
     elif mnemonic == 'xchg':
-        if len(operands) >= 2:
-            op1_regs = extract_regs_from_operand(operands[0])
-            op2_regs = extract_regs_from_operand(operands[1])
+        if num_operands >= 2:
+            op1_regs = extract_regs_from_operand(operands[0].lower())
+            op2_regs = extract_regs_from_operand(operands[1].lower())
             regs_read.update(op1_regs)
             regs_written.update(op1_regs)
             regs_read.update(op2_regs)
             regs_written.update(op2_regs)
-
     return list(regs_read), list(regs_written)
 
 def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses):
@@ -261,14 +289,15 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
             instruction_metrics["ret_count"] += 1
         elif mnemonic in ['jmp', 'jmpq', 'jmpl']:
             instruction_metrics["jump_count"] += 1
-        if instr_assembly.startswith('call ') or instr_assembly.startswith('jmp '):
+        if instr_assembly.startswith(('call ', 'jmp ')):
             parts = instr_assembly.split(None, 1)
             if len(parts) > 1:
-                operand = parts[1].lower()
-                if operand.startswith(('r', 'e', 'a', 'b', 'c', 'd', 's', 'i', 'f', 'g', 'h')) or '[' in operand:
-                    if not operand.startswith('0x') and not operand.replace('_', '').replace('.', '').replace('$', '').isalnum():
-                        has_indirect_call = True
-                        break
+                operand = parts[1].lower().strip()
+                if operand.startswith('[') and operand.endswith(']'):
+                    has_indirect_call = True
+                elif any(operand.startswith(reg) for reg in SORTED_ALL_REGS):
+                    if operand.isalnum() or '_' in operand:
+                         has_indirect_call = True
         regs_read, regs_written = _extract_register_usage(instr_assembly)
         all_regs_read.update(regs_read)
         all_regs_written.update(regs_written)
