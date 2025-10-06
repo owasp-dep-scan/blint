@@ -3,6 +3,23 @@ import lief
 import hashlib
 from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS
 
+ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'adc', 'sbb']
+CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
+                'jp', 'jnp', 'jo', 'jno',
+                'js', 'jns', 'loop', 'loopz', 'loopnz', 'jcxz', 'jecxz', 'jrcxz']
+SHIFT_INST = ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'psll', 'psrl', 'psra', 'vpsll', 'vpsrl', 'vpsra']
+COMMON_REGS_64 = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
+                  'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'}
+COMMON_REGS_32 = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp',
+                  'r8d', 'r9d', 'r10d', 'r11d', 'r12d', 'r13d', 'r14d', 'r15d'}
+COMMON_REGS_16 = {'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp',
+                  'r8w', 'r9w', 'r10w', 'r11w', 'r12w', 'r13w', 'r14w', 'r15w'}
+COMMON_REGS_8l = {'al', 'bl', 'cl', 'dl', 'sil', 'dil', 'bpl', 'spl',
+                  'r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b', 'r14b', 'r15b'}
+COMMON_REGS_8h = {'ah', 'bh', 'ch', 'dh'}
+
+ALL_REGS = COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h
+
 try:
     from nyxstone import Nyxstone
     NYXSTONE_AVAILABLE = True
@@ -106,6 +123,99 @@ def _get_disasm_range(func_addr, sec_obj, parsed_obj, section_func_map):
     size_to_disasm = max(0, min(size_to_disasm, len(sec_content_bytes) - func_offset_in_sec))
     return func_offset_in_sec, size_to_disasm, sec_content_bytes
 
+def extract_regs_from_operand(op):
+    found_regs = set()
+    for reg in ALL_REGS:
+         if reg in op:
+             found_regs.add(reg)
+    return found_regs
+
+def _extract_register_usage(instr_assembly):
+    """
+    Performs a first-pass analysis to extract approximate register read/write usage
+    from the instruction assembly string.
+    """
+    regs_read = set()
+    regs_written = set()
+
+    if not instr_assembly:
+        return list(regs_read), list(regs_written)
+
+    parts = instr_assembly.strip().split()
+    if not parts:
+        return list(regs_read), list(regs_written)
+
+    mnemonic = parts[0].lower().rstrip(':')
+    operands = [op.rstrip(',').lower() for op in parts[1:]]
+    if mnemonic in ['mov', 'movzx', 'movsx', 'movsxd', 'lea']:
+        if len(operands) >= 2:
+            dst_ops = operands[0]
+            src_ops = operands[1]
+            dst_regs = extract_regs_from_operand(dst_ops)
+            src_regs = extract_regs_from_operand(src_ops)
+            regs_written.update(dst_regs)
+            regs_read.update(src_regs)
+    elif mnemonic in ['add', 'sub', 'imul', 'and', 'or', 'xor', 'cmp', 'test']:
+        if len(operands) >= 2:
+            dst_ops = operands[0]
+            src_ops = operands[1]
+            dst_regs = extract_regs_from_operand(dst_ops)
+            src_regs = extract_regs_from_operand(src_ops)
+            regs_read.update(dst_regs)
+            regs_read.update(src_regs)
+            if mnemonic not in ['cmp', 'test']:
+                regs_written.update(dst_regs)
+    elif mnemonic in ['inc', 'dec', 'not', 'neg']:
+        if operands:
+            op_regs = extract_regs_from_operand(operands[0])
+            regs_read.update(op_regs)
+            regs_written.update(op_regs)
+    elif mnemonic == 'lea':
+        if len(operands) >= 2:
+            dst_ops = operands[0]
+            src_ops = operands[1]
+            dst_regs = extract_regs_from_operand(dst_ops)
+            src_regs = extract_regs_from_operand(src_ops)
+            regs_written.update(dst_regs)
+            regs_read.update(src_regs)
+    elif mnemonic in ['push', 'pop']:
+        stack_regs = {'rsp'}
+        regs_read.update(stack_regs)
+        regs_written.update(stack_regs)
+        if operands:
+            op_regs = extract_regs_from_operand(operands[0])
+            if mnemonic == 'push':
+                regs_read.update(op_regs)
+            else:
+                regs_written.update(op_regs)
+    elif mnemonic == 'call':
+        cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
+        regs_written.update(cc_regs)
+        if operands and operands[0].startswith('0x'):
+            pass
+        elif operands:
+            op_regs = extract_regs_from_operand(operands[0])
+            regs_read.update(op_regs)
+    elif mnemonic == 'ret':
+        cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
+        regs_read.update(cc_regs)
+    elif mnemonic.startswith('j'):
+        if operands and operands[0].startswith('0x'):
+            pass
+        elif operands:
+            op_regs = extract_regs_from_operand(operands[0])
+            regs_read.update(op_regs)
+    elif mnemonic == 'xchg':
+        if len(operands) >= 2:
+            op1_regs = extract_regs_from_operand(operands[0])
+            op2_regs = extract_regs_from_operand(operands[1])
+            regs_read.update(op1_regs)
+            regs_written.update(op1_regs)
+            regs_read.update(op2_regs)
+            regs_written.update(op2_regs)
+
+    return list(regs_read), list(regs_written)
+
 def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses):
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
     instruction_mnemonics = []
@@ -120,14 +230,16 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
     }
     has_indirect_call = False
     has_loop = False
-
+    all_regs_read = set()
+    all_regs_written = set()
+    instructions_with_registers = []
     for instr in instr_list:
         instr_assembly = instr.assembly
         mnemonic = instr.assembly.split(None, 1)[0].lower()
         instruction_mnemonics.append(mnemonic)
         if mnemonic == 'call':
             instruction_metrics["call_count"] += 1
-        elif mnemonic in ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe', 'jp', 'jnp', 'jo', 'jno', 'js', 'jns', 'loop', 'loopz', 'loopnz', 'jcxz', 'jecxz', 'jrcxz']:
+        elif mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
             parts = instr_assembly.split()
             if len(parts) >= 2:
@@ -141,9 +253,9 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                         continue
         elif mnemonic == 'xor':
             instruction_metrics["xor_count"] += 1
-        elif mnemonic in ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'psll', 'psrl', 'psra', 'vpsll', 'vpsrl', 'vpsra']:
+        elif mnemonic in SHIFT_INST:
             instruction_metrics["shift_count"] += 1
-        elif mnemonic in ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'adc', 'sbb']:
+        elif mnemonic in ARITH_INST:
             instruction_metrics["arith_count"] += 1
         elif mnemonic == 'ret':
             instruction_metrics["ret_count"] += 1
@@ -157,7 +269,16 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                     if not operand.startswith('0x') and not operand.replace('_', '').replace('.', '').replace('$', '').isalnum():
                         has_indirect_call = True
                         break
-    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop
+        regs_read, regs_written = _extract_register_usage(instr_assembly)
+        all_regs_read.update(regs_read)
+        all_regs_written.update(regs_written)
+        instructions_with_registers.append({
+            "regs_read": regs_read,
+            "regs_written": regs_written
+        })
+        instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
+        instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
+    return (instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers)
 
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
@@ -306,7 +427,7 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                 assembly_hash = hashlib.sha256(plain_assembly_text.encode('utf-8')).hexdigest()
                 instruction_count = len(instr_list)
                 instr_addresses = [instr.address for instr in instr_list]
-                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop = _analyze_instructions(instr_list, func_addr, func_addr + size_to_disasm, instr_addresses)
+                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers = _analyze_instructions(instr_list, func_addr, func_addr + size_to_disasm, instr_addresses)
                 direct_calls = _resolve_direct_calls(instr_list, addr_to_name_map)
                 joined_mnemonics = "\n".join(instruction_mnemonics)
                 instruction_hash = hashlib.sha256(joined_mnemonics.encode('utf-8')).hexdigest()
@@ -330,6 +451,9 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                     "has_crypto_call": has_crypto_call,
                     "has_gpu_call": has_gpu_call,
                     "has_loop": has_loop,
+                    "regs_read": regs_read,
+                    "regs_written": regs_written,
+                    "instructions_with_registers": instructions_with_registers,
                     "function_type": function_type
                 }
             except ValueError as e:

@@ -6,45 +6,73 @@ The `disassembled_functions` attribute is an optional output of the `blint` bina
 
 ## Prerequisites
 
-*   LLVM 18 and g++ must be installed. Alternatively, use the blint container image.
-*   blint extended with `nyxstone` library must be installed (`pip install blint[extended]`).
-*   Invoke blint cli with `--disassemble`
+- LLVM 18 and g++ must be installed. Alternatively, use the blint container image.
+- blint extended with `nyxstone` library must be installed (`pip install blint[extended]`).
+- Invoke blint cli with `--disassemble`
 
 ## Structure
 
 The `disassembled_functions` attribute is a dictionary where keys are function names (as determined by the initial `lief` parsing and symbol resolution). The value for each key is another dictionary containing the following fields:
 
-| Field Name | Type | Description |
-| :--- | :--- | :--- |
-| `name` | String | The name of the function. |
-| `address` | String | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345"). |
-| `assembly` | String | The full disassembled code of the function, with instructions separated by newlines. |
-| `assembly_hash` | String | A SHA-256 hash of the entire `assembly` string. |
-| `instruction_hash` | String | A SHA-256 hash of the newline-separated list of instruction *mnemonics* (e.g., "push", "mov", "call"). |
-| `instruction_count` | Integer | The total number of instructions disassembled. |
-| `instruction_metrics` | Dictionary | A map of specific instruction types to their counts. |
-| `direct_calls` | List of Strings | A list of function names identified as targets of *direct* calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function. |
-| `has_indirect_call` | Boolean | True if the function contains instructions like `call rax` or `call [rax+0x10]`. |
-| `has_system_call` | Boolean | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`). |
-| `has_security_feature` | Boolean | True if the function contains instructions related to security features (e.g., `endbr64`, `endbr32`). |
-| `has_crypto_call` | Boolean | True if the function's disassembly text contains patterns indicating cryptographic operations (based on `blint.config.CRYPTO_INDICATORS`). |
-| `has_gpu_call` | Boolean | True if the function's disassembly text contains patterns indicating GPU-related operations (based on `blint.config.GPU_INDICATORS`). |
-| `has_loop` | Boolean | True if the function contains conditional jumps that target addresses earlier within the disassembled range (indicating a potential loop). |
-| `function_type` | String | A classification of the function based on heuristics (e.g., "PLT_Thunk", "Simple_Return", "Has_Indirect_Calls", "Has_Conditional_Jumps", "Complex"). |
+| Field Name                    | Type               | Description                                                                                                                                                                              |
+| :---------------------------- | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                        | String             | The name of the function.                                                                                                                                                                |
+| `address`                     | String             | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345").                                                                                                   |
+| `assembly`                    | String             | The full disassembled code of the function, with instructions separated by newlines.                                                                                                     |
+| `assembly_hash`               | String             | A SHA-256 hash of the entire `assembly` string.                                                                                                                                          |
+| `instruction_hash`            | String             | A SHA-256 hash of the newline-separated list of instruction _mnemonics_ (e.g., "push", "mov", "call").                                                                                   |
+| `instruction_count`           | Integer            | The total number of instructions disassembled.                                                                                                                                           |
+| `instruction_metrics`         | Dictionary         | A map of specific instruction types to their counts.                                                                                                                                     |
+| `direct_calls`                | List of Strings    | A list of function names identified as targets of _direct_ calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function.                        |
+| `has_indirect_call`           | Boolean            | True if the function contains instructions like `call rax` or `call [rax+0x10]`.                                                                                                         |
+| `has_system_call`             | Boolean            | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`).                                                                                                    |
+| `has_security_feature`        | Boolean            | True if the function contains instructions related to security features (e.g., `endbr64`, `endbr32`).                                                                                    |
+| `has_crypto_call`             | Boolean            | True if the function's disassembly text contains patterns indicating cryptographic operations (based on `blint.config.CRYPTO_INDICATORS`).                                               |
+| `has_gpu_call`                | Boolean            | True if the function's disassembly text contains patterns indicating GPU-related operations (based on `blint.config.GPU_INDICATORS`).                                                    |
+| `has_loop`                    | Boolean            | True if the function contains conditional jumps that target addresses earlier within the disassembled range (indicating a potential loop).                                               |
+| `regs_read`                   | List of Strings    | A list of unique register names that are _read_ within the disassembled function code. This provides a high-level view of all registers whose values influence the function's execution. |
+| `regs_written`                | List of Strings    | A list of unique register names that are _written to_ within the disassembled function code. This indicates registers whose values are modified by the function.                         |
+| `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                              |
+| `function_type`               | String             | A classification of the function based on heuristics (e.g., "PLT_Thunk", "Simple_Return", "Has_Indirect_Calls", "Has_Conditional_Jumps", "Complex").                                     |
 
 ### `instruction_metrics` Sub-structure
 
 The `instruction_metrics` dictionary contains counts for specific categories of instructions found during disassembly:
 
-| Field Name | Type | Description |
-| :--- | :--- | :--- |
-| `call_count` | Integer | Number of `call` instructions. |
-| `conditional_jump_count` | Integer | Number of conditional jump instructions (e.g., `je`, `jne`, `jg`, `jle`). |
-| `xor_count` | Integer | Number of `xor` instructions. |
-| `shift_count` | Integer | Number of shift/rotate instructions (e.g., `shl`, `shr`, `rol`, `ror`). |
-| `arith_count` | Integer | Number of arithmetic/logical instructions (e.g., `add`, `sub`, `imul`, `and`, `or`). |
-| `ret_count` | Integer | Number of `ret` instructions. |
-| `jump_count` | Integer | Number of `jmp` instructions. |
+| Field Name                  | Type    | Description                                                                                   |
+| :-------------------------- | :------ | :-------------------------------------------------------------------------------------------- |
+| `call_count`                | Integer | Number of `call` instructions.                                                                |
+| `conditional_jump_count`    | Integer | Number of conditional jump instructions (e.g., `je`, `jne`, `jg`, `jle`).                     |
+| `xor_count`                 | Integer | Number of `xor` instructions.                                                                 |
+| `shift_count`               | Integer | Number of shift/rotate instructions (e.g., `shl`, `shr`, `rol`, `ror`).                       |
+| `arith_count`               | Integer | Number of arithmetic/logical instructions (e.g., `add`, `sub`, `imul`, `and`, `or`).          |
+| `ret_count`                 | Integer | Number of `ret` instructions.                                                                 |
+| `jump_count`                | Integer | Number of `jmp` instructions.                                                                 |
+| `unique_regs_read_count`    | Integer | Number of unique registers read within the function (aggregated from all instructions).       |
+| `unique_regs_written_count` | Integer | Number of unique registers written to within the function (aggregated from all instructions). |
+
+### `instructions_with_registers` Sub-structure
+
+Each element in the `instructions_with_registers` list is a dictionary corresponding to a single disassembled instruction. It contains:
+
+| Field Name     | Type            | Description                                                                                      |
+| :------------- | :-------------- | :----------------------------------------------------------------------------------------------- |
+| `regs_read`    | List of Strings | A list of register names that are _read_ as part of this specific instruction's operation.       |
+| `regs_written` | List of Strings | A list of register names that are _written to_ as part of this specific instruction's operation. |
+
+#### Understanding Register Usage
+
+The `regs_read` and `regs_written` fields (both globally for the function and per-instruction) provide a first-pass approximation of register usage. They analyze the textual representation of the assembly instruction.
+
+- **`regs_read`**: Indicates registers whose current value is used by the instruction.
+  - Example: `add rax, rbx`
+    - `regs_read`: `["rax", "rbx"]` (The values in `rax` and `rbx` are inputs to the addition).
+- **`regs_written`**: Indicates registers whose value is modified or set by the instruction.
+  - Example: `add rax, rbx`
+    - `regs_written`: `["rax"]` (The result of `rax + rbx` is stored back into `rax`).
+- **Implicit Operands**: Some instructions implicitly read or write specific registers (e.g., `push`/`pop` use `rsp`; `call`/`ret` affect `rsp` and `rip`). The analysis attempts to account for common implicit behaviors for certain instruction types, but coverage might not be exhaustive.
+- **Memory Operands**: Instructions accessing memory via addresses calculated from registers (e.g., `mov rax, [rbx + rcx*2]`) indicate that `rbx` and `rcx` are read (used for address calculation). The destination `rax` is written.
+- **Limitations**: This analysis is based on parsing the assembly text string. It provides a good approximation for common instructions but might be inaccurate for highly complex or obfuscated code, or for instructions not explicitly handled in the parsing logic.
 
 ## Use Cases
 
@@ -55,4 +83,85 @@ The `instruction_metrics` dictionary contains counts for specific categories of 
 5.  **Function Characterization:** Quickly assess the nature of a function using the `function_type` field and boolean flags (`has_loop`, `has_security_feature`, etc.). This can help prioritize analysis or identify specific types of functions (e.g., PLT thunks).
 6.  **Call Graph Approximation:** Use the `direct_calls` field to build a partial call graph based on statically resolvable direct calls. Note that this will not include calls resolved via PLT/GOT or indirect calls.
 7.  **Security Feature Verification:** Confirm the presence of control-flow integrity features (like CET) by checking the `has_security_feature` flag and examining the `assembly` for relevant instructions.
+8.  **Register Usage Analysis:**
+    - **Identify Potential Arguments:** Functions that read specific registers (especially those used for argument passing conventions like `rcx`, `rdx`, `r8`, `r9` on Windows x64 or `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` on System V AMD64 ABI) at the beginning might be taking arguments via those registers.
+    - **Track Data Flow:** By examining `instructions_with_registers`, you can trace how data moves through registers within a function. For example, seeing `rax` written by one instruction and then read by a subsequent one.
+    - **Detect Register Preservation:** Check if a function modifies callee-saved registers (like `rbx`, `rbp`, `r12-r15` on x64) without restoring them, which might violate calling conventions or indicate specific behavior.
+    - **Spot Unusual Register Patterns:** Functions that read or write an unusually large number of registers might be complex, perform context switching, or manipulate state extensively.
 
+## Examples
+
+Consider a simple function that adds two numbers passed in `rcx` and `rdx`, stores the result in `rax`, and returns.
+
+**Disassembly Snippet:**
+
+```assembly
+simple_add:
+   push rbp
+   mov rbp, rsp
+   mov rax, rcx  ; Move first argument (rcx) to rax
+   add rax, rdx  ; Add second argument (rdx) to rax
+   pop rbp
+   ret
+```
+
+**Corresponding `disassembled_functions` Entry (Simplified):**
+
+```json
+{
+  "0x140012345::simple_add": {
+    "name": "simple_add",
+    "address": "0x140012345",
+    "assembly": "push rbp\nmov rbp, rsp\nmov rax, rcx\nadd rax, rdx\npop rbp\nret",
+    "instruction_count": 6,
+    "instruction_metrics": {
+      "arith_count": 1,
+      "call_count": 0,
+      ...
+      "unique_regs_read_count": 4,
+      "unique_regs_written_count": 3
+    },
+    "regs_read": ["rbp", "rsp", "rcx", "rdx"],
+    "regs_written": ["rbp", "rsp", "rax"],
+    "instructions_with_registers": [
+      {
+        "regs_read": ["rbp"],
+        "regs_written": ["rsp"]
+      },
+      {
+        "regs_read": ["rsp"],
+        "regs_written": ["rbp"]
+      },
+      {
+        "regs_read": ["rcx"],
+        "regs_written": ["rax"]
+      },
+      {
+        "regs_read": ["rax", "rdx"],
+        "regs_written": ["rax"]
+      },
+      {
+        "regs_read": ["rbp"],
+        "regs_written": ["rsp"]
+      },
+      {
+        "regs_read": [],
+        "regs_written": []
+      }
+    ],
+    ...
+  }
+}
+```
+
+**Explanation:**
+
+1.  **Global `regs_read`**: `["rbp", "rsp", "rcx", "rdx"]` - These are all the unique registers read anywhere in the function. `rbp` and `rsp` are used for stack frame management. `rcx` and `rdx` are the input arguments.
+2.  **Global `regs_written`**: `["rbp", "rsp", "rax"]` - These are all the unique registers modified. `rbp` and `rsp` are modified during stack frame setup/teardown. `rax` holds the result.
+3.  **`instructions_with_registers`**:
+    - `push rbp`: Reads `rbp`, Writes `rsp` (stack pointer decremented).
+    - `mov rbp, rsp`: Reads `rsp`, Writes `rbp` (base pointer set to current stack top).
+    - `mov rax, rcx`: Reads `rcx`, Writes `rax` (first argument moved to result register).
+    - `add rax, rdx`: Reads `rax` and `rdx`, Writes `rax` (adds second argument to result).
+    - `pop rbp`: Reads `rbp` (from stack, implicitly using `rsp`), Writes `rsp` (stack pointer incremented).
+    - `ret`: Typically doesn't directly read/write general-purpose registers listed here (though it implicitly uses `rsp` to get the return address and `rip` to set the next instruction).
