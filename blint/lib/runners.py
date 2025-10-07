@@ -14,7 +14,7 @@ from blint.lib.analysis import (
     review_entries_dict, review_exe_dict,
     review_imports_dict, review_methods_dict,
     review_rules_cache, review_symbols_dict, run_checks,
-    run_prefuzz
+    run_prefuzz, review_functions_dict, initialize_rules
 )
 from blint.lib.binary import parse
 from blint.logger import LOG
@@ -81,15 +81,10 @@ class AnalysisRunner:
         the source files, parses the metadata, checks the security properties,
         performs symbol reviews, and suggests fuzzable targets if specified.
 
-        Args:
-            files (list): The list of source files to be analyzed.
-            reports_dir (str): The directory where the reports will be stored.
-            no_reviews (bool): Whether to perform reviews or not.
-            suggest_fuzzables (bool): Whether to suggest fuzzable targets or not.
-
         Returns:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
+        initialize_rules(blint_options)
         with self.progress:
             self.task = self.progress.add_task(
                 f"[green] BLinting {len(exe_files)} binaries",
@@ -101,14 +96,8 @@ class AnalysisRunner:
         return self.findings, self.reviews, self.fuzzables
 
     def _process_files(self, f, blint_options):
-        """Processes the given file and generates findings.
-
-        Args:
-            f (str): The file to be processed.
-            reports_dir (str): The directory where the reports will be stored.
-            no_reviews (bool): Whether to perform reviews or not.
-            suggest_fuzzables (bool): Whether to suggest fuzzable targets or not.
-
+        """
+        Processes the given file and generates findings.
         """
         self.progress.update(self.task, description=f"Processing [bold]{f}[/bold]")
         metadata = parse(f, blint_options.disassemble)
@@ -152,6 +141,7 @@ class ReviewRunner:
         self.review_symbols_list = []
         self.review_imports_list = []
         self.review_entries_list = []
+        self.review_functions_list = []
 
     def run_review(self, metadata):
         """
@@ -179,6 +169,7 @@ class ReviewRunner:
                 or self.review_symbols_list
                 or self.review_imports_list
                 or self.review_entries_list
+                or self.review_functions_list
         ):
             return self._review_lists(metadata)
         return self._review_loader_symbols(metadata)
@@ -202,6 +193,8 @@ class ReviewRunner:
             self._review_imports(metadata)
         if self.review_entries_list:
             self._review_entries(metadata)
+        if self.review_functions_list:
+            self._review_functions(metadata)
         self._review_pii(metadata)
         self._review_loader_symbols(metadata)
         return self.results
@@ -283,6 +276,72 @@ class ReviewRunner:
         if self.review_exe_list:
             self.run_review_methods_symbols(self.review_exe_list, symbols_list)
 
+    def _review_functions(self, metadata):
+        """
+        Reviews disassembled functions based on their behavioural metadata.
+        """
+        if not metadata.get("disassembled_functions"):
+            return
+
+        LOG.debug(f"Reviewing {len(metadata['disassembled_functions'])} disassembled functions")
+        results = defaultdict(list)
+        found_cid = defaultdict(int)
+        for review_group in self.review_functions_list:
+            for rule_id, rule_obj in review_group.items():
+                for func_key, func_data in metadata["disassembled_functions"].items():
+                    if found_cid[rule_id] >= EVIDENCE_LIMIT:
+                        continue
+                    check_type = rule_obj.get("check_type")
+                    passed = False
+                    if check_type == "function_flag":
+                        check_field = rule_obj.get("check_field")
+                        if func_data.get(check_field):
+                            passed = True
+                    elif check_type == "function_metric":
+                        check_field = rule_obj.get("check_field")
+                        operator_str = rule_obj.get("operator")
+                        threshold = rule_obj.get("threshold")
+                        if check_field and operator_str and threshold is not None:
+                            value = func_data
+                            for key in check_field.split('.'):
+                                value = value.get(key)
+                                if value is None:
+                                    break
+                            if value is not None:
+                                if operator_str == ">":
+                                    passed = value > threshold
+                                elif operator_str == ">=":
+                                    passed = value >= threshold
+                                elif operator_str == "<":
+                                    passed = value < threshold
+                                elif operator_str == "<=":
+                                    passed = value <= threshold
+                                elif operator_str == "==":
+                                    passed = value == threshold
+                                elif operator_str == "!=":
+                                    passed = value != threshold
+                    elif check_type == "function_analysis":
+                        if rule_id == "CRYPTO_BEHAVIOR":
+                            metrics = func_data.get("instruction_metrics", {})
+                            icount = func_data.get("instruction_count", 0)
+                            if icount > 10:
+                                shift_xor = metrics.get("shift_count", 0) + metrics.get("xor_count", 0)
+                                if (shift_xor / icount > 0.2) and metrics.get("simd_fpu_count", 0) > 0:
+                                    passed = True
+                        elif rule_id == "ANTI_DISASSEMBLY_TRICKS":
+                            metrics = func_data.get("instruction_metrics", {})
+                            if func_data.get("instruction_count", 0) <= 5 and metrics.get("jump_count", 0) > 0:
+                                passed = True
+                    if passed:
+                        evidence = {
+                            "function": func_data.get("name", func_key),
+                            "address": func_data.get("address"),
+                            "snippet": func_data.get("assembly", "").split('\n')[0]
+                        }
+                        results[rule_id].append(evidence)
+                        found_cid[rule_id] += 1
+        self.results |= results
+
     def _methods_or_exe(self, metadata):
         """
         Reviews lists in the metadata and performs specific actions based on the
@@ -318,6 +377,7 @@ class ReviewRunner:
         self.review_symbols_list = review_symbols_dict.get(exe_type)
         self.review_imports_list = review_imports_dict.get(exe_type)
         self.review_entries_list = review_entries_dict.get(exe_type)
+        self.review_functions_list = review_functions_dict.get(exe_type)
 
     def process_review(self, f, exe_name):
         """
@@ -336,7 +396,8 @@ class ReviewRunner:
                 "filename": f,
                 "exe_name": exe_name,
             }
-            del aresult["patterns"]
+            if hasattr(aresult, "patterns"):
+                del aresult["patterns"]
             reviews.append(aresult)
         return reviews
 

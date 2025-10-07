@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import os
 import platform
 import re
-from typing import List
+from typing import List, Optional
 from appdirs import user_data_dir
 
 ARCH = platform.machine()
@@ -1270,6 +1270,7 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    custom_rules_dir: Optional[str] = None
 
     def __post_init__(self):
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):

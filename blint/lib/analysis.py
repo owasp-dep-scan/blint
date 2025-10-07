@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from itertools import islice
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from rich.terminal_theme import MONOKAI
@@ -25,7 +26,7 @@ from blint.lib.checks import (
     check_codesign,
     check_trust_info,
 )
-from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env
+from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env, BlintOptions
 from blint.logger import LOG, console
 from blint.lib.utils import (
     create_findings_table,
@@ -59,6 +60,8 @@ review_methods_dict = defaultdict(list)
 review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
 review_entries_dict = defaultdict(list)
+review_functions_dict = defaultdict(list)
+
 review_rules_cache = {
     "PII_READ": {
         "id": "PII_READ",
@@ -129,35 +132,140 @@ for tmp_data in raw_rules:
     for rule in rules_list:
         rules_dict[rule.get("id")] = rule
 
-# Load the default review methods
-for review_methods_file in review_files:
-    raw_annotations = []
-    with get_resource("blint.data.annotations", review_methods_file) as fp:
-        raw_annotations = fp.read().split("---")
-        for tmp_data in raw_annotations:
-            if not tmp_data:
-                continue
-            methods_reviews_groups = yaml.safe_load(tmp_data)
-            exe_type_list = methods_reviews_groups.get("exe_type")
-            if isinstance(exe_type_list, str):
-                exe_type_list = [exe_type_list]
-            all_rules = methods_reviews_groups.get("rules")
-            method_rules_dict = {}
-            for rule in all_rules:
-                method_rules_dict[rule.get("id")] = rule
-                review_rules_cache[rule.get("id")] = rule
-            for etype in exe_type_list:
-                if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
-                    review_methods_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
-                    review_exe_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
-                    review_symbols_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
-                    review_imports_dict[etype].append(method_rules_dict)
-                elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
-                    review_entries_dict[etype].append(method_rules_dict)
+def load_default_rules():
+    """Load default rules from package resources."""
+    with get_resource("blint.data", "rules.yml") as fp:
+        raw_rules = fp.read().split("---")
+    for tmp_data in raw_rules:
+        if not tmp_data:
+            continue
+        rules_list = yaml.safe_load(tmp_data)
+        for rule in rules_list:
+            rules_dict[rule.get("id")] = rule
+    for review_methods_file in review_files:
+        with get_resource("blint.data.annotations", review_methods_file) as fp:
+            raw_annotations = fp.read().split("---")
+            for tmp_data in raw_annotations:
+                if not tmp_data:
+                    continue
+                methods_reviews_groups = yaml.safe_load(tmp_data)
+                exe_type_list = methods_reviews_groups.get("exe_type")
+                if isinstance(exe_type_list, str):
+                    exe_type_list = [exe_type_list]
+                all_rules = methods_reviews_groups.get("rules")
+                method_rules_dict = {}
+                for rule in all_rules:
+                    rule_id = rule.get("id")
+                    if rule_id:
+                        method_rules_dict[rule_id] = rule
+                        review_rules_cache[rule_id] = rule
+                    else:
+                        LOG.warning("Default rule has no 'id'. Skipping.")
+                        continue
+                for etype in exe_type_list:
+                    if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                        review_methods_dict[etype].append(method_rules_dict)
+                    elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                        review_exe_dict[etype].append(method_rules_dict)
+                    elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                        review_symbols_dict[etype].append(method_rules_dict)
+                    elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                        review_imports_dict[etype].append(method_rules_dict)
+                    elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                        review_entries_dict[etype].append(method_rules_dict)
+                    elif methods_reviews_groups.get("group") == "FUNCTION_REVIEWS":
+                        review_functions_dict[etype].append(method_rules_dict)
 
+def load_custom_rules(custom_dir_path: Optional[str], review_rules_cache, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict):
+    """
+    Loads custom review rules from a specified directory.
+    """
+    if not custom_dir_path:
+        return
+    if not os.path.isdir(custom_dir_path):
+        LOG.debug(f"Custom rules directory '{custom_dir_path}' does not exist or is not a directory. Skipping custom rules.")
+        return
+
+    LOG.debug(f"Loading custom review rules from '{custom_dir_path}'")
+    custom_path = Path(custom_dir_path)
+    custom_rule_files = list(custom_path.glob("*.yml")) + list(custom_path.glob("*.yaml"))
+
+    for rule_file_path in custom_rule_files:
+        LOG.debug(f"Loading custom rules from {rule_file_path}")
+        try:
+            with open(rule_file_path, 'r', encoding='utf-8') as f:
+                raw_annotations = f.read().split("---")
+                for tmp_data in raw_annotations:
+                    if not tmp_data:
+                        continue
+                    methods_reviews_groups = yaml.safe_load(tmp_data)
+                    if not methods_reviews_groups:
+                        continue
+                    exe_type_list = methods_reviews_groups.get("exe_type")
+                    if isinstance(exe_type_list, str):
+                        exe_type_list = [exe_type_list]
+                    all_rules = methods_reviews_groups.get("rules")
+                    if not all_rules:
+                        LOG.info(f"No 'rules' found in block of {rule_file_path}")
+                        continue
+                    method_rules_dict = {}
+                    for rule in all_rules:
+                        rule_id = rule.get("id")
+                        if rule_id:
+                            method_rules_dict[rule_id] = rule
+                            review_rules_cache[rule_id] = rule
+                        else:
+                            LOG.warning(f"Rule in {rule_file_path} has no 'id'. Skipping.")
+                            continue
+
+                    for etype in exe_type_list:
+                        if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                            review_methods_dict[etype].append(method_rules_dict)
+                        elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                            review_exe_dict[etype].append(method_rules_dict)
+                        elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                            review_symbols_dict[etype].append(method_rules_dict)
+                        elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                            review_imports_dict[etype].append(method_rules_dict)
+                        elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                            review_entries_dict[etype].append(method_rules_dict)
+                        elif methods_reviews_groups.get("group") == "FUNCTION_REVIEWS":
+                            review_functions_dict[etype].append(method_rules_dict)
+                        else:
+                            LOG.warning(f"Unknown group '{methods_reviews_groups.get('group')}' in {rule_file_path}. Skipping block.")
+        except Exception as e:
+            LOG.error(f"Error loading custom rules from {rule_file_path}: {e}")
+
+def initialize_rules(blint_options: BlintOptions):
+    """
+    Loads default and custom rules based on blint_options.
+    """
+    rules_dict.clear()
+    review_exe_dict.clear()
+    review_methods_dict.clear()
+    review_symbols_dict.clear()
+    review_imports_dict.clear()
+    review_entries_dict.clear()
+    review_functions_dict.clear()
+    review_rules_cache.clear()
+    review_rules_cache.update({
+        "PII_READ": {
+            "id": "PII_READ",
+            "title": "Detect PII Read Operations",
+            "summary": "Can Retrieve Sensitive PII data",
+            "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
+            "patterns": PII_WORDS,
+        },
+        "LOADER_SYMBOLS": {
+            "id": "LOADER_SYMBOLS",
+            "title": "Detect Initial Loader",
+            "summary": "Behaves like a loader",
+            "description": "The binary behaves like a loader by downloading and executing additional payloads.",
+            "patterns": FIRST_STAGE_WORDS,
+        },
+    })
+    load_default_rules()
+    load_custom_rules(blint_options.custom_rules_dir, review_rules_cache, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict)
 
 def run_checks(f, metadata):
     """Runs the checks on the provided metadata using the loaded rules.
