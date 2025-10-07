@@ -1,9 +1,10 @@
 import orjson
 from pathlib import Path
 
-from blint.lib.analysis import run_checks
+from blint.lib.analysis import run_checks, load_default_rules
 from blint.lib.runners import ReviewRunner
 
+load_default_rules()
 
 def test_gobinary():
     test_go_file = Path(__file__).parent / "data" / "ngrok-elf.json"
