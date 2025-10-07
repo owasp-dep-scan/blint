@@ -4,7 +4,7 @@ import hashlib
 import re
 from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS
 
-OPERAND_DELIMITERS_PATTERN = re.compile(r'[\s\+\-\*\[\]\(\),]+')
+OPERAND_DELIMITERS_PATTERN = re.compile(r'[\s+\-*\[\](),]+')
 
 ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'adc', 'sbb']
 CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
@@ -52,7 +52,7 @@ def _get_function_ranges(parsed_obj, metadata):
                      for sec in parsed_obj.sections:
                          sec_start = sec.virtual_address + parsed_obj.optional_header.imagebase
                          if sec_start <= func_addr < sec_start + sec.virtual_size:
-                             sec_identifier = sec.virtual_address
+                             sec_identifier = sec.virtual_address + parsed_obj.optional_header.imagebase
                              break
                 elif isinstance(parsed_obj, lief.MachO.Binary):
                      for seg in parsed_obj.segments:
@@ -307,7 +307,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         })
         instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
         instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
-    return (instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers)
+    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers
 
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
