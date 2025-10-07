@@ -84,6 +84,7 @@ class AnalysisRunner:
         Returns:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
+        initialize_rules(blint_options)
         with self.progress:
             self.task = self.progress.add_task(
                 f"[green] BLinting {len(exe_files)} binaries",
@@ -108,7 +109,6 @@ class AnalysisRunner:
             self.findings += finding
         # Perform symbol reviews
         if not blint_options.no_reviews:
-            initialize_rules(blint_options)
             self.do_review(exe_name, f, metadata)
         # Suggest fuzzable targets
         if blint_options.fuzzy and (fuzzdata := run_prefuzz(metadata)):

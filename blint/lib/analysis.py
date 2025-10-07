@@ -134,7 +134,6 @@ for tmp_data in raw_rules:
 
 def load_default_rules():
     """Load default rules from package resources."""
-    global rules_dict, review_rules_cache, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict
     with get_resource("blint.data", "rules.yml") as fp:
         raw_rules = fp.read().split("---")
     for tmp_data in raw_rules:
@@ -241,7 +240,6 @@ def initialize_rules(blint_options: BlintOptions):
     """
     Loads default and custom rules based on blint_options.
     """
-    global rules_dict, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict, review_rules_cache
     rules_dict.clear()
     review_exe_dict.clear()
     review_methods_dict.clear()
