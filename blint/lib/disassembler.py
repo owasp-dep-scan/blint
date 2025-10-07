@@ -486,5 +486,5 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                     "function_type": function_type
                 }
             except ValueError as e:
-                LOG.warning(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
+                LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     return disassembly_results
