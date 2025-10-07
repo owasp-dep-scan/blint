@@ -30,26 +30,28 @@ def test_extract_register_usage_lea():
 
 def test_extract_register_usage_push_pop():
     instr_asm_push = "push rax"
-    regs_read_push, regs_written_push = _extract_register_usage(instr_asm_push)
-    assert "rax" in regs_read_push
+    regs_read_push, regs_written_push = _extract_register_usage(instr_asm_push, {}, "x86_64")
     assert "rsp" in regs_read_push
     assert "rsp" in regs_written_push
     instr_asm_pop = "pop rbx"
-    regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop)
-    assert "rbx" in regs_written_pop
+    regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop, {}, "x86_64")
     assert "rsp" in regs_read_pop
     assert "rsp" in regs_written_pop
 
 def test_extract_register_usage_call():
     instr_asm = "call 0x123456"
-    regs_read, regs_written = _extract_register_usage(instr_asm)
-    cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
+    regs_read, regs_written = _extract_register_usage(instr_asm, {}, "x86_64")
+    cc_regs = {'rsi', 'rcx', 'r9', 'r10', 'rax', 'rdi', 'r8', 'r11', 'rdx'}
     assert set(regs_written) == cc_regs
     assert set(regs_read) == set()
     instr_asm_indirect = "call r12"
-    regs_read_indirect, regs_written_indirect = _extract_register_usage(instr_asm_indirect)
+    regs_read_indirect, regs_written_indirect = _extract_register_usage(instr_asm_indirect, {}, "aarch64")
     assert "r12" in regs_read_indirect
     assert set(regs_written_indirect) == cc_regs
+    instr_asm_pop = "pop ebx"
+    regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop, {}, "x86")
+    assert "esp" in regs_read_pop
+    assert "esp" in regs_written_pop
 
 def test_extract_register_usage_invalid():
     regs_read, regs_written = _extract_register_usage("")
@@ -98,8 +100,8 @@ def test_analyze_instructions_basic(mock_instructions):
     func_addr = 0x1000
     next_func_addr_in_sec = 0x2000
     (metrics, mnemonics, has_indirect_call, has_loop,
-     regs_read, regs_written, instrs_with_regs) = _analyze_instructions(
-        mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses
+     regs_read, regs_written, instrs_with_regs, _) = _analyze_instructions(
+        mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses, {}, "x86_64"
     )
     assert metrics["call_count"] == 2
     assert metrics["arith_count"] == 1
@@ -129,7 +131,7 @@ def test_analyze_instructions_loop_detection():
     target_instr = MagicMock()
     target_instr.address = 0x0FFF
     instr_addresses_with_target = instr_addresses + [target_instr.address]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _) = _analyze_instructions(
         instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
     )
     instrs_corrected = []
@@ -138,7 +140,7 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _) = _analyze_instructions(
         instrs_corrected, func_addr, next_func_addr_in_sec, instr_addresses_corrected
     )
     assert has_loop == True
@@ -203,3 +205,21 @@ def test_classify_function_unknown():
 
     ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
     assert ftype == ""
+
+def test_extract_register_usage_cmov():
+    instr_asm = "cmovne rax, rbx"
+    regs_read, regs_written = _extract_register_usage(instr_asm)
+    assert set(regs_read) == {"rbx"}
+    assert set(regs_written) == {"rax"}
+
+def test_extract_register_usage_xadd():
+    instr_asm = "xadd rcx, rdx"
+    regs_read, regs_written = _extract_register_usage(instr_asm)
+    assert set(regs_read) == {"rcx", "rdx"}
+    assert set(regs_written) == {"rcx", "rdx"}
+
+def test_extract_register_usage_bsf():
+    instr_asm = "bsf eax, [rsi]"
+    regs_read, regs_written = _extract_register_usage(instr_asm)
+    assert set(regs_read) == {"rsi"}
+    assert set(regs_written) == {"eax"}

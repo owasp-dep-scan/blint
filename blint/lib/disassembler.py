@@ -2,15 +2,15 @@ from blint.logger import LOG
 import lief
 import hashlib
 import re
-from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS
+from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS, IMPLICIT_REGS_X86, IMPLICIT_REGS_X64
 
-OPERAND_DELIMITERS_PATTERN = re.compile(r'[\s+\-*\[\](),]+')
+OPERAND_DELIMITERS_PATTERN = re.compile(r'[^a-zA-Z0-9_]+')
 
-ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'adc', 'sbb']
+ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'xor', 'adc', 'sbb', 'xadd', 'cmpxchg']
+SHIFT_INST = ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'rcl', 'rcr', 'psll', 'psrl', 'psra', 'vpsll', 'vpsrl', 'vpsra']
 CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
                 'jp', 'jnp', 'jo', 'jno',
                 'js', 'jns', 'loop', 'loopz', 'loopnz', 'jcxz', 'jecxz', 'jrcxz']
-SHIFT_INST = ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'psll', 'psrl', 'psra', 'vpsll', 'vpsrl', 'vpsra']
 COMMON_REGS_64 = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
                   'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'}
 COMMON_REGS_32 = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp',
@@ -21,8 +21,35 @@ COMMON_REGS_8l = {'al', 'bl', 'cl', 'dl', 'sil', 'dil', 'bpl', 'spl',
                   'r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b', 'r14b', 'r15b'}
 COMMON_REGS_8h = {'ah', 'bh', 'ch', 'dh'}
 
-ALL_REGS = COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h
+TERMINATING_INST = {'ret', 'retn', 'retf', 'iret', 'iretd', 'iretq'}
+UNCONDITIONAL_JMP_INST = {'jmp', 'jmpq', 'jmpl'}
+READ_WRITE_BOTH_OPS_INST = {'xadd', 'cmpxchg', 'cmpxchg8b', 'cmpxchg16b'}
+BIT_MANIPULATION_INST = {'bt', 'bts', 'bsf', 'bsr', 'btr', 'btc', 'popcnt', 'lzcnt', 'tzcnt'}
+READ_WRITE_ONE_OP_INST = {'inc', 'dec', 'not', 'neg', 'rol', 'ror', 'rcl', 'rcr', 'shl', 'shr', 'sal', 'sar'}
+WRITE_DST_READ_SRC_INST = {
+    'add', 'adc', 'sub', 'sbb', 'imul', 'and', 'or', 'xor',
+    'mov', 'movzx', 'movsx', 'movsxd', 'lea',
+    'cmove', 'cmovne', 'cmovz', 'cmovnz', 'cmova', 'cmovnbe', 'cmovae', 'cmovnb',
+    'cmovb', 'cmovnae', 'cmovbe', 'cmovna', 'cmovg', 'cmovnle', 'cmovge', 'cmovnl',
+    'cmovl', 'cmovnge', 'cmovle', 'cmovng', 'cmovc', 'cmovnc', 'cmovo', 'cmovno',
+    'cmovs', 'cmovns', 'cmovp', 'cmovpe', 'cmovnp', 'cmovpo'
+}
+
+SEGMENT_REGS = {'cs', 'ds', 'es', 'fs', 'gs', 'ss'}
+FPU_REGS = {f'st({i})' for i in range(8)}
+MMX_REGS = {f'mm{i}' for i in range(8)}
+XMM_REGS = {f'xmm{i}' for i in range(32)}
+YMM_REGS = {f'ymm{i}' for i in range(32)}
+ZMM_REGS = {f'zmm{i}' for i in range(32)}
+ALL_SIMD_REGS = FPU_REGS | MMX_REGS | XMM_REGS | YMM_REGS | ZMM_REGS
+ALL_REGS = COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h | ALL_SIMD_REGS | SEGMENT_REGS
 SORTED_ALL_REGS = sorted(ALL_REGS, key=len, reverse=True)
+
+WIN_X64_VOLATILE_REGS = frozenset({'rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11'})
+SYSV_X64_VOLATILE_REGS = frozenset({'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'})
+CDECL_X86_VOLATILE_REGS = frozenset({'eax', 'ecx', 'edx'})
+X64_RETURN_REGS = frozenset({'rax'})
+X86_RETURN_REGS = frozenset({'eax'})
 
 try:
     from nyxstone import Nyxstone
@@ -30,6 +57,47 @@ try:
 except ImportError:
     LOG.debug("Nyxstone not found. Disassembly features will be unavailable. Install with 'pip install blint[extended]'.")
     NYXSTONE_AVAILABLE = False
+
+def _get_implicit_regs_map(arch_target):
+    """Selects the appropriate implicit registers map based on architecture."""
+    if "64" in arch_target:
+        return IMPLICIT_REGS_X64
+    return IMPLICIT_REGS_X86
+
+def _find_function_end_index(instr_list):
+    """
+    Scans a list of instructions to find the most likely end of a function.
+    Returns the index of the last instruction belonging to the function.
+    """
+    if not instr_list:
+        return -1
+    for i, instr in enumerate(instr_list):
+        mnemonic = instr.assembly.split(None, 1)[0].lower()
+        if mnemonic in TERMINATING_INST:
+            if i + 1 < len(instr_list):
+                next_mnemonic = instr_list[i+1].assembly.split(None, 1)[0].lower()
+                if next_mnemonic in ['int3', 'nop']:
+                    return i
+            return i
+        if mnemonic in UNCONDITIONAL_JMP_INST:
+            return i
+    return len(instr_list) - 1
+
+def _get_abi_volatile_regs(parsed_obj, arch_target):
+    """
+    Determines the set of volatile (caller-saved) registers based on the
+    binary type and architecture.
+    """
+    is_64bit = "64" in arch_target or "aarch64" in arch_target
+    if isinstance(parsed_obj, lief.PE.Binary):
+        if is_64bit:
+            return WIN_X64_VOLATILE_REGS
+        else:
+            return CDECL_X86_VOLATILE_REGS
+    if is_64bit:
+        return SYSV_X64_VOLATILE_REGS
+    else:
+        return CDECL_X86_VOLATILE_REGS
 
 def _get_function_ranges(parsed_obj, metadata):
     """Calculates the address ranges for each function based on the next function or section end."""
@@ -71,33 +139,31 @@ def _get_function_ranges(parsed_obj, metadata):
         addr_list.sort()
     return section_func_map
 
-def _find_section_object(parsed_obj, func_addr):
-    """Finds the section object containing a given function address."""
-    sec_obj = None
-    search_addr = func_addr
-    if isinstance(parsed_obj, lief.PE.Binary):
-        search_addr = func_addr + parsed_obj.optional_header.imagebase
-    if isinstance(parsed_obj, lief.ELF.Binary):
-         for sec in parsed_obj.sections:
-             if sec.virtual_address <= search_addr < sec.virtual_address + sec.size:
-                 sec_obj = sec
-                 break
-    elif isinstance(parsed_obj, lief.PE.Binary):
-         for sec in parsed_obj.sections:
-             sec_start = sec.virtual_address + parsed_obj.optional_header.imagebase
-             if sec_start <= search_addr < sec_start + sec.virtual_size:
-                 sec_obj = sec
-                 break
-    elif isinstance(parsed_obj, lief.MachO.Binary):
-         for seg in parsed_obj.segments:
-             if seg.file_offset <= search_addr - parsed_obj.imagebase < seg.file_offset + seg.file_size:
-                 for sec_in_seg in seg.sections:
-                     if sec_in_seg.virtual_address <= search_addr < sec_in_seg.virtual_address + sec_in_seg.size:
-                         sec_obj = sec_in_seg
-                         break
-                 if sec_obj:
-                     break
-    return sec_obj
+def _build_section_lookup(parsed_obj):
+    """
+    Creates a sorted list of (start_va, size, section_obj) for fast lookups.
+    """
+    sections = []
+    if not hasattr(parsed_obj, 'sections'):
+        return []
+
+    for sec in parsed_obj.sections:
+        start_va = sec.virtual_address
+        size = sec.virtual_size if hasattr(sec, 'virtual_size') else sec.size
+        if isinstance(parsed_obj, lief.PE.Binary):
+            start_va += parsed_obj.optional_header.imagebase
+        sections.append((start_va, size, sec))
+    sections.sort(key=lambda s: s[0])
+    return sections
+
+def _find_section_object(func_addr_va, section_lookup):
+    """
+    Finds the section object for a function VA using the pre-built sorted list.
+    """
+    for start_va, size, sec_obj in section_lookup:
+        if start_va <= func_addr_va < start_va + size:
+            return sec_obj
+    return None
 
 def _get_disasm_range(func_addr, sec_obj, parsed_obj, section_func_map):
     """Calculates the start offset and size to disassemble for a function."""
@@ -137,11 +203,12 @@ def extract_regs_from_operand(op):
             found_regs.add(token)
     return found_regs
 
-def _extract_register_usage(instr_assembly):
+def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
     """
     Performs a first-pass analysis to extract approximate register read/write usage
     from the instruction assembly string.
     """
+    implicit_regs_map = _get_implicit_regs_map(arch_target)
     regs_read = set()
     regs_written = set()
     if not instr_assembly:
@@ -153,10 +220,7 @@ def _extract_register_usage(instr_assembly):
     else:
         mnemonic_part = instr_assembly[:first_space_idx].strip().lower().rstrip(':')
         operands_part = instr_assembly[first_space_idx + 1:].strip()
-        if mnemonic_part.endswith(':'):
-             mnemonic = mnemonic_part[:-1]
-        else:
-             mnemonic = mnemonic_part
+        mnemonic = mnemonic_part.rstrip(':')
         comma_idx = operands_part.find(',')
         if comma_idx != -1:
             op1 = operands_part[:comma_idx].strip()
@@ -164,76 +228,102 @@ def _extract_register_usage(instr_assembly):
             operands = [op1, op2]
         else:
             operands = [operands_part] if operands_part else []
-
     num_operands = len(operands)
     if num_operands > 0:
         operands = [op.rstrip(',') for op in operands]
-    if mnemonic in ['mov', 'movzx', 'movsx', 'movsxd', 'lea']:
+
+    has_rep_prefix = False
+    if mnemonic.startswith(('rep', 'repe', 'repne')):
+        has_rep_prefix = True
+        mnemonic = mnemonic[4:] if len(mnemonic) > 3 and mnemonic[3] == 'e' else mnemonic[3:]
+
+    if mnemonic in implicit_regs_map:
+        regs_read.update(implicit_regs_map[mnemonic].get('read', set()))
+        regs_written.update(implicit_regs_map[mnemonic].get('write', set()))
+
+    if has_rep_prefix:
+        is_64bit = "64" in arch_target
+        counter_reg = 'rcx' if is_64bit else 'ecx'
+        regs_read.add(counter_reg)
+        regs_written.add(counter_reg)
+
+    if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith('cmov'):
         if num_operands >= 2:
-            dst_ops = operands[0].lower()
-            src_ops = operands[1].lower()
-            dst_regs = extract_regs_from_operand(dst_ops)
-            src_regs = extract_regs_from_operand(src_ops)
+            dst_regs = extract_regs_from_operand(operands[0].lower())
+            src_regs = extract_regs_from_operand(operands[1].lower())
             regs_written.update(dst_regs)
             regs_read.update(src_regs)
-    elif mnemonic in ['add', 'sub', 'imul', 'and', 'or', 'xor', 'cmp', 'test']:
+            if mnemonic not in ['mov', 'movzx', 'movsx', 'movsxd', 'lea'] and not mnemonic.startswith('cmov'):
+                regs_read.update(dst_regs)
+
+    elif mnemonic in READ_WRITE_BOTH_OPS_INST:
         if num_operands >= 2:
-            dst_ops = operands[0].lower()
-            src_ops = operands[1].lower()
-            dst_regs = extract_regs_from_operand(dst_ops)
-            src_regs = extract_regs_from_operand(src_ops)
-            regs_read.update(dst_regs)
+            op1_regs = extract_regs_from_operand(operands[0].lower())
+            op2_regs = extract_regs_from_operand(operands[1].lower())
+            regs_read.update(op1_regs)
+            regs_written.update(op1_regs)
+            regs_read.update(op2_regs)
+            if mnemonic != 'cmpxchg':
+                regs_written.update(op2_regs)
+
+    elif mnemonic in BIT_MANIPULATION_INST:
+        if num_operands >= 2:
+            dst_regs = extract_regs_from_operand(operands[0].lower())
+            src_regs = extract_regs_from_operand(operands[1].lower())
+            regs_written.update(dst_regs)
             regs_read.update(src_regs)
-            if mnemonic not in ['cmp', 'test']:
-                regs_written.update(dst_regs)
-    elif mnemonic in ['inc', 'dec', 'not', 'neg']:
+            if mnemonic not in ['bsf', 'bsr', 'lzcnt', 'tzcnt', 'popcnt']:
+                regs_read.update(dst_regs)
+
+    elif mnemonic in READ_WRITE_ONE_OP_INST:
         if num_operands >= 1:
             op_regs = extract_regs_from_operand(operands[0].lower())
             regs_read.update(op_regs)
             regs_written.update(op_regs)
-    elif mnemonic == 'lea':
+
+    elif mnemonic in ['cmp', 'test']:
         if num_operands >= 2:
-            dst_ops = operands[0].lower()
-            src_ops = operands[1].lower()
-            dst_regs = extract_regs_from_operand(dst_ops)
-            src_regs = extract_regs_from_operand(src_ops)
-            regs_written.update(dst_regs)
-            regs_read.update(src_regs)
+            regs_read.update(extract_regs_from_operand(operands[0].lower()))
+            regs_read.update(extract_regs_from_operand(operands[1].lower()))
+
     elif mnemonic in ['push', 'pop']:
-        stack_regs = {'rsp'}
-        regs_read.update(stack_regs)
-        regs_written.update(stack_regs)
+        is_64bit = "64" in arch_target
+        stack_reg = 'rsp' if is_64bit else 'esp'
+        regs_read.add(stack_reg)
+        regs_written.add(stack_reg)
         if num_operands >= 1:
             op_regs = extract_regs_from_operand(operands[0].lower())
             if mnemonic == 'push':
                 regs_read.update(op_regs)
             else:
                 regs_written.update(op_regs)
+
     elif mnemonic == 'call':
-        cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
-        regs_written.update(cc_regs)
+        volatile_regs = _get_abi_volatile_regs(parsed_obj, arch_target)
+        regs_written.update(volatile_regs)
         if num_operands >= 1:
             op = operands[0].lower()
-            if op.startswith('0x'):
-                pass
-            elif op.isdigit() or (op.startswith(('+', '-')) and op[1:].isdigit()):
-                 pass
-            else:
-                op_regs = extract_regs_from_operand(op)
-                regs_read.update(op_regs)
-    elif mnemonic == 'ret':
-        cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
-        regs_read.update(cc_regs)
+            if not op.startswith('0x') and not op.isdigit():
+                 op_regs = extract_regs_from_operand(op)
+                 regs_read.update(op_regs)
+
+    elif mnemonic in TERMINATING_INST:
+        is_64bit = "64" in arch_target or "aarch64" in arch_target
+        if is_64bit:
+            regs_read.update(X64_RETURN_REGS)
+        else:
+            regs_read.update(X86_RETURN_REGS)
+        stack_reg = 'rsp' if is_64bit else 'esp'
+        regs_read.add(stack_reg)
+        regs_written.add(stack_reg)
+
     elif mnemonic.startswith('j'):
         if num_operands >= 1:
             op = operands[0].lower()
-            if op.startswith('0x'):
-                pass
-            elif op.isdigit() or (op.startswith(('+', '-')) and op[1:].isdigit()):
-                 pass
-            else:
+            if not op.startswith('0x') and not op.isdigit():
                 op_regs = extract_regs_from_operand(op)
                 regs_read.update(op_regs)
+
     elif mnemonic == 'xchg':
         if num_operands >= 2:
             op1_regs = extract_regs_from_operand(operands[0].lower())
@@ -242,9 +332,14 @@ def _extract_register_usage(instr_assembly):
             regs_written.update(op1_regs)
             regs_read.update(op2_regs)
             regs_written.update(op2_regs)
+
+    if mnemonic in ['mul', 'imul', 'div', 'idiv'] and num_operands == 1:
+        op_regs = extract_regs_from_operand(operands[0].lower())
+        regs_read.update(op_regs)
+
     return list(regs_read), list(regs_written)
 
-def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses):
+def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses, parsed_obj=None, arch_target=""):
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
     instruction_mnemonics = []
     instruction_metrics = {
@@ -255,11 +350,13 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         "arith_count": 0,
         "ret_count": 0,
         "jump_count": 0,
+        "simd_fpu_count": 0
     }
     has_indirect_call = False
     has_loop = False
     all_regs_read = set()
     all_regs_written = set()
+    used_simd_reg_types = set()
     instructions_with_registers = []
     for instr in instr_list:
         instr_assembly = instr.assembly
@@ -298,7 +395,26 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                 elif any(operand.startswith(reg) for reg in SORTED_ALL_REGS):
                     if operand.isalnum() or '_' in operand:
                          has_indirect_call = True
-        regs_read, regs_written = _extract_register_usage(instr_assembly)
+        regs_read, regs_written = _extract_register_usage(instr_assembly, parsed_obj, arch_target)
+        all_instr_regs = set(regs_read) | set(regs_written)
+        is_simd_fpu = False
+        if any(reg in FPU_REGS for reg in all_instr_regs):
+            used_simd_reg_types.add("FPU")
+            is_simd_fpu = True
+        if any(reg in MMX_REGS for reg in all_instr_regs):
+            used_simd_reg_types.add("MMX")
+            is_simd_fpu = True
+        if any(reg in XMM_REGS for reg in all_instr_regs):
+            used_simd_reg_types.add("SSE/AVX")
+            is_simd_fpu = True
+        if any(reg in YMM_REGS for reg in all_instr_regs):
+            used_simd_reg_types.add("AVX/AVX2")
+            is_simd_fpu = True
+        if any(reg in ZMM_REGS for reg in all_instr_regs):
+            used_simd_reg_types.add("AVX-512")
+            is_simd_fpu = True
+        if is_simd_fpu:
+            instruction_metrics["simd_fpu_count"] += 1
         all_regs_read.update(regs_read)
         all_regs_written.update(regs_written)
         instructions_with_registers.append({
@@ -307,7 +423,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         })
         instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
         instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
-    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers
+    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers, list(used_simd_reg_types)
 
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
@@ -366,7 +482,7 @@ def _classify_function(instruction_metrics, instruction_count, plain_assembly_te
         function_type = "Has_Conditional_Jumps"
     return function_type
 
-def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", features="", immediate_style=0):
+def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features="", immediate_style=0):
     """
     Disassembles functions found in the metadata dictionary using Nyxstone.
     Retrieves section content directly from the parsed_obj.
@@ -399,7 +515,6 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                 ...
               }
     """
-    LOG.debug(f"Attempting to disassemble functions using Nyxstone for target: {arch_target}")
     disassembly_results = {}
     if not NYXSTONE_AVAILABLE:
         LOG.debug("Nyxstone is not available. Cannot perform disassembly.")
@@ -410,15 +525,23 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
         arch_target = cpu_type
     elif machine_type and machine_type != arch_target:
         arch_target = machine_type
-    if arch_target == "arm64":
+    if arch_target == "arm64" or (metadata.get("binary_type", "") == "MachO" and not arch_target):
         arch_target = "aarch64"
+    if not arch_target:
+        arch_target = "x86_64"
     try:
+        LOG.debug(f"Attempting to disassemble functions using Nyxstone for target: {arch_target}")
         nyxstone_instance = Nyxstone(target_triple=arch_target, cpu=cpu, features=features, immediate_style=immediate_style)
     except ValueError as e:
         LOG.error(f"Failed to initialize Nyxstone for target '{arch_target}': {e}")
         return disassembly_results
     section_func_map = _get_function_ranges(parsed_obj, metadata)
     addr_to_name_map = _build_addr_to_name_map(metadata)
+    section_lookup = _build_section_lookup(parsed_obj)
+    # Disassembling all instructions for PE binaries is quite fiddly
+    inst_count = 0
+    num_failures = 0
+    num_success = 0
     for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"]:
         for func_entry in metadata.get(func_list_key, []):
             func_name = func_entry.get("name", "unknown_func")
@@ -431,7 +554,11 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
             except ValueError:
                 LOG.debug(f"Could not parse address '{func_addr_str}' for function '{func_name}'. Skipping.")
                 continue
-            sec_obj = _find_section_object(parsed_obj, func_addr)
+            if isinstance(parsed_obj, lief.PE.Binary):
+                func_addr_va = func_addr + parsed_obj.optional_header.imagebase
+            else:
+                func_addr_va = func_addr
+            sec_obj = _find_section_object(func_addr_va, section_lookup)
             func_offset_in_sec, size_to_disasm, sec_content_bytes = _get_disasm_range(func_addr, sec_obj, parsed_obj, section_func_map)
             if func_offset_in_sec is None or size_to_disasm is None or sec_content_bytes is None:
                  LOG.debug(f"Could not determine disassembly range for function '{func_name}' at {func_addr_str}.")
@@ -444,20 +571,34 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                 LOG.debug(f"'{func_name}' is empty.")
                 continue
             func_bytes_list = list(func_bytes)
-            if isinstance(parsed_obj, lief.PE.Binary):
-                func_addr_va = func_addr + parsed_obj.optional_header.imagebase
-            else:
-                func_addr_va = func_addr
             func_addr_va_hex = hex(func_addr_va)
             try:
-                instr_list = nyxstone_instance.disassemble_to_instructions(func_bytes_list, func_addr_va)
-                plain_assembly_text = nyxstone_instance.disassemble(func_bytes_list, func_addr_va).strip()
+                plain_assembly_text = ""
+                instr_list = []
+                try:
+                    instr_list = nyxstone_instance.disassemble_to_instructions(func_bytes_list, func_addr_va, inst_count)
+                    plain_assembly_text = nyxstone_instance.disassemble(func_bytes_list, func_addr_va, inst_count).strip()
+                except ValueError:
+                    num_failures += 1
+                    # Retry by reducing the instructions count
+                    if inst_count == 0:
+                        inst_count = 10
+                        instr_list = nyxstone_instance.disassemble_to_instructions(func_bytes_list, func_addr_va, inst_count)
+                        plain_assembly_text = nyxstone_instance.disassemble(func_bytes_list, func_addr_va, inst_count).strip()
+                end_index = _find_function_end_index(instr_list)
+                if end_index != -1:
+                    truncated_instr_list = instr_list[:end_index + 1]
+                else:
+                    truncated_instr_list = []
+                if not truncated_instr_list:
+                    LOG.debug(f"Could not find valid instructions for function '{func_name}'.")
+                    continue
                 lower_assembly = plain_assembly_text.lower()
                 assembly_hash = hashlib.sha256(plain_assembly_text.encode('utf-8')).hexdigest()
-                instruction_count = len(instr_list)
-                instr_addresses = [instr.address for instr in instr_list]
-                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers = _analyze_instructions(instr_list, func_addr, func_addr + size_to_disasm, instr_addresses)
-                direct_calls = _resolve_direct_calls(instr_list, addr_to_name_map)
+                instruction_count = len(truncated_instr_list)
+                instr_addresses = [instr.address for instr in truncated_instr_list]
+                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers, used_simd_reg_types = _analyze_instructions(truncated_instr_list, func_addr, func_addr + size_to_disasm, instr_addresses, parsed_obj, arch_target)
+                direct_calls = _resolve_direct_calls(truncated_instr_list, addr_to_name_map)
                 joined_mnemonics = "\n".join(instruction_mnemonics)
                 instruction_hash = hashlib.sha256(joined_mnemonics.encode('utf-8')).hexdigest()
                 has_system_call = any(syscall_pattern in lower_assembly for syscall_pattern in SYSCALL_INDICATORS)
@@ -482,9 +623,15 @@ def disassemble_functions(parsed_obj, metadata, arch_target="aarch64", cpu="", f
                     "has_loop": has_loop,
                     "regs_read": regs_read,
                     "regs_written": regs_written,
+                    "used_simd_reg_types": used_simd_reg_types,
                     "instructions_with_registers": instructions_with_registers,
                     "function_type": function_type
                 }
+                if inst_count == 0:
+                    num_success += 1
+                # Should we go back to full disassembly again
+                if num_failures < 10 or num_success > 10:
+                    inst_count = 0
             except ValueError as e:
-                LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
+                LOG.warning(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     return disassembly_results

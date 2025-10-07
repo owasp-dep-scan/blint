@@ -12,28 +12,29 @@ The `disassembled_functions` attribute is an optional output of the `blint` bina
 
 ## Structure
 
-The `disassembled_functions` attribute is a dictionary where keys are function names (as determined by the initial `lief` parsing and symbol resolution). The value for each key is another dictionary containing the following fields:
+The `disassembled_functions` attribute is a dictionary where each key is a unique string identifying the function by its virtual address and name, in the format "0xADDRESS::FUNCTION_NAME" (e.g., "0x140012345::simple_add"). Using both address and name prevents collisions in cases where multiple functions might share the same name (e.g., in different modules or due to symbol stripping). The value for each key is another dictionary containing the following fields:
 
-| Field Name                    | Type               | Description                                                                                                                                                                              |
-| :---------------------------- | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                        | String             | The name of the function.                                                                                                                                                                |
-| `address`                     | String             | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345").                                                                                                   |
-| `assembly`                    | String             | The full disassembled code of the function, with instructions separated by newlines.                                                                                                     |
-| `assembly_hash`               | String             | A SHA-256 hash of the entire `assembly` string.                                                                                                                                          |
-| `instruction_hash`            | String             | A SHA-256 hash of the newline-separated list of instruction _mnemonics_ (e.g., "push", "mov", "call").                                                                                   |
-| `instruction_count`           | Integer            | The total number of instructions disassembled.                                                                                                                                           |
-| `instruction_metrics`         | Dictionary         | A map of specific instruction types to their counts.                                                                                                                                     |
-| `direct_calls`                | List of Strings    | A list of function names identified as targets of _direct_ calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function.                        |
-| `has_indirect_call`           | Boolean            | True if the function contains instructions like `call rax` or `call [rax+0x10]`.                                                                                                         |
-| `has_system_call`             | Boolean            | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`).                                                                                                    |
-| `has_security_feature`        | Boolean            | True if the function contains instructions related to security features (e.g., `endbr64`, `endbr32`).                                                                                    |
-| `has_crypto_call`             | Boolean            | True if the function's disassembly text contains patterns indicating cryptographic operations (based on `blint.config.CRYPTO_INDICATORS`).                                               |
-| `has_gpu_call`                | Boolean            | True if the function's disassembly text contains patterns indicating GPU-related operations (based on `blint.config.GPU_INDICATORS`).                                                    |
-| `has_loop`                    | Boolean            | True if the function contains conditional jumps that target addresses earlier within the disassembled range (indicating a potential loop).                                               |
-| `regs_read`                   | List of Strings    | A list of unique register names that are _read_ within the disassembled function code. This provides a high-level view of all registers whose values influence the function's execution. |
-| `regs_written`                | List of Strings    | A list of unique register names that are _written to_ within the disassembled function code. This indicates registers whose values are modified by the function.                         |
-| `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                              |
-| `function_type`               | String             | A classification of the function based on heuristics (e.g., "PLT_Thunk", "Simple_Return", "Has_Indirect_Calls", "Has_Conditional_Jumps", "Complex").                                     |
+| Field Name                    | Type               | Description                                                                                                                                                                                                                                                                                        |
+| :---------------------------- | :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                        | String             | The name of the function.                                                                                                                                                                                                                                                                          |
+| `address`                     | String             | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345").                                                                                                                                                                                                             |
+| `assembly`                    | String             | The full disassembled code of the function, with instructions separated by newlines.                                                                                                                                                                                                               |
+| `assembly_hash`               | String             | A SHA-256 hash of the entire `assembly` string.                                                                                                                                                                                                                                                    |
+| `instruction_hash`            | String             | A SHA-256 hash of the newline-separated list of instruction _mnemonics_ (e.g., "push", "mov", "call").                                                                                                                                                                                             |
+| `instruction_count`           | Integer            | The total number of instructions disassembled.                                                                                                                                                                                                                                                     |
+| `instruction_metrics`         | Dictionary         | A map of specific instruction types to their counts.                                                                                                                                                                                                                                               |
+| `direct_calls`                | List of Strings    | A list of function names identified as targets of _direct_ calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function.                                                                                                                                  |
+| `has_indirect_call`           | Boolean            | True if the function contains instructions like `call rax` or `call [rax+0x10]`.                                                                                                                                                                                                                   |
+| `has_system_call`             | Boolean            | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`).                                                                                                                                                                                                              |
+| `has_security_feature`        | Boolean            | True if the function contains instructions related to security features (e.g., `endbr64`, `endbr32`).                                                                                                                                                                                              |
+| `has_crypto_call`             | Boolean            | True if the function's disassembly text contains patterns indicating cryptographic operations (based on `blint.config.CRYPTO_INDICATORS`).                                                                                                                                                         |
+| `has_gpu_call`                | Boolean            | True if the function's disassembly text contains patterns indicating GPU-related operations (based on `blint.config.GPU_INDICATORS`).                                                                                                                                                              |
+| `has_loop`                    | Boolean            | True if the function contains conditional jumps that target addresses earlier within the disassembled range (indicating a potential loop).                                                                                                                                                         |
+| `regs_read`                   | List of Strings    | A list of unique register names that are _read_ within the disassembled function code. This provides a high-level view of all registers whose values influence the function's execution.                                                                                                           |
+| `regs_written`                | List of Strings    | A list of unique register names that are _written to_ within the disassembled function code. This indicates registers whose values are modified by the function.                                                                                                                                   |
+| `used_simd_reg_types`         | List of Strings    | A list of SIMD register types such as FPU, MMX, SSE/AVX etc.                                                                                                                                                                                                                                       |
+| `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                                                                                                                                        |
+| `function_type`               | String             | A classification of the function based on heuristics. Possible values include: "PLT_Thunk", "Simple_Return", "Has_Syscalls", "Has_Indirect_Calls", or "Has_Conditional_Jumps". If a function doesn't fit these specific categories but is not a simple return, this field will be an empty string. |
 
 ### `instruction_metrics` Sub-structure
 
@@ -48,6 +49,7 @@ The `instruction_metrics` dictionary contains counts for specific categories of 
 | `arith_count`               | Integer | Number of arithmetic/logical instructions (e.g., `add`, `sub`, `imul`, `and`, `or`).          |
 | `ret_count`                 | Integer | Number of `ret` instructions.                                                                 |
 | `jump_count`                | Integer | Number of `jmp` instructions.                                                                 |
+| `simd_fpu_count`            | Integer | Number of `simd` instructions.                                                                |
 | `unique_regs_read_count`    | Integer | Number of unique registers read within the function (aggregated from all instructions).       |
 | `unique_regs_written_count` | Integer | Number of unique registers written to within the function (aggregated from all instructions). |
 
@@ -125,7 +127,7 @@ simple_add:
     "regs_written": ["rbp", "rsp", "rax"],
     "instructions_with_registers": [
       {
-        "regs_read": ["rbp"],
+        "regs_read": ["rbp", "rsp"],
         "regs_written": ["rsp"]
       },
       {
@@ -141,14 +143,14 @@ simple_add:
         "regs_written": ["rax"]
       },
       {
-        "regs_read": ["rbp"],
-        "regs_written": ["rsp"]
+        "regs_read": ["rsp"],
+        "regs_written": ["rbp", "rsp"]
       },
       {
-        "regs_read": [],
-        "regs_written": []
+        "regs_read": ["rax", "rsp"],
+        "regs_written": ["rsp"]
       }
-    ],
+    ]
     ...
   }
 }
@@ -165,3 +167,13 @@ simple_add:
     - `add rax, rdx`: Reads `rax` and `rdx`, Writes `rax` (adds second argument to result).
     - `pop rbp`: Reads `rbp` (from stack, implicitly using `rsp`), Writes `rsp` (stack pointer incremented).
     - `ret`: Typically doesn't directly read/write general-purpose registers listed here (though it implicitly uses `rsp` to get the return address and `rip` to set the next instruction).
+
+## Function Boundary Detection
+
+The disassembler determines the end of a function using a "linear sweep" heuristic. Disassembly begins at the function's entry point and stops when it encounters a terminating instruction (like ret or an unconditional jmp) or when it reaches the address of the next known function in the same section.
+
+### Implications:
+
+- For most compiler-generated functions, this approach is highly accurate.
+- In functions with multiple ret paths (e.g., an early error-checking exit), the disassembly may be truncated at the first ret it finds.
+- This method may not correctly handle hand-crafted assembly with unusual control flow, such as functions that fall through into one another without an explicit jmp or ret.
