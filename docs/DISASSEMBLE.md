@@ -32,6 +32,7 @@ The `disassembled_functions` attribute is a dictionary where keys are function n
 | `has_loop`                    | Boolean            | True if the function contains conditional jumps that target addresses earlier within the disassembled range (indicating a potential loop).                                               |
 | `regs_read`                   | List of Strings    | A list of unique register names that are _read_ within the disassembled function code. This provides a high-level view of all registers whose values influence the function's execution. |
 | `regs_written`                | List of Strings    | A list of unique register names that are _written to_ within the disassembled function code. This indicates registers whose values are modified by the function.                         |
+| `used_simd_reg_types`         | List of Strings    | A list of SIMD register types such as FPU, MMX, SSE/AVX etc.                                                                                                                             |
 | `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                              |
 | `function_type`               | String             | A classification of the function based on heuristics (e.g., "PLT_Thunk", "Simple_Return", "Has_Indirect_Calls", "Has_Conditional_Jumps", "Complex").                                     |
 
@@ -48,6 +49,7 @@ The `instruction_metrics` dictionary contains counts for specific categories of 
 | `arith_count`               | Integer | Number of arithmetic/logical instructions (e.g., `add`, `sub`, `imul`, `and`, `or`).          |
 | `ret_count`                 | Integer | Number of `ret` instructions.                                                                 |
 | `jump_count`                | Integer | Number of `jmp` instructions.                                                                 |
+| `simd_fpu_count`            | Integer | Number of `simd` instructions.                                                                |
 | `unique_regs_read_count`    | Integer | Number of unique registers read within the function (aggregated from all instructions).       |
 | `unique_regs_written_count` | Integer | Number of unique registers written to within the function (aggregated from all instructions). |
 
