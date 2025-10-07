@@ -102,6 +102,12 @@ def build_parser():
         help="Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.",
     )
     parser.add_argument(
+        "--custom-rules-dir",
+        dest="custom_rules_dir",
+        type=str,
+        help="Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -249,6 +255,7 @@ def handle_args():
         stdout_mode=args.stdout_mode,
         use_blintdb=args.use_blintdb,
         disassemble=args.disassemble,
+        custom_rules_dir=args.custom_rules_dir,
     )
     return blint_options
 

@@ -64,6 +64,8 @@ options:
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
   --use-blintdb         Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
   --disassemble         Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.
+  --custom-rules-dir CUSTOM_RULES_DIR
+                        Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.
   -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
@@ -122,6 +124,12 @@ Pass `--suggest-fuzzable` to get suggestions for fuzzing. A dictionary containin
 
 ```bash
 blint -i ~/ngrok -o /tmp/blint --suggest-fuzzable
+```
+
+To use [custom rules](./docs/RULES.md), use the `--custom-rules-dir` argument.
+
+```
+blint --custom-rules-dir /path/to/my_custom_rules ...
 ```
 
 To generate SBOM in [CycloneDX format](https://cyclonedx.org/) for supported binaries, use the sbom sub-command.

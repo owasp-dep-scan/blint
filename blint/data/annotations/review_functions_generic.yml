@@ -1,0 +1,132 @@
+---
+group: FUNCTION_REVIEWS
+exe_type: [PE32, PE64, genericbinary, ELF, MachO]
+rules:
+  - id: CRYPTO_BEHAVIOR
+    title: Function with Cryptographic Behavior
+    summary: Function exhibits behavior commonly found in cryptographic routines.
+    description: This function contains a high number of bitwise/shift/rotate instructions and uses SIMD registers, which is a strong indicator of cryptographic operations.
+    check_type: function_analysis
+  - id: INDIRECT_EXECUTION
+    title: Function with Indirect Execution
+    summary: Function uses indirect calls or jumps (e.g., call rax), a common technique in malware.
+    description: Indirect control flow can be used to hide malicious functionality or implement complex logic like virtual function calls.
+    check_type: function_flag
+    check_field: has_indirect_call
+  - id: SYSTEM_CALL_USAGE
+    title: Function with Direct System Call
+    summary: Function contains direct system call instructions (e.g., syscall).
+    description: Direct system calls can be used to bypass standard library wrappers (libc) and are often seen in malware and shellcode.
+    check_type: function_flag
+    check_field: has_system_call
+  - id: ANTI_DISASSEMBLY_TRICKS
+    title: Function with Potential Anti-Disassembly
+    summary: Function has a very low instruction count but contains jumps, potentially indicating an obfuscated thunk.
+    description: Very small functions that do nothing but jump can be used to thwart linear sweep disassemblers or hide the true control flow.
+    check_type: function_analysis
+  - id: HIGH_ENTROPY_INDIRECT_CALL
+    title: Function with High Entropy Indirect Call Target
+    summary: Function performs indirect calls using a register whose value appears to be calculated or obfuscated.
+    description: Indirect calls where the target is derived from complex calculations (e.g., arithmetic, shifts, XORs on constants or other registers) are common in malware for anti-analysis and hiding control flow.
+    check_type: function_analysis
+  - id: POTENTIAL_STACK_STRING
+    title: Function Manipulates Potential Stack Strings
+    summary: Function performs many moves and stores, possibly constructing strings on the stack.
+    description: Malware sometimes constructs API names or other strings directly on the stack before passing them to functions like GetProcAddress.
+    check_type: function_analysis
+  - id: SUSPICIOUS_MEMORY_ALLOC
+    title: Function Allocates Memory and Jumps/Executes
+    summary: Function allocates memory (e.g., VirtualAlloc) and then potentially jumps to or executes code within that memory.
+    description: This pattern is common in shellcode loaders and packers where decrypted/decoded code is allocated dynamically and then executed.
+    check_type: function_analysis
+  - id: HIGH_REGISTER_USAGE
+    title: Function with High Register Usage
+    summary: Function reads or writes a very high number of unique registers.
+    description: Functions performing cryptographic operations or heavy obfuscation often manipulate many registers simultaneously. Checks `unique_regs_read_count` or `unique_regs_written_count` in `instruction_metrics`.
+    check_type: function_metric
+    check_field: instruction_metrics.unique_regs_read_count
+    operator: ">"
+    threshold: 25
+  - id: HIGH_XOR_USAGE
+    title: Function with High XOR Instruction Count
+    summary: Function contains a disproportionately high number of XOR instructions.
+    description: XOR instructions are common in obfuscation techniques and cryptographic routines. Checks `xor_count` in `instruction_metrics`.
+    check_type: function_metric
+    check_field: instruction_metrics.xor_count
+    operator: ">"
+    threshold: 50
+  - id: HIGH_SHIFT_USAGE
+    title: Function with High Shift/Rotate Instruction Count
+    summary: Function contains a disproportionately high number of shift or rotate instructions.
+    description: Shift and rotate instructions are characteristic of many cryptographic and hashing algorithms. Checks `shift_count` in `instruction_metrics`.
+    check_type: function_metric
+    check_field: instruction_metrics.shift_count
+    operator: ">"
+    threshold: 25
+  - id: POTENTIAL_ANTI_DEBUG
+    title: Function Contains Potential Anti-Debugging Checks
+    summary: Function contains patterns commonly used for anti-debugging.
+    description: This could involve checking specific registers, calling specific APIs (if resolved later), or using instructions like rdtsc for timing.
+    check_type: function_analysis
+  - id: HIGH_SIMD_USAGE
+    title: Function with High SIMD/Vector Instruction Usage
+    summary: Function uses a significant number of SIMD (SSE, AVX, etc.) instructions.
+    description: SIMD instructions are often used for performance in cryptographic routines or data processing. Checks `simd_fpu_count` in `instruction_metrics`.
+    check_type: function_metric
+    check_field: instruction_metrics.simd_fpu_count
+    operator: ">"
+    threshold: 30
+  - id: COMPLEX_CONTROL_FLOW
+    title: Function with Complex Control Flow
+    summary: Function contains a high number of conditional jumps, indicating complex logic or obfuscation.
+    description: A high `conditional_jump_count` in `instruction_metrics` can suggest complex control flow, often used for obfuscation.
+    check_type: function_metric
+    check_field: instruction_metrics.conditional_jump_count
+    operator: ">"
+    threshold: 50
+  - id: POTENTIAL_IAT_MANIPULATION
+    title: Function Writes to Potential Import Address Table
+    summary: Function writes data to memory locations that might correspond to the Import Address Table (IAT).
+    description: Malware sometimes modifies the IAT to hook API calls or bypass standard library functions.
+    check_type: function_analysis
+  - id: UNUSUAL_CALLING_CONVENTION
+    title: Function Potentially Violates Standard Calling Convention
+    summary: Function modifies registers typically preserved by the calling convention without apparent restoration.
+    description: Functions that modify callee-saved registers (like rbp, rbx, r12-r15 on x64) without saving them on the stack might be implementing hooks, trampolines, or other non-standard logic.
+    check_type: function_analysis
+  - id: POTENTIAL_SHELLCODE_CHARS
+    title: Function Exhibits Potential Shellcode Characteristics
+    summary: Function combines several indicators common in shellcode (e.g., syscalls, indirect calls, high register usage).
+    description: A meta-rule combining flags like `has_system_call`, `has_indirect_call`, high `instruction_metrics.conditional_jump_count`, and low `instruction_count` might indicate shellcode-like behavior.
+    check_type: function_analysis
+  - id: LOOP_WITH_SELF_MODIFY_HINT
+    title: Function Loop with Potential Self-Modification Indicators
+    summary: Function contains a loop and also writes to memory (potential self-modifying code).
+    description: A combination of `has_loop` and instructions that write to general memory locations (not just stack or known local variables) could be a hint.
+    check_type: function_analysis
+  - id: HIGH_ARITHMETIC_USAGE
+    title: Function with High Arithmetic Instruction Count
+    summary: Function contains a disproportionately high number of arithmetic/logical instructions (e.g., add, sub, imul, and, or).
+    description: High usage of arithmetic instructions can be a sign of cryptographic algorithms or complex mathematical computations often found in malware. Checks `arith_count` in `instruction_metrics`.
+    check_type: function_metric
+    check_field: instruction_metrics.arith_count
+    operator: ">"
+    threshold: 50
+  - id: DYNAMIC_API_RESOLUTION_HINT
+    title: Function Shows Hints of Dynamic API Resolution
+    summary: Function manipulates strings (potential API names) and makes indirect calls.
+    description: Combines potential stack string construction (`POTENTIAL_STACK_STRING` logic) or string manipulation with indirect calls (`has_indirect_call`), suggesting dynamic API resolution.
+    check_type: function_analysis
+  - id: HIGH_JUMP_USAGE
+    title: Function with High Unconditional Jump Count
+    summary: Function contains a disproportionately high number of unconditional jump instructions.
+    description: High `jump_count` in `instruction_metrics` might indicate obfuscation techniques or the implementation of jump tables, common in packed or obfuscated code.
+    check_type: function_metric
+    check_field: instruction_metrics.jump_count
+    operator: ">"
+    threshold: 50
+  - id: POTENTIAL_ROP_GADGET
+    title: Function Resembles a Potential ROP Gadget
+    summary: Function is very small, performs minimal operations, and ends with a return.
+    description: Short functions (e.g., < 10 instructions) that read registers/stack, perform simple operations, and end with `ret` might be ROP gadgets used in exploits.
+    check_type: function_analysis

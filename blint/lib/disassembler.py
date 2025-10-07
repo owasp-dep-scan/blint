@@ -633,5 +633,5 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
                 if num_failures < 10 or num_success > 10:
                     inst_count = 0
             except ValueError as e:
-                LOG.warning(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
+                LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     return disassembly_results
