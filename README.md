@@ -1,6 +1,6 @@
 # BLint
 
-<img src="./blint.png" width="400" />
+<img src="./blint.png" width="200" height="auto" />
 
 BLint is a Binary Linter that checks the security properties and capabilities of your executables. It is powered by [lief](https://github.com/lief-project/LIEF). Since version 2, blint can also generate Software Bill-of-Materials (SBOM) for supported binaries.
 
