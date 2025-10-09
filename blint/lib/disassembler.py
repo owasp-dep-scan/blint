@@ -542,7 +542,11 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
     inst_count = 0
     num_failures = 0
     num_success = 0
-    for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"]:
+    # Function attributes to inspect
+    function_attrs = ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"]
+    if metadata.get("exe_type", "") in ("gobinary",):
+        function_attrs.append("symtab_symbols")
+    for func_list_key in function_attrs:
         for func_entry in metadata.get(func_list_key, []):
             func_name = func_entry.get("name", "unknown_func")
             func_addr_str = func_entry.get("address", "")
