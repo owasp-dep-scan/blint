@@ -183,7 +183,7 @@ def parse_functions(functions):
     func_list = []
     with contextlib.suppress(AttributeError, TypeError):
         for idx, f in enumerate(functions):
-            if f.name and f.address:
+            if f.name or f.address:
                 cleaned_name = demangle_symbolic_name(f.name)
                 func_list.append(
                     {
@@ -576,7 +576,7 @@ def parse_pe_imports(imports):
                         {
                             "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
                             "short_name": demangle_symbolic_name(entry.name),
-                            "data": entry.data,
+                            "address": ADDRESS_FMT.format(entry.data).strip(),
                             "iat_value": entry.iat_value,
                             "hint": entry.hint,
                         }
@@ -610,7 +610,7 @@ def parse_pe_exports(exports):
             metadata = {
                 "name": demangle_symbolic_name(entry.name),
                 "ordinal": entry.ordinal,
-                "address": ADDRESS_FMT.format(entry.address),
+                "address": ADDRESS_FMT.format(entry.address).strip(),
                 "extern": extern,
             }
         fwd = entry.forward_information if entry.is_forwarded else None
@@ -644,11 +644,8 @@ def parse_macho_symbols(symbols):
             libname = ""
             if symbol.has_binding_info and symbol.binding_info.has_library:
                 libname = symbol.binding_info.library.name
-            symbol_value = (
-                symbol.value
-                if symbol.value > 0 or not symbol.has_binding_info
-                else ADDRESS_FMT.format(symbol.binding_info.address)
-            )
+            address = symbol.value if symbol.value > 0 or not symbol.has_binding_info else symbol.binding_info.address
+            symbol_value = ADDRESS_FMT.format(address).strip()
             symbol_name = symbol.demangled_name
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
                 symbol_name = demangle_symbolic_name(symbol.name)
@@ -661,10 +658,13 @@ def parse_macho_symbols(symbols):
                     {
                         "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
                         "short_name": symbol_name,
+                        "category": symbol.category,
                         "type": symbol.type,
                         "num_sections": symbol.numberof_sections,
                         "description": symbol.description,
-                        "value": symbol_value,
+                        "address": symbol_value,
+                        "export_info": symbol.export_info if symbol.has_export_info else None,
+                        "origin": symbol.origin,
                     }
                 )
         except (AttributeError, TypeError):
@@ -1255,7 +1255,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
-            metadata["tls_address_index"] = tls.addressof_index
+            metadata["tls_address_index"] = ADDRESS_FMT.format(tls.addressof_index).strip()
             metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
             metadata["tls_data_template_len"] = len(tls.data_template)
             metadata["tls_characteristics"] = tls.characteristics
