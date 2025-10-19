@@ -1648,6 +1648,18 @@ def add_mach0_functions(metadata, parsed_obj):
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["unwind_functions"] = parse_functions(parsed_obj.unwind_functions)
     metadata["symtab_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
+
+    # Populate function info based on local symbols for .o files or others where parsed_obj.functions is empty.
+    if not metadata["functions"]:
+        metadata["functions"] = [
+            {
+                "idx": idx,
+                "name": symbol["name"],
+                "address": symbol["address"]
+            }
+            for idx, symbol in enumerate(s for s in metadata["symtab_symbols"] if s["category"] == lief.MachO.Symbol.CATEGORY.LOCAL) 
+        ]
+
     if exe_type:
         metadata["exe_type"] = exe_type
     if parsed_obj.dylinker:
