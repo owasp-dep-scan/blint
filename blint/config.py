@@ -1402,14 +1402,14 @@ CRYPTO_INDICATORS = [
                     'movdqa', 'movdqu', 'vmovdqa', 'vmovdqu',
                     'padd', 'psub', 'pmul',
                     'psll', 'psrl', 'psra',
-                    'vpaddd', 'vpsubd', 'vpmulld',
+                    'vpaddd', 'vpsubd', 'vpmulld', 'pmaddwd'
                 ]
 GPU_INDICATORS = [
                     'glbind', 'glvertex', 'glcolor', 'glbegin', 'glend', 'glenable', 'gldisable', 'glget', 'glset', 'glload', 'glsave', 'gluniform', 'gluseprogram', 'glattachshader', 'gldraw', 'glclear', 'glviewport', 'glmatrix', 'glpushmatrix', 'glpopmatrix',
                     'cuda', 'cuinit', 'cucontext', 'cudriver', 'cugpu', 'cudevice', 'cumem', 'cuptr', 'cukernel', 'culaunch', 'cugrid', 'cublock', 'cuthread', 'cufree', 'cucopy',
                     'clgetplatform', 'clgetdevice', 'clcreatecontext', 'clcreatecommandqueue', 'clcreateshared', 'clcreatekernel', 'clsetkernelarg', 'clenqueuendrange', 'clfinish', 'clrelease', 'clbuildprogram',
                     'd3d', 'd3d11', 'd3d12', 'create', 'device', 'swapchain', 'rendertarget', 'shaders', 'ps_', 'vs_', 'gs_', 'cs_', 'hs_', 'ds_',
-                    'vk', 'vkcreate', 'vkdestroy', 'vkallocate', 'vkfree', 'vkqueue', 'vksubmit', 'vkwait', 'vkacquire', 'vkpresent', 'vkcmd', 'vkbegin', 'vkend', 'vkbind', 'vkdraw', 'vkdispatch', 'vkcopy', 'vkblit', 'vkclear', 'vkfill', 'vkupdate',
+                    'vkcreate', 'vkdestroy', 'vkallocate', 'vkfree', 'vkqueue', 'vksubmit', 'vkwait', 'vkacquire', 'vkpresent', 'vkcmd', 'vkbegin', 'vkend', 'vkbind', 'vkdraw', 'vkdispatch', 'vkcopy', 'vkblit', 'vkclear', 'vkfill', 'vkupdate',
                     'mtl', 'metal', 'mtldevice', 'mtlcommand', 'mtlrender', 'mtlcompute', 'mtlbuffer', 'mtltexture', 'mtlfunction', 'mtllibrary', 'mtlencoder', 'mtlpass',
                     'gpu', 'compute', 'shader', 'vertex', 'fragment', 'pixel', 'kernel', 'workgroup', 'local', 'global', 'buffer', 'texture', 'surface',
                 ]
@@ -1475,4 +1475,17 @@ IMPLICIT_REGS_X64 = {
     'cmpsq':  {'read': {'rsi', 'rdi'}},
     'cpuid':  {'read': {'eax', 'ecx'}, 'write': {'eax', 'ebx', 'ecx', 'edx'}},
     'syscall':{'read': {'rcx', 'r11'}, 'write': {'rcx', 'r11'}},
+}
+
+IMPLICIT_REGS_ARM64 = {
+    'bl':    {'write': {'x30'}},
+    'blr':   {'read': {'x30'}, 'write': {'x30'}},
+    'ret':   {'read': {'x30'}},
+    'ret x0': {'read': {'x0'}},
+    'mrs':   {'write': {'x0'}},
+    'msr':   {'read': {'x0'}},
+    'svc':   {'read': {'x8', 'sp'}},
+    'hvc':   {'read': {'x8', 'sp'}},
+    'smc':   {'read': {'x8', 'sp'}},
+    'brk':   {'read': {'x0'}},
 }

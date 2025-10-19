@@ -2,7 +2,7 @@ from blint.logger import LOG
 import lief
 import hashlib
 import re
-from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS, IMPLICIT_REGS_X86, IMPLICIT_REGS_X64
+from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS, IMPLICIT_REGS_X86, IMPLICIT_REGS_X64, IMPLICIT_REGS_ARM64
 
 OPERAND_DELIMITERS_PATTERN = re.compile(r'[^a-zA-Z0-9_]+')
 
@@ -11,6 +11,13 @@ SHIFT_INST = ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'rcl', 'rcr', 'psll', 'p
 CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
                 'jp', 'jnp', 'jo', 'jno',
                 'js', 'jns', 'loop', 'loopz', 'loopnz', 'jcxz', 'jecxz', 'jrcxz']
+ARM64_GENERAL_REGS_64 = {f'x{i}' for i in range(31)}
+ARM64_GENERAL_REGS_32 = {f'w{i}' for i in range(31)}
+ARM64_SPECIAL_REGS = {'sp', 'xzr', 'wzr'}
+ARM64_ALL_REGS = (
+    ARM64_GENERAL_REGS_64 | ARM64_GENERAL_REGS_32 | ARM64_SPECIAL_REGS
+)
+
 COMMON_REGS_64 = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
                   'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'}
 COMMON_REGS_32 = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp',
@@ -42,8 +49,8 @@ XMM_REGS = {f'xmm{i}' for i in range(32)}
 YMM_REGS = {f'ymm{i}' for i in range(32)}
 ZMM_REGS = {f'zmm{i}' for i in range(32)}
 ALL_SIMD_REGS = FPU_REGS | MMX_REGS | XMM_REGS | YMM_REGS | ZMM_REGS
-ALL_REGS = COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h | ALL_SIMD_REGS | SEGMENT_REGS
-SORTED_ALL_REGS = sorted(ALL_REGS, key=len, reverse=True)
+ALL_REGS_X86 = (COMMON_REGS_64 | COMMON_REGS_32 | COMMON_REGS_16 | COMMON_REGS_8l | COMMON_REGS_8h | ALL_SIMD_REGS | SEGMENT_REGS)
+SORTED_ALL_REGS_X86 = sorted(ALL_REGS_X86, key=len, reverse=True)
 
 WIN_X64_VOLATILE_REGS = frozenset({'rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11'})
 SYSV_X64_VOLATILE_REGS = frozenset({'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'})
@@ -58,10 +65,21 @@ except ImportError:
     LOG.debug("Nyxstone not found. Disassembly features will be unavailable. Install with 'pip install blint[extended]'.")
     NYXSTONE_AVAILABLE = False
 
+def get_arch_reg_set(arch_target):
+    """Returns the appropriate set of registers based on the architecture."""
+    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
+    if is_aarch64:
+        combined_regs = ALL_REGS_X86 | ARM64_ALL_REGS
+        return sorted(combined_regs, key=len, reverse=True)
+    else:
+        return SORTED_ALL_REGS_X86
+
 def _get_implicit_regs_map(arch_target):
     """Selects the appropriate implicit registers map based on architecture."""
-    if "64" in arch_target:
+    if "64" in arch_target and "aarch64" not in arch_target.lower():
         return IMPLICIT_REGS_X64
+    elif "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
+        return IMPLICIT_REGS_ARM64
     return IMPLICIT_REGS_X86
 
 def _find_function_end_index(instr_list):
@@ -193,14 +211,23 @@ def _get_disasm_range(func_addr, sec_obj, parsed_obj, section_func_map):
     size_to_disasm = max(0, min(size_to_disasm, len(sec_content_bytes) - func_offset_in_sec))
     return func_offset_in_sec, size_to_disasm, sec_content_bytes
 
-def extract_regs_from_operand(op):
+def extract_regs_from_operand(op, sorted_arch_regs=SORTED_ALL_REGS_X86):
     found_regs = set()
     if not op:
         return found_regs
     potential_tokens = filter(None, OPERAND_DELIMITERS_PATTERN.split(op.lower()))
     for token in potential_tokens:
-        if token in SORTED_ALL_REGS:
+        if token in sorted_arch_regs:
             found_regs.add(token)
+        cleaned_token = token.strip('[]!')
+        if cleaned_token in sorted_arch_regs:
+            found_regs.add(cleaned_token)
+        if ' ' in cleaned_token:
+             sub_tokens = cleaned_token.split()
+             for sub_t in sub_tokens:
+                 sub_cleaned = sub_t.strip('[]!')
+                 if sub_cleaned in sorted_arch_regs:
+                     found_regs.add(sub_cleaned)
     return found_regs
 
 def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
@@ -213,6 +240,8 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
     regs_written = set()
     if not instr_assembly:
         return list(regs_read), list(regs_written)
+    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
+    sorted_arch_regs = get_arch_reg_set(arch_target)
     first_space_idx = instr_assembly.find(' ')
     if first_space_idx == -1:
         mnemonic = instr_assembly.strip().lower().rstrip(':')
@@ -231,111 +260,186 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
     num_operands = len(operands)
     if num_operands > 0:
         operands = [op.rstrip(',') for op in operands]
-
     has_rep_prefix = False
     if mnemonic.startswith(('rep', 'repe', 'repne')):
         has_rep_prefix = True
         mnemonic = mnemonic[4:] if len(mnemonic) > 3 and mnemonic[3] == 'e' else mnemonic[3:]
-
     if mnemonic in implicit_regs_map:
         regs_read.update(implicit_regs_map[mnemonic].get('read', set()))
         regs_written.update(implicit_regs_map[mnemonic].get('write', set()))
-
     if has_rep_prefix:
         is_64bit = "64" in arch_target
         counter_reg = 'rcx' if is_64bit else 'ecx'
         regs_read.add(counter_reg)
         regs_written.add(counter_reg)
-
-    if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith('cmov'):
-        if num_operands >= 2:
-            dst_regs = extract_regs_from_operand(operands[0].lower())
-            src_regs = extract_regs_from_operand(operands[1].lower())
-            regs_written.update(dst_regs)
-            regs_read.update(src_regs)
-            if mnemonic not in ['mov', 'movzx', 'movsx', 'movsxd', 'lea'] and not mnemonic.startswith('cmov'):
-                regs_read.update(dst_regs)
-
-    elif mnemonic in READ_WRITE_BOTH_OPS_INST:
-        if num_operands >= 2:
-            op1_regs = extract_regs_from_operand(operands[0].lower())
-            op2_regs = extract_regs_from_operand(operands[1].lower())
-            regs_read.update(op1_regs)
-            regs_written.update(op1_regs)
-            regs_read.update(op2_regs)
-            if mnemonic != 'cmpxchg':
-                regs_written.update(op2_regs)
-
-    elif mnemonic in BIT_MANIPULATION_INST:
-        if num_operands >= 2:
-            dst_regs = extract_regs_from_operand(operands[0].lower())
-            src_regs = extract_regs_from_operand(operands[1].lower())
-            regs_written.update(dst_regs)
-            regs_read.update(src_regs)
-            if mnemonic not in ['bsf', 'bsr', 'lzcnt', 'tzcnt', 'popcnt']:
-                regs_read.update(dst_regs)
-
-    elif mnemonic in READ_WRITE_ONE_OP_INST:
-        if num_operands >= 1:
-            op_regs = extract_regs_from_operand(operands[0].lower())
-            regs_read.update(op_regs)
-            regs_written.update(op_regs)
-
-    elif mnemonic in ['cmp', 'test']:
-        if num_operands >= 2:
-            regs_read.update(extract_regs_from_operand(operands[0].lower()))
-            regs_read.update(extract_regs_from_operand(operands[1].lower()))
-
-    elif mnemonic in ['push', 'pop']:
-        is_64bit = "64" in arch_target
-        stack_reg = 'rsp' if is_64bit else 'esp'
-        regs_read.add(stack_reg)
-        regs_written.add(stack_reg)
-        if num_operands >= 1:
-            op_regs = extract_regs_from_operand(operands[0].lower())
-            if mnemonic == 'push':
+    if is_aarch64:
+        if mnemonic in ['add', 'adds', 'sub', 'subs', 'neg', 'negs', 'mul', 'umull', 'smull', 'smulh', 'umulh', 'div', 'udiv']:
+            if num_operands >= 2:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src1_regs)
+                if num_operands >= 3:
+                    src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                    regs_read.update(src2_regs)
+        elif mnemonic in ['mov', 'movz', 'movk', 'movn', 'fmov', 'fmov immediate']:
+            if num_operands >= 1:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                if num_operands >= 2 and not operands[1].lower().startswith('#'):
+                    src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                    regs_read.update(src_regs)
+        elif mnemonic in ['csel', 'csinc', 'csinv', 'cset', 'csetm', 'cinc', 'cinv']:
+            if num_operands >= 3:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src1_regs)
+                regs_read.update(src2_regs)
+                if mnemonic in ['cinc', 'cinv']:
+                     regs_read.update(dst_regs)
+        elif mnemonic in ['cmp', 'cmn', 'tst']:
+            if num_operands >= 2:
+                src1_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src2_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_read.update(src1_regs)
+                regs_read.update(src2_regs)
+        elif mnemonic.startswith('ldr') or mnemonic.startswith('str'):
+            if num_operands >= 2:
+                data_reg = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                addr_parts = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                if 'str' in mnemonic:
+                    regs_read.update(data_reg)
+                    regs_read.update(addr_parts)
+                else: # ldr
+                    regs_written.update(data_reg)
+                    regs_read.update(addr_parts)
+        elif mnemonic.startswith('ldp') or mnemonic.startswith('stp'):
+            if num_operands >= 3:
+                data_reg1 = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                data_reg2 = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                addr_parts = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                if 'str' in mnemonic:
+                    regs_read.update(data_reg1)
+                    regs_read.update(data_reg2)
+                    regs_read.update(addr_parts)
+                else:
+                    regs_written.update(data_reg1)
+                    regs_written.update(data_reg2)
+                    regs_read.update(addr_parts)
+        elif mnemonic.startswith('cb') or mnemonic.startswith('tb'):
+            if num_operands >= 1:
+                src_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                regs_read.update(src_regs)
+        elif mnemonic.startswith('b') and mnemonic not in ['bl', 'blr', 'br']:
+            pass
+        elif mnemonic in ['bl', 'blr', 'br']:
+            if num_operands >= 1 and mnemonic != 'bl':
+                target_op = operands[0].lower()
+                if not target_op.startswith('#') and not target_op.isdigit():
+                    target_regs = extract_regs_from_operand(target_op, sorted_arch_regs)
+                    regs_read.update(target_regs)
+        elif mnemonic in ['ret']:
+            pass
+        elif mnemonic in ['and', 'orr', 'eor', 'bic', 'tst']:
+            if num_operands >= 2:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src1_regs)
+                if num_operands >= 3:
+                    src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                    regs_read.update(src2_regs)
+        elif mnemonic in ['lsl', 'lsr', 'asr', 'ror', 'uxtw', 'sxtw', 'sxtx', 'uxtb', 'uxth', 'sxtb', 'sxth']:
+            if num_operands >= 2:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src1_regs)
+                if num_operands >= 3:
+                    src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                    regs_read.update(src2_regs)
+    else:
+        if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith('cmov'):
+            if num_operands >= 2:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src_regs)
+                if mnemonic not in ['mov', 'movzx', 'movsx', 'movsxd', 'lea'] and not mnemonic.startswith('cmov'):
+                    regs_read.update(dst_regs)
+        elif mnemonic in READ_WRITE_BOTH_OPS_INST:
+            if num_operands >= 2:
+                op1_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                op2_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_read.update(op1_regs)
+                regs_written.update(op1_regs)
+                regs_read.update(op2_regs)
+                if mnemonic != 'cmpxchg':
+                    regs_written.update(op2_regs)
+        elif mnemonic in BIT_MANIPULATION_INST:
+            if num_operands >= 2:
+                dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_written.update(dst_regs)
+                regs_read.update(src_regs)
+                if mnemonic not in ['bsf', 'bsr', 'lzcnt', 'tzcnt', 'popcnt']:
+                    regs_read.update(dst_regs)
+        elif mnemonic in READ_WRITE_ONE_OP_INST:
+            if num_operands >= 1:
+                op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 regs_read.update(op_regs)
-            else:
                 regs_written.update(op_regs)
-
-    elif mnemonic == 'call':
-        volatile_regs = _get_abi_volatile_regs(parsed_obj, arch_target)
-        regs_written.update(volatile_regs)
-        if num_operands >= 1:
-            op = operands[0].lower()
-            if not op.startswith('0x') and not op.isdigit():
-                 op_regs = extract_regs_from_operand(op)
-                 regs_read.update(op_regs)
-
-    elif mnemonic in TERMINATING_INST:
-        is_64bit = "64" in arch_target or "aarch64" in arch_target
-        if is_64bit:
-            regs_read.update(X64_RETURN_REGS)
-        else:
-            regs_read.update(X86_RETURN_REGS)
-        stack_reg = 'rsp' if is_64bit else 'esp'
-        regs_read.add(stack_reg)
-        regs_written.add(stack_reg)
-
-    elif mnemonic.startswith('j'):
-        if num_operands >= 1:
-            op = operands[0].lower()
-            if not op.startswith('0x') and not op.isdigit():
-                op_regs = extract_regs_from_operand(op)
-                regs_read.update(op_regs)
-
-    elif mnemonic == 'xchg':
-        if num_operands >= 2:
-            op1_regs = extract_regs_from_operand(operands[0].lower())
-            op2_regs = extract_regs_from_operand(operands[1].lower())
-            regs_read.update(op1_regs)
-            regs_written.update(op1_regs)
-            regs_read.update(op2_regs)
-            regs_written.update(op2_regs)
-
-    if mnemonic in ['mul', 'imul', 'div', 'idiv'] and num_operands == 1:
-        op_regs = extract_regs_from_operand(operands[0].lower())
-        regs_read.update(op_regs)
+        elif mnemonic in ['cmp', 'test']:
+            if num_operands >= 2:
+                regs_read.update(extract_regs_from_operand(operands[0].lower(), sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1].lower(), sorted_arch_regs))
+        elif mnemonic in ['push', 'pop']:
+            is_64bit = "64" in arch_target
+            stack_reg = 'rsp' if is_64bit else 'esp'
+            regs_read.add(stack_reg)
+            regs_written.add(stack_reg)
+            if num_operands >= 1:
+                op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                if mnemonic == 'push':
+                    regs_read.update(op_regs)
+                else:
+                    regs_written.update(op_regs)
+        elif mnemonic == 'call':
+            volatile_regs = _get_abi_volatile_regs(parsed_obj, arch_target)
+            regs_written.update(volatile_regs)
+            if num_operands >= 1:
+                op = operands[0].lower()
+                if not op.startswith('0x') and not op.isdigit():
+                    op_regs = extract_regs_from_operand(op, sorted_arch_regs)
+                    regs_read.update(op_regs)
+        elif mnemonic in TERMINATING_INST:
+            is_64bit = "64" in arch_target or "aarch64" in arch_target
+            if is_64bit:
+                regs_read.update(X64_RETURN_REGS)
+            else:
+                regs_read.update(X86_RETURN_REGS)
+            stack_reg = 'rsp' if is_64bit else 'esp'
+            regs_read.add(stack_reg)
+            regs_written.add(stack_reg)
+        elif mnemonic.startswith('j'):
+            if num_operands >= 1:
+                op = operands[0].lower()
+                if not op.startswith('0x') and not op.isdigit():
+                    op_regs = extract_regs_from_operand(op, sorted_arch_regs)
+                    regs_read.update(op_regs)
+        elif mnemonic == 'xchg':
+            if num_operands >= 2:
+                op1_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                op2_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                regs_read.update(op1_regs)
+                regs_written.update(op1_regs)
+                regs_read.update(op2_regs)
+                regs_written.update(op2_regs)
+        if mnemonic in ['mul', 'imul', 'div', 'idiv'] and num_operands == 1:
+            op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+            regs_read.update(op_regs)
 
     return list(regs_read), list(regs_written)
 
@@ -362,7 +466,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         instr_assembly = instr.assembly
         mnemonic = instr.assembly.split(None, 1)[0].lower()
         instruction_mnemonics.append(mnemonic)
-        if mnemonic == 'call':
+        if mnemonic in ('call'):
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
@@ -392,9 +496,20 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                 operand = parts[1].lower().strip()
                 if operand.startswith('[') and operand.endswith(']'):
                     has_indirect_call = True
-                elif any(operand.startswith(reg) for reg in SORTED_ALL_REGS):
+                elif any(operand.startswith(reg) for reg in SORTED_ALL_REGS_X86):
                     if operand.isalnum() or '_' in operand:
                          has_indirect_call = True
+        # Check for ARM64 indirect calls and jumps
+        elif instr_assembly.startswith(('bl ', 'blr ', 'br ')):
+            parts = instr_assembly.split(None, 1)
+            if len(parts) > 1:
+                operand = parts[1].lower().strip()
+            if any(operand.startswith(reg) for reg in SORTED_ALL_REGS_X86):
+                has_indirect_call = True
+            elif '[' in operand and ']' in operand:
+                has_indirect_call = True
+            elif operand.startswith('#') or operand.startswith(('+', '-')) or operand.startswith('0x'):
+                instruction_metrics["call_count"] += 1
         regs_read, regs_written = _extract_register_usage(instr_assembly, parsed_obj, arch_target)
         all_instr_regs = set(regs_read) | set(regs_written)
         is_simd_fpu = False
