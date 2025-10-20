@@ -1488,3 +1488,12 @@ IMPLICIT_REGS_ARM64 = {
     'smc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
     'brk':   {'read': {'x0'}},
 }
+
+# https://github.com/AsahiLinux/docs/blob/main/docs/hw/cpu/apple-instructions.md
+APPLE_PROPRIETARY_INSTRUCTION_RANGES = {
+    "AMX": (0x00201000, 0x002012df),
+    "WKDM": (0x00200800, 0x00200cff),
+    "GuardedMode": (0x00201400, 0x00201420),
+    "AddressTranslation": (0x00201440, 0x00201440),
+    "SyncBarrier": (0x00201460, 0x00201463),
+}

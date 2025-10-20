@@ -1,4 +1,5 @@
 import pytest
+import lief
 from unittest.mock import MagicMock
 
 from blint.lib.disassembler import _extract_register_usage, _analyze_instructions, _classify_function
@@ -104,7 +105,7 @@ def test_analyze_instructions_basic(mock_instructions):
     func_addr = 0x1000
     next_func_addr_in_sec = 0x2000
     (metrics, mnemonics, has_indirect_call, has_loop,
-     regs_read, regs_written, instrs_with_regs, _) = _analyze_instructions(
+     regs_read, regs_written, instrs_with_regs, _, _) = _analyze_instructions(
         mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses, {}, "x86_64"
     )
     assert metrics["call_count"] == 3
@@ -135,7 +136,7 @@ def test_analyze_instructions_loop_detection():
     target_instr = MagicMock()
     target_instr.address = 0x0FFF
     instr_addresses_with_target = instr_addresses + [target_instr.address]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _) = _analyze_instructions(
         instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
     )
     instrs_corrected = []
@@ -144,11 +145,30 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _) = _analyze_instructions(
         instrs_corrected, func_addr, next_func_addr_in_sec, instr_addresses_corrected
     )
     assert has_loop == True
 
+def test_apple_proprietary_instruction_detection():
+    func_addr = 0x1000
+    next_func_addr_in_sec = 0x2000
+    instr1_corrected = MagicMock()
+    instr1_corrected.assembly = ".inst 0x00201420"
+    instr1_corrected.address = 0x1000
+    instr1_corrected.bytes = (0x00201420).to_bytes(4, 'little')
+    instrs_corrected = [instr1_corrected]
+    instr_addresses_corrected = [0x1000]
+    mock_macho = MagicMock(spec=lief.MachO.Binary)
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, proprietary_instructions) = _analyze_instructions(
+        instrs_corrected,
+        func_addr,
+        next_func_addr_in_sec,
+        instr_addresses_corrected,
+        parsed_obj=mock_macho,
+        arch_target="aarch64"
+    )
+    assert proprietary_instructions == ['GuardedMode']
 
 def test_classify_function_plt_thunk():
     metrics = {"jump_count": 1, "conditional_jump_count": 0, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}
