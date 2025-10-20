@@ -14,9 +14,14 @@ CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja'
 ARM64_GENERAL_REGS_64 = {f'x{i}' for i in range(31)}
 ARM64_GENERAL_REGS_32 = {f'w{i}' for i in range(31)}
 ARM64_SPECIAL_REGS = {'sp', 'xzr', 'wzr'}
+ARM64_VFP_NEON_REGS = {f'v{i}' for i in range(32)} | \
+                      {f's{i}' for i in range(32)} | \
+                      {f'd{i}' for i in range(32)} | \
+                      {f'q{i}' for i in range(32)}
 ARM64_ALL_REGS = (
-    ARM64_GENERAL_REGS_64 | ARM64_GENERAL_REGS_32 | ARM64_SPECIAL_REGS
+    ARM64_GENERAL_REGS_64 | ARM64_GENERAL_REGS_32 | ARM64_SPECIAL_REGS | ARM64_VFP_NEON_REGS
 )
+SORTED_ARM64_ALL_REGS = sorted(ARM64_ALL_REGS, key=len, reverse=True)
 
 COMMON_REGS_64 = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
                   'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'}
@@ -69,8 +74,7 @@ def get_arch_reg_set(arch_target):
     """Returns the appropriate set of registers based on the architecture."""
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
     if is_aarch64:
-        combined_regs = ALL_REGS_X86 | ARM64_ALL_REGS
-        return sorted(combined_regs, key=len, reverse=True)
+        return SORTED_ARM64_ALL_REGS
     else:
         return SORTED_ALL_REGS_X86
 
@@ -230,7 +234,7 @@ def extract_regs_from_operand(op, sorted_arch_regs=SORTED_ALL_REGS_X86):
                      found_regs.add(sub_cleaned)
     return found_regs
 
-def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
+def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sorted_arch_regs=None):
     """
     Performs a first-pass analysis to extract approximate register read/write usage
     from the instruction assembly string.
@@ -241,22 +245,18 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
     if not instr_assembly:
         return list(regs_read), list(regs_written)
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
-    sorted_arch_regs = get_arch_reg_set(arch_target)
+    if not sorted_arch_regs:
+        sorted_arch_regs = get_arch_reg_set(arch_target)
     first_space_idx = instr_assembly.find(' ')
+    operands = []
     if first_space_idx == -1:
         mnemonic = instr_assembly.strip().lower().rstrip(':')
-        operands = []
     else:
         mnemonic_part = instr_assembly[:first_space_idx].strip().lower().rstrip(':')
         operands_part = instr_assembly[first_space_idx + 1:].strip()
         mnemonic = mnemonic_part.rstrip(':')
-        comma_idx = operands_part.find(',')
-        if comma_idx != -1:
-            op1 = operands_part[:comma_idx].strip()
-            op2 = operands_part[comma_idx + 1:].strip()
-            operands = [op1, op2]
-        else:
-            operands = [operands_part] if operands_part else []
+        if operands_part:
+            operands = [op.strip() for op in operands_part.split(',')]
     num_operands = len(operands)
     if num_operands > 0:
         operands = [op.rstrip(',') for op in operands]
@@ -319,7 +319,12 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target=""):
             if num_operands >= 3:
                 data_reg1 = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 data_reg2 = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                mem_operand = operands[2].lower()
                 addr_parts = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
+                if '!' in mem_operand:
+                    base_reg = next(iter(addr_parts), None)
+                    if base_reg:
+                        regs_written.add(base_reg)
                 if 'str' in mnemonic:
                     regs_read.update(data_reg1)
                     regs_read.update(data_reg2)
@@ -462,6 +467,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
     all_regs_written = set()
     used_simd_reg_types = set()
     instructions_with_registers = []
+    sorted_arch_regs = get_arch_reg_set(arch_target)
     for instr in instr_list:
         instr_assembly = instr.assembly
         mnemonic = instr.assembly.split(None, 1)[0].lower()
@@ -496,7 +502,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                 operand = parts[1].lower().strip()
                 if operand.startswith('[') and operand.endswith(']'):
                     has_indirect_call = True
-                elif any(operand.startswith(reg) for reg in SORTED_ALL_REGS_X86):
+                elif any(operand.startswith(reg) for reg in sorted_arch_regs):
                     if operand.isalnum() or '_' in operand:
                          has_indirect_call = True
         # Check for ARM64 indirect calls and jumps
@@ -504,30 +510,35 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
             parts = instr_assembly.split(None, 1)
             if len(parts) > 1:
                 operand = parts[1].lower().strip()
-            if any(operand.startswith(reg) for reg in SORTED_ALL_REGS_X86):
+            if any(operand.startswith(reg) for reg in sorted_arch_regs):
                 has_indirect_call = True
             elif '[' in operand and ']' in operand:
                 has_indirect_call = True
             elif operand.startswith('#') or operand.startswith(('+', '-')) or operand.startswith('0x'):
                 instruction_metrics["call_count"] += 1
-        regs_read, regs_written = _extract_register_usage(instr_assembly, parsed_obj, arch_target)
+        regs_read, regs_written = _extract_register_usage(instr_assembly, parsed_obj, arch_target, sorted_arch_regs)
         all_instr_regs = set(regs_read) | set(regs_written)
         is_simd_fpu = False
-        if any(reg in FPU_REGS for reg in all_instr_regs):
-            used_simd_reg_types.add("FPU")
-            is_simd_fpu = True
-        if any(reg in MMX_REGS for reg in all_instr_regs):
-            used_simd_reg_types.add("MMX")
-            is_simd_fpu = True
-        if any(reg in XMM_REGS for reg in all_instr_regs):
-            used_simd_reg_types.add("SSE/AVX")
-            is_simd_fpu = True
-        if any(reg in YMM_REGS for reg in all_instr_regs):
-            used_simd_reg_types.add("AVX/AVX2")
-            is_simd_fpu = True
-        if any(reg in ZMM_REGS for reg in all_instr_regs):
-            used_simd_reg_types.add("AVX-512")
-            is_simd_fpu = True
+        if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
+            if any(reg in ARM64_VFP_NEON_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("NEON/VFP")
+                is_simd_fpu = True
+        else:
+            if any(reg in FPU_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("FPU")
+                is_simd_fpu = True
+            if any(reg in MMX_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("MMX")
+                is_simd_fpu = True
+            if any(reg in XMM_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("SSE/AVX")
+                is_simd_fpu = True
+            if any(reg in YMM_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("AVX/AVX2")
+                is_simd_fpu = True
+            if any(reg in ZMM_REGS for reg in all_instr_regs):
+                used_simd_reg_types.add("AVX-512")
+                is_simd_fpu = True
         if is_simd_fpu:
             instruction_metrics["simd_fpu_count"] += 1
         all_regs_read.update(regs_read)

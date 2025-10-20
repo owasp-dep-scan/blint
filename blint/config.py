@@ -1479,13 +1479,12 @@ IMPLICIT_REGS_X64 = {
 
 IMPLICIT_REGS_ARM64 = {
     'bl':    {'write': {'x30'}},
-    'blr':   {'read': {'x30'}, 'write': {'x30'}},
+    'blr':   {'write': {'x30'}},
     'ret':   {'read': {'x30'}},
-    'ret x0': {'read': {'x0'}},
     'mrs':   {'write': {'x0'}},
     'msr':   {'read': {'x0'}},
-    'svc':   {'read': {'x8', 'sp'}},
-    'hvc':   {'read': {'x8', 'sp'}},
-    'smc':   {'read': {'x8', 'sp'}},
+    'svc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
+    'hvc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
+    'smc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
     'brk':   {'read': {'x0'}},
 }
