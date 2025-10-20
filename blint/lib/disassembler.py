@@ -562,7 +562,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
     addr_to_name_map = {}
-    for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"]:
+    for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports", "imports", "symtab_symbols", "dynamic_symbols"]:
         for func_entry in metadata.get(func_list_key, []):
             addr_str = func_entry.get("address", "")
             name = func_entry.get("name", "")
@@ -574,31 +574,40 @@ def _build_addr_to_name_map(metadata):
                     continue
     return addr_to_name_map
 
-def _resolve_direct_calls(instr_list, addr_to_name_map):
+def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
     """Identifies direct calls in instructions and resolves target addresses to function names.
     Handles both immediate absolute addresses (0x...) and relative offsets."""
     potential_callees = []
+    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
     for instr in instr_list:
         instr_assembly = instr.assembly
-        if instr_assembly.startswith('call '):
-            parts = instr_assembly.split(None, 1)
-            if len(parts) > 1:
-                operand = parts[1]
-                target_addr = None
+        parts = instr_assembly.split(None, 1)
+        if not parts:
+            continue
+        mnemonic = parts[0].lower()
+        is_direct_call = False
+        if is_aarch64 and mnemonic == 'bl':
+            is_direct_call = True
+        elif not is_aarch64 and mnemonic == 'call':
+            is_direct_call = True
+        if is_direct_call and len(parts) > 1:
+            operand = parts[1]
+            target_addr = None
+            try:
                 if operand.startswith('0x'):
-                    try:
-                        target_addr = int(operand, 16)
-                    except ValueError:
-                        continue
-                elif operand.isdigit():
-                    target_addr = operand
-                elif operand.startswith(('+', '-')):
-                     offset = int(operand, 10)
-                     target_addr = instr.address + offset
-                if target_addr is not None:
-                    target_name = addr_to_name_map.get(target_addr)
-                    if target_name:
-                        potential_callees.append(target_name)
+                    target_addr = int(operand, 16)
+                elif operand.startswith('#'):
+                    offset = int(operand.lstrip('#'))
+                    target_addr = instr.address + offset
+                elif operand.isdigit() or operand.startswith(('+', '-')):
+                     offset = int(operand)
+                     target_addr = instr.address + len(instr.bytes) + offset
+            except (ValueError, IndexError):
+                continue
+            if target_addr is not None:
+                target_name = addr_to_name_map.get(target_addr)
+                if target_name:
+                    potential_callees.append(target_name)
     return potential_callees
 
 def _classify_function(instruction_metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call):
@@ -738,7 +747,7 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
                 instruction_count = len(truncated_instr_list)
                 instr_addresses = [instr.address for instr in truncated_instr_list]
                 instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers, used_simd_reg_types, proprietary_instructions = _analyze_instructions(truncated_instr_list, func_addr, func_addr + size_to_disasm, instr_addresses, parsed_obj, arch_target)
-                direct_calls = _resolve_direct_calls(truncated_instr_list, addr_to_name_map)
+                direct_calls = _resolve_direct_calls(truncated_instr_list, addr_to_name_map, arch_target)
                 joined_mnemonics = "\n".join(instruction_mnemonics)
                 instruction_hash = hashlib.sha256(joined_mnemonics.encode('utf-8')).hexdigest()
                 has_system_call = any(syscall_pattern in lower_assembly for syscall_pattern in SYSCALL_INDICATORS)
