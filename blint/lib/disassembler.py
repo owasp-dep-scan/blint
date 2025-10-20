@@ -2,7 +2,7 @@ from blint.logger import LOG
 import lief
 import hashlib
 import re
-from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS, IMPLICIT_REGS_X86, IMPLICIT_REGS_X64, IMPLICIT_REGS_ARM64, APPLE_PROPRIETARY_INSTRUCTION_RANGES
+from blint.config import CRYPTO_INDICATORS, GPU_INDICATORS, SECURITY_INDICATORS, SYSCALL_INDICATORS, IMPLICIT_REGS_X86, IMPLICIT_REGS_X64, IMPLICIT_REGS_ARM64, APPLE_PROPRIETARY_INSTRUCTION_RANGES, APPLE_PROPRIETARY_SREGS
 
 OPERAND_DELIMITERS_PATTERN = re.compile(r'[^a-zA-Z0-9_]+')
 
@@ -62,6 +62,12 @@ SYSV_X64_VOLATILE_REGS = frozenset({'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9
 CDECL_X86_VOLATILE_REGS = frozenset({'eax', 'ecx', 'edx'})
 X64_RETURN_REGS = frozenset({'rax'})
 X86_RETURN_REGS = frozenset({'eax'})
+
+_SREG_TO_CATEGORY_MAP = {
+    sreg.lower(): category
+    for category, sregs in APPLE_PROPRIETARY_SREGS.items()
+    for sreg in sregs
+}
 
 try:
     from nyxstone import Nyxstone
@@ -469,22 +475,37 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
     instructions_with_registers = []
     sorted_arch_regs = get_arch_reg_set(arch_target)
     proprietary_instr_found = set()
+    sreg_interactions = set()
     is_apple_silicon = "aarch64" in arch_target.lower() and isinstance(parsed_obj, lief.MachO.Binary)
     for instr in instr_list:
         instr_assembly = instr.assembly
+        parts = instr_assembly.split()
         if is_apple_silicon and len(instr.bytes) == 4:
             opcode = int.from_bytes(instr.bytes, 'little')
             for name, (start, end) in APPLE_PROPRIETARY_INSTRUCTION_RANGES.items():
                 if start <= opcode <= end:
                     proprietary_instr_found.add(name)
                     break
-        mnemonic = instr.assembly.split(None, 1)[0].lower()
+        mnemonic_and_operands = instr_assembly.split(None, 1)
+        mnemonic = mnemonic_and_operands[0].lower()
+        if is_apple_silicon and mnemonic in ('mrs', 'msr') and len(parts) > 1:
+            operands_str = mnemonic_and_operands[1]
+            operands = [op.strip().lower() for op in operands_str.split(',')]
+            sreg_operand = None
+            try:
+                if mnemonic == 'mrs':
+                    sreg_operand = operands[1]
+                elif mnemonic == 'msr':
+                    sreg_operand = operands[0]
+            except IndexError:
+                pass
+            if sreg_operand and sreg_operand in _SREG_TO_CATEGORY_MAP:
+                sreg_interactions.add(_SREG_TO_CATEGORY_MAP[sreg_operand])
         instruction_mnemonics.append(mnemonic)
         if mnemonic in ('call'):
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
-            parts = instr_assembly.split()
             if len(parts) >= 2:
                 target_part = parts[1]
                 if target_part.startswith('0x'):
@@ -557,7 +578,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         })
         instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
         instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
-    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers, list(used_simd_reg_types), list(proprietary_instr_found)
+    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers, list(used_simd_reg_types), list(proprietary_instr_found), list(sreg_interactions)
 
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
@@ -746,7 +767,7 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
                 assembly_hash = hashlib.sha256(plain_assembly_text.encode('utf-8')).hexdigest()
                 instruction_count = len(truncated_instr_list)
                 instr_addresses = [instr.address for instr in truncated_instr_list]
-                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers, used_simd_reg_types, proprietary_instructions = _analyze_instructions(truncated_instr_list, func_addr, func_addr + size_to_disasm, instr_addresses, parsed_obj, arch_target)
+                instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, regs_read, regs_written, instructions_with_registers, used_simd_reg_types, proprietary_instructions, sreg_interactions = _analyze_instructions(truncated_instr_list, func_addr, func_addr + size_to_disasm, instr_addresses, parsed_obj, arch_target)
                 direct_calls = _resolve_direct_calls(truncated_instr_list, addr_to_name_map, arch_target)
                 joined_mnemonics = "\n".join(instruction_mnemonics)
                 instruction_hash = hashlib.sha256(joined_mnemonics.encode('utf-8')).hexdigest()
@@ -775,7 +796,8 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
                     "used_simd_reg_types": used_simd_reg_types,
                     "instructions_with_registers": instructions_with_registers,
                     "function_type": function_type,
-                    "proprietary_instructions": proprietary_instructions
+                    "proprietary_instructions": proprietary_instructions,
+                    "sreg_interactions": sreg_interactions
                 }
                 if inst_count == 0:
                     num_success += 1

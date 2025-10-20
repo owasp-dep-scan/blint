@@ -105,7 +105,7 @@ def test_analyze_instructions_basic(mock_instructions):
     func_addr = 0x1000
     next_func_addr_in_sec = 0x2000
     (metrics, mnemonics, has_indirect_call, has_loop,
-     regs_read, regs_written, instrs_with_regs, _, _) = _analyze_instructions(
+     regs_read, regs_written, instrs_with_regs, _, _, _) = _analyze_instructions(
         mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses, {}, "x86_64"
     )
     assert metrics["call_count"] == 3
@@ -136,7 +136,7 @@ def test_analyze_instructions_loop_detection():
     target_instr = MagicMock()
     target_instr.address = 0x0FFF
     instr_addresses_with_target = instr_addresses + [target_instr.address]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _) = _analyze_instructions(
         instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
     )
     instrs_corrected = []
@@ -145,7 +145,7 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _) = _analyze_instructions(
         instrs_corrected, func_addr, next_func_addr_in_sec, instr_addresses_corrected
     )
     assert has_loop == True
@@ -160,7 +160,7 @@ def test_apple_proprietary_instruction_detection():
     instrs_corrected = [instr1_corrected]
     instr_addresses_corrected = [0x1000]
     mock_macho = MagicMock(spec=lief.MachO.Binary)
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, proprietary_instructions) = _analyze_instructions(
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, proprietary_instructions, _) = _analyze_instructions(
         instrs_corrected,
         func_addr,
         next_func_addr_in_sec,
@@ -169,6 +169,48 @@ def test_apple_proprietary_instruction_detection():
         arch_target="aarch64"
     )
     assert proprietary_instructions == ['GuardedMode']
+
+def test_apple_sreg_interaction_msr():
+    func_addr = 0x1000
+    next_func_addr_in_sec = 0x2000
+    instr = MagicMock()
+    instr.assembly = "msr s3_6_c15_c1_0, x0"
+    instr.address = 0x1004
+    instr.bytes = b'\x00\x00\x00\x00'
+    instructions = [instr]
+    instr_addresses = [instr.address]
+    mock_macho = MagicMock(spec=lief.MachO.Binary)
+    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions) = _analyze_instructions(
+        instructions,
+        func_addr,
+        next_func_addr_in_sec,
+        instr_addresses,
+        parsed_obj=mock_macho,
+        arch_target="aarch64"
+    )
+    assert proprietary_instructions == []
+    assert sreg_interactions == ['SPRR_CONTROL']
+
+def test_apple_sreg_interaction_mrs():
+    func_addr = 0x1000
+    next_func_addr_in_sec = 0x2000
+    instr = MagicMock()
+    instr.assembly = "mrs x1, s3_6_c15_c1_0"
+    instr.address = 0x1008
+    instr.bytes = b'\x00\x00\x00\x00'
+    instructions = [instr]
+    instr_addresses = [instr.address]
+    mock_macho = MagicMock(spec=lief.MachO.Binary)
+    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions) = _analyze_instructions(
+        instructions,
+        func_addr,
+        next_func_addr_in_sec,
+        instr_addresses,
+        parsed_obj=mock_macho,
+        arch_target="aarch64"
+    )
+    assert proprietary_instructions == []
+    assert sreg_interactions == ['SPRR_CONTROL']
 
 def test_classify_function_plt_thunk():
     metrics = {"jump_count": 1, "conditional_jump_count": 0, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}

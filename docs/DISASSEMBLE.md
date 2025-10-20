@@ -35,7 +35,8 @@ The `disassembled_functions` attribute is a dictionary where each key is a uniqu
 | `used_simd_reg_types`         | List of Strings    | A list of SIMD register types such as FPU, MMX, SSE/AVX etc.                                                                                                                                                                                                                                       |
 | `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                                                                                                                                        |
 | `function_type`               | String             | A classification of the function based on heuristics. Possible values include: "PLT_Thunk", "Simple_Return", "Has_Syscalls", "Has_Indirect_Calls", or "Has_Conditional_Jumps". If a function doesn't fit these specific categories but is not a simple return, this field will be an empty string. |
-| `proprietary_instructions`    | List of Strings    | List of proprietary instructions such as Apple. Eg: `GuardedMode`, `SyncBarrier`                                                                                                                                                                                                                   |
+| `proprietary_instructions`    | List of Strings    | (Apple Silicon Only) A list of categories for proprietary instructions found (e.g., "GuardedMode", "AMX"). This indicates the use of non-standard hardware features.                                                                                                                                                                                                                   |
+| `sreg_interactions`           | List of Strings    | (Apple Silicon Only) A list of categories for interactions with proprietary System Registers (e.g., "SPRR_CONTROL", "PAC_KEYS"). This signals manipulation of low-level security and hardware configuration.                                                                                                                                                                                                                |                                                                                                                                                                                                                              |
 
 ### `instruction_metrics` Sub-structure
 
@@ -77,6 +78,8 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 - **Memory Operands**: Instructions accessing memory via addresses calculated from registers (e.g., `mov rax, [rbx + rcx*2]`) indicate that `rbx` and `rcx` are read (used for address calculation). The destination `rax` is written.
 - **Limitations**: This analysis is based on parsing the assembly text string. It provides a good approximation for common instructions but might be inaccurate for highly complex or obfuscated code, or for instructions not explicitly handled in the parsing logic.
 
+-----
+
 ## Use Cases
 
 1.  **Binary Fingerprinting and Diffing:** Compare binaries by matching functions based on their `assembly_hash` or `instruction_hash`. This helps identify identical or modified functions between different versions or variants of a binary.
@@ -91,6 +94,27 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
     - **Track Data Flow:** By examining `instructions_with_registers`, you can trace how data moves through registers within a function. For example, seeing `rax` written by one instruction and then read by a subsequent one.
     - **Detect Register Preservation:** Check if a function modifies callee-saved registers (like `rbx`, `rbp`, `r12-r15` on x64) without restoring them, which might violate calling conventions or indicate specific behavior.
     - **Spot Unusual Register Patterns:** Functions that read or write an unusually large number of registers might be complex, perform context switching, or manipulate state extensively.
+9. Analyzing Proprietary Hardware Features (Apple Silicon)
+
+The proprietary_instructions and sreg_interactions fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS.
+    - **Detecting Advanced Security Hardening:**
+        - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features.
+        - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL".
+        - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components.
+    - **Identifying Anti-Debugging and Anti-Emulation:**
+        - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments.
+        - blint Findings: The sreg_interactions list contains "PERF_COUNTERS".
+        - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators.
+    - **Finding Performance-Critical Code:**
+        - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks.
+        - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor).
+        - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications.
+    - **Locating Kernel-Level Pointer Authentication Logic:**
+        - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack.
+        - blint Findings: The sreg_interactions list contains "PAC_KEYS".
+        - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
+
+------
 
 ## Examples
 
@@ -168,6 +192,56 @@ simple_add:
     - `add rax, rdx`: Reads `rax` and `rdx`, Writes `rax` (adds second argument to result).
     - `pop rbp`: Reads `rbp` (from stack, implicitly using `rsp`), Writes `rsp` (stack pointer incremented).
     - `ret`: Typically doesn't directly read/write general-purpose registers listed here (though it implicitly uses `rsp` to get the return address and `rip` to set the next instruction).
+
+
+Example 2: Analyzing an Apple Silicon Security Function
+
+Consider a hypothetical function on macOS that configures memory permissions.
+
+```
+_configure_secure_memory:
+   stp    x29, x30, [sp, #-16]!
+   mov    x29, sp
+   mrs    x0, s3_6_c15_c1_0  // Read SPRR_CONFIG_EL1
+   orr    x0, x0, #1         // Set the SPRR_CONFIG_EN bit
+   msr    s3_6_c15_c1_0, x0  // Write back to enable SPRR
+   ldp    x29, x30, [sp], #16
+   ret
+```
+
+Corresponding `disassembled_functions` attribute:
+
+```json
+{
+  "0x1000abcde::_configure_secure_memory": {
+    "name": "_configure_secure_memory",
+    "address": "0x1000abcde",
+    "assembly": "stp x29, x30, [sp, #-16]!\nmov x29, sp\nmrs x0, s3_6_c15_c1_0\norr x0, x0, #1\nmsr s3_6_c15_c1_0, x0\nldp x29, x30, [sp], #16\nret",
+    "proprietary_instructions": [],
+    "sreg_interactions": [
+      "SPRR_CONTROL"
+    ],
+    "regs_read": ["x29", "x30", "sp", "x0"],
+    "regs_written": ["x29", "x30", "sp", "x0"],
+    "instructions_with_registers": [
+      // ...
+      {
+        "regs_read": [],
+        "regs_written": ["x0"]
+      },
+      // ...
+    ]
+    ...
+  }
+}
+```
+
+**Explanation:**
+
+1. sreg_interactions: The analysis detects that the code reads (mrs) and writes (msr) to the s3_6_c15_c1_0 system register. It looks this up in its internal map and correctly identifies it as a control register for the SPRR hardware feature, adding "SPRR_CONTROL" to the list.
+2. Analyst Conclusion: An analyst can immediately conclude that this function is not a typical application function but is instead part of a low-level system component responsible for configuring hardware memory security. This allows them to prioritize it for further investigation.
+
+------
 
 ## Function Boundary Detection
 

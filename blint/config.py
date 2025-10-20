@@ -1497,3 +1497,51 @@ APPLE_PROPRIETARY_INSTRUCTION_RANGES = {
     "AddressTranslation": (0x00201440, 0x00201440),
     "SyncBarrier": (0x00201460, 0x00201463),
 }
+
+APPLE_PROPRIETARY_SREGS = {
+    "GXF_CONTROL": {
+        "S3_6_C15_C1_2",
+        "S3_6_C15_C8_1",
+    },
+    "SPRR_CONTROL": {
+        "S3_6_C15_C1_0",
+        "S3_6_C15_C1_5",
+        "S3_6_C15_C1_6",
+    },
+    "PAC_KEYS": {
+        "S3_4_C15_C1_0",
+        "S3_4_C15_C1_1",
+    },
+    "JIT_HARDENING": {
+        "S3_4_C15_C2_6",
+        "S3_4_C15_C2_7",
+    },
+    "PERF_COUNTERS": {
+        "S3_1_C15_C0_0",
+        "S3_1_C15_C1_0",
+        "S3_1_C15_C2_0",
+        "S3_1_C15_C3_0",
+        "S3_1_C15_C4_0",
+        "S3_1_C15_C5_0",
+        "S3_1_C15_C6_0",
+        "S3_1_C15_C13_0",
+        "S3_2_C15_C0_0",
+        "S3_2_C15_C1_0",
+        "S3_2_C15_C2_0",
+        "S3_2_C15_C3_0",
+        "S3_2_C15_C4_0",
+        "S3_2_C15_C5_0",
+        "S3_2_C15_C6_0",
+        "S3_2_C15_C7_0",
+        "S3_2_C15_C9_0",
+        "S3_2_C15_C10_0",
+    },
+    "IPI_CONTROL": {
+        "S3_5_C15_C1_1",
+        "S3_5_C15_C3_1",
+    },
+    "VIRTUALIZATION": {
+        "S3_5_C15_C1_2",
+        "S3_5_C15_C1_3",
+    },
+}
