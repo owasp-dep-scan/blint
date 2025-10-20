@@ -19,6 +19,7 @@ from blint.lib.utils import (
     cleanup_dict_lief_errors,
     decode_base64,
     demangle_symbolic_name,
+    enum_to_str,
 )
 from blint.lib.disassembler import disassemble_functions
 
@@ -98,7 +99,7 @@ def extract_note_data(idx, note):
     if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
         build_id = description_str.replace(" ", "")
     type_str = note.type
-    type_str = str(type_str).rsplit(".", maxsplit=1)[-1]
+    type_str = enum_to_str(type_str)
     note_details = ""
     sdk_version = ""
     ndk_version = ""
@@ -258,10 +259,10 @@ def parse_symbols(symbols):
             symbols_list.append(
                 {
                     "name": symbol_name,
-                    "type": str(symbol.type).rsplit(".", maxsplit=1)[-1],
+                    "type": enum_to_str(symbol.type),
                     "value": symbol.value,
-                    "visibility": str(symbol.visibility).rsplit(".", maxsplit=1)[-1],
-                    "binding": str(symbol.binding).rsplit(".", maxsplit=1)[-1],
+                    "visibility": enum_to_str(symbol.visibility),
+                    "binding": enum_to_str(symbol.binding),
                     "is_imported": is_imported,
                     "is_exported": is_exported,
                     "information": symbol.information,
@@ -342,13 +343,13 @@ def parse_pe_data(parsed_obj):
         section_name = ""
         section_chars = ""
         section_entropy = ""
-        dir_type = str(directory.type).rsplit(".", maxsplit=1)[-1]
+        dir_type = enum_to_str(directory.type)
         if not dir_type.startswith("?") and directory.size:
             if directory.has_section:
                 if directory.section.has_characteristic:
                     section_chars = ", ".join(
                         [
-                            str(chara).rsplit(".", maxsplit=1)[-1]
+                            enum_to_str(chara)
                             for chara in directory.section.characteristics_lists
                         ]
                     )
@@ -433,10 +434,10 @@ def process_pe_signature(parsed_obj):
             ci = sig.content_info
             signature_obj = {
                 "version": sig.version,
-                "digest_algorithm": str(sig.digest_algorithm).rsplit(".", maxsplit=1)[-1],
+                "digest_algorithm": enum_to_str(sig.digest_algorithm),
                 "content_info": {
                     "content_type": lief.PE.oid_to_string(ci.content_type),
-                    "digest_algorithm": str(ci.digest_algorithm).rsplit(".", maxsplit=1)[-1],
+                    "digest_algorithm": enum_to_str(ci.digest_algorithm),
                     "digest": ci.digest.hex(),
                 },
             }
@@ -446,7 +447,7 @@ def process_pe_signature(parsed_obj):
                     "version": signer.version,
                     "serial_number": signer.serial_number.hex(),
                     "issuer": str(signer.issuer),
-                    "digest_algorithm": str(signer.digest_algorithm).rsplit(".", maxsplit=1)[-1],
+                    "digest_algorithm": enum_to_str(signer.digest_algorithm),
                     "encryption_algorithm": str(signer.encryption_algorithm).rsplit(
                         ".", maxsplit=1
                     )[-1],
@@ -475,7 +476,7 @@ def parse_pe_authenticode(parsed_obj):
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
             "sha512_hash": parsed_obj.authentihash_sha512.hex(*sep),
             "sha1_hash": parsed_obj.authentihash(lief.PE.ALGORITHMS.SHA_1).hex(*sep),
-            "verification_flags": str(parsed_obj.verify_signature()).rsplit(".", maxsplit=1)[-1],
+            "verification_flags": enum_to_str(parsed_obj.verify_signature()),
         }
         if signatures := parsed_obj.signatures:
             if not isinstance(signatures, lief.lief_errors) and signatures[0].signers:
@@ -535,9 +536,9 @@ def parse_pe_symbols(symbols):
                         "name": demangle_symbolic_name(symbol.name),
                         "value": symbol.value,
                         "id": section_nb_str,
-                        "base_type": str(symbol.base_type).rsplit(".", maxsplit=1)[-1],
-                        "complex_type": str(symbol.complex_type).rsplit(".", maxsplit=1)[-1],
-                        "storage_class": str(symbol.storage_class).rsplit(".", maxsplit=1)[-1],
+                        "base_type": enum_to_str(symbol.base_type),
+                        "complex_type": enum_to_str(symbol.complex_type),
+                        "storage_class": enum_to_str(symbol.storage_class),
                     }
                 )
         except (IndexError, AttributeError, ValueError, RuntimeError):
@@ -790,16 +791,14 @@ def add_elf_header(header, metadata):
         return metadata
     try:
         eflags_str = determine_elf_flags(header)
-        metadata["class"] = str(header.identity_class).rsplit(".", maxsplit=1)[-1]
-        metadata["endianness"] = str(header.identity_data).rsplit(".", maxsplit=1)[-1]
-        metadata["identity_version"] = str(header.identity_version).rsplit(".", maxsplit=1)[-1]
-        metadata["identity_os_abi"] = str(header.identity_os_abi).rsplit(".", maxsplit=1)[-1]
-        metadata["identity_abi_version"] = header.identity_abi_version
-        metadata["file_type"] = str(header.file_type).rsplit(".", maxsplit=1)[-1]
-        metadata["machine_type"] = str(header.machine_type).rsplit(".", maxsplit=1)[-1]
-        metadata["object_file_version"] = str(header.object_file_version).rsplit(".", maxsplit=1)[
-            -1
-        ]
+        metadata["class"] = enum_to_str(header.identity_class)
+        metadata["endianness"] = enum_to_str(header.identity_data)
+        metadata["identity_version"] = enum_to_str(header.identity_version)
+        metadata["identity_os_abi"] = enum_to_str(header.identity_os_abi)
+        metadata["identity_abi_version"] = enum_to_str(header.identity_abi_version)
+        metadata["file_type"] = enum_to_str(header.file_type)
+        metadata["machine_type"] = enum_to_str(header.machine_type)
+        metadata["object_file_version"] = enum_to_str(header.object_file_version)
         metadata["entrypoint"] = header.entrypoint
         metadata["processor_flag"] = str(header.processor_flag) + eflags_str
     except (AttributeError, TypeError, ValueError) as e:
@@ -864,7 +863,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
             metadata["dynamic_entries"].append(
                 {
                     "name": demangle_symbolic_name(entry.name),
-                    "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
+                    "tag": enum_to_str(entry.tag),
                     "value": entry.value,
                 }
             )
@@ -876,7 +875,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
             metadata["dynamic_entries"].append(
                 {
                     "name": "runpath",
-                    "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
+                    "tag": enum_to_str(entry.tag),
                     "value": entry.runpath,
                 }
             )
@@ -886,7 +885,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
             metadata["dynamic_entries"].append(
                 {
                     "name": "rpath",
-                    "tag": str(entry.tag).rsplit(".", maxsplit=1)[-1],
+                    "tag": enum_to_str(entry.tag),
                     "value": entry.rpath,
                 }
             )
@@ -904,7 +903,7 @@ def determine_elf_flags(header):
     eflags_str = ""
     if header.machine_type == lief.ELF.ARCH.ARM and hasattr(header, "arm_flags_list"):
         eflags_str = " - ".join(
-            [str(s).rsplit(".", maxsplit=1)[-1] for s in header.arm_flags_list]
+            [enum_to_str(s) for s in header.arm_flags_list]
         )
     if header.machine_type in [
         lief.ELF.ARCH.MIPS,
@@ -912,15 +911,15 @@ def determine_elf_flags(header):
         lief.ELF.ARCH.MIPS_X,
     ]:
         eflags_str = " - ".join(
-            [str(s).rsplit(".", maxsplit=1)[-1] for s in header.mips_flags_list]
+            [enum_to_str(s) for s in header.mips_flags_list]
         )
     if header.machine_type == lief.ELF.ARCH.PPC64:
         eflags_str = " - ".join(
-            [str(s).rsplit(".", maxsplit=1)[-1] for s in header.ppc64_flags_list]
+            [enum_to_str(s) for s in header.ppc64_flags_list]
         )
     if header.machine_type == lief.ELF.ARCH.HEXAGON:
         eflags_str = " - ".join(
-            [str(s).rsplit(".", maxsplit=1)[-1] for s in header.hexagon_flags_list]
+            [enum_to_str(s) for s in header.hexagon_flags_list]
         )
     return eflags_str
 
@@ -1308,7 +1307,7 @@ def add_pe_header_data(metadata, parsed_obj):
                 dos_header.addressof_new_exeheader
             ).strip()
             metadata["characteristics"] = ", ".join(
-                [str(chara).rsplit(".", maxsplit=1)[-1] for chara in header.characteristics_list]
+                [enum_to_str(chara) for chara in header.characteristics_list]
             )
             metadata["num_sections"] = header.numberof_sections
             metadata["time_date_stamps"] = header.time_date_stamps
@@ -1336,14 +1335,14 @@ def add_pe_optional_headers(metadata, optional_header):
     with contextlib.suppress(IndexError, TypeError):
         metadata["dll_characteristics"] = ", ".join(
             [
-                str(chara).rsplit(".", maxsplit=1)[-1]
+                enum_to_str(chara)
                 for chara in optional_header.dll_characteristics_lists
             ]
         )
         # Detect if this binary is a driver
         if "WDM_DRIVER" in metadata["dll_characteristics"]:
             metadata["is_driver"] = True
-        metadata["subsystem"] = str(optional_header.subsystem).rsplit(".", maxsplit=1)[-1]
+        metadata["subsystem"] = enum_to_str(optional_header.subsystem)
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
         metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
         metadata["major_linker_version"] = optional_header.major_linker_version
@@ -1557,13 +1556,13 @@ def add_mach0_build_metadata(exe_file, metadata, parsed_obj):
         build_version = parsed_obj.build_version
         if not build_version:
             return metadata
-        metadata["platform"] = str(build_version.platform).rsplit(".", maxsplit=1)[-1]
+        metadata["platform"] = enum_to_str(build_version.platform)
         metadata["minos"] = "{:d}.{:d}.{:d}".format(*build_version.minos)
         metadata["sdk"] = "{:d}.{:d}.{:d}".format(*build_version.sdk)
         if tools := build_version.tools:
             metadata["tools"] = []
             for tool in tools:
-                tool_str = str(tool.tool).rsplit(".", maxsplit=1)[-1]
+                tool_str = enum_to_str(tool.tool)
                 metadata["tools"].append(
                     {
                         "tool": tool_str,
@@ -1619,12 +1618,12 @@ def add_mach0_header_data(exe_file, metadata, parsed_obj):
     """
     try:
         header = parsed_obj.header
-        flags_str = ", ".join([str(s).rsplit(".", maxsplit=1)[-1] for s in header.flags_list])
-        metadata["magic"] = str(header.magic).rsplit(".", maxsplit=1)[-1]
+        flags_str = ", ".join([enum_to_str(s) for s in header.flags_list])
+        metadata["magic"] = enum_to_str(header.magic)
         metadata["is_neural_model"] = header.magic == lief.MachO.MACHO_TYPES.NEURAL_MODEL
-        metadata["cpu_type"] = str(header.cpu_type).rsplit(".", maxsplit=1)[-1]
+        metadata["cpu_type"] = enum_to_str(header.cpu_type)
         metadata["cpu_subtype"] = header.cpu_subtype
-        metadata["file_type"] = str(header.file_type).rsplit(".", maxsplit=1)[-1]
+        metadata["file_type"] = enum_to_str(header.file_type)
         metadata["flags"] = flags_str
         metadata["number_commands"] = header.nb_cmds
         metadata["size_commands"] = header.sizeof_cmds

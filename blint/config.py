@@ -1402,14 +1402,14 @@ CRYPTO_INDICATORS = [
                     'movdqa', 'movdqu', 'vmovdqa', 'vmovdqu',
                     'padd', 'psub', 'pmul',
                     'psll', 'psrl', 'psra',
-                    'vpaddd', 'vpsubd', 'vpmulld',
+                    'vpaddd', 'vpsubd', 'vpmulld', 'pmaddwd'
                 ]
 GPU_INDICATORS = [
                     'glbind', 'glvertex', 'glcolor', 'glbegin', 'glend', 'glenable', 'gldisable', 'glget', 'glset', 'glload', 'glsave', 'gluniform', 'gluseprogram', 'glattachshader', 'gldraw', 'glclear', 'glviewport', 'glmatrix', 'glpushmatrix', 'glpopmatrix',
                     'cuda', 'cuinit', 'cucontext', 'cudriver', 'cugpu', 'cudevice', 'cumem', 'cuptr', 'cukernel', 'culaunch', 'cugrid', 'cublock', 'cuthread', 'cufree', 'cucopy',
                     'clgetplatform', 'clgetdevice', 'clcreatecontext', 'clcreatecommandqueue', 'clcreateshared', 'clcreatekernel', 'clsetkernelarg', 'clenqueuendrange', 'clfinish', 'clrelease', 'clbuildprogram',
                     'd3d', 'd3d11', 'd3d12', 'create', 'device', 'swapchain', 'rendertarget', 'shaders', 'ps_', 'vs_', 'gs_', 'cs_', 'hs_', 'ds_',
-                    'vk', 'vkcreate', 'vkdestroy', 'vkallocate', 'vkfree', 'vkqueue', 'vksubmit', 'vkwait', 'vkacquire', 'vkpresent', 'vkcmd', 'vkbegin', 'vkend', 'vkbind', 'vkdraw', 'vkdispatch', 'vkcopy', 'vkblit', 'vkclear', 'vkfill', 'vkupdate',
+                    'vkcreate', 'vkdestroy', 'vkallocate', 'vkfree', 'vkqueue', 'vksubmit', 'vkwait', 'vkacquire', 'vkpresent', 'vkcmd', 'vkbegin', 'vkend', 'vkbind', 'vkdraw', 'vkdispatch', 'vkcopy', 'vkblit', 'vkclear', 'vkfill', 'vkupdate',
                     'mtl', 'metal', 'mtldevice', 'mtlcommand', 'mtlrender', 'mtlcompute', 'mtlbuffer', 'mtltexture', 'mtlfunction', 'mtllibrary', 'mtlencoder', 'mtlpass',
                     'gpu', 'compute', 'shader', 'vertex', 'fragment', 'pixel', 'kernel', 'workgroup', 'local', 'global', 'buffer', 'texture', 'surface',
                 ]
@@ -1475,4 +1475,73 @@ IMPLICIT_REGS_X64 = {
     'cmpsq':  {'read': {'rsi', 'rdi'}},
     'cpuid':  {'read': {'eax', 'ecx'}, 'write': {'eax', 'ebx', 'ecx', 'edx'}},
     'syscall':{'read': {'rcx', 'r11'}, 'write': {'rcx', 'r11'}},
+}
+
+IMPLICIT_REGS_ARM64 = {
+    'bl':    {'write': {'x30'}},
+    'blr':   {'write': {'x30'}},
+    'ret':   {'read': {'x30'}},
+    'mrs':   {'write': {'x0'}},
+    'msr':   {'read': {'x0'}},
+    'svc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
+    'hvc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
+    'smc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
+    'brk':   {'read': {'x0'}},
+}
+
+# https://github.com/AsahiLinux/docs/blob/main/docs/hw/cpu/apple-instructions.md
+APPLE_PROPRIETARY_INSTRUCTION_RANGES = {
+    "AMX": (0x00201000, 0x002012df),
+    "WKDM": (0x00200800, 0x00200cff),
+    "GuardedMode": (0x00201400, 0x00201420),
+    "AddressTranslation": (0x00201440, 0x00201440),
+    "SyncBarrier": (0x00201460, 0x00201463),
+}
+
+APPLE_PROPRIETARY_SREGS = {
+    "GXF_CONTROL": {
+        "S3_6_C15_C1_2",
+        "S3_6_C15_C8_1",
+    },
+    "SPRR_CONTROL": {
+        "S3_6_C15_C1_0",
+        "S3_6_C15_C1_5",
+        "S3_6_C15_C1_6",
+    },
+    "PAC_KEYS": {
+        "S3_4_C15_C1_0",
+        "S3_4_C15_C1_1",
+    },
+    "JIT_HARDENING": {
+        "S3_4_C15_C2_6",
+        "S3_4_C15_C2_7",
+    },
+    "PERF_COUNTERS": {
+        "S3_1_C15_C0_0",
+        "S3_1_C15_C1_0",
+        "S3_1_C15_C2_0",
+        "S3_1_C15_C3_0",
+        "S3_1_C15_C4_0",
+        "S3_1_C15_C5_0",
+        "S3_1_C15_C6_0",
+        "S3_1_C15_C13_0",
+        "S3_2_C15_C0_0",
+        "S3_2_C15_C1_0",
+        "S3_2_C15_C2_0",
+        "S3_2_C15_C3_0",
+        "S3_2_C15_C4_0",
+        "S3_2_C15_C5_0",
+        "S3_2_C15_C6_0",
+        "S3_2_C15_C7_0",
+        "S3_2_C15_C9_0",
+        "S3_2_C15_C10_0",
+    },
+    "IPI_CONTROL": {
+        "S3_5_C15_C1_1",
+        "S3_5_C15_C3_1",
+    },
+    "VIRTUALIZATION": {
+        "S3_5_C15_C1_2",
+        "S3_5_C15_C1_3",
+    },
 }

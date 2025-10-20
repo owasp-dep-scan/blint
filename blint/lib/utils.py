@@ -682,3 +682,7 @@ def json_serializer(obj):
             return ""
 
     return obj
+
+def enum_to_str(enum_obj) -> str:
+    """Converts a lief enum object to its string name."""
+    return str(enum_obj).rsplit(".", maxsplit=1)[-1]
