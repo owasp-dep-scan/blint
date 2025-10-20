@@ -130,7 +130,7 @@ def build_parser():
         "--src",
         dest="src_dir_image",
         action="extend",
-        default=[os.getcwd()],
+        default=[],
         nargs="+",
         help="Source directories, container images or binary files. Defaults to current directory.",
     )
@@ -238,6 +238,8 @@ def handle_args():
     args = build_args()
     if not args.no_banner and args.subcommand_name != "sbom":
         print(BLINT_LOGO)
+    if not args.src_dir_image:
+        args.src_dir_image = [os.getcwd()]
     blint_options = BlintOptions(
         deep_mode=args.deep_mode,
         exports_prefix=args.exports_prefix,
