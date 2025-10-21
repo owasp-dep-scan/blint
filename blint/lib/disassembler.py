@@ -262,7 +262,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
     regs_read = set()
     regs_written = set()
     if not instr_assembly:
-        return list(regs_read), list(regs_written)
+        return sorted(regs_read), sorted(regs_written)
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
     if not sorted_arch_regs:
         sorted_arch_regs = get_arch_reg_set(arch_target)
@@ -465,7 +465,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
             op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
             regs_read.update(op_regs)
 
-    return list(regs_read), list(regs_written)
+    return sorted(regs_read), sorted(regs_written)
 
 def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses, parsed_obj=None, arch_target=""):
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
@@ -591,7 +591,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
         })
         instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
         instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
-    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, list(all_regs_read), list(all_regs_written), instructions_with_registers, list(used_simd_reg_types), list(proprietary_instr_found), list(sreg_interactions)
+    return instruction_metrics, instruction_mnemonics, has_indirect_call, has_loop, sorted(all_regs_read), sorted(all_regs_written), instructions_with_registers, sorted(used_simd_reg_types), sorted(proprietary_instr_found), sorted(sreg_interactions)
 
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
