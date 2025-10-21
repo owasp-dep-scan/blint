@@ -8,9 +8,20 @@ OPERAND_DELIMITERS_PATTERN = re.compile(r'[^a-zA-Z0-9_]+')
 
 ARITH_INST = ['add', 'sub', 'imul', 'mul', 'div', 'idiv', 'inc', 'dec', 'neg', 'not', 'and', 'or', 'xor', 'adc', 'sbb', 'xadd', 'cmpxchg']
 SHIFT_INST = ['shl', 'shr', 'sal', 'sar', 'rol', 'ror', 'rcl', 'rcr', 'psll', 'psrl', 'psra', 'vpsll', 'vpsrl', 'vpsra']
-CONDITIONAL_JMP_INST = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
+CONDITIONAL_JMP_INST_X86 = ['je', 'jne', 'jz', 'jnz', 'jg', 'jge', 'jl', 'jle', 'ja', 'jae', 'jb', 'jbe',
                 'jp', 'jnp', 'jo', 'jno',
                 'js', 'jns', 'loop', 'loopz', 'loopnz', 'jcxz', 'jecxz', 'jrcxz']
+X86_CALL_INST = {'call'}
+X86_UNCONDITIONAL_JMP_INST = {'jmp', 'jmpq', 'jmpl'}
+X86_RET_INST = {'ret', 'retn', 'retf', 'iret', 'iretd', 'iretq'}
+ARM64_B_COND_INST = [
+    'beq', 'bne', 'bge', 'bgt', 'ble', 'blt', 'bhs', 'bcs',
+    'blo', 'bcc', 'bvs', 'bvc', 'bmi', 'bpl', 'bhi', 'bls'
+]
+ARM64_CB_TB_INST = ['cbz', 'cbnz', 'tbz', 'tbnz']
+ARM64_CONDITIONAL_JMP_INST = ARM64_B_COND_INST + ARM64_CB_TB_INST
+CONDITIONAL_JMP_INST = CONDITIONAL_JMP_INST_X86 + ARM64_CONDITIONAL_JMP_INST
+
 ARM64_GENERAL_REGS_64 = {f'x{i}' for i in range(31)}
 ARM64_GENERAL_REGS_32 = {f'w{i}' for i in range(31)}
 ARM64_SPECIAL_REGS = {'sp', 'xzr', 'wzr'}
@@ -21,6 +32,11 @@ ARM64_VFP_NEON_REGS = {f'v{i}' for i in range(32)} | \
 ARM64_ALL_REGS = (
     ARM64_GENERAL_REGS_64 | ARM64_GENERAL_REGS_32 | ARM64_SPECIAL_REGS | ARM64_VFP_NEON_REGS
 )
+ARM64_CALL_INST = {'bl', 'blr'}
+ARM64_UNCONDITIONAL_JMP_INST = {'b', 'br'}
+ARM64_RET_INST = {'ret', 'eret'}
+TERMINATING_INST = X86_RET_INST | ARM64_RET_INST
+UNCONDITIONAL_JMP_INST_ALL = X86_UNCONDITIONAL_JMP_INST | ARM64_UNCONDITIONAL_JMP_INST
 SORTED_ARM64_ALL_REGS = sorted(ARM64_ALL_REGS, key=len, reverse=True)
 
 COMMON_REGS_64 = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
@@ -32,9 +48,6 @@ COMMON_REGS_16 = {'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp',
 COMMON_REGS_8l = {'al', 'bl', 'cl', 'dl', 'sil', 'dil', 'bpl', 'spl',
                   'r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b', 'r14b', 'r15b'}
 COMMON_REGS_8h = {'ah', 'bh', 'ch', 'dh'}
-
-TERMINATING_INST = {'ret', 'retn', 'retf', 'iret', 'iretd', 'iretq'}
-UNCONDITIONAL_JMP_INST = {'jmp', 'jmpq', 'jmpl'}
 READ_WRITE_BOTH_OPS_INST = {'xadd', 'cmpxchg', 'cmpxchg8b', 'cmpxchg16b'}
 BIT_MANIPULATION_INST = {'bt', 'bts', 'bsf', 'bsr', 'btr', 'btc', 'popcnt', 'lzcnt', 'tzcnt'}
 READ_WRITE_ONE_OP_INST = {'inc', 'dec', 'not', 'neg', 'rol', 'ror', 'rcl', 'rcr', 'shl', 'shr', 'sal', 'sar'}
@@ -104,10 +117,10 @@ def _find_function_end_index(instr_list):
         if mnemonic in TERMINATING_INST:
             if i + 1 < len(instr_list):
                 next_mnemonic = instr_list[i+1].assembly.split(None, 1)[0].lower()
-                if next_mnemonic in ['int3', 'nop']:
+                if next_mnemonic in ('int3', 'nop'):
                     return i
             return i
-        if mnemonic in UNCONDITIONAL_JMP_INST:
+        if mnemonic in UNCONDITIONAL_JMP_INST_ALL:
             return i
     return len(instr_list) - 1
 
@@ -130,7 +143,7 @@ def _get_abi_volatile_regs(parsed_obj, arch_target):
 def _get_function_ranges(parsed_obj, metadata):
     """Calculates the address ranges for each function based on the next function or section end."""
     section_func_map = {}
-    for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"]:
+    for func_list_key in ("functions", "ctor_functions", "exception_functions", "unwind_functions", "exports"):
         for func_entry in metadata.get(func_list_key, []):
             func_addr_str = func_entry.get("address", "")
             if func_addr_str:
@@ -279,7 +292,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
         regs_read.add(counter_reg)
         regs_written.add(counter_reg)
     if is_aarch64:
-        if mnemonic in ['add', 'adds', 'sub', 'subs', 'neg', 'negs', 'mul', 'umull', 'smull', 'smulh', 'umulh', 'div', 'udiv']:
+        if mnemonic in ('add', 'adds', 'sub', 'subs', 'neg', 'negs', 'mul', 'umull', 'smull', 'smulh', 'umulh', 'div', 'udiv'):
             if num_operands >= 2:
                 dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
@@ -288,14 +301,14 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 if num_operands >= 3:
                     src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
                     regs_read.update(src2_regs)
-        elif mnemonic in ['mov', 'movz', 'movk', 'movn', 'fmov', 'fmov immediate']:
+        elif mnemonic in ('mov', 'movz', 'movk', 'movn', 'fmov', 'fmov immediate'):
             if num_operands >= 1:
                 dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 regs_written.update(dst_regs)
                 if num_operands >= 2 and not operands[1].lower().startswith('#'):
                     src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
                     regs_read.update(src_regs)
-        elif mnemonic in ['csel', 'csinc', 'csinv', 'cset', 'csetm', 'cinc', 'cinv']:
+        elif mnemonic in ('csel', 'csinc', 'csinv', 'cset', 'csetm', 'cinc', 'cinv'):
             if num_operands >= 3:
                 dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
@@ -303,9 +316,9 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 regs_written.update(dst_regs)
                 regs_read.update(src1_regs)
                 regs_read.update(src2_regs)
-                if mnemonic in ['cinc', 'cinv']:
+                if mnemonic in ('cinc', 'cinv'):
                      regs_read.update(dst_regs)
-        elif mnemonic in ['cmp', 'cmn', 'tst']:
+        elif mnemonic in ('cmp', 'cmn', 'tst'):
             if num_operands >= 2:
                 src1_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 src2_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
@@ -343,17 +356,17 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
             if num_operands >= 1:
                 src_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 regs_read.update(src_regs)
-        elif mnemonic.startswith('b') and mnemonic not in ['bl', 'blr', 'br']:
+        elif mnemonic.startswith('b') and mnemonic not in ('bl', 'blr', 'br'):
             pass
-        elif mnemonic in ['bl', 'blr', 'br']:
+        elif mnemonic in ('bl', 'blr', 'br'):
             if num_operands >= 1 and mnemonic != 'bl':
                 target_op = operands[0].lower()
                 if not target_op.startswith('#') and not target_op.isdigit():
                     target_regs = extract_regs_from_operand(target_op, sorted_arch_regs)
                     regs_read.update(target_regs)
-        elif mnemonic in ['ret']:
+        elif mnemonic in ('ret', 'eret'):
             pass
-        elif mnemonic in ['and', 'orr', 'eor', 'bic', 'tst']:
+        elif mnemonic in ('and', 'orr', 'eor', 'bic', 'tst'):
             if num_operands >= 2:
                 dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
@@ -362,7 +375,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 if num_operands >= 3:
                     src2_regs = extract_regs_from_operand(operands[2].lower(), sorted_arch_regs)
                     regs_read.update(src2_regs)
-        elif mnemonic in ['lsl', 'lsr', 'asr', 'ror', 'uxtw', 'sxtw', 'sxtx', 'uxtb', 'uxth', 'sxtb', 'sxth']:
+        elif mnemonic in ('lsl', 'lsr', 'asr', 'ror', 'uxtw', 'sxtw', 'sxtx', 'uxtb', 'uxth', 'sxtb', 'sxth'):
             if num_operands >= 2:
                 dst_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 src1_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
@@ -378,7 +391,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src_regs)
-                if mnemonic not in ['mov', 'movzx', 'movsx', 'movsxd', 'lea'] and not mnemonic.startswith('cmov'):
+                if mnemonic not in ('mov', 'movzx', 'movsx', 'movsxd', 'lea') and not mnemonic.startswith('cmov'):
                     regs_read.update(dst_regs)
         elif mnemonic in READ_WRITE_BOTH_OPS_INST:
             if num_operands >= 2:
@@ -395,18 +408,18 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 src_regs = extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src_regs)
-                if mnemonic not in ['bsf', 'bsr', 'lzcnt', 'tzcnt', 'popcnt']:
+                if mnemonic not in ('bsf', 'bsr', 'lzcnt', 'tzcnt', 'popcnt'):
                     regs_read.update(dst_regs)
         elif mnemonic in READ_WRITE_ONE_OP_INST:
             if num_operands >= 1:
                 op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
                 regs_read.update(op_regs)
                 regs_written.update(op_regs)
-        elif mnemonic in ['cmp', 'test']:
+        elif mnemonic in ('cmp', 'test'):
             if num_operands >= 2:
                 regs_read.update(extract_regs_from_operand(operands[0].lower(), sorted_arch_regs))
                 regs_read.update(extract_regs_from_operand(operands[1].lower(), sorted_arch_regs))
-        elif mnemonic in ['push', 'pop']:
+        elif mnemonic in ('push', 'pop'):
             is_64bit = "64" in arch_target
             stack_reg = 'rsp' if is_64bit else 'esp'
             regs_read.add(stack_reg)
@@ -448,7 +461,7 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
                 regs_written.update(op1_regs)
                 regs_read.update(op2_regs)
                 regs_written.update(op2_regs)
-        if mnemonic in ['mul', 'imul', 'div', 'idiv'] and num_operands == 1:
+        if mnemonic in ('mul', 'imul', 'div', 'idiv') and num_operands == 1:
             op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
             regs_read.update(op_regs)
 
@@ -456,6 +469,15 @@ def _extract_register_usage(instr_assembly, parsed_obj=None, arch_target="", sor
 
 def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_addresses, parsed_obj=None, arch_target=""):
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
+    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
+    if is_aarch64:
+        CALL_INST = ARM64_CALL_INST
+        UNCONDITIONAL_JMP_INST = ARM64_UNCONDITIONAL_JMP_INST
+        RET_INST = ARM64_RET_INST
+    else:
+        CALL_INST = X86_CALL_INST
+        UNCONDITIONAL_JMP_INST = X86_UNCONDITIONAL_JMP_INST
+        RET_INST = X86_RET_INST
     instruction_mnemonics = []
     instruction_metrics = {
         "call_count": 0,
@@ -502,7 +524,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
             if sreg_operand and sreg_operand in _SREG_TO_CATEGORY_MAP:
                 sreg_interactions.add(_SREG_TO_CATEGORY_MAP[sreg_operand])
         instruction_mnemonics.append(mnemonic)
-        if mnemonic in ('call'):
+        if mnemonic in CALL_INST:
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
@@ -515,36 +537,27 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
                             has_loop = True
                     except ValueError:
                         continue
+        elif mnemonic in UNCONDITIONAL_JMP_INST:
+            instruction_metrics["jump_count"] += 1
         elif mnemonic == 'xor':
             instruction_metrics["xor_count"] += 1
         elif mnemonic in SHIFT_INST:
             instruction_metrics["shift_count"] += 1
         elif mnemonic in ARITH_INST:
             instruction_metrics["arith_count"] += 1
-        elif mnemonic == 'ret':
+        elif mnemonic in RET_INST:
             instruction_metrics["ret_count"] += 1
-        elif mnemonic in ['jmp', 'jmpq', 'jmpl']:
-            instruction_metrics["jump_count"] += 1
-        if instr_assembly.startswith(('call ', 'jmp ')):
-            parts = instr_assembly.split(None, 1)
-            if len(parts) > 1:
-                operand = parts[1].lower().strip()
-                if operand.startswith('[') and operand.endswith(']'):
-                    has_indirect_call = True
-                elif any(operand.startswith(reg) for reg in sorted_arch_regs):
-                    if operand.isalnum() or '_' in operand:
-                         has_indirect_call = True
         # Check for ARM64 indirect calls and jumps
-        elif instr_assembly.startswith(('bl ', 'blr ', 'br ')):
-            parts = instr_assembly.split(None, 1)
+        if mnemonic in (CALL_INST | UNCONDITIONAL_JMP_INST):
+            is_indirect = False
             if len(parts) > 1:
                 operand = parts[1].lower().strip()
-            if any(operand.startswith(reg) for reg in sorted_arch_regs):
+                if any(operand.startswith(reg) for reg in sorted_arch_regs) and (operand.isalnum() or '_' in operand):
+                    is_indirect = True
+                elif '[' in operand and ']' in operand:
+                    is_indirect = True
+            if is_indirect:
                 has_indirect_call = True
-            elif '[' in operand and ']' in operand:
-                has_indirect_call = True
-            elif operand.startswith('#') or operand.startswith(('+', '-')) or operand.startswith('0x'):
-                instruction_metrics["call_count"] += 1
         regs_read, regs_written = _extract_register_usage(instr_assembly, parsed_obj, arch_target, sorted_arch_regs)
         all_instr_regs = set(regs_read) | set(regs_written)
         is_simd_fpu = False
@@ -583,7 +596,7 @@ def _analyze_instructions(instr_list, func_addr, next_func_addr_in_sec, instr_ad
 def _build_addr_to_name_map(metadata):
     """Builds a lookup map from address (int) to name from metadata functions."""
     addr_to_name_map = {}
-    for func_list_key in ["functions", "ctor_functions", "exception_functions", "unwind_functions", "exports", "imports", "symtab_symbols", "dynamic_symbols"]:
+    for func_list_key in ("functions", "ctor_functions", "exception_functions", "unwind_functions", "exports", "imports", "symtab_symbols", "dynamic_symbols"):
         for func_entry in metadata.get(func_list_key, []):
             addr_str = func_entry.get("address", "")
             name = func_entry.get("name", "")
@@ -634,7 +647,18 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
 def _classify_function(instruction_metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call):
     """Classifies the function based on metrics and other flags."""
     function_type = ""
-    if instruction_metrics["jump_count"] > 0 and instruction_count <= 5 and all(mnem in ['jmp', 'push', 'sub'] for mnem in [i.split(None, 1)[0].lower() for i in plain_assembly_text.split('\n') if i.strip()]):
+    if (
+        instruction_metrics["jump_count"] > 0
+        and instruction_count <= 5
+        and all(
+            mnem in ("jmp", "push", "sub")
+            for mnem in [
+                i.split(None, 1)[0].lower()
+                for i in plain_assembly_text.split("\n")
+                if i.strip()
+            ]
+        )
+    ):
         function_type = "PLT_Thunk"
     elif instruction_count == 1 and instruction_metrics["ret_count"] == 1:
         function_type = "Simple_Return"
