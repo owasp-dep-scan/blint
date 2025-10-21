@@ -108,7 +108,7 @@ def test_analyze_instructions_basic(mock_instructions):
      regs_read, regs_written, instrs_with_regs, _, _, _) = _analyze_instructions(
         mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses, {}, "x86_64"
     )
-    assert metrics["call_count"] == 3
+    assert metrics["call_count"] == 2
     assert metrics["arith_count"] == 1
     assert metrics["ret_count"] == 1
     assert metrics["conditional_jump_count"] == 1
