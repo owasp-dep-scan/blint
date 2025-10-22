@@ -653,6 +653,8 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                 for entry in archive:
                     # This workarounds a bug in ar that returns multiple names
                     file_name = entry.name.split("\n")[0].removesuffix("/")
+                    if os.path.sep in file_name:
+                        file_name = file_name.rsplit(os.path.sep, 1)[-1]
                     afile = os.path.join(to_dir, file_name)
                     with open(afile, "wb") as output:
                         output.write(archive.open(entry, "rb").read())
