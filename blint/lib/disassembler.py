@@ -715,6 +715,8 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
         arch_target = machine_type
     if arch_target == "arm64" or (metadata.get("binary_type", "") == "MachO" and not arch_target):
         arch_target = "aarch64"
+    if arch_target == "riscv":
+        arch_target = "riscv64"
     if not arch_target:
         arch_target = "x86_64"
     try:
@@ -797,8 +799,8 @@ def disassemble_functions(parsed_obj, metadata, arch_target="", cpu="", features
                 instruction_hash = hashlib.sha256(joined_mnemonics.encode('utf-8')).hexdigest()
                 has_system_call = any(syscall_pattern in lower_assembly for syscall_pattern in SYSCALL_INDICATORS)
                 has_security_feature = any(feature_pattern in lower_assembly for feature_pattern in SECURITY_INDICATORS)
-                has_crypto_call = any(indicator in lower_assembly for indicator in CRYPTO_INDICATORS)
-                has_gpu_call = any(indicator in lower_assembly for indicator in GPU_INDICATORS)
+                has_crypto_call = any(f"{indicator} " in lower_assembly for indicator in CRYPTO_INDICATORS if len(indicator) > 3)
+                has_gpu_call = any(f"{indicator} " in lower_assembly for indicator in GPU_INDICATORS if len(indicator) > 3)
                 function_type = _classify_function(instruction_metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
                 disassembly_results[f"{func_addr_va_hex}::{func_name}"] = {
                     "name": func_name,
