@@ -394,6 +394,11 @@ def process_pe_resources(parsed_obj):
                 for e in lc_item.entries:
                     version_metadata[e.key] = e.value
     try:
+        version_info_dict = {}
+        if version_info:
+            for k in ("file_info", "key", "type"):
+                if hasattr(version_info, k):
+                    version_info_dict[k] = re.sub('\s+', ' ', str(getattr(version_info, k)))
         resources = {
             "has_accelerator": rm.has_accelerator,
             "has_dialogs": rm.has_dialogs,
@@ -407,7 +412,7 @@ def process_pe_resources(parsed_obj):
                 if rm.has_manifest
                 else None
             ),
-            "version_info": str(rm.version) if rm.has_version else None,
+            "version_info": version_info_dict,
             "html": rm.html if rm.has_html else None,
         }
         if version_metadata:
