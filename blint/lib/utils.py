@@ -660,7 +660,8 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                         output.write(archive.open(entry, "rb").read())
                         files_list.append(afile)
         except (ArchiveError, ValueError) as e:
-            LOG.warning(f"Failed to extract {ar_file}: {e}")
+            if e.args and "Unexpected magic" not in e.args[0]:
+                LOG.warning(f"Failed to extract {ar_file}: {e}")
     return files_list
 
 

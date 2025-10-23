@@ -398,7 +398,7 @@ def process_pe_resources(parsed_obj):
         if version_info:
             for k in ("file_info", "key", "type"):
                 if hasattr(version_info, k):
-                    version_info_dict[k] = re.sub('\s+', ' ', str(getattr(version_info, k)))
+                    version_info_dict[k] = re.sub('\s+', ' ', str(getattr(version_info, k))).strip()
         resources = {
             "has_accelerator": rm.has_accelerator,
             "has_dialogs": rm.has_dialogs,
