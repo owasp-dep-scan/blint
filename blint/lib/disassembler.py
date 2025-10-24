@@ -1034,7 +1034,7 @@ def disassemble_functions(
             ):
                 code_segment = seg
                 break
-        if code_segment:
+        if code_segment and all_func_addrs_sorted:
             min_func_addr = all_func_addrs_sorted[0]
             if code_segment.virtual_address != min_func_addr:
                 base_delta = code_segment.virtual_address - min_func_addr
@@ -1084,14 +1084,18 @@ def disassemble_functions(
             rebased_bytes_mv = parsed_obj.get_content_from_virtual_address(
                 lief_lookup_va, size_to_disasm
             )
-        except lief.lief_errors:
+            if isinstance(rebased_bytes_mv, lief.lief_errors):
+                rebased_bytes_mv = None
+        except Exception:
             pass
         original_bytes_mv = None
         try:
             original_bytes_mv = parsed_obj.get_content_from_virtual_address(
                 func_addr_va, size_to_disasm
             )
-        except lief.lief_errors:
+            if isinstance(original_bytes_mv, lief.lief_errors):
+                original_bytes_mv = None
+        except Exception:
             pass
         if not rebased_bytes_mv and not original_bytes_mv:
             LOG.debug(
