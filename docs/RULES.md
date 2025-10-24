@@ -6,35 +6,35 @@
 
 A custom rules file is a YAML document with the following top-level keys:
 
-*   `text` (Optional): A human-readable description of the review group.
-*   `group`: Specifies the category of the rules. Valid groups are:
-    *   `METHOD_REVIEWS`: Reviews symbols found in the main symbol table or function lists.
-    *   `EXE_REVIEWS`: Reviews symbols (often used for general executable characteristics).
-    *   `SYMBOL_REVIEWS`: Reviews dynamic symbols (e.g., imported symbols in PE, ELF, MachO).
-    *   `IMPORT_REVIEWS`: Reviews imported library names or function names (e.g., from PE imports, ELF NEEDED entries).
-    *   `ENTRIES_REVIEWS`: Reviews dynamic entries (e.g., ELF NEEDED entries).
-    *   `FUNCTION_REVIEWS`: Reviews the `disassembled_functions` metadata generated when using `--disassemble`.
-*   `exe_type`: A list of executable types this group applies to. Common types include `PE32`, `PE64`, `ELF`, `MachO`, `dotnetbinary`, `genericbinary`. You can use a single string if it applies to only one type.
-*   `binary_type` (Optional): An additional filter based on the binary format (e.g., `MachO`, `ELF`, `PE`).
-*   `rules`: A list of individual rule definitions.
+- `text` (Optional): A human-readable description of the review group.
+- `group`: Specifies the category of the rules. Valid groups are:
+  - `METHOD_REVIEWS`: Reviews symbols found in the main symbol table or function lists.
+  - `EXE_REVIEWS`: Reviews symbols (often used for general executable characteristics).
+  - `SYMBOL_REVIEWS`: Reviews dynamic symbols (e.g., imported symbols in PE, ELF, MachO).
+  - `IMPORT_REVIEWS`: Reviews imported library names or function names (e.g., from PE imports, ELF NEEDED entries).
+  - `ENTRIES_REVIEWS`: Reviews dynamic entries (e.g., ELF NEEDED entries).
+  - `FUNCTION_REVIEWS`: Reviews the `disassembled_functions` metadata generated when using `--disassemble`.
+- `exe_type`: A list of executable types this group applies to. Common types include `PE32`, `PE64`, `ELF`, `MachO`, `dotnetbinary`, `genericbinary`. You can use a single string if it applies to only one type.
+- `binary_type` (Optional): An additional filter based on the binary format (e.g., `MachO`, `ELF`, `PE`).
+- `rules`: A list of individual rule definitions.
 
 ## Rule Definition Structure
 
 Each rule within the `rules` list is a dictionary containing the following keys:
 
-*   `id` (Required): A unique identifier string for the rule. This ID is used in the output report.
-*   `title` (Required): A short, descriptive title for the rule.
-*   `summary` (Required): A brief summary of what the rule detects.
-*   `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
-*   `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. If any pattern matches, the rule triggers.
-*   `check_type` (Required for `FUNCTION_REVIEWS`): Specifies how the rule evaluates the `disassembled_functions` data. Valid types are:
-    *   `function_flag`: Checks if a specific boolean field within the function's metadata is `true`.
-    *   `function_metric`: Compares a numerical field within the function's metadata (e.g., `instruction_metrics`) against a threshold using an operator.
-    *   `function_analysis`: Requires custom logic within the `blint` codebase to evaluate the function's metadata (e.g., `assembly`, `instruction_metrics`, `regs_read`, etc.) based on complex criteria.
-*   `check_field` (Required for `function_flag` and `function_metric`): The path to the field within the `disassembled_functions` dictionary for the function being analyzed (e.g., `has_system_call`, `instruction_metrics.xor_count`).
-*   `operator` (Required for `function_metric`): The comparison operator to use (e.g., `>`, `>=`, `<`, `<=`, `==`, `!=`).
-*   `threshold` (Required for `function_metric`): The numerical value to compare the `check_field` against using the `operator`.
-*   `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`). This might influence reporting or filtering.
+- `id` (Required): A unique identifier string for the rule. This ID is used in the output report.
+- `title` (Required): A short, descriptive title for the rule.
+- `summary` (Required): A brief summary of what the rule detects.
+- `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
+- `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. If any pattern matches, the rule triggers.
+- `check_type` (Required for `FUNCTION_REVIEWS`): Specifies how the rule evaluates the `disassembled_functions` data. Valid types are:
+  - `function_flag`: Checks if a specific boolean field within the function's metadata is `true`.
+  - `function_metric`: Compares a numerical field within the function's metadata (e.g., `instruction_metrics`) against a threshold using an operator.
+  - `function_analysis`: Requires custom logic within the `blint` codebase to evaluate the function's metadata (e.g., `assembly`, `instruction_metrics`, `regs_read`, etc.) based on complex criteria.
+- `check_field` (Required for `function_flag` and `function_metric`): The path to the field within the `disassembled_functions` dictionary for the function being analyzed (e.g., `has_system_call`, `instruction_metrics.xor_count`).
+- `operator` (Required for `function_metric`): The comparison operator to use (e.g., `>`, `>=`, `<`, `<=`, `==`, `!=`).
+- `threshold` (Required for `function_metric`): The numerical value to compare the `check_field` against using the `operator`.
+- `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`). This might influence reporting or filtering.
 
 ## Sample Rules
 
@@ -220,4 +220,4 @@ To use your custom rules:
     blint --disassemble --custom-rules-dir ./my_rules/ /path/to/binary
     ```
 
-`blint` will load the rules from the specified directory and apply them during the analysis, reporting matches alongside its default checks. Rules in the custom directory are loaded *after* the default rules, so they will be applied to the analysis process.
+`blint` will load the rules from the specified directory and apply them during the analysis, reporting matches alongside its default checks. Rules in the custom directory are loaded _after_ the default rules, so they will be applied to the analysis process.

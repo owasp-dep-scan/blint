@@ -15,7 +15,7 @@ The `disassembled_functions` attribute is an optional output of the `blint` bina
 The `disassembled_functions` attribute is a dictionary where each key is a unique string identifying the function by its virtual address and name, in the format "0xADDRESS::FUNCTION_NAME" (e.g., "0x140012345::simple_add"). Using both address and name prevents collisions in cases where multiple functions might share the same name (e.g., in different modules or due to symbol stripping). The value for each key is another dictionary containing the following fields:
 
 | Field Name                    | Type               | Description                                                                                                                                                                                                                                                                                        |
-|:------------------------------|:-------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| :---------------------------- | :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
 | `name`                        | String             | The name of the function.                                                                                                                                                                                                                                                                          |
 | `address`                     | String             | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345").                                                                                                                                                                                                             |
 | `assembly`                    | String             | The full disassembled code of the function, with instructions separated by newlines.                                                                                                                                                                                                               |
@@ -35,8 +35,8 @@ The `disassembled_functions` attribute is a dictionary where each key is a uniqu
 | `used_simd_reg_types`         | List of Strings    | A list of SIMD register types such as FPU, MMX, SSE/AVX etc.                                                                                                                                                                                                                                       |
 | `instructions_with_registers` | List of Dictionary | A detailed list providing register usage information for _each individual instruction_ within the function.                                                                                                                                                                                        |
 | `function_type`               | String             | A classification of the function based on heuristics. Possible values include: "PLT_Thunk", "Simple_Return", "Has_Syscalls", "Has_Indirect_Calls", or "Has_Conditional_Jumps". If a function doesn't fit these specific categories but is not a simple return, this field will be an empty string. |
-| `proprietary_instructions`    | List of Strings    | (Apple Silicon Only) A list of categories for proprietary instructions found (e.g., "GuardedMode", "AMX"). This indicates the use of non-standard hardware features.                                                                                                                                                                                                                   |
-| `sreg_interactions`           | List of Strings    | (Apple Silicon Only) A list of categories for interactions with proprietary System Registers (e.g., "SPRR_CONTROL", "PAC_KEYS"). This signals manipulation of low-level security and hardware configuration.                                                                                                                                                                                                                |                                                                                                                                                                                                                              |
+| `proprietary_instructions`    | List of Strings    | (Apple Silicon Only) A list of categories for proprietary instructions found (e.g., "GuardedMode", "AMX"). This indicates the use of non-standard hardware features.                                                                                                                               |
+| `sreg_interactions`           | List of Strings    | (Apple Silicon Only) A list of categories for interactions with proprietary System Registers (e.g., "SPRR_CONTROL", "PAC_KEYS"). This signals manipulation of low-level security and hardware configuration.                                                                                       |     |
 
 ### `instruction_metrics` Sub-structure
 
@@ -78,7 +78,7 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 - **Memory Operands**: Instructions accessing memory via addresses calculated from registers (e.g., `mov rax, [rbx + rcx*2]`) indicate that `rbx` and `rcx` are read (used for address calculation). The destination `rax` is written.
 - **Limitations**: This analysis is based on parsing the assembly text string. It provides a good approximation for common instructions but might be inaccurate for highly complex or obfuscated code, or for instructions not explicitly handled in the parsing logic.
 
------
+---
 
 ## Use Cases
 
@@ -94,27 +94,11 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
     - **Track Data Flow:** By examining `instructions_with_registers`, you can trace how data moves through registers within a function. For example, seeing `rax` written by one instruction and then read by a subsequent one.
     - **Detect Register Preservation:** Check if a function modifies callee-saved registers (like `rbx`, `rbp`, `r12-r15` on x64) without restoring them, which might violate calling conventions or indicate specific behavior.
     - **Spot Unusual Register Patterns:** Functions that read or write an unusually large number of registers might be complex, perform context switching, or manipulate state extensively.
-9. Analyzing Proprietary Hardware Features (Apple Silicon)
+9.  Analyzing Proprietary Hardware Features (Apple Silicon)
 
-The proprietary_instructions and sreg_interactions fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS.
-    - **Detecting Advanced Security Hardening:**
-        - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features.
-        - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL".
-        - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components.
-    - **Identifying Anti-Debugging and Anti-Emulation:**
-        - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments.
-        - blint Findings: The sreg_interactions list contains "PERF_COUNTERS".
-        - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators.
-    - **Finding Performance-Critical Code:**
-        - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks.
-        - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor).
-        - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications.
-    - **Locating Kernel-Level Pointer Authentication Logic:**
-        - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack.
-        - blint Findings: The sreg_interactions list contains "PAC_KEYS".
-        - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
+The proprietary_instructions and sreg_interactions fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS. - **Detecting Advanced Security Hardening:** - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features. - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL". - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components. - **Identifying Anti-Debugging and Anti-Emulation:** - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments. - blint Findings: The sreg_interactions list contains "PERF_COUNTERS". - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators. - **Finding Performance-Critical Code:** - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks. - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor). - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications. - **Locating Kernel-Level Pointer Authentication Logic:** - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack. - blint Findings: The sreg_interactions list contains "PAC_KEYS". - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
 
-------
+---
 
 ## Examples
 
@@ -193,7 +177,6 @@ simple_add:
     - `pop rbp`: Reads `rbp` (from stack, implicitly using `rsp`), Writes `rsp` (stack pointer incremented).
     - `ret`: Typically doesn't directly read/write general-purpose registers listed here (though it implicitly uses `rsp` to get the return address and `rip` to set the next instruction).
 
-
 Example 2: Analyzing an Apple Silicon Security Function
 
 Consider a hypothetical function on macOS that configures memory permissions.
@@ -241,14 +224,30 @@ Corresponding `disassembled_functions` attribute:
 1. sreg_interactions: The analysis detects that the code reads (mrs) and writes (msr) to the s3_6_c15_c1_0 system register. It looks this up in its internal map and correctly identifies it as a control register for the SPRR hardware feature, adding "SPRR_CONTROL" to the list.
 2. Analyst Conclusion: An analyst can immediately conclude that this function is not a typical application function but is instead part of a low-level system component responsible for configuring hardware memory security. This allows them to prioritize it for further investigation.
 
-------
+---
 
-## Function Boundary Detection
+## Disassembly Approach: Strengths and Limitations
 
-The disassembler determines the end of a function using a "linear sweep" heuristic. Disassembly begins at the function's entry point and stops when it encounters a terminating instruction (like ret or an unconditional jmp) or when it reaches the address of the next known function in the same section.
+blint's disassembly engine is designed for resilience, especially when analyzing stripped firmware (extracted using [binwalk](https://github.com/ReFirmLabs/binwalk)) and other non-standard binaries.
 
-### Implications:
+```
+[ Get Function Address & Size from Metadata ]
+                |
+                V
+ [ Fetch Bytes (Dual-Strategy) ]
+  /                           \
+[1. Manual Segment Lookup]   [2. LIEF VA-to-Offset] --> (Whichever succeeds first)
+                |
+                V
+ [ Disassembly Heuristic ]
+  /         |          \
+[ MIPS32? ] [ MIPS16? ] [ microMIPS? ] --> (For each mode, also try small offsets 0-3)
+                |
+                V
+ [ SUCCESS ] -> [ Analyze Instructions & Generate Metrics ]
+```
 
-- For most compiler-generated functions, this approach is highly accurate.
-- In functions with multiple ret paths (e.g., an early error-checking exit), the disassembly may be truncated at the first ret it finds.
-- This method may not correctly handle hand-crafted assembly with unusual control flow, such as functions that fall through into one another without an explicit jmp or ret.
+- _Strength:_ Hybrid Byte Fetching. blint first attempts a manual, segment-based calculation to find a function's bytes, which is highly effective for firmware where symbol addresses may not align with LIEF's standard view. If that fails, it falls back to LIEF's canonical virtual_address_to_offset method, which correctly handles standard ELF files. This hybrid approach maximizes the number of functions found.
+- _Strength:_ Multi-Mode Disassembly. For MIPS binaries, blint doesn't just assume one instruction set. It intelligently attempts to disassemble a function as MIPS32, then MIPS16, and finally microMIPS. This is crucial for correctly analyzing binaries that mix standard and compressed instruction sets.
+- _Strength:_ Offset Probing. blint also probes small offsets (0-3 bytes) from the reported function address. This handles common cases where a symbol points to a data word or is slightly misaligned from the first true instruction.
+- _Limitation:_ Heuristic Register Analysis. The regs_read and regs_written attributes are generated by a pattern-matching heuristic, not a full data-flow analysis. They provide a good overview but may be inaccurate for complex instructions or unusual addressing modes. They are best used for initial triage, not for precise exploit development.
