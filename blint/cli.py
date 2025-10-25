@@ -138,7 +138,7 @@ def build_parser():
         "-o",
         "--output-file",
         dest="sbom_output",
-        help="SBOM output file. Defaults to bom-post-build.cdx.json in current directory.",
+        help="SBOM output file. Defaults to sbom-binary-postbuild.cdx.json in current directory.",
     )
     sbom_parser.add_argument(
         "--deep",
