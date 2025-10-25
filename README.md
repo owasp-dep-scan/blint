@@ -40,10 +40,6 @@ For **disassembly support**, which enables instruction-level analysis of functio
 pip install blint[extended]
 ```
 
-### Standalone Executables
-
-Single-file executables that do not require Python are available from the [blint releases page](https://github.com/OWASP-dep-scan/blint/releases). The macOS `.pkg` file is signed with a valid Apple Developer ID.
-
 ## Quick Start
 
 Analyze a binary and save the reports to the `/tmp/blint` directory:
