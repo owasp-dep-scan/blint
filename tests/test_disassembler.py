@@ -289,3 +289,60 @@ def test_extract_register_usage_bsf():
     regs_read, regs_written = _extract_register_usage(instr_asm)
     assert set(regs_read) == {"rsi"}
     assert set(regs_written) == {"eax"}
+
+def test_extract_register_usage_mips_addiu():
+    instr_asm = "addiu $sp, $sp, -32"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$sp"}
+    assert set(regs_written) == {"$sp"}
+
+def test_extract_register_usage_mips_sw():
+    instr_asm = "sw $ra, 28($sp)"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$ra", "$sp"}
+    assert set(regs_written) == set()
+
+def test_extract_register_usage_mips_lw():
+    instr_asm = "lw $gp, 24($sp)"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$sp"}
+    assert set(regs_written) == {"$gp"}
+
+def test_extract_register_usage_mips_move():
+    instr_asm = "move $t9, $ra"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$ra"}
+    assert set(regs_written) == {"$t9"}
+
+def test_extract_register_usage_mips_3_operand():
+    instr_asm = "addu $v0, $t0, $t1"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$t0", "$t1"}
+    assert set(regs_written) == {"$v0"}
+
+def test_extract_register_usage_mips_branch():
+    instr_asm = "bne $a0, $a1, 0x1234"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$a0", "$a1"}
+    assert set(regs_written) == set()
+
+def test_extract_register_usage_mips_implicit():
+    instr_asm = "jal 0x400000"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == set()
+    assert set(regs_written) == {"$ra"}
+
+    instr_asm = "jr $ra"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$ra"}
+    assert set(regs_written) == set()
+
+    instr_asm = "mflo $v0"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert "lo" in regs_read
+    assert "$v0" in regs_written
+
+    instr_asm = "mult $a0, $a1"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
+    assert set(regs_read) == {"$a0", "$a1"}
+    assert set(regs_written) == {"hi", "lo"}

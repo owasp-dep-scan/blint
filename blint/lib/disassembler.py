@@ -10,6 +10,16 @@ from blint.config import (
     IMPLICIT_REGS_X86,
     IMPLICIT_REGS_X64,
     IMPLICIT_REGS_ARM64,
+    IMPLICIT_REGS_MIPS,
+    SORTED_ALL_REGS_MIPS,
+    MIPS_ARITH_LOGIC_3_OP,
+    MIPS_ARITH_LOGIC_2_OP_IMM,
+    MIPS_SHIFT_3_OP,
+    MIPS_SHIFT_2_OP_IMM,
+    MIPS_LOAD_STORE,
+    MIPS_MOVE,
+    MIPS_BRANCH_2_OP,
+    MIPS_MULT_DIV,
     APPLE_PROPRIETARY_INSTRUCTION_RANGES,
     APPLE_PROPRIETARY_SREGS,
 )
@@ -26,7 +36,7 @@ FUNCTION_SYMBOLS = (
     "dynamic_symbols",
 )
 
-OPERAND_DELIMITERS_PATTERN = re.compile(r"[^a-zA-Z0-9_]+")
+OPERAND_DELIMITERS_PATTERN = re.compile(r"[^a-zA-Z0-9_$]+")
 
 ARITH_INST = [
     "add",
@@ -326,18 +336,22 @@ except ImportError:
 
 def get_arch_reg_set(arch_target):
     """Returns the appropriate set of registers based on the architecture."""
-    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
-    if is_aarch64:
+    lower_arch = arch_target.lower()
+    if "aarch64" in lower_arch or "arm64" in lower_arch:
         return SORTED_ARM64_ALL_REGS
+    if "mips" in lower_arch:
+        return SORTED_ALL_REGS_MIPS
     else:
         return SORTED_ALL_REGS_X86
-
 def _get_implicit_regs_map(arch_target):
     """Selects the appropriate implicit registers map based on architecture."""
-    if "64" in arch_target and "aarch64" not in arch_target.lower():
+    lower_arch = arch_target.lower()
+    if "64" in lower_arch and "aarch64" not in lower_arch:
         return IMPLICIT_REGS_X64
-    elif "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
+    if "aarch64" in lower_arch or "arm64" in lower_arch:
         return IMPLICIT_REGS_ARM64
+    if "mips" in lower_arch:
+        return IMPLICIT_REGS_MIPS
     return IMPLICIT_REGS_X86
 
 def _find_function_end_index(instr_list):
@@ -407,6 +421,7 @@ def _extract_register_usage(
     if not instr_assembly:
         return sorted(regs_read), sorted(regs_written)
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
+    is_mips = "mips" in arch_target.lower()
     if not sorted_arch_regs:
         sorted_arch_regs = get_arch_reg_set(arch_target)
     first_space_idx = instr_assembly.find(" ")
@@ -599,6 +614,53 @@ def _extract_register_usage(
                         operands[2].lower(), sorted_arch_regs
                     )
                     regs_read.update(src2_regs)
+    elif is_mips:
+        if mnemonic in MIPS_ARITH_LOGIC_3_OP or mnemonic in MIPS_SHIFT_3_OP:
+            if num_operands >= 3:
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[2], sorted_arch_regs))
+        elif mnemonic in MIPS_ARITH_LOGIC_2_OP_IMM or mnemonic in MIPS_SHIFT_2_OP_IMM:
+             if num_operands >= 2:
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+        elif mnemonic in MIPS_LOAD_STORE:
+            if num_operands >= 2:
+                data_reg_op = operands[0]
+                mem_op = operands[1]
+                data_regs = extract_regs_from_operand(data_reg_op, sorted_arch_regs)
+                base_addr_regs = extract_regs_from_operand(mem_op, sorted_arch_regs)
+                if mnemonic.startswith('s'):
+                    regs_read.update(data_regs)
+                    regs_read.update(base_addr_regs)
+                else:
+                    regs_written.update(data_regs)
+                    regs_read.update(base_addr_regs)
+        elif mnemonic in MIPS_BRANCH_2_OP:
+            if num_operands >= 2:
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+        elif mnemonic in MIPS_MOVE:
+             if num_operands >= 2:
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+        elif mnemonic in ("mfhi", "mflo"):
+            if num_operands >= 1:
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+        elif mnemonic in MIPS_MULT_DIV:
+            if num_operands >= 2:
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+        elif mnemonic == 'jr':
+             if num_operands >= 1:
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+        elif mnemonic in ('jalr', 'bal'):
+             if num_operands >= 1:
+                if num_operands == 2:
+                    regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                    regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+                else:
+                    regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
     else:
         if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith("cmov"):
             if num_operands >= 2:
