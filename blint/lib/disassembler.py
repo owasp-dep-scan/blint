@@ -948,6 +948,7 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
     Handles both immediate absolute addresses (0x...) and relative offsets."""
     potential_callees = []
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
+    is_mips = "mips" in arch_target.lower()
     for instr in instr_list:
         instr_assembly = instr.assembly
         parts = instr_assembly.split(None, 1)
@@ -957,6 +958,8 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
         is_direct_call = False
         if is_aarch64 and mnemonic == 'bl':
             is_direct_call = True
+        elif is_mips and mnemonic in {'jal', 'bal'}:
+            is_direct_call = True
         elif not is_aarch64 and mnemonic == 'call':
             is_direct_call = True
         if is_direct_call and len(parts) > 1:
@@ -965,6 +968,8 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
             try:
                 if operand.startswith('0x'):
                     target_addr = int(operand, 16)
+                elif is_mips and operand.isdigit():
+                    target_addr = int(operand)
                 elif operand.startswith('#'):
                     offset = int(operand.lstrip('#'))
                     target_addr = instr.address + offset
@@ -974,7 +979,7 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
             except (ValueError, IndexError):
                 continue
             if target_addr is not None:
-                target_name = addr_to_name_map.get(target_addr)
+                target_name = addr_to_name_map.get(target_addr & ~1) or addr_to_name_map.get(target_addr)
                 if target_name:
                     potential_callees.append(target_name)
     return potential_callees
