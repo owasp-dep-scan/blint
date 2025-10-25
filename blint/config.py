@@ -1621,3 +1621,4 @@ MIPS_LOAD_STORE = {"lb", "lbu", "lh", "lhu", "lw", "lwl", "lwr", "sb", "sh", "sw
 MIPS_MOVE = {"move"}
 MIPS_BRANCH_2_OP = {"beq", "bne", "bgez", "bgtz", "blez", "bltz"}
 MIPS_MULT_DIV = {"mult", "multu", "div", "divu"}
+MIPS_CALL_INST = {"jal", "bal"}
