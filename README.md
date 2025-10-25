@@ -19,8 +19,9 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 
 - **Comprehensive Security Audits:** Automatically checks for common security mitigations like PIE, ASLR, NX, Stack Canaries, and RELRO. Ideal for ensuring your CI/CD pipeline produces hardened binaries.
 - **Software Bill-of-Materials (SBOM) Generation:** Creates CycloneDX SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
-- **Deep Binary Inspection:** Extracts and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
-  - **For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).**
+- **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
+  - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
+  - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
 - **Fuzzing Target Identification:** Suggests interesting functions to target for fuzzing based on common patterns in function names (e.g., `parse`, `decode`, `copy`).
