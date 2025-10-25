@@ -189,7 +189,7 @@ def create_sbom(
     symbols_purl_map: dict,
 ) -> CycloneDX:
     """
-    Creates a Software Bill of Materials (SBOM) with the provided components,
+    Creates a Software Bill-of-Materials (SBOM) with the provided components,
     dependencies, output file, and SBOM object.
 
     Args:
@@ -314,7 +314,7 @@ def process_exe_file(
     use_blintdb: bool = False,
 ) -> list[Component]:
     """
-    Processes an executable file, extracts metadata, and generates a Software Bill of Materials.
+    Processes an executable file, extracts metadata, and generates a Software Bill-of-Materials.
 
     Args:
         dependencies_dict (dict[str, set]): A dictionary of dependencies.
@@ -691,7 +691,7 @@ def process_android_file(
         dependencies_dict (dict[str, set]): Existing dependencies dictionary.
         deep_mode (bool): Flag indicating whether to process in deep mode.
         f (str): File to be processed.
-        sbom (obj): Software Bill of Materials object to be updated.
+        sbom (obj): Software Bill-of-Materials object to be updated.
 
     Returns:
         list: Updated components list after processing.
