@@ -410,7 +410,7 @@ def print_reviews_table(reviews, files):
         if len(files) > 1:
             table.add_row(
                 r.get("id"),
-                r.get("exe_name"),
+                os.path.basename(r.get("exe_name")),
                 r.get("summary"),
                 "\n".join(evidences),
             )

@@ -143,7 +143,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
             )
         for exe in exe_files:
             progress.update(
-                task, description=f"Processing [bold]{exe}[/bold]", advance=1
+                task, description=f"Processing [bold]{os.path.basename(exe)}[/bold]", advance=1
             )
             components += process_exe_file(
                 dependencies_dict,

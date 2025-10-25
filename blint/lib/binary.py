@@ -1,6 +1,7 @@
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
+import os
 import re
 import sys
 import warnings
@@ -15,6 +16,7 @@ from blint.logger import DEBUG, LOG
 from blint.lib.utils import (
     camel_to_snake,
     calculate_entropy,
+    calculate_hashes,
     check_secret,
     cleanup_dict_lief_errors,
     decode_base64,
@@ -191,6 +193,8 @@ def parse_functions(functions):
                         "index": idx,
                         "name": cleaned_name,
                         "address": ADDRESS_FMT.format(f.address).strip(),
+                        "size": f.size,
+                        "flags": str(f.flags_list) if f.flags_list else None,
                     }
                 )
     return func_list
@@ -256,12 +260,16 @@ def parse_symbols(symbols):
             else:
                 symbol_name = demangle_symbolic_name(symbol_name)
             exe_type = guess_exe_type(symbol_name)
+            visibility = ""
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                visibility = enum_to_str(symbol.visibility)
             symbols_list.append(
                 {
                     "name": symbol_name,
                     "type": enum_to_str(symbol.type),
-                    "value": symbol.value,
-                    "visibility": enum_to_str(symbol.visibility),
+                    "value": ADDRESS_FMT.format(symbol.value).strip() if symbol.value > 0 else symbol.value,
+                    "visibility": visibility,
                     "binding": enum_to_str(symbol.binding),
                     "is_imported": is_imported,
                     "is_exported": is_exported,
@@ -270,6 +278,8 @@ def parse_symbols(symbols):
                     "is_static": symbol.is_static,
                     "is_variable": symbol.is_variable,
                     "version": str(symbol_version),
+                    "shndx": symbol.shndx,
+                    "size": symbol.size if symbol.size > 0 else None
                 }
             )
         except (AttributeError, IndexError, TypeError):
@@ -398,7 +408,7 @@ def process_pe_resources(parsed_obj):
         if version_info:
             for k in ("file_info", "key", "type"):
                 if hasattr(version_info, k):
-                    version_info_dict[k] = re.sub('\s+', ' ', str(getattr(version_info, k))).strip()
+                    version_info_dict[k] = re.sub('\\s+', ' ', str(getattr(version_info, k))).strip()
         resources = {
             "has_accelerator": rm.has_accelerator,
             "has_dialogs": rm.has_dialogs,
@@ -540,6 +550,7 @@ def parse_pe_symbols(symbols):
                     {
                         "name": demangle_symbolic_name(symbol.name),
                         "value": symbol.value,
+                        "size": symbol.size,
                         "id": section_nb_str,
                         "base_type": enum_to_str(symbol.base_type),
                         "complex_type": enum_to_str(symbol.complex_type),
@@ -683,6 +694,195 @@ def parse_macho_symbols(symbols):
     return symbols_list, exe_type
 
 
+def construct_llvm_target_tuple(metadata: dict) -> str:
+    """
+    Constructs an LLVM target tuple string from binary metadata.
+    Format: arch-vendor-os-environment
+
+    Args:
+        metadata (dict): The dictionary of parsed binary metadata.
+
+    Returns:
+        str: A string representing the LLVM target tuple.
+    """
+    if metadata.get("is_dotnet"):
+        if metadata.get("exe_type") == "PE32":
+            arch = "i686"
+        else:
+            arch = "x86_64"
+        return f"{arch}-pc-windows-msvc"
+    vendor = "unknown"
+    os = "unknown"
+    env = ""
+    machine_type = (metadata.get("machine_type") or metadata.get("cpu_type") or "").upper()
+    endianness = metadata.get("endianness", "LSB").upper()
+    arch_map = {
+        "I386": "x86",
+        "X86_64": "x86_64",
+        "AMD64": "x86_64",
+        "ARM": "arm",
+        "AARCH64": "aarch64",
+        "ARM64": "aarch64",
+        "MIPS": "mips",
+        "MIPS_RS3_LE": "mipsel",
+        "PPC": "ppc",
+        "POWERPC": "ppc",
+        "PPC64": "ppc64",
+        "POWERPC64": "ppc64",
+        "RISCV": "riscv64",
+        "SYSTEMZ": "systemz",
+        "S390": "systemz",
+        "SPARCV9": "sparcv9",
+        "HEXAGON": "hexagon",
+    }
+    arch = arch_map.get(machine_type, "unknown")
+    if "mips" in arch and endianness == "LSB":
+        arch = arch.replace("mips", "mipsel")
+    elif "ppc" in arch and endianness == "LSB":
+        arch += "le"
+    elif "aarch64" in arch and endianness == "MSB":
+        arch = "aarch64_be"
+    elif "arm" in arch and endianness == "MSB":
+        arch = "armeb"
+    binary_type = metadata.get("binary_type")
+    if binary_type == "PE":
+        os = "win32"
+        vendor = "pc"
+    elif binary_type == "MachO":
+        vendor = "apple"
+        platform = metadata.get("platform", "MACOS").upper()
+        os_map = {
+            "MACOS": "macosx",
+            "IOS": "ios",
+            "TVOS": "tvos",
+            "WATCHOS": "watchos",
+            "BRIDGEOS": "bridgeos",
+            "DRIVERKIT": "driverkit",
+        }
+        os = os_map.get(platform, "darwin")
+    elif binary_type == "ELF":
+        vendor = "unknown"
+        os_abi = metadata.get("identity_os_abi", "LINUX").upper()
+        os_map = {
+            "LINUX": "linux",
+            "SYSTEMV": "linux",
+            "FREEBSD": "freebsd",
+            "NETBSD": "netbsd",
+            "OPENBSD": "openbsd",
+            "SOLARIS": "solaris",
+        }
+        os = os_map.get(os_abi, "linux")
+    if metadata.get("is_targeting_android"):
+        os = "linux"
+        env = "android"
+    elif os == "win32":
+        env = "msvc"
+    elif os == "linux":
+        if metadata.get("is_musl"):
+            env = "musl"
+            interpreter = metadata.get("interpreter", "")
+            if "-sf.so" in interpreter:
+                env = "muslsf"
+            elif arch == "arm":
+                if "hard" in metadata.get("processor_flag", "").lower() or "-hf.so" in interpreter:
+                    env = "musleabihf"
+                else:
+                    env = "musleabi"
+            elif arch == "mips64" or arch == "mips64el":
+                env = "muslabi64"
+        else:
+            env = "gnu"
+            if arch.startswith("arm") and "hard" in metadata.get("processor_flag", "").lower():
+                env = "gnueabihf"
+    components = [arch, vendor, os]
+    if env:
+        components.append(env)
+    return "-".join(components)
+
+
+def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> dict:
+    """Constructs a summary of security mitigations."""
+    has_symtab = metadata.get("static", False)
+    properties = {
+        "nx": metadata.get("has_nx", False),
+        "pie": metadata.get("is_pie", False),
+        "relro": metadata.get("relro", "no"),
+        "canary": metadata.get("has_canary", False),
+        "stripped": not has_symtab,
+        "is_signed": bool(metadata.get("signatures")),
+    }
+    if isinstance(parsed_obj, lief.PE.Binary):
+        if dll_chars := metadata.get("dll_characteristics", ""):
+            properties["control_flow_guard"] = "CONTROL_FLOW_GUARD" in dll_chars
+            properties["aslr"] = "DYNAMIC_BASE" in dll_chars
+    return properties
+
+
+def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dict:
+    """Summarizes the binary's composition."""
+    composition = {}
+    dependencies = metadata.get("dynamic_entries", [])
+    if isinstance(parsed_obj, lief.ELF.Binary):
+        composition["linking_type"] = "dynamic" if metadata.get("has_interpreter") else "static"
+    else:
+        composition["linking_type"] = "dynamic" if dependencies else "static"
+    composition["dependency_count"] = len(dependencies)
+    runtimes = set()
+    if metadata.get("is_musl"):
+        runtimes.add("musl")
+    elif "gnu" in metadata.get("llvm_target_tuple", ""):
+        runtimes.add("glibc")
+    if metadata.get("is_dotnet"):
+        runtimes.add("dotnet_runtime")
+    for dep in dependencies:
+        dep_name = dep.get("name", "").lower()
+        if "msvc" in dep_name: runtimes.add("msvcrt")
+        if "libc.so" in dep_name: runtimes.add("glibc")
+        for d in ("libstdc++", "openssl", "curl", "ffmpeg"):
+            if d  in dep_name:
+                runtimes.add("libstdc++")
+    composition["runtime_dependencies"] = sorted(list(runtimes))
+    return composition
+
+
+def standardize_keys(metadata: dict) -> dict:
+    """Standardizes common keys across different binary formats."""
+    if "entrypoint" in metadata:
+        metadata["entry_point"] = metadata["entrypoint"]
+    elif "addressof_entrypoint" in metadata:
+        metadata["entry_point"] = int(metadata["addressof_entrypoint"].replace("0x", ""), 16)
+    if "imagebase" in metadata:
+        metadata["image_base"] = metadata["imagebase"]
+    return metadata
+
+
+def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary):
+    """
+    Adds various derived, high-level attributes to the metadata dictionary.
+    """
+    metadata["hashes"] = calculate_hashes(metadata["file_path"])
+    metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
+    metadata["binary_composition"] = construct_binary_composition(metadata, parsed_obj)
+    build_info = {}
+    if go_formulation := metadata.get("go_formulation"):
+        build_info["language"] = "Go"
+        build_info["go_version"] = go_formulation.get("go_version")
+    elif metadata.get("rust_dependencies"):
+        build_info["language"] = "Rust"
+    elif metadata.get("is_dotnet"):
+        build_info["language"] = ".NET"
+    if "major_linker_version" in metadata:
+        build_info["linker_version"] = f'{metadata["major_linker_version"]}.{metadata["minor_linker_version"]}'
+    if isinstance(parsed_obj, lief.ELF.Binary):
+        build_info["linking_type"] = "dynamic" if parsed_obj.has_interpreter else "static"
+        if parsed_obj.has_section(".comment"):
+            comment_section = parsed_obj.get_section(".comment")
+            build_info["compiler_version"] = comment_section.content.tobytes().decode('ascii', 'ignore').strip('\x00')
+    if build_info:
+        metadata["build_info"] = build_info
+    return metadata
+
+
 def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
@@ -693,6 +893,8 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
     metadata = {"file_path": exe_file}
     try:
         parsed_obj = lief.parse(exe_file)
+        if not parsed_obj:
+            return metadata
         metadata["is_shared_library"] = is_shared_library(parsed_obj)
         # ELF Binary
         if isinstance(parsed_obj, lief.ELF.Binary):
@@ -702,7 +904,10 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata = add_pe_metadata(exe_file, metadata, parsed_obj)
         elif isinstance(parsed_obj, lief.MachO.Binary):
             metadata = add_mach0_metadata(exe_file, metadata, parsed_obj)
+        metadata = standardize_keys(metadata)
         metadata["import_dependencies"] = analyze_import_deps(metadata)
+        metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
+        metadata = add_derived_attributes(metadata, parsed_obj)
         if disassemble:
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
     except (AttributeError, TypeError, ValueError) as e:
@@ -728,10 +933,22 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata = add_elf_header(header, metadata)
     metadata["name"] = exe_file
     metadata["imagebase"] = parsed_obj.imagebase
-    metadata["interpreter"] = parsed_obj.interpreter
+    if parsed_obj.interpreter:
+        metadata["interpreter"] = parsed_obj.interpreter
+        if "mipsel" in parsed_obj.interpreter:
+            metadata["is_mips"] = True
+        if "musl" in parsed_obj.interpreter:
+            metadata["is_musl"] = True
     metadata["is_pie"] = parsed_obj.is_pie
+    metadata["is_targeting_android"] = parsed_obj.is_targeting_android
     metadata["virtual_size"] = parsed_obj.virtual_size
     metadata["has_nx"] = parsed_obj.has_nx
+    metadata["has_interpreter"] = parsed_obj.has_interpreter
+    metadata["has_notes"] = parsed_obj.has_notes
+    metadata["has_overlay"] = parsed_obj.has_overlay
+    metadata["use_gnu_hash"] = parsed_obj.use_gnu_hash
+    metadata["use_sysv_hash"] = parsed_obj.use_sysv_hash
+    metadata["eof_offset"] = parsed_obj.eof_offset
     metadata["relro"] = parse_relro(parsed_obj)
     metadata["exe_type"] = detect_exe_type(parsed_obj, metadata)
     # Canary check
@@ -775,6 +992,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
         metadata["exe_type"] = exe_type
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
+    metadata["dtor_functions"] = parse_functions(parsed_obj.dtor_functions)
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
@@ -805,7 +1023,23 @@ def add_elf_header(header, metadata):
         metadata["machine_type"] = enum_to_str(header.machine_type)
         metadata["object_file_version"] = enum_to_str(header.object_file_version)
         metadata["entrypoint"] = header.entrypoint
-        metadata["processor_flag"] = str(header.processor_flag) + eflags_str
+        for k in (
+            "header_size",
+            "identity_class",
+            "numberof_sections",
+            "numberof_segments",
+            "program_header_offset",
+            "program_header_size",
+            "section_header_offset",
+            "object_type",
+            "section_header_size",
+            "modes_list",
+            "is_32",
+            "is_64",
+        ):
+            if hasattr(header, k):
+                metadata[k] = getattr(header, k)
+        metadata["processor_flag"] = eflags_str
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)}: {e} while parsing elf headers.")
     return metadata
@@ -907,7 +1141,7 @@ def determine_elf_flags(header):
     """
     eflags_str = ""
     if header.machine_type == lief.ELF.ARCH.ARM and hasattr(header, "arm_flags_list"):
-        eflags_str = " - ".join(
+        eflags_str = ", ".join(
             [enum_to_str(s) for s in header.arm_flags_list]
         )
     if header.machine_type in [
@@ -915,15 +1149,15 @@ def determine_elf_flags(header):
         lief.ELF.ARCH.MIPS_RS3_LE,
         lief.ELF.ARCH.MIPS_X,
     ]:
-        eflags_str = " - ".join(
-            [enum_to_str(s) for s in header.mips_flags_list]
+        eflags_str = ", ".join(
+            [enum_to_str(s) for s in header.flags_list]
         )
     if header.machine_type == lief.ELF.ARCH.PPC64:
-        eflags_str = " - ".join(
+        eflags_str = ", ".join(
             [enum_to_str(s) for s in header.ppc64_flags_list]
         )
     if header.machine_type == lief.ELF.ARCH.HEXAGON:
-        eflags_str = " - ".join(
+        eflags_str = ", ".join(
             [enum_to_str(s) for s in header.hexagon_flags_list]
         )
     return eflags_str
@@ -1191,7 +1425,8 @@ def analyze_import_deps(metadata):
 
                 if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
                     dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
-    LOG.debug(f"Generated import dependency graph with {len(dep_graph['dependencies'])} dependencies.")
+    if len(dep_graph['dependencies']):
+        LOG.debug(f"Generated import dependency graph with {len(dep_graph['dependencies'])} dependencies.")
     return dep_graph
 
 
@@ -1291,6 +1526,7 @@ def add_pe_header_data(metadata, parsed_obj):
         try:
             metadata["magic"] = str(dos_header.magic)
             header = parsed_obj.header
+            metadata["machine_type"] = enum_to_str(header.machine)
             metadata["used_bytes_in_the_last_page"] = dos_header.used_bytes_in_last_page
             metadata["file_size_in_pages"] = dos_header.file_size_in_pages
             metadata["num_relocation"] = dos_header.numberof_relocation
@@ -1661,7 +1897,7 @@ def add_mach0_functions(metadata, parsed_obj):
                 "name": symbol["name"],
                 "address": symbol["address"]
             }
-            for idx, symbol in enumerate(s for s in metadata["symtab_symbols"] if s["category"] == lief.MachO.Symbol.CATEGORY.LOCAL) 
+            for idx, symbol in enumerate(s for s in metadata["symtab_symbols"] if s["category"] == lief.MachO.Symbol.CATEGORY.LOCAL)
         ]
 
     if exe_type:

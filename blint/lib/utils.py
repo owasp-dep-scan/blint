@@ -3,6 +3,7 @@ import binascii
 import math
 import os
 import re
+import hashlib
 import shutil
 import string
 import tempfile
@@ -689,3 +690,16 @@ def json_serializer(obj):
 def enum_to_str(enum_obj) -> str:
     """Converts a lief enum object to its string name."""
     return str(enum_obj).rsplit(".", maxsplit=1)[-1]
+
+def calculate_hashes(file_path: str) -> dict:
+    """Calculates MD5, SHA1, and SHA256 hashes for a file."""
+    hashes = {}
+    try:
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+            hashes["md5"] = hashlib.md5(file_bytes).hexdigest()
+            hashes["sha1"] = hashlib.sha1(file_bytes).hexdigest()
+            hashes["sha256"] = hashlib.sha256(file_bytes).hexdigest()
+    except IOError as e:
+        LOG.error(f"Could not read file {file_path} to calculate hashes: {e}")
+    return hashes

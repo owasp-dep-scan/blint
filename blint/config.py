@@ -1587,3 +1587,38 @@ APPLE_PROPRIETARY_SREGS = {
         "S3_5_C15_C1_3",
     },
 }
+
+MIPS_GPR = {f"${i}" for i in range(32)}
+MIPS_ABI_REGS = {
+    "$zero", "$at", "$v0", "$v1", "$a0", "$a1", "$a2", "$a3",
+    "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
+    "$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6", "$s7",
+    "$t8", "$t9", "$k0", "$k1", "$gp", "$sp", "$fp", "$ra"
+}
+MIPS_SPECIAL_REGS = {"lo", "hi", "pc"}
+
+ALL_REGS_MIPS = MIPS_GPR | MIPS_ABI_REGS | MIPS_SPECIAL_REGS
+SORTED_ALL_REGS_MIPS = sorted(ALL_REGS_MIPS, key=len, reverse=True)
+IMPLICIT_REGS_MIPS = {
+    'jal':    {'write': {'$ra'}},
+    'jalr':   {'write': {'$ra'}},
+    'jr':     {'read': {'$ra'}},
+    'syscall':{'read': {'$v0', '$a0', '$a1', '$a2', '$a3'}, 'write': {'$v0', '$v1'}},
+    'mult':   {'write': {'hi', 'lo'}},
+    'multu':  {'write': {'hi', 'lo'}},
+    'div':    {'write': {'hi', 'lo'}},
+    'divu':   {'write': {'hi', 'lo'}},
+    'mfhi':   {'read': {'hi'}},
+    'mflo':   {'read': {'lo'}},
+    'mthi':   {'write': {'hi'}},
+    'mtlo':   {'write': {'lo'}},
+}
+MIPS_ARITH_LOGIC_3_OP = {"add", "addu", "sub", "subu", "and", "or", "xor", "nor", "slt", "sltu"}
+MIPS_ARITH_LOGIC_2_OP_IMM = {"addi", "addiu", "andi", "ori", "xori", "slti", "sltiu"}
+MIPS_SHIFT_3_OP = {"sllv", "srlv", "srav"}
+MIPS_SHIFT_2_OP_IMM = {"sll", "srl", "sra"}
+MIPS_LOAD_STORE = {"lb", "lbu", "lh", "lhu", "lw", "lwl", "lwr", "sb", "sh", "sw", "swl", "swr"}
+MIPS_MOVE = {"move"}
+MIPS_BRANCH_2_OP = {"beq", "bne", "bgez", "bgtz", "blez", "bltz"}
+MIPS_MULT_DIV = {"mult", "multu", "div", "divu"}
+MIPS_CALL_INST = {"jal", "bal"}
