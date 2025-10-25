@@ -94,9 +94,27 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
     - **Track Data Flow:** By examining `instructions_with_registers`, you can trace how data moves through registers within a function. For example, seeing `rax` written by one instruction and then read by a subsequent one.
     - **Detect Register Preservation:** Check if a function modifies callee-saved registers (like `rbx`, `rbp`, `r12-r15` on x64) without restoring them, which might violate calling conventions or indicate specific behavior.
     - **Spot Unusual Register Patterns:** Functions that read or write an unusually large number of registers might be complex, perform context switching, or manipulate state extensively.
-9.  Analyzing Proprietary Hardware Features (Apple Silicon)
+9.  **Analyzing Proprietary Hardware Features (Apple Silicon):**
 
-The proprietary_instructions and sreg_interactions fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS. - **Detecting Advanced Security Hardening:** - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features. - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL". - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components. - **Identifying Anti-Debugging and Anti-Emulation:** - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments. - blint Findings: The sreg_interactions list contains "PERF_COUNTERS". - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators. - **Finding Performance-Critical Code:** - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks. - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor). - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications. - **Locating Kernel-Level Pointer Authentication Logic:** - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack. - blint Findings: The sreg_interactions list contains "PAC_KEYS". - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
+The `proprietary_instructions` and `sreg_interactions` fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS.
+
+- **Detecting Advanced Security Hardening:** 
+    - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features.
+    - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL".
+    - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components.
+
+- **Identifying Anti-Debugging and Anti-Emulation:**
+    - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments.
+    - blint Findings: The sreg_interactions list contains "PERF_COUNTERS". 
+    - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators
+- **Finding Performance-Critical Code:** 
+    - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks.
+    - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor).
+    - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications. 
+- **Locating Kernel-Level Pointer Authentication Logic:** 
+   - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack. 
+   - blint Findings: The sreg_interactions list contains "PAC_KEYS". 
+   - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
 
 ---
 
