@@ -943,6 +943,13 @@ def _classify_function(instruction_metrics, instruction_count, plain_assembly_te
         function_type = "Has_Conditional_Jumps"
     return function_type
 
+def _mem_bytes_len(b):
+    if isinstance(b, list):
+        return len(b)
+    if hasattr(b, "nbytes"):
+        return getattr(b, "nbytes")
+    return None
+
 def _try_disassemble(instance, byte_list, address, inst_count=0):
     """Helper to safely call Nyxstone and handle immediate failures."""
     try:
@@ -1055,14 +1062,14 @@ def disassemble_functions(
         if not func_addr_str:
             continue
         try:
-            func_addr = int(func_addr_str, 16)
+            original_func_addr = int(func_addr_str, 16)
         except ValueError:
             LOG.debug(
                 f"Could not parse address '{func_addr_str}' for function '{func_name}'. Skipping."
             )
             continue
-        original_func_addr = func_addr
-        if is_mips and (func_addr & 1):
+        func_addr = original_func_addr
+        if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
             func_addr = func_addr & ~1
         size_to_disasm = func_entry.get("size")
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
@@ -1078,32 +1085,32 @@ def disassemble_functions(
             LOG.debug(f"Function '{func_name}' has a size of 0. Skipping.")
             continue
         func_addr_va = func_addr
+        if isinstance(parsed_obj, lief.PE.Binary):
+            func_addr_va = func_addr + parsed_obj.optional_header.imagebase
+        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, 'imagebase'):
+            func_addr_va = func_addr + parsed_obj.imagebase
         lief_lookup_va = func_addr + base_delta
         rebased_bytes_mv = None
         try:
-            rebased_bytes_mv = parsed_obj.get_content_from_virtual_address(
-                lief_lookup_va, size_to_disasm
-            )
-            if isinstance(rebased_bytes_mv, lief.lief_errors):
-                rebased_bytes_mv = None
-        except Exception:
+            result = parsed_obj.get_content_from_virtual_address(lief_lookup_va, size_to_disasm)
+            if not isinstance(result, lief.lief_errors):
+                rebased_bytes_mv = result
+        except (SystemError, Exception):
             pass
         original_bytes_mv = None
         try:
-            original_bytes_mv = parsed_obj.get_content_from_virtual_address(
-                func_addr_va, size_to_disasm
-            )
-            if isinstance(original_bytes_mv, lief.lief_errors):
-                original_bytes_mv = None
-        except Exception:
+            result = parsed_obj.get_content_from_virtual_address(func_addr_va, size_to_disasm)
+            if not isinstance(result, lief.lief_errors):
+                original_bytes_mv = result
+        except (SystemError, Exception):
             pass
-        if not rebased_bytes_mv and not original_bytes_mv:
+        if rebased_bytes_mv is None and original_bytes_mv is None:
             LOG.debug(
                 f"Could not get bytes for function '{func_name}' at {func_addr_str} using any method."
             )
             continue
-        rebased_bytes_list = list(rebased_bytes_mv) if rebased_bytes_mv else []
-        original_bytes_list = list(original_bytes_mv) if original_bytes_mv else []
+        rebased_bytes_list = rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
+        original_bytes_list = original_bytes_mv.toreadonly() if original_bytes_mv is not None else []
         func_addr_va_hex = hex(func_addr_va)
         try:
             instr_list = None
@@ -1113,9 +1120,7 @@ def disassemble_functions(
             if micromips_nyxstone_instance:
                 disassemblers_to_try.append((micromips_nyxstone_instance, "MicroMIPS"))
             for offset in range(4):
-                if offset >= len(original_bytes_list) and offset >= len(
-                    rebased_bytes_list
-                ):
+                if offset >= _mem_bytes_len(original_bytes_list) and offset >= _mem_bytes_len(rebased_bytes_list):
                     break
                 addr_to_try = func_addr_va + offset
                 for instance, mode_name in disassemblers_to_try:
@@ -1124,7 +1129,7 @@ def disassemble_functions(
                         (original_bytes_list, "original"),
                     ]
                     for byte_source, source_name in bytes_sets:
-                        if offset >= len(byte_source):
+                        if offset >= _mem_bytes_len(byte_source):
                             continue
                         bytes_to_try = byte_source[offset:]
                         instr_list = _try_disassemble(
