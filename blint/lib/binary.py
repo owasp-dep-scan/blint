@@ -396,7 +396,8 @@ def process_pe_resources(parsed_obj):
     version_metadata = {}
     version_info = rm.version if rm.has_version else None
     if isinstance(version_info, list) and len(version_info):
-        version_info = version_info[0]
+        if not isinstance(version_info[0], lief.lief_errors):
+            version_info = version_info[0]
     if version_info and hasattr(version_info, "string_file_info"):
         string_file_info: lief.PE.ResourceStringFileInfo = version_info.string_file_info
         for lc_item in string_file_info.children:
