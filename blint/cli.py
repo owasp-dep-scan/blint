@@ -178,6 +178,13 @@ def build_parser():
         nargs="+",
         help="Directories containing pre-build and build BOMs. Use to improve the precision.",
     )
+    sbom_parser.add_argument(
+        "--use-blintdb",
+        action="store_true",
+        default=os.path.exists(BLINTDB_LOC),
+        dest="use_blintdb",
+        help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+    )
     db_parser = subparsers.add_parser(
         "db", help="Command to manage the pre-compiled database."
     )
