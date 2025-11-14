@@ -66,10 +66,8 @@ jobs:
         CPPFLAGS: "-I/opt/homebrew/include"
     - name: Install all
       run: |        
-        poetry install --without=extended
+        poetry install --without=extended --with=dev
       if: runner.os == 'Windows'
-      env:
-        RUSTFLAGS: "-A mismatched-lifetime-syntaxes"
     - name: Test with pytest
       run: |
         poetry run pytest --cov=blint tests
