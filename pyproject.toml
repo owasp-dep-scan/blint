@@ -1,6 +1,6 @@
 [project]
 name = "blint"
-version = "3.0.5"
+version = "3.0.6"
 description = "Linter and SBOM generator for binary files."
 authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
@@ -12,7 +12,7 @@ dependencies = [
     "defusedxml>=0.7.1",
     "pydantic[email]>=2.11.3",
     "orjson>=3.10.16",
-    "symbolic==10.2.1",
+    "multi-demangle>=1.0.0",
     "ar>=1.0.0",
     "custom-json-diff>=2.1.6",
     "appdirs>=1.4.4",

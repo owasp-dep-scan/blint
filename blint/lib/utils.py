@@ -4,6 +4,7 @@ import math
 import os
 import re
 import hashlib
+import multi_demangle
 import shutil
 import string
 import tempfile
@@ -47,23 +48,18 @@ CHARSET = string.digits + string.ascii_letters + r"""!&@"""
 # Known files compressed with ar
 KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
+demangle_options_complete = multi_demangle.DemangleOptions.complete()
+demangle_options_name_only = multi_demangle.DemangleOptions.name_only()
 
-SYMBOLIC_FOUND = True
-try:
-    from symbolic._lowlevel import ffi, lib
-    from symbolic.utils import encode_str, decode_str, rustcall
-except OSError:
-    SYMBOLIC_FOUND = False
-
-def demangle_symbolic_name(symbol, lang=None, no_args=False):
+def demangle_symbolic_name(symbol, name_only=False):
     """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
-    if not SYMBOLIC_FOUND:
-        return symbol
     try:
-        func = lib.symbolic_demangle_no_args if no_args else lib.symbolic_demangle
-        lang_str = encode_str(lang) if lang else ffi.NULL
-        demangled = rustcall(func, encode_str(symbol), lang_str)
-        demangled_symbol = decode_str(demangled, free=True).strip()
+        demangled_symbol = multi_demangle.demangle_symbol(
+            symbol,
+            options=demangle_options_name_only
+            if name_only
+            else demangle_options_complete,
+        )
         # demangling didn't work
         if symbol and symbol == demangled_symbol:
             for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
@@ -74,9 +70,9 @@ def demangle_symbolic_name(symbol, lang=None, no_args=False):
             if symbol.startswith("@feat.00"):
                 return "SAFESEH"
             if (
-                    symbol.startswith("__imp_")
-                    or symbol.startswith(".rdata$")
-                    or symbol.startswith(".refptr.")
+                symbol.startswith("__imp_")
+                or symbol.startswith(".rdata$")
+                or symbol.startswith(".refptr.")
             ):
                 symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
             demangled_symbol = (
