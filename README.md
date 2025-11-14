@@ -14,6 +14,7 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 - PE (Windows executables and DLLs)
 - Mach-O (macOS and iOS, x64 and arm64)
 - Android (APK, AAB, including DEX files in deep mode)
+- Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips.
 
 ## Key Features & Use Cases
 

@@ -1,6 +1,10 @@
 name: Build Windows Binaries
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -28,8 +32,6 @@ jobs:
         cd blint
         poetry config virtualenvs.create false
         poetry install --without=extended --no-cache
-      env:
-        RUSTFLAGS: "-A mismatched-lifetime-syntaxes"
     - name: Binary windows build
       run: |
         cd blint
@@ -41,7 +43,6 @@ jobs:
         PYTHONIOENCODING: utf-8
         LANG: en_US.utf-8
         PYTHONUTF8: 1
-        RUSTFLAGS: "-A mismatched-lifetime-syntaxes"
     - uses: actions/upload-artifact@v4
       with:
         path: blint/dist

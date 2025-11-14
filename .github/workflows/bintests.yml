@@ -55,7 +55,7 @@ jobs:
         CPPFLAGS: "-I/opt/homebrew/include"
     - name: Install all
       run: |        
-        poetry install --without=extended
+        poetry install --without=extended --all-extras
       if: runner.os == 'Windows'
     - name: Test binaries
       run: |
