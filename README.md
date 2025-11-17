@@ -32,27 +32,39 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 
 `blint` requires Python >= 3.10.
 
-```bash
+```shell
 pip install blint
 ```
 
 For **disassembly support**, which enables instruction-level analysis of functions, install the `extended` version. This includes the [nyxstone](https://github.com/emproof-com/nyxstone) disassembler.
 
-```bash
+```shell
 pip install blint[extended]
+```
+
+### Via Container Image
+
+You can also run blint using the official container image available on GitHub Container Registry. This is a convenient way to run blint without installing Python or any dependencies on your host machine.
+
+```
+docker run --rm -it -v $(pwd):/app -w /app ghcr.io/owasp-dep-scan/blint:latest -i /path/to/your/binary
 ```
 
 ## Quick Start
 
 Analyze a binary and save the reports to the `/tmp/blint` directory:
 
-```bash
+```shell
 blint -i /bin/netstat -o /tmp/blint
+```
+
+```shell
+docker run --rm -it -v /tmp:/tmp -v /bin:/app/bin -w /app ghcr.io/owasp-dep-scan/blint:latest -i /app/bin/netstat -o /tmp/blint
 ```
 
 Analyze a Go or Rust binary and get suggestions for fuzzing targets:
 
-```bash
+```shell
 blint -i /path/to/my-binary --suggest-fuzzable
 ```
 
@@ -62,12 +74,16 @@ Generate a CycloneDX SBOM for an Android application:
 blint sbom -i /path/to/app.apk -o sbom.cdx.json
 ```
 
+```shell
+docker run --rm -it -v /path/to:/app -w /app ghcr.io/owasp-dep-scan/blint:latest sbom -i /app/app.apk -o sbom.cdx.json
+```
+
 ## Understanding the Output
 
 blint produces several JSON artifacts in the specified reports directory.
 
 | Filename                | Purpose                                                                                         | Details                                                                                                                                                                            |
-|-------------------------|-------------------------------------------------------------------------------------------------| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ----------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `exename-metadata.json` | **Raw, detailed metadata** extracted from the binary. This is the source for all other reports. | Contains everything: headers, symbols, functions, dependencies, signature info, and more. See the **[Technical Metadata Documentation](./docs/METADATA.md)** for a full breakdown. |
 | `findings.json`         | A summary of the **security properties audit**. Designed for CI/CD integration.                 | Lists security mitigations like PIE, NX, and Stack Canaries and whether they are present.                                                                                          |
 | `reviews.json`          | A summary of the **capability review**.                                                         | Lists detected capabilities (e.g., "networking", "file-read", "crypto") based on the symbols and functions found.                                                                  |
