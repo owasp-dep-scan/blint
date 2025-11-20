@@ -1,12 +1,12 @@
 [project]
 name = "blint"
-version = "3.0.6"
+version = "3.0.7"
 description = "Linter and SBOM generator for binary files."
 authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
 ]
 dependencies = [
-    "lief>=0.16.6",
+    "lief>=0.17.1",
     "rich>=14.0.0",
     "PyYAML>=6.0.2",
     "defusedxml>=0.7.1",

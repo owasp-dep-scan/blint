@@ -641,6 +641,60 @@ def parse_pe_exports(exports):
     return exports_list
 
 
+def parse_pe_exceptions(exceptions):
+    """
+    Parses the exceptions and returns a list of exceptions metadata.
+
+    Args:
+        exceptions: The exceptions object to parse.
+
+    Returns:
+        list[dict]: A list of exceptions dictionaries.
+
+    """
+    exceptions_list = []
+    for exc in exceptions:
+        em = {"arch": exc.arch.name, "size": exc.size, "raw_str": str(exc)}
+        if isinstance(exc, lief.PE.RuntimeFunctionX64):
+            ei = exc.unwind_info
+            em = {
+                **em,
+                "unwind_rva": exc.unwind_rva,
+                "count_opcodes": ei.count_opcodes,
+                "flags": ei.flags,
+                "frame_reg": ei.frame_reg,
+                "frame_reg_offset": ei.frame_reg_offset,
+                "raw_opcodes": ei.raw_opcodes,
+                "opcodes": [
+                    {"name": o.opcode.name, "position": o.position} for o in ei.opcodes
+                ],
+                "sizeof_prologue": ei.sizeof_prologue,
+                "version": ei.version
+            }
+            if hasattr(ei, "chained") and ei.chained:
+                chained_info = ei.chained.unwind_info
+                em["chained"] = {
+                    "arch": ei.chained.arch.name,
+                    "size": ei.chained.size,
+                    "unwind_rva": ei.chained.unwind_rva,
+                    "count_opcodes": chained_info.count_opcodes,
+                    "flags": chained_info.flags,
+                    "frame_reg": chained_info.frame_reg,
+                    "frame_reg_offset": chained_info.frame_reg_offset,
+                    "raw_opcodes": chained_info.raw_opcodes,
+                    "opcodes": [
+                        {"name": o.opcode.name, "position": o.position}
+                        for o in chained_info.opcodes
+                    ],
+                    "sizeof_prologue": chained_info.sizeof_prologue,
+                    "version": chained_info.version
+                }
+        elif isinstance(exc, lief.PE.RuntimeFunctionAArch64):
+            em["flags"] = exc.flag.name
+        exceptions_list.append(em)
+    return exceptions_list
+
+
 def parse_macho_symbols(symbols):
     """
     Parses the symbols and determines the executable type.
@@ -893,7 +947,13 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
     """
     metadata = {"file_path": exe_file}
     try:
-        parsed_obj = lief.parse(exe_file)
+        if lief.is_oat(exe_file):
+            parsed_obj = lief.OAT.parse(exe_file)
+        elif lief.is_pe(exe_file):
+            parser_config = lief.PE.ParserConfig.all
+            parsed_obj = lief.PE.parse(exe_file, parser_config)
+        else:
+            parsed_obj = lief.parse(exe_file)
         if not parsed_obj:
             return metadata
         metadata["is_shared_library"] = is_shared_library(parsed_obj)
@@ -910,7 +970,9 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
         if disassemble:
-            metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
+            metadata["disassembled_functions"] = disassemble_functions(
+                parsed_obj, metadata
+            )
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)
@@ -1455,13 +1517,19 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
         metadata["virtual_size"] = parsed_obj.virtual_size
         metadata["has_nx"] = parsed_obj.has_nx
-        metadata["imphash_pefile"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.PEFILE)
-        metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
+        metadata["imphash_pefile"] = lief.PE.get_imphash(
+            parsed_obj, lief.PE.IMPHASH_MODE.PEFILE
+        )
+        metadata["imphash_lief"] = lief.PE.get_imphash(
+            parsed_obj, lief.PE.IMPHASH_MODE.LIEF
+        )
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
         metadata["resources"] = process_pe_resources(parsed_obj)
+        metadata["is_arm64ec"] = parsed_obj.is_arm64ec
+        metadata["is_arm64x"] = parsed_obj.is_arm64x
         metadata["symtab_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
@@ -1486,26 +1554,53 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     else:
                         text_section = section
         if rdata_section or text_section:
-            add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
+            add_rdata_symbols(
+                metadata, rdata_section, text_section, parsed_obj.sections
+            )
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
+        metadata["exceptions"] = parse_pe_exceptions(parsed_obj.exceptions)
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
-        metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
+        metadata["exception_functions"] = parse_functions(
+            parsed_obj.exception_functions
+        )
         # Detect if this PE might be dotnet
         for i, dd in enumerate(parsed_obj.data_directories):
-            if i == 14 and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value:
+            if (
+                i == 14
+                and dd.type.value
+                == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+            ):
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
-        metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
+        metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(
+            parsed_obj
+        )
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
         if tls and tls.sizeof_zero_fill:
-            metadata["tls_address_index"] = ADDRESS_FMT.format(tls.addressof_index).strip()
+            metadata["tls_address_index"] = ADDRESS_FMT.format(
+                tls.addressof_index
+            ).strip()
             metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
             metadata["tls_data_template_len"] = len(tls.data_template)
             metadata["tls_characteristics"] = tls.characteristics
             metadata["tls_section_name"] = tls.section.name
             metadata["tls_directory_type"] = str(tls.directory.type)
+        nested_binary = parsed_obj.nested_pe_binary
+        if nested_binary:
+            LOG.debug("Binary has ARM64EC representation!")
+            metadata["nested_binary"] = {
+                "is_pie": nested_binary.is_pie,
+                "is_reproducible_build": nested_binary.is_reproducible_build,
+                "virtual_size": nested_binary.virtual_size,
+                "has_nx": nested_binary.has_nx,
+                "exports": parse_pe_exports(nested_binary.get_export()),
+                "exceptions": parse_pe_exceptions(nested_binary.exceptions),
+                "functions": parse_functions(nested_binary.functions),
+                "ctor_functions": parse_functions(nested_binary.ctor_functions),
+                "dotnet_dependencies": parse_overlay(nested_binary),
+            }
     except (AttributeError, IndexError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)}: {e} while parsing {exe_file} PE metadata.")
         raise
