@@ -1,4 +1,4 @@
-ARG SYSBASE=quay.io/almalinuxautobot/almalinux:10
+ARG SYSBASE=quay.io/almalinuxorg/10-base
 FROM ${SYSBASE} AS system-build
 
 LABEL maintainer="appthreat" \
