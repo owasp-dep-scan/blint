@@ -1132,6 +1132,7 @@ def disassemble_functions(
         func_addr_str = func_entry.get("address") or func_entry.get("rva_start")
         if not func_addr_str:
             continue
+        func_name = func_entry.get("name", "unknown_func")
         try:
             original_func_addr = int(func_addr_str, 16)
         except ValueError:
@@ -1142,7 +1143,6 @@ def disassemble_functions(
         if original_func_addr in visited_addrs:
             continue
         visited_addrs.add(original_func_addr)
-        func_name = func_entry.get("name", "unknown_func")
         if not func_name:
             func_name = f"sub_{original_func_addr:x}"
         func_addr = original_func_addr
