@@ -286,6 +286,25 @@ class ReviewRunner:
         LOG.debug(f"Reviewing {len(metadata['disassembled_functions'])} disassembled functions")
         results = defaultdict(list)
         found_cid = defaultdict(int)
+        ALLOC_APIS = {
+            "virtualalloc", "virtualallocex", "heapalloc", "globalalloc", "localalloc",
+            "virtualprotect", "virtualprotectex", "cryptmemalloc",
+            "ntallocatevirtualmemory", "ntprotectvirtualmemory", "zwallocatevirtualmemory",
+            "mmap", "mprotect", "malloc", "calloc", "realloc", "posix_memalign", "valloc", "pvalloc",
+            "writeprocessmemory", "createremotethread", "queueuserapc",
+            "setthreadcontext", "getthreadcontext", "resumethread",
+            "ntwritevirtualmemory", "ntresumethread", "ntqueueapcvalues"
+        }
+        DEBUG_APIS = {
+            "isdebuggerpresent", "checkremotedebuggerpresent", "outputdebugstring", "debugbreak",
+            "ptrace", "getppid",
+            "gettickcount", "gettickcount64", "queryperformancecounter", "timegettime",
+            "ntqueryinformationprocess", "zwqueryinformationprocess",
+            "ntsetinformationthread", "zwsetinformationthread",
+            "openprocess", "checkremotedebuggerpresent",
+            "setunhandledexceptionfilter", "raiseexception", "rtladdvectoredexceptionhandler",
+            "findwindow", "findwindowex", "enumwindows", "getforegroundwindow"
+        }
         for review_group in self.review_functions_list:
             for rule_id, rule_obj in review_group.items():
                 for func_key, func_data in metadata["disassembled_functions"].items():
@@ -321,16 +340,56 @@ class ReviewRunner:
                                 elif operator_str == "!=":
                                     passed = value != threshold
                     elif check_type == "function_analysis":
+                        metrics = func_data.get("instruction_metrics", {})
+                        icount = func_data.get("instruction_count", 0)
+                        assembly = func_data.get("assembly", "").lower()
+                        direct_calls = [dc.lower() for dc in func_data.get("direct_calls", [])]
                         if rule_id == "CRYPTO_BEHAVIOR":
-                            metrics = func_data.get("instruction_metrics", {})
-                            icount = func_data.get("instruction_count", 0)
                             if icount > 10:
                                 shift_xor = metrics.get("shift_count", 0) + metrics.get("xor_count", 0)
                                 if (shift_xor / icount > 0.2) and metrics.get("simd_fpu_count", 0) > 0:
                                     passed = True
                         elif rule_id == "ANTI_DISASSEMBLY_TRICKS":
-                            metrics = func_data.get("instruction_metrics", {})
-                            if func_data.get("instruction_count", 0) <= 5 and metrics.get("jump_count", 0) > 0:
+                            if icount <= 6 and metrics.get("jump_count", 0) > 0:
+                                passed = True
+                        elif rule_id == "HIGH_ENTROPY_INDIRECT_CALL":
+                            if func_data.get("has_indirect_call"):
+                                math_ops = metrics.get("arith_count", 0) + metrics.get("shift_count", 0) + metrics.get("xor_count", 0)
+                                if icount > 0 and (math_ops / icount) > 0.3:
+                                    passed = True
+                        elif rule_id == "POTENTIAL_STACK_STRING":
+                            mov_count = assembly.count("mov")
+                            if icount > 15 and (mov_count / icount) > 0.6:
+                                passed = True
+                        elif rule_id == "SUSPICIOUS_MEMORY_ALLOC":
+                            has_alloc = any(api in c for c in direct_calls for api in ALLOC_APIS)
+                            if has_alloc and (func_data.get("has_indirect_call") or metrics.get("jump_count", 0) > 0):
+                                passed = True
+                        elif rule_id == "POTENTIAL_ANTI_DEBUG":
+                            if "rdtsc" in assembly:
+                                passed = True
+                            elif any(api in c for c in direct_calls for api in DEBUG_APIS):
+                                passed = True
+                        elif rule_id == "POTENTIAL_SHELLCODE_CHARS":
+                            if func_data.get("has_system_call") and func_data.get("has_indirect_call"):
+                                passed = True
+                        elif rule_id == "LOOP_WITH_SELF_MODIFY_HINT":
+                            if func_data.get("has_loop") and metrics.get("xor_count", 0) > 0:
+                                passed = True
+                        elif rule_id == "DYNAMIC_API_RESOLUTION_HINT":
+                            if func_data.get("has_indirect_call"):
+                                if metrics.get("shift_count", 0) > 0 or metrics.get("xor_count", 0) > 0:
+                                    passed = True
+                        elif rule_id == "POTENTIAL_ROP_GADGET":
+                            if 1 <= icount <= 8 and metrics.get("ret_count", 0) > 0:
+                                passed = True
+                        elif rule_id == "UNUSUAL_CALLING_CONVENTION":
+                            regs_written = func_data.get("regs_written", [])
+                            if "rsp" in regs_written or "esp" in regs_written:
+                                if "mov rsp" in assembly or "xchg rsp" in assembly:
+                                    passed = True
+                        elif rule_id == "POTENTIAL_IAT_MANIPULATION":
+                            if func_data.get("sreg_interactions"):
                                 passed = True
                     if passed:
                         evidence = {

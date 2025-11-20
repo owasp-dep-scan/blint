@@ -35,6 +35,7 @@ FUNCTION_SYMBOLS = (
     "imports",
     "symtab_symbols",
     "dynamic_symbols",
+    "exceptions",
 )
 
 OPERAND_DELIMITERS_PATTERN = re.compile(r"[^a-zA-Z0-9_$]+")
@@ -1094,9 +1095,10 @@ def disassemble_functions(
     all_func_addrs = []
     for func_list_key in FUNCTION_SYMBOLS:
         for func_entry in metadata.get(func_list_key, []):
-            if func_entry.get("address"):
+            addr_str = func_entry.get("address") or func_entry.get("rva_start")
+            if addr_str:
                 try:
-                    all_func_addrs.append(int(func_entry["address"], 16))
+                    all_func_addrs.append(int(addr_str, 16))
                 except ValueError:
                     pass
     all_func_addrs_sorted = sorted(list(set(all_func_addrs)))
@@ -1123,13 +1125,14 @@ def disassemble_functions(
     all_funcs = []
     for func_list_key in FUNCTION_SYMBOLS:
         all_funcs.extend(metadata.get(func_list_key, []))
+    visited_addrs = set()
     # Merely invoking this method leads to more successful disassembly!
     memoryview(parsed_obj.write_to_bytes())
     for func_entry in all_funcs:
-        func_name = func_entry.get("name", "unknown_func")
-        func_addr_str = func_entry.get("address", "")
+        func_addr_str = func_entry.get("address") or func_entry.get("rva_start")
         if not func_addr_str:
             continue
+        func_name = func_entry.get("name")
         try:
             original_func_addr = int(func_addr_str, 16)
         except ValueError:
@@ -1137,10 +1140,15 @@ def disassemble_functions(
                 f"Could not parse address '{func_addr_str}' for function '{func_name}'. Skipping."
             )
             continue
+        if original_func_addr in visited_addrs:
+            continue
+        visited_addrs.add(original_func_addr)
+        if not func_name:
+            func_name = f"sub_{original_func_addr:x}"
         func_addr = original_func_addr
         if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
             func_addr = func_addr & ~1
-        size_to_disasm = func_entry.get("size")
+        size_to_disasm = func_entry.get("size") or func_entry.get("length")
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
             current_index = addr_to_index.get(func_addr)
             if current_index is not None and current_index + 1 < len(
@@ -1156,19 +1164,25 @@ def disassemble_functions(
         func_addr_va = func_addr
         if isinstance(parsed_obj, lief.PE.Binary):
             func_addr_va = func_addr + parsed_obj.optional_header.imagebase
-        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, 'imagebase'):
+        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(
+            parsed_obj, "imagebase"
+        ):
             func_addr_va = func_addr + parsed_obj.imagebase
         lief_lookup_va = func_addr + base_delta
         rebased_bytes_mv = None
         try:
-            result = parsed_obj.get_content_from_virtual_address(lief_lookup_va, size_to_disasm)
+            result = parsed_obj.get_content_from_virtual_address(
+                lief_lookup_va, size_to_disasm
+            )
             if not isinstance(result, lief.lief_errors):
                 rebased_bytes_mv = result
         except (SystemError, Exception):
             pass
         original_bytes_mv = None
         try:
-            result = parsed_obj.get_content_from_virtual_address(func_addr_va, size_to_disasm)
+            result = parsed_obj.get_content_from_virtual_address(
+                func_addr_va, size_to_disasm
+            )
             if not isinstance(result, lief.lief_errors):
                 original_bytes_mv = result
         except (SystemError, Exception):

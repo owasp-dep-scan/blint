@@ -641,55 +641,83 @@ def parse_pe_exports(exports):
     return exports_list
 
 
+def _parse_unwind_flags(flags_int):
+    """Decodes the integer flags into a list of readable names."""
+    try:
+        flag_obj = lief.PE.RuntimeFunctionX64.UNWIND_FLAGS(flags_int)
+        return [f.name for f in lief.PE.RuntimeFunctionX64.UNWIND_FLAGS if f in flag_obj]
+    except Exception:
+        return [str(flags_int)]
+
+def _get_unwind_reg_name(reg_int):
+    """Maps the register integer to its name."""
+    try:
+        return lief.PE.RuntimeFunctionX64.UNWIND_REG(reg_int).name
+    except Exception:
+        return str(reg_int)
+
+def _parse_x64_opcode(opcode):
+    if not opcode:
+        return None
+
+    data = {
+        "name": opcode.opcode.name,
+        "position": opcode.position,
+    }
+
+    if hasattr(opcode, "reg"):
+        data["reg"] = enum_to_str(opcode.reg)
+    if hasattr(opcode, "offset"):
+        data["offset"] = opcode.offset
+    if hasattr(opcode, "size"):
+        data["size"] = opcode.size
+
+    return data
+
+def _parse_x64_unwind_info(ei):
+    f_reg = _get_unwind_reg_name(ei.frame_reg) if hasattr(ei, "frame_reg") else None
+    info = {
+        "version": ei.version,
+        "flags_raw": ei.flags,
+        "flags": _parse_unwind_flags(ei.flags),
+        "sizeof_prologue": ei.sizeof_prologue,
+        "count_opcodes": ei.count_opcodes,
+        "frame_reg": f_reg,
+        "frame_reg_offset": ei.frame_reg_offset,
+        "handler_rva": ADDRESS_FMT.format(ei.handler).strip() if ei.handler else "0x0",
+        "opcodes": [_parse_x64_opcode(o) for o in ei.opcodes]
+    }
+    return info
+
 def parse_pe_exceptions(exceptions):
-    """
-    Parses the exceptions and returns a list of exceptions metadata.
-
-    Args:
-        exceptions: The exceptions object to parse.
-
-    Returns:
-        list[dict]: A list of exceptions dictionaries.
-
-    """
     exceptions_list = []
     for exc in exceptions:
-        em = {"arch": exc.arch.name, "size": exc.size, "raw_str": str(exc)}
+        em = {
+            "arch": exc.arch.name,
+            "rva_start": ADDRESS_FMT.format(exc.rva_start).strip(),
+            "section_offset": exc.offset,
+            "raw_str": str(exc)
+        }
         if isinstance(exc, lief.PE.RuntimeFunctionX64):
+            em["rva_end"] = ADDRESS_FMT.format(exc.rva_end).strip()
+            em["size"] = exc.size
+            em["unwind_rva"] = ADDRESS_FMT.format(exc.unwind_rva).strip()
             ei = exc.unwind_info
-            em = {
-                **em,
-                "unwind_rva": exc.unwind_rva,
-                "count_opcodes": ei.count_opcodes,
-                "flags": ei.flags,
-                "frame_reg": ei.frame_reg,
-                "frame_reg_offset": ei.frame_reg_offset,
-                "raw_opcodes": ei.raw_opcodes,
-                "opcodes": [
-                    {"name": o.opcode.name, "position": o.position} for o in ei.opcodes
-                ],
-                "sizeof_prologue": ei.sizeof_prologue,
-                "version": ei.version
-            }
+            em.update(_parse_x64_unwind_info(ei))
             if hasattr(ei, "chained") and ei.chained:
-                chained_info = ei.chained.unwind_info
+                chained_obj = ei.chained
+                chained_info = chained_obj.unwind_info
                 em["chained"] = {
-                    "arch": ei.chained.arch.name,
-                    "size": ei.chained.size,
-                    "unwind_rva": ei.chained.unwind_rva,
-                    "count_opcodes": chained_info.count_opcodes,
-                    "flags": chained_info.flags,
-                    "frame_reg": chained_info.frame_reg,
-                    "frame_reg_offset": chained_info.frame_reg_offset,
-                    "raw_opcodes": chained_info.raw_opcodes,
-                    "opcodes": [
-                        {"name": o.opcode.name, "position": o.position}
-                        for o in chained_info.opcodes
-                    ],
-                    "sizeof_prologue": chained_info.sizeof_prologue,
-                    "version": chained_info.version
+                    "arch": chained_obj.arch.name,
+                    "rva_start": ADDRESS_FMT.format(chained_obj.rva_start).strip(),
+                    "rva_end": ADDRESS_FMT.format(chained_obj.rva_end).strip(),
+                    "size": chained_obj.size,
+                    "unwind_rva": ADDRESS_FMT.format(chained_obj.unwind_rva).strip(),
+                    **_parse_x64_unwind_info(chained_info)
                 }
         elif isinstance(exc, lief.PE.RuntimeFunctionAArch64):
+            em["rva_end"] = ADDRESS_FMT.format(exc.rva_end).strip()
+            em["length"] = exc.length
             em["flags"] = exc.flag.name
         exceptions_list.append(em)
     return exceptions_list
