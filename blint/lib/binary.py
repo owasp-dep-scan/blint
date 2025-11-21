@@ -34,6 +34,14 @@ if LOG.level != DEBUG:
 
 ADDRESS_FMT = "0x{:<10x}"
 
+# Regex to extract crate name and version from Rust panic messages
+# Based on https://github.com/rustsec/rustsec/blob/main/quitters/src/lib.rs
+RUST_PANIC_REGEX_UNIX = re.compile(
+    rb"cargo/registry/src/[^/]+/(?P<crate>[0-9A-Za-z_-]+)-(?P<version>[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z+.-]*)/"
+)
+RUST_PANIC_REGEX_WIN = re.compile(
+    rb"cargo\\registry\\src\\[^\\]+\\(?P<crate>[0-9A-Za-z_-]+)-(?P<version>[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z+.-]*)\\"
+)
 
 def is_shared_library(parsed_obj):
     """
@@ -1350,10 +1358,49 @@ def parse_go_buildinfo(
 
     return deps, formulation
 
+def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list:
+    """
+    Heuristically recover Rust dependencies by scanning for panic messages in the binary sections.
+    This is useful when cargo-auditable data is stripped or missing.
+
+    Args:
+        parsed_obj (lief.Binary): The parsed binary object.
+
+    Returns:
+        list: A list of dictionaries containing 'name' and 'version'.
+    """
+    detected_deps = {}
+    for section in parsed_obj.sections:
+        if section.size == 0:
+            continue
+        try:
+            content = section.content.tobytes()
+        except Exception:
+            continue
+        for match in RUST_PANIC_REGEX_UNIX.finditer(content):
+            try:
+                crate = match.group("crate").decode("utf-8", errors="ignore")
+                version = match.group("version").decode("utf-8", errors="ignore")
+                detected_deps[(crate, version)] = True
+            except (UnicodeDecodeError, AttributeError):
+                continue
+        for match in RUST_PANIC_REGEX_WIN.finditer(content):
+            try:
+                crate = match.group("crate").decode("utf-8", errors="ignore")
+                version = match.group("version").decode("utf-8", errors="ignore")
+                detected_deps[(crate, version)] = True
+            except (UnicodeDecodeError, AttributeError):
+                continue
+    return [
+        {"name": name, "version": version} for name, version in detected_deps.keys()
+    ]
+
 
 def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
     """
-    Parse the rust build info section that are cargo-auditable to extract rust dependencies
+    Parse the rust build info section that are cargo-auditable to extract rust dependencies.
+    Falls back to panic message parsing if auditable data is not present.
+
     Args:
         parsed_obj (lief.Binary): The parsed object representing the binary.
 
@@ -1361,7 +1408,6 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
         list: List representing the dependencies.
     """
     deps = []
-
     try:
         audit_data_section = next(
             filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None
@@ -1373,9 +1419,11 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
             if audit_data and audit_data["packages"]:
                 packages = audit_data["packages"]
                 deps = [x for x in packages if "root" not in x]
-    except orjson.JSONDecodeError:
-        pass
-
+                return deps
+    except (orjson.JSONDecodeError, zlib.error, Exception) as e:
+        LOG.debug(f"Failed to parse .dep-v0 section: {e}")
+    if not deps:
+        deps = recover_rust_deps_from_panic(parsed_obj)
     return deps
 
 
