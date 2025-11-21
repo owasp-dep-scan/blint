@@ -43,6 +43,9 @@ RUST_PANIC_REGEX_WIN = re.compile(
     rb"cargo\\registry\\src\\[^\\]+\\(?P<crate>[0-9A-Za-z_-]+)-(?P<version>[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z+.-]*)\\"
 )
 
+# ELF dlopen specification - https://github.com/uapi-group/specifications/blob/main/specs/elf_dlopen_metadata.md
+DLOPEN_NOTE_TYPE = 0x407c0c0a
+
 def is_shared_library(parsed_obj):
     """
     Checks if the given parsed binary object represents a shared library.
@@ -98,24 +101,51 @@ def extract_note_data(idx, note):
     """
     note_str = ""
     build_id = ""
+    dlopen_info = None
+
+    # Check for GNU Build ID
     if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
         note_str = str(note)
     if "ID Hash" in note_str:
         build_id = note_str.rsplit("ID Hash:", maxsplit=1)[-1].strip()
+
     description = note.description
     description_str = " ".join(map(integer_to_hex_str, description[:64]))
     if len(description) > 64:
         description_str += " ..."
+
     if note.type == lief.ELF.Note.TYPE.GNU_BUILD_ID:
         build_id = description_str.replace(" ", "")
-    type_str = note.type
-    type_str = enum_to_str(type_str)
+
+    type_str = enum_to_str(note.type)
+    raw_type = getattr(note, "original_type", -1)
+    if raw_type <= 0:
+         with contextlib.suppress(ValueError, TypeError):
+            raw_type = int(note.type)
+    # Check for FDO dlopen metadata (0x407c0c0a)
+    # Logic adapted from: https://github.com/systemd/package-notes/blob/main/dlopen-notes.py
+    if raw_type == DLOPEN_NOTE_TYPE:
+        type_str = "DLOPEN_METADATA"
+        note_name = note.name.strip("\x00") if note.name else ""
+        if note_name == "FDO":
+            try:
+                raw_data = bytes(note.description)
+                json_str = raw_data.decode("utf-8", errors="ignore").strip("\x00 \n\t")
+                parsed_json = orjson.loads(json_str)
+                if isinstance(parsed_json, list):
+                    dlopen_info = parsed_json
+                else:
+                    LOG.debug(f"DLOPEN_METADATA payload is not a list: {type(parsed_json)}")
+            except (orjson.JSONDecodeError, ValueError, TypeError) as e:
+                LOG.debug(f"Failed to parse DLOPEN_METADATA JSON payload: {e}")
+
     note_details = ""
     sdk_version = ""
     ndk_version = ""
     ndk_build_number = ""
     abi = ""
     version_str = ""
+
     if type_str == "ANDROID_IDENT":
         sdk_version = note.sdk_version
         ndk_version = note.ndk_version
@@ -129,9 +159,11 @@ def extract_note_data(idx, note):
             version = note_details.version
             abi = str(note_details.abi)
             version_str = f"{version[0]}.{version[1]}.{version[2]}"
+
     if not version_str and build_id:
         version_str = build_id
-    return {
+
+    result = {
         "index": idx,
         "description": description_str,
         "type": type_str,
@@ -143,6 +175,65 @@ def extract_note_data(idx, note):
         "version": version_str,
         "build_id": build_id,
     }
+
+    if dlopen_info:
+        result["dlopen_info"] = dlopen_info
+
+    return result
+
+def consolidate_dlopen_dependencies(notes_data: list) -> list:
+    """
+    Aggregates DLOPEN_METADATA notes into a flat list of dependencies.
+    Resolves priorities if the same library is mentioned multiple times.
+    """
+    prio_map = {"suggested": 1, "recommended": 2, "required": 3}
+
+    deps_map = {}
+
+    for note in notes_data:
+        if note.get("type") != "DLOPEN_METADATA" or not note.get("dlopen_info"):
+            continue
+
+        for entry in note["dlopen_info"]:
+            feature = entry.get("feature", "unknown")
+            desc = entry.get("description", "")
+            priority_str = entry.get("priority", "recommended")
+            priority_val = prio_map.get(priority_str, 2)
+
+            sonames = entry.get("soname", [])
+            if isinstance(sonames, str):
+                sonames = [sonames]
+
+            for soname in sonames:
+                if soname not in deps_map:
+                    deps_map[soname] = {
+                        "priority_val": 0,
+                        "priority": "suggested",
+                        "features": set(),
+                        "descriptions": set(),
+                    }
+
+                if priority_val > deps_map[soname]["priority_val"]:
+                    deps_map[soname]["priority_val"] = priority_val
+                    deps_map[soname]["priority"] = priority_str
+
+                if feature:
+                    deps_map[soname]["features"].add(feature)
+                if desc:
+                    deps_map[soname]["descriptions"].add(desc)
+
+    results = []
+    for soname, data in deps_map.items():
+        results.append(
+            {
+                "name": soname,
+                "priority": data["priority"],
+                "features": sorted(list(data["features"])),
+                "description": " | ".join(sorted(list(data["descriptions"]))),
+            }
+        )
+
+    return sorted(results, key=lambda x: x["name"])
 
 
 def integer_to_hex_str(e):
@@ -1079,6 +1170,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
         metadata = add_elf_dynamic_entries(dynamic_entries, metadata)
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
+    metadata["dlopen_dependencies"] = consolidate_dlopen_dependencies(metadata["notes"])
     metadata["strings"] = parse_strings(parsed_obj)
     metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
     rdata_section = parsed_obj.get_section(".rodata")
