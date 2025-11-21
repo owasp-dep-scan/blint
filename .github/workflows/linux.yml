@@ -5,11 +5,21 @@ on:
     branches:
       - main
   pull_request:
+  tags:
+    - 'v*'
   workflow_dispatch:
 
 jobs:
   Blint-GNU-Build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            binary_name: blint-linux-amd64
+          - os: ubuntu-22.04-arm
+            binary_name: blint-linux-arm64
     permissions:
       contents: write
       packages: write
@@ -41,26 +51,26 @@ jobs:
         pyinstaller blint/cli.py --noconfirm --log-level=WARN \
           --nowindow \
           --onefile \
-          --name blint \
+          --name ${{ matrix.binary_name }} \
           --add-data="blint/data:blint/data" \
           --add-data="blint/data/annotations:blint/data/annotations" \
           --collect-submodules blint \
-          --collect-submodules symbolic \
+          --collect-submodules multi-demangle \
           --collect-submodules oras \
           --noupx
-        ./dist/blint -i dist/blint -o /tmp/reports
-        sha256sum ./dist/blint > ./dist/blint.sha256
+        ./dist/${{ matrix.binary_name }} -i dist/${{ matrix.binary_name }} -o /tmp/reports
+        sha256sum ./dist/${{ matrix.binary_name }} > ./dist/${{ matrix.binary_name }}.sha256
       env:
         PYTHONIOENCODING: utf-8
         LANG: en_US.utf-8
     - uses: actions/upload-artifact@v4
       with:
         path: ./blint/dist
-        name: blint-linux-gnu
+        name: ${{ matrix.binary_name }}
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
-          blint/dist/blint
-          blint/dist/blint.sha256
+          blint/dist/${{ matrix.binary_name }}
+          blint/dist/${{ matrix.binary_name }}.sha256    
