@@ -1392,7 +1392,12 @@ def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list:
             except (UnicodeDecodeError, AttributeError):
                 continue
     return [
-        {"name": name, "version": version} for name, version in detected_deps.keys()
+        {
+            "name": name,
+            "version": version,
+            "purl": f"pkg:cargo/{name}@{version}" if version else f"pkg:cargo/{name}",
+        }
+        for name, version in detected_deps.keys()
     ]
 
 
