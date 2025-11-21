@@ -17,9 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             binary_name: blint-linux-amd64
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-24.04-arm
             binary_name: blint-linux-arm64
     permissions:
       contents: write
