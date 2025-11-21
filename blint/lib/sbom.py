@@ -835,11 +835,13 @@ def process_rust_dependencies(
         idx_to_purl[idx] = f"""pkg:cargo/{dep["name"]}@{dep["version"]}"""
     for dependency in rust_deps:
         purl = f"""pkg:cargo/{dependency["name"]}@{dependency["version"]}"""
-        purl_qualifer = (
-            f"""?repository={dependency.get("source")}"""
-            if dependency.get("source", "") != "crates.io"
-            else ""
-        )
+        purl_qualifer = ""
+        if dependency.get("source"):
+            purl_qualifer = (
+                f"""?repository={dependency.get("source")}"""
+                if dependency.get("source", "") != "crates.io"
+                else ""
+            )
         comp = Component(
             type=Type.library,
             name=dependency["name"],
