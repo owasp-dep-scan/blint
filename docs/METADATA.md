@@ -44,6 +44,10 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
 - **Notes (`notes`):** Contains metadata from `.note` sections.
   - `GNU_BUILD_ID`: A unique hash identifying the specific build, useful for matching the binary with its corresponding debug symbols.
   - `ANDROID_IDENT`: If present, provides Android-specific information like `sdk_version` and `ndk_version`.
+  - **`dlopen_dependencies`**: Metadata extracted from the [FDO ELF Note](https://uapi-group.org/specifications/specs/elf_dlopen_metadata/) designed to declare dependencies loaded dynamically at runtime via `dlopen()`.
+    - **Context**: Standard binary analysis usually only detects libraries linked at build time (found in `NEEDED` entries). However, many modern applications load plugins, codecs, or optional modules programmatically during execution.
+    - **Content**: This attribute parses the embedded JSON note to list these "hidden" dependencies, including the library name (`soname`), its necessity (`required`, `recommended`, or `suggested`), and the specific application feature it enables.
+    - **Use Case**: Critical for discovering the full dependency tree of modular applications (like media players or system daemons) that would otherwise appear to have very few dependencies during static analysis.
 
 ### For PE Binaries
 
@@ -53,6 +57,10 @@ PE (Portable Executable) files are the standard for Windows.
   - `machine_type`: The target architecture (e.g., `AMD64`, `I386`).
   - `subsystem`: Indicates whether the application is `WINDOWS_GUI` or `WINDOWS_CUI` (console).
   - `dll_characteristics`: A set of flags indicating security features like `DYNAMIC_BASE` (ASLR) and `CONTROL_FLOW_GUARD`.
+
+- **Load Configuration (`load_configuration`):**
+  - `guard_flags`: The raw integer flags indicating various security settings processed by the OS loader.
+  - `guard_cf_flags`: A human-readable list of active Guard features, such as `CF_INSTRUMENTED` (Control Flow Guard) and `RF_INSTRUMENTED` (Return Flow Guard/PAC).
 
 - **Authenticode (`authenticode`, `signatures`):** Detailed information about the binary's digital signature.
   - Provides hashes (`authentihash_*`) of the signed content.
@@ -66,20 +74,16 @@ PE (Portable Executable) files are the standard for Windows.
   - `imports`: A list of all functions imported from external DLLs, grouped by library. Forms the basis of the `imphash`.
   - `exports`: A list of all functions this binary provides to other executables.
 
-- **Exceptions (exceptions):**
-
-For x86-64 and ARM64 PE binaries, this section provides detailed stack unwinding information extracted from the IMAGE_DIRECTORY_ENTRY_EXCEPTION.
-
-    Attributes:
-        - rva_start and rva_end: The memory boundaries of the function code.
-        - unwind_info: metadata including sizeof_prologue, frame_reg (frame pointer register), and flags.
-        - opcodes: The specific machine instructions (e.g., PUSH_NONVOL, ALLOC_SMALL) used to set up the stack frame.
-        - handler_rva: The address of the language-specific exception handler (e.g., __C_specific_handler).
-
-    - Use Cases for Analysts:
-        - Function Discovery in Stripped Binaries: Even if the symbol table is removed, the Exception Directory must remain valid for the OS to handle crashes. This makes rva_start and rva_end the most reliable way to discover function boundaries in stripped malware or commercial software.
-        - Stack Frame Reconstruction: By analyzing the opcodes and prologue_size, analysts can reconstruct exactly how the stack is manipulated. This is vital for understanding where local variables are stored and identifying potential buffer overflow conditions.
-        - Anti-Analysis Detection: Malware sometimes employs custom exception handlers (handler_rva) to obscure control flow or detect debuggers. Identifying non-standard handlers is a key indicator of obfuscation.
+- **Exceptions (exceptions):** For x86-64 and ARM64 PE binaries, this section provides detailed stack unwinding information extracted from the IMAGE_DIRECTORY_ENTRY_EXCEPTION.
+  - Attributes:
+    - `rva_start` and `rva_end`: The memory boundaries of the function code.
+    - `unwind_info`: metadata including sizeof_prologue, frame_reg (frame pointer register), and flags.
+    - `opcodes`: The specific machine instructions (e.g., PUSH_NONVOL, ALLOC_SMALL) used to set up the stack frame.
+    - `handler_rva`: The address of the language-specific exception handler (e.g., \_\_C_specific_handler).
+  - Use Cases:
+    - _Function Discovery in Stripped Binaries_: Even if the symbol table is removed, the Exception Directory must remain valid for the OS to handle crashes. This makes rva_start and rva_end the most reliable way to discover function boundaries in stripped malware or commercial software.
+    - _Stack Frame Reconstruction_: By analyzing the opcodes and prologue_size, analysts can reconstruct exactly how the stack is manipulated. This is vital for understanding where local variables are stored and identifying potential buffer overflow conditions.
+    - _Anti-Analysis Detection_: Malware sometimes employs custom exception handlers (handler_rva) to obscure control flow or detect debuggers. Identifying non-standard handlers is a key indicator of obfuscation.
 
 In the case of ARM64X, a single PE file encapsulates ARM64 and ARM64EC architectures. For `ARM64EC` nested PE binaries, an additional attribute `nested_binary` would contain the information such as `exports`, `exceptions`, `functions`, `ctor_functions`, and `dotnet_dependencies`.
 
@@ -190,12 +194,19 @@ This is where blint provides the most value, by interpreting low-level data and 
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
 
-| Property             | Description                                                                                                                                                                               | Security Implication                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `nx`                 | **Non-eXecutable Stack/Heap.** True if memory regions intended for data (like the stack and heap) are marked as non-executable.                                                           | Mitigates entire classes of exploits that rely on injecting and executing shellcode from the stack or heap.           |
-| `pie`                | **Position-Independent Executable.** True if the binary is compiled to be loaded at a random memory address each time it runs.                                                            | A prerequisite for effective ASLR (Address Space Layout Randomization). Makes ROP/JOP attacks significantly harder.   |
-| `relro`              | **Relocation Read-Only.** Describes the protection level of ELF global data sections (`.got`, `.dtors`). Can be `"no"`, `"partial"`, or `"full"`.                                         | `"full"` RELRO makes the Global Offset Table (GOT) read-only after linking, preventing GOT overwrite exploits.        |
-| `canary`             | **Stack Canary.** True if the binary was compiled with stack canaries, which are secret values placed on the stack to detect buffer overflows before they can overwrite return addresses. | A primary defense against classic stack-based buffer overflow attacks.                                                |
-| `stripped`           | **Stripped Symbols.** True if the symbol table (`.symtab`), which contains names for internal, non-exported functions, has been removed.                                                  | Makes reverse engineering more difficult as function names are lost. Most production binaries are stripped.           |
-| `is_signed`          | True if the binary has a digital signature (Authenticode for PE, Code Signature for Mach-O).                                                                                              | Indicates the binary's integrity and origin can be potentially verified. An unsigned binary is often more suspicious. |
-| `control_flow_guard` | **(PE Only)** True if the binary is compiled with Microsoft's Control Flow Guard, which validates indirect call targets.                                                                  | Mitigates exploits that rely on corrupting function pointers to hijack control flow.                                  |
+| Property                 | Description                                                                                                             | Security Implication                                                                                       |
+| :----------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| `nx`                     | **Non-eXecutable.** True if data regions (stack/heap) are not executable.                                               | Mitigates code injection attacks.                                                                          |
+| `pie` / `aslr`           | **Address Space Layout Randomization.**                                                                                 | Makes memory corruption exploits harder by randomizing locations.                                          |
+| `canary`                 | **Stack Cookie.** Confirmed via Load Config or symbols.                                                                 | Mitigates stack-based buffer overflows.                                                                    |
+| `control_flow_guard`     | **CFG (Forward-Edge).** Validates indirect call targets.                                                                | Mitigates function pointer corruption (e.g., vtable hijacking).                                            |
+| `xfg`                    | **Extended Flow Guard.** A stricter version of CFG that validates function signatures (types) at indirect call sites.   | significantly reduces the number of valid targets for an attacker compared to standard CFG.                |
+| `cfg_export_suppression` | **CFG Export Suppression.** Prevents valid exported functions from being called indirectly unless explicitly permitted. | Reduces the attack surface by limiting available gadgets in exported APIs.                                 |
+| `pac`                    | **Pointer Authentication (ARM64).** Signs return addresses.                                                             | Hardware-enforced protection against ROP.                                                                  |
+| `pac_strict`             | **Strict PAC.** Fails to load if hardware support is missing.                                                           | Enforces a fail-closed security policy for PAC.                                                            |
+| `cet_shadow_stack`       | **Intel CET / Shadow Stack.** Indicated by EH Continuation Tables.                                                      | Hardware-enforced protection against ROP by maintaining a secondary, immutable stack for return addresses. |
+| `retpoline`              | **Retpoline.** Use of return trampolines.                                                                               | Mitigates Spectre Variant 2 (Branch Target Injection) side-channel attacks.                                |
+| `cast_guard`             | **CastGuard.** Validates virtual function calls.                                                                        | Mitigates C++ type confusion and vtable hijacking attacks.                                                 |
+| `safe_seh`               | **Safe SEH.** (x86) Registers exception handlers at compile time.                                                       | Prevents attackers from overwriting SEH chains on the stack to gain execution.                             |
+| `safe_delay_load`        | **Protected Delay-Load IAT.** Marks delay-load tables read-only after initialization.                                   | Prevents hooking of APIs that are loaded lazily during execution.                                          |
+| `enclave`                | **Enclave Support.** Binary contains configuration for SGX/VBS.                                                         | Indicates the application uses TEE (Trusted Execution Environment) features for high-security operations.  |

@@ -995,8 +995,47 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
     }
     if isinstance(parsed_obj, lief.PE.Binary):
         if dll_chars := metadata.get("dll_characteristics", ""):
-            properties["control_flow_guard"] = "CONTROL_FLOW_GUARD" in dll_chars
             properties["aslr"] = "DYNAMIC_BASE" in dll_chars
+        if parsed_obj.has_configuration:
+            try:
+                lc = parsed_obj.load_configuration
+                flags = lief.PE.LoadConfiguration.IMAGE_GUARD
+                if lc.has(flags.CF_INSTRUMENTED):
+                    properties["control_flow_guard"] = True
+                    properties["forward_edge_cfi"] = True
+                    if lc.has(flags.CF_ENABLE_EXPORT_SUPPRESSION):
+                        properties["cfg_export_suppression"] = True
+                if lc.has(flags.XFG_ENABLED):
+                    properties["xfg"] = True
+                    properties["forward_edge_cfi"] = True
+                machine_type = parsed_obj.header.machine
+                is_arm64 = machine_type in [
+                    lief.PE.Header.MACHINE_TYPES.ARM64,
+                    lief.PE.Header.MACHINE_TYPES.ARM64EC,
+                    lief.PE.Header.MACHINE_TYPES.ARM64X,
+                ]
+                if is_arm64 and lc.has(flags.RF_INSTRUMENTED):
+                    properties["pac"] = True
+                    properties["backward_edge_cfi"] = True
+                    if lc.has(flags.RF_STRICT):
+                        properties["pac_strict"] = True
+                if lc.has(flags.EH_CONTINUATION_TABLE_PRESENT):
+                    properties["cet_shadow_stack"] = True
+                    properties["backward_edge_cfi"] = True
+                if lc.has(flags.RETPOLINE_PRESENT):
+                    properties["retpoline"] = True
+                if lc.has(flags.CASTGUARD_PRESENT):
+                    properties["cast_guard"] = True
+                if lc.has(flags.PROTECT_DELAYLOAD_IAT):
+                    properties["safe_delay_load"] = True
+                if lc.se_handler_count is not None and lc.se_handler_count > 0:
+                    properties["safe_seh"] = True
+                if not lc.has(flags.SECURITY_COOKIE_UNUSED):
+                    properties["canary"] = True
+                if lc.enclave_configuration_ptr and lc.enclave_configuration_ptr != 0:
+                    properties["enclave"] = True
+            except (AttributeError, Exception) as e:
+                LOG.debug(f"Error analyzing security properties from LoadConfig: {e}")
     return properties
 
 
@@ -1666,6 +1705,24 @@ def analyze_import_deps(metadata):
     return dep_graph
 
 
+def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
+    """
+    Parses the Load Configuration to extract Guard flags (CFG, PAC, etc.).
+    """
+    lc_info = {}
+    if not parsed_obj.has_configuration:
+        return lc_info
+    try:
+        load_config = parsed_obj.load_configuration
+        lc_info["guard_flags"] = load_config.guard_flags
+        lc_info["guard_cf_flags"] = [
+            str(flag).split(".")[-1] for flag in load_config.guard_cf_flags_list
+        ]
+    except (AttributeError, Exception) as e:
+        LOG.debug(f"Error parsing Load Configuration: {e}")
+    return lc_info
+
+
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     """Adds PE metadata to the given metadata dictionary.
 
@@ -1697,6 +1754,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
             parsed_obj, lief.PE.IMPHASH_MODE.LIEF
         )
         metadata = add_pe_header_data(metadata, parsed_obj)
+        metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
