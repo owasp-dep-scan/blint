@@ -15,7 +15,7 @@ The `disassembled_functions` attribute is an optional output of the `blint` bina
 The `disassembled_functions` attribute is a dictionary where each key is a unique string identifying the function by its virtual address and name, in the format "0xADDRESS::FUNCTION_NAME" (e.g., "0x140012345::simple_add"). Using both address and name prevents collisions in cases where multiple functions might share the same name (e.g., in different modules or due to symbol stripping). The value for each key is another dictionary containing the following fields:
 
 | Field Name                    | Type               | Description                                                                                                                                                                                                                                                                                        |
-| :---------------------------- | :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | 
+| :---------------------------- | :----------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`                        | String             | The name of the function.                                                                                                                                                                                                                                                                          |
 | `address`                     | String             | The virtual address of the function entry point (hexadecimal string, e.g., "0x12345").                                                                                                                                                                                                             |
 | `assembly`                    | String             | The full disassembled code of the function, with instructions separated by newlines.                                                                                                                                                                                                               |
@@ -25,6 +25,7 @@ The `disassembled_functions` attribute is a dictionary where each key is a uniqu
 | `instruction_metrics`         | Dictionary         | A map of specific instruction types to their counts.                                                                                                                                                                                                                                               |
 | `direct_calls`                | List of Strings    | A list of function names identified as targets of _direct_ calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function.                                                                                                                                  |
 | `has_indirect_call`           | Boolean            | True if the function contains instructions like `call rax` or `call [rax+0x10]`.                                                                                                                                                                                                                   |
+| `has_pac`                     | Boolean            | True if the function contains ARM64 Pointer Authentication Code (PAC) instructions (e.g., `pacibsp`, `autibsp`, `retaa`). These instructions sign and authenticate pointers (typically return addresses) to mitigate Return-Oriented Programming (ROP) attacks.                                    |
 | `has_system_call`             | Boolean            | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`).                                                                                                                                                                                                              |
 | `has_security_feature`        | Boolean            | True if the function contains instructions related to security features (e.g., `endbr64`, `endbr32`).                                                                                                                                                                                              |
 | `has_crypto_call`             | Boolean            | True if the function's disassembly text contains patterns indicating cryptographic operations (based on `blint.config.CRYPTO_INDICATORS`).                                                                                                                                                         |
@@ -88,7 +89,9 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 4.  **Code Similarity Analysis:** Group functions based on their `assembly_hash` or `instruction_hash` to find duplicated or similar code blocks within a binary.
 5.  **Function Characterization:** Quickly assess the nature of a function using the `function_type` field and boolean flags (`has_loop`, `has_security_feature`, etc.). This can help prioritize analysis or identify specific types of functions (e.g., PLT thunks).
 6.  **Call Graph Approximation:** Use the `direct_calls` field to build a partial call graph based on statically resolvable direct calls. Note that this will not include calls resolved via PLT/GOT or indirect calls.
-7.  **Security Feature Verification:** Confirm the presence of control-flow integrity features (like CET) by checking the `has_security_feature` flag and examining the `assembly` for relevant instructions.
+7.  **Security Feature Verification:** Confirm the presence of control-flow integrity features.
+    - **Intel CET:** Check `has_security_feature` for `endbr` instructions.
+    - **ARM64 PAC:** Check `has_pac` for pointer signing instructions. This confirms that protections claimed in headers are actually compiled into the code.
 8.  **Register Usage Analysis:**
     - **Identify Potential Arguments:** Functions that read specific registers (especially those used for argument passing conventions like `rcx`, `rdx`, `r8`, `r9` on Windows x64 or `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` on System V AMD64 ABI) at the beginning might be taking arguments via those registers.
     - **Track Data Flow:** By examining `instructions_with_registers`, you can trace how data moves through registers within a function. For example, seeing `rax` written by one instruction and then read by a subsequent one.
@@ -98,27 +101,29 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 
 The `proprietary_instructions` and `sreg_interactions` fields provide powerful insights into how software leverages Apple's custom silicon features. This is critical for security research, anti-tampering analysis, and performance tuning on macOS and iOS.
 
-- **Detecting Advanced Security Hardening:** 
-    - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features.
-    - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL".
-    - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components.
+- **Detecting Advanced Security Hardening:**
+  - Use Case: A kernel extension or system daemon uses hardware-enforced memory permissions that are stronger than standard ARM features.
+  - blint Findings: The sreg_interactions list contains "SPRR_CONTROL" or "GXF_CONTROL".
+  - Analysis: This indicates the function is setting up or entering a "Guarded Execution" mode (GXF) or manipulating the Secure Page Table (SPRR). This code is highly security-sensitive and is likely part of Apple's core operating system defenses, such as protecting kernel memory or DRM components.
 
 - **Identifying Anti-Debugging and Anti-Emulation:**
-    - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments.
-    - blint Findings: The sreg_interactions list contains "PERF_COUNTERS". 
-    - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators
-- **Finding Performance-Critical Code:** 
-    - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks.
-    - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor).
-    - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications. 
-- **Locating Kernel-Level Pointer Authentication Logic:** 
-   - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack. 
-   - blint Findings: The sreg_interactions list contains "PAC_KEYS". 
-   - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
+  - Use Case: A protected application wants to detect if it's being run under a debugger or in an emulator. It does this by reading hardware performance counters, which behave differently in virtualized environments.
+  - blint Findings: The sreg_interactions list contains "PERF_COUNTERS".
+  - Analysis: This is a strong indicator of an anti-analysis technique. The function is likely measuring execution time or specific hardware events to detect anomalies caused by debuggers or emulators
+- **Finding Performance-Critical Code:**
+  - Use Case: A high-performance application uses Apple's custom matrix co-processor for machine learning or signal processing tasks.
+  - blint Findings: The proprietary_instructions list contains "AMX" (Apple Matrix Coprocessor).
+  - Analysis: This function is a candidate for performance analysis. It directly leverages specialized hardware, and any changes to it could have significant performance implications.
+- **Locating Kernel-Level Pointer Authentication Logic:**
+  - Use Case: The kernel is configuring Pointer Authentication (PAC) keys to protect its own function pointers from being overwritten in an attack.
+  - blint Findings: The sreg_interactions list contains "PAC_KEYS".
+  - Analysis: This function is manipulating the hardware keys used for pointer signing and authentication. It is a critical part of the system's control-flow integrity and a high-value target for security researchers.
 
 ---
 
 ## Examples
+
+Example 1: Standard x64 Arithmetic
 
 Consider a simple function that adds two numbers passed in `rcx` and `rdx`, stores the result in `rax`, and returns.
 
@@ -183,19 +188,41 @@ simple_add:
 }
 ```
 
-**Explanation:**
+Example 2: Analyzing ARM64 PAC Compliance
 
-1.  **Global `regs_read`**: `["rbp", "rsp", "rcx", "rdx"]` - These are all the unique registers read anywhere in the function. `rbp` and `rsp` are used for stack frame management. `rcx` and `rdx` are the input arguments.
-2.  **Global `regs_written`**: `["rbp", "rsp", "rax"]` - These are all the unique registers modified. `rbp` and `rsp` are modified during stack frame setup/teardown. `rax` holds the result.
-3.  **`instructions_with_registers`**:
-    - `push rbp`: Reads `rbp`, Writes `rsp` (stack pointer decremented).
-    - `mov rbp, rsp`: Reads `rsp`, Writes `rbp` (base pointer set to current stack top).
-    - `mov rax, rcx`: Reads `rcx`, Writes `rax` (first argument moved to result register).
-    - `add rax, rdx`: Reads `rax` and `rdx`, Writes `rax` (adds second argument to result).
-    - `pop rbp`: Reads `rbp` (from stack, implicitly using `rsp`), Writes `rsp` (stack pointer incremented).
-    - `ret`: Typically doesn't directly read/write general-purpose registers listed here (though it implicitly uses `rsp` to get the return address and `rip` to set the next instruction).
+This example demonstrates how `has_pac` helps analysts confirm that a critical function is protected by Return Address Signing.
 
-Example 2: Analyzing an Apple Silicon Security Function
+**Disassembly Snippet (ARM64 Windows):**
+
+```assembly
+secure_function:
+   pacibsp                      ; Sign return address (LR) using SP and Key B
+   stp    x29, x30, [sp, #-16]! ; Save frame pointer and signed LR to stack
+   mov    x29, sp               ; Setup frame pointer
+   ...
+   ldp    x29, x30, [sp], #16   ; Restore frame pointer and signed LR
+   autibsp                      ; Authenticate return address (check signature)
+   ret                          ; Return (will fault if signature mismatch)
+```
+
+**Corresponding `disassembled_functions` Entry:**
+
+```json
+{
+  "0x140001000::secure_function": {
+    "name": "secure_function",
+    "has_pac": true,
+    "assembly": "pacibsp\nstp x29, x30, [sp, #-16]!\nmov x29, sp\n...\nldp x29, x30, [sp], #16\nautibsp\nret",
+    "instruction_metrics": { ... },
+    ...
+  }
+}
+```
+
+**Analysis:**
+The presence of `has_pac: true` and the visible `pacibsp`/`autibsp` instructions confirm that this function is actively hardened against ROP attacks. If `has_pac` were false for a critical function in a high-security binary, it would indicate a potential vulnerability or build misconfiguration.
+
+Example 3: Analyzing an Apple Silicon Security Function
 
 Consider a hypothetical function on macOS that configures memory permissions.
 
@@ -236,11 +263,6 @@ Corresponding `disassembled_functions` attribute:
   }
 }
 ```
-
-**Explanation:**
-
-1. sreg_interactions: The analysis detects that the code reads (mrs) and writes (msr) to the s3_6_c15_c1_0 system register. It looks this up in its internal map and correctly identifies it as a control register for the SPRR hardware feature, adding "SPRR_CONTROL" to the list.
-2. Analyst Conclusion: An analyst can immediately conclude that this function is not a typical application function but is instead part of a low-level system component responsible for configuring hardware memory security. This allows them to prioritize it for further investigation.
 
 ---
 

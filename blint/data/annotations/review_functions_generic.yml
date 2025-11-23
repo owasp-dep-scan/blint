@@ -130,3 +130,21 @@ rules:
     summary: Function is very small, performs minimal operations, and ends with a return.
     description: Short functions (e.g., < 10 instructions) that read registers/stack, perform simple operations, and end with `ret` might be ROP gadgets used in exploits.
     check_type: function_analysis
+  - id: ARM64_PAC_USAGE
+    title: Function uses Pointer Authentication (PAC)
+    summary: Function contains ARM64 Pointer Authentication instructions.
+    description: The presence of instructions like `pacibsp` or `autibsp` indicates that this function's return address is cryptographically signed to prevent ROP attacks.
+    check_type: function_flag
+    check_field: has_pac
+  - id: INTEL_CET_IBT_USAGE
+    title: Function uses Intel CET (IBT)
+    summary: Function contains Intel Indirect Branch Tracking instructions.
+    description: The presence of `endbr64` or `endbr32` instructions indicates the function is instrumented for Control-flow Enforcement Technology (CET) to prevent valid targets from being bypassed.
+    check_type: function_flag
+    check_field: has_security_feature
+  - id: APPLE_SILICON_SREG_ACCESS
+    title: Function Accesses Proprietary Apple System Registers
+    summary: Function interacts with Apple-specific hardware controls (SPRR, GXF, PAC Keys).
+    description: The function reads or writes to undocumented or Apple-proprietary system registers (MSR/MRS instructions). This usually indicates kernel-level security enforcement, anti-debugging, or hardware configuration.
+    check_type: function_analysis
+    check_field: sreg_interactions
