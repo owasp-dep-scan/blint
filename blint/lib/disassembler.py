@@ -154,6 +154,9 @@ ARM64_PAC_INST = {
     "blraa", "blrab",
     "ldra", "ldrab",
 }
+# Mapping of ARM64 HINT immediate values to PAC meanings
+# 25=paciasp, 27=pacibsp, 29=autiasp, 31=autibsp
+ARM64_PAC_HINTS = {"25", "27", "29", "31"}
 MIPS_RET_INST = {"jr"}
 MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
 TERMINATING_INST = X86_RET_INST | ARM64_RET_INST | MIPS_RET_INST
@@ -860,6 +863,11 @@ def _analyze_instructions(
         instruction_mnemonics.append(mnemonic)
         if mnemonic in ARM64_PAC_INST:
             has_pac = True
+        elif mnemonic == "hint":
+            if len(parts) > 1:
+                operand = parts[1].strip().replace("#", "")
+                if operand in ARM64_PAC_HINTS:
+                    has_pac = True
         if mnemonic in CALL_INST:
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
@@ -1066,6 +1074,11 @@ def disassemble_functions(
         return disassembly_results
     if not arch_target:
         arch_target = metadata.get("llvm_target_tuple")
+    if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
+        if not features:
+            features = "+pauth"
+        elif "+pauth" not in features:
+            features += ",+pauth"
     try:
         LOG.debug(
             f"Attempting to disassemble functions using Nyxstone for target: {arch_target}"

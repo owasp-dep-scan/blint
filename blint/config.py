@@ -1529,6 +1529,22 @@ IMPLICIT_REGS_ARM64 = {
     'hvc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
     'smc':   {'read': {'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x8'}, 'write': {'x0'}},
     'brk':   {'read': {'x0'}},
+    'pacibsp': {'read': {'x30', 'sp'}, 'write': {'x30'}},
+    'paciasp': {'read': {'x30', 'sp'}, 'write': {'x30'}},
+    'autibsp': {'read': {'x30', 'sp'}, 'write': {'x30'}},
+    'autiasp': {'read': {'x30', 'sp'}, 'write': {'x30'}},
+    'pacibz':  {'read': {'x30'}, 'write': {'x30'}},
+    'pacib1':  {'read': {'x30', 'x1'}, 'write': {'x30'}},
+    'paciaz':  {'read': {'x30'}, 'write': {'x30'}},
+    'pacia1':  {'read': {'x30', 'x1'}, 'write': {'x30'}},
+    'autibz':  {'read': {'x30'}, 'write': {'x30'}},
+    'autib1':  {'read': {'x30', 'x1'}, 'write': {'x30'}},
+    'autiaz':  {'read': {'x30'}, 'write': {'x30'}},
+    'autia1':  {'read': {'x30', 'x1'}, 'write': {'x30'}},
+    'xpaci':   {'read': {'x30'}, 'write': {'x30'}},
+    'xpacd':   {'read': {'x30'}, 'write': {'x30'}},
+    'retaa':   {'read': {'x30', 'sp'}},
+    'retab':   {'read': {'x30', 'sp'}},
 }
 
 # https://github.com/AsahiLinux/docs/blob/main/docs/hw/cpu/apple-instructions.md
