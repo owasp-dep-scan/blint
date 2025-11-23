@@ -25,6 +25,7 @@ from blint.lib.checks import (
     check_dll_characteristics,
     check_codesign,
     check_trust_info,
+    check_security_property,
 )
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env, BlintOptions
 from blint.logger import LOG, console
@@ -34,6 +35,13 @@ from blint.lib.utils import (
     print_findings_table,
     export_metadata
 )
+
+check_pac = check_security_property
+check_pac_strict = check_security_property
+check_xfg = check_security_property
+check_cet = check_security_property
+check_enclave = check_security_property
+check_cfg_export_suppression = check_security_property
 
 try:
     import importlib.resources  # pylint: disable=ungrouped-imports
@@ -163,37 +171,51 @@ def load_default_rules():
                         LOG.warning("Default rule has no 'id'. Skipping.")
                         continue
                 for etype in exe_type_list:
-                    if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                    group = methods_reviews_groups.get("group")
+                    if group == "METHOD_REVIEWS":
                         review_methods_dict[etype].append(method_rules_dict)
-                    elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                    elif group == "EXE_REVIEWS":
                         review_exe_dict[etype].append(method_rules_dict)
-                    elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                    elif group == "SYMBOL_REVIEWS":
                         review_symbols_dict[etype].append(method_rules_dict)
-                    elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                    elif group == "IMPORT_REVIEWS":
                         review_imports_dict[etype].append(method_rules_dict)
-                    elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                    elif group == "ENTRIES_REVIEWS":
                         review_entries_dict[etype].append(method_rules_dict)
-                    elif methods_reviews_groups.get("group") == "FUNCTION_REVIEWS":
+                    elif group == "FUNCTION_REVIEWS":
                         review_functions_dict[etype].append(method_rules_dict)
 
-def load_custom_rules(custom_dir_path: Optional[str], review_rules_cache, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict):
+def load_custom_rules(
+    custom_dir_path: Optional[str],
+    review_rules_cache,
+    review_exe_dict,
+    review_methods_dict,
+    review_symbols_dict,
+    review_imports_dict,
+    review_entries_dict,
+    review_functions_dict,
+):
     """
     Loads custom review rules from a specified directory.
     """
     if not custom_dir_path:
         return
     if not os.path.isdir(custom_dir_path):
-        LOG.debug(f"Custom rules directory '{custom_dir_path}' does not exist or is not a directory. Skipping custom rules.")
+        LOG.debug(
+            f"Custom rules directory '{custom_dir_path}' does not exist or is not a directory. Skipping custom rules."
+        )
         return
 
     LOG.debug(f"Loading custom review rules from '{custom_dir_path}'")
     custom_path = Path(custom_dir_path)
-    custom_rule_files = list(custom_path.glob("*.yml")) + list(custom_path.glob("*.yaml"))
+    custom_rule_files = list(custom_path.glob("*.yml")) + list(
+        custom_path.glob("*.yaml")
+    )
 
     for rule_file_path in custom_rule_files:
         LOG.debug(f"Loading custom rules from {rule_file_path}")
         try:
-            with open(rule_file_path, 'r', encoding='utf-8') as f:
+            with open(rule_file_path, "r", encoding="utf-8") as f:
                 raw_annotations = f.read().split("---")
                 for tmp_data in raw_annotations:
                     if not tmp_data:
@@ -215,24 +237,29 @@ def load_custom_rules(custom_dir_path: Optional[str], review_rules_cache, review
                             method_rules_dict[rule_id] = rule
                             review_rules_cache[rule_id] = rule
                         else:
-                            LOG.warning(f"Rule in {rule_file_path} has no 'id'. Skipping.")
+                            LOG.warning(
+                                f"Rule in {rule_file_path} has no 'id'. Skipping."
+                            )
                             continue
 
                     for etype in exe_type_list:
-                        if methods_reviews_groups.get("group") == "METHOD_REVIEWS":
+                        group = methods_reviews_groups.get("group")
+                        if group == "METHOD_REVIEWS":
                             review_methods_dict[etype].append(method_rules_dict)
-                        elif methods_reviews_groups.get("group") == "EXE_REVIEWS":
+                        elif group == "EXE_REVIEWS":
                             review_exe_dict[etype].append(method_rules_dict)
-                        elif methods_reviews_groups.get("group") == "SYMBOL_REVIEWS":
+                        elif group == "SYMBOL_REVIEWS":
                             review_symbols_dict[etype].append(method_rules_dict)
-                        elif methods_reviews_groups.get("group") == "IMPORT_REVIEWS":
+                        elif group == "IMPORT_REVIEWS":
                             review_imports_dict[etype].append(method_rules_dict)
-                        elif methods_reviews_groups.get("group") == "ENTRIES_REVIEWS":
+                        elif group == "ENTRIES_REVIEWS":
                             review_entries_dict[etype].append(method_rules_dict)
-                        elif methods_reviews_groups.get("group") == "FUNCTION_REVIEWS":
+                        elif group == "FUNCTION_REVIEWS":
                             review_functions_dict[etype].append(method_rules_dict)
                         else:
-                            LOG.warning(f"Unknown group '{methods_reviews_groups.get('group')}' in {rule_file_path}. Skipping block.")
+                            LOG.warning(
+                                f"Unknown group '{methods_reviews_groups.get('group')}' in {rule_file_path}. Skipping block."
+                            )
         except Exception as e:
             LOG.error(f"Error loading custom rules from {rule_file_path}: {e}")
 

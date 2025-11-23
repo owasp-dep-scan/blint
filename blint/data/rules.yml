@@ -198,3 +198,51 @@
     - PE32
     - PE64
     - dotnetbinary
+- id: CHECK_PAC
+  title: Missing ARM64 Pointer Authentication (PAC)
+  description: |
+    Pointer Authentication Code (PAC) is a security feature in ARMv8.3+ architectures that signs pointers (specifically return addresses) to protect against Return-Oriented Programming (ROP) attacks.
+    This binary does not appear to have PAC enabled. Ensure the binary is compiled with `/guard:signret` (MSVC) or `-mbranch-protection=pac-ret` (Clang/GCC).
+  severity: info
+  property_key: pac
+  exe_types:
+    - PE32
+    - PE64
+- id: CHECK_PAC_STRICT
+  title: Missing Strict Pointer Authentication Enforcement
+  description: |
+    The binary has PAC enabled but lacks "Strict" enforcement. Strict enforcement (`/guard:signret` + compatibility mode disabled) ensures the OS loader refuses to run the binary on hardware that does not support PAC, providing a "fail-closed" security guarantee.
+  severity: info
+  property_key: pac_strict
+  exe_types:
+    - PE32
+    - PE64
+- id: CHECK_XFG
+  title: Missing Extended Flow Guard (XFG)
+  description: |
+    Extended Flow Guard (XFG) provides stricter Forward-Edge Control Flow Integrity than standard CFG. It validates not just the target address but also the function signature hash, reducing the gadget space for attackers.
+    Enable with `/guard:xfg`.
+  severity: info
+  property_key: xfg
+  exe_types:
+    - PE32
+    - PE64
+- id: CHECK_CET
+  title: Missing Shadow Stack (Intel CET)
+  description: |
+    Intel Control-flow Enforcement Technology (CET) Shadow Stack protects return addresses from being overwritten on the stack (classic buffer overflows).
+    Enable with `/cetcompat`.
+  severity: info
+  property_key: cet_shadow_stack
+  exe_types:
+    - PE32
+    - PE64
+- id: CHECK_ENCLAVE
+  title: Binary not configured for Enclave
+  description: |
+    The binary is not marked as an Enclave application (SGX/VBS). If this application handles high-value secrets (keys, identity tokens), consider moving sensitive logic to a Trusted Execution Environment.
+  severity: info
+  property_key: enclave
+  exe_types:
+    - PE32
+    - PE64

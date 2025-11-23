@@ -58,9 +58,21 @@ PE (Portable Executable) files are the standard for Windows.
   - `subsystem`: Indicates whether the application is `WINDOWS_GUI` or `WINDOWS_CUI` (console).
   - `dll_characteristics`: A set of flags indicating security features like `DYNAMIC_BASE` (ASLR) and `CONTROL_FLOW_GUARD`.
 
-- **Load Configuration (`load_configuration`):**
+- **Load Configuration (`load_configuration`):** This structure is the bridge between the static binary and the OS Loader/Hypervisor security features.
   - `guard_flags`: The raw integer flags indicating various security settings processed by the OS loader.
-  - `guard_cf_flags`: A human-readable list of active Guard features, such as `CF_INSTRUMENTED` (Control Flow Guard) and `RF_INSTRUMENTED` (Return Flow Guard/PAC).
+  - `guard_cf_flags`: List of active Guard features, such as `CF_INSTRUMENTED` (Control Flow Guard) and `RF_INSTRUMENTED` (Return Flow Guard/PAC).
+  - `code_integrity`: Configuration for **Hypervisor-Protected Code Integrity (HVCI)**.
+    - `flags`: Settings determining how the kernel verifies the digital signature of this binary at runtime.
+    - `catalog`: Indicates if the signature is stored in an external catalog file rather than embedded in the binary.
+  - `enclave_config`: Metadata for running inside a **Trusted Execution Environment (TEE)**, such as Intel SGX or Windows VBS (Virtualization-based Security) Enclaves.
+    - `policy_flags`: Security policies enforced by the enclave (e.g., debugging allowed).
+    - `imports`: Specific functions imported by the enclave code from the host process.
+  - `volatile_metadata`: Information used by **Virtual Secure Mode (VSM)**.
+    - Defines memory ranges that are mutable vs. executable, allowing the Hypervisor to enforce W^X (Write XOR Execute) policies more granularly than standard page tables.
+  - `runtime_checks`: A dictionary of specific function pointers present in the binary that correspond to hardware-backed security checks.
+    - `guard_rf_verify_stackpointer`: Indicates the binary expects the OS to verify the Stack Pointer using ARM64 PAC keys (Key B).
+    - `guard_xfg_check`: Indicates support for Extended Flow Guard (Type-based CFI).
+    - `guard_eh_continuation`: Indicates support for Intel CET (Shadow Stack) during exception handling.
 
 - **Authenticode (`authenticode`, `signatures`):** Detailed information about the binary's digital signature.
   - Provides hashes (`authentihash_*`) of the signed content.

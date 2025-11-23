@@ -1707,7 +1707,8 @@ def analyze_import_deps(metadata):
 
 def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     """
-    Parses the Load Configuration to extract Guard flags (CFG, PAC, etc.).
+    Parses the Load Configuration to extract Guard flags, Code Integrity,
+    Enclaves, and Volatile Metadata.
     """
     lc_info = {}
     if not parsed_obj.has_configuration:
@@ -1718,6 +1719,43 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
         lc_info["guard_cf_flags"] = [
             str(flag).split(".")[-1] for flag in load_config.guard_cf_flags_list
         ]
+        if hasattr(load_config, "code_integrity"):
+            ci = load_config.code_integrity
+            lc_info["code_integrity"] = {
+                "flags": ci.flags,
+                "catalog": ci.catalog,
+                "catalog_offset": ci.catalog_offset,
+                "reserved": ci.reserved,
+            }
+        if hasattr(load_config, "enclave_config") and load_config.enclave_config:
+            enclave = load_config.enclave_config
+            lc_info["enclave_config"] = {
+                "policy_flags": enclave.policy_flags,
+                "profile_id": [hex(x) for x in enclave.family_id],
+                "image_id": [hex(x) for x in enclave.image_id],
+                "security_version": enclave.security_version,
+                "enclave_size": enclave.enclave_size,
+                "nb_threads": enclave.nb_threads,
+                "imports": [
+                    {"name": imp.import_name, "type": enum_to_str(imp.type)}
+                    for imp in enclave.imports
+                ],
+            }
+        if hasattr(load_config, "volatile_metadata") and load_config.volatile_metadata:
+            vm = load_config.volatile_metadata
+            lc_info["volatile_metadata"] = {
+                "min_version": vm.min_version,
+                "max_version": vm.max_version,
+                "access_table_size": vm.access_table_size,
+                "info_ranges_size": vm.info_ranges_size,
+            }
+        checks = {
+            "guard_rf_verify_stackpointer": load_config.guard_rf_verify_stackpointer_function_pointer,
+            "guard_xfg_check": load_config.guard_xfg_check_function_pointer,
+            "guard_eh_continuation": load_config.guard_eh_continuation_count,
+            "dynamic_value_reloc_table": load_config.dynamic_value_reloctable_offset,
+        }
+        lc_info["runtime_checks"] = {k: v for k, v in checks.items() if v}
     except (AttributeError, Exception) as e:
         LOG.debug(f"Error parsing Load Configuration: {e}")
     return lc_info
