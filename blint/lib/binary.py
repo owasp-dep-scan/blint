@@ -865,7 +865,7 @@ def parse_macho_symbols(symbols):
                         "export_info": {
                             "symbol": symbol.export_info.symbol, "kind": symbol.export_info.kind,
                             "flags": str(symbol.export_info.flags),
-                            "offset": ADDRESS_FMT.format(symbol.export_info.offset),
+                            "offset": ADDRESS_FMT.format(symbol.export_info.node_offset),
                             "address": ADDRESS_FMT.format(symbol.export_info.address)
                         } if symbol.has_export_info else None,
                         "origin": symbol.origin,
