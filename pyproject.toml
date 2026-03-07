@@ -6,7 +6,7 @@ authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
 ]
 dependencies = [
-    "lief>=0.17.1",
+    "lief>=0.17.4",
     "rich>=14.0.0",
     "PyYAML>=6.0.2",
     "defusedxml>=0.7.1",
@@ -35,6 +35,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.10,<3.14"
