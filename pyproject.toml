@@ -1,24 +1,24 @@
 [project]
 name = "blint"
-version = "3.1.1"
+version = "3.1.2"
 description = "Linter and SBOM generator for binary files."
 authors = [
     {name= "Team AppThreat", email = "cloud@appthreat.com"},
 ]
 dependencies = [
     "lief>=0.17.4",
-    "rich>=14.0.0",
-    "PyYAML>=6.0.2",
+    "rich>=14.3.3",
+    "PyYAML>=6.0.3",
     "defusedxml>=0.7.1",
-    "pydantic[email]>=2.11.3",
-    "orjson>=3.10.16",
+    "pydantic[email]>=2.12.5",
+    "orjson>=3.11.7",
     "multi-demangle>=1.0.1",
-    "ar>=1.0.0",
+    "ar>=1.0.1",
     "custom-json-diff>=2.1.6",
     "appdirs>=1.4.4",
-    "apsw>=3.49.1.0",
-    "packageurl-python>=0.16.0",
-    "oras>=0.2.28",
+    "apsw>=3.51.2.0",
+    "packageurl-python>=0.17.6",
+    "oras>=0.2.41",
 ]
 license = "MIT"
 readme = "README.md"
@@ -38,7 +38,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.15"
 include = ["blint/data/*.yml"]
 
 [project.urls]
@@ -49,12 +49,12 @@ blint = 'blint.cli:main'
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.5",
-    "black>=25.1.0",
-    "flake8>=7.2.0",
-    "pylint>=3.3.6",
-    "pytest-cov>=6.1.1",
-    "pyinstaller>=6.12.0"
+    "pytest>=9.0.2",
+    "black>=26.3.0",
+    "flake8>=7.3.0",
+    "pylint>=4.0.5",
+    "pytest-cov>=7.0.0",
+    "pyinstaller>=6.19.0"
 ]
 
 [tool.black]

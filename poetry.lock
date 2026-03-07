@@ -2120,5 +2120,5 @@ dev = ["black", "flake8", "pyinstaller", "pylint", "pytest", "pytest-cov"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10,<3.14"
-content-hash = "fbcae07f60120641d924a975b0ad3be54d63a81a93b932c1c86b65888fc708f3"
+python-versions = ">=3.10,<3.15"
+content-hash = "4d0450038dbb1d173b9930e90fe2230922c4d092c4d350ce90246ac096641b69"
