@@ -899,7 +899,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     machine_type = (metadata.get("machine_type") or metadata.get("cpu_type") or "").upper()
     endianness = metadata.get("endianness", "LSB").upper()
     arch_map = {
-        "I386": "x86",
+        "I386": "i686",
         "X86_64": "x86_64",
         "AMD64": "x86_64",
         "ARM": "arm",
@@ -928,7 +928,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         arch = "armeb"
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        os = "win32"
+        os = "windows"
         vendor = "pc"
     elif binary_type == "MachO":
         vendor = "apple"
@@ -957,7 +957,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     if metadata.get("is_targeting_android"):
         os = "linux"
         env = "android"
-    elif os == "win32":
+    elif os == "windows":
         env = "msvc"
     elif os == "linux":
         if metadata.get("is_musl"):
@@ -1837,8 +1837,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         for i, dd in enumerate(parsed_obj.data_directories):
             if (
                 i == 14
-                and dd.type.value
-                == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+                and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+                and dd.size > 0
             ):
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)

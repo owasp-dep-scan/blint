@@ -1196,6 +1196,22 @@ def disassemble_functions(
         ):
             func_addr_va = func_addr + parsed_obj.imagebase
         lief_lookup_va = func_addr + base_delta
+        func_addr_va_hex = hex(func_addr_va)
+        is_executable = True
+        if isinstance(parsed_obj, lief.PE.Binary) and hasattr(parsed_obj, "sections"):
+            is_executable = False
+            for sec in parsed_obj.sections:
+                sec_start = sec.virtual_address
+                sec_size = getattr(sec, "virtual_size", sec.size)
+                if sec_size == 0:
+                    sec_size = sec.size
+                if sec_start <= func_addr < (sec_start + sec_size):
+                    if sec.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE):
+                        is_executable = True
+                    break
+        if not is_executable:
+            LOG.debug(f"Address {func_addr_va_hex} for '{func_name}' is not in an executable section. Skipping disassembly.")
+            continue
         rebased_bytes_mv = None
         try:
             result = parsed_obj.get_content_from_virtual_address(
@@ -1221,7 +1237,6 @@ def disassemble_functions(
             continue
         rebased_bytes_list = rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
         original_bytes_list = original_bytes_mv.toreadonly() if original_bytes_mv is not None else []
-        func_addr_va_hex = hex(func_addr_va)
         try:
             instr_list = None
             disassemblers_to_try = [(nyxstone_instance, arch_target)]
