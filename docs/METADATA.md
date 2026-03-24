@@ -81,11 +81,19 @@ PE (Portable Executable) files are the standard for Windows.
 - **Resources (`resources`):** Metadata extracted from the `.rsrc` section.
   - `version_metadata`: Contains key-value pairs like `ProductName`, `CompanyName`, and `FileVersion`. Useful for identifying the software and its origin.
   - `manifest`: The embedded XML application manifest, which controls privileges, dependencies, and UI settings.
-
+- **data_directories, sections, and rich_header**
+  - See the official LIEF documentation to learn about these [attributes](https://lief.re/doc/latest/formats/pe/python.html#data-directory).
 - **Imports and Exports (`imports`, `exports`):**
   - `imports`: A list of all functions imported from external DLLs, grouped by library. Forms the basis of the `imphash`.
   - `exports`: A list of all functions this binary provides to other executables.
-
+- **Thread Local Storage (TLS) Callbacks:**
+  - `tls_callbacks`: List of the callbacks associated with the current TLS. These functions are called before any other functions.
+  - `tls_address_index`: The location to receive the TLS index assigned by the loader. This location should be located in a writable section like .data.
+  - `tls_sizeof_zero_fill`: Size in bytes of the zeros to be padded after the data specified by data_template.
+  - `tls_data_template_len`: Length of the initial content used to initialize TLS data.
+  - `tls_characteristics`: The four bits [23:20] describe alignment info. Possible values are those defined as LIEF.IMAGE*SCN_ALIGN*\*, which are also used to describe alignment of section in object files. The other 28 bits are reserved for future use.
+  - `tls_section_name`: Section associated with the TLS object (or absent if not linked)
+  - `tls_directory_type`: Name of the DataDirectory associated with the TLS object (or absent if not linked)
 - **Exceptions (exceptions):** For x86-64 and ARM64 PE binaries, this section provides detailed stack unwinding information extracted from the IMAGE_DIRECTORY_ENTRY_EXCEPTION.
   - Attributes:
     - `rva_start` and `rva_end`: The memory boundaries of the function code.

@@ -899,7 +899,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     machine_type = (metadata.get("machine_type") or metadata.get("cpu_type") or "").upper()
     endianness = metadata.get("endianness", "LSB").upper()
     arch_map = {
-        "I386": "x86",
+        "I386": "i686",
         "X86_64": "x86_64",
         "AMD64": "x86_64",
         "ARM": "arm",
@@ -928,7 +928,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         arch = "armeb"
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        os = "win32"
+        os = "windows"
         vendor = "pc"
     elif binary_type == "MachO":
         vendor = "apple"
@@ -957,7 +957,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     if metadata.get("is_targeting_android"):
         os = "linux"
         env = "android"
-    elif os == "win32":
+    elif os == "windows":
         env = "msvc"
     elif os == "linux":
         if metadata.get("is_musl"):
@@ -1721,12 +1721,13 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
         ]
         if hasattr(load_config, "code_integrity"):
             ci = load_config.code_integrity
-            lc_info["code_integrity"] = {
-                "flags": ci.flags,
-                "catalog": ci.catalog,
-                "catalog_offset": ci.catalog_offset,
-                "reserved": ci.reserved,
-            }
+            if ci:
+                lc_info["code_integrity"] = {
+                    "flags": ci.flags,
+                    "catalog": ci.catalog,
+                    "catalog_offset": ci.catalog_offset,
+                    "reserved": ci.reserved,
+                }
         if hasattr(load_config, "enclave_config") and load_config.enclave_config:
             enclave = load_config.enclave_config
             lc_info["enclave_config"] = {
@@ -1794,6 +1795,31 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
+        metadata["sections"] =[]
+        ep = parsed_obj.optional_header.addressof_entrypoint
+        for sec in parsed_obj.sections:
+            sec_size = max(getattr(sec, "virtual_size", 0), getattr(sec, "sizeof_raw_data", 0))
+            if sec.virtual_address <= ep < (sec.virtual_address + sec_size):
+                metadata["entry_point_section"] = sec.name
+                break
+            sec_data = {
+                "name": sec.name,
+                "entropy": sec.entropy,
+                "virtual_size": getattr(sec, "virtual_size", 0),
+                "raw_size": getattr(sec, "sizeof_raw_data", 0),
+            }
+            if hasattr(sec, "characteristics_lists"):
+                sec_data["characteristics"] =[enum_to_str(c) for c in sec.characteristics_lists]
+            metadata["sections"].append(sec_data)
+        if parsed_obj.has_rich_header:
+            rich = parsed_obj.rich_header
+            metadata["rich_header"] = {
+                "key": hex(rich.key),
+                "entries":[
+                    {"id": e.id, "build_id": e.build_id, "count": e.count}
+                    for e in rich.entries
+                ]
+            }
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
         metadata["resources"] = process_pe_resources(parsed_obj)
@@ -1837,8 +1863,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         for i, dd in enumerate(parsed_obj.data_directories):
             if (
                 i == 14
-                and dd.type.value
-                == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+                and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+                and dd.size > 0
             ):
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
@@ -1847,15 +1873,21 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         )
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
-        if tls and tls.sizeof_zero_fill:
-            metadata["tls_address_index"] = ADDRESS_FMT.format(
-                tls.addressof_index
-            ).strip()
-            metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
-            metadata["tls_data_template_len"] = len(tls.data_template)
-            metadata["tls_characteristics"] = tls.characteristics
-            metadata["tls_section_name"] = tls.section.name
-            metadata["tls_directory_type"] = str(tls.directory.type)
+        if tls:
+            metadata["tls_callbacks"] = [
+                ADDRESS_FMT.format(cb).strip() for cb in getattr(tls, "callbacks", [])
+            ]
+            if hasattr(tls, "sizeof_zero_fill"):
+                metadata["tls_address_index"] = ADDRESS_FMT.format(
+                    tls.addressof_index
+                ).strip()
+                metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
+                metadata["tls_data_template_len"] = len(tls.data_template)
+                metadata["tls_characteristics"] = tls.characteristics
+                if tls.has_section:
+                    metadata["tls_section_name"] = tls.section.name
+                if tls.has_data_directory:
+                    metadata["tls_directory_type"] = str(tls.directory.type)
         nested_binary = parsed_obj.nested_pe_binary
         if nested_binary:
             LOG.debug("Binary has ARM64EC representation!")
@@ -1873,6 +1905,20 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     except (AttributeError, IndexError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)}: {e} while parsing {exe_file} PE metadata.")
         raise
+    try:
+        if hasattr(parsed_obj, "overlay") and parsed_obj.overlay:
+            if hasattr(parsed_obj.overlay, "tobytes"):
+                overlay_bytes = parsed_obj.overlay.tobytes()
+            else:
+                overlay_bytes = bytes(parsed_obj.overlay)
+            if len(overlay_bytes) > 0:
+                metadata["overlay_info"] = {
+                    "offset": getattr(parsed_obj, "overlay_offset", 0),
+                    "size": len(overlay_bytes),
+                    "entropy": calculate_entropy(overlay_bytes)
+                }
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Failed to parse PE overlay for {exe_file}: {e}")
     return metadata
 
 
