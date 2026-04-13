@@ -662,7 +662,7 @@ def parse_pe_symbols(symbols):
     return symbols_list, exe_type
 
 
-def parse_pe_imports(imports):
+def parse_pe_imports(imports, imagebase):
     """
     Parses the imports and returns lists of imported symbols and DLLs.
 
@@ -696,6 +696,7 @@ def parse_pe_imports(imports):
                             "address": ADDRESS_FMT.format(entry.data).strip(),
                             "iat_value": entry.iat_value,
                             "hint": entry.hint,
+                            "iat_address": (entry.iat_address + imagebase) if hasattr(entry, "iat_address") else None,
                         }
                     )
             except AttributeError:
@@ -1801,7 +1802,6 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
             sec_size = max(getattr(sec, "virtual_size", 0), getattr(sec, "sizeof_raw_data", 0))
             if sec.virtual_address <= ep < (sec.virtual_address + sec_size):
                 metadata["entry_point_section"] = sec.name
-                break
             sec_data = {
                 "name": sec.name,
                 "entropy": sec.entropy,
@@ -1831,7 +1831,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         (
             metadata["imports"],
             metadata["dynamic_entries"],
-        ) = parse_pe_imports(parsed_obj.imports)
+        ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
         # Attempt to detect if this PE is a driver
         if metadata["dynamic_entries"]:
             for e in metadata["dynamic_entries"]:
