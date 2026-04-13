@@ -9,6 +9,8 @@ concurrency:
 permissions: {}
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -29,10 +31,6 @@ jobs:
         brew install llvm@18
         echo /opt/homebrew/opt/llvm@18/bin >> $GITHUB_PATH
       if: runner.os == 'macOS'
-    - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7  # v1.16.0
-      with:
-        cache: false
-      if: runner.os == 'Windows'
     - name: Set up Python
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:

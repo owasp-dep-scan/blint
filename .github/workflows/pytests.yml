@@ -11,6 +11,8 @@ concurrency:
 permissions: {}
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
