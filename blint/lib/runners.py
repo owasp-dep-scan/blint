@@ -320,25 +320,41 @@ class ReviewRunner:
                         check_field = rule_obj.get("check_field")
                         operator_str = rule_obj.get("operator")
                         threshold = rule_obj.get("threshold")
-                        if check_field and operator_str and threshold is not None:
+                        patterns = rule_obj.get("patterns")
+                        if check_field and operator_str:
                             value = func_data
                             for key in check_field.split('.'):
-                                value = value.get(key)
+                                if isinstance(value, dict):
+                                    value = value.get(key)
+                                else:
+                                    value = None
                                 if value is None:
                                     break
                             if value is not None:
-                                if operator_str == ">":
-                                    passed = value > threshold
-                                elif operator_str == ">=":
-                                    passed = value >= threshold
-                                elif operator_str == "<":
-                                    passed = value < threshold
-                                elif operator_str == "<=":
-                                    passed = value <= threshold
-                                elif operator_str == "==":
-                                    passed = value == threshold
-                                elif operator_str == "!=":
-                                    passed = value != threshold
+                                if threshold is not None:
+                                    if operator_str == ">":
+                                        passed = value > threshold
+                                    elif operator_str == ">=":
+                                        passed = value >= threshold
+                                    elif operator_str == "<":
+                                        passed = value < threshold
+                                    elif operator_str == "<=":
+                                        passed = value <= threshold
+                                    elif operator_str == "==":
+                                        passed = value == threshold
+                                    elif operator_str == "!=":
+                                        passed = value != threshold
+                                elif patterns is not None:
+                                    if operator_str == "contains_all":
+                                        if isinstance(value, list):
+                                            passed = all(any(p.lower() in str(v).lower() for v in value) for p in patterns)
+                                        elif isinstance(value, str):
+                                            passed = all(p.lower() in value.lower() for p in patterns)
+                                    elif operator_str in ("contains_any", "contains"):
+                                        if isinstance(value, list):
+                                            passed = any(any(p.lower() in str(v).lower() for v in value) for p in patterns)
+                                        elif isinstance(value, str):
+                                            passed = any(p.lower() in value.lower() for p in patterns)
                     elif check_type == "function_analysis":
                         metrics = func_data.get("instruction_metrics", {})
                         icount = func_data.get("instruction_count", 0)

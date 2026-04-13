@@ -4278,3 +4278,16 @@ rules:
       - AuditSetSystemPolicy
       - SetPrivilege
       - SetIntegrity
+  - id: BYOVD_PHYS_MEM_MAPPING
+    title: Potential BYOVD Physical Memory Mapping Capability
+    summary: The driver imports APIs commonly abused to map physical memory directly to user-space.
+    description: |
+      This rule detects the import of APIs like HalTranslateBusAddress, ZwOpenSection, and ZwMapViewOfSection or MmMapIoSpace. 
+      Vulnerable drivers (like CVE-2026-29923 in pstrip64.sys) use these to bridge physical hardware addresses into unprivileged 
+      user-mode virtual address spaces. Attackers abuse this primitive to scan physical RAM for EPROCESS structures and steal SYSTEM tokens.
+    patterns:
+      - HalTranslateBusAddress
+      - ZwMapViewOfSection
+      - MmMapIoSpace
+      - IoAllocateMdl
+      - MmMapLockedPages

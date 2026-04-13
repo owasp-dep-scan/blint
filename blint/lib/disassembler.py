@@ -342,6 +342,14 @@ _SREG_TO_CATEGORY_MAP = {
     for sreg in sregs
 }
 
+# A universal superset of padding, trap, and disassembler artifact mnemonics
+PADDING_TRAP_MNEMONICS = {
+    "nop", "int3", "ud2", "hlt", "pause",
+    "brk", "udf", "trap",
+    "break",
+    "align", "invalid", "unallocated"
+}
+
 try:
     from nyxstone import Nyxstone
     NYXSTONE_AVAILABLE = True
@@ -369,23 +377,32 @@ def _get_implicit_regs_map(arch_target):
         return IMPLICIT_REGS_MIPS
     return IMPLICIT_REGS_X86
 
-def _find_function_end_index(instr_list):
+def _find_function_end_index(instr_list, has_exact_size=False):
     """
-    Scans a list of instructions to find the most likely end of a function.
-    Returns the index of the last instruction belonging to the function.
+    Scans a list of instructions to find the true end of a function.
+    If exact size is known, it strips trailing compiler padding/traps.
+    If guessed, it uses heuristics to find the first likely boundary.
     """
     if not instr_list:
         return -1
+
+    if has_exact_size:
+        for i in range(len(instr_list) - 1, 0, -1):
+            mnemonic = instr_list[i].assembly.split(None, 1)[0].lower()
+            if mnemonic not in PADDING_TRAP_MNEMONICS:
+                return i
+        return 0
+
+    # Fallback heuristic: the size was a blind guess (e.g., 4096 bytes),
     for i, instr in enumerate(instr_list):
         mnemonic = instr.assembly.split(None, 1)[0].lower()
-        if mnemonic in TERMINATING_INST:
-            if i + 1 < len(instr_list):
-                next_mnemonic = instr_list[i+1].assembly.split(None, 1)[0].lower()
-                if next_mnemonic in ('int3', 'nop'):
-                    return i
-            return i
-        if mnemonic in UNCONDITIONAL_JMP_INST_ALL:
-            return i
+        if mnemonic in TERMINATING_INST or mnemonic in UNCONDITIONAL_JMP_INST_ALL:
+            if i + 1 >= len(instr_list):
+                return i
+            next_mnemonic = instr_list[i+1].assembly.split(None, 1)[0].lower()
+            if next_mnemonic in PADDING_TRAP_MNEMONICS:
+                return i
+
     return len(instr_list) - 1
 
 def _get_abi_volatile_regs(parsed_obj, arch_target):
@@ -937,9 +954,13 @@ def _analyze_instructions(
             instruction_metrics["simd_fpu_count"] += 1
         all_regs_read.update(regs_read)
         all_regs_written.update(regs_written)
-        instructions_with_registers.append(
-            {"regs_read": regs_read, "regs_written": regs_written}
-        )
+        if regs_read or regs_written:
+            reg_data = {"position": len(instruction_mnemonics) - 1}
+            if regs_read:
+                reg_data["regs_read"] = regs_read
+            if regs_written:
+                reg_data["regs_written"] = regs_written
+            instructions_with_registers.append(reg_data)
         instruction_metrics["unique_regs_read_count"] = len(all_regs_read)
         instruction_metrics["unique_regs_written_count"] = len(all_regs_written)
     return (
@@ -970,6 +991,10 @@ def _build_addr_to_name_map(metadata):
                     addr_to_name_map[addr_int] = name
                 except ValueError:
                     continue
+            # IAT absolute addresses for resolving indirect RIP calls
+            iat_addr = func_entry.get("iat_address")
+            if iat_addr and name:
+                addr_to_name_map[iat_addr] = name
     return addr_to_name_map
 
 def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
@@ -1001,6 +1026,13 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                         target_addr = instr.address + 4 + val
                     else:
                         target_addr = val
+                # Handle x64 RIP-Relative Addressing
+                elif "rip" in operand.lower():
+                    m = re.search(r'\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]', operand.lower())
+                    if m:
+                        sign = 1 if m.group(1) == '+' else -1
+                        offset = int(m.group(2), 16) if m.group(2).startswith('0x') else int(m.group(2))
+                        target_addr = instr.address + len(instr.bytes) + (sign * offset)
             except (ValueError, IndexError):
                 continue
             if target_addr is not None:
@@ -1151,6 +1183,8 @@ def disassemble_functions(
     num_success = 0
     all_funcs = []
     for func_list_key in FUNCTION_SYMBOLS:
+        if isinstance(parsed_obj, lief.PE.Binary) and func_list_key in ("imports",):
+            continue
         all_funcs.extend(metadata.get(func_list_key, []))
     visited_addrs = set()
     # Merely invoking this method leads to more successful disassembly!
@@ -1176,6 +1210,7 @@ def disassemble_functions(
         if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
             func_addr = func_addr & ~1
         size_to_disasm = func_entry.get("size") or func_entry.get("length")
+        has_exact_size = True
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
             current_index = addr_to_index.get(func_addr)
             if current_index is not None and current_index + 1 < len(
@@ -1185,6 +1220,7 @@ def disassemble_functions(
                 size_to_disasm = next_func_addr - func_addr
             else:
                 size_to_disasm = 4096
+                has_exact_size = False
         if size_to_disasm <= 0:
             LOG.debug(f"Function '{func_name}' has a size of 0. Skipping.")
             continue
@@ -1283,7 +1319,7 @@ def disassemble_functions(
                 )
                 continue
             plain_assembly_text = "\n".join(i.assembly for i in instr_list)
-            end_index = _find_function_end_index(instr_list)
+            end_index = _find_function_end_index(instr_list, has_exact_size)
             truncated_instr_list = (
                 instr_list[: end_index + 1] if end_index != -1 else instr_list
             )
@@ -1354,6 +1390,7 @@ def disassemble_functions(
             disassembly_results[f"{func_addr_va_hex}::{func_name}"] = {
                 "name": func_name,
                 "address": func_addr_va_hex,
+                "rvaOrAddress": func_addr_str,
                 "assembly": plain_assembly_text,
                 "assembly_hash": assembly_hash,
                 "instruction_hash": instruction_hash,

@@ -32,7 +32,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
   - `function_metric`: Compares a numerical field within the function's metadata (e.g., `instruction_metrics`) against a threshold using an operator.
   - `function_analysis`: Requires custom logic within the `blint` codebase to evaluate the function's metadata (e.g., `assembly`, `instruction_metrics`, `regs_read`, etc.) based on complex criteria.
 - `check_field` (Required for `function_flag` and `function_metric`): The path to the field within the `disassembled_functions` dictionary for the function being analyzed (e.g., `has_system_call`, `instruction_metrics.xor_count`).
-- `operator` (Required for `function_metric`): The comparison operator to use (e.g., `>`, `>=`, `<`, `<=`, `==`, `!=`).
+- `operator` (Required for `function_metric`): Supports comparison operators (`>`, `>=`, `<`, `<=`, `==`, `!=`), `contains_all`, `contains_any` (or simply `contains`).
 - `threshold` (Required for `function_metric`): The numerical value to compare the `check_field` against using the `operator`.
 - `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`). This might influence reporting or filtering.
 
@@ -207,6 +207,19 @@ rules:
     summary: Function is very small, performs minimal operations, and ends with a return.
     description: Short functions (e.g., < 10 instructions) that read registers/stack, perform simple operations, and end with `ret` might be ROP gadgets used in exploits.
     check_type: function_analysis
+  - id: BYOVD_API_CHAIN_IN_FUNCTION
+    title: Function Chains BYOVD Memory Mapping APIs
+    summary: A single function directly calls the sequence of APIs required to map physical memory.
+    description: |
+      This function directly invokes HalTranslateBusAddress and ZwMapViewOfSection. This exact behavior 
+      matches known BYOVD exploits like CVE-2026-29923. It indicates the function likely accepts a user-provided 
+      physical address via an IOCTL and maps it into the calling process's memory.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - HalTranslateBusAddress
+      - ZwMapViewOfSection
 ```
 
 ## Using Custom Rules

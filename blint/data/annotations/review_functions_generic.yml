@@ -148,3 +148,16 @@ rules:
     description: The function reads or writes to undocumented or Apple-proprietary system registers (MSR/MRS instructions). This usually indicates kernel-level security enforcement, anti-debugging, or hardware configuration.
     check_type: function_analysis
     check_field: sreg_interactions
+  - id: BYOVD_API_CHAIN_IN_FUNCTION
+    title: Function Chains BYOVD Memory Mapping APIs
+    summary: A single function directly calls the sequence of APIs required to map physical memory.
+    description: |
+      This function directly invokes HalTranslateBusAddress and ZwMapViewOfSection. This exact behavior 
+      matches known BYOVD exploits like CVE-2026-29923. It indicates the function likely accepts a user-provided 
+      physical address via an IOCTL and maps it into the calling process's memory.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - HalTranslateBusAddress
+      - ZwMapViewOfSection

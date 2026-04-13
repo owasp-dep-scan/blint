@@ -117,9 +117,9 @@ def test_analyze_instructions_basic(mock_instructions):
     assert "rcx" in regs_read
     assert "rax" in regs_written
     assert has_indirect_call == True
-    assert len(instrs_with_regs) == len(mock_instructions)
+    assert len(instrs_with_regs) == 5
     assert "rax" in instrs_with_regs[0]["regs_written"]
-    assert instrs_with_regs[0]["regs_read"] == []
+    assert instrs_with_regs[1]["regs_read"] == ["rax", "rbx"]
     assert "rcx" in instrs_with_regs[3]["regs_read"]
     cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
     assert cc_regs.issubset(set(instrs_with_regs[3]["regs_written"]))
