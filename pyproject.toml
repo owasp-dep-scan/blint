@@ -7,16 +7,16 @@ authors = [
 ]
 dependencies = [
     "lief>=0.17.4",
-    "rich>=14.3.3",
+    "rich>=15.0.0",
     "PyYAML>=6.0.3",
     "defusedxml>=0.7.1",
-    "pydantic[email]>=2.12.5",
+    "pydantic[email]>=2.13.0",
     "orjson>=3.11.7",
-    "multi-demangle>=1.0.1",
+    "multi-demangle>=1.0.3",
     "ar>=1.0.1",
     "custom-json-diff>=2.1.6",
     "appdirs>=1.4.4",
-    "apsw>=3.51.2.0",
+    "apsw>=3.53.0.0",
     "packageurl-python>=0.17.6",
     "oras>=0.2.41",
 ]

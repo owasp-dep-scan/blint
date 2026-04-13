@@ -695,7 +695,6 @@ def parse_pe_imports(imports, imagebase):
                             "short_name": demangle_symbolic_name(entry.name),
                             "address": ADDRESS_FMT.format(entry.data).strip(),
                             "iat_value": entry.iat_value,
-                            "iat_address": entry.iat_address if hasattr(entry, "iat_address") else None,
                             "hint": entry.hint,
                             "iat_address": (entry.iat_address + imagebase) if hasattr(entry, "iat_address") else None,
                         }

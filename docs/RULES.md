@@ -33,7 +33,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
   - `function_analysis`: Requires custom logic within the `blint` codebase to evaluate the function's metadata (e.g., `assembly`, `instruction_metrics`, `regs_read`, etc.) based on complex criteria.
 - `check_field` (Required for `function_flag` and `function_metric`): The path to the field within the `disassembled_functions` dictionary for the function being analyzed (e.g., `has_system_call`, `instruction_metrics.xor_count`).
 - `operator` (Required for `function_metric`): Supports comparison operators (`>`, `>=`, `<`, `<=`, `==`, `!=`), `contains_all`, `contains_any` (or simply `contains`).
-- `threshold` (Required for `function_metric`): The numerical value to compare the `check_field` against using the `operator`.
+- `threshold` (Required only for `function_metric` with comparison operators): The numerical value to compare the `check_field` against using the `operator`.
 - `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`). This might influence reporting or filtering.
 
 ## Sample Rules
