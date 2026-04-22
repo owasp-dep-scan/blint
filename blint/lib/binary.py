@@ -1010,7 +1010,8 @@ def parse_macho_symbols(symbols):
                 symbol_name = demangle_symbolic_name(symbol_name)
             if not exe_type:
                 exe_type = guess_exe_type(symbol_name)
-            with warnings.catch_warnings(action="ignore"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
                 symbols_list.append(
                     {
                         "name": (
