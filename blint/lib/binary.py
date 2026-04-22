@@ -329,9 +329,6 @@ def parse_wasm_metadata(exe_file: str, metadata: dict) -> dict:
             "exe_type": "wasmbinary",
         }
     )
-    if parse_wasm_file is None:
-        metadata["errors"] = ["wasm_tools is not installed"]
-        return metadata
     try:
         report = parse_wasm_file(exe_file) or {}
     except (AttributeError, TypeError, ValueError, OSError) as exc:

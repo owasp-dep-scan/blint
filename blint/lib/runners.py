@@ -22,7 +22,7 @@ from blint.lib.analysis import (
     run_checks,
     run_prefuzz,
 )
-from blint.lib.binary import parse
+from blint.lib.binary import is_wasm_file, parse
 from blint.lib.sbom import generate
 from blint.lib.utils import export_metadata, find_android_files, gen_file_list
 from blint.logger import LOG
@@ -46,6 +46,11 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
         ):
             os.makedirs(blint_options.sbom_output_dir)
     exe_files = gen_file_list(blint_options.src_dir_image)
+    wasm_files = [f for f in exe_files if is_wasm_file(f)]
+    if wasm_files:
+        LOG.info(
+            f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing"
+        )
     android_files = []
     for src in blint_options.src_dir_image:
         if files := find_android_files(src):
@@ -110,14 +115,27 @@ class AnalysisRunner:
         self.progress.update(
             self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]"
         )
-        metadata = parse(f, blint_options.disassemble)
+        should_disassemble = blint_options.disassemble and not is_wasm_file(f)
+        if blint_options.disassemble and not should_disassemble:
+            LOG.debug(f"Skipping disassembly for wasm file {f}")
+        metadata = parse(f, should_disassemble)
         exe_name = metadata.get("name", f)
+        wasm_report = metadata.get("wasm_report")
+        metadata_to_export = dict(metadata)
+        if wasm_report:
+            metadata_to_export.pop("wasm_report", None)
         # Store raw metadata
         export_metadata(
             blint_options.reports_dir,
-            metadata,
+            metadata_to_export,
             f"{os.path.basename(exe_name)}-metadata",
         )
+        if wasm_report:
+            export_metadata(
+                blint_options.reports_dir,
+                wasm_report,
+                f"{os.path.basename(exe_name)}-wasm-report",
+            )
         self.progress.update(
             self.task,
             description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules",

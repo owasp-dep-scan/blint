@@ -127,7 +127,7 @@ WASM (WebAssembly) binaries are parsed via `wasm_tools` and then normalized into
 
 - **Detection:** blint treats a file as WASM when the extension is `.wasm` or the magic bytes are `00 61 73 6d`.
 - **Normalization:** blint preserves common cross-format keys (`imports`, `dynamic_entries`, `functions`, `symtab_symbols`, `dynamic_symbols`) so dependency and review workflows continue to work.
-- **Raw passthrough:** the complete parser output is available under `wasm_report` for advanced use-cases.
+- **Raw passthrough export:** the complete parser output is written as a separate report artifact (`*-wasm-report.json`) in the reports directory.
 
 | Attribute         | Description                                                                                       | Notes                                                                       |
 | ----------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
@@ -147,9 +147,12 @@ WASM (WebAssembly) binaries are parsed via `wasm_tools` and then normalized into
 | `wasm_analysis`   | Structured analysis from `wasm_tools` (detections, capabilities, profiles, findings).             | Preserved as provided by parser API.                                        |
 | `wasm_errors`     | Parser-reported errors, if any.                                                                   | Non-fatal parse warnings/errors can appear here.                            |
 | `errors`          | blint-level error list for WASM parsing.                                                          | Set when parser reports issues or parse operation fails.                    |
-| `wasm_report`     | Full raw report from `wasm_tools.api.parse_wasm_file`.                                            | Treated as parser passthrough; useful for deep tooling.                     |
 
 WASM binaries also receive common derived fields like `hashes`, `import_dependencies`, `llvm_target_tuple` (for example `wasm32-unknown-unknown`), `security_properties`, and `binary_composition`.
+
+blint writes the raw parser payload to a companion file named `*-wasm-report.json` alongside `*-metadata.json`.
+
+Representative WASM fixtures used by tests are available under `tests/data/*.wasm`.
 
 ---
 

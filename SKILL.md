@@ -25,7 +25,7 @@ This file defines practical skills an AI agent should apply when working on `bli
 - Preserve format-specific fields while maintaining normalized top-level fields.
 - Do not break keys used downstream by checks/reviews/SBOM mappers.
 - Keep defensive parsing style: suppress parser exceptions where already expected.
-- Validate changes against representative fixtures in `tests/data/*.json`.
+- Validate changes against representative fixtures in `tests/data/*.json` and `tests/data/*.wasm`.
 
 ## Skill: Extend disassembly analytics
 
@@ -78,3 +78,4 @@ This file defines practical skills an AI agent should apply when working on `bli
   - SBOM generation
 - Run tests after editing Python logic.
 - Ensure no accidental behavior change in non-targeted binary formats.
+- For WASM parsing changes, verify both normalized fields (`imports`, `dynamic_entries`, `functions`) and raw passthrough fields (`wasm_report`, `wasm_analysis`).

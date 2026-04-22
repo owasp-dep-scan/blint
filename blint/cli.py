@@ -50,7 +50,7 @@ def build_parser():
         default=[],
         nargs="+",
         help="Source directories, container images or binary files. Defaults "
-             "to current directory.",
+        "to current directory.",
     )
     parser.add_argument(
         "-o",
@@ -146,7 +146,7 @@ def build_parser():
         default=False,
         dest="deep_mode",
         help="Enable deep mode to collect more used symbols and modules "
-             "aggressively. Slow operation.",
+        "aggressively. Slow operation.",
     )
     sbom_parser.add_argument(
         "--stdout",
@@ -199,15 +199,16 @@ def build_parser():
     db_parser.add_argument(
         "--image-url",
         dest="image_url",
-        choices=["ghcr.io/appthreat/blintdb-vcpkg:v1",
-                 "ghcr.io/appthreat/blintdb-vcpkg-arm64:v1",
-                 "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
-                 "ghcr.io/appthreat/blintdb-vcpkg-musl:v1",
-                 "ghcr.io/appthreat/blintdb-meson:v1",
-                 "ghcr.io/appthreat/blintdb-meson-arm64:v1",
-                 "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
-                 "ghcr.io/appthreat/blintdb-meson-musl:v1",
-                 ],
+        choices=[
+            "ghcr.io/appthreat/blintdb-vcpkg:v1",
+            "ghcr.io/appthreat/blintdb-vcpkg-arm64:v1",
+            "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
+            "ghcr.io/appthreat/blintdb-vcpkg-musl:v1",
+            "ghcr.io/appthreat/blintdb-meson:v1",
+            "ghcr.io/appthreat/blintdb-meson-arm64:v1",
+            "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
+            "ghcr.io/appthreat/blintdb-meson-musl:v1",
+        ],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
     )

@@ -24,7 +24,9 @@ def get(db_file: str = BLINTDB_LOC, read_only=True) -> apsw.Connection:
     if not db_file.startswith("file:") and db_file != ":memory:":
         db_file = f"file:{DB_FILE_SEP}{os.path.abspath(db_file)}"
     global db_conn
-    ro_flags = apsw.SQLITE_OPEN_URI | apsw.SQLITE_OPEN_NOFOLLOW | apsw.SQLITE_OPEN_READONLY
+    ro_flags = (
+        apsw.SQLITE_OPEN_URI | apsw.SQLITE_OPEN_NOFOLLOW | apsw.SQLITE_OPEN_READONLY
+    )
     db_conn = apsw.Connection(db_file, flags=ro_flags)
     return db_conn
 
@@ -38,7 +40,9 @@ def return_batch_binaries_detected(symbols_list):
     # The export ids that led to the match
     binaries_eid_dict = {}
     if not isinstance(symbols_list, list):
-        raise TypeError(f"Incorrect type symbols_lists should be List not {type(symbols_list)}")
+        raise TypeError(
+            f"Incorrect type symbols_lists should be List not {type(symbols_list)}"
+        )
 
     # Errors not being caught here
     output_list = get_bid_using_ename_batch(symbols_list)
@@ -51,7 +55,7 @@ def return_batch_binaries_detected(symbols_list):
         for bid in bid_list:
             matching_binaries = find_binary_from_db(bid)
             if matching_binaries:
-                for (bname, pname, purl) in matching_binaries:
+                for bname, pname, purl in matching_binaries:
                     binaries_eid_dict[purl] = eid_list
                     if purl in binaries_detected_dict:
                         binaries_detected_dict[purl] += score
@@ -107,7 +111,8 @@ def find_binary_from_db(bid):
         return None
     res = connection.execute(
         "SELECT bname, pname, purl from Binaries JOIN Projects on Binaries.pid = Projects.pid WHERE Binaries.bid = ?",
-        (bid,))
+        (bid,),
+    )
     return frozenset(res.fetchall())
 
 
@@ -126,7 +131,10 @@ def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
     eid_list = [symbol["name"] for symbol in symbols_list]
     LOG.debug(f"Attempting to find the binaries for {len(eid_list)} symbols.")
     # creates a 2D array with SYMBOLS_LOOKUP_BATCH_LEN, SYMBOLS_LOOKUP_BATCH_LEN eids are processed in a single query
-    eid_2d_list = [eid_list[i: i + SYMBOLS_LOOKUP_BATCH_LEN] for i in range(0, len(eid_list), SYMBOLS_LOOKUP_BATCH_LEN)]
+    eid_2d_list = [
+        eid_list[i : i + SYMBOLS_LOOKUP_BATCH_LEN]
+        for i in range(0, len(eid_list), SYMBOLS_LOOKUP_BATCH_LEN)
+    ]
 
     # for eid in eid_list:
     with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -142,7 +150,9 @@ def detect_binaries_utilized(symbols_list) -> tuple[set, dict]:
                 else:
                     bin_detected_dict[purl] = score
     # create a set() and remove false positives
-    binary_detected = {purl for purl, score in bin_detected_dict.items() if score > MIN_MATCH_SCORE}
+    binary_detected = {
+        purl for purl, score in bin_detected_dict.items() if score > MIN_MATCH_SCORE
+    }
     binary_evidence_eids = {}
     for purl, eids in binaries_eid_dict.items():
         if purl in binary_detected:

@@ -4,7 +4,7 @@ This guide helps AI coding agents work effectively in the `blint` repository.
 
 ## Mission
 
-`OWASP blint` is a binary linter, disassembler, and SBOM generator for ELF, PE, Mach-O, and Android artifacts.
+`OWASP blint` is a binary linter, disassembler, and SBOM generator for ELF, PE, Mach-O, WASM, and Android artifacts.
 
 Primary workflows:
 
@@ -19,7 +19,7 @@ Primary workflows:
 - `blint/config.py`: defaults, env vars, rule constants, disassembly indicator lists.
 - `blint/lib/runners.py`: default analysis flow and SBOM flow orchestration.
 - `blint/lib/analysis.py`: rule loading, checks execution, review engine, report writing.
-- `blint/lib/binary.py`: format parsing and metadata extraction (ELF/PE/Mach-O).
+- `blint/lib/binary.py`: format parsing and metadata extraction (ELF/PE/Mach-O/WASM).
 - `blint/lib/disassembler.py`: nyxstone-backed function disassembly and metrics.
 - `blint/lib/sbom.py`: CycloneDX object construction and dependency modeling.
 - `blint/lib/android.py`: APK/AAB metadata extraction and component mapping.
@@ -52,7 +52,7 @@ Primary workflows:
 
 - Preserve existing CLI compatibility and JSON schema shape.
 - Prefer additive metadata fields over breaking renames/removals.
-- Keep cross-format behavior consistent (ELF/PE/Mach-O field normalization).
+- Keep cross-format behavior consistent (ELF/PE/Mach-O/WASM field normalization).
 - Rule engine behavior must remain deterministic and case-insensitive where expected.
 - Keep heavy operations behind explicit flags (`--disassemble`, `--deep`, `--use-blintdb`).
 - Avoid weakening error handling around malformed binaries.

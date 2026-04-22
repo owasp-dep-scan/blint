@@ -1,10 +1,13 @@
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
-from blint.lib import binary as binary_lib
 from blint.lib.binary import demangle_symbolic_name, parse
+
+
+TEST_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def test_parse():
@@ -13,74 +16,54 @@ def test_parse():
         assert metadata
 
 
-def test_parse_wasm_metadata(tmp_path, monkeypatch):
-    wasm_file = tmp_path / "simple_add.wasm"
-    wasm_file.write_bytes(b"\x00asm\x01\x00\x00\x00")
-
-    report = {
-        "module_version": 1,
-        "section_count": 4,
-        "sections": [{"index": 0, "id": 1, "name": "Type", "size": 8, "offset": 8}],
-        "function_count": 1,
-        "functions": [
-            {
-                "index": 0,
-                "name": "add",
-                "signature_index": 0,
-                "offset": 40,
-                "body_size": 12,
-                "instruction_count": 4,
-                "instructions": [
-                    {"offset": 40, "opcode": "local.get", "immediates": [0]}
-                ],
-            }
-        ],
-        "imports": [
-            {
-                "index": 0,
-                "module": "env",
-                "name": "log",
-                "kind": "func",
-                "type_index": 0,
-            }
-        ],
-        "exports": [{"index": 0, "name": "add", "kind": "func", "ref_index": 0}],
-        "memories": [{"index": 0, "limits": {"min": 1, "max": 2, "is_64": False}}],
-        "analysis": {
-            "detections": {
-                "wasi": {"detected": False, "variants": []},
-                "js_interface": {"detected": False},
-            }
-        },
-        "errors": [],
-    }
-    monkeypatch.setattr(binary_lib, "parse_wasm_file", lambda _: report)
-
+@pytest.mark.parametrize(
+    "wasm_name",
+    [
+        "adversarial_ops.wasm",
+        "bulk_memory.wasm",
+        "complex_flow.wasm",
+        "dos_growth_loop.wasm",
+    ],
+)
+def test_parse_wasm_metadata(wasm_name):
+    wasm_file = TEST_DATA_DIR / wasm_name
     metadata = parse(str(wasm_file))
 
+    assert wasm_file.exists(), f"Missing test fixture: {wasm_file}"
     assert metadata["binary_type"] == "WASM"
     assert metadata["machine_type"] == "WASM32"
     assert metadata["module_version"] == 1
-    assert metadata["functions"][0]["name"] == "add"
-    assert metadata["dynamic_entries"] == [{"name": "env", "tag": "NEEDED"}]
-    assert metadata["import_dependencies"]["dependencies"]
+    assert metadata["functions"]
+    assert metadata["exports"]
+    assert metadata["section_count"] > 0
+    assert isinstance(metadata.get("wasm_imports"), list)
+    assert metadata["imports"] == metadata["dynamic_entries"]
+    assert (
+        metadata["import_dependencies"]["libraries"][str(wasm_file)]["type"]
+        == "main_binary"
+    )
     assert metadata["llvm_target_tuple"] == "wasm32-unknown-unknown"
     assert metadata["hashes"]["sha256"]
+    assert metadata["wasm_report"]["file"] == str(wasm_file)
 
 
-def test_parse_wasm_parser_failure(tmp_path, monkeypatch):
+def test_parse_wasm_parser_failure(tmp_path):
     wasm_file = tmp_path / "broken.wasm"
-    wasm_file.write_bytes(b"\x00asm\x01\x00\x00\x00")
-
-    def _raise_parse(_):
-        raise ValueError("boom")
-
-    monkeypatch.setattr(binary_lib, "parse_wasm_file", _raise_parse)
+    wasm_file.write_bytes(b"\x00asm\x01\x00")
     metadata = parse(str(wasm_file))
 
     assert metadata["binary_type"] == "WASM"
     assert metadata["errors"]
-    assert "Failed to parse wasm file" in metadata["errors"][0]
+    assert "WebAssembly" in metadata["errors"][0]
+
+
+def test_parse_wasm_detects_dos_growth_loop_finding():
+    wasm_file = TEST_DATA_DIR / "dos_growth_loop.wasm"
+    metadata = parse(str(wasm_file))
+
+    findings = (metadata.get("wasm_analysis") or {}).get("findings") or []
+    finding_ids = {finding.get("id") for finding in findings}
+    assert "WASM-DOS-003" in finding_ids
 
 
 @pytest.mark.skipif(

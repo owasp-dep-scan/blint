@@ -30,7 +30,7 @@ from blint.cyclonedx.spec import (
 )
 from blint.db import detect_binaries_utilized
 from blint.lib.android import collect_app_metadata
-from blint.lib.binary import parse
+from blint.lib.binary import is_wasm_file, parse
 from blint.lib.utils import (
     camel_to_snake,
     create_component_evidence,
@@ -140,7 +140,11 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
                 total=len(exe_files),
                 start=True,
             )
+        skipped_wasm = 0
         for exe in exe_files:
+            if is_wasm_file(exe):
+                skipped_wasm += 1
+                continue
             progress.update(
                 task,
                 description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
@@ -155,6 +159,8 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
                 symbols_purl_map,
                 blint_options.use_blintdb,
             )
+        if skipped_wasm:
+            LOG.info(f"Skipped {skipped_wasm} wasm file(s) during SBOM generation")
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -338,6 +344,8 @@ def process_exe_file(
         list[Component]: The updated list of components.
 
     """
+    if is_wasm_file(exe):
+        return []
     metadata: Dict[str, Any] = parse(exe)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
