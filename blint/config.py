@@ -1388,6 +1388,7 @@ if BLINTDB_REFRESH in ["true", "True", "1"]:
 
 SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
 MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
+BLINT_MAX_HEX_BYTES = max(0, get_int_from_env("BLINT_MAX_HEX_BYTES", 4096))
 
 SYSCALL_INDICATORS = ["syscall", "int 0x80", "sysenter", "svc #", "smc #", "ecall"]
 SECURITY_INDICATORS = [

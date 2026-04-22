@@ -8,6 +8,7 @@ import shutil
 import string
 import tempfile
 import zipfile
+from enum import Enum
 from importlib.metadata import distribution
 from pathlib import Path
 from typing import Dict
@@ -24,6 +25,7 @@ from rich import box
 from rich.table import Table
 
 from blint.config import (
+    BLINT_MAX_HEX_BYTES,
     BLINTDB_HOME,
     BLINTDB_IMAGE_URL,
     BLINTDB_LOC,
@@ -52,6 +54,19 @@ KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
 demangle_options_complete = multi_demangle.DemangleOptions.complete()
 demangle_options_name_only = multi_demangle.DemangleOptions.name_only()
+
+_HEX_TRUNCATION_TOTAL = 0
+
+
+def reset_hex_truncation_count() -> None:
+    """Resets the process-level counter for truncated undecodable byte fields."""
+    global _HEX_TRUNCATION_TOTAL
+    _HEX_TRUNCATION_TOTAL = 0
+
+
+def get_hex_truncation_count() -> int:
+    """Returns the process-level count of truncated undecodable byte fields."""
+    return _HEX_TRUNCATION_TOTAL
 
 
 def demangle_symbolic_name(symbol, name_only=False):
@@ -678,8 +693,14 @@ def export_metadata(directory: str, metadata: Dict, mtype: str):
     if not os.path.exists(directory):
         os.makedirs(directory)
     outfile = str(Path(directory) / f"{mtype.lower()}.json")
+    count_before = get_hex_truncation_count()
     output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")
     file_write(outfile, output, success_msg="", log=LOG)
+    truncated_fields = get_hex_truncation_count() - count_before
+    if truncated_fields:
+        LOG.debug(
+            f"Hex-truncated {truncated_fields} undecodable byte field(s) while exporting {outfile}"
+        )
 
 
 def json_serializer(obj):
@@ -688,9 +709,34 @@ def json_serializer(obj):
         try:
             return obj.decode("utf-8")
         except UnicodeDecodeError:
-            return ""
-
-    return obj
+            if BLINT_MAX_HEX_BYTES and len(obj) > BLINT_MAX_HEX_BYTES:
+                global _HEX_TRUNCATION_TOTAL
+                _HEX_TRUNCATION_TOTAL += 1
+                hex_data = obj[:BLINT_MAX_HEX_BYTES].hex()
+                return f"{hex_data}...<truncated:{len(obj)}_bytes>"
+            return obj.hex()
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, Enum):
+        return obj.name
+    if isinstance(obj, set):
+        # Keep output deterministic without calling str() on native objects.
+        normalized = [
+            item
+            if isinstance(item, (str, int, float, bool, type(None)))
+            else json_serializer(item)
+            for item in obj
+        ]
+        return sorted(
+            normalized,
+            key=lambda item: orjson.dumps(item, default=json_serializer),
+        )
+    obj_class = getattr(obj, "__class__", None)
+    if obj_class is not None:
+        class_name = getattr(obj_class, "__name__", "unknown")
+        module_name = getattr(obj_class, "__module__", "unknown")
+        return f"<unsupported:{module_name}.{class_name}>"
+    return "<unsupported:unknown>"
 
 
 def enum_to_str(enum_obj) -> str:

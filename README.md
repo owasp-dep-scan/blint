@@ -113,6 +113,13 @@ The workflow is a two-step process:
 
 This will cross-reference symbols found in your binary against the database to identify components like OpenSSL, zlib, and others.
 
+## Environment Variables
+
+- `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`: Control blintdb download location, source image, and refresh behavior.
+- `BLINT_MAX_HEX_BYTES`: Maximum number of raw bytes converted to hex when metadata contains undecodable byte sequences. Default is `4096`.
+  - `0` disables truncation.
+  - When truncation happens, blint appends `...<truncated:N_bytes>` to preserve context without producing huge JSON fields.
+
 ## Command-Line Reference
 
 <details>

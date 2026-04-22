@@ -24,7 +24,13 @@ from blint.lib.analysis import (
 )
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.sbom import generate
-from blint.lib.utils import export_metadata, find_android_files, gen_file_list
+from blint.lib.utils import (
+    export_metadata,
+    find_android_files,
+    gen_file_list,
+    get_hex_truncation_count,
+    reset_hex_truncation_count,
+)
 from blint.logger import LOG
 
 
@@ -59,10 +65,17 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
 
 
 def run_default_mode(blint_options: BlintOptions) -> None:
+    reset_hex_truncation_count()
     exe_files = gen_file_list(blint_options.src_dir_image)
     analyzer = AnalysisRunner()
     findings, reviews, fuzzables = analyzer.start(blint_options, exe_files)
     report(blint_options, exe_files, findings, reviews, fuzzables)
+    truncation_count = get_hex_truncation_count()
+    if truncation_count:
+        LOG.info(
+            f"Metadata export hex-truncated {truncation_count} undecodable byte field(s). "
+            "Tune BLINT_MAX_HEX_BYTES (or set to 0 to disable truncation)."
+        )
 
     if os.getenv("CI") and not blint_options.no_error:
         for f in findings:

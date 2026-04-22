@@ -20,6 +20,14 @@ At the highest level, the JSON output contains attributes that identify the bina
 | `llvm_target_tuple` | A string constructed to represent the binary's target environment in a format recognized by LLVM. The format is `arch-vendor-os-environment`. For example: `x86_64-pc-win32-msvc` or `mipsel-unknown-linux-muslsf`. This is crucial for accurate disassembly. | Configuring disassemblers and decompilers; understanding the intended operating system and ABI.                                    |
 | `strings`           | A list of strings extracted from the binary that exhibit high entropy or match patterns for secrets (API keys, private keys, etc.). Non-secret strings are filtered out to reduce noise. Base64-encoded strings are automatically decoded.                    | Triage for hardcoded credentials, sensitive URLs, or cryptographic material. A primary step in vulnerability and malware analysis. |
 
+### Serialization Notes
+
+- Some parser fields can include raw bytes that are not valid UTF-8.
+- blint serializes undecodable bytes as hex strings for compatibility with JSON reports.
+- To avoid oversized report fields, hex output is capped by `BLINT_MAX_HEX_BYTES` (default: `4096`).
+- If capped, the value is emitted as `<hex>...<truncated:N_bytes>` where `N` is the original byte length.
+- Set `BLINT_MAX_HEX_BYTES=0` to disable truncation.
+
 ---
 
 ## Format-Specific Attributes
