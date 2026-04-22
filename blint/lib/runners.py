@@ -66,10 +66,19 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
 
 def run_default_mode(blint_options: BlintOptions) -> None:
     reset_hex_truncation_count()
+    wants_callgraph_outputs = (
+        blint_options.render_mermaid_callgraph
+        or blint_options.export_callgraph_graphml
+        or blint_options.export_callgraph_gexf
+    )
+    if wants_callgraph_outputs and not blint_options.disassemble:
+        LOG.info(
+            "Callgraph export was requested without --disassemble; no callgraph artifacts will be generated."
+        )
     exe_files = gen_file_list(blint_options.src_dir_image)
     analyzer = AnalysisRunner()
-    findings, reviews, fuzzables = analyzer.start(blint_options, exe_files)
-    report(blint_options, exe_files, findings, reviews, fuzzables)
+    findings, reviews, fuzzables, callgraphs = analyzer.start(blint_options, exe_files)
+    report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs)
     truncation_count = get_hex_truncation_count()
     if truncation_count:
         LOG.info(
@@ -90,6 +99,7 @@ class AnalysisRunner:
         self.findings = []
         self.reviews = []
         self.fuzzables = []
+        self.callgraphs = []
         self.progress = Progress(
             transient=True,
             redirect_stderr=True,
@@ -119,7 +129,7 @@ class AnalysisRunner:
             )
             for f in exe_files:
                 self._process_files(f, blint_options)
-        return self.findings, self.reviews, self.fuzzables
+        return self.findings, self.reviews, self.fuzzables, self.callgraphs
 
     def _process_files(self, f, blint_options):
         """
@@ -148,6 +158,18 @@ class AnalysisRunner:
                 blint_options.reports_dir,
                 wasm_report,
                 f"{os.path.basename(exe_name)}-wasm-report",
+            )
+        wants_callgraph_outputs = (
+            blint_options.render_mermaid_callgraph
+            or blint_options.export_callgraph_graphml
+            or blint_options.export_callgraph_gexf
+        )
+        if wants_callgraph_outputs and metadata.get("callgraph"):
+            self.callgraphs.append(
+                {
+                    "exe_name": os.path.basename(exe_name),
+                    "callgraph": metadata.get("callgraph"),
+                }
             )
         self.progress.update(
             self.task,

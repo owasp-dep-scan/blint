@@ -102,6 +102,34 @@ def build_parser():
         help="Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.",
     )
     parser.add_argument(
+        "--export-callgraph-mermaid",
+        action="store_true",
+        default=False,
+        dest="render_mermaid_callgraph",
+        help="Export callgraph as Mermaid (.mmd) files and embed diagrams into blint-output.html. Effective when --disassemble is enabled.",
+    )
+    parser.add_argument(
+        "--export-callgraph-graphml",
+        action="store_true",
+        default=False,
+        dest="export_callgraph_graphml",
+        help="Export callgraph as GraphML for external graph analysis tools. Effective when --disassemble is enabled.",
+    )
+    parser.add_argument(
+        "--export-callgraph-gexf",
+        action="store_true",
+        default=False,
+        dest="export_callgraph_gexf",
+        help="Export callgraph as GEXF for Gephi and other graph tooling. Effective when --disassemble is enabled.",
+    )
+    parser.add_argument(
+        "--callgraph-min-confidence",
+        choices=["low", "medium", "high"],
+        default="low",
+        dest="callgraph_min_confidence",
+        help="Filter exported callgraph edges/external links by confidence. Defaults to low (no filtering).",
+    )
+    parser.add_argument(
         "--custom-rules-dir",
         dest="custom_rules_dir",
         type=str,
@@ -265,6 +293,10 @@ def handle_args():
         stdout_mode=args.stdout_mode,
         use_blintdb=args.use_blintdb,
         disassemble=args.disassemble,
+        render_mermaid_callgraph=args.render_mermaid_callgraph,
+        export_callgraph_graphml=args.export_callgraph_graphml,
+        export_callgraph_gexf=args.export_callgraph_gexf,
+        callgraph_min_confidence=args.callgraph_min_confidence,
         custom_rules_dir=args.custom_rules_dir,
     )
     return blint_options

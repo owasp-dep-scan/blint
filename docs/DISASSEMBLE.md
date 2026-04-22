@@ -4,11 +4,18 @@
 
 The `disassembled_functions` attribute is an optional output of the `blint` binary analysis tool. It provides disassembled machine code and related analysis for functions identified in the binary's metadata (e.g., from symbol tables). This feature requires the `nyxstone` library for disassembly.
 
+When disassembly is enabled, blint also derives a top-level `callgraph` metadata object from each function's `direct_calls` list. This provides a compact graph view without re-processing assembly text.
+
+For a pass-by-pass explanation of callgraph computation and analyst triage workflow, see [`docs/CALLGRAPH.md`](./CALLGRAPH.md).
+
 ## Prerequisites
 
 - LLVM 18 and g++ must be installed. Alternatively, use the blint container image.
 - blint extended with `nyxstone` library must be installed (`pip install blint[extended]`).
 - Invoke blint cli with `--disassemble`
+- Use `--export-callgraph-mermaid` to additionally emit per-binary Mermaid files (`*-callgraph.mmd`) and embed diagrams in `blint-output.html`.
+- Use `--export-callgraph-graphml` to emit GraphML files (`*-callgraph.graphml`) for tools like Gephi/Cytoscape.
+- Use `--export-callgraph-gexf` to emit GEXF files (`*-callgraph.gexf`) for Gephi-focused workflows.
 
 ## Structure
 
@@ -89,6 +96,8 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 4.  **Code Similarity Analysis:** Group functions based on their `assembly_hash` or `instruction_hash` to find duplicated or similar code blocks within a binary.
 5.  **Function Characterization:** Quickly assess the nature of a function using the `function_type` field and boolean flags (`has_loop`, `has_security_feature`, etc.). This can help prioritize analysis or identify specific types of functions (e.g., PLT thunks).
 6.  **Call Graph Approximation:** Use the `direct_calls` field to build a partial call graph based on statically resolvable direct calls. Note that this will not include calls resolved via PLT/GOT or indirect calls.
+    - blint now emits this approximation directly in top-level metadata as `callgraph` with deterministic node IDs and counted edges.
+    - Ambiguous targets (same symbol name in multiple internal nodes) and unresolved targets are emitted under `callgraph.external`.
 7.  **Security Feature Verification:** Confirm the presence of control-flow integrity features.
     - **Intel CET:** Check `has_security_feature` for `endbr` instructions.
     - **ARM64 PAC:** Check `has_pac` for pointer signing instructions. This confirms that protections claimed in headers are actually compiled into the code.

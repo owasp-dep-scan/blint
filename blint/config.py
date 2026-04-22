@@ -1270,6 +1270,10 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    render_mermaid_callgraph: bool = False
+    export_callgraph_graphml: bool = False
+    export_callgraph_gexf: bool = False
+    callgraph_min_confidence: str = "low"
     custom_rules_dir: Optional[str] = None
 
     def __post_init__(self):

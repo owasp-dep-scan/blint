@@ -18,6 +18,7 @@ At the highest level, the JSON output contains attributes that identify the bina
 | `binary_type`       | The format of the binary, such as `ELF`, `PE`, `MachO`, or `WASM`. This is the primary key for interpreting format-specific sections.                                                                                                                         | Directing further analysis; knowing which format-specific tools to use next.                                                       |
 | `hashes`            | A collection of cryptographic hashes for the file, including MD5, SHA1, SHA256, and SHA512.                                                                                                                                                                   | File identification, malware signature matching, and searching in threat intelligence platforms like VirusTotal.                   |
 | `llvm_target_tuple` | A string constructed to represent the binary's target environment in a format recognized by LLVM. The format is `arch-vendor-os-environment`. For example: `x86_64-pc-win32-msvc` or `mipsel-unknown-linux-muslsf`. This is crucial for accurate disassembly. | Configuring disassemblers and decompilers; understanding the intended operating system and ABI.                                    |
+| `callgraph`         | Optional compact function-call graph derived from `disassembled_functions` when `--disassemble` is enabled. Includes `nodes`, internal `edges` (with call counts), and unresolved/ambiguous external targets.                                                 | Control-flow triage, function reachability analysis, and quick hotspot detection without parsing full assembly text.               |
 | `strings`           | A list of strings extracted from the binary that exhibit high entropy or match patterns for secrets (API keys, private keys, etc.). Non-secret strings are filtered out to reduce noise. Base64-encoded strings are automatically decoded.                    | Triage for hardcoded credentials, sensitive URLs, or cryptographic material. A primary step in vulnerability and malware analysis. |
 
 ### Serialization Notes
@@ -250,6 +251,24 @@ These attributes provide detailed lists of third-party libraries and packages co
 ## Derived and Analytical Attributes
 
 This is where blint provides the most value, by interpreting low-level data and presenting high-level security and compositional insights.
+
+### `callgraph` (optional, requires `--disassemble`)
+
+When disassembly output is available, blint derives a deterministic top-level callgraph:
+
+- `version`: Schema version for downstream compatibility.
+- `node_count` / `edge_count`: Number of internal nodes and internal edges.
+- `nodes`: Stable list of functions with `{id, key, name, address, aliases}` where `aliases` includes other names sharing the same entry address.
+- `edges`: Internal call edges as `{src, dst, count, kind, confidence}` where `kind` is one of `direct`, `tailcall`, `indirect_hint`.
+- `external`: Unresolved or ambiguous call targets as `{src, target, count, reason, confidence}`.
+
+Notes:
+
+- The graph includes direct edges, tail-call approximations, and register-tracked indirect hints.
+- `confidence` indicates edge trust level (`high`, `medium`, `low`) for analyst triage.
+- Duplicate call instructions are preserved via edge `count`.
+- Address/name collisions and misses are surfaced in `external` with reason buckets such as `ambiguous_address`, `ambiguous_name`, and `address_space_miss`.
+- Same-address symbol aliases are collapsed into a canonical node to reduce false ambiguity while preserving alias visibility.
 
 ### `security_properties`
 

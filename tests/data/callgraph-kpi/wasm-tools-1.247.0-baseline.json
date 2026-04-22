@@ -1,0 +1,158 @@
+{
+  "entries": {
+    "aarch64-apple-macosx": {
+      "allowed_drop": {
+        "external_edges": 3658,
+        "external_reason_buckets": {
+          "*": 3658
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 42,
+        "external_reason_buckets": {
+          "unresolved:tailcall": 42
+        },
+        "functions_total": 11807,
+        "functions_with_direct_targets": 10814,
+        "internal_edge_kinds": {
+          "direct": 48129,
+          "indirect_hint": 313,
+          "tailcall": 4026
+        },
+        "internal_edges": 52468
+      }
+    },
+    "aarch64-pc-windows-msvc": {
+      "allowed_drop": {
+        "external_edges": 90,
+        "external_reason_buckets": {
+          "*": 90
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 90,
+        "external_reason_buckets": {
+          "unresolved:tailcall": 90
+        },
+        "functions_total": 15923,
+        "functions_with_direct_targets": 15760,
+        "internal_edge_kinds": {
+          "direct": 61864,
+          "indirect_hint": 357,
+          "tailcall": 5035
+        },
+        "internal_edges": 67256
+      }
+    },
+    "aarch64-unknown-linux-gnu": {
+      "allowed_drop": {
+        "external_edges": 68,
+        "external_reason_buckets": {
+          "*": 68
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 68,
+        "external_reason_buckets": {
+          "address_space_miss": 24,
+          "address_space_miss:indirect_hint": 29,
+          "address_space_miss:tailcall": 5,
+          "unresolved:tailcall": 10
+        },
+        "functions_total": 22181,
+        "functions_with_direct_targets": 15931,
+        "internal_edge_kinds": {
+          "direct": 55061,
+          "indirect_hint": 81,
+          "tailcall": 1548
+        },
+        "internal_edges": 56690
+      }
+    },
+    "x86_64-pc-windows-msvc": {
+      "allowed_drop": {
+        "external_edges": 3933,
+        "external_reason_buckets": {
+          "*": 3933
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 3926,
+        "external_reason_buckets": {
+          "address_space_miss:indirect_hint": 57,
+          "address_space_miss:tailcall": 1,
+          "symbol_only_miss:indirect_hint": 500,
+          "unresolved:indirect_hint": 3358,
+          "unresolved:tailcall": 10
+        },
+        "functions_total": 16145,
+        "functions_with_direct_targets": 15977,
+        "internal_edge_kinds": {
+          "direct": 62644,
+          "indirect_hint": 21,
+          "tailcall": 4887
+        },
+        "internal_edges": 67552
+      }
+    },
+    "x86_64-unknown-linux-gnu": {
+      "allowed_drop": {
+        "external_edges": 92532,
+        "external_reason_buckets": {
+          "*": 92532
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 92527,
+        "external_reason_buckets": {
+          "address_space_miss": 216,
+          "address_space_miss:indirect_hint": 5678,
+          "address_space_miss:tailcall": 926,
+          "symbol_only_miss:indirect_hint": 5593,
+          "symbol_only_miss:tailcall": 4115,
+          "unresolved:indirect_hint": 75861,
+          "unresolved:tailcall": 138
+        },
+        "functions_total": 22173,
+        "functions_with_direct_targets": 17881,
+        "internal_edge_kinds": {
+          "direct": 22257,
+          "indirect_hint": 22,
+          "tailcall": 9
+        },
+        "internal_edges": 22288
+      }
+    }
+  },
+  "schema_version": 1
+}

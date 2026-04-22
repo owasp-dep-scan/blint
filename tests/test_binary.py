@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from blint.lib.binary import demangle_symbolic_name, parse, parse_macho_symbols
+from blint.lib.binary import (
+    build_disassembly_callgraph_metadata,
+    demangle_symbolic_name,
+    parse,
+    parse_macho_symbols,
+)
 
 
 TEST_DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -93,6 +98,526 @@ def test_parse_macho_symbols_export_info_symbol_is_json_safe():
     export_info = symbols[0]["export_info"]
     assert export_info
     assert export_info["symbol"] == "macho_symbol"
+
+
+def test_build_disassembly_callgraph_metadata_counts_and_external():
+    metadata = {
+        "disassembled_functions": {
+            "0x20::beta": {
+                "name": "beta",
+                "address": "0x20",
+                "direct_calls": [],
+            },
+            "0x10::alpha": {
+                "name": "alpha",
+                "address": "0x10",
+                "direct_calls": ["beta", "beta", "ext::io", "dup"],
+            },
+            "0x30::dup": {
+                "name": "dup",
+                "address": "0x30",
+                "direct_calls": [],
+            },
+            "0x40::dup": {
+                "name": "dup",
+                "address": "0x40",
+                "direct_calls": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["version"] == 2
+    assert graph["node_count"] == 4
+    assert graph["edge_count"] == 1
+    assert graph["nodes"][0]["name"] == "alpha"
+    assert graph["nodes"][1]["name"] == "beta"
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 2,
+            "kind": "direct",
+            "confidence": "high",
+        }
+    ]
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "dup",
+            "count": 1,
+            "reason": "ambiguous_name",
+            "confidence": "low",
+        },
+        {
+            "src": 0,
+            "target": "ext::io",
+            "count": 1,
+            "reason": "symbol_only_miss",
+            "confidence": "low",
+        },
+    ]
+
+
+def test_build_disassembly_callgraph_metadata_deterministic_for_input_order():
+    metadata_a = {
+        "disassembled_functions": {
+            "0x20::beta": {
+                "name": "beta",
+                "address": "0x20",
+                "direct_calls": [],
+            },
+            "0x10::alpha": {
+                "name": "alpha",
+                "address": "0x10",
+                "direct_calls": ["beta"],
+            },
+        }
+    }
+    metadata_b = {
+        "disassembled_functions": {
+            "0x10::alpha": {
+                "name": "alpha",
+                "address": "0x10",
+                "direct_calls": ["beta"],
+            },
+            "0x20::beta": {
+                "name": "beta",
+                "address": "0x20",
+                "direct_calls": [],
+            },
+        }
+    }
+
+    graph_a = build_disassembly_callgraph_metadata(metadata_a)
+    graph_b = build_disassembly_callgraph_metadata(metadata_b)
+
+    assert graph_a == graph_b
+
+
+def test_build_disassembly_callgraph_metadata_prefers_address_targets():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::foo": {
+                "name": "foo",
+                "address": "0x10",
+                "direct_calls": [],
+                "direct_call_targets": [
+                    {
+                        "target_name": "dup",
+                        "target_address": "0x30",
+                        "raw_operand": "0x30",
+                    },
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "raw_operand": "std::rt::lang_start",
+                    },
+                ],
+            },
+            "0x20::dup": {
+                "name": "dup",
+                "address": "0x20",
+                "direct_calls": [],
+            },
+            "0x30::dup": {
+                "name": "dup",
+                "address": "0x30",
+                "direct_calls": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edge_count"] == 1
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 2,
+            "count": 1,
+            "kind": "direct",
+            "confidence": "high",
+        }
+    ]
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "std::rt::lang_start",
+            "count": 1,
+            "reason": "unresolved",
+            "confidence": "low",
+        }
+    ]
+
+
+def test_build_disassembly_callgraph_metadata_handles_none_target_name_and_rva():
+    metadata = {
+        "image_base": 0x100000000,
+        "disassembled_functions": {
+            "0x100000010::foo": {
+                "name": "foo",
+                "address": "0x100000010",
+                "direct_call_targets": [
+                    {
+                        "target_name": None,
+                        "target_address": "0x30",
+                        "raw_operand": "#48",
+                    }
+                ],
+            },
+            "0x100000030::bar": {
+                "name": "bar",
+                "address": "0x100000030",
+                "direct_call_targets": [],
+            },
+        },
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edge_count"] == 1
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "direct",
+            "confidence": "high",
+        }
+    ]
+    assert graph["external"] == []
+
+
+def test_build_disassembly_callgraph_metadata_preserves_edge_kind():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::foo": {
+                "name": "foo",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "bar",
+                        "target_address": "0x20",
+                        "raw_operand": "0x20",
+                        "kind": "tailcall",
+                    },
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "raw_operand": "jmp_target",
+                        "kind": "tailcall",
+                    },
+                ],
+            },
+            "0x20::bar": {
+                "name": "bar",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "tailcall",
+            "confidence": "medium",
+        }
+    ]
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "jmp_target",
+            "count": 1,
+            "reason": "unresolved:tailcall",
+            "confidence": "low",
+        }
+    ]
+
+
+def test_build_disassembly_callgraph_metadata_indirect_hint_reason_and_edge():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::caller": {
+                "name": "caller",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "callee",
+                        "target_address": "0x20",
+                        "target_address_candidates": ["0x20"],
+                        "raw_operand": "rax",
+                        "kind": "indirect_hint",
+                    },
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "unknown_reg",
+                        "kind": "indirect_hint",
+                    },
+                ],
+            },
+            "0x20::callee": {
+                "name": "callee",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "indirect_hint",
+            "confidence": "low",
+        }
+    ]
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "unknown_reg",
+            "count": 1,
+            "reason": "unresolved:indirect_hint",
+            "confidence": "low",
+        }
+    ]
+
+
+def test_build_disassembly_callgraph_metadata_indirect_hint_links_plt_alias_to_internal():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::caller": {
+                "name": "caller",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "callee@plt",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "qword ptr [rip + 0x10]",
+                        "kind": "indirect_hint",
+                    }
+                ],
+            },
+            "0x20::callee": {
+                "name": "callee",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+            "0x20::callee@plt": {
+                "name": "callee@plt",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "indirect_hint",
+            "confidence": "low",
+        }
+    ]
+    assert graph["external"] == []
+
+
+def test_build_disassembly_callgraph_metadata_indirect_hint_plt_alias_ambiguity_is_external():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::caller": {
+                "name": "caller",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "puts@plt",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "qword ptr [rip + 0x10]",
+                        "kind": "indirect_hint",
+                    }
+                ],
+            },
+            "0x20::puts_one": {
+                "name": "puts",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+            "0x30::puts_two": {
+                "name": "puts",
+                "address": "0x30",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == []
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "qword ptr [rip + 0x10]",
+            "count": 1,
+            "reason": "ambiguous_address:indirect_hint",
+            "confidence": "low",
+        }
+    ]
+
+
+def test_build_disassembly_callgraph_metadata_collapses_same_address_aliases():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::foo_alias": {
+                "name": "foo_alias",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "bar",
+                        "target_address": "0x20",
+                        "target_address_candidates": ["0x20"],
+                        "raw_operand": "0x20",
+                        "kind": "direct",
+                    }
+                ],
+            },
+            "0x10::foo_main": {
+                "name": "foo_main",
+                "address": "0x10",
+                "direct_call_targets": [],
+            },
+            "0x20::bar": {
+                "name": "bar",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["node_count"] == 2
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "direct",
+            "confidence": "high",
+        }
+    ]
+    assert graph["nodes"][0]["aliases"] == ["foo_alias", "foo_main"]
+
+
+def test_build_disassembly_callgraph_metadata_canonical_alias_is_deterministic():
+    metadata_a = {
+        "disassembled_functions": {
+            "0x10::zzz": {"name": "zzz", "address": "0x10", "direct_call_targets": []},
+            "0x10::aaa": {"name": "aaa", "address": "0x10", "direct_call_targets": []},
+        }
+    }
+    metadata_b = {
+        "disassembled_functions": {
+            "0x10::aaa": {"name": "aaa", "address": "0x10", "direct_call_targets": []},
+            "0x10::zzz": {"name": "zzz", "address": "0x10", "direct_call_targets": []},
+        }
+    }
+
+    graph_a = build_disassembly_callgraph_metadata(metadata_a)
+    graph_b = build_disassembly_callgraph_metadata(metadata_b)
+
+    assert graph_a == graph_b
+    assert graph_a["nodes"][0]["name"] == "aaa"
+    assert graph_a["nodes"][0]["aliases"] == ["aaa", "zzz"]
+
+
+def test_build_disassembly_callgraph_metadata_keeps_tied_address_candidates_ambiguous():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::caller": {
+                "name": "caller",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": ["0x1000", "0x2000"],
+                        "raw_operand": "0x1000",
+                        "kind": "direct",
+                    }
+                ],
+            },
+            "0x1000::func_a": {
+                "name": "func_a",
+                "address": "0x1000",
+                "direct_call_targets": [],
+            },
+            "0x2000::func_b": {
+                "name": "func_b",
+                "address": "0x2000",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == []
+    assert graph["external"] == [
+        {
+            "src": 0,
+            "target": "0x1000",
+            "count": 1,
+            "reason": "ambiguous_address",
+            "confidence": "low",
+        }
+    ]
+
+
+def test_parse_adds_callgraph_when_disassembly_results_exist(monkeypatch):
+    if not os.path.exists("/bin/ls"):
+        pytest.skip("/bin/ls not available on this host")
+
+    fake_disassembly = {
+        "0x10::core::main": {
+            "name": "core::main",
+            "address": "0x10",
+            "direct_calls": ["helper"],
+        },
+        "0x20::helper": {
+            "name": "helper",
+            "address": "0x20",
+            "direct_calls": [],
+        },
+    }
+
+    def _fake_disassemble_functions(_parsed_obj, _metadata):
+        return fake_disassembly
+
+    monkeypatch.setattr(
+        "blint.lib.binary.disassemble_functions", _fake_disassemble_functions
+    )
+
+    metadata = parse("/bin/ls", disassemble=True)
+
+    assert metadata.get("disassembled_functions") == fake_disassembly
+    assert metadata.get("callgraph")
+    assert metadata["callgraph"]["edge_count"] == 1
 
 
 @pytest.mark.skipif(

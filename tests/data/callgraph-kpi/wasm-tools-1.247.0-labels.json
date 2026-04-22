@@ -1,0 +1,265 @@
+{
+  "schema_version": 1,
+  "entries": {
+    "aarch64-apple-macosx": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "sub_b28@0x100000b28",
+          "dst": "sub_7324@0x100007324",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Known startup direct edge after system-library filtering"
+        },
+        {
+          "type": "internal",
+          "src": "sub_b28@0x100000b28",
+          "dst": "sub_752c@0x10000752c",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Known startup-to-helper direct edge"
+        },
+        {
+          "type": "internal",
+          "src": "sub_b28@0x100000b28",
+          "dst": "sub_b28@0x100000b28",
+          "kind": "tailcall",
+          "expect_present": true,
+          "note": "Self tailcall detected in baseline"
+        },
+        {
+          "type": "external",
+          "src": "sub_14bf74@0x10014bf74",
+          "target": "x2",
+          "reason": "unresolved:tailcall",
+          "expect_present": true,
+          "note": "Representative unresolved tailcall after system-library filtering"
+        },
+        {
+          "type": "internal",
+          "src": "sub_8c0@0x1000008c0",
+          "dst": "sub_deadbeef@0x100deadbe",
+          "kind": "direct",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive edges"
+        },
+        {
+          "type": "external",
+          "src": "sub_7750@0x100007750",
+          "target": "#999999",
+          "reason": "address_space_miss",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive external bucket entries"
+        }
+      ]
+    },
+    "aarch64-unknown-linux-gnu": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "_init@0xc3bc0",
+          "dst": "call_weak_fn@0x127e2c",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Representative startup edge"
+        },
+        {
+          "type": "internal",
+          "src": "hashbrown::raw::RawTable<T,A>::reserve_rehash@0xc630c",
+          "dst": "hashbrown::raw::RawTable<T,A>::reserve_rehash@0xc630c",
+          "kind": "tailcall",
+          "expect_present": true,
+          "note": "Recovered self tailcall in optimized Rust path"
+        },
+        {
+          "type": "external",
+          "src": "wasm_tools::dump::Dump::print_module@0x1281ac",
+          "target": "[x8,#72]",
+          "reason": "address_space_miss:indirect_hint",
+          "expect_present": true,
+          "note": "Current unresolved ARM64 indirect dispatch target"
+        },
+        {
+          "type": "external",
+          "src": "_init@0xc3bc0",
+          "target": "x2",
+          "reason": "address_space_miss:tailcall",
+          "expect_present": true,
+          "note": "Current unresolved register tailcall bucket"
+        },
+        {
+          "type": "internal",
+          "src": "_init@0xc3bc0",
+          "dst": "sub_deadbeef@0xdeadbeef",
+          "kind": "direct",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive edges"
+        },
+        {
+          "type": "external",
+          "src": "wasm_tools::dump::Dump::print_module@0x1281ac",
+          "target": "[x8,#999]",
+          "reason": "address_space_miss:indirect_hint",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive external entries"
+        }
+      ]
+    },
+    "aarch64-pc-windows-msvc": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "sub_108c@0x14000108c",
+          "dst": "sub_811720@0x140811720",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Representative startup direct edge"
+        },
+        {
+          "type": "internal",
+          "src": "sub_11b0@0x1400011b0",
+          "dst": "sub_11b0@0x1400011b0",
+          "kind": "tailcall",
+          "expect_present": true,
+          "note": "Recovered self tailcall in PE AArch64 startup thunk"
+        },
+        {
+          "type": "external",
+          "src": "sub_c174c@0x1400c174c",
+          "target": "x1",
+          "reason": "unresolved:tailcall",
+          "expect_present": true,
+          "note": "Current unresolved register tailcall bucket"
+        },
+        {
+          "type": "external",
+          "src": "sub_7fbd80@0x1407fbd80",
+          "target": "x9",
+          "reason": "unresolved:tailcall",
+          "expect_present": true,
+          "note": "Representative unresolved single-register tailcall"
+        },
+        {
+          "type": "internal",
+          "src": "sub_108c@0x14000108c",
+          "dst": "sub_deadbeef@0x1400deadb",
+          "kind": "direct",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive internal edge"
+        },
+        {
+          "type": "external",
+          "src": "sub_c174c@0x1400c174c",
+          "target": "x999",
+          "reason": "unresolved:tailcall",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive external edge"
+        }
+      ]
+    },
+    "x86_64-unknown-linux-gnu": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "__do_global_dtors_aux@0x361a60",
+          "dst": "deregister_tm_clones@0x3619f0",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Common startup edge"
+        },
+        {
+          "type": "internal",
+          "src": "wasm_tools::dump::Dump::print_module@0x361da0",
+          "dst": "wasm_tools::dump::Dump::print_ops@0x36b380",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Representative app-level direct edge"
+        },
+        {
+          "type": "external",
+          "src": "wasm_tools::dump::Dump::print_module@0x361da0",
+          "target": "qword ptr [rax + 72]",
+          "reason": "unresolved:indirect_hint",
+          "expect_present": true,
+          "note": "Current unresolved indirect memory call"
+        },
+        {
+          "type": "external",
+          "src": "frame_dummy@0x361aa0",
+          "target": "-137",
+          "reason": "symbol_only_miss:tailcall",
+          "expect_present": true,
+          "note": "Current tailcall miss bucket"
+        },
+        {
+          "type": "internal",
+          "src": "wasm_tools::dump::Dump::print_module@0x361da0",
+          "dst": "sub_deadbeef@0xdeadbeef",
+          "kind": "direct",
+          "expect_present": false,
+          "note": "Guardrail for false positives"
+        },
+        {
+          "type": "external",
+          "src": "__do_global_dtors_aux@0x361a60",
+          "target": "#999999",
+          "reason": "address_space_miss",
+          "expect_present": false,
+          "note": "Guardrail for false positives"
+        }
+      ]
+    },
+    "x86_64-pc-windows-msvc": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "sub_10c0@0x1400010c0",
+          "dst": "sub_986300@0x140986300",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Representative startup direct edge"
+        },
+        {
+          "type": "internal",
+          "src": "sub_12b0@0x1400012b0",
+          "dst": "sub_12b0@0x1400012b0",
+          "kind": "tailcall",
+          "expect_present": true,
+          "note": "Recovered self tailcall from decimal jump operand"
+        },
+        {
+          "type": "external",
+          "src": "sub_12b0@0x1400012b0",
+          "target": "qword ptr [rax + 72]",
+          "reason": "unresolved:indirect_hint",
+          "expect_present": true,
+          "note": "Current unresolved indirect dispatch target"
+        },
+        {
+          "type": "external",
+          "src": "sub_9f30@0x140009f30",
+          "target": "qword ptr [rax + 88]",
+          "reason": "unresolved:indirect_hint",
+          "expect_present": true,
+          "note": "Representative unresolved vtable-style call"
+        },
+        {
+          "type": "internal",
+          "src": "sub_10c0@0x1400010c0",
+          "dst": "sub_deadbeef@0x1400deadb",
+          "kind": "direct",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive internal edge"
+        },
+        {
+          "type": "external",
+          "src": "sub_12b0@0x1400012b0",
+          "target": "qword ptr [rax + 999]",
+          "reason": "unresolved:indirect_hint",
+          "expect_present": false,
+          "note": "Guardrail for obvious false-positive external edge"
+        }
+      ]
+    }
+  }
+}

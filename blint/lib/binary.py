@@ -6,6 +6,7 @@ import re
 import sys
 import warnings
 import zlib
+from collections import Counter, defaultdict
 from typing import Tuple
 
 import lief
@@ -1296,6 +1297,490 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary):
     return metadata
 
 
+def _address_sort_key(address: str) -> tuple[int, str]:
+    """Build a stable sort key for hex-like addresses."""
+    if not isinstance(address, str):
+        return sys.maxsize, ""
+    with contextlib.suppress(ValueError):
+        return int(address, 16), address
+    return sys.maxsize, address
+
+
+def _name_lookup_keys(symbol_name: str) -> list[str]:
+    """Generate deterministic name lookup keys, including lightweight PLT aliases."""
+    if not isinstance(symbol_name, str):
+        return []
+    out = []
+
+    def _add(name: str):
+        if not isinstance(name, str):
+            return
+        normalized = name.strip()
+        if normalized and normalized not in out:
+            out.append(normalized)
+
+    _add(symbol_name)
+    if not out:
+        return out
+
+    primary = out[0]
+    for suffix in ("@plt", ".plt"):
+        if primary.endswith(suffix) and len(primary) > len(suffix):
+            _add(primary[: -len(suffix)])
+    if primary.startswith(".plt.") and len(primary) > len(".plt."):
+        _add(primary[len(".plt.") :])
+
+    return out
+
+
+def _default_confidence_for_kind(kind: str) -> str:
+    return "high" if kind == "direct" else "medium" if kind == "tailcall" else "low"
+
+
+def _set_edge_confidence(
+    edge_confidence: dict, confidence_rank: dict, edge_key, confidence: str
+):
+    existing = edge_confidence.get(edge_key)
+    if not existing:
+        edge_confidence[edge_key] = confidence
+        return
+    if confidence_rank.get(confidence, 0) < confidence_rank.get(existing, 0):
+        edge_confidence[edge_key] = confidence
+
+
+def _candidate_variants(addr_int: int, image_base_int: int | None) -> list[int]:
+    """Address-space normalization helper with deterministic ordering."""
+    variants = [addr_int]
+    if image_base_int:
+        variants.append(addr_int + image_base_int)
+        if addr_int >= image_base_int:
+            variants.append(addr_int - image_base_int)
+    out = []
+    for val in variants:
+        if val >= 0 and val not in out:
+            out.append(val)
+    return out
+
+
+def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
+    """Builds a compact deterministic callgraph from disassembled functions."""
+    # We build the graph only from disassembly output so the result reflects executable
+    # control-flow evidence, not just symbol tables.
+    disassembled = metadata.get("disassembled_functions")
+    if not isinstance(disassembled, dict) or not disassembled:
+        return {}
+
+    # We keep both user-facing identity (name/address) and call evidence
+    # produced by the disassembler (`direct_call_targets`).
+    nodes_raw = []
+    for func_key, func_data in disassembled.items():
+        if not isinstance(func_data, dict):
+            continue
+        name = func_data.get("name", "")
+        address = func_data.get("address", "")
+        if not name and "::" in func_key:
+            name = func_key.split("::", 1)[1]
+        if not address and "::" in func_key:
+            address = func_key.split("::", 1)[0]
+        canonical_key = f"{address}::{name}" if address and name else func_key
+        nodes_raw.append(
+            {
+                "key": canonical_key,
+                "name": name,
+                "address": address,
+                "rva_or_address": func_data.get("rvaOrAddress", ""),
+                "direct_calls": func_data.get("direct_calls") or [],
+                "direct_call_targets": func_data.get("direct_call_targets") or [],
+            }
+        )
+
+    if not nodes_raw:
+        return {}
+
+    nodes_raw.sort(
+        key=lambda node: (
+            _address_sort_key(node.get("address", "")),
+            node.get("name", ""),
+            node.get("key", ""),
+        )
+    )
+
+    # Mach-O and heavily symbolized Rust binaries often emit multiple names for
+    # the same entrypoint. Without this collapse, a single target address can
+    # appear ambiguous even though it is one concrete function location.
+    by_address = defaultdict(list)
+    no_address_nodes = []
+    for node in nodes_raw:
+        if node.get("address"):
+            by_address[node["address"]].append(node)
+        else:
+            no_address_nodes.append(node)
+
+    collapsed_nodes_raw = []
+    for address, group in sorted(
+        by_address.items(), key=lambda item: _address_sort_key(item[0])
+    ):
+        group_sorted = sorted(
+            group, key=lambda n: (n.get("name", ""), n.get("key", ""))
+        )
+        canonical = dict(group_sorted[0])
+        alias_names = sorted(
+            {
+                n.get("name", "")
+                for n in group_sorted
+                if isinstance(n.get("name"), str) and n.get("name")
+            }
+        )
+        canonical["alias_names"] = alias_names
+        merged_direct_calls = []
+        merged_targets = []
+        for item in group_sorted:
+            merged_direct_calls.extend(item.get("direct_calls") or [])
+            merged_targets.extend(item.get("direct_call_targets") or [])
+        canonical["direct_calls"] = merged_direct_calls
+        canonical["direct_call_targets"] = merged_targets
+        collapsed_nodes_raw.append(canonical)
+
+    collapsed_nodes_raw.extend(
+        sorted(
+            no_address_nodes,
+            key=lambda node: (
+                node.get("name", ""),
+                node.get("key", ""),
+            ),
+        )
+    )
+    nodes_raw = collapsed_nodes_raw
+
+    # These indexes are used by later matching passes in descending confidence:
+    # exact VA -> normalized VA -> RVA space -> image-base transforms -> name.
+    nodes = []
+    name_to_ids = defaultdict(list)
+    addr_to_ids = defaultdict(list)
+    rva_to_ids = defaultdict(list)
+    direct_calls_by_src = {}
+    direct_call_targets_by_src = {}
+    node_addr_ints = []
+    for node_id, node in enumerate(nodes_raw):
+        key = node["key"]
+        nodes.append(
+            {
+                "id": node_id,
+                "key": key,
+                "name": node["name"],
+                "address": node["address"],
+                "aliases": node.get("alias_names", []),
+            }
+        )
+        indexed_names = {node["name"], *(node.get("alias_names") or [])}
+        node_lookup_keys = set()
+        for indexed_name in indexed_names:
+            node_lookup_keys.update(_name_lookup_keys(indexed_name))
+        for lookup_key in sorted(node_lookup_keys):
+            name_to_ids[lookup_key].append(node_id)
+        direct_calls_by_src[node_id] = node.get("direct_calls", [])
+        if node["address"]:
+            with contextlib.suppress(ValueError):
+                addr_int = int(node["address"], 16)
+                addr_to_ids[addr_int].append(node_id)
+                node_addr_ints.append((addr_int, node_id))
+        if node.get("rva_or_address"):
+            with contextlib.suppress(ValueError):
+                rva_to_ids[int(node.get("rva_or_address"), 16)].append(node_id)
+
+    for src_id, node in enumerate(nodes_raw):
+        direct_call_targets_by_src[src_id] = node.get("direct_call_targets") or []
+
+    # Build coarse function ranges from sorted entrypoints. This is a practical
+    # fallback for targets landing on basic-block labels rather than exact
+    # function starts (common in optimized code and jump-heavy dispatchers).
+    node_ranges = {}
+    if node_addr_ints:
+        node_addr_ints.sort(key=lambda x: x[0])
+        for idx, (start_addr, node_id) in enumerate(node_addr_ints):
+            if idx + 1 < len(node_addr_ints):
+                end_addr = node_addr_ints[idx + 1][0] - 1
+            else:
+                end_addr = start_addr
+            node_ranges[node_id] = (start_addr, end_addr)
+
+    image_base_int = None
+    image_base = metadata.get("image_base", metadata.get("imagebase"))
+    if isinstance(image_base, int):
+        image_base_int = image_base
+    elif isinstance(image_base, str):
+        with contextlib.suppress(ValueError):
+            image_base_int = int(image_base, 16)
+
+    # We aggregate counts by (src, dst, kind) and track confidence separately
+    # because the same edge can be observed through multiple heuristics.
+    edge_counts = Counter()
+    edge_confidence = {}
+    external_counts = Counter()
+
+    confidence_rank = {"low": 1, "medium": 2, "high": 3}
+
+    for src_id, direct_targets in direct_call_targets_by_src.items():
+        if not direct_targets:
+            continue
+        for target in direct_targets:
+            if not isinstance(target, dict):
+                continue
+            target_addr = target.get("target_address", "")
+            target_addr_candidates = target.get("target_address_candidates") or []
+            target_name = target.get("target_name") or ""
+            raw_operand = target.get("raw_operand", "")
+            edge_kind = target.get("kind") or "direct"
+            # Higher score means stronger matching evidence. Scores are designed
+            # as a strict ladder so deterministic tie-breakers can resolve only
+            # genuinely equivalent candidates.
+            candidate_scores = defaultdict(int)
+            primary_addr_int = None
+            with contextlib.suppress(ValueError):
+                if target_addr:
+                    primary_addr_int = int(target_addr, 16)
+
+            def _score_candidates(id_list, score):
+                for cid in id_list or []:
+                    if score > candidate_scores[cid]:
+                        candidate_scores[cid] = score
+
+            numeric_candidates = []
+            if target_addr:
+                numeric_candidates.append(target_addr)
+            if isinstance(target_addr_candidates, list):
+                numeric_candidates.extend(target_addr_candidates)
+
+            for candidate in numeric_candidates:
+                if not isinstance(candidate, str) or not candidate:
+                    continue
+                with contextlib.suppress(ValueError):
+                    addr_int = int(candidate, 16)
+                    _score_candidates(addr_to_ids.get(addr_int, []), 100)
+                    _score_candidates(addr_to_ids.get(addr_int & ~1, []), 95)
+                    _score_candidates(rva_to_ids.get(addr_int, []), 90)
+                    if image_base_int:
+                        _score_candidates(
+                            addr_to_ids.get(addr_int + image_base_int, []), 85
+                        )
+                        _score_candidates(
+                            addr_to_ids.get((addr_int + image_base_int) & ~1, []), 80
+                        )
+                        if addr_int >= image_base_int:
+                            _score_candidates(
+                                rva_to_ids.get(addr_int - image_base_int, []), 75
+                            )
+
+                    # Range containment fallback: recover caller->callee edges
+                    # when target points inside a function body.
+                    for range_node_id, (start_addr, end_addr) in node_ranges.items():
+                        if start_addr <= addr_int <= end_addr:
+                            _score_candidates([range_node_id], 70)
+                            break
+                        if (
+                            image_base_int
+                            and start_addr <= addr_int + image_base_int <= end_addr
+                        ):
+                            _score_candidates([range_node_id], 65)
+                            break
+
+            if target_name:
+                for idx, lookup_key in enumerate(_name_lookup_keys(target_name)):
+                    _score_candidates(
+                        name_to_ids.get(lookup_key, []), 50 if idx == 0 else 45
+                    )
+
+            if candidate_scores:
+                max_score = max(candidate_scores.values())
+                top_candidates = sorted(
+                    [cid for cid, sc in candidate_scores.items() if sc == max_score]
+                )
+            else:
+                top_candidates = []
+
+            # Deterministic disambiguation chain:
+            # 1) primary target narrowing
+            # 2) smallest containing range
+            # 3) nearest entrypoint distance
+            # 4) lowest node id as final stable fallback
+            selected_candidate = None
+            selected_confidence = _default_confidence_for_kind(edge_kind)
+            if len(top_candidates) == 1:
+                selected_candidate = top_candidates[0]
+            elif len(top_candidates) > 1:
+                working = list(top_candidates)
+
+                if primary_addr_int is not None:
+                    primary_ids = set()
+                    for variant in _candidate_variants(
+                        primary_addr_int, image_base_int
+                    ):
+                        primary_ids.update(addr_to_ids.get(variant, []))
+                        primary_ids.update(addr_to_ids.get(variant & ~1, []))
+                        primary_ids.update(rva_to_ids.get(variant, []))
+                    narrowed = sorted(set(working).intersection(primary_ids))
+                    if len(narrowed) == 1:
+                        selected_candidate = narrowed[0]
+                        selected_confidence = "medium"
+                    elif narrowed:
+                        working = narrowed
+
+                if selected_candidate is None and primary_addr_int is not None:
+                    containing = []
+                    for cid in working:
+                        rng = node_ranges.get(cid)
+                        if not rng:
+                            continue
+                        start_addr, end_addr = rng
+                        for variant in _candidate_variants(
+                            primary_addr_int, image_base_int
+                        ):
+                            if start_addr <= variant <= end_addr:
+                                containing.append(cid)
+                                break
+                    if containing:
+                        min_width = min(
+                            (node_ranges[cid][1] - node_ranges[cid][0])
+                            for cid in containing
+                            if cid in node_ranges
+                        )
+                        narrowed = sorted(
+                            [
+                                cid
+                                for cid in containing
+                                if (node_ranges[cid][1] - node_ranges[cid][0])
+                                == min_width
+                            ]
+                        )
+                        if len(narrowed) == 1:
+                            selected_candidate = narrowed[0]
+                            selected_confidence = "medium"
+                        else:
+                            working = narrowed
+
+                if (
+                    selected_candidate is None
+                    and primary_addr_int is not None
+                    and working
+                ):
+                    distance_map = {}
+                    for cid in working:
+                        rng = node_ranges.get(cid)
+                        if not rng:
+                            continue
+                        start_addr = rng[0]
+                        distance_map[cid] = min(
+                            abs(start_addr - variant)
+                            for variant in _candidate_variants(
+                                primary_addr_int, image_base_int
+                            )
+                        )
+                    if distance_map:
+                        min_dist = min(distance_map.values())
+                        narrowed = sorted(
+                            [
+                                cid
+                                for cid, dist in distance_map.items()
+                                if dist == min_dist
+                            ]
+                        )
+                        if len(narrowed) == 1:
+                            selected_candidate = narrowed[0]
+                            selected_confidence = "medium"
+                        elif narrowed:
+                            working = narrowed
+
+            if selected_candidate is not None:
+                edge_key = (src_id, selected_candidate, edge_kind)
+                edge_counts[edge_key] += 1
+                _set_edge_confidence(
+                    edge_confidence, confidence_rank, edge_key, selected_confidence
+                )
+                continue
+
+            # If no unique internal match exists, preserve evidence as an
+            # external edge with a reason bucket. These buckets are useful KPI
+            # signals and guide future resolver improvements.
+            if raw_operand or target_name or target_addr:
+                ext_target = raw_operand or target_name or target_addr
+                if len(top_candidates) > 1:
+                    reason = "ambiguous_address"
+                else:
+                    is_numeric_raw = isinstance(
+                        raw_operand, str
+                    ) and raw_operand.startswith(("#", "0x"))
+                    if target_addr or target_addr_candidates:
+                        reason = "address_space_miss"
+                    elif target_name:
+                        reason = "symbol_only_miss"
+                    elif is_numeric_raw:
+                        reason = "raw_imm"
+                    else:
+                        reason = "unresolved"
+                if edge_kind != "direct":
+                    reason = f"{reason}:{edge_kind}"
+                external_counts[(src_id, ext_target, reason)] += 1
+
+    for src_id, direct_calls in direct_calls_by_src.items():
+        if direct_call_targets_by_src.get(src_id):
+            continue
+        for target_name in direct_calls:
+            if not isinstance(target_name, str) or not target_name:
+                continue
+            candidate_ids = sorted(
+                {
+                    node_id
+                    for lookup_key in _name_lookup_keys(target_name)
+                    for node_id in name_to_ids.get(lookup_key, [])
+                }
+            )
+            if len(candidate_ids) == 1:
+                edge_key = (src_id, candidate_ids[0], "direct")
+                edge_counts[edge_key] += 1
+                _set_edge_confidence(edge_confidence, confidence_rank, edge_key, "high")
+            else:
+                reason = (
+                    "ambiguous_name" if len(candidate_ids) > 1 else "symbol_only_miss"
+                )
+                external_counts[(src_id, target_name, reason)] += 1
+
+    edges = [
+        {
+            "src": src,
+            "dst": dst,
+            "count": count,
+            "kind": kind,
+            "confidence": edge_confidence.get(
+                (src, dst, kind), _default_confidence_for_kind(kind)
+            ),
+        }
+        for (src, dst, kind), count in sorted(
+            edge_counts.items(), key=lambda item: item[0]
+        )
+    ]
+    external = [
+        {
+            "src": src,
+            "target": target,
+            "count": count,
+            "reason": reason,
+            "confidence": "low",
+        }
+        for (src, target, reason), count in sorted(
+            external_counts.items(), key=lambda item: item[0]
+        )
+    ]
+
+    return {
+        "version": 2,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+        "external": external,
+    }
+
+
 def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
@@ -1338,6 +1823,8 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata["disassembled_functions"] = disassemble_functions(
                 parsed_obj, metadata
             )
+            if callgraph := build_disassembly_callgraph_metadata(metadata):
+                metadata["callgraph"] = callgraph
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)

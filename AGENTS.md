@@ -89,6 +89,26 @@ poetry run blint --help
 poetry run blint sbom --help
 ```
 
+### Callgraph regression validation policy
+
+For any change that can affect disassembly or callgraph output (for example edits in
+`blint/lib/disassembler.py`, `blint/lib/binary.py`, `blint/lib/callgraph_kpi.py`,
+callgraph export/matching code, or callgraph fixture baselines/labels), agents must
+validate KPI baseline + label accuracy for **all architecture entries** present in:
+
+- `tests/data/callgraph-kpi/wasm-tools-1.247.0-baseline.json` (`entries` keys)
+- `tests/data/callgraph-kpi/wasm-tools-1.247.0-labels.json` (`entries` keys)
+
+Use `tests/scripts/callgraph_kpi_baseline.py` for each architecture fixture, passing
+both `--baseline` and `--labels`. Do not update one architecture baseline in isolation
+without checking the others for silent drift.
+
+For fast iterative experiments (especially callgraph tuning), prefer quiet non-review runs:
+
+```bash
+poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/reports --disassemble
+```
+
 ## Environment variables used often
 
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`, `USE_BLINTDB`

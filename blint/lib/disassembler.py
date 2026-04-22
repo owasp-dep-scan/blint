@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import re
 
@@ -39,6 +40,29 @@ FUNCTION_SYMBOLS = (
     "dynamic_symbols",
     "exceptions",
 )
+
+
+def _is_macos_system_symbol_name(symbol_name: str) -> bool:
+    """Return True for symbol names that clearly belong to macOS system dylibs."""
+    if not symbol_name:
+        return False
+    name = symbol_name.strip()
+    lib_part = name.split("::", 1)[0]
+    return lib_part.startswith(("/usr/lib/", "/System/Library/"))
+
+
+def _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key: str) -> bool:
+    """Skip symbol buckets that are usually non-local to this binary."""
+    if isinstance(parsed_obj, lief.PE.Binary) and func_list_key in ("imports",):
+        return True
+    if isinstance(parsed_obj, lief.MachO.Binary) and func_list_key in (
+        "imports",
+        "symtab_symbols",
+        "dynamic_symbols",
+    ):
+        return True
+    return False
+
 
 OPERAND_DELIMITERS_PATTERN = re.compile(r"[^a-zA-Z0-9_$]+")
 
@@ -143,8 +167,8 @@ ARM64_ALL_REGS = (
     | ARM64_SPECIAL_REGS
     | ARM64_VFP_NEON_REGS
 )
-ARM64_CALL_INST = {"bl", "blr"}
-ARM64_UNCONDITIONAL_JMP_INST = {"b", "br"}
+ARM64_CALL_INST = {"bl", "blr", "blraa", "blrab"}
+ARM64_UNCONDITIONAL_JMP_INST = {"b", "br", "braa", "brab"}
 ARM64_RET_INST = {"ret", "eret"}
 ARM64_PAC_INST = {
     "pacia",
@@ -630,9 +654,17 @@ def _extract_register_usage(
                     operands[0].lower(), sorted_arch_regs
                 )
                 regs_read.update(src_regs)
-        elif mnemonic.startswith("b") and mnemonic not in ("bl", "blr", "br"):
+        elif mnemonic.startswith("b") and mnemonic not in (
+            "bl",
+            "blr",
+            "blraa",
+            "blrab",
+            "br",
+            "braa",
+            "brab",
+        ):
             pass
-        elif mnemonic in ("bl", "blr", "br"):
+        elif mnemonic in ("bl", "blr", "blraa", "blrab", "br", "braa", "brab"):
             if num_operands >= 1 and mnemonic != "bl":
                 target_op = operands[0].lower()
                 if not target_op.startswith("#") and not target_op.isdigit():
@@ -986,9 +1018,8 @@ def _analyze_instructions(
             is_indirect = False
             if len(parts) > 1:
                 operand = parts[1].lower().strip()
-                if any(operand.startswith(reg) for reg in sorted_arch_regs) and (
-                    operand.isalnum() or "_" in operand
-                ):
+                reg_token = _extract_register_token(operand, set(sorted_arch_regs))
+                if reg_token:
                     is_indirect = True
                 elif "[" in operand and "]" in operand:
                     is_indirect = True
@@ -1047,7 +1078,7 @@ def _analyze_instructions(
     )
 
 
-def _build_addr_to_name_map(metadata):
+def _build_addr_to_name_map(metadata, parsed_obj=None):
     """Builds a lookup map from address (int) to name from metadata functions."""
     addr_to_name_map = {}
     for func_list_key in FUNCTION_SYMBOLS:
@@ -1060,66 +1091,671 @@ def _build_addr_to_name_map(metadata):
                     addr_to_name_map[addr_int] = name
                 except ValueError:
                     continue
+            if name:
+                value = func_entry.get("value")
+                if isinstance(value, int) and value >= 0:
+                    addr_to_name_map[value] = name
+                elif isinstance(value, str):
+                    with contextlib.suppress(ValueError):
+                        addr_to_name_map[int(value, 16)] = name
             # IAT absolute addresses for resolving indirect RIP calls
             iat_addr = func_entry.get("iat_address")
             if iat_addr and name:
                 addr_to_name_map[iat_addr] = name
+
+    # For ELF binaries, GOT/PLT relocation slots carry imported symbol names.
+    if isinstance(parsed_obj, lief.ELF.Binary):
+        for reloc_list in (
+            getattr(parsed_obj, "pltgot_relocations", []),
+            getattr(parsed_obj, "dynamic_relocations", []),
+        ):
+            for reloc in reloc_list:
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    if not reloc.has_symbol:
+                        continue
+                    sym_name = (reloc.symbol.name or "").strip()
+                    if not sym_name:
+                        continue
+                    addr_to_name_map[int(reloc.address)] = sym_name
     return addr_to_name_map
 
 
+def _append_unique_target_addr(target_addrs: list[int], addr_val):
+    if isinstance(addr_val, int) and addr_val >= 0 and addr_val not in target_addrs:
+        target_addrs.append(addr_val)
+
+
+def _resolve_operand_target_addresses(
+    mnemonic: str,
+    operand: str,
+    instr,
+    is_aarch64: bool,
+    is_mips: bool,
+    is_windows: bool,
+):
+    """Parse operand forms and return normalized numeric target candidates."""
+    operand = (operand or "").strip().rstrip(",")
+    if operand.startswith("#"):
+        operand = operand[1:]
+    target_addrs = []
+    try:
+        if "rip" in operand.lower():
+            match = re.search(
+                r"\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]", operand.lower()
+            )
+            if match:
+                sign = 1 if match.group(1) == "+" else -1
+                offset = (
+                    int(match.group(2), 16)
+                    if match.group(2).startswith("0x")
+                    else int(match.group(2))
+                )
+                _append_unique_target_addr(
+                    target_addrs, instr.address + len(instr.bytes) + (sign * offset)
+                )
+        else:
+            match_hex = re.search(r"[-+]?0x[0-9a-fA-F]+", operand)
+            if match_hex:
+                _append_unique_target_addr(target_addrs, int(match_hex.group(0), 16))
+            elif operand.isdigit() or operand.startswith(("+", "-")):
+                val = int(operand)
+                if mnemonic == "bal":
+                    _append_unique_target_addr(target_addrs, instr.address + 4 + val)
+                elif is_aarch64:
+                    # Some AArch64 disassembly styles emit branch immediates as
+                    # hex-like digits without a 0x prefix (for example #410212).
+                    # Try that interpretation first for larger operands, then keep
+                    # decimal as fallback.
+                    if operand.isdigit() and len(operand) >= 5:
+                        with contextlib.suppress(ValueError):
+                            _append_unique_target_addr(target_addrs, int(operand, 16))
+                    if operand.startswith(("+", "-")):
+                        _append_unique_target_addr(target_addrs, instr.address + val)
+                        _append_unique_target_addr(
+                            target_addrs, instr.address + 4 + val
+                        )
+                    else:
+                        # Unsigned AArch64 branch immediates are frequently emitted
+                        # as PC-relative decimal deltas.
+                        _append_unique_target_addr(target_addrs, instr.address + val)
+                        _append_unique_target_addr(
+                            target_addrs, instr.address + 4 + val
+                        )
+                    _append_unique_target_addr(target_addrs, val)
+                elif not is_mips and (
+                    mnemonic.startswith("call")
+                    or (is_windows and mnemonic.startswith("j"))
+                ):
+                    _append_unique_target_addr(
+                        target_addrs, instr.address + len(instr.bytes) + val
+                    )
+                    # Keep absolute fallback for call-like operands where disassembly style
+                    # can vary between relative and absolute textual forms.
+                    if mnemonic.startswith("call"):
+                        _append_unique_target_addr(target_addrs, val)
+                else:
+                    _append_unique_target_addr(target_addrs, val)
+    except (ValueError, IndexError, AttributeError):
+        return []
+    return target_addrs
+
+
+def _extract_symbol_from_operand(operand: str, arch_reg_set: set[str]) -> str:
+    """Symbol extraction fallback for cases where numeric resolution fails."""
+    operand = (operand or "").strip()
+    if not operand:
+        return ""
+    if "<" in operand and ">" in operand:
+        inside = operand.split("<", 1)[1].split(">", 1)[0]
+        inside = inside.split("@", 1)[0].split("+", 1)[0].strip()
+        if inside and inside.lower().lstrip("%") not in arch_reg_set:
+            return inside
+    cleaned = operand.split("+", 1)[0].split("@", 1)[0].strip()
+    if (
+        cleaned
+        and not cleaned.startswith(("0x", "#"))
+        and "[" not in cleaned
+        and cleaned.lower().lstrip("%") not in arch_reg_set
+    ):
+        return cleaned
+    return ""
+
+
+def _parse_immediate_token(token: str):
+    token = (token or "").strip().lstrip("#")
+    if not token:
+        return None
+    with contextlib.suppress(ValueError):
+        if token.lower().startswith(("-0x", "+0x", "0x")):
+            return int(token, 16)
+        if token.startswith(("+", "-")) or token.isdigit():
+            return int(token, 10)
+    return None
+
+
+def _parse_x86_memory_operand_base_disp(
+    operand: str, arch_reg_set: set[str]
+) -> tuple[str, int]:
+    """Parse simple x86 memory operands like [rax + 72] or [r12 + 0x48]."""
+    operand = (operand or "").strip().lower()
+    match = re.search(r"\[\s*([%a-z0-9]+)\s*([+-])\s*(0x[0-9a-f]+|\d+)\s*\]", operand)
+    if match:
+        base_reg = match.group(1).lstrip("%")
+        if base_reg in arch_reg_set:
+            disp = (
+                int(match.group(3), 16)
+                if match.group(3).startswith("0x")
+                else int(match.group(3))
+            )
+            return base_reg, disp if match.group(2) == "+" else -disp
+
+    match = re.search(r"\[\s*([%a-z0-9]+)\s*\]", operand)
+    if match:
+        base_reg = match.group(1).lstrip("%")
+        if base_reg in arch_reg_set:
+            return base_reg, 0
+
+    return "", 0
+
+
+def _parse_arm64_memory_operand_base_disp(
+    operand: str, arch_reg_set: set[str]
+) -> tuple[str, int, bool]:
+    """Parse ARM64 memory operands like [x8, #0x18], [x8], or [x8], #0x20."""
+    operand = (operand or "").strip().lower()
+    match = re.search(r"\[([^\]]+)]", operand)
+    if not match:
+        return "", 0, False
+
+    inner = match.group(1)
+    inner_parts = [part.strip() for part in inner.split(",") if part.strip()]
+    if not inner_parts:
+        return "", 0, True
+
+    base_reg = inner_parts[0].lstrip("%")
+    if base_reg not in arch_reg_set:
+        return "", 0, True
+
+    displacement = 0
+    if len(inner_parts) >= 2:
+        imm = _parse_immediate_token(inner_parts[1])
+        if imm is not None:
+            displacement = imm
+
+    # Post-index form: ldr x0, [x1], #0x20
+    tail = operand[match.end() :].strip().lstrip(",").strip()
+    if tail:
+        imm = _parse_immediate_token(tail)
+        if imm is not None:
+            displacement += imm
+
+    return base_reg, displacement, True
+
+
+def _extract_reg_target_candidate_addrs(reg_target: dict) -> list[int]:
+    out = []
+    for inferred_candidate in reg_target.get("inferred_address_candidates", []):
+        with contextlib.suppress(ValueError, TypeError):
+            _append_unique_target_addr(out, int(inferred_candidate, 16))
+    for candidate in reg_target.get("target_address_candidates", []):
+        with contextlib.suppress(ValueError, TypeError):
+            _append_unique_target_addr(out, int(candidate, 16))
+    if not out and reg_target.get("target_address"):
+        with contextlib.suppress(ValueError, TypeError):
+            _append_unique_target_addr(out, int(reg_target.get("target_address"), 16))
+    return out
+
+
+def _adjust_candidate_addrs(candidate_addrs: list[int], displacement: int) -> list[int]:
+    out = []
+    for addr in candidate_addrs:
+        _append_unique_target_addr(out, addr + displacement)
+    return out
+
+
+def _get_chain_hops(reg_target: dict) -> int:
+    with contextlib.suppress(TypeError, ValueError):
+        return int(reg_target.get("chain_hops", 0))
+    return 0
+
+
+def _extract_register_token(operand: str, arch_reg_set: set[str]) -> str:
+    cleaned = (operand or "").strip().lower().rstrip(",")
+    if not cleaned or "[" in cleaned or "]" in cleaned:
+        return ""
+    # Branch-auth forms like `blraa x16, x17` carry extra operands; target is first.
+    if "," in cleaned:
+        cleaned = cleaned.split(",", 1)[0].strip()
+    cleaned = cleaned.lstrip("*#")
+    parts = cleaned.split()
+    token = parts[-1] if parts else cleaned
+    token = token.lstrip("%")
+    return token if token in arch_reg_set else ""
+
+
+def _arm64_memory_operand_uses_index_register(
+    operand: str, arch_reg_set: set[str]
+) -> bool:
+    """Return True when ARM64 memory operand address depends on an index register."""
+    operand = (operand or "").strip().lower()
+    match = re.search(r"\[([^\]]+)]", operand)
+    if not match:
+        return False
+    inner_parts = [part.strip() for part in match.group(1).split(",") if part.strip()]
+    if len(inner_parts) < 2:
+        return False
+    if _parse_immediate_token(inner_parts[1]) is not None:
+        return False
+    return inner_parts[1].lstrip("%") in arch_reg_set
+
+
+def _filter_windows_arm64_indirect_candidates(
+    candidate_addrs: list[int], is_windows: bool, is_aarch64: bool
+) -> list[int]:
+    if not (is_windows and is_aarch64):
+        return candidate_addrs
+    # Keep only canonical low virtual addresses for Windows ARM64 indirect hints.
+    return [addr for addr in candidate_addrs if 0 <= addr <= 0x0000FFFFFFFFFFFF]
+
+
+def _update_register_target(
+    instr,
+    reg_targets: dict,
+    arch_reg_set: set[str],
+    is_aarch64: bool,
+    is_mips: bool,
+    is_windows: bool,
+    chain_hop_limit: int = 2,
+):
+    """Track register assignments used later for indirect call hints."""
+    parts = instr.assembly.split(None, 1)
+    if len(parts) < 2:
+        return
+    mnemonic = parts[0].lower()
+    operands = [op.strip() for op in parts[1].split(",")]
+    if not operands:
+        return
+    dst_reg = _extract_register_token(operands[0], arch_reg_set)
+    if not dst_reg:
+        return
+
+    if is_aarch64 and mnemonic.startswith("ldr") and len(operands) >= 2:
+        # ARM64 memory operands contain commas inside brackets, so we rebuild
+        # the source operand from all remaining tokens.
+        src = ",".join(operands[1:]).strip()
+        src_base_reg, src_displacement, has_mem_operand = (
+            _parse_arm64_memory_operand_base_disp(src, arch_reg_set)
+        )
+        if has_mem_operand:
+            if _arm64_memory_operand_uses_index_register(src, arch_reg_set):
+                reg_targets.pop(dst_reg, None)
+                return
+            if src_base_reg and src_base_reg in reg_targets:
+                base_target = reg_targets[src_base_reg]
+                next_hops = _get_chain_hops(base_target) + 1
+                if next_hops > chain_hop_limit:
+                    reg_targets.pop(dst_reg, None)
+                    return
+                adjusted_addrs = _adjust_candidate_addrs(
+                    _extract_reg_target_candidate_addrs(base_target), src_displacement
+                )
+                adjusted_addrs = _filter_windows_arm64_indirect_candidates(
+                    adjusted_addrs, is_windows, is_aarch64
+                )
+                if adjusted_addrs:
+                    reg_targets[dst_reg] = {
+                        "target_name": "",
+                        "target_address": hex(adjusted_addrs[0]),
+                        "target_address_candidates": [hex(a) for a in adjusted_addrs],
+                        "raw_operand": src.split("<", 1)[0].strip(),
+                        "chain_hops": next_hops,
+                    }
+                    return
+            reg_targets.pop(dst_reg, None)
+            return
+
+    if (
+        mnemonic in {"mov", "movq", "movabs", "lea", "adr", "adrp"}
+        and len(operands) >= 2
+    ):
+        src = operands[1]
+        src_base_reg, src_displacement = _parse_x86_memory_operand_base_disp(
+            src, arch_reg_set
+        )
+        if (
+            is_windows
+            and src_base_reg
+            and src_base_reg != "rip"
+            and src_base_reg in reg_targets
+        ):
+            base_target = reg_targets[src_base_reg]
+            next_hops = _get_chain_hops(base_target) + 1
+            if next_hops > chain_hop_limit:
+                reg_targets.pop(dst_reg, None)
+                return
+            adjusted_addrs = _adjust_candidate_addrs(
+                _extract_reg_target_candidate_addrs(base_target), src_displacement
+            )
+            if adjusted_addrs:
+                reg_targets[dst_reg] = {
+                    "target_name": "",
+                    "target_address": "",
+                    "target_address_candidates": [],
+                    "inferred_address_candidates": [hex(a) for a in adjusted_addrs],
+                    "raw_operand": "",
+                    "chain_hops": next_hops,
+                }
+                return
+            reg_targets.pop(dst_reg, None)
+            return
+
+        if is_windows and src_base_reg and src_base_reg != "rip":
+            # Avoid treating `[reg + imm]` immediates as absolute constants when
+            # chain state is unavailable.
+            reg_targets.pop(dst_reg, None)
+            return
+
+        addrs = _resolve_operand_target_addresses(
+            mnemonic, src, instr, is_aarch64, is_mips, is_windows
+        )
+        addrs = _filter_windows_arm64_indirect_candidates(addrs, is_windows, is_aarch64)
+        name = _extract_symbol_from_operand(src, arch_reg_set)
+        raw = src.split("<", 1)[0].strip()
+        if addrs or name:
+            reg_targets[dst_reg] = {
+                "target_name": name,
+                "target_address": hex(addrs[0]) if addrs else "",
+                "target_address_candidates": [hex(a) for a in addrs],
+                "raw_operand": raw,
+                "chain_hops": 0,
+            }
+            return
+        reg_targets.pop(dst_reg, None)
+        return
+    if mnemonic in {"add", "sub"} and len(operands) >= 3:
+        src_reg = _extract_register_token(operands[1], arch_reg_set)
+        imm = _parse_immediate_token(operands[2])
+        if src_reg and imm is not None and src_reg in reg_targets:
+            base = reg_targets[src_reg]
+            base_candidates = []
+            for candidate in base.get("target_address_candidates", []):
+                with contextlib.suppress(ValueError):
+                    base_candidates.append(int(candidate, 16))
+            if not base_candidates and base.get("target_address"):
+                with contextlib.suppress(ValueError):
+                    base_candidates.append(int(base["target_address"], 16))
+            if base_candidates:
+                adjusted = [
+                    val + imm if mnemonic == "add" else val - imm
+                    for val in base_candidates
+                ]
+                adjusted = _filter_windows_arm64_indirect_candidates(
+                    adjusted, is_windows, is_aarch64
+                )
+                if not adjusted:
+                    reg_targets.pop(dst_reg, None)
+                    return
+                reg_targets[dst_reg] = {
+                    "target_name": base.get("target_name", ""),
+                    "target_address": hex(adjusted[0]),
+                    "target_address_candidates": [hex(a) for a in adjusted],
+                    "raw_operand": base.get("raw_operand", ""),
+                    "chain_hops": _get_chain_hops(base),
+                }
+                return
+        reg_targets.pop(dst_reg, None)
+
+
 def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
-    """Identifies direct calls in instructions and resolves target addresses to function names.
-    Handles both immediate absolute addresses (0x...) and relative offsets."""
+    """Identifies direct calls and returns both legacy names and rich call targets."""
     potential_callees = []
+    direct_call_targets = []
     is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
     is_mips = "mips" in arch_target.lower()
+    is_windows = "windows" in arch_target.lower()
+    arch_reg_set = {
+        reg.lower() for reg in get_arch_reg_set(arch_target) if isinstance(reg, str)
+    }
+    reg_targets = {}
+
     for instr in instr_list:
         instr_assembly = instr.assembly
         parts = instr_assembly.split(None, 1)
         if not parts:
             continue
         mnemonic = parts[0].lower()
+        _update_register_target(
+            instr,
+            reg_targets,
+            arch_reg_set,
+            is_aarch64=is_aarch64,
+            is_mips=is_mips,
+            is_windows=is_windows,
+        )
         is_direct_call = False
+        is_indirect_call = False
         if (
             (is_aarch64 and mnemonic == "bl")
             or (is_mips and mnemonic in MIPS_CALL_INST)
-            or (not is_aarch64 and not is_mips and mnemonic == "call")
+            or (not is_aarch64 and not is_mips and mnemonic.startswith("call"))
         ):
             is_direct_call = True
-        if is_direct_call and len(parts) > 1:
-            operand = parts[1]
-            target_addr = None
-            try:
-                if operand.startswith("0x"):
-                    target_addr = int(operand, 16)
-                elif operand.isdigit() or operand.startswith(("+", "-")):
-                    val = int(operand)
-                    if mnemonic == "bal":
-                        target_addr = instr.address + 4 + val
-                    else:
-                        target_addr = val
-                # Handle x64 RIP-Relative Addressing
-                elif "rip" in operand.lower():
-                    m = re.search(
-                        r"\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]", operand.lower()
-                    )
-                    if m:
-                        sign = 1 if m.group(1) == "+" else -1
-                        offset = (
-                            int(m.group(2), 16)
-                            if m.group(2).startswith("0x")
-                            else int(m.group(2))
+        if len(parts) > 1:
+            operand_text = parts[1]
+            operand_reg = _extract_register_token(operand_text, arch_reg_set)
+            has_memory_operand = "[" in operand_text and "]" in operand_text
+            if (is_aarch64 and mnemonic in {"blr", "blraa", "blrab"}) or (
+                not is_aarch64
+                and not is_mips
+                and mnemonic.startswith("call")
+                and (operand_reg or has_memory_operand)
+            ):
+                is_indirect_call = True
+                is_direct_call = False
+
+        if is_indirect_call and len(parts) > 1:
+            operand_text = parts[1].strip()
+            reg_token = _extract_register_token(operand_text, arch_reg_set)
+            if reg_token and reg_token in reg_targets:
+                reg_target = reg_targets[reg_token]
+                target_name = reg_target.get("target_name", "")
+                if not target_name:
+                    for candidate_addr in _extract_reg_target_candidate_addrs(
+                        reg_target
+                    ):
+                        target_name = (
+                            addr_to_name_map.get(candidate_addr)
+                            or addr_to_name_map.get(candidate_addr & ~1)
+                            or ""
                         )
-                        target_addr = instr.address + len(instr.bytes) + (sign * offset)
-            except (ValueError, IndexError):
+                        if target_name:
+                            break
+                if target_name:
+                    potential_callees.append(target_name)
+                direct_call_targets.append(
+                    {
+                        "target_name": target_name,
+                        "target_address": reg_target.get("target_address", ""),
+                        "target_address_candidates": reg_target.get(
+                            "target_address_candidates", []
+                        ),
+                        "raw_operand": reg_target.get("raw_operand", reg_token),
+                        "kind": "indirect_hint",
+                    }
+                )
                 continue
-            if target_addr is not None:
-                target_name = addr_to_name_map.get(target_addr) or addr_to_name_map.get(
-                    target_addr & ~1
+
+            # Preserve memory-indirect and annotated-symbol evidence for
+            # unresolved bucketing without pretending the pointer slot is callee VA.
+            if "[" in operand_text and "]" in operand_text:
+                target_name = ""
+                base_reg, displacement = _parse_x86_memory_operand_base_disp(
+                    operand_text, arch_reg_set
+                )
+                if base_reg and base_reg in reg_targets:
+                    reg_target = reg_targets[base_reg]
+                    for candidate_addr in _adjust_candidate_addrs(
+                        _extract_reg_target_candidate_addrs(reg_target), displacement
+                    ):
+                        target_name = (
+                            addr_to_name_map.get(candidate_addr)
+                            or addr_to_name_map.get(candidate_addr & ~1)
+                            or ""
+                        )
+                        if target_name:
+                            break
+                    if not target_name and displacement == 0:
+                        target_name = reg_target.get("target_name", "")
+
+                target_addrs = _resolve_operand_target_addresses(
+                    mnemonic, operand_text, instr, is_aarch64, is_mips, is_windows
+                )
+                if not target_name:
+                    for candidate_addr in target_addrs:
+                        target_name = (
+                            addr_to_name_map.get(candidate_addr)
+                            or addr_to_name_map.get(candidate_addr & ~1)
+                            or ""
+                        )
+                        if target_name:
+                            break
+                if not target_name:
+                    target_name = _extract_symbol_from_operand(
+                        operand_text, arch_reg_set
+                    )
+                if target_name:
+                    potential_callees.append(target_name)
+                raw_operand = operand_text.split("<", 1)[0].strip()
+                if target_name or raw_operand:
+                    direct_call_targets.append(
+                        {
+                            "target_name": target_name,
+                            "target_address": "",
+                            "target_address_candidates": [],
+                            "raw_operand": raw_operand,
+                            "kind": "indirect_hint",
+                        }
+                    )
+            continue
+
+        if is_direct_call and len(parts) > 1:
+            operand = parts[1].strip()
+            target_addrs = _resolve_operand_target_addresses(
+                mnemonic, operand, instr, is_aarch64, is_mips, is_windows
+            )
+            target_addr = target_addrs[0] if target_addrs else None
+            target_name = ""
+            for candidate_addr in target_addrs:
+                target_name = (
+                    addr_to_name_map.get(candidate_addr)
+                    or addr_to_name_map.get(candidate_addr & ~1)
+                    or ""
                 )
                 if target_name:
                     potential_callees.append(target_name)
-    return potential_callees
+                    break
+            if not target_name:
+                target_name = _extract_symbol_from_operand(operand, arch_reg_set)
+                if target_name:
+                    potential_callees.append(target_name)
+            raw_operand = operand.split("<", 1)[0].strip()
+            direct_call_targets.append(
+                {
+                    "target_name": target_name,
+                    "target_address": hex(target_addr)
+                    if target_addr is not None
+                    else "",
+                    "target_address_candidates": [hex(t) for t in target_addrs],
+                    "raw_operand": raw_operand,
+                    "kind": "direct",
+                }
+            )
+
+    # This recovers common compiler-emitted tail dispatch patterns that would
+    # otherwise appear as disconnected terminal blocks.
+    if instr_list:
+        tail_instr = instr_list[-1]
+        parts = tail_instr.assembly.split(None, 1)
+        if parts:
+            mnemonic = parts[0].lower()
+            jump_set = (
+                ARM64_UNCONDITIONAL_JMP_INST
+                if is_aarch64
+                else MIPS_UNCONDITIONAL_JMP_INST
+                if is_mips
+                else X86_UNCONDITIONAL_JMP_INST
+            )
+            if mnemonic in jump_set and len(parts) > 1:
+                operand = parts[1].strip()
+                reg_token = _extract_register_token(operand, arch_reg_set)
+                if reg_token and reg_token in reg_targets:
+                    reg_target = reg_targets[reg_token]
+                    target_addrs = _extract_reg_target_candidate_addrs(reg_target)
+                    target_addr = target_addrs[0] if target_addrs else None
+                    target_name = reg_target.get("target_name", "")
+                    if not target_name:
+                        for candidate_addr in target_addrs:
+                            target_name = (
+                                addr_to_name_map.get(candidate_addr)
+                                or addr_to_name_map.get(candidate_addr & ~1)
+                                or ""
+                            )
+                            if target_name:
+                                break
+                    raw_operand = operand.split("<", 1)[0].strip()
+                    if target_name or target_addr is not None or raw_operand:
+                        direct_call_targets.append(
+                            {
+                                "target_name": target_name,
+                                "target_address": hex(target_addr)
+                                if target_addr is not None
+                                else "",
+                                "target_address_candidates": [
+                                    hex(t) for t in target_addrs
+                                ],
+                                "raw_operand": raw_operand,
+                                "kind": "tailcall",
+                            }
+                        )
+                elif not any(ch in operand for ch in ("[", "]")):
+                    target_addrs = _resolve_operand_target_addresses(
+                        mnemonic,
+                        operand,
+                        tail_instr,
+                        is_aarch64,
+                        is_mips,
+                        is_windows,
+                    )
+                    target_addr = target_addrs[0] if target_addrs else None
+                    target_name = ""
+                    for candidate_addr in target_addrs:
+                        target_name = (
+                            addr_to_name_map.get(candidate_addr)
+                            or addr_to_name_map.get(candidate_addr & ~1)
+                            or ""
+                        )
+                        if target_name:
+                            break
+                    if not target_name:
+                        target_name = _extract_symbol_from_operand(
+                            operand, arch_reg_set
+                        )
+                    raw_operand = operand.split("<", 1)[0].strip()
+                    if target_name or target_addr is not None or raw_operand:
+                        direct_call_targets.append(
+                            {
+                                "target_name": target_name,
+                                "target_address": hex(target_addr)
+                                if target_addr is not None
+                                else "",
+                                "target_address_candidates": [
+                                    hex(t) for t in target_addrs
+                                ],
+                                "raw_operand": raw_operand,
+                                "kind": "tailcall",
+                            }
+                        )
+    return potential_callees, direct_call_targets
 
 
 def _classify_function(
@@ -1242,7 +1878,7 @@ def disassemble_functions(
             )
         except ValueError as e:
             LOG.warning(f"Failed to initialize microMIPS disassembler: {e}")
-    addr_to_name_map = _build_addr_to_name_map(metadata)
+    addr_to_name_map = _build_addr_to_name_map(metadata, parsed_obj)
     all_func_addrs = []
     for func_list_key in FUNCTION_SYMBOLS:
         for func_entry in metadata.get(func_list_key, []):
@@ -1275,7 +1911,7 @@ def disassemble_functions(
     num_success = 0
     all_funcs = []
     for func_list_key in FUNCTION_SYMBOLS:
-        if isinstance(parsed_obj, lief.PE.Binary) and func_list_key in ("imports",):
+        if _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key):
             continue
         all_funcs.extend(metadata.get(func_list_key, []))
     visited_addrs = set()
@@ -1298,6 +1934,10 @@ def disassemble_functions(
         visited_addrs.add(original_func_addr)
         if not func_name:
             func_name = f"sub_{original_func_addr:x}"
+        if isinstance(parsed_obj, lief.MachO.Binary) and _is_macos_system_symbol_name(
+            func_name
+        ):
+            continue
         func_addr = original_func_addr
         if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
             func_addr = func_addr & ~1
@@ -1457,7 +2097,7 @@ def disassemble_functions(
                 parsed_obj,
                 arch_target,
             )
-            direct_calls = _resolve_direct_calls(
+            direct_calls, direct_call_targets = _resolve_direct_calls(
                 truncated_instr_list, addr_to_name_map, arch_target
             )
             joined_mnemonics = "\n".join(instruction_mnemonics)
@@ -1499,6 +2139,7 @@ def disassemble_functions(
                 "instruction_count": instruction_count,
                 "instruction_metrics": instruction_metrics,
                 "direct_calls": direct_calls,
+                "direct_call_targets": direct_call_targets,
                 "has_indirect_call": has_indirect_call,
                 "has_pac": has_pac,
                 "has_system_call": has_system_call,

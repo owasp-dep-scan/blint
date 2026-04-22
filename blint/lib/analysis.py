@@ -1,4 +1,5 @@
 import contextlib
+import html
 import importlib  # noqa
 import os
 import re
@@ -9,6 +10,7 @@ from datetime import datetime
 from itertools import islice
 from pathlib import Path
 from typing import Optional
+from xml.etree import ElementTree as ET
 
 import yaml
 from rich.terminal_theme import MONOKAI
@@ -472,7 +474,340 @@ def print_reviews_table(reviews, files):
     console.print(table)
 
 
-def report(blint_options, exe_files, findings, reviews, fuzzables):
+def _safe_mermaid_label(value: str) -> str:
+    """Normalizes Mermaid labels to a parser-safe single-line representation."""
+    label = str(value or "")
+    label = (
+        label.replace("\r", " ")
+        .replace("\n", " ")
+        .replace("\t", " ")
+        .replace("\\", "/")
+        .replace('"', "'")
+        .replace("|", "/")
+        .replace("`", "'")
+    )
+    label = "".join(ch if ch.isprintable() else " " for ch in label)
+    return " ".join(label.split()).strip()
+
+
+def _build_mermaid_callgraph_text(callgraph: dict) -> str:
+    """Builds Mermaid graph text from a blint callgraph object."""
+    lines = ["graph TD"]
+    nodes = callgraph.get("nodes") or []
+    edges = callgraph.get("edges") or []
+    external = callgraph.get("external") or []
+    for node in nodes:
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        node_name = node.get("name") or "unknown"
+        node_addr = node.get("address") or ""
+        label = _safe_mermaid_label(
+            f"{node_name} ({node_addr})" if node_addr else node_name
+        )
+        lines.append(f'    N{node_id}["{label}"]')
+    for edge in edges:
+        src = edge.get("src")
+        dst = edge.get("dst")
+        if src is None or dst is None:
+            continue
+        count = edge.get("count", 1)
+        edge_label = f"|{count}|" if count and count > 1 else ""
+        lines.append(f"    N{src} -->{edge_label} N{dst}")
+    for idx, ext in enumerate(external):
+        src = ext.get("src")
+        if src is None:
+            continue
+        target = _safe_mermaid_label(ext.get("target") or "unknown")
+        reason = _safe_mermaid_label(ext.get("reason") or "unresolved")
+        count = ext.get("count", 1)
+        ext_id = f"X{idx}"
+        lines.append(f'    {ext_id}["{_safe_mermaid_label(f"{target} ({reason})")}"]')
+        edge_label = f"|{count}|" if count and count > 1 else ""
+        lines.append(f"    N{src} -.->{edge_label} {ext_id}")
+    return "\n".join(lines) + "\n"
+
+
+def _sanitize_stem(name: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name or "")).strip("_")
+    return stem or "binary"
+
+
+def _filter_callgraph_by_min_confidence(callgraph: dict, min_confidence: str) -> dict:
+    rank = {"low": 1, "medium": 2, "high": 3}
+    threshold = rank.get((min_confidence or "low").lower(), 1)
+    if threshold <= 1:
+        return callgraph
+
+    filtered = dict(callgraph)
+    filtered["edges"] = [
+        edge
+        for edge in (callgraph.get("edges") or [])
+        if rank.get((edge.get("confidence") or "low").lower(), 1) >= threshold
+    ]
+    filtered["external"] = [
+        ext
+        for ext in (callgraph.get("external") or [])
+        if rank.get((ext.get("confidence") or "low").lower(), 1) >= threshold
+    ]
+    filtered["edge_count"] = len(filtered["edges"])
+    return filtered
+
+
+def _iter_callgraph_exports(
+    callgraphs: list[dict], min_confidence: str = "low"
+) -> list[dict]:
+    """Builds stable per-binary export metadata with collision-safe file stems."""
+    exports = []
+    stem_counts = defaultdict(int)
+    for entry in callgraphs:
+        if not isinstance(entry, dict):
+            continue
+        callgraph = _filter_callgraph_by_min_confidence(
+            entry.get("callgraph") or {}, min_confidence
+        )
+        if not isinstance(callgraph, dict) or not callgraph.get("nodes"):
+            continue
+        stem = _sanitize_stem(entry.get("exe_name", "binary"))
+        stem_counts[stem] += 1
+        suffix = f"-{stem_counts[stem]}" if stem_counts[stem] > 1 else ""
+        file_stem = f"{stem}{suffix}-callgraph"
+        exports.append(
+            {
+                "exe_name": entry.get("exe_name") or stem,
+                "callgraph": callgraph,
+                "file_stem": file_stem,
+            }
+        )
+    return exports
+
+
+def _render_mermaid_callgraphs(
+    reports_dir: str, callgraphs: list[dict], min_confidence: str = "low"
+) -> list[dict]:
+    """Writes Mermaid callgraph files and returns render metadata for HTML injection."""
+    rendered = []
+    for entry in _iter_callgraph_exports(callgraphs, min_confidence=min_confidence):
+        file_name = f"{entry['file_stem']}.mmd"
+        mermaid_text = _build_mermaid_callgraph_text(entry["callgraph"])
+        mmd_file = Path(reports_dir) / file_name
+        mmd_file.write_text(mermaid_text, encoding="utf-8")
+        rendered.append(
+            {
+                "exe_name": entry["exe_name"],
+                "file_name": file_name,
+                "mermaid_text": mermaid_text,
+            }
+        )
+    return rendered
+
+
+def _build_graphml_tree(callgraph: dict) -> ET.Element:
+    """Builds a GraphML XML tree for a callgraph."""
+    root = ET.Element("graphml", xmlns="http://graphml.graphdrawing.org/xmlns")
+    ET.SubElement(
+        root,
+        "key",
+        id="node_label",
+        **{"for": "node", "attr.name": "label", "attr.type": "string"},
+    )
+    ET.SubElement(
+        root,
+        "key",
+        id="node_kind",
+        **{"for": "node", "attr.name": "kind", "attr.type": "string"},
+    )
+    ET.SubElement(
+        root,
+        "key",
+        id="edge_kind",
+        **{"for": "edge", "attr.name": "kind", "attr.type": "string"},
+    )
+    ET.SubElement(
+        root,
+        "key",
+        id="edge_count",
+        **{"for": "edge", "attr.name": "count", "attr.type": "int"},
+    )
+    graph = ET.SubElement(root, "graph", edgedefault="directed")
+
+    for node in callgraph.get("nodes") or []:
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        n = ET.SubElement(graph, "node", id=f"n{node_id}")
+        label = _safe_mermaid_label(
+            f"{node.get('name') or 'unknown'} ({node.get('address') or ''})"
+        )
+        ET.SubElement(n, "data", key="node_label").text = label
+        ET.SubElement(n, "data", key="node_kind").text = "internal"
+
+    ext_node_base = len(callgraph.get("nodes") or [])
+    for idx, ext in enumerate(callgraph.get("external") or []):
+        ext_node_id = f"x{ext_node_base + idx}"
+        n = ET.SubElement(graph, "node", id=ext_node_id)
+        ext_label = _safe_mermaid_label(
+            f"{ext.get('target') or 'unknown'} ({ext.get('reason') or 'unresolved'})"
+        )
+        ET.SubElement(n, "data", key="node_label").text = ext_label
+        ET.SubElement(n, "data", key="node_kind").text = "external"
+
+    edge_index = 0
+    for edge in callgraph.get("edges") or []:
+        src = edge.get("src")
+        dst = edge.get("dst")
+        if src is None or dst is None:
+            continue
+        e = ET.SubElement(
+            graph, "edge", id=f"e{edge_index}", source=f"n{src}", target=f"n{dst}"
+        )
+        ET.SubElement(e, "data", key="edge_kind").text = edge.get("kind", "direct")
+        ET.SubElement(e, "data", key="edge_count").text = str(edge.get("count", 1))
+        edge_index += 1
+
+    for idx, ext in enumerate(callgraph.get("external") or []):
+        src = ext.get("src")
+        if src is None:
+            continue
+        target = f"x{ext_node_base + idx}"
+        e = ET.SubElement(
+            graph,
+            "edge",
+            id=f"e{edge_index}",
+            source=f"n{src}",
+            target=target,
+        )
+        ET.SubElement(e, "data", key="edge_kind").text = ext.get("reason", "unresolved")
+        ET.SubElement(e, "data", key="edge_count").text = str(ext.get("count", 1))
+        edge_index += 1
+    return root
+
+
+def _render_graphml_callgraphs(
+    reports_dir: str, callgraphs: list[dict], min_confidence: str = "low"
+) -> list[str]:
+    """Writes GraphML callgraph files and returns generated filenames."""
+    generated = []
+    for entry in _iter_callgraph_exports(callgraphs, min_confidence=min_confidence):
+        file_name = f"{entry['file_stem']}.graphml"
+        graphml_tree = ET.ElementTree(_build_graphml_tree(entry["callgraph"]))
+        graphml_tree.write(
+            Path(reports_dir) / file_name,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+        generated.append(file_name)
+    return generated
+
+
+def _build_gexf_tree(callgraph: dict) -> ET.Element:
+    """Builds a GEXF XML tree for a callgraph."""
+    root = ET.Element("gexf", xmlns="http://www.gexf.net/1.2draft", version="1.2")
+    graph = ET.SubElement(root, "graph", mode="static", defaultedgetype="directed")
+    nodes = ET.SubElement(graph, "nodes")
+    edges = ET.SubElement(graph, "edges")
+
+    for node in callgraph.get("nodes") or []:
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        label = _safe_mermaid_label(
+            f"{node.get('name') or 'unknown'} ({node.get('address') or ''})"
+        )
+        ET.SubElement(nodes, "node", id=f"n{node_id}", label=label)
+
+    ext_node_base = len(callgraph.get("nodes") or [])
+    for idx, ext in enumerate(callgraph.get("external") or []):
+        ext_id = f"x{ext_node_base + idx}"
+        ext_label = _safe_mermaid_label(
+            f"{ext.get('target') or 'unknown'} ({ext.get('reason') or 'unresolved'})"
+        )
+        ET.SubElement(nodes, "node", id=ext_id, label=ext_label)
+
+    edge_index = 0
+    for edge in callgraph.get("edges") or []:
+        src = edge.get("src")
+        dst = edge.get("dst")
+        if src is None or dst is None:
+            continue
+        ET.SubElement(
+            edges,
+            "edge",
+            id=f"e{edge_index}",
+            source=f"n{src}",
+            target=f"n{dst}",
+            weight=str(edge.get("count", 1)),
+            label=edge.get("kind", "direct"),
+        )
+        edge_index += 1
+
+    for idx, ext in enumerate(callgraph.get("external") or []):
+        src = ext.get("src")
+        if src is None:
+            continue
+        ET.SubElement(
+            edges,
+            "edge",
+            id=f"e{edge_index}",
+            source=f"n{src}",
+            target=f"x{ext_node_base + idx}",
+            weight=str(ext.get("count", 1)),
+            label=ext.get("reason", "unresolved"),
+        )
+        edge_index += 1
+    return root
+
+
+def _render_gexf_callgraphs(
+    reports_dir: str, callgraphs: list[dict], min_confidence: str = "low"
+) -> list[str]:
+    """Writes GEXF callgraph files and returns generated filenames."""
+    generated = []
+    for entry in _iter_callgraph_exports(callgraphs, min_confidence=min_confidence):
+        file_name = f"{entry['file_stem']}.gexf"
+        gexf_tree = ET.ElementTree(_build_gexf_tree(entry["callgraph"]))
+        gexf_tree.write(
+            Path(reports_dir) / file_name,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+        generated.append(file_name)
+    return generated
+
+
+def _inject_mermaid_into_html(html_file: Path, rendered_callgraphs: list[dict]) -> None:
+    """Injects Mermaid diagrams and script into the console HTML report."""
+    if not rendered_callgraphs or not html_file.exists():
+        return
+    html_text = html_file.read_text(encoding="utf-8", errors="ignore")
+    if "blint-mermaid-callgraphs" in html_text:
+        return
+
+    diagrams = []
+    for item in rendered_callgraphs:
+        title = html.escape(str(item.get("exe_name", "binary")))
+        file_name = html.escape(str(item.get("file_name", "")))
+        mermaid_block = html.escape(item.get("mermaid_text", ""))
+        diagrams.append(
+            f'<section><h3>{title}</h3><p><code>{file_name}</code></p><pre class="mermaid">{mermaid_block}</pre></section>'
+        )
+
+    mermaid_section = (
+        '<section id="blint-mermaid-callgraphs">'
+        "<h2>Mermaid Callgraphs</h2>" + "".join(diagrams) + "</section>"
+        '<script type="module">'
+        "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';"
+        "mermaid.initialize({startOnLoad:true,securityLevel:'loose'});"
+        "</script>"
+    )
+    if "</body>" in html_text:
+        html_text = html_text.replace("</body>", mermaid_section + "</body>", 1)
+    else:
+        html_text += mermaid_section
+    html_file.write_text(html_text, encoding="utf-8")
+
+
+def report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs=None):
     """Generates a report based on the analysis results.
 
     Args:
@@ -483,11 +818,29 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
         fuzzables: A list of fuzzable methods.
 
     """
-    if not findings and not reviews:
+    should_render_callgraphs = bool(
+        blint_options.render_mermaid_callgraph and callgraphs
+    )
+    should_export_graphml_callgraphs = bool(
+        blint_options.export_callgraph_graphml and callgraphs
+    )
+    should_export_gexf_callgraphs = bool(
+        blint_options.export_callgraph_gexf and callgraphs
+    )
+    should_emit_any_callgraph = (
+        should_render_callgraphs
+        or should_export_graphml_callgraphs
+        or should_export_gexf_callgraphs
+    )
+    if not findings and not reviews and not should_emit_any_callgraph:
         LOG.info(
             f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!"
         )
         return
+    if not findings and not reviews:
+        LOG.info(
+            f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}. Rendering callgraph artifacts."
+        )
     if not os.path.exists(blint_options.reports_dir):
         os.makedirs(blint_options.reports_dir)
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
@@ -520,4 +873,23 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
     # Try console output as html
     html_file = Path(blint_options.reports_dir) / "blint-output.html"
     console.save_html(html_file, theme=MONOKAI)
+    if should_render_callgraphs:
+        rendered_callgraphs = _render_mermaid_callgraphs(
+            blint_options.reports_dir,
+            callgraphs,
+            min_confidence=blint_options.callgraph_min_confidence,
+        )
+        _inject_mermaid_into_html(html_file, rendered_callgraphs)
+    if should_export_graphml_callgraphs:
+        _render_graphml_callgraphs(
+            blint_options.reports_dir,
+            callgraphs,
+            min_confidence=blint_options.callgraph_min_confidence,
+        )
+    if should_export_gexf_callgraphs:
+        _render_gexf_callgraphs(
+            blint_options.reports_dir,
+            callgraphs,
+            min_confidence=blint_options.callgraph_min_confidence,
+        )
     LOG.debug(f"HTML report written to {html_file}")
