@@ -1,29 +1,31 @@
-from blint.logger import LOG
-import lief
 import hashlib
 import re
+
+import lief
+
 from blint.config import (
-    CRYPTO_INDICATORS,
-    GPU_INDICATORS,
-    SECURITY_INDICATORS,
-    SYSCALL_INDICATORS,
-    IMPLICIT_REGS_X86,
-    IMPLICIT_REGS_X64,
-    IMPLICIT_REGS_ARM64,
-    IMPLICIT_REGS_MIPS,
-    SORTED_ALL_REGS_MIPS,
-    MIPS_ARITH_LOGIC_3_OP,
-    MIPS_ARITH_LOGIC_2_OP_IMM,
-    MIPS_SHIFT_3_OP,
-    MIPS_SHIFT_2_OP_IMM,
-    MIPS_LOAD_STORE,
-    MIPS_MOVE,
-    MIPS_BRANCH_2_OP,
-    MIPS_CALL_INST,
-    MIPS_MULT_DIV,
     APPLE_PROPRIETARY_INSTRUCTION_RANGES,
     APPLE_PROPRIETARY_SREGS,
+    CRYPTO_INDICATORS,
+    GPU_INDICATORS,
+    IMPLICIT_REGS_ARM64,
+    IMPLICIT_REGS_MIPS,
+    IMPLICIT_REGS_X64,
+    IMPLICIT_REGS_X86,
+    MIPS_ARITH_LOGIC_2_OP_IMM,
+    MIPS_ARITH_LOGIC_3_OP,
+    MIPS_BRANCH_2_OP,
+    MIPS_CALL_INST,
+    MIPS_LOAD_STORE,
+    MIPS_MOVE,
+    MIPS_MULT_DIV,
+    MIPS_SHIFT_2_OP_IMM,
+    MIPS_SHIFT_3_OP,
+    SECURITY_INDICATORS,
+    SORTED_ALL_REGS_MIPS,
+    SYSCALL_INDICATORS,
 )
+from blint.logger import LOG
 
 FUNCTION_SYMBOLS = (
     "functions",
@@ -145,14 +147,28 @@ ARM64_CALL_INST = {"bl", "blr"}
 ARM64_UNCONDITIONAL_JMP_INST = {"b", "br"}
 ARM64_RET_INST = {"ret", "eret"}
 ARM64_PAC_INST = {
-    "pacia", "pacib", "pacda", "pacdb",
-    "autia", "autib", "autda", "autdb",
-    "pacibsp", "autibsp", "pacia1716", "autia1716",
-    "xpaci", "xpacd",
-    "retaa", "retab",
-    "braa", "brab",
-    "blraa", "blrab",
-    "ldra", "ldrab",
+    "pacia",
+    "pacib",
+    "pacda",
+    "pacdb",
+    "autia",
+    "autib",
+    "autda",
+    "autdb",
+    "pacibsp",
+    "autibsp",
+    "pacia1716",
+    "autia1716",
+    "xpaci",
+    "xpacd",
+    "retaa",
+    "retab",
+    "braa",
+    "brab",
+    "blraa",
+    "blrab",
+    "ldra",
+    "ldrab",
 }
 # Mapping of ARM64 HINT immediate values to PAC meanings
 # 25=paciasp, 27=pacibsp, 29=autiasp, 31=autibsp
@@ -161,7 +177,9 @@ MIPS_RET_INST = {"jr"}
 MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
 TERMINATING_INST = X86_RET_INST | ARM64_RET_INST | MIPS_RET_INST
 UNCONDITIONAL_JMP_INST_ALL = (
-    X86_UNCONDITIONAL_JMP_INST | ARM64_UNCONDITIONAL_JMP_INST | MIPS_UNCONDITIONAL_JMP_INST
+    X86_UNCONDITIONAL_JMP_INST
+    | ARM64_UNCONDITIONAL_JMP_INST
+    | MIPS_UNCONDITIONAL_JMP_INST
 )
 SORTED_ARM64_ALL_REGS = sorted(ARM64_ALL_REGS, key=len, reverse=True)
 
@@ -344,18 +362,30 @@ _SREG_TO_CATEGORY_MAP = {
 
 # A universal superset of padding, trap, and disassembler artifact mnemonics
 PADDING_TRAP_MNEMONICS = {
-    "nop", "int3", "ud2", "hlt", "pause",
-    "brk", "udf", "trap",
+    "nop",
+    "int3",
+    "ud2",
+    "hlt",
+    "pause",
+    "brk",
+    "udf",
+    "trap",
     "break",
-    "align", "invalid", "unallocated"
+    "align",
+    "invalid",
+    "unallocated",
 }
 
 try:
     from nyxstone import Nyxstone
+
     NYXSTONE_AVAILABLE = True
 except ImportError:
-    LOG.debug("Nyxstone not found. Disassembly features will be unavailable. Install with 'pip install blint[extended]'.")
+    LOG.debug(
+        "Nyxstone not found. Disassembly features will be unavailable. Install with 'pip install blint[extended]'."
+    )
     NYXSTONE_AVAILABLE = False
+
 
 def get_arch_reg_set(arch_target):
     """Returns the appropriate set of registers based on the architecture."""
@@ -366,6 +396,8 @@ def get_arch_reg_set(arch_target):
         return SORTED_ALL_REGS_MIPS
     else:
         return SORTED_ALL_REGS_X86
+
+
 def _get_implicit_regs_map(arch_target):
     """Selects the appropriate implicit registers map based on architecture."""
     lower_arch = arch_target.lower()
@@ -376,6 +408,7 @@ def _get_implicit_regs_map(arch_target):
     if "mips" in lower_arch:
         return IMPLICIT_REGS_MIPS
     return IMPLICIT_REGS_X86
+
 
 def _find_function_end_index(instr_list, has_exact_size=False):
     """
@@ -399,11 +432,12 @@ def _find_function_end_index(instr_list, has_exact_size=False):
         if mnemonic in TERMINATING_INST or mnemonic in UNCONDITIONAL_JMP_INST_ALL:
             if i + 1 >= len(instr_list):
                 return i
-            next_mnemonic = instr_list[i+1].assembly.split(None, 1)[0].lower()
+            next_mnemonic = instr_list[i + 1].assembly.split(None, 1)[0].lower()
             if next_mnemonic in PADDING_TRAP_MNEMONICS:
                 return i
 
     return len(instr_list) - 1
+
 
 def _get_abi_volatile_regs(parsed_obj, arch_target):
     """
@@ -421,6 +455,7 @@ def _get_abi_volatile_regs(parsed_obj, arch_target):
     else:
         return CDECL_X86_VOLATILE_REGS
 
+
 def extract_regs_from_operand(op, sorted_arch_regs=SORTED_ALL_REGS_X86):
     found_regs = set()
     if not op:
@@ -429,16 +464,17 @@ def extract_regs_from_operand(op, sorted_arch_regs=SORTED_ALL_REGS_X86):
     for token in potential_tokens:
         if token in sorted_arch_regs:
             found_regs.add(token)
-        cleaned_token = token.strip('[]!')
+        cleaned_token = token.strip("[]!")
         if cleaned_token in sorted_arch_regs:
             found_regs.add(cleaned_token)
-        if ' ' in cleaned_token:
-             sub_tokens = cleaned_token.split()
-             for sub_t in sub_tokens:
-                 sub_cleaned = sub_t.strip('[]!')
-                 if sub_cleaned in sorted_arch_regs:
-                     found_regs.add(sub_cleaned)
+        if " " in cleaned_token:
+            sub_tokens = cleaned_token.split()
+            for sub_t in sub_tokens:
+                sub_cleaned = sub_t.strip("[]!")
+                if sub_cleaned in sorted_arch_regs:
+                    found_regs.add(sub_cleaned)
     return found_regs
+
 
 def _extract_register_usage(
     instr_assembly, parsed_obj=None, arch_target="", sorted_arch_regs=None
@@ -649,20 +685,30 @@ def _extract_register_usage(
     elif is_mips:
         if mnemonic in MIPS_ARITH_LOGIC_3_OP or mnemonic in MIPS_SHIFT_3_OP:
             if num_operands >= 3:
-                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[2], sorted_arch_regs))
+                regs_written.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[2], sorted_arch_regs)
+                )
         elif mnemonic in MIPS_ARITH_LOGIC_2_OP_IMM or mnemonic in MIPS_SHIFT_2_OP_IMM:
-             if num_operands >= 2:
-                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+            if num_operands >= 2:
+                regs_written.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
+                )
         elif mnemonic in MIPS_LOAD_STORE:
             if num_operands >= 2:
                 data_reg_op = operands[0]
                 mem_op = operands[1]
                 data_regs = extract_regs_from_operand(data_reg_op, sorted_arch_regs)
                 base_addr_regs = extract_regs_from_operand(mem_op, sorted_arch_regs)
-                if mnemonic.startswith('s'):
+                if mnemonic.startswith("s"):
                     regs_read.update(data_regs)
                     regs_read.update(base_addr_regs)
                 else:
@@ -670,29 +716,51 @@ def _extract_register_usage(
                     regs_read.update(base_addr_regs)
         elif mnemonic in MIPS_BRANCH_2_OP:
             if num_operands >= 2:
-                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+                regs_read.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
+                )
         elif mnemonic in MIPS_MOVE:
-             if num_operands >= 2:
-                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+            if num_operands >= 2:
+                regs_written.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
+                )
         elif mnemonic in ("mfhi", "mflo"):
             if num_operands >= 1:
-                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_written.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
         elif mnemonic in MIPS_MULT_DIV:
             if num_operands >= 2:
-                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
-        elif mnemonic == 'jr':
-             if num_operands >= 1:
-                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-        elif mnemonic in ('jalr', 'bal'):
-             if num_operands >= 1:
+                regs_read.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+                regs_read.update(
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
+                )
+        elif mnemonic == "jr":
+            if num_operands >= 1:
+                regs_read.update(
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
+                )
+        elif mnemonic in ("jalr", "bal"):
+            if num_operands >= 1:
                 if num_operands == 2:
-                    regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                    regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+                    regs_written.update(
+                        extract_regs_from_operand(operands[0], sorted_arch_regs)
+                    )
+                    regs_read.update(
+                        extract_regs_from_operand(operands[1], sorted_arch_regs)
+                    )
                 else:
-                    regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                    regs_read.update(
+                        extract_regs_from_operand(operands[0], sorted_arch_regs)
+                    )
     else:
         if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith("cmov"):
             if num_operands >= 2:
@@ -805,6 +873,7 @@ def _extract_register_usage(
             regs_read.update(op_regs)
 
     return sorted(regs_read), sorted(regs_written)
+
 
 def _analyze_instructions(
     instr_list,
@@ -997,6 +1066,7 @@ def _build_addr_to_name_map(metadata):
                 addr_to_name_map[iat_addr] = name
     return addr_to_name_map
 
+
 def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
     """Identifies direct calls in instructions and resolves target addresses to function names.
     Handles both immediate absolute addresses (0x...) and relative offsets."""
@@ -1010,38 +1080,55 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
             continue
         mnemonic = parts[0].lower()
         is_direct_call = False
-        if (is_aarch64 and mnemonic == 'bl') or \
-           (is_mips and mnemonic in MIPS_CALL_INST) or \
-           (not is_aarch64 and not is_mips and mnemonic == 'call'):
+        if (
+            (is_aarch64 and mnemonic == "bl")
+            or (is_mips and mnemonic in MIPS_CALL_INST)
+            or (not is_aarch64 and not is_mips and mnemonic == "call")
+        ):
             is_direct_call = True
         if is_direct_call and len(parts) > 1:
             operand = parts[1]
             target_addr = None
             try:
-                if operand.startswith('0x'):
+                if operand.startswith("0x"):
                     target_addr = int(operand, 16)
-                elif operand.isdigit() or operand.startswith(('+', '-')):
+                elif operand.isdigit() or operand.startswith(("+", "-")):
                     val = int(operand)
-                    if mnemonic == 'bal':
+                    if mnemonic == "bal":
                         target_addr = instr.address + 4 + val
                     else:
                         target_addr = val
                 # Handle x64 RIP-Relative Addressing
                 elif "rip" in operand.lower():
-                    m = re.search(r'\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]', operand.lower())
+                    m = re.search(
+                        r"\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]", operand.lower()
+                    )
                     if m:
-                        sign = 1 if m.group(1) == '+' else -1
-                        offset = int(m.group(2), 16) if m.group(2).startswith('0x') else int(m.group(2))
+                        sign = 1 if m.group(1) == "+" else -1
+                        offset = (
+                            int(m.group(2), 16)
+                            if m.group(2).startswith("0x")
+                            else int(m.group(2))
+                        )
                         target_addr = instr.address + len(instr.bytes) + (sign * offset)
             except (ValueError, IndexError):
                 continue
             if target_addr is not None:
-                target_name = addr_to_name_map.get(target_addr) or addr_to_name_map.get(target_addr & ~1)
+                target_name = addr_to_name_map.get(target_addr) or addr_to_name_map.get(
+                    target_addr & ~1
+                )
                 if target_name:
                     potential_callees.append(target_name)
     return potential_callees
 
-def _classify_function(instruction_metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call):
+
+def _classify_function(
+    instruction_metrics,
+    instruction_count,
+    plain_assembly_text,
+    has_system_call,
+    has_indirect_call,
+):
     """Classifies the function based on metrics and other flags."""
     function_type = ""
     if (
@@ -1067,6 +1154,7 @@ def _classify_function(instruction_metrics, instruction_count, plain_assembly_te
         function_type = "Has_Conditional_Jumps"
     return function_type
 
+
 def _mem_bytes_len(b):
     if isinstance(b, list):
         return len(b)
@@ -1074,13 +1162,17 @@ def _mem_bytes_len(b):
         return getattr(b, "nbytes")
     return None
 
+
 def _try_disassemble(instance, byte_list, address, inst_count=0):
     """Helper to safely call Nyxstone and handle immediate failures."""
     try:
-        instructions = instance.disassemble_to_instructions(byte_list, address, inst_count)
+        instructions = instance.disassemble_to_instructions(
+            byte_list, address, inst_count
+        )
         return instructions if instructions else None
     except ValueError:
         return None
+
 
 def disassemble_functions(
     parsed_obj, metadata, arch_target="", cpu="", features="", immediate_style=0
@@ -1242,11 +1334,15 @@ def disassemble_functions(
                 if sec_size == 0:
                     sec_size = sec.size
                 if sec_start <= func_addr < (sec_start + sec_size):
-                    if sec.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE):
+                    if sec.has_characteristic(
+                        lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE
+                    ):
                         is_executable = True
                     break
         if not is_executable:
-            LOG.debug(f"Address {func_addr_va_hex} for '{func_name}' is not in an executable section. Skipping disassembly.")
+            LOG.debug(
+                f"Address {func_addr_va_hex} for '{func_name}' is not in an executable section. Skipping disassembly."
+            )
             continue
         rebased_bytes_mv = None
         try:
@@ -1271,8 +1367,12 @@ def disassemble_functions(
                 f"Could not get bytes for function '{func_name}' at {func_addr_str} using any method."
             )
             continue
-        rebased_bytes_list = rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
-        original_bytes_list = original_bytes_mv.toreadonly() if original_bytes_mv is not None else []
+        rebased_bytes_list = (
+            rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
+        )
+        original_bytes_list = (
+            original_bytes_mv.toreadonly() if original_bytes_mv is not None else []
+        )
         try:
             instr_list = None
             disassemblers_to_try = [(nyxstone_instance, arch_target)]
@@ -1281,7 +1381,9 @@ def disassemble_functions(
             if micromips_nyxstone_instance:
                 disassemblers_to_try.append((micromips_nyxstone_instance, "MicroMIPS"))
             for offset in range(4):
-                if offset >= _mem_bytes_len(original_bytes_list) and offset >= _mem_bytes_len(rebased_bytes_list):
+                if offset >= _mem_bytes_len(
+                    original_bytes_list
+                ) and offset >= _mem_bytes_len(rebased_bytes_list):
                     break
                 addr_to_try = func_addr_va + offset
                 for instance, mode_name in disassemblers_to_try:

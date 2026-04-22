@@ -1,8 +1,13 @@
-import pytest
-import lief
 from unittest.mock import MagicMock
 
-from blint.lib.disassembler import _extract_register_usage, _analyze_instructions, _classify_function
+import lief
+import pytest
+
+from blint.lib.disassembler import (
+    _analyze_instructions,
+    _classify_function,
+    _extract_register_usage,
+)
 
 
 def test_extract_register_usage_mov():
@@ -11,17 +16,20 @@ def test_extract_register_usage_mov():
     assert set(regs_read) == {"rbx"}
     assert set(regs_written) == {"rax"}
 
+
 def test_extract_register_usage_arith():
     instr_asm = "add rax, rcx"
     regs_read, regs_written = _extract_register_usage(instr_asm)
     assert set(regs_read) == {"rax", "rcx"}
     assert set(regs_written) == {"rax"}
 
+
 def test_extract_register_usage_cmp():
     instr_asm = "cmp rdi, 5"
-    regs_read, regs_written = _extract_register_usage(instr_asm, None, 'x86_64')
+    regs_read, regs_written = _extract_register_usage(instr_asm, None, "x86_64")
     assert set(regs_read) == {"rdi"}
     assert set(regs_written) == set()
+
 
 def test_extract_register_usage_lea():
     instr_asm = "lea r8, [rbx + r9 * 2 + 10]"
@@ -29,30 +37,39 @@ def test_extract_register_usage_lea():
     assert set(regs_read) == {"rbx", "r9"}
     assert set(regs_written) == {"r8"}
 
+
 def test_extract_register_usage_push_pop():
     instr_asm_push = "push rax"
-    regs_read_push, regs_written_push = _extract_register_usage(instr_asm_push, {}, "x86_64")
+    regs_read_push, regs_written_push = _extract_register_usage(
+        instr_asm_push, {}, "x86_64"
+    )
     assert "rsp" in regs_read_push
     assert "rsp" in regs_written_push
     instr_asm_pop = "pop rbx"
-    regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop, {}, "x86_64")
+    regs_read_pop, regs_written_pop = _extract_register_usage(
+        instr_asm_pop, {}, "x86_64"
+    )
     assert "rsp" in regs_read_pop
     assert "rsp" in regs_written_pop
+
 
 def test_extract_register_usage_call():
     instr_asm = "call 0x123456"
     regs_read, regs_written = _extract_register_usage(instr_asm, {}, "x86_64")
-    cc_regs = {'rsi', 'rcx', 'r9', 'r10', 'rax', 'rdi', 'r8', 'r11', 'rdx'}
+    cc_regs = {"rsi", "rcx", "r9", "r10", "rax", "rdi", "r8", "r11", "rdx"}
     assert set(regs_written) == cc_regs
     assert set(regs_read) == set()
     instr_asm_indirect = "blr x12"
-    regs_read_indirect, regs_written_indirect = _extract_register_usage(instr_asm_indirect, {}, "aarch64")
+    regs_read_indirect, regs_written_indirect = _extract_register_usage(
+        instr_asm_indirect, {}, "aarch64"
+    )
     assert "x12" in regs_read_indirect
-    assert set(regs_written_indirect) == {'x30'}
+    assert set(regs_written_indirect) == {"x30"}
     instr_asm_pop = "pop ebx"
     regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop, {}, "x86")
     assert "esp" in regs_read_pop
     assert "esp" in regs_written_pop
+
 
 def test_extract_register_usage_invalid():
     regs_read, regs_written = _extract_register_usage("")
@@ -100,13 +117,30 @@ def mock_instructions():
     instrs.append(instr7)
     return instrs
 
+
 def test_analyze_instructions_basic(mock_instructions):
     instr_addresses = [i.address for i in mock_instructions]
     func_addr = 0x1000
     next_func_addr_in_sec = 0x2000
-    (metrics, mnemonics, has_indirect_call, has_loop,
-     regs_read, regs_written, instrs_with_regs, _, _, _, _) = _analyze_instructions(
-        mock_instructions, func_addr, next_func_addr_in_sec, instr_addresses, {}, "x86_64"
+    (
+        metrics,
+        mnemonics,
+        has_indirect_call,
+        has_loop,
+        regs_read,
+        regs_written,
+        instrs_with_regs,
+        _,
+        _,
+        _,
+        _,
+    ) = _analyze_instructions(
+        mock_instructions,
+        func_addr,
+        next_func_addr_in_sec,
+        instr_addresses,
+        {},
+        "x86_64",
     )
     assert metrics["call_count"] == 2
     assert metrics["arith_count"] == 1
@@ -121,8 +155,9 @@ def test_analyze_instructions_basic(mock_instructions):
     assert "rax" in instrs_with_regs[0]["regs_written"]
     assert instrs_with_regs[1]["regs_read"] == ["rax", "rbx"]
     assert "rcx" in instrs_with_regs[3]["regs_read"]
-    cc_regs = {'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'r8', 'r9', 'r10', 'r11'}
+    cc_regs = {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
     assert cc_regs.issubset(set(instrs_with_regs[3]["regs_written"]))
+
 
 def test_analyze_instructions_loop_detection():
     instrs = []
@@ -136,8 +171,10 @@ def test_analyze_instructions_loop_detection():
     target_instr = MagicMock()
     target_instr.address = 0x0FFF
     instr_addresses_with_target = instr_addresses + [target_instr.address]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = _analyze_instructions(
-        instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = (
+        _analyze_instructions(
+            instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
+        )
     )
     instrs_corrected = []
     instr1_corrected = MagicMock()
@@ -145,10 +182,16 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = _analyze_instructions(
-        instrs_corrected, func_addr, next_func_addr_in_sec, instr_addresses_corrected
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = (
+        _analyze_instructions(
+            instrs_corrected,
+            func_addr,
+            next_func_addr_in_sec,
+            instr_addresses_corrected,
+        )
     )
     assert has_loop == True
+
 
 def test_apple_proprietary_instruction_detection():
     func_addr = 0x1000
@@ -156,19 +199,32 @@ def test_apple_proprietary_instruction_detection():
     instr1_corrected = MagicMock()
     instr1_corrected.assembly = ".inst 0x00201420"
     instr1_corrected.address = 0x1000
-    instr1_corrected.bytes = (0x00201420).to_bytes(4, 'little')
+    instr1_corrected.bytes = (0x00201420).to_bytes(4, "little")
     instrs_corrected = [instr1_corrected]
     instr_addresses_corrected = [0x1000]
     mock_macho = MagicMock(spec=lief.MachO.Binary)
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, proprietary_instructions, _, _) = _analyze_instructions(
+    (
+        metrics,
+        mnemonics,
+        has_indirect_call,
+        has_loop,
+        _,
+        _,
+        _,
+        _,
+        proprietary_instructions,
+        _,
+        _,
+    ) = _analyze_instructions(
         instrs_corrected,
         func_addr,
         next_func_addr_in_sec,
         instr_addresses_corrected,
         parsed_obj=mock_macho,
-        arch_target="aarch64"
+        arch_target="aarch64",
     )
-    assert proprietary_instructions == ['GuardedMode']
+    assert proprietary_instructions == ["GuardedMode"]
+
 
 def test_apple_sreg_interaction_msr():
     func_addr = 0x1000
@@ -176,20 +232,23 @@ def test_apple_sreg_interaction_msr():
     instr = MagicMock()
     instr.assembly = "msr s3_6_c15_c1_0, x0"
     instr.address = 0x1004
-    instr.bytes = b'\x00\x00\x00\x00'
+    instr.bytes = b"\x00\x00\x00\x00"
     instructions = [instr]
     instr_addresses = [instr.address]
     mock_macho = MagicMock(spec=lief.MachO.Binary)
-    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions, _) = _analyze_instructions(
-        instructions,
-        func_addr,
-        next_func_addr_in_sec,
-        instr_addresses,
-        parsed_obj=mock_macho,
-        arch_target="aarch64"
+    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions, _) = (
+        _analyze_instructions(
+            instructions,
+            func_addr,
+            next_func_addr_in_sec,
+            instr_addresses,
+            parsed_obj=mock_macho,
+            arch_target="aarch64",
+        )
     )
     assert proprietary_instructions == []
-    assert sreg_interactions == ['SPRR_CONTROL']
+    assert sreg_interactions == ["SPRR_CONTROL"]
+
 
 def test_apple_sreg_interaction_mrs():
     func_addr = 0x1000
@@ -197,80 +256,173 @@ def test_apple_sreg_interaction_mrs():
     instr = MagicMock()
     instr.assembly = "mrs x1, s3_6_c15_c1_0"
     instr.address = 0x1008
-    instr.bytes = b'\x00\x00\x00\x00'
+    instr.bytes = b"\x00\x00\x00\x00"
     instructions = [instr]
     instr_addresses = [instr.address]
     mock_macho = MagicMock(spec=lief.MachO.Binary)
-    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions, _) = _analyze_instructions(
-        instructions,
-        func_addr,
-        next_func_addr_in_sec,
-        instr_addresses,
-        parsed_obj=mock_macho,
-        arch_target="aarch64"
+    (_, _, _, _, _, _, _, _, proprietary_instructions, sreg_interactions, _) = (
+        _analyze_instructions(
+            instructions,
+            func_addr,
+            next_func_addr_in_sec,
+            instr_addresses,
+            parsed_obj=mock_macho,
+            arch_target="aarch64",
+        )
     )
     assert proprietary_instructions == []
-    assert sreg_interactions == ['SPRR_CONTROL']
+    assert sreg_interactions == ["SPRR_CONTROL"]
+
 
 def test_classify_function_plt_thunk():
-    metrics = {"jump_count": 1, "conditional_jump_count": 0, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 1,
+        "conditional_jump_count": 0,
+        "call_count": 0,
+        "ret_count": 0,
+        "arith_count": 0,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 3
     plain_assembly_text = "jmp qword ptr [rip + 0x1234]\npush 0x1\njmp 0x123456"
     has_system_call = False
     has_indirect_call = False
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == "PLT_Thunk"
 
+
 def test_classify_function_simple_return():
-    metrics = {"jump_count": 0, "conditional_jump_count": 0, "call_count": 0, "ret_count": 1, "arith_count": 0, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 0,
+        "conditional_jump_count": 0,
+        "call_count": 0,
+        "ret_count": 1,
+        "arith_count": 0,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 1
     plain_assembly_text = "ret"
     has_system_call = False
     has_indirect_call = False
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == "Simple_Return"
 
+
 def test_classify_function_has_syscalls():
-    metrics = {"jump_count": 0, "conditional_jump_count": 0, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 0,
+        "conditional_jump_count": 0,
+        "call_count": 0,
+        "ret_count": 0,
+        "arith_count": 0,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 10
     plain_assembly_text = "mov rax, 1\nsyscall"
     has_system_call = True
     has_indirect_call = False
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == "Has_Syscalls"
 
+
 def test_classify_function_has_indirect_calls():
-    metrics = {"jump_count": 0, "conditional_jump_count": 0, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 0,
+        "conditional_jump_count": 0,
+        "call_count": 0,
+        "ret_count": 0,
+        "arith_count": 0,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 5
     plain_assembly_text = "call rax\nmov rbx, 1"
     has_system_call = False
     has_indirect_call = True
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == "Has_Indirect_Calls"
 
+
 def test_classify_function_has_conditional_jumps():
-    metrics = {"jump_count": 0, "conditional_jump_count": 2, "call_count": 0, "ret_count": 0, "arith_count": 0, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 0,
+        "conditional_jump_count": 2,
+        "call_count": 0,
+        "ret_count": 0,
+        "arith_count": 0,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 15
     plain_assembly_text = "cmp rax, rbx\nje label\n..."
     has_system_call = False
     has_indirect_call = False
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == "Has_Conditional_Jumps"
 
+
 def test_classify_function_unknown():
-    metrics = {"jump_count": 0, "conditional_jump_count": 0, "call_count": 1, "ret_count": 1, "arith_count": 2, "shift_count": 0, "xor_count": 0}
+    metrics = {
+        "jump_count": 0,
+        "conditional_jump_count": 0,
+        "call_count": 1,
+        "ret_count": 1,
+        "arith_count": 2,
+        "shift_count": 0,
+        "xor_count": 0,
+    }
     instruction_count = 20
     plain_assembly_text = "mov rax, rbx\nadd rax, 1\n..."
     has_system_call = False
     has_indirect_call = False
 
-    ftype = _classify_function(metrics, instruction_count, plain_assembly_text, has_system_call, has_indirect_call)
+    ftype = _classify_function(
+        metrics,
+        instruction_count,
+        plain_assembly_text,
+        has_system_call,
+        has_indirect_call,
+    )
     assert ftype == ""
+
 
 def test_extract_register_usage_cmov():
     instr_asm = "cmovne rax, rbx"
@@ -278,11 +430,13 @@ def test_extract_register_usage_cmov():
     assert set(regs_read) == {"rbx"}
     assert set(regs_written) == {"rax"}
 
+
 def test_extract_register_usage_xadd():
     instr_asm = "xadd rcx, rdx"
     regs_read, regs_written = _extract_register_usage(instr_asm)
     assert set(regs_read) == {"rcx", "rdx"}
     assert set(regs_written) == {"rcx", "rdx"}
+
 
 def test_extract_register_usage_bsf():
     instr_asm = "bsf eax, [rsi]"
@@ -290,11 +444,13 @@ def test_extract_register_usage_bsf():
     assert set(regs_read) == {"rsi"}
     assert set(regs_written) == {"eax"}
 
+
 def test_extract_register_usage_mips_addiu():
     instr_asm = "addiu $sp, $sp, -32"
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
     assert set(regs_read) == {"$sp"}
     assert set(regs_written) == {"$sp"}
+
 
 def test_extract_register_usage_mips_sw():
     instr_asm = "sw $ra, 28($sp)"
@@ -302,11 +458,13 @@ def test_extract_register_usage_mips_sw():
     assert set(regs_read) == {"$ra", "$sp"}
     assert set(regs_written) == set()
 
+
 def test_extract_register_usage_mips_lw():
     instr_asm = "lw $gp, 24($sp)"
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
     assert set(regs_read) == {"$sp"}
     assert set(regs_written) == {"$gp"}
+
 
 def test_extract_register_usage_mips_move():
     instr_asm = "move $t9, $ra"
@@ -314,17 +472,20 @@ def test_extract_register_usage_mips_move():
     assert set(regs_read) == {"$ra"}
     assert set(regs_written) == {"$t9"}
 
+
 def test_extract_register_usage_mips_3_operand():
     instr_asm = "addu $v0, $t0, $t1"
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
     assert set(regs_read) == {"$t0", "$t1"}
     assert set(regs_written) == {"$v0"}
 
+
 def test_extract_register_usage_mips_branch():
     instr_asm = "bne $a0, $a1, 0x1234"
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
     assert set(regs_read) == {"$a0", "$a1"}
     assert set(regs_written) == set()
+
 
 def test_extract_register_usage_mips_implicit():
     instr_asm = "jal 0x400000"
@@ -346,6 +507,7 @@ def test_extract_register_usage_mips_implicit():
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
     assert set(regs_read) == {"$a0", "$a1"}
     assert set(regs_written) == {"hi", "lo"}
+
 
 def test_analyze_instructions_pac_detection():
     func_addr = 0x1000

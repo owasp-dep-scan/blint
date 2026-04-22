@@ -80,6 +80,7 @@ def check_trust_info(f, metadata, rule_obj):  # noqa
                             return f"{vk}:{manifest_k.get(vk)}"
     return True
 
+
 def check_security_property(f, metadata, rule_obj):  # noqa
     properties = metadata.get("security_properties", {})
     key = rule_obj.get("property_key")

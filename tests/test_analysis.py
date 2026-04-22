@@ -1,10 +1,12 @@
-import orjson
 from pathlib import Path
 
-from blint.lib.analysis import run_checks, load_default_rules
+import orjson
+
+from blint.lib.analysis import load_default_rules, run_checks
 from blint.lib.runners import ReviewRunner
 
 load_default_rules()
+
 
 def test_gobinary():
     test_go_file = Path(__file__).parent / "data" / "ngrok-elf.json"
@@ -29,5 +31,5 @@ def test_genericbinary():
     assert not results
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review('data/netstat-elf.json', test_gnu_file.name)
+    results = reviewer.process_review("data/netstat-elf.json", test_gnu_file.name)
     assert not results

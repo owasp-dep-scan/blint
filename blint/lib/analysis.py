@@ -13,28 +13,29 @@ from typing import Optional
 import yaml
 from rich.terminal_theme import MONOKAI
 
+from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_from_env
+
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
+    check_authenticode,
+    check_canary,
+    check_codesign,
+    check_dll_characteristics,
     check_nx,
     check_pie,
     check_relro,
-    check_canary,
     check_rpath,
-    check_virtual_size,
-    check_authenticode,
-    check_dll_characteristics,
-    check_codesign,
-    check_trust_info,
     check_security_property,
+    check_trust_info,
+    check_virtual_size,
 )
-from blint.config import FIRST_STAGE_WORDS, PII_WORDS, get_int_from_env, BlintOptions
-from blint.logger import LOG, console
 from blint.lib.utils import (
     create_findings_table,
+    export_metadata,
     is_fuzzable_name,
     print_findings_table,
-    export_metadata
 )
+from blint.logger import LOG, console
 
 check_pac = check_security_property
 check_pac_strict = check_security_property
@@ -55,7 +56,9 @@ if HAVE_RESOURCE_READER:
     with contextlib.suppress(NameError, FileNotFoundError):
         review_files = (
             resource.name
-            for resource in importlib.resources.files("blint.data.annotations").iterdir()
+            for resource in importlib.resources.files(
+                "blint.data.annotations"
+            ).iterdir()
             if resource.is_file() and resource.name.endswith(".yml")
         )
 if not review_files:
@@ -102,7 +105,11 @@ def get_resource(package, resource):
         # If we're in the context of a module, we could also use
         # ``__loader__.get_resource_reader(__name__).open_resource(resource)``.
         # We use open_binary() because it is simple.
-        return importlib.resources.files(package).joinpath(resource).open("r", encoding="utf-8")
+        return (
+            importlib.resources.files(package)
+            .joinpath(resource)
+            .open("r", encoding="utf-8")
+        )
 
     # Fall back to __file__.
 
@@ -139,6 +146,7 @@ for tmp_data in raw_rules:
     rules_list = yaml.safe_load(tmp_data)
     for rule in rules_list:
         rules_dict[rule.get("id")] = rule
+
 
 def load_default_rules():
     """Load default rules from package resources."""
@@ -184,6 +192,7 @@ def load_default_rules():
                         review_entries_dict[etype].append(method_rules_dict)
                     elif group == "FUNCTION_REVIEWS":
                         review_functions_dict[etype].append(method_rules_dict)
+
 
 def load_custom_rules(
     custom_dir_path: Optional[str],
@@ -263,6 +272,7 @@ def load_custom_rules(
         except Exception as e:
             LOG.error(f"Error loading custom rules from {rule_file_path}: {e}")
 
+
 def initialize_rules(blint_options: BlintOptions):
     """
     Loads default and custom rules based on blint_options.
@@ -275,24 +285,36 @@ def initialize_rules(blint_options: BlintOptions):
     review_entries_dict.clear()
     review_functions_dict.clear()
     review_rules_cache.clear()
-    review_rules_cache.update({
-        "PII_READ": {
-            "id": "PII_READ",
-            "title": "Detect PII Read Operations",
-            "summary": "Can Retrieve Sensitive PII data",
-            "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
-            "patterns": PII_WORDS,
-        },
-        "LOADER_SYMBOLS": {
-            "id": "LOADER_SYMBOLS",
-            "title": "Detect Initial Loader",
-            "summary": "Behaves like a loader",
-            "description": "The binary behaves like a loader by downloading and executing additional payloads.",
-            "patterns": FIRST_STAGE_WORDS,
-        },
-    })
+    review_rules_cache.update(
+        {
+            "PII_READ": {
+                "id": "PII_READ",
+                "title": "Detect PII Read Operations",
+                "summary": "Can Retrieve Sensitive PII data",
+                "description": "Contains logic to retrieve sensitive data such as names, email, passwords etc.",
+                "patterns": PII_WORDS,
+            },
+            "LOADER_SYMBOLS": {
+                "id": "LOADER_SYMBOLS",
+                "title": "Detect Initial Loader",
+                "summary": "Behaves like a loader",
+                "description": "The binary behaves like a loader by downloading and executing additional payloads.",
+                "patterns": FIRST_STAGE_WORDS,
+            },
+        }
+    )
     load_default_rules()
-    load_custom_rules(blint_options.custom_rules_dir, review_rules_cache, review_exe_dict, review_methods_dict, review_symbols_dict, review_imports_dict, review_entries_dict, review_functions_dict)
+    load_custom_rules(
+        blint_options.custom_rules_dir,
+        review_rules_cache,
+        review_exe_dict,
+        review_methods_dict,
+        review_symbols_dict,
+        review_imports_dict,
+        review_entries_dict,
+        review_functions_dict,
+    )
+
 
 def run_checks(f, metadata):
     """Runs the checks on the provided metadata using the loaded rules.
@@ -462,7 +484,9 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
 
     """
     if not findings and not reviews:
-        LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
+        LOG.info(
+            f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!"
+        )
         return
     if not os.path.exists(blint_options.reports_dir):
         os.makedirs(blint_options.reports_dir)
@@ -473,12 +497,24 @@ def report(blint_options, exe_files, findings, reviews, fuzzables):
     }
     if findings:
         print_findings_table(findings, exe_files)
-        export_metadata(blint_options.reports_dir, {**common_metadata, "findings": findings}, "Findings")
+        export_metadata(
+            blint_options.reports_dir,
+            {**common_metadata, "findings": findings},
+            "Findings",
+        )
     if reviews:
         print_reviews_table(reviews, exe_files)
-        export_metadata(blint_options.reports_dir, {**common_metadata, "reviews": reviews}, "Reviews")
+        export_metadata(
+            blint_options.reports_dir,
+            {**common_metadata, "reviews": reviews},
+            "Reviews",
+        )
     if fuzzables:
-        export_metadata(blint_options.reports_dir, {**common_metadata, "fuzzables": fuzzables}, "Fuzzables")
+        export_metadata(
+            blint_options.reports_dir,
+            {**common_metadata, "fuzzables": fuzzables},
+            "Fuzzables",
+        )
     else:
         LOG.debug("No suggestion available for fuzzing")
     # Try console output as html

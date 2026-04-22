@@ -10,16 +10,22 @@ from blint.config import BlintOptions
 from blint.cyclonedx.spec import CycloneDX
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
+    initialize_rules,
     report,
-    review_entries_dict, review_exe_dict,
-    review_imports_dict, review_methods_dict,
-    review_rules_cache, review_symbols_dict, run_checks,
-    run_prefuzz, review_functions_dict, initialize_rules
+    review_entries_dict,
+    review_exe_dict,
+    review_functions_dict,
+    review_imports_dict,
+    review_methods_dict,
+    review_rules_cache,
+    review_symbols_dict,
+    run_checks,
+    run_prefuzz,
 )
 from blint.lib.binary import parse
-from blint.logger import LOG
 from blint.lib.sbom import generate
 from blint.lib.utils import export_metadata, find_android_files, gen_file_list
+from blint.logger import LOG
 
 
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
@@ -35,7 +41,9 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
-        if blint_options.sbom_output_dir and not os.path.exists(blint_options.sbom_output_dir):
+        if blint_options.sbom_output_dir and not os.path.exists(
+            blint_options.sbom_output_dir
+        ):
             os.makedirs(blint_options.sbom_output_dir)
     exe_files = gen_file_list(blint_options.src_dir_image)
     android_files = []
@@ -53,7 +61,7 @@ def run_default_mode(blint_options: BlintOptions) -> None:
 
     if os.getenv("CI") and not blint_options.no_error:
         for f in findings:
-            if f['severity'] == 'critical':
+            if f["severity"] == "critical":
                 sys.exit(1)
 
 
@@ -99,12 +107,21 @@ class AnalysisRunner:
         """
         Processes the given file and generates findings.
         """
-        self.progress.update(self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]")
+        self.progress.update(
+            self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]"
+        )
         metadata = parse(f, blint_options.disassemble)
         exe_name = metadata.get("name", f)
         # Store raw metadata
-        export_metadata(blint_options.reports_dir, metadata, f"{os.path.basename(exe_name)}-metadata")
-        self.progress.update(self.task, description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules")
+        export_metadata(
+            blint_options.reports_dir,
+            metadata,
+            f"{os.path.basename(exe_name)}-metadata",
+        )
+        self.progress.update(
+            self.task,
+            description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules",
+        )
         if finding := run_checks(f, metadata):
             self.findings += finding
         # Perform symbol reviews
@@ -123,7 +140,9 @@ class AnalysisRunner:
 
     def do_review(self, exe_name, f, metadata):
         """Performs a review of the given file."""
-        self.progress.update(self.task, description="Checking methods against review rules")
+        self.progress.update(
+            self.task, description="Checking methods against review rules"
+        )
         self.reviewer = ReviewRunner()
         self.reviewer.run_review(metadata)
         if self.reviewer.results:
@@ -164,12 +183,12 @@ class ReviewRunner:
         self._gen_review_lists(exe_type)
         # Check if reviews are available for this exe type
         if (
-                self.review_methods_list
-                or self.review_exe_list
-                or self.review_symbols_list
-                or self.review_imports_list
-                or self.review_entries_list
-                or self.review_functions_list
+            self.review_methods_list
+            or self.review_exe_list
+            or self.review_symbols_list
+            or self.review_imports_list
+            or self.review_entries_list
+            or self.review_functions_list
         ):
             return self._review_lists(metadata)
         return self._review_loader_symbols(metadata)
@@ -255,7 +274,9 @@ class ReviewRunner:
         Returns:
             dict: The results of the review.
         """
-        entries_list = [f.get("name", "") for f in metadata.get("first_stage_symbols", [])]
+        entries_list = [
+            f.get("name", "") for f in metadata.get("first_stage_symbols", [])
+        ]
         results = defaultdict(list)
         for e in entries_list[0:EVIDENCE_LIMIT]:
             results["LOADER_SYMBOLS"].append({"pattern": e, "function": e})
@@ -283,27 +304,65 @@ class ReviewRunner:
         if not metadata.get("disassembled_functions"):
             return
 
-        LOG.debug(f"Reviewing {len(metadata['disassembled_functions'])} disassembled functions")
+        LOG.debug(
+            f"Reviewing {len(metadata['disassembled_functions'])} disassembled functions"
+        )
         results = defaultdict(list)
         found_cid = defaultdict(int)
         ALLOC_APIS = {
-            "virtualalloc", "virtualallocex", "heapalloc", "globalalloc", "localalloc",
-            "virtualprotect", "virtualprotectex", "cryptmemalloc",
-            "ntallocatevirtualmemory", "ntprotectvirtualmemory", "zwallocatevirtualmemory",
-            "mmap", "mprotect", "malloc", "calloc", "realloc", "posix_memalign", "valloc", "pvalloc",
-            "writeprocessmemory", "createremotethread", "queueuserapc",
-            "setthreadcontext", "getthreadcontext", "resumethread",
-            "ntwritevirtualmemory", "ntresumethread", "ntqueueapcvalues"
+            "virtualalloc",
+            "virtualallocex",
+            "heapalloc",
+            "globalalloc",
+            "localalloc",
+            "virtualprotect",
+            "virtualprotectex",
+            "cryptmemalloc",
+            "ntallocatevirtualmemory",
+            "ntprotectvirtualmemory",
+            "zwallocatevirtualmemory",
+            "mmap",
+            "mprotect",
+            "malloc",
+            "calloc",
+            "realloc",
+            "posix_memalign",
+            "valloc",
+            "pvalloc",
+            "writeprocessmemory",
+            "createremotethread",
+            "queueuserapc",
+            "setthreadcontext",
+            "getthreadcontext",
+            "resumethread",
+            "ntwritevirtualmemory",
+            "ntresumethread",
+            "ntqueueapcvalues",
         }
         DEBUG_APIS = {
-            "isdebuggerpresent", "checkremotedebuggerpresent", "outputdebugstring", "debugbreak",
-            "ptrace", "getppid",
-            "gettickcount", "gettickcount64", "queryperformancecounter", "timegettime",
-            "ntqueryinformationprocess", "zwqueryinformationprocess",
-            "ntsetinformationthread", "zwsetinformationthread",
-            "openprocess", "checkremotedebuggerpresent",
-            "setunhandledexceptionfilter", "raiseexception", "rtladdvectoredexceptionhandler",
-            "findwindow", "findwindowex", "enumwindows", "getforegroundwindow"
+            "isdebuggerpresent",
+            "checkremotedebuggerpresent",
+            "outputdebugstring",
+            "debugbreak",
+            "ptrace",
+            "getppid",
+            "gettickcount",
+            "gettickcount64",
+            "queryperformancecounter",
+            "timegettime",
+            "ntqueryinformationprocess",
+            "zwqueryinformationprocess",
+            "ntsetinformationthread",
+            "zwsetinformationthread",
+            "openprocess",
+            "checkremotedebuggerpresent",
+            "setunhandledexceptionfilter",
+            "raiseexception",
+            "rtladdvectoredexceptionhandler",
+            "findwindow",
+            "findwindowex",
+            "enumwindows",
+            "getforegroundwindow",
         }
         for review_group in self.review_functions_list:
             for rule_id, rule_obj in review_group.items():
@@ -323,7 +382,7 @@ class ReviewRunner:
                         patterns = rule_obj.get("patterns")
                         if check_field and operator_str:
                             value = func_data
-                            for key in check_field.split('.'):
+                            for key in check_field.split("."):
                                 if isinstance(value, dict):
                                     value = value.get(key)
                                 else:
@@ -347,30 +406,58 @@ class ReviewRunner:
                                 elif patterns is not None:
                                     if operator_str == "contains_all":
                                         if isinstance(value, list):
-                                            passed = all(any(p.lower() in str(v).lower() for v in value) for p in patterns)
+                                            passed = all(
+                                                any(
+                                                    p.lower() in str(v).lower()
+                                                    for v in value
+                                                )
+                                                for p in patterns
+                                            )
                                         elif isinstance(value, str):
-                                            passed = all(p.lower() in value.lower() for p in patterns)
+                                            passed = all(
+                                                p.lower() in value.lower()
+                                                for p in patterns
+                                            )
                                     elif operator_str in ("contains_any", "contains"):
                                         if isinstance(value, list):
-                                            passed = any(any(p.lower() in str(v).lower() for v in value) for p in patterns)
+                                            passed = any(
+                                                any(
+                                                    p.lower() in str(v).lower()
+                                                    for v in value
+                                                )
+                                                for p in patterns
+                                            )
                                         elif isinstance(value, str):
-                                            passed = any(p.lower() in value.lower() for p in patterns)
+                                            passed = any(
+                                                p.lower() in value.lower()
+                                                for p in patterns
+                                            )
                     elif check_type == "function_analysis":
                         metrics = func_data.get("instruction_metrics", {})
                         icount = func_data.get("instruction_count", 0)
                         assembly = func_data.get("assembly", "").lower()
-                        direct_calls = [dc.lower() for dc in func_data.get("direct_calls", [])]
+                        direct_calls = [
+                            dc.lower() for dc in func_data.get("direct_calls", [])
+                        ]
                         if rule_id == "CRYPTO_BEHAVIOR":
                             if icount > 10:
-                                shift_xor = metrics.get("shift_count", 0) + metrics.get("xor_count", 0)
-                                if (shift_xor / icount > 0.2) and metrics.get("simd_fpu_count", 0) > 0:
+                                shift_xor = metrics.get("shift_count", 0) + metrics.get(
+                                    "xor_count", 0
+                                )
+                                if (shift_xor / icount > 0.2) and metrics.get(
+                                    "simd_fpu_count", 0
+                                ) > 0:
                                     passed = True
                         elif rule_id == "ANTI_DISASSEMBLY_TRICKS":
                             if icount <= 6 and metrics.get("jump_count", 0) > 0:
                                 passed = True
                         elif rule_id == "HIGH_ENTROPY_INDIRECT_CALL":
                             if func_data.get("has_indirect_call"):
-                                math_ops = metrics.get("arith_count", 0) + metrics.get("shift_count", 0) + metrics.get("xor_count", 0)
+                                math_ops = (
+                                    metrics.get("arith_count", 0)
+                                    + metrics.get("shift_count", 0)
+                                    + metrics.get("xor_count", 0)
+                                )
                                 if icount > 0 and (math_ops / icount) > 0.3:
                                     passed = True
                         elif rule_id == "POTENTIAL_STACK_STRING":
@@ -378,23 +465,38 @@ class ReviewRunner:
                             if icount > 15 and (mov_count / icount) > 0.6:
                                 passed = True
                         elif rule_id == "SUSPICIOUS_MEMORY_ALLOC":
-                            has_alloc = any(api in c for c in direct_calls for api in ALLOC_APIS)
-                            if has_alloc and (func_data.get("has_indirect_call") or metrics.get("jump_count", 0) > 0):
+                            has_alloc = any(
+                                api in c for c in direct_calls for api in ALLOC_APIS
+                            )
+                            if has_alloc and (
+                                func_data.get("has_indirect_call")
+                                or metrics.get("jump_count", 0) > 0
+                            ):
                                 passed = True
                         elif rule_id == "POTENTIAL_ANTI_DEBUG":
                             if "rdtsc" in assembly:
                                 passed = True
-                            elif any(api in c for c in direct_calls for api in DEBUG_APIS):
+                            elif any(
+                                api in c for c in direct_calls for api in DEBUG_APIS
+                            ):
                                 passed = True
                         elif rule_id == "POTENTIAL_SHELLCODE_CHARS":
-                            if func_data.get("has_system_call") and func_data.get("has_indirect_call"):
+                            if func_data.get("has_system_call") and func_data.get(
+                                "has_indirect_call"
+                            ):
                                 passed = True
                         elif rule_id == "LOOP_WITH_SELF_MODIFY_HINT":
-                            if func_data.get("has_loop") and metrics.get("xor_count", 0) > 0:
+                            if (
+                                func_data.get("has_loop")
+                                and metrics.get("xor_count", 0) > 0
+                            ):
                                 passed = True
                         elif rule_id == "DYNAMIC_API_RESOLUTION_HINT":
                             if func_data.get("has_indirect_call"):
-                                if metrics.get("shift_count", 0) > 0 or metrics.get("xor_count", 0) > 0:
+                                if (
+                                    metrics.get("shift_count", 0) > 0
+                                    or metrics.get("xor_count", 0) > 0
+                                ):
                                     passed = True
                         elif rule_id == "POTENTIAL_ROP_GADGET":
                             if 1 <= icount <= 8 and metrics.get("ret_count", 0) > 0:
@@ -411,7 +513,7 @@ class ReviewRunner:
                         evidence = {
                             "function": func_data.get("name", func_key),
                             "address": func_data.get("address"),
-                            "snippet": func_data.get("assembly", "").split('\n')[0]
+                            "snippet": func_data.get("assembly", "").split("\n")[0],
                         }
                         results[rule_id].append(evidence)
                         found_cid[rule_id] += 1
@@ -426,13 +528,18 @@ class ReviewRunner:
             metadata (dict): The metadata to review.
         """
         functions_list = [
-            re.sub(r"[*&()]", "", f.get("name", "")) for f in metadata.get("functions", [])
+            re.sub(r"[*&()]", "", f.get("name", ""))
+            for f in metadata.get("functions", [])
         ]
         if metadata.get("magic", "").startswith("PE"):
-            functions_list += [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
+            functions_list += [
+                f.get("name", "") for f in metadata.get("symtab_symbols", [])
+            ]
         # If there are no function but static symbols use that instead
         if not functions_list and metadata.get("symtab_symbols"):
-            functions_list = [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
+            functions_list = [
+                f.get("name", "") for f in metadata.get("symtab_symbols", [])
+            ]
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         if self.review_methods_list:
             self.run_review_methods_symbols(self.review_methods_list, functions_list)
@@ -504,11 +611,14 @@ class ReviewRunner:
                     continue
                 patterns = rule_obj.get("patterns")
                 for apattern in patterns:
-                    if found_pattern[apattern] > EVIDENCE_LIMIT or found_cid[cid] > EVIDENCE_LIMIT:
+                    if (
+                        found_pattern[apattern] > EVIDENCE_LIMIT
+                        or found_cid[cid] > EVIDENCE_LIMIT
+                    ):
                         continue
                     for afun in functions_list:
                         if apattern.lower() in afun.lower() and not found_function.get(
-                                afun.lower()
+                            afun.lower()
                         ):
                             result = {
                                 "pattern": apattern,

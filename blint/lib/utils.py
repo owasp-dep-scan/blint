@@ -1,10 +1,9 @@
 import base64
 import binascii
+import hashlib
 import math
 import os
 import re
-import hashlib
-import multi_demangle
 import shutil
 import string
 import tempfile
@@ -14,32 +13,35 @@ from pathlib import Path
 from typing import Dict
 
 import lief
+import multi_demangle
+import oras.client
 from ar import Archive, ArchiveError
 from custom_json_diff.lib.utils import file_write
-from defusedxml.ElementTree import fromstring, ParseError
+from defusedxml.ElementTree import ParseError, fromstring
+from oras.logger import setup_logger
 from orjson import orjson
 from rich import box
 from rich.table import Table
 
 from blint.config import (
+    BLINTDB_HOME,
+    BLINTDB_IMAGE_URL,
+    BLINTDB_LOC,
+    BLINTDB_REFRESH,
+    fuzzable_names,
     ignore_directories,
     ignore_files,
-    strings_allowlist,
-    fuzzable_names,
     secrets_regex,
-    BLINTDB_HOME, BLINTDB_LOC, BLINTDB_IMAGE_URL, BLINTDB_REFRESH
+    strings_allowlist,
 )
 from blint.cyclonedx.spec import (
     ComponentEvidence,
-    FieldModel,
     ComponentIdentityEvidence,
+    FieldModel,
     Method,
     Technique,
 )
-from blint.logger import console, LOG
-
-import oras.client
-from oras.logger import setup_logger
+from blint.logger import LOG, console
 
 setup_logger(quiet=True, debug=False)
 
@@ -50,6 +52,7 @@ KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
 
 demangle_options_complete = multi_demangle.DemangleOptions.complete()
 demangle_options_name_only = multi_demangle.DemangleOptions.name_only()
+
 
 def demangle_symbolic_name(symbol, name_only=False):
     """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
@@ -283,13 +286,18 @@ def blintdb_setup(args):
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
     # Should we refresh the database
-    if os.path.exists(BLINTDB_LOC) and not BLINTDB_REFRESH and (
-            not args.image_url or args.image_url == BLINTDB_IMAGE_URL):
+    if (
+        os.path.exists(BLINTDB_LOC)
+        and not BLINTDB_REFRESH
+        and (not args.image_url or args.image_url == BLINTDB_IMAGE_URL)
+    ):
         LOG.debug(f"blintdb is present at {BLINTDB_LOC}. Skipping refresh.")
         return
     try:
         oras_client = oras.client.OrasClient()
-        target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
+        target_url = (
+            args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
+        )
         LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
         oras_client.pull(
             target=target_url,
@@ -334,9 +342,7 @@ def filter_ignored_dirs(dirs):
     Returns:
         list: Filtered list of directories
     """
-    return [
-        dirs.remove(d) for d in list(dirs) if d.lower() in ignore_directories
-    ]
+    return [dirs.remove(d) for d in list(dirs) if d.lower() in ignore_directories]
 
 
 def find_exe_files(src):
@@ -398,7 +404,9 @@ def find_files(path, extns):
         for root, dirs, files in os.walk(path):
             filter_ignored_dirs(dirs)
             for file in files:
-                result += [os.path.join(root, file) for ext in extns if file.endswith(ext)]
+                result += [
+                    os.path.join(root, file) for ext in extns if file.endswith(ext)
+                ]
     return result
 
 
@@ -463,7 +471,7 @@ def print_findings_table(findings, files):
     for f in findings:
         severity = f.get("severity").upper()
         severity_fmt = (
-            f'{"[bright_red]" if severity in ("CRITICAL", "HIGH") else ""}' f"{severity}"
+            f"{'[bright_red]' if severity in ('CRITICAL', 'HIGH') else ''}{severity}"
         )
         if len(files) > 1:
             table.add_row(
@@ -602,8 +610,9 @@ def cleanup_list_lief_errors(d):
     return new_lst
 
 
-def create_component_evidence(method_value: str, confidence: float,
-                              evidence_metadata: dict = None) -> ComponentEvidence:
+def create_component_evidence(
+    method_value: str, confidence: float, evidence_metadata: dict = None
+) -> ComponentEvidence:
     """
     Creates component evidence based on the provided method value.
 
@@ -683,9 +692,11 @@ def json_serializer(obj):
 
     return obj
 
+
 def enum_to_str(enum_obj) -> str:
     """Converts a lief enum object to its string name."""
     return str(enum_obj).rsplit(".", maxsplit=1)[-1]
+
 
 def calculate_hashes(file_path: str) -> dict:
     """Calculates MD5, SHA1, and SHA256 hashes for a file."""

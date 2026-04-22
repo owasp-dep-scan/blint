@@ -15,7 +15,7 @@ At the highest level, the JSON output contains attributes that identify the bina
 | Attribute           | Description                                                                                                                                                                                                                                                   | Use Case                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `file_path`         | The absolute path to the analyzed binary file on the filesystem.                                                                                                                                                                                              | Basic file identification and tracking.                                                                                            |
-| `binary_type`       | The format of the binary, such as `ELF`, `PE`, or `MachO`. This is the primary key for interpreting format-specific sections.                                                                                                                                 | Directing further analysis; knowing which format-specific tools to use next.                                                       |
+| `binary_type`       | The format of the binary, such as `ELF`, `PE`, `MachO`, or `WASM`. This is the primary key for interpreting format-specific sections.                                                                                                                         | Directing further analysis; knowing which format-specific tools to use next.                                                       |
 | `hashes`            | A collection of cryptographic hashes for the file, including MD5, SHA1, SHA256, and SHA512.                                                                                                                                                                   | File identification, malware signature matching, and searching in threat intelligence platforms like VirusTotal.                   |
 | `llvm_target_tuple` | A string constructed to represent the binary's target environment in a format recognized by LLVM. The format is `arch-vendor-os-environment`. For example: `x86_64-pc-win32-msvc` or `mipsel-unknown-linux-muslsf`. This is crucial for accurate disassembly. | Configuring disassemblers and decompilers; understanding the intended operating system and ABI.                                    |
 | `strings`           | A list of strings extracted from the binary that exhibit high entropy or match patterns for secrets (API keys, private keys, etc.). Non-secret strings are filtered out to reduce noise. Base64-encoded strings are automatically decoded.                    | Triage for hardcoded credentials, sensitive URLs, or cryptographic material. A primary step in vulnerability and malware analysis. |
@@ -120,6 +120,36 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `uuid`: A unique identifier for the binary, used by debuggers and crash report symbolication tools.
   - `rpath`: A runtime search path for libraries.
   - `code_signature`: Information about the binary's digital signature, crucial for Apple's security model.
+
+### For WASM Binaries
+
+WASM (WebAssembly) binaries are parsed via `wasm_tools` and then normalized into blint's common metadata model.
+
+- **Detection:** blint treats a file as WASM when the extension is `.wasm` or the magic bytes are `00 61 73 6d`.
+- **Normalization:** blint preserves common cross-format keys (`imports`, `dynamic_entries`, `functions`, `symtab_symbols`, `dynamic_symbols`) so dependency and review workflows continue to work.
+- **Raw passthrough:** the complete parser output is available under `wasm_report` for advanced use-cases.
+
+| Attribute         | Description                                                                                       | Notes                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `binary_type`     | Set to `WASM`.                                                                                    | Distinguishes the format in downstream logic.                               |
+| `exe_type`        | Set to `wasmbinary`.                                                                              | Format hint used by review logic.                                           |
+| `machine_type`    | WASM architecture class: `WASM32` or `WASM64`.                                                    | Derived from memory limits (`memories[].limits.is_64`).                     |
+| `module_version`  | WebAssembly module version from header.                                                           | Usually `1` for core wasm modules.                                          |
+| `section_count`   | Number of parsed sections.                                                                        | Mirrors parser report.                                                      |
+| `sections`        | Parsed section records (`id`, `name`, `size`, `offset`, etc.).                                    | Format-specific detail for structural analysis.                             |
+| `wasm_imports`    | Detailed WASM imports with `module`, `name`, `kind`, `type_index`.                                | Use this for function-level import analysis.                                |
+| `imports`         | Compatibility dependency list.                                                                    | For WASM this is normalized to module-level `{name, tag:"NEEDED"}` entries. |
+| `dynamic_entries` | Same dependency-style list as `imports`.                                                          | Keeps dependency processing consistent with ELF/PE/Mach-O.                  |
+| `exports`         | WASM exports with `name`, `kind`, `ref_index`.                                                    | Export-level capability and surface analysis.                               |
+| `functions`       | Parsed functions mapped to blint shape (`index`, `name`, `address`, `size`, `instruction_count`). | `address` reflects instruction/body offset in wasm bytes.                   |
+| `dynamic_symbols` | Synthetic imported symbol list used by dependency graph logic.                                    | Built from WASM imports; includes `is_imported` markers.                    |
+| `symtab_symbols`  | Synthetic exported symbol list used by review logic.                                              | Built from WASM exports; includes `is_exported` markers.                    |
+| `wasm_analysis`   | Structured analysis from `wasm_tools` (detections, capabilities, profiles, findings).             | Preserved as provided by parser API.                                        |
+| `wasm_errors`     | Parser-reported errors, if any.                                                                   | Non-fatal parse warnings/errors can appear here.                            |
+| `errors`          | blint-level error list for WASM parsing.                                                          | Set when parser reports issues or parse operation fails.                    |
+| `wasm_report`     | Full raw report from `wasm_tools.api.parse_wasm_file`.                                            | Treated as parser passthrough; useful for deep tooling.                     |
+
+WASM binaries also receive common derived fields like `hashes`, `import_dependencies`, `llvm_target_tuple` (for example `wasm32-unknown-unknown`), `security_properties`, and `binary_composition`.
 
 ---
 
