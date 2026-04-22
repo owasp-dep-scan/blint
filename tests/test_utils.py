@@ -4,6 +4,7 @@ import orjson
 
 import blint.lib.utils as utils
 from blint.lib.utils import (
+    calculate_entropy,
     export_metadata,
     get_hex_truncation_count,
     reset_hex_truncation_count,
@@ -74,3 +75,9 @@ def test_hex_truncation_counter_reset(tmp_path, monkeypatch):
     assert get_hex_truncation_count() == 1
     reset_hex_truncation_count()
     assert get_hex_truncation_count() == 0
+
+
+def test_calculate_entropy_accepts_bytes_like_payloads():
+    entropy = calculate_entropy(b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09")
+    assert isinstance(entropy, float)
+    assert entropy >= 0

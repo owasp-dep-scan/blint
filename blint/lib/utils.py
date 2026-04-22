@@ -203,6 +203,13 @@ def calculate_entropy(data):
     Returns:
         float: The calculated entropy value.
     """
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        # Overlay and section payloads can be raw bytes.
+        data = bytes(data).decode("latin-1", "ignore")
+
+    if not isinstance(data, str):
+        return 0
+
     if not data or len(data) < 8:
         return 0
 
