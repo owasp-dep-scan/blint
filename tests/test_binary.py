@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from blint.lib.binary import demangle_symbolic_name, parse
+from blint.lib.binary import demangle_symbolic_name, parse, parse_macho_symbols
 
 
 TEST_DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -64,6 +64,35 @@ def test_parse_wasm_detects_dos_growth_loop_finding():
     findings = (metadata.get("wasm_analysis") or {}).get("findings") or []
     finding_ids = {finding.get("id") for finding in findings}
     assert "WASM-DOS-003" in finding_ids
+
+
+def test_parse_macho_symbols_export_info_symbol_is_json_safe():
+    class _FakeExportInfo:
+        symbol = object()
+        kind = "regular"
+        flags = "FLAG_A"
+        node_offset = 0x10
+        address = 0x20
+
+    class _FakeSymbol:
+        has_binding_info = False
+        value = 0x1000
+        demangled_name = "macho_symbol"
+        name = "macho_symbol"
+        has_export_info = True
+        export_info = _FakeExportInfo()
+        category = "N_SECT"
+        type = "TYPE"
+        numberof_sections = 1
+        description = "desc"
+        origin = "ORIGIN"
+
+    symbols, _ = parse_macho_symbols([_FakeSymbol()])
+
+    assert symbols
+    export_info = symbols[0]["export_info"]
+    assert export_info
+    assert export_info["symbol"] == "macho_symbol"
 
 
 @pytest.mark.skipif(

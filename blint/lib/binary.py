@@ -1023,7 +1023,7 @@ def parse_macho_symbols(symbols):
                         "description": symbol.description,
                         "address": symbol_value,
                         "export_info": {
-                            "symbol": symbol.export_info.symbol,
+                            "symbol": symbol_name,
                             "kind": symbol.export_info.kind,
                             "flags": str(symbol.export_info.flags),
                             "offset": ADDRESS_FMT.format(
