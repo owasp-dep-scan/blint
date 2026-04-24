@@ -1570,8 +1570,6 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                         )
                         if target_name:
                             break
-                if target_name:
-                    potential_callees.append(target_name)
                 direct_call_targets.append(
                     {
                         "target_name": target_name,
@@ -1623,8 +1621,6 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                     target_name = _extract_symbol_from_operand(
                         operand_text, arch_reg_set
                     )
-                if target_name:
-                    potential_callees.append(target_name)
                 raw_operand = operand_text.split("<", 1)[0].strip()
                 if target_name or raw_operand:
                     direct_call_targets.append(

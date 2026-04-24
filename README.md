@@ -154,6 +154,8 @@ options:
                         Export callgraph as GraphML for external graph analysis tools. Effective when --disassemble is enabled.
   --export-callgraph-gexf
                         Export callgraph as GEXF for Gephi and other graph tooling. Effective when --disassemble is enabled.
+  --callgraph-min-confidence {low,medium,high}
+                        Filter exported callgraph edges/external links by confidence. Defaults to low (no filtering).
   --custom-rules-dir CUSTOM_RULES_DIR
                         Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.
   -q, --quiet           Disable logging and progress bars.

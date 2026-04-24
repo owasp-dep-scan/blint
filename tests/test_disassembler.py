@@ -479,7 +479,7 @@ def test_resolve_direct_calls_extracts_symbol_from_bracket_annotation():
 
     direct_calls, direct_targets = _resolve_direct_calls([instr], {}, "x86_64")
 
-    assert "std::panicking::begin_panic_handler" in direct_calls
+    assert direct_calls == []
     assert direct_targets[0]["target_name"] == "std::panicking::begin_panic_handler"
 
 
@@ -517,7 +517,7 @@ def test_resolve_direct_calls_indirect_hint_from_register_tracking():
         [load_instr, call_instr], {0x2000: "helper"}, "x86_64"
     )
 
-    assert "helper" in direct_calls
+    assert direct_calls == []
     assert any(t.get("kind") == "indirect_hint" for t in direct_targets)
 
 
@@ -695,7 +695,7 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol():
         [instr], {0x1012: "puts"}, "x86_64"
     )
 
-    assert direct_calls == ["puts"]
+    assert direct_calls == []
     assert direct_targets == [
         {
             "target_name": "puts",
@@ -722,7 +722,7 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_register_plus_
         [mov_instr, call_instr], {0x101A: "puts"}, "x86_64-pc-windows-msvc"
     )
 
-    assert direct_calls == ["puts"]
+    assert direct_calls == []
     assert direct_targets == [
         {
             "target_name": "puts",
@@ -749,7 +749,7 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_r12_plus_disp(
         [mov_instr, call_instr], {0x206A: "dispatch_target"}, "x86_64-pc-windows-msvc"
     )
 
-    assert direct_calls == ["dispatch_target"]
+    assert direct_calls == []
     assert direct_targets == [
         {
             "target_name": "dispatch_target",
@@ -788,7 +788,7 @@ def test_resolve_direct_calls_windows_propagates_two_hop_memory_chain_before_cal
         "x86_64-pc-windows-msvc",
     )
 
-    assert direct_calls == ["virt_func"]
+    assert direct_calls == []
     assert direct_targets == [
         {
             "target_name": "virt_func",
@@ -937,7 +937,7 @@ def test_resolve_direct_calls_aarch64_ldr_chain_recovers_blr_target_from_base_re
         "aarch64-unknown-linux-gnu",
     )
 
-    assert direct_calls == ["dispatch_target"]
+    assert direct_calls == []
     assert direct_targets[-1] == {
         "target_name": "dispatch_target",
         "target_address": "0x400038",
@@ -996,7 +996,7 @@ def test_resolve_direct_calls_aarch64_pac_branch_call_uses_first_register_operan
         "aarch64-pc-windows-msvc",
     )
 
-    assert direct_calls == ["dispatch_target"]
+    assert direct_calls == []
     assert direct_targets[-1] == {
         "target_name": "dispatch_target",
         "target_address": "0x410000",

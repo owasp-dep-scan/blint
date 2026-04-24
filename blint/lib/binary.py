@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines,consider-using-f-string
+import bisect
 import codecs
 import contextlib
 import os
@@ -1495,6 +1496,9 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
     # fallback for targets landing on basic-block labels rather than exact
     # function starts (common in optimized code and jump-heavy dispatchers).
     node_ranges = {}
+    range_starts = []
+    range_ends = []
+    range_node_ids = []
     if node_addr_ints:
         node_addr_ints.sort(key=lambda x: x[0])
         for idx, (start_addr, node_id) in enumerate(node_addr_ints):
@@ -1503,6 +1507,19 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
             else:
                 end_addr = start_addr
             node_ranges[node_id] = (start_addr, end_addr)
+            range_starts.append(start_addr)
+            range_ends.append(end_addr)
+            range_node_ids.append(node_id)
+
+    def _find_containing_node_id(addr_int):
+        if not range_starts:
+            return None
+        idx = bisect.bisect_right(range_starts, addr_int) - 1
+        if idx < 0:
+            return None
+        if addr_int <= range_ends[idx]:
+            return range_node_ids[idx]
+        return None
 
     image_base_int = None
     image_base = metadata.get("image_base", metadata.get("imagebase"))
@@ -1573,16 +1590,15 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
 
                     # Range containment fallback: recover caller->callee edges
                     # when target points inside a function body.
-                    for range_node_id, (start_addr, end_addr) in node_ranges.items():
-                        if start_addr <= addr_int <= end_addr:
-                            _score_candidates([range_node_id], 70)
-                            break
-                        if (
-                            image_base_int
-                            and start_addr <= addr_int + image_base_int <= end_addr
-                        ):
-                            _score_candidates([range_node_id], 65)
-                            break
+                    containing_node_id = _find_containing_node_id(addr_int)
+                    if containing_node_id is not None:
+                        _score_candidates([containing_node_id], 70)
+                    elif image_base_int:
+                        containing_node_id = _find_containing_node_id(
+                            addr_int + image_base_int
+                        )
+                        if containing_node_id is not None:
+                            _score_candidates([containing_node_id], 65)
 
             if target_name:
                 for idx, lookup_key in enumerate(_name_lookup_keys(target_name)):

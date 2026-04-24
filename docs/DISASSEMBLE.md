@@ -4,7 +4,7 @@
 
 The `disassembled_functions` attribute is an optional output of the `blint` binary analysis tool. It provides disassembled machine code and related analysis for functions identified in the binary's metadata (e.g., from symbol tables). This feature requires the `nyxstone` library for disassembly.
 
-When disassembly is enabled, blint also derives a top-level `callgraph` metadata object from each function's `direct_calls` list. This provides a compact graph view without re-processing assembly text.
+When disassembly is enabled, blint also derives a top-level `callgraph` metadata object from each function's `direct_call_targets` list. This provides a compact graph view without re-processing assembly text.
 
 For a pass-by-pass explanation of callgraph computation and analyst triage workflow, see [`docs/CALLGRAPH.md`](./CALLGRAPH.md).
 
@@ -30,7 +30,7 @@ The `disassembled_functions` attribute is a dictionary where each key is a uniqu
 | `instruction_hash`            | String             | A SHA-256 hash of the newline-separated list of instruction _mnemonics_ (e.g., "push", "mov", "call").                                                                                                                                                                                             |
 | `instruction_count`           | Integer            | The total number of instructions disassembled.                                                                                                                                                                                                                                                     |
 | `instruction_metrics`         | Dictionary         | A map of specific instruction types to their counts.                                                                                                                                                                                                                                               |
-| `direct_calls`                | List of Strings    | A list of function names identified as targets of _direct_ calls (e.g., `call 0x123456` where `0x123456` resolves to a known function name) within this function.                                                                                                                                  |
+| `direct_calls`                | List of Strings    | A legacy list of function names identified as targets of _direct_ calls only (e.g., `call 0x123456` where `0x123456` resolves to a known function name). Indirect heuristics and tailcalls are not included here.                                                                                 |
 | `has_indirect_call`           | Boolean            | True if the function contains instructions like `call rax` or `call [rax+0x10]`.                                                                                                                                                                                                                   |
 | `has_pac`                     | Boolean            | True if the function contains ARM64 Pointer Authentication Code (PAC) instructions (e.g., `pacibsp`, `autibsp`, `retaa`). These instructions sign and authenticate pointers (typically return addresses) to mitigate Return-Oriented Programming (ROP) attacks.                                    |
 | `has_system_call`             | Boolean            | True if the function contains system call instructions (e.g., `syscall`, `int 0x80`).                                                                                                                                                                                                              |
@@ -95,7 +95,7 @@ The `regs_read` and `regs_written` fields (both globally for the function and pe
 3.  **Malware Analysis:** Analyze the disassembled code for suspicious patterns, such as indirect calls (`has_indirect_call`), system calls (`has_system_call`), or cryptographic operations (`has_crypto_call`). The `assembly` field allows for manual inspection.
 4.  **Code Similarity Analysis:** Group functions based on their `assembly_hash` or `instruction_hash` to find duplicated or similar code blocks within a binary.
 5.  **Function Characterization:** Quickly assess the nature of a function using the `function_type` field and boolean flags (`has_loop`, `has_security_feature`, etc.). This can help prioritize analysis or identify specific types of functions (e.g., PLT thunks).
-6.  **Call Graph Approximation:** Use the `direct_calls` field to build a partial call graph based on statically resolvable direct calls. Note that this will not include calls resolved via PLT/GOT or indirect calls.
+6.  **Call Graph Approximation:** Use the top-level `callgraph` object, which is derived from per-function `direct_call_targets` entries (including `kind` values such as `direct`, `indirect_hint`, and `tailcall`) and confidence scoring.
     - blint now emits this approximation directly in top-level metadata as `callgraph` with deterministic node IDs and counted edges.
     - Ambiguous targets (same symbol name in multiple internal nodes) and unresolved targets are emitted under `callgraph.external`.
 7.  **Security Feature Verification:** Confirm the presence of control-flow integrity features.

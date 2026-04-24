@@ -524,6 +524,48 @@ def test_build_disassembly_callgraph_metadata_collapses_same_address_aliases():
     assert graph["nodes"][0]["aliases"] == ["foo_alias", "foo_main"]
 
 
+def test_build_disassembly_callgraph_metadata_resolves_target_inside_function_range():
+    metadata = {
+        "disassembled_functions": {
+            "0x10::caller": {
+                "name": "caller",
+                "address": "0x10",
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "0x25",
+                        "target_address_candidates": ["0x25"],
+                        "raw_operand": "0x25",
+                        "kind": "direct",
+                    }
+                ],
+            },
+            "0x20::callee": {
+                "name": "callee",
+                "address": "0x20",
+                "direct_call_targets": [],
+            },
+            "0x30::next_fn": {
+                "name": "next_fn",
+                "address": "0x30",
+                "direct_call_targets": [],
+            },
+        }
+    }
+
+    graph = build_disassembly_callgraph_metadata(metadata)
+
+    assert graph["edges"] == [
+        {
+            "src": 0,
+            "dst": 1,
+            "count": 1,
+            "kind": "direct",
+            "confidence": "high",
+        }
+    ]
+
+
 def test_build_disassembly_callgraph_metadata_canonical_alias_is_deterministic():
     metadata_a = {
         "disassembled_functions": {
