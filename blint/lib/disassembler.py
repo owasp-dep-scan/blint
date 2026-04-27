@@ -1,6 +1,8 @@
 import contextlib
 import hashlib
 import re
+from functools import lru_cache
+from typing import NamedTuple
 
 import lief
 
@@ -369,6 +371,9 @@ ALL_REGS_X86 = (
     | SEGMENT_REGS
 )
 SORTED_ALL_REGS_X86 = sorted(ALL_REGS_X86, key=len, reverse=True)
+ARCH_REG_SET_ARM64 = frozenset(ARM64_ALL_REGS)
+ARCH_REG_SET_MIPS = frozenset(SORTED_ALL_REGS_MIPS)
+ARCH_REG_SET_X86 = frozenset(ALL_REGS_X86)
 
 WIN_X64_VOLATILE_REGS = frozenset({"rax", "rcx", "rdx", "r8", "r9", "r10", "r11"})
 SYSV_X64_VOLATILE_REGS = frozenset(
@@ -411,20 +416,139 @@ except ImportError:
     NYXSTONE_AVAILABLE = False
 
 
+@lru_cache(maxsize=None)
+def _normalize_arch_target(arch_target):
+    return (arch_target or "").lower()
+
+
+class ParsedInstruction(NamedTuple):
+    mnemonic: str
+    operand_text: str
+    operand_text_lower: str
+    operands: tuple[str, ...]
+    operands_lower: tuple[str, ...]
+
+
+def _split_instruction_operands(operand_text: str) -> tuple[str, ...]:
+    if not operand_text:
+        return ()
+    operands = []
+    current = []
+    square_depth = 0
+    paren_depth = 0
+    angle_depth = 0
+    for ch in operand_text:
+        if ch == "[":
+            square_depth += 1
+        elif ch == "]" and square_depth:
+            square_depth -= 1
+        elif ch == "(":
+            paren_depth += 1
+        elif ch == ")" and paren_depth:
+            paren_depth -= 1
+        elif ch == "<":
+            angle_depth += 1
+        elif ch == ">" and angle_depth:
+            angle_depth -= 1
+        elif ch == "," and not (square_depth or paren_depth or angle_depth):
+            operand = "".join(current).strip().rstrip(",")
+            if operand:
+                operands.append(operand)
+            current = []
+            continue
+        current.append(ch)
+    operand = "".join(current).strip().rstrip(",")
+    if operand:
+        operands.append(operand)
+    return tuple(operands)
+
+
+@lru_cache(maxsize=32768)
+def _parse_instruction_text(instr_assembly: str) -> ParsedInstruction:
+    assembly = (instr_assembly or "").strip()
+    if not assembly:
+        return ParsedInstruction("", "", "", (), ())
+    parts = assembly.split(None, 1)
+    mnemonic = parts[0].lower().rstrip(":")
+    operand_text = parts[1].strip() if len(parts) > 1 else ""
+    operands = _split_instruction_operands(operand_text)
+    return ParsedInstruction(
+        mnemonic,
+        operand_text,
+        operand_text.lower(),
+        operands,
+        tuple(op.lower() for op in operands),
+    )
+
+
+def _extract_bracket_contents(operand: str) -> tuple[str, int]:
+    operand = operand or ""
+    start = operand.find("[")
+    if start == -1:
+        return "", -1
+    depth = 0
+    inner_start = -1
+    for idx, ch in enumerate(operand[start:], start=start):
+        if ch == "[":
+            depth += 1
+            if depth == 1:
+                inner_start = idx + 1
+        elif ch == "]" and depth:
+            depth -= 1
+            if depth == 0 and inner_start != -1:
+                return operand[inner_start:idx], idx
+    return "", -1
+
+
+def _raw_operand_text(operand: str) -> str:
+    return (operand or "").split("<", 1)[0].strip()
+
+
+def _lookup_target_name(candidate_addrs: list[int], addr_to_name_map: dict) -> str:
+    for candidate_addr in candidate_addrs:
+        target_name = (
+            addr_to_name_map.get(candidate_addr)
+            or addr_to_name_map.get(candidate_addr & ~1)
+            or ""
+        )
+        if target_name:
+            return target_name
+    return ""
+
+
+def _find_immediate_token(text: str) -> str:
+    token_chars = []
+    for ch in text or "":
+        if ch.isalnum() or ch in "#+-%":
+            token_chars.append(ch)
+            continue
+        if token_chars:
+            token = "".join(token_chars)
+            token_chars = []
+            if _parse_immediate_token(token) is not None:
+                return token
+    if token_chars:
+        token = "".join(token_chars)
+        if _parse_immediate_token(token) is not None:
+            return token
+    return ""
+
+
+@lru_cache(maxsize=None)
 def get_arch_reg_set(arch_target):
     """Returns the appropriate set of registers based on the architecture."""
-    lower_arch = arch_target.lower()
+    lower_arch = _normalize_arch_target(arch_target)
     if "aarch64" in lower_arch or "arm64" in lower_arch:
-        return SORTED_ARM64_ALL_REGS
+        return ARCH_REG_SET_ARM64
     if "mips" in lower_arch:
-        return SORTED_ALL_REGS_MIPS
-    else:
-        return SORTED_ALL_REGS_X86
+        return ARCH_REG_SET_MIPS
+    return ARCH_REG_SET_X86
 
 
+@lru_cache(maxsize=None)
 def _get_implicit_regs_map(arch_target):
     """Selects the appropriate implicit registers map based on architecture."""
-    lower_arch = arch_target.lower()
+    lower_arch = _normalize_arch_target(arch_target)
     if "64" in lower_arch and "aarch64" not in lower_arch:
         return IMPLICIT_REGS_X64
     if "aarch64" in lower_arch or "arm64" in lower_arch:
@@ -480,55 +604,42 @@ def _get_abi_volatile_regs(parsed_obj, arch_target):
         return CDECL_X86_VOLATILE_REGS
 
 
-def extract_regs_from_operand(op, sorted_arch_regs=SORTED_ALL_REGS_X86):
-    found_regs = set()
+def extract_regs_from_operand(op, sorted_arch_regs=ARCH_REG_SET_X86):
     if not op:
-        return found_regs
-    potential_tokens = filter(None, OPERAND_DELIMITERS_PATTERN.split(op.lower()))
-    for token in potential_tokens:
-        if token in sorted_arch_regs:
-            found_regs.add(token)
-        cleaned_token = token.strip("[]!")
-        if cleaned_token in sorted_arch_regs:
-            found_regs.add(cleaned_token)
-        if " " in cleaned_token:
-            sub_tokens = cleaned_token.split()
-            for sub_t in sub_tokens:
-                sub_cleaned = sub_t.strip("[]!")
-                if sub_cleaned in sorted_arch_regs:
-                    found_regs.add(sub_cleaned)
-    return found_regs
+        return set()
+    return {
+        token
+        for token in OPERAND_DELIMITERS_PATTERN.split(op.lower())
+        if token and token in sorted_arch_regs
+    }
 
 
 def _extract_register_usage(
-    instr_assembly, parsed_obj=None, arch_target="", sorted_arch_regs=None
+    instr_assembly,
+    parsed_obj=None,
+    arch_target="",
+    sorted_arch_regs=None,
+    parsed_instr=None,
 ):
     """
     Performs a first-pass analysis to extract approximate register read/write usage
     from the instruction assembly string.
     """
-    implicit_regs_map = _get_implicit_regs_map(arch_target)
+    lower_arch = _normalize_arch_target(arch_target)
+    implicit_regs_map = _get_implicit_regs_map(lower_arch)
     regs_read = set()
     regs_written = set()
-    if not instr_assembly:
+    if parsed_instr is None:
+        parsed_instr = _parse_instruction_text(instr_assembly)
+    if not parsed_instr.mnemonic:
         return sorted(regs_read), sorted(regs_written)
-    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
-    is_mips = "mips" in arch_target.lower()
+    is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
+    is_mips = "mips" in lower_arch
     if not sorted_arch_regs:
-        sorted_arch_regs = get_arch_reg_set(arch_target)
-    first_space_idx = instr_assembly.find(" ")
-    operands = []
-    if first_space_idx == -1:
-        mnemonic = instr_assembly.strip().lower().rstrip(":")
-    else:
-        mnemonic_part = instr_assembly[:first_space_idx].strip().lower().rstrip(":")
-        operands_part = instr_assembly[first_space_idx + 1 :].strip()
-        mnemonic = mnemonic_part.rstrip(":")
-        if operands_part:
-            operands = [op.strip() for op in operands_part.split(",")]
+        sorted_arch_regs = get_arch_reg_set(lower_arch)
+    mnemonic = parsed_instr.mnemonic
+    operands = parsed_instr.operands_lower
     num_operands = len(operands)
-    if num_operands > 0:
-        operands = [op.rstrip(",") for op in operands]
     has_rep_prefix = False
     if mnemonic.startswith(("rep", "repe", "repne")):
         has_rep_prefix = True
@@ -539,7 +650,7 @@ def _extract_register_usage(
         regs_read.update(implicit_regs_map[mnemonic].get("read", set()))
         regs_written.update(implicit_regs_map[mnemonic].get("write", set()))
     if has_rep_prefix:
-        is_64bit = "64" in arch_target
+        is_64bit = "64" in lower_arch
         counter_reg = "rcx" if is_64bit else "ecx"
         regs_read.add(counter_reg)
         regs_written.add(counter_reg)
@@ -560,41 +671,25 @@ def _extract_register_usage(
             "udiv",
         ):
             if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src1_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src1_regs)
                 if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(
-                        operands[2].lower(), sorted_arch_regs
-                    )
+                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
                     regs_read.update(src2_regs)
         elif mnemonic in ("mov", "movz", "movk", "movn", "fmov", "fmov immediate"):
             if num_operands >= 1:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 regs_written.update(dst_regs)
-                if num_operands >= 2 and not operands[1].lower().startswith("#"):
-                    src_regs = extract_regs_from_operand(
-                        operands[1].lower(), sorted_arch_regs
-                    )
+                if num_operands >= 2 and not operands[1].startswith("#"):
+                    src_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                     regs_read.update(src_regs)
         elif mnemonic in ("csel", "csinc", "csinv", "cset", "csetm", "cinc", "cinv"):
             if num_operands >= 3:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src1_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
-                src2_regs = extract_regs_from_operand(
-                    operands[2].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
+                src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src1_regs)
                 regs_read.update(src2_regs)
@@ -602,22 +697,14 @@ def _extract_register_usage(
                     regs_read.update(dst_regs)
         elif mnemonic in ("cmp", "cmn", "tst"):
             if num_operands >= 2:
-                src1_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src2_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                src1_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_read.update(src1_regs)
                 regs_read.update(src2_regs)
         elif mnemonic.startswith("ldr") or mnemonic.startswith("str"):
             if num_operands >= 2:
-                data_reg = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                addr_parts = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                data_reg = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                addr_parts = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 if "str" in mnemonic:
                     regs_read.update(data_reg)
                     regs_read.update(addr_parts)
@@ -626,21 +713,15 @@ def _extract_register_usage(
                     regs_read.update(addr_parts)
         elif mnemonic.startswith("ldp") or mnemonic.startswith("stp"):
             if num_operands >= 3:
-                data_reg1 = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                data_reg2 = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
-                mem_operand = operands[2].lower()
-                addr_parts = extract_regs_from_operand(
-                    operands[2].lower(), sorted_arch_regs
-                )
+                data_reg1 = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                data_reg2 = extract_regs_from_operand(operands[1], sorted_arch_regs)
+                mem_operand = ",".join(operands[2:]).strip()
+                addr_parts = extract_regs_from_operand(mem_operand, sorted_arch_regs)
                 if "!" in mem_operand:
                     base_reg = next(iter(addr_parts), None)
                     if base_reg:
                         regs_written.add(base_reg)
-                if "str" in mnemonic:
+                if mnemonic.startswith("stp"):
                     regs_read.update(data_reg1)
                     regs_read.update(data_reg2)
                     regs_read.update(addr_parts)
@@ -650,9 +731,7 @@ def _extract_register_usage(
                     regs_read.update(addr_parts)
         elif mnemonic.startswith("cb") or mnemonic.startswith("tb"):
             if num_operands >= 1:
-                src_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
+                src_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 regs_read.update(src_regs)
         elif mnemonic.startswith("b") and mnemonic not in (
             "bl",
@@ -666,7 +745,7 @@ def _extract_register_usage(
             pass
         elif mnemonic in ("bl", "blr", "blraa", "blrab", "br", "braa", "brab"):
             if num_operands >= 1 and mnemonic != "bl":
-                target_op = operands[0].lower()
+                target_op = operands[0]
                 if not target_op.startswith("#") and not target_op.isdigit():
                     target_regs = extract_regs_from_operand(target_op, sorted_arch_regs)
                     regs_read.update(target_regs)
@@ -674,18 +753,12 @@ def _extract_register_usage(
             pass
         elif mnemonic in ("and", "orr", "eor", "bic", "tst"):
             if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src1_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src1_regs)
                 if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(
-                        operands[2].lower(), sorted_arch_regs
-                    )
+                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
                     regs_read.update(src2_regs)
         elif mnemonic in (
             "lsl",
@@ -701,18 +774,12 @@ def _extract_register_usage(
             "sxth",
         ):
             if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src1_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src1_regs)
                 if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(
-                        operands[2].lower(), sorted_arch_regs
-                    )
+                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
                     regs_read.update(src2_regs)
     elif is_mips:
         if mnemonic in MIPS_ARITH_LOGIC_3_OP or mnemonic in MIPS_SHIFT_3_OP:
@@ -796,12 +863,8 @@ def _extract_register_usage(
     else:
         if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith("cmov"):
             if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src_regs)
                 if mnemonic not in (
@@ -814,12 +877,8 @@ def _extract_register_usage(
                     regs_read.update(dst_regs)
         elif mnemonic in READ_WRITE_BOTH_OPS_INST:
             if num_operands >= 2:
-                op1_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                op2_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                op1_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                op2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_read.update(op1_regs)
                 regs_written.update(op1_regs)
                 regs_read.update(op2_regs)
@@ -827,54 +886,46 @@ def _extract_register_usage(
                     regs_written.update(op2_regs)
         elif mnemonic in BIT_MANIPULATION_INST:
             if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                src_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                src_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_written.update(dst_regs)
                 regs_read.update(src_regs)
                 if mnemonic not in ("bsf", "bsr", "lzcnt", "tzcnt", "popcnt"):
                     regs_read.update(dst_regs)
         elif mnemonic in READ_WRITE_ONE_OP_INST:
             if num_operands >= 1:
-                op_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
+                op_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 regs_read.update(op_regs)
                 regs_written.update(op_regs)
         elif mnemonic in ("cmp", "test"):
             if num_operands >= 2:
                 regs_read.update(
-                    extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+                    extract_regs_from_operand(operands[0], sorted_arch_regs)
                 )
                 regs_read.update(
-                    extract_regs_from_operand(operands[1].lower(), sorted_arch_regs)
+                    extract_regs_from_operand(operands[1], sorted_arch_regs)
                 )
         elif mnemonic in ("push", "pop"):
-            is_64bit = "64" in arch_target
+            is_64bit = "64" in lower_arch
             stack_reg = "rsp" if is_64bit else "esp"
             regs_read.add(stack_reg)
             regs_written.add(stack_reg)
             if num_operands >= 1:
-                op_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
+                op_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 if mnemonic == "push":
                     regs_read.update(op_regs)
                 else:
                     regs_written.update(op_regs)
         elif mnemonic == "call":
-            volatile_regs = _get_abi_volatile_regs(parsed_obj, arch_target)
+            volatile_regs = _get_abi_volatile_regs(parsed_obj, lower_arch)
             regs_written.update(volatile_regs)
             if num_operands >= 1:
-                op = operands[0].lower()
+                op = operands[0]
                 if not op.startswith("0x") and not op.isdigit():
                     op_regs = extract_regs_from_operand(op, sorted_arch_regs)
                     regs_read.update(op_regs)
         elif mnemonic in TERMINATING_INST:
-            is_64bit = "64" in arch_target or "aarch64" in arch_target
+            is_64bit = "64" in lower_arch or "aarch64" in lower_arch
             if is_64bit:
                 regs_read.update(X64_RETURN_REGS)
             else:
@@ -884,24 +935,20 @@ def _extract_register_usage(
             regs_written.add(stack_reg)
         elif mnemonic.startswith("j"):
             if num_operands >= 1:
-                op = operands[0].lower()
+                op = operands[0]
                 if not op.startswith("0x") and not op.isdigit():
                     op_regs = extract_regs_from_operand(op, sorted_arch_regs)
                     regs_read.update(op_regs)
         elif mnemonic == "xchg":
             if num_operands >= 2:
-                op1_regs = extract_regs_from_operand(
-                    operands[0].lower(), sorted_arch_regs
-                )
-                op2_regs = extract_regs_from_operand(
-                    operands[1].lower(), sorted_arch_regs
-                )
+                op1_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+                op2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_read.update(op1_regs)
                 regs_written.update(op1_regs)
                 regs_read.update(op2_regs)
                 regs_written.update(op2_regs)
         if mnemonic in ("mul", "imul", "div", "idiv") and num_operands == 1:
-            op_regs = extract_regs_from_operand(operands[0].lower(), sorted_arch_regs)
+            op_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
             regs_read.update(op_regs)
 
     return sorted(regs_read), sorted(regs_written)
@@ -914,10 +961,12 @@ def _analyze_instructions(
     instr_addresses,
     parsed_obj=None,
     arch_target="",
+    parsed_instrs=None,
 ):
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
-    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
-    is_mips = "mips" in arch_target.lower()
+    lower_arch = _normalize_arch_target(arch_target)
+    is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
+    is_mips = "mips" in lower_arch
     if is_aarch64:
         CALL_INST = ARM64_CALL_INST
         UNCONDITIONAL_JMP_INST = ARM64_UNCONDITIONAL_JMP_INST
@@ -948,26 +997,31 @@ def _analyze_instructions(
     all_regs_written = set()
     used_simd_reg_types = set()
     instructions_with_registers = []
-    sorted_arch_regs = get_arch_reg_set(arch_target)
+    arch_reg_set = get_arch_reg_set(lower_arch)
+    instr_address_set = set(instr_addresses)
     proprietary_instr_found = set()
     sreg_interactions = set()
-    is_apple_silicon = "aarch64" in arch_target.lower() and isinstance(
+    is_apple_silicon = "aarch64" in lower_arch and isinstance(
         parsed_obj, lief.MachO.Binary
     )
-    for instr in instr_list:
+    if parsed_instrs is None:
+        parsed_instrs = [
+            _parse_instruction_text(instr.assembly) for instr in instr_list
+        ]
+    for instr, parsed_instr in zip(instr_list, parsed_instrs):
         instr_assembly = instr.assembly
-        parts = instr_assembly.split()
+        if not parsed_instr.mnemonic:
+            continue
+        operand_text = parsed_instr.operand_text
         if is_apple_silicon and len(instr.bytes) == 4:
             opcode = int.from_bytes(instr.bytes, "little")
             for name, (start, end) in APPLE_PROPRIETARY_INSTRUCTION_RANGES.items():
                 if start <= opcode <= end:
                     proprietary_instr_found.add(name)
                     break
-        mnemonic_and_operands = instr_assembly.split(None, 1)
-        mnemonic = mnemonic_and_operands[0].lower()
-        if is_apple_silicon and mnemonic in ("mrs", "msr") and len(parts) > 1:
-            operands_str = mnemonic_and_operands[1]
-            operands = [op.strip().lower() for op in operands_str.split(",")]
+        mnemonic = parsed_instr.mnemonic
+        if is_apple_silicon and mnemonic in ("mrs", "msr") and operand_text:
+            operands = parsed_instr.operands_lower
             sreg_operand = None
             try:
                 if mnemonic == "mrs":
@@ -982,23 +1036,23 @@ def _analyze_instructions(
         if mnemonic in ARM64_PAC_INST:
             has_pac = True
         elif mnemonic == "hint":
-            if len(parts) > 1:
-                operand = parts[1].strip().replace("#", "")
+            if operand_text:
+                operand = operand_text.strip().replace("#", "")
                 if operand in ARM64_PAC_HINTS:
                     has_pac = True
         if mnemonic in CALL_INST:
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
-            if len(parts) >= 2:
-                target_part = parts[1]
+            if operand_text:
+                target_part = operand_text
                 if target_part.startswith("0x"):
                     try:
                         target_addr = int(target_part, 16)
                         if (
                             func_addr <= target_addr < next_func_addr_in_sec
                             and target_addr < instr.address
-                            and target_addr in instr_addresses
+                            and target_addr in instr_address_set
                         ):
                             has_loop = True
                     except ValueError:
@@ -1016,9 +1070,9 @@ def _analyze_instructions(
         # Check for ARM64 indirect calls and jumps
         if mnemonic in (CALL_INST | UNCONDITIONAL_JMP_INST):
             is_indirect = False
-            if len(parts) > 1:
-                operand = parts[1].lower().strip()
-                reg_token = _extract_register_token(operand, set(sorted_arch_regs))
+            if operand_text:
+                operand = parsed_instr.operand_text_lower
+                reg_token = _extract_register_token(operand, arch_reg_set)
                 if reg_token:
                     is_indirect = True
                 elif "[" in operand and "]" in operand:
@@ -1026,28 +1080,32 @@ def _analyze_instructions(
             if is_indirect:
                 has_indirect_call = True
         regs_read, regs_written = _extract_register_usage(
-            instr_assembly, parsed_obj, arch_target, sorted_arch_regs
+            instr_assembly,
+            parsed_obj,
+            lower_arch,
+            arch_reg_set,
+            parsed_instr=parsed_instr,
         )
         all_instr_regs = set(regs_read) | set(regs_written)
         is_simd_fpu = False
-        if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
-            if any(reg in ARM64_VFP_NEON_REGS for reg in all_instr_regs):
+        if is_aarch64:
+            if all_instr_regs & ARM64_VFP_NEON_REGS:
                 used_simd_reg_types.add("NEON/VFP")
                 is_simd_fpu = True
         else:
-            if any(reg in FPU_REGS for reg in all_instr_regs):
+            if all_instr_regs & FPU_REGS:
                 used_simd_reg_types.add("FPU")
                 is_simd_fpu = True
-            if any(reg in MMX_REGS for reg in all_instr_regs):
+            if all_instr_regs & MMX_REGS:
                 used_simd_reg_types.add("MMX")
                 is_simd_fpu = True
-            if any(reg in XMM_REGS for reg in all_instr_regs):
+            if all_instr_regs & XMM_REGS:
                 used_simd_reg_types.add("SSE/AVX")
                 is_simd_fpu = True
-            if any(reg in YMM_REGS for reg in all_instr_regs):
+            if all_instr_regs & YMM_REGS:
                 used_simd_reg_types.add("AVX/AVX2")
                 is_simd_fpu = True
-            if any(reg in ZMM_REGS for reg in all_instr_regs):
+            if all_instr_regs & ZMM_REGS:
                 used_simd_reg_types.add("AVX-512")
                 is_simd_fpu = True
         if is_simd_fpu:
@@ -1135,30 +1193,31 @@ def _resolve_operand_target_addresses(
 ):
     """Parse operand forms and return normalized numeric target candidates."""
     operand = (operand or "").strip().rstrip(",")
-    if operand.startswith("#"):
-        operand = operand[1:]
     target_addrs = []
     try:
-        if "rip" in operand.lower():
-            match = re.search(
-                r"\[rip\s*([+-])\s*(0x[0-9a-fA-F]+|\d+)]", operand.lower()
+        lower_operand = operand.lower()
+        if "rip" in lower_operand:
+            base_reg, displacement = _parse_x86_memory_operand_base_disp(
+                lower_operand, ARCH_REG_SET_X86
             )
-            if match:
-                sign = 1 if match.group(1) == "+" else -1
-                offset = (
-                    int(match.group(2), 16)
-                    if match.group(2).startswith("0x")
-                    else int(match.group(2))
-                )
+            if base_reg == "rip":
                 _append_unique_target_addr(
-                    target_addrs, instr.address + len(instr.bytes) + (sign * offset)
+                    target_addrs, instr.address + len(instr.bytes) + displacement
                 )
         else:
-            match_hex = re.search(r"[-+]?0x[0-9a-fA-F]+", operand)
-            if match_hex:
-                _append_unique_target_addr(target_addrs, int(match_hex.group(0), 16))
-            elif operand.isdigit() or operand.startswith(("+", "-")):
-                val = int(operand)
+            whole_operand_is_immediate = _parse_immediate_token(operand) is not None
+            immediate_token = (
+                operand
+                if whole_operand_is_immediate
+                else _find_immediate_token(operand)
+            )
+            val = _parse_immediate_token(immediate_token)
+            is_hex_token = (
+                immediate_token.lower().lstrip("#").startswith(("0x", "+0x", "-0x"))
+            )
+            if val is not None and is_hex_token:
+                _append_unique_target_addr(target_addrs, val)
+            elif val is not None:
                 if mnemonic == "bal":
                     _append_unique_target_addr(target_addrs, instr.address + 4 + val)
                 elif is_aarch64:
@@ -1166,15 +1225,20 @@ def _resolve_operand_target_addresses(
                     # hex-like digits without a 0x prefix (for example #410212).
                     # Try that interpretation first for larger operands, then keep
                     # decimal as fallback.
-                    if operand.isdigit() and len(operand) >= 5:
+                    stripped_token = immediate_token.lstrip("#")
+                    if stripped_token.isdigit() and len(stripped_token) >= 5:
                         with contextlib.suppress(ValueError):
-                            _append_unique_target_addr(target_addrs, int(operand, 16))
-                    if operand.startswith(("+", "-")):
+                            _append_unique_target_addr(
+                                target_addrs, int(stripped_token, 16)
+                            )
+                    if whole_operand_is_immediate and immediate_token.startswith(
+                        ("+", "-")
+                    ):
                         _append_unique_target_addr(target_addrs, instr.address + val)
                         _append_unique_target_addr(
                             target_addrs, instr.address + 4 + val
                         )
-                    else:
+                    elif whole_operand_is_immediate:
                         # Unsigned AArch64 branch immediates are frequently emitted
                         # as PC-relative decimal deltas.
                         _append_unique_target_addr(target_addrs, instr.address + val)
@@ -1182,9 +1246,13 @@ def _resolve_operand_target_addresses(
                             target_addrs, instr.address + 4 + val
                         )
                     _append_unique_target_addr(target_addrs, val)
-                elif not is_mips and (
-                    mnemonic.startswith("call")
-                    or (is_windows and mnemonic.startswith("j"))
+                elif (
+                    whole_operand_is_immediate
+                    and not is_mips
+                    and (
+                        mnemonic.startswith("call")
+                        or (is_windows and mnemonic.startswith("j"))
+                    )
                 ):
                     _append_unique_target_addr(
                         target_addrs, instr.address + len(instr.bytes) + val
@@ -1238,24 +1306,29 @@ def _parse_x86_memory_operand_base_disp(
 ) -> tuple[str, int]:
     """Parse simple x86 memory operands like [rax + 72] or [r12 + 0x48]."""
     operand = (operand or "").strip().lower()
-    match = re.search(r"\[\s*([%a-z0-9]+)\s*([+-])\s*(0x[0-9a-f]+|\d+)\s*\]", operand)
-    if match:
-        base_reg = match.group(1).lstrip("%")
-        if base_reg in arch_reg_set:
-            disp = (
-                int(match.group(3), 16)
-                if match.group(3).startswith("0x")
-                else int(match.group(3))
-            )
-            return base_reg, disp if match.group(2) == "+" else -disp
-
-    match = re.search(r"\[\s*([%a-z0-9]+)\s*\]", operand)
-    if match:
-        base_reg = match.group(1).lstrip("%")
-        if base_reg in arch_reg_set:
+    inner, _ = _extract_bracket_contents(operand)
+    if not inner:
+        return "", 0
+    compact = "".join(inner.split())
+    if not compact:
+        return "", 0
+    split_idx = -1
+    for idx, ch in enumerate(compact[1:], start=1):
+        if ch in "+-":
+            split_idx = idx
+            break
+    if split_idx == -1:
+        base_reg = compact.lstrip("%")
+        if "*" not in base_reg and (base_reg == "rip" or base_reg in arch_reg_set):
             return base_reg, 0
-
-    return "", 0
+        return "", 0
+    base_reg = compact[:split_idx].lstrip("%")
+    if "*" in base_reg or (base_reg != "rip" and base_reg not in arch_reg_set):
+        return "", 0
+    displacement = _parse_immediate_token(compact[split_idx:])
+    if displacement is None:
+        return "", 0
+    return base_reg, displacement
 
 
 def _parse_arm64_memory_operand_base_disp(
@@ -1263,11 +1336,10 @@ def _parse_arm64_memory_operand_base_disp(
 ) -> tuple[str, int, bool]:
     """Parse ARM64 memory operands like [x8, #0x18], [x8], or [x8], #0x20."""
     operand = (operand or "").strip().lower()
-    match = re.search(r"\[([^\]]+)]", operand)
-    if not match:
+    inner, end_idx = _extract_bracket_contents(operand)
+    if end_idx == -1:
         return "", 0, False
 
-    inner = match.group(1)
     inner_parts = [part.strip() for part in inner.split(",") if part.strip()]
     if not inner_parts:
         return "", 0, True
@@ -1283,7 +1355,7 @@ def _parse_arm64_memory_operand_base_disp(
             displacement = imm
 
     # Post-index form: ldr x0, [x1], #0x20
-    tail = operand[match.end() :].strip().lstrip(",").strip()
+    tail = operand[end_idx + 1 :].strip().lstrip(",").strip()
     if tail:
         imm = _parse_immediate_token(tail)
         if imm is not None:
@@ -1338,10 +1410,10 @@ def _arm64_memory_operand_uses_index_register(
 ) -> bool:
     """Return True when ARM64 memory operand address depends on an index register."""
     operand = (operand or "").strip().lower()
-    match = re.search(r"\[([^\]]+)]", operand)
-    if not match:
+    inner, end_idx = _extract_bracket_contents(operand)
+    if end_idx == -1:
         return False
-    inner_parts = [part.strip() for part in match.group(1).split(",") if part.strip()]
+    inner_parts = [part.strip() for part in inner.split(",") if part.strip()]
     if len(inner_parts) < 2:
         return False
     if _parse_immediate_token(inner_parts[1]) is not None:
@@ -1366,13 +1438,15 @@ def _update_register_target(
     is_mips: bool,
     is_windows: bool,
     chain_hop_limit: int = 2,
+    parsed_instr=None,
 ):
     """Track register assignments used later for indirect call hints."""
-    parts = instr.assembly.split(None, 1)
-    if len(parts) < 2:
+    if parsed_instr is None:
+        parsed_instr = _parse_instruction_text(instr.assembly)
+    if not parsed_instr.operand_text:
         return
-    mnemonic = parts[0].lower()
-    operands = [op.strip() for op in parts[1].split(",")]
+    mnemonic = parsed_instr.mnemonic
+    operands = parsed_instr.operands
     if not operands:
         return
     dst_reg = _extract_register_token(operands[0], arch_reg_set)
@@ -1380,9 +1454,7 @@ def _update_register_target(
         return
 
     if is_aarch64 and mnemonic.startswith("ldr") and len(operands) >= 2:
-        # ARM64 memory operands contain commas inside brackets, so we rebuild
-        # the source operand from all remaining tokens.
-        src = ",".join(operands[1:]).strip()
+        src = ",".join(part.strip() for part in operands[1].split(","))
         src_base_reg, src_displacement, has_mem_operand = (
             _parse_arm64_memory_operand_base_disp(src, arch_reg_set)
         )
@@ -1407,7 +1479,7 @@ def _update_register_target(
                         "target_name": "",
                         "target_address": hex(adjusted_addrs[0]),
                         "target_address_candidates": [hex(a) for a in adjusted_addrs],
-                        "raw_operand": src.split("<", 1)[0].strip(),
+                        "raw_operand": _raw_operand_text(src),
                         "chain_hops": next_hops,
                     }
                     return
@@ -1460,7 +1532,7 @@ def _update_register_target(
         )
         addrs = _filter_windows_arm64_indirect_candidates(addrs, is_windows, is_aarch64)
         name = _extract_symbol_from_operand(src, arch_reg_set)
-        raw = src.split("<", 1)[0].strip()
+        raw = _raw_operand_text(src)
         if addrs or name:
             reg_targets[dst_reg] = {
                 "target_name": name,
@@ -1506,24 +1578,28 @@ def _update_register_target(
         reg_targets.pop(dst_reg, None)
 
 
-def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
+def _resolve_direct_calls(
+    instr_list, addr_to_name_map, arch_target="", parsed_instrs=None
+):
     """Identifies direct calls and returns both legacy names and rich call targets."""
     potential_callees = []
     direct_call_targets = []
-    is_aarch64 = "aarch64" in arch_target.lower() or "arm64" in arch_target.lower()
-    is_mips = "mips" in arch_target.lower()
-    is_windows = "windows" in arch_target.lower()
-    arch_reg_set = {
-        reg.lower() for reg in get_arch_reg_set(arch_target) if isinstance(reg, str)
-    }
+    lower_arch = _normalize_arch_target(arch_target)
+    is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
+    is_mips = "mips" in lower_arch
+    is_windows = "windows" in lower_arch
+    arch_reg_set = get_arch_reg_set(lower_arch)
     reg_targets = {}
+    if parsed_instrs is None:
+        parsed_instrs = [
+            _parse_instruction_text(instr.assembly) for instr in instr_list
+        ]
 
-    for instr in instr_list:
-        instr_assembly = instr.assembly
-        parts = instr_assembly.split(None, 1)
-        if not parts:
+    for instr, parsed_instr in zip(instr_list, parsed_instrs):
+        if not parsed_instr.mnemonic:
             continue
-        mnemonic = parts[0].lower()
+        mnemonic = parsed_instr.mnemonic
+        operand_text = parsed_instr.operand_text
         _update_register_target(
             instr,
             reg_targets,
@@ -1531,6 +1607,7 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
             is_aarch64=is_aarch64,
             is_mips=is_mips,
             is_windows=is_windows,
+            parsed_instr=parsed_instr,
         )
         is_direct_call = False
         is_indirect_call = False
@@ -1540,8 +1617,7 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
             or (not is_aarch64 and not is_mips and mnemonic.startswith("call"))
         ):
             is_direct_call = True
-        if len(parts) > 1:
-            operand_text = parts[1]
+        if operand_text:
             operand_reg = _extract_register_token(operand_text, arch_reg_set)
             has_memory_operand = "[" in operand_text and "]" in operand_text
             if (is_aarch64 and mnemonic in {"blr", "blraa", "blrab"}) or (
@@ -1553,23 +1629,17 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                 is_indirect_call = True
                 is_direct_call = False
 
-        if is_indirect_call and len(parts) > 1:
-            operand_text = parts[1].strip()
-            reg_token = _extract_register_token(operand_text, arch_reg_set)
+        if is_indirect_call and operand_text:
+            operand = operand_text.strip()
+            reg_token = _extract_register_token(operand, arch_reg_set)
             if reg_token and reg_token in reg_targets:
                 reg_target = reg_targets[reg_token]
                 target_name = reg_target.get("target_name", "")
                 if not target_name:
-                    for candidate_addr in _extract_reg_target_candidate_addrs(
-                        reg_target
-                    ):
-                        target_name = (
-                            addr_to_name_map.get(candidate_addr)
-                            or addr_to_name_map.get(candidate_addr & ~1)
-                            or ""
-                        )
-                        if target_name:
-                            break
+                    target_name = _lookup_target_name(
+                        _extract_reg_target_candidate_addrs(reg_target),
+                        addr_to_name_map,
+                    )
                 direct_call_targets.append(
                     {
                         "target_name": target_name,
@@ -1585,43 +1655,31 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
 
             # Preserve memory-indirect and annotated-symbol evidence for
             # unresolved bucketing without pretending the pointer slot is callee VA.
-            if "[" in operand_text and "]" in operand_text:
+            if "[" in operand and "]" in operand:
                 target_name = ""
                 base_reg, displacement = _parse_x86_memory_operand_base_disp(
-                    operand_text, arch_reg_set
+                    operand, arch_reg_set
                 )
                 if base_reg and base_reg in reg_targets:
                     reg_target = reg_targets[base_reg]
-                    for candidate_addr in _adjust_candidate_addrs(
-                        _extract_reg_target_candidate_addrs(reg_target), displacement
-                    ):
-                        target_name = (
-                            addr_to_name_map.get(candidate_addr)
-                            or addr_to_name_map.get(candidate_addr & ~1)
-                            or ""
-                        )
-                        if target_name:
-                            break
+                    target_name = _lookup_target_name(
+                        _adjust_candidate_addrs(
+                            _extract_reg_target_candidate_addrs(reg_target),
+                            displacement,
+                        ),
+                        addr_to_name_map,
+                    )
                     if not target_name and displacement == 0:
                         target_name = reg_target.get("target_name", "")
 
                 target_addrs = _resolve_operand_target_addresses(
-                    mnemonic, operand_text, instr, is_aarch64, is_mips, is_windows
+                    mnemonic, operand, instr, is_aarch64, is_mips, is_windows
                 )
                 if not target_name:
-                    for candidate_addr in target_addrs:
-                        target_name = (
-                            addr_to_name_map.get(candidate_addr)
-                            or addr_to_name_map.get(candidate_addr & ~1)
-                            or ""
-                        )
-                        if target_name:
-                            break
+                    target_name = _lookup_target_name(target_addrs, addr_to_name_map)
                 if not target_name:
-                    target_name = _extract_symbol_from_operand(
-                        operand_text, arch_reg_set
-                    )
-                raw_operand = operand_text.split("<", 1)[0].strip()
+                    target_name = _extract_symbol_from_operand(operand, arch_reg_set)
+                raw_operand = _raw_operand_text(operand)
                 if target_name or raw_operand:
                     direct_call_targets.append(
                         {
@@ -1634,27 +1692,20 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                     )
             continue
 
-        if is_direct_call and len(parts) > 1:
-            operand = parts[1].strip()
+        if is_direct_call and operand_text:
+            operand = operand_text.strip()
             target_addrs = _resolve_operand_target_addresses(
                 mnemonic, operand, instr, is_aarch64, is_mips, is_windows
             )
             target_addr = target_addrs[0] if target_addrs else None
-            target_name = ""
-            for candidate_addr in target_addrs:
-                target_name = (
-                    addr_to_name_map.get(candidate_addr)
-                    or addr_to_name_map.get(candidate_addr & ~1)
-                    or ""
-                )
-                if target_name:
-                    potential_callees.append(target_name)
-                    break
+            target_name = _lookup_target_name(target_addrs, addr_to_name_map)
+            if target_name:
+                potential_callees.append(target_name)
             if not target_name:
                 target_name = _extract_symbol_from_operand(operand, arch_reg_set)
                 if target_name:
                     potential_callees.append(target_name)
-            raw_operand = operand.split("<", 1)[0].strip()
+            raw_operand = _raw_operand_text(operand)
             direct_call_targets.append(
                 {
                     "target_name": target_name,
@@ -1671,9 +1722,9 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
     # otherwise appear as disconnected terminal blocks.
     if instr_list:
         tail_instr = instr_list[-1]
-        parts = tail_instr.assembly.split(None, 1)
-        if parts:
-            mnemonic = parts[0].lower()
+        parsed_tail = parsed_instrs[-1]
+        if parsed_tail.mnemonic:
+            mnemonic = parsed_tail.mnemonic
             jump_set = (
                 ARM64_UNCONDITIONAL_JMP_INST
                 if is_aarch64
@@ -1681,8 +1732,8 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                 if is_mips
                 else X86_UNCONDITIONAL_JMP_INST
             )
-            if mnemonic in jump_set and len(parts) > 1:
-                operand = parts[1].strip()
+            if mnemonic in jump_set and parsed_tail.operand_text:
+                operand = parsed_tail.operand_text.strip()
                 reg_token = _extract_register_token(operand, arch_reg_set)
                 if reg_token and reg_token in reg_targets:
                     reg_target = reg_targets[reg_token]
@@ -1690,15 +1741,10 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                     target_addr = target_addrs[0] if target_addrs else None
                     target_name = reg_target.get("target_name", "")
                     if not target_name:
-                        for candidate_addr in target_addrs:
-                            target_name = (
-                                addr_to_name_map.get(candidate_addr)
-                                or addr_to_name_map.get(candidate_addr & ~1)
-                                or ""
-                            )
-                            if target_name:
-                                break
-                    raw_operand = operand.split("<", 1)[0].strip()
+                        target_name = _lookup_target_name(
+                            target_addrs, addr_to_name_map
+                        )
+                    raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
                         direct_call_targets.append(
                             {
@@ -1723,20 +1769,12 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target=""):
                         is_windows,
                     )
                     target_addr = target_addrs[0] if target_addrs else None
-                    target_name = ""
-                    for candidate_addr in target_addrs:
-                        target_name = (
-                            addr_to_name_map.get(candidate_addr)
-                            or addr_to_name_map.get(candidate_addr & ~1)
-                            or ""
-                        )
-                        if target_name:
-                            break
+                    target_name = _lookup_target_name(target_addrs, addr_to_name_map)
                     if not target_name:
                         target_name = _extract_symbol_from_operand(
                             operand, arch_reg_set
                         )
-                    raw_operand = operand.split("<", 1)[0].strip()
+                    raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
                         direct_call_targets.append(
                             {
@@ -2071,6 +2109,10 @@ def disassemble_functions(
                 plain_assembly_text.encode("utf-8")
             ).hexdigest()
             instruction_count = len(truncated_instr_list)
+            parsed_instrs = [
+                _parse_instruction_text(instr.assembly)
+                for instr in truncated_instr_list
+            ]
             instr_addresses = [instr.address for instr in truncated_instr_list]
             next_func_boundary = func_addr_va + size_to_disasm
             (
@@ -2092,9 +2134,10 @@ def disassemble_functions(
                 instr_addresses,
                 parsed_obj,
                 arch_target,
+                parsed_instrs,
             )
             direct_calls, direct_call_targets = _resolve_direct_calls(
-                truncated_instr_list, addr_to_name_map, arch_target
+                truncated_instr_list, addr_to_name_map, arch_target, parsed_instrs
             )
             joined_mnemonics = "\n".join(instruction_mnemonics)
             instruction_hash = hashlib.sha256(

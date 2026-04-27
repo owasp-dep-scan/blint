@@ -41,6 +41,13 @@ def test_extract_register_usage_lea():
     assert set(regs_written) == {"r8"}
 
 
+def test_extract_register_usage_mixed_case_percent_prefixed():
+    instr_asm = "MOV %RAX, %RBX"
+    regs_read, regs_written = _extract_register_usage(instr_asm)
+    assert set(regs_read) == {"rbx"}
+    assert set(regs_written) == {"rax"}
+
+
 def test_extract_register_usage_push_pop():
     instr_asm_push = "push rax"
     regs_read_push, regs_written_push = _extract_register_usage(
@@ -582,6 +589,13 @@ def test_extract_register_usage_mips_move():
     assert set(regs_written) == {"$t9"}
 
 
+def test_extract_register_usage_aarch64_store_pair_writeback():
+    instr_asm = "stp x29, x30, [sp, #-16]!"
+    regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="aarch64")
+    assert set(regs_read) == {"sp", "x29", "x30"}
+    assert set(regs_written) == {"sp"}
+
+
 def test_extract_register_usage_mips_3_operand():
     instr_asm = "addu $v0, $t0, $t1"
     regs_read, regs_written = _extract_register_usage(instr_asm, arch_target="mipsel")
@@ -707,6 +721,28 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol():
     ]
 
 
+def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol_without_spaces():
+    instr = MagicMock()
+    instr.assembly = "callq qword ptr [rip+0x10]"
+    instr.address = 0x1000
+    instr.bytes = b"\x90\x90"
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [instr], {0x1012: "puts"}, "x86_64"
+    )
+
+    assert direct_calls == []
+    assert direct_targets == [
+        {
+            "target_name": "puts",
+            "target_address": "",
+            "target_address_candidates": [],
+            "raw_operand": "qword ptr [rip+0x10]",
+            "kind": "indirect_hint",
+        }
+    ]
+
+
 def test_resolve_direct_calls_memory_operand_recovers_symbol_from_register_plus_disp():
     mov_instr = MagicMock()
     mov_instr.assembly = "mov rax, qword ptr [rip + 0x10]"
@@ -729,6 +765,33 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_register_plus_
             "target_address": "",
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rax + 0x8]",
+            "kind": "indirect_hint",
+        }
+    ]
+
+
+def test_resolve_direct_calls_memory_operand_recovers_symbol_from_percent_register_base():
+    mov_instr = MagicMock()
+    mov_instr.assembly = "mov rax, 0x2000 <helper>"
+    mov_instr.address = 0x1000
+    mov_instr.bytes = b"\x90\x90"
+
+    call_instr = MagicMock()
+    call_instr.assembly = "callq qword ptr [%rax]"
+    call_instr.address = 0x1002
+    call_instr.bytes = b"\x90\x90"
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [mov_instr, call_instr], {0x2000: "helper"}, "x86_64-pc-windows-msvc"
+    )
+
+    assert direct_calls == []
+    assert direct_targets == [
+        {
+            "target_name": "helper",
+            "target_address": "",
+            "target_address_candidates": [],
+            "raw_operand": "qword ptr [%rax]",
             "kind": "indirect_hint",
         }
     ]

@@ -56,6 +56,7 @@ Primary workflows:
 - Rule engine behavior must remain deterministic and case-insensitive where expected.
 - Keep heavy operations behind explicit flags (`--disassemble`, `--deep`, `--use-blintdb`).
 - Avoid weakening error handling around malformed binaries.
+- Nyxstone currently provides disassembly text, but not structured operand/register metadata; register usage and call-target heuristics in `blint/lib/disassembler.py` must therefore remain text-based.
 
 ## Common task playbooks
 
