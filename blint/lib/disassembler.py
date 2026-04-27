@@ -1537,7 +1537,7 @@ def _update_register_target(
         return
 
     if is_aarch64 and mnemonic.startswith("ldr") and len(operands) >= 2:
-        src = ",".join(part.strip() for part in operands[1].split(","))
+        src = ",".join(part.strip() for part in operands[1:])
         src_base_reg, src_displacement, has_mem_operand = (
             _parse_arm64_memory_operand_base_disp(src, arch_reg_set)
         )

@@ -1005,7 +1005,44 @@ def test_resolve_direct_calls_aarch64_ldr_chain_recovers_blr_target_from_base_re
         "target_name": "dispatch_target",
         "target_address": "0x400038",
         "target_address_candidates": ["0x400038"],
-        "raw_operand": "[x8,#0x18]",
+        "raw_operand": "[x8, #0x18]",
+        "kind": "indirect_hint",
+    }
+
+
+def test_resolve_direct_calls_aarch64_ldr_post_index_preserves_tail_displacement():
+    adrp_instr = MagicMock()
+    adrp_instr.assembly = "adrp x8, #0x400000"
+    adrp_instr.address = 0x1000
+    adrp_instr.bytes = b"\x90\x90\x90\x90"
+
+    add_instr = MagicMock()
+    add_instr.assembly = "add x8, x8, #0x20"
+    add_instr.address = 0x1004
+    add_instr.bytes = b"\x90\x90\x90\x90"
+
+    ldr_instr = MagicMock()
+    ldr_instr.assembly = "ldr x16, [x8], #0x18"
+    ldr_instr.address = 0x1008
+    ldr_instr.bytes = b"\x90\x90\x90\x90"
+
+    blr_instr = MagicMock()
+    blr_instr.assembly = "blr x16"
+    blr_instr.address = 0x100C
+    blr_instr.bytes = b"\x90\x90\x90\x90"
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [adrp_instr, add_instr, ldr_instr, blr_instr],
+        {0x400038: "dispatch_target"},
+        "aarch64-unknown-linux-gnu",
+    )
+
+    assert direct_calls == []
+    assert direct_targets[-1] == {
+        "target_name": "dispatch_target",
+        "target_address": "0x400038",
+        "target_address_candidates": ["0x400038"],
+        "raw_operand": "[x8],#0x18",
         "kind": "indirect_hint",
     }
 

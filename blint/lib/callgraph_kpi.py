@@ -8,6 +8,29 @@ def _edge_key(name: str, address: str) -> str:
     return f"{name}@{address}"
 
 
+def _normalize_external_target(target: str) -> str:
+    """Normalize bracketed operand spacing for stable label matching."""
+    target = (target or "").strip()
+    if "[" not in target:
+        return target
+
+    out: list[str] = []
+    bracket_depth = 0
+    for ch in target:
+        if ch == "[":
+            bracket_depth += 1
+            out.append(ch)
+            continue
+        if ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            out.append(ch)
+            continue
+        if bracket_depth > 0 and ch.isspace():
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def build_edge_indexes(callgraph: dict[str, Any]) -> tuple[set[str], set[str]]:
     """Build stable internal/external edge indexes from a callgraph payload."""
     nodes = callgraph.get("nodes") or []
@@ -31,7 +54,7 @@ def build_edge_indexes(callgraph: dict[str, Any]) -> tuple[set[str], set[str]]:
             nodes[edge.get("src", -1)] if 0 <= edge.get("src", -1) < len(nodes) else {}
         )
         src_ref = _edge_key(src.get("name", ""), src.get("address", ""))
-        target = edge.get("target") or ""
+        target = _normalize_external_target(edge.get("target") or "")
         reason = edge.get("reason") or ""
         external_index.add(f"{src_ref}->{target}::{reason}")
 
@@ -136,10 +159,8 @@ def evaluate_accuracy(
             )
             present = key in internal_index
         elif label_type == "external":
-            key = (
-                f"{item.get('src', '')}->{item.get('target', '')}::"
-                f"{item.get('reason', '')}"
-            )
+            target = _normalize_external_target(item.get("target", ""))
+            key = f"{item.get('src', '')}->{target}::{item.get('reason', '')}"
             present = key in external_index
         else:
             continue

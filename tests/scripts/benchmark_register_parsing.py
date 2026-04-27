@@ -58,11 +58,12 @@ def main() -> None:
 
     def run_extract_usage() -> None:
         for asm, arch in corpus:
-            _extract_register_usage(asm, {}, arch)
+            _extract_register_usage(asm, None, arch)
 
+    x86_corpus = [asm for asm, arch in corpus if arch == "x86_64"]
     mock_instrs = []
     addr = 0x1000
-    for asm, _ in corpus[:12000]:
+    for asm in x86_corpus[:12000]:
         mock_instrs.append(
             SimpleNamespace(assembly=asm, address=addr, bytes=b"\x90\x90\x90\x90")
         )

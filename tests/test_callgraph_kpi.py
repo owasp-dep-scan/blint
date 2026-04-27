@@ -127,3 +127,63 @@ def test_evaluate_accuracy_tracks_fp_and_fn():
     assert accuracy["false_negatives"] == 1
     assert accuracy["false_positives"] == 1
     assert accuracy["true_negatives"] == 1
+
+
+def test_evaluate_accuracy_normalizes_external_bracket_target_spacing():
+    metadata = {
+        "callgraph": {
+            "nodes": [{"id": 0, "name": "alpha", "address": "0x10"}],
+            "edges": [],
+            "external": [
+                {
+                    "src": 0,
+                    "target": "[x8, #72]",
+                    "reason": "address_space_miss:indirect_hint",
+                }
+            ],
+        }
+    }
+    labels = [
+        {
+            "type": "external",
+            "src": "alpha@0x10",
+            "target": "[x8,#72]",
+            "reason": "address_space_miss:indirect_hint",
+            "expect_present": True,
+        }
+    ]
+
+    accuracy = evaluate_accuracy(metadata, labels)
+
+    assert accuracy["true_positives"] == 1
+    assert accuracy["false_negatives"] == 0
+
+
+def test_evaluate_accuracy_external_target_still_requires_semantic_match():
+    metadata = {
+        "callgraph": {
+            "nodes": [{"id": 0, "name": "alpha", "address": "0x10"}],
+            "edges": [],
+            "external": [
+                {
+                    "src": 0,
+                    "target": "[x8, #72]",
+                    "reason": "address_space_miss:indirect_hint",
+                }
+            ],
+        }
+    }
+    labels = [
+        {
+            "type": "external",
+            "src": "alpha@0x10",
+            "target": "[x8,#999]",
+            "reason": "address_space_miss:indirect_hint",
+            "expect_present": True,
+        }
+    ]
+
+    accuracy = evaluate_accuracy(metadata, labels)
+
+    assert accuracy["true_positives"] == 0
+    assert accuracy["false_negatives"] == 1
