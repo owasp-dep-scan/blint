@@ -504,6 +504,10 @@ def _raw_operand_text(operand: str) -> str:
     return (operand or "").split("<", 1)[0].strip()
 
 
+def _hex_list(candidate_addrs: list[int]) -> list[str]:
+    return [hex(addr) for addr in candidate_addrs]
+
+
 def _lookup_target_name(candidate_addrs: list[int], addr_to_name_map: dict) -> str:
     for candidate_addr in candidate_addrs:
         target_name = (
@@ -532,6 +536,49 @@ def _find_immediate_token(text: str) -> str:
         if _parse_immediate_token(token) is not None:
             return token
     return ""
+
+
+def _build_reg_target(
+    *,
+    target_name: str = "",
+    target_addrs: list[int] | None = None,
+    inferred_addrs: list[int] | None = None,
+    raw_operand: str = "",
+    chain_hops: int = 0,
+) -> dict:
+    target_addrs = target_addrs or []
+    inferred_addrs = inferred_addrs or []
+    return {
+        "target_name": target_name,
+        "target_address": hex(target_addrs[0]) if target_addrs else "",
+        "target_address_candidates": _hex_list(target_addrs),
+        "_target_address_candidates_int": list(target_addrs),
+        "inferred_address_candidates": _hex_list(inferred_addrs),
+        "_inferred_address_candidates_int": list(inferred_addrs),
+        "raw_operand": raw_operand,
+        "chain_hops": chain_hops,
+    }
+
+
+def _append_call_target(
+    direct_call_targets: list[dict],
+    *,
+    kind: str,
+    target_name: str = "",
+    target_addr: int | None = None,
+    target_addrs: list[int] | None = None,
+    raw_operand: str = "",
+):
+    target_addrs = target_addrs or []
+    direct_call_targets.append(
+        {
+            "target_name": target_name,
+            "target_address": hex(target_addr) if target_addr is not None else "",
+            "target_address_candidates": _hex_list(target_addrs),
+            "raw_operand": raw_operand,
+            "kind": kind,
+        }
+    )
 
 
 @lru_cache(maxsize=None)
@@ -1268,27 +1315,52 @@ def _resolve_operand_target_addresses(
     return target_addrs
 
 
-def _extract_symbol_from_operand(operand: str, arch_reg_set: set[str]) -> str:
+@lru_cache(maxsize=65536)
+def _extract_symbol_from_operand_cached(
+    operand: str, arch_reg_set: frozenset[str]
+) -> str:
     """Symbol extraction fallback for cases where numeric resolution fails."""
     operand = (operand or "").strip()
     if not operand:
         return ""
-    if "<" in operand and ">" in operand:
-        inside = operand.split("<", 1)[1].split(">", 1)[0]
-        inside = inside.split("@", 1)[0].split("+", 1)[0].strip()
-        if inside and inside.lower().lstrip("%") not in arch_reg_set:
-            return inside
-    cleaned = operand.split("+", 1)[0].split("@", 1)[0].strip()
-    if (
-        cleaned
-        and not cleaned.startswith(("0x", "#"))
-        and "[" not in cleaned
-        and cleaned.lower().lstrip("%") not in arch_reg_set
-    ):
+
+    def _normalize_symbol(symbol_text: str) -> str:
+        symbol_text = symbol_text.strip()
+        if not symbol_text:
+            return ""
+        at_idx = symbol_text.find("@")
+        if at_idx != -1:
+            symbol_text = symbol_text[:at_idx]
+        plus_idx = symbol_text.find("+")
+        if plus_idx != -1:
+            symbol_text = symbol_text[:plus_idx]
+        symbol_text = symbol_text.strip()
+        if not symbol_text:
+            return ""
+        lowered = symbol_text.lower().lstrip("%")
+        return "" if lowered in arch_reg_set else symbol_text
+
+    lt_idx = operand.find("<")
+    if lt_idx != -1:
+        gt_idx = operand.find(">", lt_idx + 1)
+        if gt_idx != -1:
+            inside = _normalize_symbol(operand[lt_idx + 1 : gt_idx])
+            if inside:
+                return inside
+
+    if "[" in operand:
+        return ""
+    cleaned = _normalize_symbol(operand)
+    if cleaned and not cleaned.startswith(("0x", "#")):
         return cleaned
     return ""
 
 
+def _extract_symbol_from_operand(operand: str, arch_reg_set: set[str]) -> str:
+    return _extract_symbol_from_operand_cached(operand or "", frozenset(arch_reg_set))
+
+
+@lru_cache(maxsize=65536)
 def _parse_immediate_token(token: str):
     token = (token or "").strip().lstrip("#")
     if not token:
@@ -1366,6 +1438,12 @@ def _parse_arm64_memory_operand_base_disp(
 
 def _extract_reg_target_candidate_addrs(reg_target: dict) -> list[int]:
     out = []
+    for inferred_candidate in reg_target.get("_inferred_address_candidates_int", []):
+        _append_unique_target_addr(out, inferred_candidate)
+    for candidate in reg_target.get("_target_address_candidates_int", []):
+        _append_unique_target_addr(out, candidate)
+    if out:
+        return out
     for inferred_candidate in reg_target.get("inferred_address_candidates", []):
         with contextlib.suppress(ValueError, TypeError):
             _append_unique_target_addr(out, int(inferred_candidate, 16))
@@ -1392,16 +1470,21 @@ def _get_chain_hops(reg_target: dict) -> int:
 
 
 def _extract_register_token(operand: str, arch_reg_set: set[str]) -> str:
-    cleaned = (operand or "").strip().lower().rstrip(",")
+    return _extract_register_token_cached(operand or "", frozenset(arch_reg_set))
+
+
+@lru_cache(maxsize=65536)
+def _extract_register_token_cached(operand: str, arch_reg_set: frozenset[str]) -> str:
+    cleaned = operand.strip().lower().rstrip(",")
     if not cleaned or "[" in cleaned or "]" in cleaned:
         return ""
-    # Branch-auth forms like `blraa x16, x17` carry extra operands; target is first.
-    if "," in cleaned:
-        cleaned = cleaned.split(",", 1)[0].strip()
+    comma_idx = cleaned.find(",")
+    if comma_idx != -1:
+        cleaned = cleaned[:comma_idx].strip()
     cleaned = cleaned.lstrip("*#")
-    parts = cleaned.split()
-    token = parts[-1] if parts else cleaned
-    token = token.lstrip("%")
+    if " " in cleaned:
+        cleaned = cleaned.rsplit(None, 1)[-1]
+    token = cleaned.lstrip("%")
     return token if token in arch_reg_set else ""
 
 
@@ -1475,13 +1558,11 @@ def _update_register_target(
                     adjusted_addrs, is_windows, is_aarch64
                 )
                 if adjusted_addrs:
-                    reg_targets[dst_reg] = {
-                        "target_name": "",
-                        "target_address": hex(adjusted_addrs[0]),
-                        "target_address_candidates": [hex(a) for a in adjusted_addrs],
-                        "raw_operand": _raw_operand_text(src),
-                        "chain_hops": next_hops,
-                    }
+                    reg_targets[dst_reg] = _build_reg_target(
+                        target_addrs=adjusted_addrs,
+                        raw_operand=_raw_operand_text(src),
+                        chain_hops=next_hops,
+                    )
                     return
             reg_targets.pop(dst_reg, None)
             return
@@ -1509,14 +1590,10 @@ def _update_register_target(
                 _extract_reg_target_candidate_addrs(base_target), src_displacement
             )
             if adjusted_addrs:
-                reg_targets[dst_reg] = {
-                    "target_name": "",
-                    "target_address": "",
-                    "target_address_candidates": [],
-                    "inferred_address_candidates": [hex(a) for a in adjusted_addrs],
-                    "raw_operand": "",
-                    "chain_hops": next_hops,
-                }
+                reg_targets[dst_reg] = _build_reg_target(
+                    inferred_addrs=adjusted_addrs,
+                    chain_hops=next_hops,
+                )
                 return
             reg_targets.pop(dst_reg, None)
             return
@@ -1534,13 +1611,11 @@ def _update_register_target(
         name = _extract_symbol_from_operand(src, arch_reg_set)
         raw = _raw_operand_text(src)
         if addrs or name:
-            reg_targets[dst_reg] = {
-                "target_name": name,
-                "target_address": hex(addrs[0]) if addrs else "",
-                "target_address_candidates": [hex(a) for a in addrs],
-                "raw_operand": raw,
-                "chain_hops": 0,
-            }
+            reg_targets[dst_reg] = _build_reg_target(
+                target_name=name,
+                target_addrs=addrs,
+                raw_operand=raw,
+            )
             return
         reg_targets.pop(dst_reg, None)
         return
@@ -1567,13 +1642,12 @@ def _update_register_target(
                 if not adjusted:
                     reg_targets.pop(dst_reg, None)
                     return
-                reg_targets[dst_reg] = {
-                    "target_name": base.get("target_name", ""),
-                    "target_address": hex(adjusted[0]),
-                    "target_address_candidates": [hex(a) for a in adjusted],
-                    "raw_operand": base.get("raw_operand", ""),
-                    "chain_hops": _get_chain_hops(base),
-                }
+                reg_targets[dst_reg] = _build_reg_target(
+                    target_name=base.get("target_name", ""),
+                    target_addrs=adjusted,
+                    raw_operand=base.get("raw_operand", ""),
+                    chain_hops=_get_chain_hops(base),
+                )
                 return
         reg_targets.pop(dst_reg, None)
 
@@ -1634,22 +1708,28 @@ def _resolve_direct_calls(
             reg_token = _extract_register_token(operand, arch_reg_set)
             if reg_token and reg_token in reg_targets:
                 reg_target = reg_targets[reg_token]
+                reg_target_candidate_addrs = _extract_reg_target_candidate_addrs(
+                    reg_target
+                )
                 target_name = reg_target.get("target_name", "")
                 if not target_name:
                     target_name = _lookup_target_name(
-                        _extract_reg_target_candidate_addrs(reg_target),
+                        reg_target_candidate_addrs,
                         addr_to_name_map,
                     )
-                direct_call_targets.append(
-                    {
-                        "target_name": target_name,
-                        "target_address": reg_target.get("target_address", ""),
-                        "target_address_candidates": reg_target.get(
-                            "target_address_candidates", []
-                        ),
-                        "raw_operand": reg_target.get("raw_operand", reg_token),
-                        "kind": "indirect_hint",
-                    }
+                exposed_target_addrs = list(
+                    reg_target.get("_target_address_candidates_int", [])
+                )
+                exposed_target_addr = (
+                    exposed_target_addrs[0] if exposed_target_addrs else None
+                )
+                _append_call_target(
+                    direct_call_targets,
+                    kind="indirect_hint",
+                    target_name=target_name,
+                    target_addr=exposed_target_addr,
+                    target_addrs=exposed_target_addrs,
+                    raw_operand=reg_target.get("raw_operand", reg_token),
                 )
                 continue
 
@@ -1681,14 +1761,11 @@ def _resolve_direct_calls(
                     target_name = _extract_symbol_from_operand(operand, arch_reg_set)
                 raw_operand = _raw_operand_text(operand)
                 if target_name or raw_operand:
-                    direct_call_targets.append(
-                        {
-                            "target_name": target_name,
-                            "target_address": "",
-                            "target_address_candidates": [],
-                            "raw_operand": raw_operand,
-                            "kind": "indirect_hint",
-                        }
+                    _append_call_target(
+                        direct_call_targets,
+                        kind="indirect_hint",
+                        target_name=target_name,
+                        raw_operand=raw_operand,
                     )
             continue
 
@@ -1706,16 +1783,13 @@ def _resolve_direct_calls(
                 if target_name:
                     potential_callees.append(target_name)
             raw_operand = _raw_operand_text(operand)
-            direct_call_targets.append(
-                {
-                    "target_name": target_name,
-                    "target_address": hex(target_addr)
-                    if target_addr is not None
-                    else "",
-                    "target_address_candidates": [hex(t) for t in target_addrs],
-                    "raw_operand": raw_operand,
-                    "kind": "direct",
-                }
+            _append_call_target(
+                direct_call_targets,
+                kind="direct",
+                target_name=target_name,
+                target_addr=target_addr,
+                target_addrs=target_addrs,
+                raw_operand=raw_operand,
             )
 
     # This recovers common compiler-emitted tail dispatch patterns that would
@@ -1746,18 +1820,13 @@ def _resolve_direct_calls(
                         )
                     raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
-                        direct_call_targets.append(
-                            {
-                                "target_name": target_name,
-                                "target_address": hex(target_addr)
-                                if target_addr is not None
-                                else "",
-                                "target_address_candidates": [
-                                    hex(t) for t in target_addrs
-                                ],
-                                "raw_operand": raw_operand,
-                                "kind": "tailcall",
-                            }
+                        _append_call_target(
+                            direct_call_targets,
+                            kind="tailcall",
+                            target_name=target_name,
+                            target_addr=target_addr,
+                            target_addrs=target_addrs,
+                            raw_operand=raw_operand,
                         )
                 elif not any(ch in operand for ch in ("[", "]")):
                     target_addrs = _resolve_operand_target_addresses(
@@ -1776,18 +1845,13 @@ def _resolve_direct_calls(
                         )
                     raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
-                        direct_call_targets.append(
-                            {
-                                "target_name": target_name,
-                                "target_address": hex(target_addr)
-                                if target_addr is not None
-                                else "",
-                                "target_address_candidates": [
-                                    hex(t) for t in target_addrs
-                                ],
-                                "raw_operand": raw_operand,
-                                "kind": "tailcall",
-                            }
+                        _append_call_target(
+                            direct_call_targets,
+                            kind="tailcall",
+                            target_name=target_name,
+                            target_addr=target_addr,
+                            target_addrs=target_addrs,
+                            raw_operand=raw_operand,
                         )
     return potential_callees, direct_call_targets
 
