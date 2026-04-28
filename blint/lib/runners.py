@@ -60,6 +60,17 @@ def _coerce_min_patterns(value) -> int:
         return 1
 
 
+def _rule_uses_informative_strings(review_list) -> bool:
+    """Checks whether any rule in a review group opted into informative strings."""
+    if not review_list:
+        return False
+    for review_methods in review_list:
+        for rule_obj in review_methods.values():
+            if _coerce_rule_bool(rule_obj.get("include_informative_strings")):
+                return True
+    return False
+
+
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -619,6 +630,19 @@ class ReviewRunner:
             functions_list = [
                 f.get("name", "") for f in metadata.get("symtab_symbols", [])
             ]
+        include_informative = _rule_uses_informative_strings(
+            self.review_methods_list
+        ) or _rule_uses_informative_strings(self.review_exe_list)
+        if include_informative:
+            informative_values = []
+            for s in metadata.get("informative_strings", []):
+                if isinstance(s, dict):
+                    value = s.get("value", "")
+                else:
+                    value = str(s)
+                if value:
+                    informative_values.append(value)
+            functions_list += informative_values
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         if self.review_methods_list:
             self.run_review_methods_symbols(self.review_methods_list, functions_list)

@@ -8,6 +8,7 @@ from blint.lib.binary import (
     build_disassembly_callgraph_metadata,
     demangle_symbolic_name,
     parse,
+    parse_informative_strings,
     parse_macho_symbols,
 )
 
@@ -60,6 +61,26 @@ def test_parse_wasm_parser_failure(tmp_path):
     assert metadata["binary_type"] == "WASM"
     assert metadata["errors"]
     assert "WebAssembly" in metadata["errors"][0]
+
+
+def test_parse_informative_strings_extracts_and_deduplicates_network_hints():
+    class _FakeParsed:
+        strings = [
+            "BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB",
+            "bpf_sock_ops_active_established_cb",
+            "IP_HDRINCL",
+            "harmless_string",
+            "127.0.0.1:53",
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+    values = [entry["value"] for entry in informative]
+
+    assert "BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB" in values
+    assert "IP_HDRINCL" in values
+    assert "127.0.0.1:53" in values
+    assert "harmless_string" not in values
+    assert len(values) == 3
 
 
 def test_parse_wasm_detects_dos_growth_loop_finding():

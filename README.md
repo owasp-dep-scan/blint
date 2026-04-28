@@ -28,6 +28,7 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
+  - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
 - **Fuzzing Target Identification:** Suggests interesting functions to target for fuzzing based on common patterns in function names (e.g., `parse`, `decode`, `copy`).
 - **Extensible with Custom Rules:** Define your own capabilities and checks using simple [YAML rule files](./docs/RULES.md).

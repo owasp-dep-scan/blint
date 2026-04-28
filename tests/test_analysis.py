@@ -323,3 +323,51 @@ def test_filter_callgraph_by_min_confidence_filters_edges_and_externals():
     assert len(filtered["edges"]) == 1
     assert filtered["edges"][0]["confidence"] == "high"
     assert filtered["external"] == []
+
+
+def test_network_evasion_cluster_reviews_trigger_with_informative_strings():
+    metadata = {
+        "exe_type": "genericbinary",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB"},
+            {"value": "bpf_setsockopt"},
+            {"value": "TCP_MAXSEG"},
+            {"value": "/dev/net/tun"},
+            {"value": "gvisor"},
+            {"value": "wintun"},
+            {"value": "IP_HDRINCL"},
+            {"value": "SOCK_RAW"},
+            {"value": "pcap_sendpacket"},
+            {"value": "DNS-over-HTTPS"},
+            {"value": "dns-query"},
+            {"value": "127.0.0.1:53"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("synthetic-net.bin", "synthetic-net.bin")
+    rule_ids = {result["id"] for result in results}
+
+    assert "EBPF_SOCK_OPS_CLUSTER" in rule_ids
+    assert "TUN_INTERFACE_CLUSTER" in rule_ids
+    assert "RAW_PACKET_SOCKET_CLUSTER" in rule_ids
+    assert "DOH_BYPASS_CLUSTER" in rule_ids
+
+
+def test_network_evasion_cluster_reviews_require_multiple_patterns():
+    metadata = {
+        "exe_type": "genericbinary",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [{"value": "IP_HDRINCL"}],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("single-token.bin", "single-token.bin")
+    rule_ids = {result["id"] for result in results}
+
+    assert "RAW_PACKET_SOCKET_CLUSTER" not in rule_ids

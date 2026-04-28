@@ -9,8 +9,6 @@ import lief
 from blint.config import (
     APPLE_PROPRIETARY_INSTRUCTION_RANGES,
     APPLE_PROPRIETARY_SREGS,
-    CRYPTO_INDICATORS,
-    GPU_INDICATORS,
     IMPLICIT_REGS_ARM64,
     IMPLICIT_REGS_MIPS,
     IMPLICIT_REGS_X64,
@@ -24,8 +22,12 @@ from blint.config import (
     MIPS_MULT_DIV,
     MIPS_SHIFT_2_OP_IMM,
     MIPS_SHIFT_3_OP,
-    SECURITY_INDICATORS,
     SORTED_ALL_REGS_MIPS,
+)
+from blint.lib.indicators import (
+    CRYPTO_INDICATORS,
+    GPU_INDICATORS,
+    SECURITY_INDICATORS,
     SYSCALL_INDICATORS,
 )
 from blint.logger import LOG

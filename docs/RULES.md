@@ -29,6 +29,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. By default, one matching pattern is enough to trigger the rule; use `min_patterns` to require more than one distinct pattern match.
 - `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct patterns from `patterns` that must match before the rule triggers. Each matched pattern must map to a distinct symbol/function/import name (a single name is consumed once per rule). Defaults to `1`.
 - `allow_shared_matches` (Optional for pattern-based review groups): If `true`, matched symbol/function/import names used by this rule are not consumed globally and may also satisfy other rules in the same review pass. Defaults to `false`.
+- `include_informative_strings` (Optional for `METHOD_REVIEWS` and `EXE_REVIEWS`): If `true`, blint also matches this rule's `patterns` against `informative_strings[*].value` when present in metadata. This is useful for cluster rules that rely on stable operational constants (for example `/dev/net/tun`, `IP_HDRINCL`, `BPF_SOCK_OPS_*`) that may not appear as symbols.
 - `check_type` (Required for `FUNCTION_REVIEWS`): Specifies how the rule evaluates the `disassembled_functions` data. Valid types are:
   - `function_flag`: Checks if a specific boolean field within the function's metadata is `true`.
   - `function_metric`: Compares a numerical field within the function's metadata (e.g., `instruction_metrics`) against a threshold using an operator.
@@ -157,6 +158,8 @@ rules:
       - RpcServerUseProtseqEp
       - RpcServerListen
 ```
+
+`include_informative_strings` can be combined with `min_patterns` to create high-signal capability clusters while reducing noise from single-token matches.
 
 ### Example 4: `FUNCTION_REVIEWS` (Malware Analysis Indicators)
 

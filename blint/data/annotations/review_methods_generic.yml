@@ -277,3 +277,64 @@ rules:
       - SpecificationParser
       - GetProceduresFromFile
       - GetProceduresFromString
+  - id: EBPF_SOCK_OPS_CLUSTER
+    title: eBPF sock_ops and TCP desync primitives used
+    summary: Uses a cluster of eBPF sock_ops and TCP socket-tuning primitives.
+    description: |
+      This review detects binaries that expose multiple indicators commonly found in kernel-assisted TLS desynchronization tooling, including sock_ops callbacks, BPF map/event plumbing, and per-connection TCP tuning.
+    min_patterns: 3
+    include_informative_strings: true
+    patterns:
+      - BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB
+      - bpf_map_lookup_elem
+      - bpf_perf_event_output
+      - bpf_setsockopt
+      - TCP_MAXSEG
+      - sock_ops
+      - libbpf
+  - id: TUN_INTERFACE_CLUSTER
+    title: System-level TUN interception stack used
+    summary: Uses multiple indicators of TUN-based traffic interception.
+    description: |
+      This review detects binaries that include multiple platform-specific TUN interception indicators such as Linux TUN device paths, Apple utun interfaces, WinTUN, or userspace netstack integration.
+    min_patterns: 3
+    include_informative_strings: true
+    patterns:
+      - /dev/net/tun
+      - utun
+      - wintun
+      - gvisor
+      - netstack
+      - sing-tun
+      - tun2socks
+  - id: RAW_PACKET_SOCKET_CLUSTER
+    title: Raw packet injection primitives used
+    summary: Uses low-level packet forging and injection APIs.
+    description: |
+      This review detects binaries that include multiple indicators for packet crafting or injection workflows, such as raw sockets, custom headers, or pcap-based frame injection.
+    min_patterns: 3
+    include_informative_strings: true
+    patterns:
+      - IP_HDRINCL
+      - SOCK_RAW
+      - pcap_sendpacket
+      - npcap
+      - checksum
+      - EtherType
+      - ttl
+  - id: DOH_BYPASS_CLUSTER
+    title: Local DoH resolver redirection behavior used
+    summary: Uses clustered DNS-over-HTTPS redirection indicators.
+    description: |
+      This review detects binaries that include multiple hints of local DNS takeover and encrypted upstream DNS transport, including DoH endpoints and local loopback DNS listener indicators.
+    min_patterns: 3
+    include_informative_strings: true
+    patterns:
+      - DNS-over-HTTPS
+      - doh
+      - dns-query
+      - cloudflare-dns.com
+      - dns.google
+      - nextdns
+      - 127.0.0.1:53
+      - resolv.conf
