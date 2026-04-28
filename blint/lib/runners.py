@@ -44,6 +44,11 @@ def _coerce_rule_bool(value) -> bool:
             return True
         if normalized in ("false", "no", "0", "off", ""):
             return False
+        LOG.debug(
+            "Unrecognized boolean string value %r in review rule; defaulting to False",
+            value,
+        )
+        return False
     return bool(value)
 
 

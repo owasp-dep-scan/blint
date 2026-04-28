@@ -235,6 +235,27 @@ def test_run_review_methods_symbols_parses_rule_options_defensively():
     assert "RULE_TRUE_STRING" in reviewer.results
     assert "RULE_SHARED_SECOND" in reviewer.results
 
+    reviewer = ReviewRunner()
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_TYPO_STRING": {
+                    "patterns": ["RpcServerListen"],
+                    "allow_shared_matches": "flase",
+                }
+            },
+            {
+                "RULE_TYPO_SECOND": {
+                    "patterns": ["RpcServerListen"],
+                }
+            },
+        ],
+        functions_list,
+    )
+
+    assert "RULE_TYPO_STRING" in reviewer.results
+    assert "RULE_TYPO_SECOND" not in reviewer.results
+
 
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():
     raw_label = ' unsafe extern "C" fn(*mut u8)\n\t\\windows\\path|core::fmt `tick` '

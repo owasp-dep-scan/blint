@@ -27,7 +27,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `summary` (Required): A brief summary of what the rule detects.
 - `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
 - `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. By default, one matching pattern is enough to trigger the rule; use `min_patterns` to require more than one distinct pattern match.
-- `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct patterns from `patterns` that must match before the rule triggers. Defaults to `1`.
+- `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct patterns from `patterns` that must match before the rule triggers. Each matched pattern must map to a distinct symbol/function/import name (a single name is consumed once per rule). Defaults to `1`.
 - `allow_shared_matches` (Optional for pattern-based review groups): If `true`, matched symbol/function/import names used by this rule are not consumed globally and may also satisfy other rules in the same review pass. Defaults to `false`.
 - `check_type` (Required for `FUNCTION_REVIEWS`): Specifies how the rule evaluates the `disassembled_functions` data. Valid types are:
   - `function_flag`: Checks if a specific boolean field within the function's metadata is `true`.

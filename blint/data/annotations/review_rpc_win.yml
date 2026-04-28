@@ -55,7 +55,6 @@ rules:
       - DhcpClient
       - dhcpcsvc
       - DhcpSvc
-      - Dhcp
       - dhcpcore.dll
       - dhcpcore6.dll
       - 3c4728c5-f0ab-448b-bda1-6ce01eb0a6d5
@@ -63,6 +62,7 @@ rules:
       - RpcSrvEnableDhcp
       - RpcSrvRenewLease
       - RpcSrvRequestPrefixEx
+      - Dhcp
   - id: RPC_GPSVC_ARTIFACTS
     title: Contains Group Policy service RPC artifacts
     summary: Contains multiple gpsvc interface identifiers associated with the published PhantomRPC coercion path.
@@ -70,8 +70,8 @@ rules:
       This binary contains multiple identifiers associated with the Group Policy Client service RPC interface inventory used in PhantomRPC-style research, such as the gpsvc interface UUID, module name, or representative server procedure names. This is an artifact review only and does not prove exploitation.
     min_patterns: 2
     patterns:
-      - gpsvc
       - gpsvc.dll
+      - gpsvc
       - 2eb08e3e-639f-4fba-97b1-14f878961076
       - Server_ProcessRefresh
       - Server_RegisterForNotification
