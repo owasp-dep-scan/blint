@@ -41,6 +41,129 @@ def test_genericbinary():
     assert not results
 
 
+def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
+    metadata = {
+        "exe_type": "PE64",
+        "imports": [
+            {"name": "Rpcrt4.dll::RpcImpersonateClient"},
+            {"name": "Rpcrt4.dll::RpcRevertToSelf"},
+            {"name": "Rpcrt4.dll::RpcServerRegisterIf"},
+            {"name": "Rpcrt4.dll::RpcServerUseProtseqEp"},
+            {"name": "Rpcrt4.dll::RpcServerListen"},
+            {"name": "Rpcrt4.dll::RpcEpRegister"},
+        ],
+        "symtab_symbols": [
+            {"name": "TermSrvApi"},
+            {"name": "bde95fdf-eee0-45de-9e12-e5a61cd0d4fe"},
+            {"name": "W32TIME_ALT"},
+            {"name": "\\PIPE\\W32TIME"},
+            {"name": "DhcpClient"},
+            {"name": "dhcpcsvc"},
+        ],
+        "disassembled_functions": {
+            "0x140001000::serve_rpc": {
+                "name": "serve_rpc",
+                "address": "0x140001000",
+                "assembly": "call RpcServerRegisterIf",
+                "direct_calls": [
+                    "RpcServerRegisterIf",
+                    "RpcServerUseProtseqEp",
+                    "RpcServerListen",
+                    "RpcImpersonateClient",
+                ],
+            },
+            "0x140001100::steal_rpc_token": {
+                "name": "steal_rpc_token",
+                "address": "0x140001100",
+                "assembly": "call RpcImpersonateClient",
+                "direct_calls": [
+                    "RpcImpersonateClient",
+                    "OpenThreadToken",
+                    "DuplicateTokenEx",
+                ],
+            },
+            "0x140001200::launch_with_rpc_token": {
+                "name": "launch_with_rpc_token",
+                "address": "0x140001200",
+                "assembly": "call RpcImpersonateClient",
+                "direct_calls": [
+                    "RpcImpersonateClient",
+                    "DuplicateTokenEx",
+                    "CreateProcessWithTokenW",
+                ],
+            },
+            "0x140001300::launch_asuser_from_rpc_token": {
+                "name": "launch_asuser_from_rpc_token",
+                "address": "0x140001300",
+                "assembly": "call RpcImpersonateClient",
+                "direct_calls": [
+                    "RpcImpersonateClient",
+                    "DuplicateTokenEx",
+                    "CreateProcessAsUserW",
+                ],
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("synthetic-pe.exe", "synthetic-pe.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "RPC_IMPERSONATION_API" in rule_ids
+    assert "RPC_SERVER_BOOTSTRAP_IMPORTS" in rule_ids
+    assert "RPC_ENDPOINT_REGISTRATION_IMPORTS" in rule_ids
+    assert "RPC_SERVER_IMPERSONATION_CHAIN" in rule_ids
+    assert "RPC_TOKEN_IMPERSONATION_CHAIN" in rule_ids
+    assert "RPC_IMPERSONATION_PROCESS_CHAIN" in rule_ids
+    assert "RPC_IMPERSONATION_ASUSER_PROCESS_CHAIN" in rule_ids
+    assert "RPC_TERMSERVICE_ARTIFACTS" in rule_ids
+    assert "RPC_W32TIME_ARTIFACTS" in rule_ids
+    assert "RPC_DHCP_SERVICE_ARTIFACTS" in rule_ids
+
+    function_review = next(
+        result for result in results if result["id"] == "RPC_SERVER_IMPERSONATION_CHAIN"
+    )
+    assert function_review["evidence"][0]["function"] == "serve_rpc"
+
+    token_review = next(
+        result for result in results if result["id"] == "RPC_TOKEN_IMPERSONATION_CHAIN"
+    )
+    assert token_review["evidence"][0]["function"] == "steal_rpc_token"
+
+    process_review = next(
+        result
+        for result in results
+        if result["id"] == "RPC_IMPERSONATION_PROCESS_CHAIN"
+    )
+    assert process_review["evidence"][0]["function"] == "launch_with_rpc_token"
+
+    asuser_review = next(
+        result
+        for result in results
+        if result["id"] == "RPC_IMPERSONATION_ASUSER_PROCESS_CHAIN"
+    )
+    assert asuser_review["evidence"][0]["function"] == "launch_asuser_from_rpc_token"
+
+
+def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
+    metadata = {
+        "exe_type": "PE64",
+        "imports": [{"name": "Rpcrt4.dll::RpcImpersonateClient"}],
+        "symtab_symbols": [{"name": "TermSrvApi"}],
+        "functions": [{"name": "TermSrvApiHelper"}],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("single-artifact.exe", "single-artifact.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "RPC_SERVER_BOOTSTRAP_IMPORTS" not in rule_ids
+    assert "RPC_ENDPOINT_REGISTRATION_IMPORTS" not in rule_ids
+    assert "RPC_TERMSERVICE_ARTIFACTS" not in rule_ids
+
+
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():
     raw_label = ' unsafe extern "C" fn(*mut u8)\n\t\\windows\\path|core::fmt `tick` '
     normalized = _safe_mermaid_label(raw_label)

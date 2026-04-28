@@ -27,6 +27,8 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `summary` (Required): A brief summary of what the rule detects.
 - `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
 - `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. If any pattern matches, the rule triggers.
+- `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct entries from `patterns` that must match before the rule triggers. Defaults to `1`.
+- `allow_shared_matches` (Optional for pattern-based review groups): If `true`, matched symbol/function/import names used by this rule are not consumed globally and may also satisfy other rules in the same review pass. Defaults to `false`.
 - `check_type` (Required for `FUNCTION_REVIEWS`): Specifies how the rule evaluates the `disassembled_functions` data. Valid types are:
   - `function_flag`: Checks if a specific boolean field within the function's metadata is `true`.
   - `function_metric`: Compares a numerical field within the function's metadata (e.g., `instruction_metrics`) against a threshold using an operator.
@@ -132,7 +134,31 @@ rules:
       - pathContentOfSymbolicLink
 ```
 
-### Example 3: `FUNCTION_REVIEWS` (Malware Analysis Indicators)
+### Example 3: `METHOD_REVIEWS` (Pattern Clusters with Shared Matches)
+
+This rule requires at least two distinct pattern hits before it triggers and allows overlapping rules to reuse the same matched symbol names.
+`allow_shared_matches` only matters when another rule in the same review pass overlaps on the same symbol names.
+
+```yaml
+---
+text: Review for RPC-style server bootstrap symbols
+group: METHOD_REVIEWS
+exe_type: PE64
+rules:
+  - id: RPC_BOOTSTRAP_CLUSTER
+    title: RPC bootstrap cluster found
+    summary: Contains multiple RPC server bootstrap method names.
+    description: |
+      Useful for triaging binaries that appear to expose a local RPC server surface.
+    min_patterns: 2
+    allow_shared_matches: true
+    patterns:
+      - RpcServerRegisterIf
+      - RpcServerUseProtseqEp
+      - RpcServerListen
+```
+
+### Example 4: `FUNCTION_REVIEWS` (Malware Analysis Indicators)
 
 These rules analyze the disassembled function metadata for signs of potentially malicious behavior.
 

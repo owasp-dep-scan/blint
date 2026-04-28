@@ -1443,6 +1443,38 @@ rules:
       - PeerDistServerRetrieveContentInformation
       - PeerDistServerCloseContentInformation
       - PeerDistServerCancelAsyncOperation
+  - id: RPC_IMPERSONATION_API
+    title: RPC impersonation primitives used
+    summary: Uses Windows RPC server-side impersonation APIs
+    description: |
+      The binary imports Windows RPC APIs that let a server impersonate the connected client or recover the server binding context. These primitives are valid in legitimate RPC services, but they are also high-value triage signals when reviewing privilege-boundary, token-handling, or local-elevation tooling. This review is intentionally narrower than the generic RPC_API signal and is not proof of exploitation.
+    patterns:
+      - RpcBindingServerFromClient
+      - RpcGetAuthorizationContextForClient
+      - RpcImpersonateClient
+  - id: RPC_SERVER_BOOTSTRAP_IMPORTS
+    title: RPC server bootstrap imports used
+    summary: Imports the core API set required to expose an RPC server and impersonate clients.
+    description: |
+      The binary imports the core RPC server bootstrap sequence, including interface registration, local endpoint exposure, server listen, and client impersonation primitives. This is a higher-signal static review for binaries that may stand up local RPC services or imitate privileged RPC endpoints, but it is not by itself proof of exploitation.
+    allow_shared_matches: true
+    min_patterns: 4
+    patterns:
+      - RpcServerRegisterIf
+      - RpcServerUseProtseqEp
+      - RpcServerListen
+      - RpcImpersonateClient
+  - id: RPC_ENDPOINT_REGISTRATION_IMPORTS
+    title: RPC endpoint registration imports used
+    summary: Imports RPC APIs commonly used to register and publish a local server endpoint.
+    description: |
+      The binary imports a cluster of RPC endpoint-registration APIs often used when publishing a local RPC service, including explicit endpoint registration. This is useful for triaging service-mimic or endpoint-exposure tooling and should be correlated with additional evidence.
+    allow_shared_matches: true
+    min_patterns: 3
+    patterns:
+      - RpcEpRegister
+      - RpcServerRegisterIf
+      - RpcServerUseProtseqEp
   - id: RPC_API
     title: RPC api functions used
     summary: Can Execute Remote Procedures

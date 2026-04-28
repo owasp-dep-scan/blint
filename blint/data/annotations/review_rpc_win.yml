@@ -1,0 +1,41 @@
+---
+text: Review for Windows RPC service mimicry artifacts
+group: METHOD_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+  - gobinary
+rules:
+  - id: RPC_TERMSERVICE_ARTIFACTS
+    title: Contains TermService RPC mimicry artifacts
+    summary: Contains multiple TermService/TermSrvApi identifiers associated with local RPC server mimicry.
+    description: |
+      This binary contains multiple identifiers associated with the published PhantomRPC-style TermService path, such as the TermSrvApi endpoint name or the documented TermService interface UUID. This is a descriptive artifact review only and does not prove exploitability.
+    min_patterns: 2
+    patterns:
+      - TermSrvApi
+      - TermService
+      - bde95fdf-eee0-45de-9e12-e5a61cd0d4fe
+  - id: RPC_W32TIME_ARTIFACTS
+    title: Contains Windows Time RPC endpoint artifacts
+    summary: Contains multiple Windows Time service endpoint identifiers associated with RPC service mimicry.
+    description: |
+      This binary contains multiple identifiers associated with the Windows Time service path discussed in PhantomRPC-style research, including W32TIME_ALT or related endpoint strings. This is a descriptive artifact review only and does not prove exploitability.
+    min_patterns: 2
+    patterns:
+      - W32TIME_ALT
+      - W32TIME
+      - \\PIPE\\W32TIME
+      - \\RPC Control\\W32TIME_ALT
+  - id: RPC_DHCP_SERVICE_ARTIFACTS
+    title: Contains DHCP RPC service artifacts
+    summary: Contains multiple DHCP service identifiers associated with local RPC service mimicry.
+    description: |
+      This binary contains multiple DHCP service identifiers that may be relevant when reviewing local RPC service mimicry or disabled-service abuse paths. This review is intentionally descriptive and should be correlated with stronger RPC server bootstrap or impersonation signals.
+    min_patterns: 2
+    patterns:
+      - DhcpClient
+      - dhcpcsvc
+      - DhcpSvc
+      - Dhcp
+

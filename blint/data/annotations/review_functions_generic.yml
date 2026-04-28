@@ -161,3 +161,52 @@ rules:
     patterns:
       - HalTranslateBusAddress
       - ZwMapViewOfSection
+  - id: RPC_SERVER_IMPERSONATION_CHAIN
+    title: Function combines RPC server setup and client impersonation
+    summary: A single function stands up an RPC endpoint and impersonates the connecting client.
+    description: |
+      This function directly calls RpcServerRegisterIf, RpcServerUseProtseqEp, RpcServerListen, and RpcImpersonateClient. That combination is uncommon in ordinary client code and is useful for triaging Windows binaries that expose privileged RPC surfaces or appear to exercise RPC impersonation logic. This is a behavioral heuristic only; it does not prove a specific exploit or validate the blog's "PhantomRPC" claim.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - RpcServerRegisterIf
+      - RpcServerUseProtseqEp
+      - RpcServerListen
+      - RpcImpersonateClient
+  - id: RPC_TOKEN_IMPERSONATION_CHAIN
+    title: Function combines RPC impersonation and token duplication
+    summary: A single function impersonates an RPC client and then opens or duplicates a token.
+    description: |
+      This function directly calls RpcImpersonateClient together with OpenThreadToken and DuplicateTokenEx. That sequence is a high-signal triage pattern for code that converts an RPC impersonation context into a reusable token. Legitimate administrative or service code can do this, so the review is intentionally behavioral and non-assertive.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - RpcImpersonateClient
+      - OpenThreadToken
+      - DuplicateTokenEx
+  - id: RPC_IMPERSONATION_PROCESS_CHAIN
+    title: Function combines RPC impersonation and token-backed process creation
+    summary: A single function impersonates an RPC client, duplicates a token, and launches a process with it.
+    description: |
+      This function directly calls RpcImpersonateClient, DuplicateTokenEx, and a token-backed process creation API such as CreateProcessWithTokenW or CreateProcessAsUser*. That combination is useful for triaging Windows service code that could transform an impersonation context into a new process running under the impersonated security context. This is not proof of exploitation, but it is a strong review signal.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - RpcImpersonateClient
+      - DuplicateTokenEx
+      - CreateProcessWithToken
+  - id: RPC_IMPERSONATION_ASUSER_PROCESS_CHAIN
+    title: Function combines RPC impersonation and CreateProcessAsUser-style launch
+    summary: A single function impersonates an RPC client, duplicates a token, and launches a process via CreateProcessAsUser*.
+    description: |
+      This function directly calls RpcImpersonateClient, DuplicateTokenEx, and CreateProcessAsUser*. That combination is useful for triaging Windows binaries that may translate an RPC impersonation context into a new process under the impersonated identity. Legitimate service helpers can use this pattern as well, so this review is intentionally descriptive rather than conclusive.
+    check_type: function_metric
+    check_field: direct_calls
+    operator: "contains_all"
+    patterns:
+      - RpcImpersonateClient
+      - DuplicateTokenEx
+      - CreateProcessAsUser

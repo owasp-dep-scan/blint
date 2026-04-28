@@ -663,6 +663,11 @@ class ReviewRunner:
                 if found_cid[cid] > EVIDENCE_LIMIT:
                     continue
                 patterns = rule_obj.get("patterns")
+                min_patterns = max(int(rule_obj.get("min_patterns", 1)), 1)
+                allow_shared_matches = bool(rule_obj.get("allow_shared_matches"))
+                rule_results = []
+                rule_matched_patterns = set()
+                rule_matched_functions = {}
                 for apattern in patterns:
                     if (
                         found_pattern[apattern] > EVIDENCE_LIMIT
@@ -670,15 +675,31 @@ class ReviewRunner:
                     ):
                         continue
                     for afun in functions_list:
-                        if apattern.lower() in afun.lower() and not found_function.get(
-                            afun.lower()
+                        afun_lower = afun.lower()
+                        if (
+                            apattern.lower() in afun_lower
+                            and (
+                                allow_shared_matches
+                                or not found_function.get(afun_lower)
+                            )
+                            and not rule_matched_functions.get(afun_lower)
                         ):
-                            result = {
-                                "pattern": apattern,
-                                "function": afun,
-                            }
-                            results[cid].append(result)
-                            found_cid[cid] += 1
-                            found_pattern[apattern] += 1
-                            found_function[afun.lower()] = True
+                            rule_results.append(
+                                {
+                                    "pattern": apattern,
+                                    "function": afun,
+                                }
+                            )
+                            rule_matched_patterns.add(apattern)
+                            rule_matched_functions[afun_lower] = True
+                            break
+                if len(rule_matched_patterns) < min_patterns:
+                    continue
+                remaining = EVIDENCE_LIMIT - found_cid[cid] + 1
+                for result in rule_results[:remaining]:
+                    results[cid].append(result)
+                    found_cid[cid] += 1
+                    found_pattern[result["pattern"]] += 1
+                    if not allow_shared_matches:
+                        found_function[result["function"].lower()] = True
         self.results |= results
