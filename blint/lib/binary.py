@@ -477,6 +477,17 @@ def parse_strings(parsed_obj):
 
 def parse_informative_strings(parsed_obj):
     """Extracts stable, non-secret string hints useful for capability clustering."""
+
+    def _matches_indicator(lowered_text: str, indicator: str) -> bool:
+        """Use boundary-aware matching for short/alphanumeric indicators."""
+        lowered_indicator = indicator.lower().strip()
+        if not lowered_indicator:
+            return False
+        if all(ch.isalnum() or ch == "_" for ch in lowered_indicator):
+            pattern = rf"(?<![a-z0-9]){re.escape(lowered_indicator)}(?![a-z0-9])"
+            return bool(re.search(pattern, lowered_text))
+        return lowered_indicator in lowered_text
+
     informative = []
     seen = set()
     with contextlib.suppress(AttributeError):
@@ -492,7 +503,10 @@ def parse_informative_strings(parsed_obj):
             lowered = text.lower()
             if lowered in seen:
                 continue
-            if any(indicator in lowered for indicator in INFORMATIVE_STRING_HINTS):
+            if any(
+                _matches_indicator(lowered, indicator)
+                for indicator in INFORMATIVE_STRING_HINTS
+            ):
                 seen.add(lowered)
                 informative.append({"value": text, "category": "network_evasion_hint"})
     return informative

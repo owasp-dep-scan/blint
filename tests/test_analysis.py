@@ -257,6 +257,33 @@ def test_run_review_methods_symbols_parses_rule_options_defensively():
     assert "RULE_TYPO_SECOND" not in reviewer.results
 
 
+def test_run_review_methods_symbols_uses_informative_strings_per_rule_opt_in():
+    functions_list = ["safe_function"]
+    informative_values = ["bpf_sock_ops_active_established_cb"]
+
+    reviewer = ReviewRunner()
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_NO_OPT_IN": {
+                    "patterns": ["bpf_sock_ops_active_established_cb"],
+                }
+            },
+            {
+                "RULE_WITH_OPT_IN": {
+                    "patterns": ["bpf_sock_ops_active_established_cb"],
+                    "include_informative_strings": True,
+                }
+            },
+        ],
+        functions_list,
+        informative_values=informative_values,
+    )
+
+    assert "RULE_NO_OPT_IN" not in reviewer.results
+    assert "RULE_WITH_OPT_IN" in reviewer.results
+
+
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():
     raw_label = ' unsafe extern "C" fn(*mut u8)\n\t\\windows\\path|core::fmt `tick` '
     normalized = _safe_mermaid_label(raw_label)

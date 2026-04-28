@@ -60,17 +60,6 @@ def _coerce_min_patterns(value) -> int:
         return 1
 
 
-def _rule_uses_informative_strings(review_list) -> bool:
-    """Checks whether any rule in a review group opted into informative strings."""
-    if not review_list:
-        return False
-    for review_methods in review_list:
-        for rule_obj in review_methods.values():
-            if _coerce_rule_bool(rule_obj.get("include_informative_strings")):
-                return True
-    return False
-
-
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -630,24 +619,27 @@ class ReviewRunner:
             functions_list = [
                 f.get("name", "") for f in metadata.get("symtab_symbols", [])
             ]
-        include_informative = _rule_uses_informative_strings(
-            self.review_methods_list
-        ) or _rule_uses_informative_strings(self.review_exe_list)
-        if include_informative:
-            informative_values = []
-            for s in metadata.get("informative_strings", []):
-                if isinstance(s, dict):
-                    value = s.get("value", "")
-                else:
-                    value = str(s)
-                if value:
-                    informative_values.append(value)
-            functions_list += informative_values
+        informative_values = []
+        for s in metadata.get("informative_strings", []):
+            if isinstance(s, dict):
+                value = s.get("value", "")
+            else:
+                value = str(s)
+            if value:
+                informative_values.append(value)
         LOG.debug(f"Reviewing {len(functions_list)} functions")
         if self.review_methods_list:
-            self.run_review_methods_symbols(self.review_methods_list, functions_list)
+            self.run_review_methods_symbols(
+                self.review_methods_list,
+                functions_list,
+                informative_values=informative_values,
+            )
         if self.review_exe_list:
-            self.run_review_methods_symbols(self.review_exe_list, functions_list)
+            self.run_review_methods_symbols(
+                self.review_exe_list,
+                functions_list,
+                informative_values=informative_values,
+            )
 
     def _gen_review_lists(self, exe_type):
         """
@@ -686,7 +678,9 @@ class ReviewRunner:
             reviews.append(aresult)
         return reviews
 
-    def run_review_methods_symbols(self, review_list, functions_list):
+    def run_review_methods_symbols(
+        self, review_list, functions_list, informative_values=None
+    ):
         """Runs a review of methods and symbols based on the provided lists.
 
         This function takes a list of review methods and a list of functions and
@@ -706,6 +700,7 @@ class ReviewRunner:
         found_cid = defaultdict(int)
         found_pattern = defaultdict(int)
         found_function = {}
+        informative_values = informative_values or []
         if not review_list:
             return
         for review_methods in review_list:
@@ -717,6 +712,14 @@ class ReviewRunner:
                 allow_shared_matches = _coerce_rule_bool(
                     rule_obj.get("allow_shared_matches")
                 )
+                include_informative_strings = _coerce_rule_bool(
+                    rule_obj.get("include_informative_strings")
+                )
+                candidate_functions = (
+                    functions_list + informative_values
+                    if include_informative_strings
+                    else functions_list
+                )
                 rule_results = []
                 rule_matched_patterns = set()
                 rule_matched_functions = {}
@@ -726,7 +729,7 @@ class ReviewRunner:
                         or found_cid[cid] >= EVIDENCE_LIMIT
                     ):
                         continue
-                    for afun in functions_list:
+                    for afun in candidate_functions:
                         afun_lower = afun.lower()
                         if (
                             apattern.lower() in afun_lower

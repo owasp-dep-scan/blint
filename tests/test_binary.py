@@ -71,6 +71,8 @@ def test_parse_informative_strings_extracts_and_deduplicates_network_hints():
             "IP_HDRINCL",
             "harmless_string",
             "127.0.0.1:53",
+            "shadow",
+            "sniper",
         ]
 
     informative = parse_informative_strings(_FakeParsed())
@@ -80,6 +82,8 @@ def test_parse_informative_strings_extracts_and_deduplicates_network_hints():
     assert "IP_HDRINCL" in values
     assert "127.0.0.1:53" in values
     assert "harmless_string" not in values
+    assert "shadow" not in values
+    assert "sniper" not in values
     assert len(values) == 3
 
 
