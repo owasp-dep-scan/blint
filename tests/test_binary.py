@@ -87,6 +87,24 @@ def test_parse_informative_strings_extracts_and_deduplicates_network_hints():
     assert len(values) == 3
 
 
+def test_parse_informative_strings_matches_punctuated_indicators_once():
+    class _FakeParsed:
+        strings = [
+            " DNS-over-HTTPS ",
+            "dns-over-https",
+            "/dev/net/tun0",
+            "dns-query endpoint",
+            "",
+            None,
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+    values = [entry["value"] for entry in informative]
+
+    assert values == ["DNS-over-HTTPS", "/dev/net/tun0", "dns-query endpoint"]
+    assert all(entry["category"] == "network_evasion_hint" for entry in informative)
+
+
 def test_parse_wasm_detects_dos_growth_loop_finding():
     wasm_file = TEST_DATA_DIR / "dos_growth_loop.wasm"
     metadata = parse(str(wasm_file))

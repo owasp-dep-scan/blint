@@ -475,18 +475,29 @@ def parse_strings(parsed_obj):
     return strings_list
 
 
+def _prepare_informative_string_matchers(indicators):
+    """Normalize informative string indicators into reusable matcher groups."""
+    boundary_patterns = []
+    substring_indicators = []
+    for indicator in indicators:
+        lowered_indicator = indicator.lower().strip()
+        if not lowered_indicator:
+            continue
+        if all(ch.isalnum() or ch == "_" for ch in lowered_indicator):
+            boundary_patterns.append(
+                re.compile(rf"(?<![a-z0-9]){re.escape(lowered_indicator)}(?![a-z0-9])")
+            )
+            continue
+        substring_indicators.append(lowered_indicator)
+    return tuple(boundary_patterns), tuple(substring_indicators)
+
+
 def parse_informative_strings(parsed_obj):
     """Extracts stable, non-secret string hints useful for capability clustering."""
 
-    def _matches_indicator(lowered_text: str, indicator: str) -> bool:
-        """Use boundary-aware matching for short/alphanumeric indicators."""
-        lowered_indicator = indicator.lower().strip()
-        if not lowered_indicator:
-            return False
-        if all(ch.isalnum() or ch == "_" for ch in lowered_indicator):
-            pattern = rf"(?<![a-z0-9]){re.escape(lowered_indicator)}(?![a-z0-9])"
-            return bool(re.search(pattern, lowered_text))
-        return lowered_indicator in lowered_text
+    boundary_patterns, substring_indicators = _prepare_informative_string_matchers(
+        INFORMATIVE_STRING_HINTS
+    )
 
     informative = []
     seen = set()
@@ -503,9 +514,8 @@ def parse_informative_strings(parsed_obj):
             lowered = text.lower()
             if lowered in seen:
                 continue
-            if any(
-                _matches_indicator(lowered, indicator)
-                for indicator in INFORMATIVE_STRING_HINTS
+            if any(indicator in lowered for indicator in substring_indicators) or any(
+                pattern.search(lowered) for pattern in boundary_patterns
             ):
                 seen.add(lowered)
                 informative.append({"value": text, "category": "network_evasion_hint"})
