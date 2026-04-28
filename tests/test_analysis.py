@@ -3,6 +3,7 @@ from pathlib import Path
 import orjson
 
 from blint.lib.analysis import (
+    EVIDENCE_LIMIT,
     _filter_callgraph_by_min_confidence,
     _build_mermaid_callgraph_text,
     _safe_mermaid_label,
@@ -54,11 +55,21 @@ def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
         ],
         "symtab_symbols": [
             {"name": "TermSrvApi"},
+            {"name": "termsrv.dll"},
             {"name": "bde95fdf-eee0-45de-9e12-e5a61cd0d4fe"},
+            {"name": "497d95a6-2d27-4bf5-9bbd-a6046957133c"},
+            {"name": "RpcOpenListener"},
             {"name": "W32TIME_ALT"},
+            {"name": "w32time.dll"},
+            {"name": "8fb6d884-2388-11d0-8c35-00c04fda2795"},
             {"name": "\\PIPE\\W32TIME"},
             {"name": "DhcpClient"},
+            {"name": "dhcpcore.dll"},
+            {"name": "3c4728c5-f0ab-448b-bda1-6ce01eb0a6d5"},
             {"name": "dhcpcsvc"},
+            {"name": "gpsvc.dll"},
+            {"name": "2eb08e3e-639f-4fba-97b1-14f878961076"},
+            {"name": "Server_ProcessRefresh"},
         ],
         "disassembled_functions": {
             "0x140001000::serve_rpc": {
@@ -120,6 +131,7 @@ def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
     assert "RPC_TERMSERVICE_ARTIFACTS" in rule_ids
     assert "RPC_W32TIME_ARTIFACTS" in rule_ids
     assert "RPC_DHCP_SERVICE_ARTIFACTS" in rule_ids
+    assert "RPC_GPSVC_ARTIFACTS" in rule_ids
 
     function_review = next(
         result for result in results if result["id"] == "RPC_SERVER_IMPERSONATION_CHAIN"
@@ -162,6 +174,66 @@ def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
     assert "RPC_SERVER_BOOTSTRAP_IMPORTS" not in rule_ids
     assert "RPC_ENDPOINT_REGISTRATION_IMPORTS" not in rule_ids
     assert "RPC_TERMSERVICE_ARTIFACTS" not in rule_ids
+    assert "RPC_GPSVC_ARTIFACTS" not in rule_ids
+
+
+def test_run_review_methods_symbols_caps_evidence_at_limit():
+    patterns = [f"pattern{i}" for i in range(EVIDENCE_LIMIT + 2)]
+    functions_list = [f"symbol_pattern{i}" for i in range(EVIDENCE_LIMIT + 2)]
+    reviewer = ReviewRunner()
+
+    reviewer.run_review_methods_symbols(
+        [{"RULE_CAP": {"patterns": patterns, "min_patterns": 1}}], functions_list
+    )
+
+    assert len(reviewer.results["RULE_CAP"]) == EVIDENCE_LIMIT
+
+
+def test_run_review_methods_symbols_parses_rule_options_defensively():
+    functions_list = ["RpcServerListen"]
+
+    reviewer = ReviewRunner()
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_FALSE_STRING": {
+                    "patterns": ["RpcServerListen"],
+                    "min_patterns": "not-a-number",
+                    "allow_shared_matches": "false",
+                }
+            },
+            {
+                "RULE_SECOND": {
+                    "patterns": ["RpcServerListen"],
+                }
+            },
+        ],
+        functions_list,
+    )
+
+    assert "RULE_FALSE_STRING" in reviewer.results
+    assert "RULE_SECOND" not in reviewer.results
+
+    reviewer = ReviewRunner()
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_TRUE_STRING": {
+                    "patterns": ["RpcServerListen"],
+                    "allow_shared_matches": "true",
+                }
+            },
+            {
+                "RULE_SHARED_SECOND": {
+                    "patterns": ["RpcServerListen"],
+                }
+            },
+        ],
+        functions_list,
+    )
+
+    assert "RULE_TRUE_STRING" in reviewer.results
+    assert "RULE_SHARED_SECOND" in reviewer.results
 
 
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():

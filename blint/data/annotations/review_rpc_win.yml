@@ -1,6 +1,6 @@
 ---
 text: Review for Windows RPC service mimicry artifacts
-group: METHOD_REVIEWS
+group: SYMBOL_REVIEWS
 exe_type:
   - PE32
   - PE64
@@ -15,7 +15,20 @@ rules:
     patterns:
       - TermSrvApi
       - TermService
+      - termsrv.dll
+      - 1f260487-ba29-4f13-928a-bbd29761b083
+      - 5267aaba-4f49-4653-8e26-d1e11f3f2ad9
+      - 28098650-fe3c-4af4-8a41-8bcd284941c5
+      - 5ca4a760-ebb1-11cf-8611-00a0245420ed
+      - 497d95a6-2d27-4bf5-9bbd-a6046957133c
+      - 2f59a331-bf7d-48cb-9e5c-7c090d76e8b8
+      - ecd85155-cc3a-4f10-aad5-9a9a2bf2ef0c
       - bde95fdf-eee0-45de-9e12-e5a61cd0d4fe
+      - RpcGetClientData
+      - RpcOpenListener
+      - RpcWinStationOpenServer
+      - RpcCreateVirtualChannel
+      - RpcLicensingOpenServer
   - id: RPC_W32TIME_ARTIFACTS
     title: Contains Windows Time RPC endpoint artifacts
     summary: Contains multiple Windows Time service endpoint identifiers associated with RPC service mimicry.
@@ -25,8 +38,13 @@ rules:
     patterns:
       - W32TIME_ALT
       - W32TIME
-      - \\PIPE\\W32TIME
-      - \\RPC Control\\W32TIME_ALT
+      - w32time.dll
+      - 8fb6d884-2388-11d0-8c35-00c04fda2795
+      - \PIPE\W32TIME
+      - \RPC Control\W32TIME_ALT
+      - s_W32TimeSync
+      - s_W32TimeQueryStatus
+      - s_W32TimeQueryProviderConfiguration
   - id: RPC_DHCP_SERVICE_ARTIFACTS
     title: Contains DHCP RPC service artifacts
     summary: Contains multiple DHCP service identifiers associated with local RPC service mimicry.
@@ -38,4 +56,24 @@ rules:
       - dhcpcsvc
       - DhcpSvc
       - Dhcp
+      - dhcpcore.dll
+      - dhcpcore6.dll
+      - 3c4728c5-f0ab-448b-bda1-6ce01eb0a6d5
+      - 3c4728c5-f0ab-448b-bda1-6ce01eb0a6d6
+      - RpcSrvEnableDhcp
+      - RpcSrvRenewLease
+      - RpcSrvRequestPrefixEx
+  - id: RPC_GPSVC_ARTIFACTS
+    title: Contains Group Policy service RPC artifacts
+    summary: Contains multiple gpsvc interface identifiers associated with the published PhantomRPC coercion path.
+    description: |
+      This binary contains multiple identifiers associated with the Group Policy Client service RPC interface inventory used in PhantomRPC-style research, such as the gpsvc interface UUID, module name, or representative server procedure names. This is an artifact review only and does not prove exploitation.
+    min_patterns: 2
+    patterns:
+      - gpsvc
+      - gpsvc.dll
+      - 2eb08e3e-639f-4fba-97b1-14f878961076
+      - Server_ProcessRefresh
+      - Server_RegisterForNotification
+      - Server_GenerateGroupPolicyNotification
 

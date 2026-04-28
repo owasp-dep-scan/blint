@@ -34,6 +34,27 @@ from blint.lib.utils import (
 from blint.logger import LOG
 
 
+def _coerce_rule_bool(value) -> bool:
+    """Parse review-rule booleans defensively from YAML-like values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "yes", "1", "on"):
+            return True
+        if normalized in ("false", "no", "0", "off", ""):
+            return False
+    return bool(value)
+
+
+def _coerce_min_patterns(value) -> int:
+    """Parse the minimum distinct pattern count safely, defaulting to 1."""
+    try:
+        return max(int(value), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -660,18 +681,20 @@ class ReviewRunner:
             return
         for review_methods in review_list:
             for cid, rule_obj in review_methods.items():
-                if found_cid[cid] > EVIDENCE_LIMIT:
+                if found_cid[cid] >= EVIDENCE_LIMIT:
                     continue
                 patterns = rule_obj.get("patterns")
-                min_patterns = max(int(rule_obj.get("min_patterns", 1)), 1)
-                allow_shared_matches = bool(rule_obj.get("allow_shared_matches"))
+                min_patterns = _coerce_min_patterns(rule_obj.get("min_patterns", 1))
+                allow_shared_matches = _coerce_rule_bool(
+                    rule_obj.get("allow_shared_matches")
+                )
                 rule_results = []
                 rule_matched_patterns = set()
                 rule_matched_functions = {}
                 for apattern in patterns:
                     if (
-                        found_pattern[apattern] > EVIDENCE_LIMIT
-                        or found_cid[cid] > EVIDENCE_LIMIT
+                        found_pattern[apattern] >= EVIDENCE_LIMIT
+                        or found_cid[cid] >= EVIDENCE_LIMIT
                     ):
                         continue
                     for afun in functions_list:
@@ -695,7 +718,7 @@ class ReviewRunner:
                             break
                 if len(rule_matched_patterns) < min_patterns:
                     continue
-                remaining = EVIDENCE_LIMIT - found_cid[cid] + 1
+                remaining = max(EVIDENCE_LIMIT - found_cid[cid], 0)
                 for result in rule_results[:remaining]:
                     results[cid].append(result)
                     found_cid[cid] += 1
