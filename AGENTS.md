@@ -104,14 +104,13 @@ poetry run blint sbom --help
 For blintdb-backed SBOM changes, also run a small real corpus validation against the linked `blint-db` workspace:
 
 ```bash
-cd /path/to/blint/blint-db
-python -m blint_db.cli --clean-start --db-file ./temp/meson-small.db --disassemble build-meson -s zlib bzip2
-
 cd /path/to/blint
-export BLINTDB_HOME=/path/to/blint/.tmp-meson-db
-poetry run blint sbom -i /path/to/libz.1.dylib --use-blintdb --stdout
-poetry run blint sbom -i /path/to/libz.1.dylib --use-blintdb --deep --stdout
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems meson
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems vcpkg
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems homebrew
 ```
+
+The manifest for that workflow lives in `tests/data/blintdb-small-corpus.json` and currently covers 5 selectors each for Meson, vcpkg, and Homebrew.
 
 ### Callgraph regression validation policy
 

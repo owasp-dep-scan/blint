@@ -70,6 +70,7 @@ This file defines practical skills an AI agent should apply when working on `bli
   - symbol-only: `blint sbom --use-blintdb`
   - disassembly-assisted: `blint sbom --use-blintdb --deep`
 - For exact binaries that were used to build the corpus, expect near-exact component identification and inspect `internal:blintdb_*` properties when debugging drift.
+- Prefer the scripted validation flow in `tests/scripts/validate_blintdb_small_corpus.py` over one-off shell snippets. The selector manifest is versioned in `tests/data/blintdb-small-corpus.json`.
 
 ## Skill: Documentation updates with code changes
 

@@ -132,6 +132,8 @@ The workflow is a two-step process:
 
 The generated SBOM keeps the inferred package purl and also records `internal:blintdb_*` evidence properties on matched components so you can review why a component was selected.
 
+For repeatable end-to-end validation of local `blint-db` changes, use the integration script in `tests/scripts/validate_blintdb_small_corpus.py`. It builds and validates a versioned 15-case corpus split across Meson, vcpkg, and Homebrew, using the manifest stored in `tests/data/blintdb-small-corpus.json`.
+
 ## Environment Variables
 
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`: Control blintdb download location, source image, and refresh behavior.

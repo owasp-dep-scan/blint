@@ -1,0 +1,83 @@
+{
+  "meson": [
+    {
+      "selector": "zlib",
+      "project_name": "zlib",
+      "preferred_artifact_names": ["libz.1", "libz.dylib", "libz.so", "zlib1"]
+    },
+    {
+      "selector": "bzip2",
+      "project_name": "bzip2",
+      "preferred_artifact_names": ["bzip2", "libbz2"]
+    },
+    {
+      "selector": "c-ares",
+      "project_name": "c-ares",
+      "preferred_artifact_names": ["libcares", "cares"]
+    },
+    {
+      "selector": "zstd",
+      "project_name": "zstd",
+      "preferred_artifact_names": ["libzstd", "zstd"]
+    },
+    {
+      "selector": "fmt",
+      "project_name": "fmt",
+      "preferred_artifact_names": ["libfmt", "fmt"]
+    }
+  ],
+  "vcpkg": [
+    {
+      "selector": "zlib",
+      "project_name": "zlib",
+      "preferred_artifact_names": ["libz", "zlib1"]
+    },
+    {
+      "selector": "bzip2",
+      "project_name": "bzip2",
+      "preferred_artifact_names": ["libbz2", "bzip2"]
+    },
+    {
+      "selector": "libpng",
+      "project_name": "libpng",
+      "preferred_artifact_names": ["libpng16", "libpng"]
+    },
+    {
+      "selector": "zstd",
+      "project_name": "zstd",
+      "preferred_artifact_names": ["libzstd", "zstd"]
+    },
+    {
+      "selector": "fmt",
+      "project_name": "fmt",
+      "preferred_artifact_names": ["libfmt", "fmt"]
+    }
+  ],
+  "homebrew": [
+    {
+      "selector": "bzip2",
+      "project_name": "bzip2",
+      "preferred_artifact_names": ["bzip2", "libbz2"]
+    },
+    {
+      "selector": "libpng",
+      "project_name": "libpng",
+      "preferred_artifact_names": ["libpng16", "libpng"]
+    },
+    {
+      "selector": "openssl@3",
+      "project_name": "openssl@3",
+      "preferred_artifact_names": ["openssl", "libcrypto", "libssl"]
+    },
+    {
+      "selector": "ripgrep",
+      "project_name": "ripgrep",
+      "preferred_artifact_names": ["rg"]
+    },
+    {
+      "selector": "zstd",
+      "project_name": "zstd",
+      "preferred_artifact_names": ["zstd", "libzstd"]
+    }
+  ]
+}

@@ -140,3 +140,5 @@ out.json
 requirements-dist.txt
 .mise.toml
 tests/fixtures/
+.tmp*/
+blint-db/
