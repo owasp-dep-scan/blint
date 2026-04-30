@@ -101,7 +101,11 @@ blint produces several JSON artifacts in the specified reports directory.
 
 ## Advanced Usage: SBOM Generation with blintdb
 
-For C/C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb**, a pre-compiled database of symbols from popular open-source libraries (like those from vcpkg), to dramatically improve component identification.
+For C and C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb v2**, a pre-compiled database built from real project outputs, to improve component identification with:
+
+- project-level symbol matching
+- binary-name hints
+- optional disassembly hash matching when deep mode is enabled
 
 The workflow is a two-step process:
 
@@ -118,7 +122,15 @@ The workflow is a two-step process:
     blint sbom -i /path/to/binary -o sbom.cdx.json --use-blintdb
     ```
 
-This will cross-reference symbols found in your binary against the database to identify components like OpenSSL, zlib, and others.
+3.  **For higher-confidence native matching, enable deep mode:**
+
+    ```shell
+    blint sbom -i /path/to/binary -o sbom.cdx.json --use-blintdb --deep
+    ```
+
+    When `--use-blintdb` and `--deep` are set together, `blint` enables disassembly automatically and searches the database with function hashes before falling back to symbol evidence.
+
+The generated SBOM keeps the inferred package purl and also records `internal:blintdb_*` evidence properties on matched components so you can review why a component was selected.
 
 ## Environment Variables
 
@@ -147,7 +159,7 @@ options:
   --no-banner           Do not display banner.
   --no-reviews          Do not perform method reviews.
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
-  --use-blintdb         Use blintdb for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
+  --use-blintdb         Use blintdb v2 for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
   --disassemble         Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.
   --export-callgraph-mermaid
                         Export callgraph as Mermaid (.mmd) files and embed diagrams into blint-output.html. Effective when --disassemble is enabled.
@@ -175,8 +187,8 @@ sub-commands:
 <summary><strong>SBOM Sub-command Help</strong></summary>
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]]
-                  [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]]
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
+                  [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]] [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
 
 options:
   -h, --help            show this help message and exit
@@ -184,12 +196,14 @@ options:
                         Source directories, container images or binary files. Defaults to current directory.
   -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
                         SBOM output file. Defaults to sbom-binary-postbuild.cdx.json in current directory.
-  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow operation.
+  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow operation. When combined with --use-blintdb, disassembly is enabled automatically to use function-hash lookup.
   --stdout              Print the SBOM to stdout instead of a file.
+  -q, --quiet           Disable logging and progress bars.
   --exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]
                         prefixes for the exports to be included in the SBOM.
   --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
                         Directories containing pre-build and build BOMs. Use to improve the precision.
+  --use-blintdb         Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the local database file exists.
 ```
 
 </details>
@@ -204,7 +218,7 @@ options:
   -h, --help            show this help message and exit
   --download            Download the pre-compiled database to the /Volumes/Work/blintdb/ directory. Use the environment variable `BLINTDB_HOME` to override.
   --image-url IMAGE_URL
-                        blintdb image url. Defaults to ghcr.io/appthreat/blintdb-vcpkg-arm64:v1. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.
+                        blintdb image url. Defaults to ghcr.io/appthreat/blintdb-vcpkg-arm64:v2. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.
 ```
 
 </details>

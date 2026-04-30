@@ -44,12 +44,16 @@ This file defines practical skills an AI agent should apply when working on `bli
 - Avoid dependency self-loops.
 - Keep deep-mode details in properties, not default minimal output.
 - Respect `--stdout` and output path behavior.
+- Remember that `blint sbom --use-blintdb --deep` auto-enables disassembly. Test that path explicitly when changing SBOM or DB matching logic.
 
 ## Skill: Use blintdb integration properly
 
 - Database usage is optional and should not block core execution.
 - Keep behavior safe when DB is missing or download fails.
-- Maintain current score-threshold semantics in `blint/db.py`.
+- Prefer the local query contract in `blint/db.py` over importing runtime helpers from `blint-db`.
+- Use project-level evidence from symbols, binary-name hints, and disassembly hashes together.
+- Keep symbol-only matching conservative. Strong exact matches are better than noisy broad guesses.
+- Filter tiny or generic hash evidence when it creates cross-project collisions.
 - Avoid introducing non-read-only DB access in analysis paths.
 
 ## Skill: Testing and validation expectations
@@ -61,6 +65,11 @@ This file defines practical skills an AI agent should apply when working on `bli
   - `tests/test_disassembler.py`
 - Add fixture-based tests for parser/rule changes.
 - Prefer narrow tests for one behavior change at a time.
+- For `blint/db.py` or `blint/lib/sbom.py` changes, run both fixture tests and one small real corpus build from the linked `blint-db` repo.
+- Validate both modes for real corpus checks:
+  - symbol-only: `blint sbom --use-blintdb`
+  - disassembly-assisted: `blint sbom --use-blintdb --deep`
+- For exact binaries that were used to build the corpus, expect near-exact component identification and inspect `internal:blintdb_*` properties when debugging drift.
 
 ## Skill: Documentation updates with code changes
 
@@ -68,6 +77,7 @@ This file defines practical skills an AI agent should apply when working on `bli
 - Update `docs/METADATA.md` when metadata keys/meaning change.
 - Update `docs/DISASSEMBLE.md` when disassembly fields/heuristics change.
 - Keep README examples aligned with actual CLI flags.
+- Update `AGENTS.md` and `SKILL.md` when the maintenance workflow changes in a meaningful way.
 
 ## Skill: High-confidence change checklist
 

@@ -92,7 +92,7 @@ def build_parser():
         action="store_true",
         default=os.path.exists(BLINTDB_LOC),
         dest="use_blintdb",
-        help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+        help=f"Use blintdb v2 for symbol resolution where supported. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
     parser.add_argument(
         "--disassemble",
@@ -174,7 +174,7 @@ def build_parser():
         default=False,
         dest="deep_mode",
         help="Enable deep mode to collect more used symbols and modules "
-        "aggressively. Slow operation.",
+        "aggressively. Slow operation. When combined with --use-blintdb, disassembly is enabled automatically to use function-hash lookup.",
     )
     sbom_parser.add_argument(
         "--stdout",
@@ -211,7 +211,7 @@ def build_parser():
         action="store_true",
         default=os.path.exists(BLINTDB_LOC),
         dest="use_blintdb",
-        help=f"Use blintdb for symbol resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+        help=f"Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
     db_parser = subparsers.add_parser(
         "db", help="Command to manage the pre-compiled database."
@@ -228,14 +228,14 @@ def build_parser():
         "--image-url",
         dest="image_url",
         choices=[
-            "ghcr.io/appthreat/blintdb-vcpkg:v1",
-            "ghcr.io/appthreat/blintdb-vcpkg-arm64:v1",
-            "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1",
-            "ghcr.io/appthreat/blintdb-vcpkg-musl:v1",
-            "ghcr.io/appthreat/blintdb-meson:v1",
-            "ghcr.io/appthreat/blintdb-meson-arm64:v1",
-            "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v1",
-            "ghcr.io/appthreat/blintdb-meson-musl:v1",
+            "ghcr.io/appthreat/blintdb-vcpkg:v2",
+            "ghcr.io/appthreat/blintdb-vcpkg-arm64:v2",
+            "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2",
+            "ghcr.io/appthreat/blintdb-vcpkg-musl:v2",
+            "ghcr.io/appthreat/blintdb-meson:v2",
+            "ghcr.io/appthreat/blintdb-meson-arm64:v2",
+            "ghcr.io/appthreat/blintdb-meson-darwin-arm64:v2",
+            "ghcr.io/appthreat/blintdb-meson-musl:v2",
         ],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
