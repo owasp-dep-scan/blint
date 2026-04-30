@@ -183,11 +183,41 @@ def _import_ecosystem_helpers(blint_root: Path, blint_db_root: Path):
     }
 
 
+def metadata_file_for_ecosystem(output_dir: Path, ecosystem: str) -> Path:
+    return output_dir / f"{ecosystem}-small.metadata.json"
+
+
+def load_run_metadata(metadata_file: str | os.PathLike) -> dict[str, Any] | None:
+    metadata_path = Path(metadata_file)
+    if not metadata_path.exists():
+        return None
+    return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+
+def build_outcomes_by_selector(
+    run_metadata: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    outcomes = ((run_metadata or {}).get("projects") or {}).get("outcomes") or []
+    return {
+        str(outcome.get("selector")): outcome
+        for outcome in outcomes
+        if isinstance(outcome, dict) and outcome.get("selector")
+    }
+
+
+def error_record(exc: BaseException) -> dict[str, str]:
+    return {
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
 def build_database_for_ecosystem(
     ecosystem: str,
     entries: list[dict[str, Any]],
     *,
     db_file: Path,
+    metadata_file: Path,
     blint_root: Path,
     blint_db_root: Path,
     bootstrap_path: Path,
@@ -200,6 +230,8 @@ def build_database_for_ecosystem(
         "--clean-start",
         "--db-file",
         str(db_file),
+        "--run-metadata-file",
+        str(metadata_file),
         "--disassemble",
         f"build-{ecosystem}",
     ]
@@ -286,6 +318,7 @@ def validate_case(
     entry: dict[str, Any],
     *,
     db_file: Path,
+    build_outcome: dict[str, Any] | None,
     staged_db_home: Path,
     helpers: dict[str, Any],
     blint_root: Path,
@@ -305,6 +338,10 @@ def validate_case(
     case_result = {
         "selector": selector,
         "project_name": project_name,
+        "build_status": (build_outcome or {}).get("status") or "unknown",
+        "build_failure": (build_outcome or {}).get("failure"),
+        "validation_status": "validated",
+        "validation_error": None,
         "artifact_file": artifact_file,
         "expected_purl": expected_purl,
         "normal": None,
@@ -340,32 +377,88 @@ def validate_case(
     return case_result
 
 
-def summarize_results(results: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+def summarize_results(
+    results: dict[str, list[dict[str, Any]]],
+    provenance: dict[str, dict[str, Any] | None] | None = None,
+) -> dict[str, Any]:
     summary: dict[str, Any] = {"ecosystems": {}, "totals": {}}
     total_cases = 0
+    total_validated_cases = 0
     total_exact_normal = 0
     total_exact_deep = 0
+    total_build_failed = 0
+    total_no_artifacts = 0
+    total_validation_errors = 0
+    provenance = provenance or {}
     for ecosystem, ecosystem_results in results.items():
         exact_normal = sum(
-            1 for case in ecosystem_results if case["normal"]["exact_match"]
+            1
+            for case in ecosystem_results
+            if case.get("normal") and case["normal"]["exact_match"]
         )
-        exact_deep = sum(1 for case in ecosystem_results if case["deep"]["exact_match"])
+        exact_deep = sum(
+            1
+            for case in ecosystem_results
+            if case.get("deep") and case["deep"]["exact_match"]
+        )
         hash_evidence = sum(
-            1 for case in ecosystem_results if case["deep"]["hash_evidence"]
+            1
+            for case in ecosystem_results
+            if case.get("deep") and case["deep"]["hash_evidence"]
+        )
+        validated_cases = sum(
+            1
+            for case in ecosystem_results
+            if case.get("validation_status") == "validated"
+        )
+        build_failed_cases = sum(
+            1
+            for case in ecosystem_results
+            if case.get("build_status") == "build_failed"
+        )
+        no_artifacts_cases = sum(
+            1
+            for case in ecosystem_results
+            if case.get("build_status") == "no_artifacts"
+        )
+        validation_errors = sum(
+            1 for case in ecosystem_results if case.get("validation_status") == "error"
         )
         count = len(ecosystem_results)
         total_cases += count
+        total_validated_cases += validated_cases
         total_exact_normal += exact_normal
         total_exact_deep += exact_deep
+        total_build_failed += build_failed_cases
+        total_no_artifacts += no_artifacts_cases
+        total_validation_errors += validation_errors
+        provenance_payload = provenance.get(ecosystem) or {}
+        provenance_projects = provenance_payload.get("projects") or {}
         summary["ecosystems"][ecosystem] = {
             "case_count": count,
+            "validated_case_count": validated_cases,
+            "build_failed_case_count": build_failed_cases,
+            "no_artifacts_case_count": no_artifacts_cases,
+            "validation_error_count": validation_errors,
             "exact_normal": exact_normal,
             "exact_deep": exact_deep,
             "deep_hash_evidence": hash_evidence,
+            "provenance": {
+                "selected_count": provenance_projects.get("selected_count", 0),
+                "attempted_count": provenance_projects.get("attempted_count", 0),
+                "success_count": provenance_projects.get("success_count", 0),
+                "failure_count": provenance_projects.get("failure_count", 0),
+                "status_counts": provenance_projects.get("status_counts", {}),
+                "build_failures": provenance_projects.get("build_failures", []),
+            },
             "cases": ecosystem_results,
         }
     summary["totals"] = {
         "case_count": total_cases,
+        "validated_case_count": total_validated_cases,
+        "build_failed_case_count": total_build_failed,
+        "no_artifacts_case_count": total_no_artifacts,
+        "validation_error_count": total_validation_errors,
         "exact_normal": total_exact_normal,
         "exact_deep": total_exact_deep,
         "exact_normal_rate": total_exact_normal / total_cases if total_cases else 0.0,
@@ -395,15 +488,18 @@ def main() -> int:
     )
     helpers = _import_ecosystem_helpers(blint_root, blint_db_root)
     results: dict[str, list[dict[str, Any]]] = {}
+    provenance_by_ecosystem: dict[str, dict[str, Any] | None] = {}
     for ecosystem in args.ecosystems:
         entries = manifest[ecosystem]
         db_file = output_dir / f"{ecosystem}-small.db"
+        metadata_file = metadata_file_for_ecosystem(output_dir, ecosystem)
         staged_db_home = output_dir / f"{ecosystem}-blintdb-home"
         if not args.skip_build:
             build_database_for_ecosystem(
                 ecosystem,
                 entries,
                 db_file=db_file,
+                metadata_file=metadata_file,
                 blint_root=blint_root,
                 blint_db_root=blint_db_root,
                 bootstrap_path=bootstrap_path,
@@ -412,31 +508,75 @@ def main() -> int:
             raise RuntimeError(
                 f"Expected existing database file was not found: {db_file}"
             )
+        run_metadata = load_run_metadata(metadata_file)
+        provenance_by_ecosystem[ecosystem] = run_metadata
+        outcomes_by_selector = build_outcomes_by_selector(run_metadata)
         stage_database_for_blint(db_file, staged_db_home)
         ecosystem_results = []
         for entry in entries:
-            case_result = validate_case(
-                ecosystem,
-                entry,
-                db_file=db_file,
-                staged_db_home=staged_db_home,
-                helpers=helpers,
-                blint_root=blint_root,
-                blint_db_root=blint_db_root,
-            )
+            selector = entry["selector"]
+            project_name = entry.get("project_name") or selector
+            build_outcome = outcomes_by_selector.get(selector)
+            if build_outcome and build_outcome.get("status") != "success":
+                case_result = {
+                    "selector": selector,
+                    "project_name": project_name,
+                    "build_status": build_outcome.get("status"),
+                    "build_failure": build_outcome.get("failure"),
+                    "validation_status": "skipped",
+                    "validation_error": None,
+                    "artifact_file": None,
+                    "expected_purl": None,
+                    "normal": None,
+                    "deep": None,
+                }
+            else:
+                try:
+                    case_result = validate_case(
+                        ecosystem,
+                        entry,
+                        db_file=db_file,
+                        build_outcome=build_outcome,
+                        staged_db_home=staged_db_home,
+                        helpers=helpers,
+                        blint_root=blint_root,
+                        blint_db_root=blint_db_root,
+                    )
+                except RuntimeError as exc:
+                    case_result = {
+                        "selector": selector,
+                        "project_name": project_name,
+                        "build_status": (build_outcome or {}).get("status")
+                        or "unknown",
+                        "build_failure": (build_outcome or {}).get("failure"),
+                        "validation_status": "error",
+                        "validation_error": error_record(exc),
+                        "artifact_file": None,
+                        "expected_purl": None,
+                        "normal": None,
+                        "deep": None,
+                    }
             ecosystem_results.append(case_result)
-            print(
-                f"[{ecosystem}] {entry['selector']}: normal_exact={case_result['normal']['exact_match']} "
-                f"deep_exact={case_result['deep']['exact_match']} "
-                f"deep_hash={case_result['deep']['hash_evidence']}"
-            )
+            if case_result["validation_status"] == "validated":
+                print(
+                    f"[{ecosystem}] {entry['selector']}: normal_exact={case_result['normal']['exact_match']} "
+                    f"deep_exact={case_result['deep']['exact_match']} "
+                    f"deep_hash={case_result['deep']['hash_evidence']}"
+                )
+            else:
+                print(
+                    f"[{ecosystem}] {entry['selector']}: build_status={case_result['build_status']} "
+                    f"validation_status={case_result['validation_status']}"
+                )
         results[ecosystem] = ecosystem_results
-    summary = summarize_results(results)
+    summary = summarize_results(results, provenance=provenance_by_ecosystem)
     summary_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(f"Wrote validation summary to {summary_file}")
     if (
-        summary["totals"]["exact_normal"] != summary["totals"]["case_count"]
-        or summary["totals"]["exact_deep"] != summary["totals"]["case_count"]
+        summary["totals"]["validated_case_count"] != summary["totals"]["case_count"]
+        or summary["totals"]["exact_normal"]
+        != summary["totals"]["validated_case_count"]
+        or summary["totals"]["exact_deep"] != summary["totals"]["validated_case_count"]
     ):
         print(json.dumps(summary["totals"], indent=2))
         return 1

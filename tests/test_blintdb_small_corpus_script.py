@@ -55,24 +55,87 @@ def test_summarize_results_counts_exact_matches_and_hash_evidence():
             "meson": [
                 {
                     "selector": "zlib",
+                    "build_status": "success",
+                    "validation_status": "validated",
                     "normal": {"exact_match": True},
                     "deep": {"exact_match": True, "hash_evidence": True},
                 },
                 {
                     "selector": "bzip2",
+                    "build_status": "success",
+                    "validation_status": "validated",
                     "normal": {"exact_match": False},
                     "deep": {"exact_match": True, "hash_evidence": False},
                 },
             ]
-        }
+        },
+        provenance={
+            "meson": {
+                "projects": {
+                    "selected_count": 2,
+                    "attempted_count": 2,
+                    "success_count": 2,
+                    "failure_count": 0,
+                    "status_counts": {"success": 2},
+                    "build_failures": [],
+                }
+            }
+        },
     )
 
     assert summary["ecosystems"]["meson"]["case_count"] == 2
+    assert summary["ecosystems"]["meson"]["validated_case_count"] == 2
     assert summary["ecosystems"]["meson"]["exact_normal"] == 1
     assert summary["ecosystems"]["meson"]["exact_deep"] == 2
     assert summary["ecosystems"]["meson"]["deep_hash_evidence"] == 1
+    assert summary["ecosystems"]["meson"]["provenance"]["status_counts"] == {
+        "success": 2
+    }
     assert summary["totals"]["case_count"] == 2
+    assert summary["totals"]["validated_case_count"] == 2
     assert summary["totals"]["exact_deep_rate"] == 1.0
+
+
+def test_summarize_results_tracks_build_failures_from_provenance():
+    summary = validate_blintdb_small_corpus.summarize_results(
+        {
+            "vcpkg": [
+                {
+                    "selector": "libpng",
+                    "build_status": "build_failed",
+                    "validation_status": "skipped",
+                    "build_failure": {"stage": "build", "message": "compile failed"},
+                    "normal": None,
+                    "deep": None,
+                }
+            ]
+        },
+        provenance={
+            "vcpkg": {
+                "projects": {
+                    "selected_count": 1,
+                    "attempted_count": 1,
+                    "success_count": 0,
+                    "failure_count": 1,
+                    "status_counts": {"build_failed": 1},
+                    "build_failures": [
+                        {
+                            "selector": "libpng",
+                            "status": "build_failed",
+                            "stage": "build",
+                            "message": "compile failed",
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+    assert summary["ecosystems"]["vcpkg"]["build_failed_case_count"] == 1
+    assert summary["ecosystems"]["vcpkg"]["validated_case_count"] == 0
+    assert summary["ecosystems"]["vcpkg"]["provenance"]["failure_count"] == 1
+    assert summary["totals"]["build_failed_case_count"] == 1
+    assert summary["totals"]["validated_case_count"] == 0
 
 
 def test_default_vcpkg_triplet_prefers_dynamic_triplet_on_macos(monkeypatch):
