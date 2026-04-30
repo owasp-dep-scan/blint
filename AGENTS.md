@@ -47,7 +47,7 @@ Primary workflows:
 3. `process_exe_file` parses binaries and maps dependencies/components.
 4. Optional `--use-blintdb` enriches component identification.
 5. `--use-blintdb --deep` automatically enables disassembly and uses function-hash lookup before symbol fallback.
-5. Output is written to the configured file (or stdout).
+6. Output is written to the configured file (or stdout).
 
 ## Agent coding guidelines for this repo
 
@@ -111,6 +111,8 @@ python tests/scripts/validate_blintdb_small_corpus.py --ecosystems homebrew
 ```
 
 The manifest for that workflow lives in `tests/data/blintdb-small-corpus.json` and currently covers 5 selectors each for Meson, vcpkg, and Homebrew.
+
+The generated `summary.json` keeps per-ecosystem provenance in `ecosystems.<name>.provenance`, mirroring the linked `blint-db` run metadata. When build diagnostics matter, inspect `projects.build_failures`, which is exposed there as a flattened list of per-project failure records with keys such as `selector`, `project_name`, `ecosystem`, `build_system`, `status`, `stage`, and `message`, plus optional fields like `returncode` and `exception_type`.
 
 ### Callgraph regression validation policy
 

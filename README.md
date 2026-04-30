@@ -118,6 +118,7 @@ The workflow is a two-step process:
     This downloads the database to the directory specified by the `BLINTDB_HOME` environment variable.
 
 2.  **Generate the SBOM with blintdb enabled:**
+
     ```shell
     blint sbom -i /path/to/binary -o sbom.cdx.json --use-blintdb
     ```
@@ -133,6 +134,8 @@ The workflow is a two-step process:
 The generated SBOM keeps the inferred package purl and also records `internal:blintdb_*` evidence properties on matched components so you can review why a component was selected.
 
 For repeatable end-to-end validation of local `blint-db` changes, use the integration script in `tests/scripts/validate_blintdb_small_corpus.py`. It builds and validates a versioned 15-case corpus split across Meson, vcpkg, and Homebrew, using the manifest stored in `tests/data/blintdb-small-corpus.json`.
+
+The generated `summary.json` includes per-ecosystem provenance copied from the linked `blint-db` run metadata under `ecosystems.<name>.provenance`. That block mirrors `projects.selected_count`, `attempted_count`, `success_count`, `failure_count`, `status_counts`, and `build_failures`. Each `projects.build_failures[]` entry is a flattened per-project failure record with stable keys such as `selector`, `project_name`, `ecosystem`, `build_system`, `status`, `stage`, and `message`, plus optional details like `returncode` or `exception_type` when they are available.
 
 ## Environment Variables
 
