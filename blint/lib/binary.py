@@ -1121,7 +1121,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             arch = "x86_64"
         return f"{arch}-pc-windows-msvc"
     vendor = "unknown"
-    os = "unknown"
+    os_str = "unknown"
     env = ""
     machine_type = (
         metadata.get("machine_type") or metadata.get("cpu_type") or ""
@@ -1161,7 +1161,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         arch = "armeb"
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        os = "windows"
+        os_str = "windows"
         vendor = "pc"
     elif binary_type == "MachO":
         vendor = "apple"
@@ -1174,7 +1174,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             "BRIDGEOS": "bridgeos",
             "DRIVERKIT": "driverkit",
         }
-        os = os_map.get(platform, "darwin")
+        os_str = os_map.get(platform, "darwin")
     elif binary_type == "ELF":
         vendor = "unknown"
         os_abi = metadata.get("identity_os_abi", "LINUX").upper()
@@ -1186,13 +1186,13 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             "OPENBSD": "openbsd",
             "SOLARIS": "solaris",
         }
-        os = os_map.get(os_abi, "linux")
+        os_str = os_map.get(os_abi, "linux")
     if metadata.get("is_targeting_android"):
-        os = "linux"
+        os_str = "linux"
         env = "android"
-    elif os == "windows":
+    elif os_str == "windows":
         env = "msvc"
-    elif os == "linux":
+    elif os_str == "linux":
         if metadata.get("is_musl"):
             env = "musl"
             interpreter = metadata.get("interpreter", "")
@@ -1215,7 +1215,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
                 and "hard" in metadata.get("processor_flag", "").lower()
             ):
                 env = "gnueabihf"
-    components = [arch, vendor, os]
+    components = [arch, vendor, os_str]
     if env:
         components.append(env)
     return "-".join(components)
