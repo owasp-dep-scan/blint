@@ -423,6 +423,14 @@ def _normalize_arch_target(arch_target):
     return (arch_target or "").lower()
 
 
+@lru_cache(maxsize=None)
+def _has_supported_nyxstone_target(arch_target: str) -> bool:
+    normalized_target = (arch_target or "").strip()
+    if not normalized_target:
+        return False
+    return normalized_target.split("-", 1)[0].lower() not in ("", "unknown")
+
+
 class ParsedInstruction(NamedTuple):
     mnemonic: str
     operand_text: str
@@ -1934,6 +1942,13 @@ def disassemble_functions(
         return disassembly_results
     if not arch_target:
         arch_target = metadata.get("llvm_target_tuple")
+    arch_target = (arch_target or "").strip()
+    if not _has_supported_nyxstone_target(arch_target):
+        LOG.debug(
+            "Skipping disassembly because the LLVM target triple is missing or has an unknown architecture: %s",
+            arch_target or "<empty>",
+        )
+        return disassembly_results
     if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
         if not features:
             features = "+pauth"

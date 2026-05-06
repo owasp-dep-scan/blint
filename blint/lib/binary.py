@@ -69,11 +69,21 @@ def is_shared_library(parsed_obj):
     """
     if not parsed_obj:
         return False
-    if parsed_obj.format == lief.Binary.FORMATS.ELF:
+    binary_format = getattr(parsed_obj, "format", None)
+    if binary_format is None:
+        if isinstance(parsed_obj, lief.ELF.Binary):
+            binary_format = lief.Binary.FORMATS.ELF
+        elif isinstance(parsed_obj, lief.PE.Binary):
+            binary_format = lief.Binary.FORMATS.PE
+        elif isinstance(parsed_obj, lief.MachO.Binary):
+            binary_format = lief.Binary.FORMATS.MACHO
+        else:
+            return False
+    if binary_format == lief.Binary.FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.Header.FILE_TYPE.DYN
-    if parsed_obj.format == lief.Binary.FORMATS.PE:
+    if binary_format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(lief.PE.Header.CHARACTERISTICS.DLL)
-    if parsed_obj.format == lief.Binary.FORMATS.MACHO:
+    if binary_format == lief.Binary.FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.Header.FILE_TYPE.DYLIB
     return False
 
@@ -1124,6 +1134,8 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         "ARM": "arm",
         "AARCH64": "aarch64",
         "ARM64": "aarch64",
+        "ARM64EC": "aarch64",
+        "ARM64X": "aarch64",
         "MIPS": "mips",
         "MIPS_RS3_LE": "mipsel",
         "PPC": "ppc",
@@ -1886,7 +1898,9 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
         metadata["import_dependencies"] = analyze_import_deps(metadata)
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
-        if disassemble:
+        if disassemble and isinstance(
+            parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
+        ):
             metadata["disassembled_functions"] = disassemble_functions(
                 parsed_obj, metadata
             )
