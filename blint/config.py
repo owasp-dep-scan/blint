@@ -1281,6 +1281,8 @@ class BlintOptions:
             self.sources = [os.getcwd()]
         if not self.reports_dir:
             self.reports_dir = os.getcwd()
+        if self.sbom_mode and self.use_blintdb and self.deep_mode:
+            self.disassemble = True
         if self.sbom_mode:
             if self.stdout_mode:
                 self.sbom_output = sys.stdout
@@ -1379,12 +1381,16 @@ if not BLINTDB_HOME:
 os.makedirs(BLINTDB_HOME, exist_ok=True)
 
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
+if not os.path.exists(BLINTDB_LOC):
+    alternate_blintdb_loc = os.path.join(BLINTDB_HOME, "blint-v2.db")
+    if os.path.exists(alternate_blintdb_loc):
+        BLINTDB_LOC = alternate_blintdb_loc
 
 BLINTDB_IMAGE_URL = os.getenv(
     "BLINTDB_IMAGE_URL",
-    "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v1"
+    "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2"
     if SYSTEM == "darwin"
-    else "ghcr.io/appthreat/blintdb-vcpkg:v1",
+    else "ghcr.io/appthreat/blintdb-vcpkg:v2",
 )
 BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
 if BLINTDB_REFRESH in ["true", "True", "1"]:

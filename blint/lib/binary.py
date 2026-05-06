@@ -69,11 +69,21 @@ def is_shared_library(parsed_obj):
     """
     if not parsed_obj:
         return False
-    if parsed_obj.format == lief.Binary.FORMATS.ELF:
+    binary_format = getattr(parsed_obj, "format", None)
+    if binary_format is None:
+        if isinstance(parsed_obj, lief.ELF.Binary):
+            binary_format = lief.Binary.FORMATS.ELF
+        elif isinstance(parsed_obj, lief.PE.Binary):
+            binary_format = lief.Binary.FORMATS.PE
+        elif isinstance(parsed_obj, lief.MachO.Binary):
+            binary_format = lief.Binary.FORMATS.MACHO
+        else:
+            return False
+    if binary_format == lief.Binary.FORMATS.ELF:
         return parsed_obj.header.file_type == lief.ELF.Header.FILE_TYPE.DYN
-    if parsed_obj.format == lief.Binary.FORMATS.PE:
+    if binary_format == lief.Binary.FORMATS.PE:
         return parsed_obj.header.has_characteristic(lief.PE.Header.CHARACTERISTICS.DLL)
-    if parsed_obj.format == lief.Binary.FORMATS.MACHO:
+    if binary_format == lief.Binary.FORMATS.MACHO:
         return parsed_obj.header.file_type == lief.MachO.Header.FILE_TYPE.DYLIB
     return False
 
@@ -1111,7 +1121,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             arch = "x86_64"
         return f"{arch}-pc-windows-msvc"
     vendor = "unknown"
-    os = "unknown"
+    os_str = "unknown"
     env = ""
     machine_type = (
         metadata.get("machine_type") or metadata.get("cpu_type") or ""
@@ -1124,6 +1134,8 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         "ARM": "arm",
         "AARCH64": "aarch64",
         "ARM64": "aarch64",
+        "ARM64EC": "aarch64",
+        "ARM64X": "aarch64",
         "MIPS": "mips",
         "MIPS_RS3_LE": "mipsel",
         "PPC": "ppc",
@@ -1149,7 +1161,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         arch = "armeb"
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        os = "windows"
+        os_str = "windows"
         vendor = "pc"
     elif binary_type == "MachO":
         vendor = "apple"
@@ -1162,7 +1174,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             "BRIDGEOS": "bridgeos",
             "DRIVERKIT": "driverkit",
         }
-        os = os_map.get(platform, "darwin")
+        os_str = os_map.get(platform, "darwin")
     elif binary_type == "ELF":
         vendor = "unknown"
         os_abi = metadata.get("identity_os_abi", "LINUX").upper()
@@ -1174,13 +1186,13 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             "OPENBSD": "openbsd",
             "SOLARIS": "solaris",
         }
-        os = os_map.get(os_abi, "linux")
+        os_str = os_map.get(os_abi, "linux")
     if metadata.get("is_targeting_android"):
-        os = "linux"
+        os_str = "linux"
         env = "android"
-    elif os == "windows":
+    elif os_str == "windows":
         env = "msvc"
-    elif os == "linux":
+    elif os_str == "linux":
         if metadata.get("is_musl"):
             env = "musl"
             interpreter = metadata.get("interpreter", "")
@@ -1203,7 +1215,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
                 and "hard" in metadata.get("processor_flag", "").lower()
             ):
                 env = "gnueabihf"
-    components = [arch, vendor, os]
+    components = [arch, vendor, os_str]
     if env:
         components.append(env)
     return "-".join(components)
@@ -1886,7 +1898,9 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
         metadata["import_dependencies"] = analyze_import_deps(metadata)
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
-        if disassemble:
+        if disassemble and isinstance(
+            parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
+        ):
             metadata["disassembled_functions"] = disassemble_functions(
                 parsed_obj, metadata
             )

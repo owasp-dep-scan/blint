@@ -23,7 +23,7 @@ Primary workflows:
 - `blint/lib/disassembler.py`: nyxstone-backed function disassembly and metrics.
 - `blint/lib/sbom.py`: CycloneDX object construction and dependency modeling.
 - `blint/lib/android.py`: APK/AAB metadata extraction and component mapping.
-- `blint/db.py`: blintdb SQLite-assisted component identification from symbols.
+- `blint/db.py`: blintdb v2 SQLite-assisted component identification from symbols, binary-name hints, and disassembly hashes.
 - `blint/data/rules.yml`: built-in hardening/security checks.
 - `blint/data/annotations/*.yml`: built-in capability and behavior reviews.
 - `docs/METADATA.md`, `docs/DISASSEMBLE.md`, `docs/RULES.md`: deep reference docs.
@@ -46,7 +46,8 @@ Primary workflows:
 2. `generate` builds CycloneDX 1.6 model.
 3. `process_exe_file` parses binaries and maps dependencies/components.
 4. Optional `--use-blintdb` enriches component identification.
-5. Output is written to the configured file (or stdout).
+5. `--use-blintdb --deep` automatically enables disassembly and uses function-hash lookup before symbol fallback.
+6. Output is written to the configured file (or stdout).
 
 ## Agent coding guidelines for this repo
 
@@ -56,7 +57,9 @@ Primary workflows:
 - Rule engine behavior must remain deterministic and case-insensitive where expected.
 - Keep heavy operations behind explicit flags (`--disassemble`, `--deep`, `--use-blintdb`).
 - Avoid weakening error handling around malformed binaries.
+- Always check for Windows path separators/characters (`\` vs `/`, drive letters, basename handling) when writing or updating filesystem logic, fixtures, and especially unit tests; avoid POSIX-only raw-string assertions when the behavior is path-based.
 - Nyxstone currently provides disassembly text, but not structured operand/register metadata; register usage and call-target heuristics in `blint/lib/disassembler.py` must therefore remain text-based.
+- For blintdb-backed SBOM matching, prefer exact project evidence over permissive fuzzy expansion. False positives in SBOM output are harder to review than missed low-confidence hints.
 
 ## Common task playbooks
 
@@ -80,6 +83,15 @@ Primary workflows:
 1. Implement or refine component conversion in `blint/lib/sbom.py`.
 2. Keep `bom_ref` stable and dependency refs consistent.
 3. Preserve deep-mode behavior and avoid huge default output growth.
+4. If the change touches `blint/db.py`, `blint/lib/sbom.py`, or blintdb evidence fields, validate both symbol-only and deep disassembly-assisted matching.
+
+### Extend blintdb-backed matching
+
+1. Treat `blint-db/` as the reference implementation for schema and corpus generation, but keep `blint` free of a runtime dependency on that package.
+2. Prefer project-level lookups over per-binary fan-out when matching SBOM components.
+3. Use `binary_type`, `llvm_target_tuple`, and binary-name hints to suppress false positives before lowering thresholds.
+4. Ignore tiny low-information function hashes unless there is a strong reason to keep them.
+5. When changing query shape, also consider indexes in `blint-db/blint_db/handlers/sqlite_handler.py`.
 
 ## Local validation commands
 
@@ -89,6 +101,19 @@ poetry run pytest -q
 poetry run blint --help
 poetry run blint sbom --help
 ```
+
+For blintdb-backed SBOM changes, also run a small real corpus validation against the linked `blint-db` workspace:
+
+```bash
+cd /path/to/blint
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems meson
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems vcpkg
+python tests/scripts/validate_blintdb_small_corpus.py --ecosystems homebrew
+```
+
+The manifest for that workflow lives in `tests/data/blintdb-small-corpus.json` and currently covers 5 selectors each for Meson, vcpkg, and Homebrew.
+
+The generated `summary.json` keeps per-ecosystem provenance in `ecosystems.<name>.provenance`, mirroring the linked `blint-db` run metadata. When build diagnostics matter, inspect `projects.build_failures`, which is exposed there as a flattened list of per-project failure records with keys such as `selector`, `project_name`, `ecosystem`, `build_system`, `status`, `stage`, and `message`, plus optional fields like `returncode` and `exception_type`.
 
 ### Callgraph regression validation policy
 
@@ -116,6 +141,7 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 - `EVIDENCE_LIMIT`, `SYMBOLS_LOOKUP_BATCH_LEN`, `MIN_MATCH_SCORE`
 - `BLINT_MAX_HEX_BYTES`
 - `SCAN_DEBUG_MODE`, `SCAN_ID`
+- `BLINT_DB_MESON_STRIP` when producing local Meson corpora in the linked `blint-db` repo
 
 ## Known sharp edges
 
@@ -123,3 +149,4 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 - Parsing code tolerates many malformed edge cases; keep exception handling intact.
 - Disassembly depends on optional nyxstone install and LLVM target correctness.
 - CI mode can fail builds on critical findings (`run_default_mode` + `CI` env).
+- SBOM matching quality is sensitive to symbol noise. File names, tiny wrapper functions, and imported system symbols can skew scores if query filters are too loose.

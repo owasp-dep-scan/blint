@@ -28,7 +28,11 @@ from blint.cyclonedx.spec import (
     Tools,
     Type,
 )
-from blint.db import detect_binaries_utilized
+from blint.db import (
+    build_function_hash_index,
+    build_symbol_source_map,
+    detect_binaries_utilized,
+)
 from blint.lib.android import collect_app_metadata
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.utils import (
@@ -158,6 +162,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
                 blint_options.exports_prefix,
                 symbols_purl_map,
                 blint_options.use_blintdb,
+                blint_options.disassemble,
             )
         if skipped_wasm:
             LOG.info(f"Skipped {skipped_wasm} wasm file(s) during SBOM generation")
@@ -327,6 +332,7 @@ def process_exe_file(
     export_prefixes: list[str] = None,
     symbols_purl_map: dict = None,
     use_blintdb: bool = False,
+    disassemble: bool = False,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill-of-Materials.
@@ -346,7 +352,7 @@ def process_exe_file(
     """
     if is_wasm_file(exe):
         return []
-    metadata: Dict[str, Any] = parse(exe)
+    metadata: Dict[str, Any] = parse(exe, disassemble=disassemble)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
     lib_components: list[Component] = []
@@ -530,41 +536,62 @@ def process_exe_file(
                 )
             )
 
-        # Should we use the blintdb to improve precision
-        if use_blintdb:
-            # utilize voting logic along with blitndb
-            # we iterate through each symbol and try to find a match in the database
-
-            LOG.debug("Utilizing blint_db")
-            symtab_symbols_list = metadata.get("symtab_symbols", [])
-            dynamic_symbols_list = metadata.get("dynamic_symbols", [])
-            if symtab_symbols_list or dynamic_symbols_list:
-                symtab_binaries_detected, binary_evidence_eids = (
-                    detect_binaries_utilized(symtab_symbols_list)
-                )
-                binaries_detected, dynamic_binary_evidence_eids = (
-                    detect_binaries_utilized(dynamic_symbols_list)
-                )
-                binaries_detected = binaries_detected.union(symtab_binaries_detected)
-                binary_evidence_eids.update(dynamic_binary_evidence_eids)
-                if binaries_detected:
-                    LOG.debug(
-                        f"Found {len(binaries_detected)} possible binary matches for {exe}."
-                    )
-                else:
-                    LOG.debug(f"Unable to identify a match for {exe}.")
-                # adds the components in a similar way to dynamic entries
-                for binary_purl in binaries_detected:
-                    entry = {
-                        "purl": binary_purl,
-                        "tag": "NEEDED",
-                    }
-                    comp = create_dynamic_component(
-                        entry,
-                        exe,
-                        {"export_ids": binary_evidence_eids.get(binary_purl)},
-                    )
-                    lib_components.append(comp)
+    if use_blintdb:
+        LOG.debug("Utilizing blintdb v2 for SBOM component matching")
+        symbol_source_map = build_symbol_source_map(metadata)
+        function_hash_index = build_function_hash_index(metadata)
+        binaries_detected, binary_evidence = detect_binaries_utilized(
+            symbol_source_map=symbol_source_map,
+            function_hash_index=function_hash_index,
+            binary_metadata=metadata,
+        )
+        if binaries_detected:
+            LOG.debug(
+                f"Found {len(binaries_detected)} possible component matches for {exe}."
+            )
+        else:
+            LOG.debug(f"Unable to identify a blintdb match for {exe}.")
+        for binary_purl in sorted(binaries_detected):
+            evidence = binary_evidence.get(binary_purl, {})
+            evidence_metadata = {
+                "blintdb_project_name": evidence.get("project_name"),
+                "blintdb_score": evidence.get("score"),
+                "blintdb_matched_binary_count": evidence.get("matched_binary_count"),
+                "blintdb_matched_binary_name_count": evidence.get(
+                    "matched_binary_name_count"
+                ),
+                "blintdb_matched_binary_names": evidence.get(
+                    "matched_binary_names", []
+                ),
+                "blintdb_binary_name_match": evidence.get("binary_name_match"),
+                "blintdb_matched_symbol_count": evidence.get("matched_symbol_count"),
+                "blintdb_matched_symbol_sources": evidence.get(
+                    "matched_symbol_sources", []
+                ),
+                "blintdb_matched_symbols": evidence.get("matched_symbols", []),
+                "blintdb_matched_instruction_hash_count": evidence.get(
+                    "matched_instruction_hash_count"
+                ),
+                "blintdb_matched_instruction_hashes": evidence.get(
+                    "matched_instruction_hashes", []
+                ),
+                "blintdb_matched_assembly_hash_count": evidence.get(
+                    "matched_assembly_hash_count"
+                ),
+                "blintdb_matched_assembly_hashes": evidence.get(
+                    "matched_assembly_hashes", []
+                ),
+            }
+            comp = create_dynamic_component(
+                {"purl": binary_purl, "tag": "NEEDED"},
+                exe,
+                {
+                    key: value
+                    for key, value in evidence_metadata.items()
+                    if value not in (None, [], "")
+                },
+            )
+            lib_components.append(comp)
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
@@ -682,10 +709,14 @@ def create_dynamic_component(
     )
     if evidence_metadata:
         for k, v in evidence_metadata.items():
+            if isinstance(v, (list, tuple, set)):
+                value = ", ".join(str(item) for item in v)
+            else:
+                value = str(v)
             properties.append(
                 Property(
                     name=f"internal:{k}",
-                    value=", ".join(str(v)) if isinstance(v, list) else str(v),
+                    value=value,
                 )
             )
     comp.properties = properties
