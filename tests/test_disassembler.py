@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import lief
 import pytest
 
+from blint.lib import disassembler as disassembler_module
 from blint.lib.disassembler import (
     _analyze_instructions,
     _classify_function,
@@ -10,6 +11,7 @@ from blint.lib.disassembler import (
     _is_macos_system_symbol_name,
     _resolve_direct_calls,
     _should_skip_symbol_list_for_disassembly,
+    disassemble_functions,
 )
 
 
@@ -538,6 +540,25 @@ def test_resolve_direct_calls_does_not_treat_register_as_symbol():
 
     assert direct_calls == []
     assert direct_targets == []
+
+
+def test_disassemble_functions_skips_unknown_windows_target_before_nyxstone(
+    monkeypatch,
+):
+    monkeypatch.setattr(disassembler_module, "NYXSTONE_AVAILABLE", True)
+
+    def _unexpected_nyxstone(*_args, **_kwargs):
+        raise AssertionError("Nyxstone should not be initialized for unknown targets")
+
+    monkeypatch.setattr(
+        disassembler_module, "Nyxstone", _unexpected_nyxstone, raising=False
+    )
+
+    result = disassemble_functions(
+        None, {"llvm_target_tuple": "unknown-pc-windows-msvc"}
+    )
+
+    assert result == {}
 
 
 def test_extract_register_usage_cmov():

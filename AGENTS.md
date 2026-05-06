@@ -57,6 +57,7 @@ Primary workflows:
 - Rule engine behavior must remain deterministic and case-insensitive where expected.
 - Keep heavy operations behind explicit flags (`--disassemble`, `--deep`, `--use-blintdb`).
 - Avoid weakening error handling around malformed binaries.
+- Always check for Windows path separators/characters (`\` vs `/`, drive letters, basename handling) when writing or updating filesystem logic, fixtures, and especially unit tests; avoid POSIX-only raw-string assertions when the behavior is path-based.
 - Nyxstone currently provides disassembly text, but not structured operand/register metadata; register usage and call-target heuristics in `blint/lib/disassembler.py` must therefore remain text-based.
 - For blintdb-backed SBOM matching, prefer exact project evidence over permissive fuzzy expansion. False positives in SBOM output are harder to review than missed low-confidence hints.
 

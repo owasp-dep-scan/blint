@@ -6,7 +6,9 @@ import pytest
 
 from blint.lib.binary import (
     build_disassembly_callgraph_metadata,
+    construct_llvm_target_tuple,
     demangle_symbolic_name,
+    is_shared_library,
     parse,
     parse_informative_strings,
     parse_macho_symbols,
@@ -61,6 +63,44 @@ def test_parse_wasm_parser_failure(tmp_path):
     assert metadata["binary_type"] == "WASM"
     assert metadata["errors"]
     assert "WebAssembly" in metadata["errors"][0]
+
+
+def test_is_shared_library_handles_objects_without_format_attribute():
+    class _FakeCoffObject:
+        pass
+
+    assert is_shared_library(_FakeCoffObject()) is False
+
+
+def test_construct_llvm_target_tuple_maps_windows_arm64_aliases():
+    metadata = {"binary_type": "PE", "machine_type": "ARM64EC"}
+
+    assert construct_llvm_target_tuple(metadata) == "aarch64-pc-windows-msvc"
+
+
+def test_parse_skips_disassembly_for_unsupported_lief_objects(monkeypatch, tmp_path):
+    fixture = tmp_path / "sample.obj"
+    fixture.write_bytes(b"coff")
+
+    class _FakeCoffObject:
+        pass
+
+    monkeypatch.setattr("blint.lib.binary.lief.is_oat", lambda _path: False)
+    monkeypatch.setattr("blint.lib.binary.lief.is_pe", lambda _path: False)
+    monkeypatch.setattr("blint.lib.binary.lief.parse", lambda _path: _FakeCoffObject())
+
+    def _unexpected_disassembly(*_args, **_kwargs):
+        raise AssertionError("disassemble_functions should not be called")
+
+    monkeypatch.setattr(
+        "blint.lib.binary.disassemble_functions", _unexpected_disassembly
+    )
+
+    metadata = parse(str(fixture), disassemble=True)
+
+    assert metadata["is_shared_library"] is False
+    assert "disassembled_functions" not in metadata
+    assert metadata["hashes"]["sha256"]
 
 
 def test_parse_informative_strings_extracts_and_deduplicates_network_hints():
