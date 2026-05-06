@@ -26,27 +26,31 @@ def test_small_corpus_manifest_includes_five_entries_per_ecosystem():
 
 
 def test_select_preferred_artifact_prefers_matching_basename_prefix():
+    shared_lib = Path("/tmp/demo/libfmt.11.1.4.dylib")
+    executable = Path("/tmp/demo/fmt")
     selected = validate_blintdb_small_corpus.select_preferred_artifact(
         [
-            "/tmp/demo/libfmt.11.1.4.dylib",
-            "/tmp/demo/fmt",
+            str(shared_lib),
+            str(executable),
         ],
         ["libfmt", "fmt"],
     )
 
-    assert selected == "/tmp/demo/libfmt.11.1.4.dylib"
+    assert Path(selected) == shared_lib
 
 
 def test_select_preferred_artifact_prefers_shared_library_over_static_archive():
+    static_archive = Path("/tmp/demo/libpng.a")
+    shared_lib = Path("/tmp/demo/libpng.dylib")
     selected = validate_blintdb_small_corpus.select_preferred_artifact(
         [
-            "/tmp/demo/libpng.a",
-            "/tmp/demo/libpng.dylib",
+            str(static_archive),
+            str(shared_lib),
         ],
         ["libpng"],
     )
 
-    assert selected == "/tmp/demo/libpng.dylib"
+    assert Path(selected) == shared_lib
 
 
 def test_summarize_results_counts_exact_matches_and_hash_evidence():
