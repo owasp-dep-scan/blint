@@ -101,3 +101,23 @@ def run_pattern_reviews(
                 if not allow_shared_matches:
                     found_function[result["function"].lower()] = True
     return results
+
+
+def build_special_symbol_review(symbol_names, cid, evidence_limit):
+    """Build simple pattern=function evidence for special-case symbol reviews."""
+    results = defaultdict(list)
+    for symbol_name in symbol_names[0:evidence_limit]:
+        results[cid].append({"pattern": symbol_name, "function": symbol_name})
+    return results
+
+
+def build_pii_review_results(metadata, evidence_limit):
+    """Build the legacy PII_READ review result set from metadata."""
+    pii_names = [f.get("name", "") for f in metadata.get("pii_symbols", [])]
+    return build_special_symbol_review(pii_names, "PII_READ", evidence_limit)
+
+
+def build_loader_symbol_review_results(metadata, evidence_limit):
+    """Build the legacy LOADER_SYMBOLS review result set from metadata."""
+    loader_names = [f.get("name", "") for f in metadata.get("first_stage_symbols", [])]
+    return build_special_symbol_review(loader_names, "LOADER_SYMBOLS", evidence_limit)

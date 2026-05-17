@@ -1,5 +1,4 @@
 import re
-from collections import defaultdict
 
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
@@ -12,7 +11,11 @@ from blint.lib.analysis import (
     review_symbols_dict,
 )
 from blint.lib.function_reviews import review_disassembled_functions
-from blint.lib.review_utils import run_pattern_reviews
+from blint.lib.review_utils import (
+    build_loader_symbol_review_results,
+    build_pii_review_results,
+    run_pattern_reviews,
+)
 from blint.logger import LOG
 
 
@@ -56,7 +59,8 @@ class ReviewRunner:
             or self.review_functions_list
         ):
             return self._review_lists(metadata)
-        return self._review_loader_symbols(metadata)
+        self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
+        return self.results
 
     def _review_lists(self, metadata):
         """
@@ -79,8 +83,8 @@ class ReviewRunner:
             self._review_entries(metadata)
         if self.review_functions_list:
             self._review_functions(metadata)
-        self._review_pii(metadata)
-        self._review_loader_symbols(metadata)
+        self.results |= build_pii_review_results(metadata, EVIDENCE_LIMIT)
+        self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
 
     def _review_imports(self, metadata):
@@ -98,24 +102,6 @@ class ReviewRunner:
         ]
         LOG.debug(f"Reviewing {len(entries_list)} dynamic entries")
         self.run_review_methods_symbols(self.review_entries_list, entries_list)
-
-    def _review_pii(self, metadata):
-        """Reviews pii symbols."""
-        entries_list = [f.get("name", "") for f in metadata.get("pii_symbols", [])]
-        results = defaultdict(list)
-        for e in entries_list[0:EVIDENCE_LIMIT]:
-            results["PII_READ"].append({"pattern": e, "function": e})
-        self.results |= results
-
-    def _review_loader_symbols(self, metadata):
-        """Reviews loader symbols."""
-        entries_list = [
-            f.get("name", "") for f in metadata.get("first_stage_symbols", [])
-        ]
-        results = defaultdict(list)
-        for e in entries_list[0:EVIDENCE_LIMIT]:
-            results["LOADER_SYMBOLS"].append({"pattern": e, "function": e})
-        self.results |= results
 
     def _review_symbols_exe(self, metadata):
         """Reviews symbols in the metadata."""

@@ -177,6 +177,48 @@ def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
     assert "RPC_GPSVC_ARTIFACTS" not in rule_ids
 
 
+def test_review_runner_emits_pii_read_special_case_results():
+    metadata = {
+        "exe_type": "genericbinary",
+        "pii_symbols": [
+            {"name": "password"},
+            {"name": "email"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("pii.bin", "pii.bin")
+
+    pii_review = next(result for result in results if result["id"] == "PII_READ")
+    assert pii_review["evidence"] == [
+        {"pattern": "password", "function": "password"},
+        {"pattern": "email", "function": "email"},
+    ]
+
+
+def test_review_runner_emits_loader_symbols_special_case_results_without_other_reviews():
+    metadata = {
+        "exe_type": "unknown-loader-type",
+        "first_stage_symbols": [
+            {"name": "download_and_exec"},
+            {"name": "reflective_loader"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("loader.bin", "loader.bin")
+
+    loader_review = next(
+        result for result in results if result["id"] == "LOADER_SYMBOLS"
+    )
+    assert loader_review["evidence"] == [
+        {"pattern": "download_and_exec", "function": "download_and_exec"},
+        {"pattern": "reflective_loader", "function": "reflective_loader"},
+    ]
+
+
 def test_ntqsi_cve_2026_40369_review_clusters_trigger_on_informative_strings():
     metadata = {
         "exe_type": "PE64",
