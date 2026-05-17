@@ -161,6 +161,42 @@ rules:
     patterns:
       - HalTranslateBusAddress
       - ZwMapViewOfSection
+  - id: NTQSI_CLASS253_ZERO_LENGTH_CALL
+    title: Function invokes NtQuerySystemInformation class 253 with zero output length
+    summary: A single function sets up the class-253 zero-length query pattern described in CVE-2026-40369 research.
+    description: |
+      This function directly calls NtQuerySystemInformation and its assembly text also contains an immediate class 253 / 0xFD selector together with a zeroed output-length argument register or stack slot. That combination is a focused triage heuristic for the class-253 arbitrary-kernel-increment trigger described in public CVE-2026-40369 proof-of-concept material. It is not proof of exploitability or malicious intent.
+    check_type: function_analysis
+  - id: NTQSIEX_SYSTEM_BUILD_VERSION_QUERY
+    title: Function invokes NtQuerySystemInformationEx for SystemBuildVersionInformation
+    summary: A single function queries the uncommon SystemBuildVersionInformation selector via NtQuerySystemInformationEx.
+    description: |
+      This function directly calls NtQuerySystemInformationEx and its assembly text contains the SystemBuildVersionInformation selector (222 / 0xDE). In published CVE-2026-40369 exploit chains this query is used as part of kernel-read and structure-confusion staging. Legitimate diagnostics code can also query this class, so treat this as a focused review signal rather than a definitive exploit claim.
+    check_type: function_analysis
+  - id: NTQSI_CLASS253_DYNAMIC_INDIRECT_CALL
+    title: Function dynamically resolves or indirectly calls class-253 NtQuerySystemInformation
+    summary: A single function combines indirect-call evidence with class-253 zero-length setup consistent with GetProcAddress-style trigger wrappers.
+    description: |
+      This function either exposes an indirect-call hint that resolves to NtQuerySystemInformation or contains a GetProcAddress-style dynamic resolver chain, and the instruction window around the indirect call also sets up class 253 / 0xFD with a zero output length. This is designed to catch more heavily obfuscated CVE-2026-40369-style trigger wrappers that avoid a normal import or direct call edge.
+    check_type: function_analysis
+  - id: NTQSIEX_SYSTEM_BUILD_VERSION_DYNAMIC_INDIRECT_QUERY
+    title: Function dynamically resolves or indirectly calls NtQuerySystemInformationEx build-version staging
+    summary: A single function combines indirect-call evidence with SystemBuildVersionInformation selector setup.
+    description: |
+      This function either exposes an indirect-call hint that resolves to NtQuerySystemInformationEx or contains a GetProcAddress-style resolver chain, and the instruction window around the indirect call contains the uncommon SystemBuildVersionInformation selector (222 / 0xDE). This helps surface more obfuscated CVE-2026-40369 staging helpers that resolve the syscall wrapper dynamically.
+    check_type: function_analysis
+  - id: NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN
+    title: Function pairs a resolver helper with class-253 indirect invocation
+    summary: A function calls an internal dynamic-resolution helper and then performs the class-253 zero-length indirect invocation pattern.
+    description: |
+      This function directly calls another internal helper that looks like a GetProcAddress-style resolver and then performs an indirect call in an instruction window containing class 253 / 0xFD and zero-length output setup. This rule is intended to catch CVE-2026-40369-style implementations that split API resolution and invocation across separate functions to avoid simpler same-function heuristics.
+    check_type: function_analysis
+  - id: NTQSIEX_SYSTEM_BUILD_VERSION_CROSS_FUNCTION_RESOLVER_CHAIN
+    title: Function pairs a resolver helper with NtQuerySystemInformationEx build-version staging
+    summary: A function calls an internal dynamic-resolution helper and then performs the SystemBuildVersionInformation indirect query pattern.
+    description: |
+      This function directly calls another internal helper that looks like a GetProcAddress-style resolver and then performs an indirect call in an instruction window containing the SystemBuildVersionInformation selector (222 / 0xDE). This helps catch CVE-2026-40369 staging logic that resolves NtQuerySystemInformationEx in one helper and consumes the returned function pointer in another.
+    check_type: function_analysis
   - id: RPC_SERVER_IMPERSONATION_CHAIN
     title: Function combines RPC server setup and client impersonation
     summary: A single function stands up an RPC endpoint and impersonates the connecting client.

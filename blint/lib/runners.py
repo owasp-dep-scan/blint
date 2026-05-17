@@ -60,6 +60,206 @@ def _coerce_min_patterns(value) -> int:
         return 1
 
 
+CLASS_253_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xfd|253)(?![a-z0-9])")
+SYSTEM_BUILD_VERSION_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xde|222)(?![a-z0-9])")
+X86_INDIRECT_CALL_REGISTERS = {
+    "rax",
+    "rbx",
+    "rcx",
+    "rdx",
+    "rsi",
+    "rdi",
+    "rbp",
+    "rsp",
+    "eax",
+    "ebx",
+    "ecx",
+    "edx",
+    "esi",
+    "edi",
+    "ebp",
+    "esp",
+}
+for _reg_idx in range(8, 16):
+    X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}")
+    X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}d")
+    X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}w")
+    X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}b")
+ARM64_INDIRECT_CALL_REGISTERS = {f"x{idx}" for idx in range(31)} | {"xzr"}
+ZERO_LENGTH_ARG_SETUP_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\b(?:xor|sub)\s+r8d,\s*r8d\b",
+        r"\b(?:xor|sub)\s+r8,\s*r8\b",
+        r"\bmov\s+r8d,\s*(?:0x0+|0)\b",
+        r"\bmov\s+r8,\s*(?:0x0+|0)\b",
+        r"\bmov\s+w2,\s*wzr\b",
+        r"\bmov\s+x2,\s*xzr\b",
+        r"\bmovz?\s+w2,\s*#?(?:0x0+|0)\b",
+        r"\bmovz?\s+x2,\s*#?(?:0x0+|0)\b",
+        r"\bpush\s+(?:0x0+|0)\b",
+    )
+)
+DYNAMIC_RESOLVER_APIS = {
+    "getprocaddress",
+    "ldrgetprocedureaddress",
+}
+MODULE_RESOLUTION_APIS = {
+    "getmodulehandle",
+    "getmodulehandlea",
+    "getmodulehandlew",
+    "getmodulehandleex",
+    "getmodulehandleexa",
+    "getmodulehandleexw",
+    "loadlibrary",
+    "loadlibrarya",
+    "loadlibraryw",
+    "loadlibraryexa",
+    "loadlibraryexw",
+    "loadpackagedlibrary",
+    "ldrloaddll",
+}
+
+
+def _normalize_direct_call_name(call_name: str) -> str:
+    """Normalize direct-call target names for exact API matching."""
+
+    normalized = str(call_name or "").strip().lower()
+    if "::" in normalized:
+        normalized = normalized.rsplit("::", maxsplit=1)[-1]
+    normalized = normalized.removeprefix("__imp_")
+    return normalized.lstrip("_")
+
+
+def _normalize_function_symbol_name(function_name: str) -> str:
+    """Normalize internal function names for cross-function call matching."""
+
+    return _normalize_direct_call_name(function_name)
+
+
+def _function_has_direct_call(func_data: dict, api_name: str) -> bool:
+    """Return True when a function's resolved direct calls include the named API."""
+
+    normalized_api_name = api_name.strip().lower()
+    return any(
+        _normalize_direct_call_name(call_name) == normalized_api_name
+        for call_name in func_data.get("direct_calls", [])
+    )
+
+
+def _function_has_any_direct_call(func_data: dict, api_names) -> bool:
+    """Return True when any normalized direct call matches one of the APIs."""
+
+    normalized_api_names = {name.strip().lower() for name in api_names}
+    return any(
+        _normalize_direct_call_name(call_name) in normalized_api_names
+        for call_name in func_data.get("direct_calls", [])
+    )
+
+
+def _function_has_indirect_target_hint(func_data: dict, api_name: str) -> bool:
+    """Return True when an indirect/tail call target hint resolves to the API."""
+
+    normalized_api_name = api_name.strip().lower()
+    return any(
+        target.get("kind") in ("indirect_hint", "tailcall")
+        and _normalize_direct_call_name(target.get("target_name", ""))
+        == normalized_api_name
+        for target in func_data.get("direct_call_targets", [])
+    )
+
+
+def _function_has_dynamic_resolution_context(func_data: dict) -> bool:
+    """Return True for common GetProcAddress/LdrGetProcedureAddress resolver chains."""
+
+    return _function_has_any_direct_call(
+        func_data, DYNAMIC_RESOLVER_APIS
+    ) and _function_has_any_direct_call(func_data, MODULE_RESOLUTION_APIS)
+
+
+def _assembly_matches_any(assembly: str, patterns) -> bool:
+    """Return True when the assembly text matches any compiled regex pattern."""
+
+    return any(pattern.search(assembly) for pattern in patterns)
+
+
+def _looks_like_indirect_call_line(line: str) -> bool:
+    """Return True for indirect call/jump-call forms used in disassembly windows."""
+
+    normalized = line.strip().lower()
+    if not normalized:
+        return False
+    mnemonic, _, operand = normalized.partition(" ")
+    operand = operand.strip()
+    if mnemonic in ("blr", "blraa", "blrab"):
+        return operand.startswith("x")
+    if not mnemonic.startswith("call") or not operand:
+        return False
+    if "[" in operand and "]" in operand:
+        return True
+    normalized_operand = operand.removeprefix("%")
+    if normalized_operand.startswith("$"):
+        return True
+    return (
+        normalized_operand in X86_INDIRECT_CALL_REGISTERS
+        or normalized_operand in ARM64_INDIRECT_CALL_REGISTERS
+    )
+
+
+def _iter_indirect_call_windows(assembly: str, window_size: int = 8):
+    """Yield short instruction windows ending at each indirect call site."""
+
+    lines = [line.strip().lower() for line in assembly.splitlines() if line.strip()]
+    for idx, line in enumerate(lines):
+        if _looks_like_indirect_call_line(line):
+            start = max(0, idx - window_size)
+            yield "\n".join(lines[start : idx + 1])
+
+
+def _function_has_indirect_call_window(
+    func_data: dict, selector_pattern, require_zero_length: bool = False
+) -> bool:
+    """Return True when an indirect-call instruction window matches the selector pattern."""
+
+    if not func_data.get("has_indirect_call"):
+        return False
+    assembly = func_data.get("assembly", "").lower()
+    for window in _iter_indirect_call_windows(assembly):
+        if not selector_pattern.search(window):
+            continue
+        if require_zero_length and not _assembly_matches_any(
+            window, ZERO_LENGTH_ARG_SETUP_PATTERNS
+        ):
+            continue
+        return True
+    return False
+
+
+def _collect_dynamic_resolver_helpers(disassembled_functions: dict) -> dict[str, str]:
+    """Map normalized helper names to display names for resolver-like internal helpers."""
+
+    resolver_helpers = {}
+    for func_data in disassembled_functions.values():
+        if _function_has_dynamic_resolution_context(func_data):
+            function_name = func_data.get("name", "")
+            normalized_name = _normalize_function_symbol_name(function_name)
+            if normalized_name:
+                resolver_helpers[normalized_name] = function_name
+    return resolver_helpers
+
+
+def _find_called_resolver_helper(
+    func_data: dict, resolver_helpers: dict[str, str]
+) -> str:
+    """Return the first called internal resolver helper name for this function."""
+
+    for call_name in func_data.get("direct_calls", []):
+        normalized_name = _normalize_function_symbol_name(call_name)
+        if normalized_name in resolver_helpers:
+            return resolver_helpers[normalized_name]
+    return ""
+
+
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -388,6 +588,9 @@ class ReviewRunner:
         )
         results = defaultdict(list)
         found_cid = defaultdict(int)
+        resolver_helpers = _collect_dynamic_resolver_helpers(
+            metadata["disassembled_functions"]
+        )
         ALLOC_APIS = {
             "virtualalloc",
             "virtualallocex",
@@ -450,6 +653,7 @@ class ReviewRunner:
                         continue
                     check_type = rule_obj.get("check_type")
                     passed = False
+                    related_function = ""
                     if check_type == "function_flag":
                         check_field = rule_obj.get("check_field")
                         if func_data.get(check_field):
@@ -588,12 +792,75 @@ class ReviewRunner:
                         elif rule_id == "POTENTIAL_IAT_MANIPULATION":
                             if func_data.get("sreg_interactions"):
                                 passed = True
+                        elif rule_id == "NTQSI_CLASS253_ZERO_LENGTH_CALL":
+                            if _function_has_direct_call(
+                                func_data, "ntquerysysteminformation"
+                            ) and CLASS_253_IMMEDIATE_RE.search(assembly):
+                                if _assembly_matches_any(
+                                    assembly, ZERO_LENGTH_ARG_SETUP_PATTERNS
+                                ):
+                                    passed = True
+                        elif rule_id == "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY":
+                            if _function_has_direct_call(
+                                func_data, "ntquerysysteminformationex"
+                            ) and SYSTEM_BUILD_VERSION_IMMEDIATE_RE.search(assembly):
+                                passed = True
+                        elif rule_id == "NTQSI_CLASS253_DYNAMIC_INDIRECT_CALL":
+                            if _function_has_indirect_call_window(
+                                func_data,
+                                CLASS_253_IMMEDIATE_RE,
+                                require_zero_length=True,
+                            ) and (
+                                _function_has_indirect_target_hint(
+                                    func_data, "ntquerysysteminformation"
+                                )
+                                or _function_has_dynamic_resolution_context(func_data)
+                            ):
+                                passed = True
+                        elif (
+                            rule_id
+                            == "NTQSIEX_SYSTEM_BUILD_VERSION_DYNAMIC_INDIRECT_QUERY"
+                        ):
+                            if _function_has_indirect_call_window(
+                                func_data,
+                                SYSTEM_BUILD_VERSION_IMMEDIATE_RE,
+                            ) and (
+                                _function_has_indirect_target_hint(
+                                    func_data, "ntquerysysteminformationex"
+                                )
+                                or _function_has_dynamic_resolution_context(func_data)
+                            ):
+                                passed = True
+                        elif rule_id == "NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN":
+                            related_function = _find_called_resolver_helper(
+                                func_data, resolver_helpers
+                            )
+                            if related_function and _function_has_indirect_call_window(
+                                func_data,
+                                CLASS_253_IMMEDIATE_RE,
+                                require_zero_length=True,
+                            ):
+                                passed = True
+                        elif (
+                            rule_id
+                            == "NTQSIEX_SYSTEM_BUILD_VERSION_CROSS_FUNCTION_RESOLVER_CHAIN"
+                        ):
+                            related_function = _find_called_resolver_helper(
+                                func_data, resolver_helpers
+                            )
+                            if related_function and _function_has_indirect_call_window(
+                                func_data,
+                                SYSTEM_BUILD_VERSION_IMMEDIATE_RE,
+                            ):
+                                passed = True
                     if passed:
                         evidence = {
                             "function": func_data.get("name", func_key),
                             "address": func_data.get("address"),
                             "snippet": func_data.get("assembly", "").split("\n")[0],
                         }
+                        if related_function:
+                            evidence["related_function"] = related_function
                         results[rule_id].append(evidence)
                         found_cid[rule_id] += 1
         self.results |= results
