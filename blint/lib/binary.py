@@ -514,10 +514,13 @@ def _prepare_informative_string_catalogs(catalogs):
     return tuple(prepared)
 
 
+PREPARED_INFORMATIVE_STRING_CATALOGS = _prepare_informative_string_catalogs(
+    INFORMATIVE_STRING_CATALOGS
+)
+
+
 def parse_informative_strings(parsed_obj):
     """Extracts stable, non-secret string hints useful for capability clustering."""
-
-    matcher_catalogs = _prepare_informative_string_catalogs(INFORMATIVE_STRING_CATALOGS)
 
     informative = []
     seen = set()
@@ -534,7 +537,11 @@ def parse_informative_strings(parsed_obj):
             lowered = text.lower()
             if lowered in seen:
                 continue
-            for category, boundary_patterns, substring_indicators in matcher_catalogs:
+            for (
+                category,
+                boundary_patterns,
+                substring_indicators,
+            ) in PREPARED_INFORMATIVE_STRING_CATALOGS:
                 if any(
                     indicator in lowered for indicator in substring_indicators
                 ) or any(pattern.search(lowered) for pattern in boundary_patterns):

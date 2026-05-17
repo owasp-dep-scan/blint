@@ -42,6 +42,14 @@ def test_genericbinary():
     assert not results
 
 
+def test_process_review_returns_empty_list_when_no_results():
+    reviewer = ReviewRunner()
+
+    results = reviewer.process_review("no-results.bin", "no-results.bin")
+
+    assert results == []
+
+
 def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
     metadata = {
         "exe_type": "PE64",
@@ -195,6 +203,7 @@ def test_review_runner_emits_pii_read_special_case_results():
         {"pattern": "password", "function": "password"},
         {"pattern": "email", "function": "email"},
     ]
+    assert "patterns" not in pii_review
 
 
 def test_review_runner_emits_loader_symbols_special_case_results_without_other_reviews():

@@ -176,7 +176,7 @@ class ReviewRunner:
         """Processes the review results for the given executable and review."""
         reviews = []
         if not self.results:
-            return {}
+            return []
         for cid, evidence in self.results.items():
             aresult = {
                 **review_rules_cache.get(cid),
@@ -184,7 +184,7 @@ class ReviewRunner:
                 "filename": f,
                 "exe_name": exe_name,
             }
-            if hasattr(aresult, "patterns"):
+            if "patterns" in aresult:
                 del aresult["patterns"]
             reviews.append(aresult)
         return reviews
