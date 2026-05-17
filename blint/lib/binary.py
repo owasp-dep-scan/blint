@@ -21,7 +21,7 @@ from blint.config import (
     get_int_from_env,
 )
 from blint.lib.disassembler import disassemble_functions
-from blint.lib.indicators import INFORMATIVE_STRING_HINTS
+from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.utils import (
     calculate_entropy,
     calculate_hashes,
@@ -502,12 +502,25 @@ def _prepare_informative_string_matchers(indicators):
     return tuple(boundary_patterns), tuple(substring_indicators)
 
 
+def _prepare_informative_string_catalogs(catalogs):
+    """Compile informative-string catalogs into reusable matcher bundles."""
+
+    prepared = []
+    for category, indicators in catalogs:
+        boundary_patterns, substring_indicators = _prepare_informative_string_matchers(
+            indicators
+        )
+        prepared.append((category, boundary_patterns, substring_indicators))
+    return tuple(prepared)
+
+
+PREPARED_INFORMATIVE_STRING_CATALOGS = _prepare_informative_string_catalogs(
+    INFORMATIVE_STRING_CATALOGS
+)
+
+
 def parse_informative_strings(parsed_obj):
     """Extracts stable, non-secret string hints useful for capability clustering."""
-
-    boundary_patterns, substring_indicators = _prepare_informative_string_matchers(
-        INFORMATIVE_STRING_HINTS
-    )
 
     informative = []
     seen = set()
@@ -524,11 +537,17 @@ def parse_informative_strings(parsed_obj):
             lowered = text.lower()
             if lowered in seen:
                 continue
-            if any(indicator in lowered for indicator in substring_indicators) or any(
-                pattern.search(lowered) for pattern in boundary_patterns
-            ):
-                seen.add(lowered)
-                informative.append({"value": text, "category": "network_evasion_hint"})
+            for (
+                category,
+                boundary_patterns,
+                substring_indicators,
+            ) in PREPARED_INFORMATIVE_STRING_CATALOGS:
+                if any(
+                    indicator in lowered for indicator in substring_indicators
+                ) or any(pattern.search(lowered) for pattern in boundary_patterns):
+                    seen.add(lowered)
+                    informative.append({"value": text, "category": category})
+                    break
     return informative
 
 

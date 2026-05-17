@@ -42,6 +42,14 @@ def test_genericbinary():
     assert not results
 
 
+def test_process_review_returns_empty_list_when_no_results():
+    reviewer = ReviewRunner()
+
+    results = reviewer.process_review("no-results.bin", "no-results.bin")
+
+    assert results == []
+
+
 def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
     metadata = {
         "exe_type": "PE64",
@@ -175,6 +183,445 @@ def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
     assert "RPC_ENDPOINT_REGISTRATION_IMPORTS" not in rule_ids
     assert "RPC_TERMSERVICE_ARTIFACTS" not in rule_ids
     assert "RPC_GPSVC_ARTIFACTS" not in rule_ids
+
+
+def test_review_runner_emits_pii_read_special_case_results():
+    metadata = {
+        "exe_type": "genericbinary",
+        "pii_symbols": [
+            {"name": "password"},
+            {"name": "email"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("pii.bin", "pii.bin")
+
+    pii_review = next(result for result in results if result["id"] == "PII_READ")
+    assert pii_review["evidence"] == [
+        {"pattern": "password", "function": "password"},
+        {"pattern": "email", "function": "email"},
+    ]
+    assert "patterns" not in pii_review
+
+
+def test_review_runner_emits_loader_symbols_special_case_results_without_other_reviews():
+    metadata = {
+        "exe_type": "unknown-loader-type",
+        "first_stage_symbols": [
+            {"name": "download_and_exec"},
+            {"name": "reflective_loader"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("loader.bin", "loader.bin")
+
+    loader_review = next(
+        result for result in results if result["id"] == "LOADER_SYMBOLS"
+    )
+    assert loader_review["evidence"] == [
+        {"pattern": "download_and_exec", "function": "download_and_exec"},
+        {"pattern": "reflective_loader", "function": "reflective_loader"},
+    ]
+
+
+def test_ntqsi_cve_2026_40369_review_clusters_trigger_on_informative_strings():
+    metadata = {
+        "exe_type": "PE64",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "NtQuerySystemInformation"},
+            {"value": "NtQuerySystemInformationEx"},
+            {"value": "[target+0] += num_processes  (DWORD increment)"},
+            {"value": "[target+4] += total_threads  (DWORD add)"},
+            {"value": "[target+8] += total_handles  (DWORD add)"},
+            {"value": "PsInitialSystemProcess"},
+            {"value": "System EPROCESS"},
+            {"value": "OpenProcessToken"},
+            {"value": "SeDebug"},
+            {"value": "VirtualAllocEx"},
+            {"value": "WriteProcessMemory"},
+            {"value": "CreateRemoteThread"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("synthetic-ntqsi.exe", "synthetic-ntqsi.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_INCREMENT_CLUSTER" in rule_ids
+    assert "NTQSI_KERNEL_TOKEN_THEFT_CLUSTER" in rule_ids
+
+
+def test_ntqsi_cve_2026_40369_review_clusters_require_multiple_indicators():
+    metadata = {
+        "exe_type": "PE64",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "NtQuerySystemInformation"},
+            {"value": "VirtualAllocEx"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("single-ntqsi.exe", "single-ntqsi.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_INCREMENT_CLUSTER" not in rule_ids
+    assert "NTQSI_KERNEL_TOKEN_THEFT_CLUSTER" not in rule_ids
+
+
+def test_ntqsi_disassembly_reviews_trigger_on_class253_and_buildinfo_patterns():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140001000::trigger_class253": {
+                "name": "trigger_class253",
+                "address": "0x140001000",
+                "assembly": "mov ecx, 0xfd\nmov rdx, rbx\nxor r8d, r8d\nlea r9, [rsp+0x20]\ncall NtQuerySystemInformation",
+                "direct_calls": ["NtQuerySystemInformation"],
+                "instruction_metrics": {},
+                "instruction_count": 5,
+            },
+            "0x140001100::query_build_info": {
+                "name": "query_build_info",
+                "address": "0x140001100",
+                "assembly": "mov ecx, 0xde\nlea rdx, [rsp+0x20]\nmov r8d, 4\nlea r9, [rsp+0x40]\ncall NtQuerySystemInformationEx",
+                "direct_calls": ["NtQuerySystemInformationEx"],
+                "instruction_metrics": {},
+                "instruction_count": 5,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-ntqsi-disasm.exe", "synthetic-ntqsi-disasm.exe"
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_ZERO_LENGTH_CALL" in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY" in rule_ids
+
+    class253_review = next(
+        result
+        for result in results
+        if result["id"] == "NTQSI_CLASS253_ZERO_LENGTH_CALL"
+    )
+    assert class253_review["evidence"][0]["function"] == "trigger_class253"
+
+    buildinfo_review = next(
+        result
+        for result in results
+        if result["id"] == "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY"
+    )
+    assert buildinfo_review["evidence"][0]["function"] == "query_build_info"
+
+
+def test_ntqsi_disassembly_reviews_do_not_fire_on_generic_system_info_calls():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140002000::ordinary_query": {
+                "name": "ordinary_query",
+                "address": "0x140002000",
+                "assembly": "mov ecx, 5\nmov r8d, 0x100\ncall NtQuerySystemInformation",
+                "direct_calls": ["NtQuerySystemInformation"],
+                "instruction_metrics": {},
+                "instruction_count": 3,
+            },
+            "0x140002100::other_ex_query": {
+                "name": "other_ex_query",
+                "address": "0x140002100",
+                "assembly": "mov ecx, 7\nmov r8d, 4\ncall NtQuerySystemInformationEx",
+                "direct_calls": ["NtQuerySystemInformationEx"],
+                "instruction_metrics": {},
+                "instruction_count": 3,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "generic-ntqsi-disasm.exe", "generic-ntqsi-disasm.exe"
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_ZERO_LENGTH_CALL" not in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY" not in rule_ids
+
+
+def test_ntqsi_indirect_dynamic_disassembly_reviews_trigger_on_getprocaddress_style_variants():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140003000::resolve_and_trigger_class253": {
+                "name": "resolve_and_trigger_class253",
+                "address": "0x140003000",
+                "assembly": "call GetModuleHandleW\ncall GetProcAddress\nmov r11, rax\nmov ecx, 0xfd\nmov rdx, rbx\nxor r8d, r8d\nlea r9, [rsp+0x20]\ncall r11",
+                "direct_calls": ["GetModuleHandleW", "GetProcAddress"],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r11",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 8,
+            },
+            "0x140003100::hinted_build_version_indirect": {
+                "name": "hinted_build_version_indirect",
+                "address": "0x140003100",
+                "assembly": "mov ecx, 0xde\nlea rdx, [rsp+0x20]\nmov r8d, 4\nlea r9, [rsp+0x40]\ncall qword ptr [rax]",
+                "direct_calls": [],
+                "direct_call_targets": [
+                    {
+                        "target_name": "NtQuerySystemInformationEx",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "qword ptr [rax]",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 5,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-ntqsi-indirect.exe", "synthetic-ntqsi-indirect.exe"
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_DYNAMIC_INDIRECT_CALL" in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_DYNAMIC_INDIRECT_QUERY" in rule_ids
+
+
+def test_ntqsi_indirect_dynamic_disassembly_reviews_require_selector_and_context():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140004000::generic_resolver_wrapper": {
+                "name": "generic_resolver_wrapper",
+                "address": "0x140004000",
+                "assembly": "call GetModuleHandleW\ncall GetProcAddress\nmov r11, rax\nmov ecx, 5\nxor r8d, r8d\ncall r11",
+                "direct_calls": ["GetModuleHandleW", "GetProcAddress"],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r11",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 6,
+            },
+            "0x140004100::wrong_hint_no_zero_length": {
+                "name": "wrong_hint_no_zero_length",
+                "address": "0x140004100",
+                "assembly": "mov ecx, 0xfd\nmov r8d, 4\ncall qword ptr [rax]",
+                "direct_calls": [],
+                "direct_call_targets": [
+                    {
+                        "target_name": "NtQuerySystemInformation",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "qword ptr [rax]",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 3,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-ntqsi-indirect-negative.exe",
+        "synthetic-ntqsi-indirect-negative.exe",
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_DYNAMIC_INDIRECT_CALL" not in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_DYNAMIC_INDIRECT_QUERY" not in rule_ids
+
+
+def test_ntqsi_cross_function_resolver_chain_reviews_trigger_on_split_resolution_and_use():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140005000::resolve_ntqsi": {
+                "name": "resolve_ntqsi",
+                "address": "0x140005000",
+                "assembly": "call GetModuleHandleW\ncall GetProcAddress\nret",
+                "direct_calls": ["GetModuleHandleW", "GetProcAddress"],
+                "direct_call_targets": [],
+                "has_indirect_call": False,
+                "instruction_metrics": {"ret_count": 1},
+                "instruction_count": 3,
+            },
+            "0x140005100::use_resolved_ntqsi": {
+                "name": "use_resolved_ntqsi",
+                "address": "0x140005100",
+                "assembly": "call resolve_ntqsi\nmov r11, rax\nmov ecx, 0xfd\nmov rdx, rbx\nxor r8d, r8d\nlea r9, [rsp+0x20]\ncall r11",
+                "direct_calls": ["resolve_ntqsi"],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r11",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 7,
+            },
+            "0x140005200::resolve_ntqsiex": {
+                "name": "resolve_ntqsiex",
+                "address": "0x140005200",
+                "assembly": "call GetModuleHandleW\ncall GetProcAddress\nret",
+                "direct_calls": ["GetModuleHandleW", "GetProcAddress"],
+                "direct_call_targets": [],
+                "has_indirect_call": False,
+                "instruction_metrics": {"ret_count": 1},
+                "instruction_count": 3,
+            },
+            "0x140005300::use_resolved_ntqsiex": {
+                "name": "use_resolved_ntqsiex",
+                "address": "0x140005300",
+                "assembly": "call resolve_ntqsiex\nmov r10, rax\nmov ecx, 0xde\nlea rdx, [rsp+0x20]\nmov r8d, 4\nlea r9, [rsp+0x40]\ncall r10",
+                "direct_calls": ["resolve_ntqsiex"],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r10",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 7,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-ntqsi-cross.exe", "synthetic-ntqsi-cross.exe"
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN" in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_CROSS_FUNCTION_RESOLVER_CHAIN" in rule_ids
+
+    class253_review = next(
+        result
+        for result in results
+        if result["id"] == "NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN"
+    )
+    assert class253_review["evidence"][0]["function"] == "use_resolved_ntqsi"
+    assert class253_review["evidence"][0]["related_function"] == "resolve_ntqsi"
+
+    buildinfo_review = next(
+        result
+        for result in results
+        if result["id"] == "NTQSIEX_SYSTEM_BUILD_VERSION_CROSS_FUNCTION_RESOLVER_CHAIN"
+    )
+    assert buildinfo_review["evidence"][0]["function"] == "use_resolved_ntqsiex"
+    assert buildinfo_review["evidence"][0]["related_function"] == "resolve_ntqsiex"
+
+
+def test_ntqsi_cross_function_resolver_chain_reviews_require_helper_call_relationship():
+    metadata = {
+        "exe_type": "PE64",
+        "disassembled_functions": {
+            "0x140006000::resolve_ntqsi": {
+                "name": "resolve_ntqsi",
+                "address": "0x140006000",
+                "assembly": "call GetModuleHandleW\ncall GetProcAddress\nret",
+                "direct_calls": ["GetModuleHandleW", "GetProcAddress"],
+                "direct_call_targets": [],
+                "has_indirect_call": False,
+                "instruction_metrics": {"ret_count": 1},
+                "instruction_count": 3,
+            },
+            "0x140006100::indirect_without_helper_link": {
+                "name": "indirect_without_helper_link",
+                "address": "0x140006100",
+                "assembly": "mov r11, rax\nmov ecx, 0xfd\nmov rdx, rbx\nxor r8d, r8d\ncall r11",
+                "direct_calls": [],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r11",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 5,
+            },
+            "0x140006200::calls_helper_but_wrong_selector": {
+                "name": "calls_helper_but_wrong_selector",
+                "address": "0x140006200",
+                "assembly": "call resolve_ntqsi\nmov r11, rax\nmov ecx, 5\nxor r8d, r8d\ncall r11",
+                "direct_calls": ["resolve_ntqsi"],
+                "direct_call_targets": [
+                    {
+                        "target_name": "",
+                        "target_address": "",
+                        "target_address_candidates": [],
+                        "raw_operand": "r11",
+                        "kind": "indirect_hint",
+                    }
+                ],
+                "has_indirect_call": True,
+                "instruction_metrics": {},
+                "instruction_count": 5,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-ntqsi-cross-negative.exe",
+        "synthetic-ntqsi-cross-negative.exe",
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN" not in rule_ids
+    assert "NTQSIEX_SYSTEM_BUILD_VERSION_CROSS_FUNCTION_RESOLVER_CHAIN" not in rule_ids
 
 
 def test_run_review_methods_symbols_caps_evidence_at_limit():

@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import blint.lib.binary as binary_module
 
 from blint.lib.binary import (
     build_disassembly_callgraph_metadata,
@@ -143,6 +144,51 @@ def test_parse_informative_strings_matches_punctuated_indicators_once():
 
     assert values == ["DNS-over-HTTPS", "/dev/net/tun0", "dns-query endpoint"]
     assert all(entry["category"] == "network_evasion_hint" for entry in informative)
+
+
+def test_parse_informative_strings_detects_windows_local_elevation_hints():
+    class _FakeParsed:
+        strings = [
+            "NtQuerySystemInformationEx",
+            "PsInitialSystemProcess",
+            "VirtualAllocEx",
+            "WriteProcessMemory",
+            "CreateRemoteThread",
+            "OpenProcessToken",
+            "harmless string",
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+
+    assert [entry["value"] for entry in informative] == [
+        "NtQuerySystemInformationEx",
+        "PsInitialSystemProcess",
+        "VirtualAllocEx",
+        "WriteProcessMemory",
+        "CreateRemoteThread",
+        "OpenProcessToken",
+    ]
+    assert all(
+        entry["category"] == "windows_local_elevation_hint" for entry in informative
+    )
+
+
+def test_parse_informative_strings_reuses_prepared_matchers(monkeypatch):
+    class _FakeParsed:
+        strings = ["IP_HDRINCL"]
+
+    def _fail_if_recompiled(_catalogs):
+        raise AssertionError("informative string catalogs should be reused")
+
+    monkeypatch.setattr(
+        binary_module,
+        "_prepare_informative_string_catalogs",
+        _fail_if_recompiled,
+    )
+
+    informative = parse_informative_strings(_FakeParsed())
+
+    assert informative == [{"value": "IP_HDRINCL", "category": "network_evasion_hint"}]
 
 
 def test_parse_wasm_detects_dos_growth_loop_finding():

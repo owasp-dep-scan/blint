@@ -19,6 +19,9 @@ Primary workflows:
 - `blint/config.py`: defaults, env vars, rule constants, disassembly indicator lists.
 - `blint/lib/runners.py`: default analysis flow and SBOM flow orchestration.
 - `blint/lib/analysis.py`: rule loading, checks execution, review engine, report writing.
+- `blint/lib/review_runner.py`: `ReviewRunner` coordination for imports/symbols/entries/functions.
+- `blint/lib/review_utils.py`: generic pattern-review matching and rule-option coercion.
+- `blint/lib/function_reviews.py`: `FUNCTION_REVIEWS` heuristics and metric evaluation.
 - `blint/lib/binary.py`: format parsing and metadata extraction (ELF/PE/Mach-O/WASM).
 - `blint/lib/disassembler.py`: nyxstone-backed function disassembly and metrics.
 - `blint/lib/sbom.py`: CycloneDX object construction and dependency modeling.
@@ -36,7 +39,7 @@ Primary workflows:
 3. Each binary is parsed (`blint/lib/binary.py::parse`).
 4. Raw metadata is exported as `*-metadata.json`.
 5. Security checks run from `rules.yml` (`run_checks`).
-6. Capability reviews run from annotation rules (`ReviewRunner`).
+6. Capability reviews run from annotation rules (`blint/lib/review_runner.py::ReviewRunner`).
 7. Optional fuzzable targets are generated (`run_prefuzz`).
 8. Findings/reviews/fuzzables are exported as JSON plus HTML console output.
 
@@ -68,7 +71,7 @@ Primary workflows:
 1. Add or edit YAML in `blint/data/rules.yml` or `blint/data/annotations/*.yml`.
 2. Ensure `id` is unique and includes required fields.
 3. If using `FUNCTION_REVIEWS`, confirm `check_type` and fields align with
-   `blint/lib/runners.py::_review_functions` logic.
+   `blint/lib/function_reviews.py` evaluation logic.
 4. Add/adjust tests in `tests/test_analysis.py` with fixture metadata.
 
 ### Add metadata extraction for a format
