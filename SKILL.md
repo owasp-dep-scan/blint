@@ -6,8 +6,9 @@ This file defines practical skills an AI agent should apply when working on `bli
 
 - Start at `blint/cli.py` to identify mode (`default`, `sbom`, `db`).
 - Follow orchestration in `blint/lib/runners.py`.
+- Review coordination lives in `blint/lib/review_runner.py`.
 - For extraction logic, use `blint/lib/binary.py` and `blint/lib/android.py`.
-- For rule behavior, use `blint/lib/analysis.py` and `blint/data/annotations/*.yml`.
+- For rule behavior, use `blint/lib/analysis.py`, `blint/lib/review_utils.py`, `blint/lib/function_reviews.py`, and `blint/data/annotations/*.yml`.
 - For SBOM behavior, use `blint/lib/sbom.py` and `blint/cyclonedx/spec.py`.
 
 ## Skill: Implement rule-driven behavior safely
@@ -15,7 +16,7 @@ This file defines practical skills an AI agent should apply when working on `bli
 - Understand rule types:
   - `rules.yml` -> hardening checks (`run_checks`).
   - annotations -> reviews (`METHOD_REVIEWS`, `SYMBOL_REVIEWS`, etc.).
-  - `FUNCTION_REVIEWS` -> disassembly-derived behavior checks.
+  - `FUNCTION_REVIEWS` -> disassembly-derived behavior checks implemented in `blint/lib/function_reviews.py`.
 - Keep rule IDs stable and unique.
 - Match field paths used in `function_metric` with actual metadata shape.
 - Respect evidence limits (`EVIDENCE_LIMIT`) to avoid noisy output.
