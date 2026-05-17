@@ -177,6 +177,56 @@ def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
     assert "RPC_GPSVC_ARTIFACTS" not in rule_ids
 
 
+def test_ntqsi_cve_2026_40369_review_clusters_trigger_on_informative_strings():
+    metadata = {
+        "exe_type": "PE64",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "NtQuerySystemInformation"},
+            {"value": "NtQuerySystemInformationEx"},
+            {"value": "[target+0] += num_processes  (DWORD increment)"},
+            {"value": "[target+4] += total_threads  (DWORD add)"},
+            {"value": "[target+8] += total_handles  (DWORD add)"},
+            {"value": "PsInitialSystemProcess"},
+            {"value": "System EPROCESS"},
+            {"value": "OpenProcessToken"},
+            {"value": "SeDebug"},
+            {"value": "VirtualAllocEx"},
+            {"value": "WriteProcessMemory"},
+            {"value": "CreateRemoteThread"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("synthetic-ntqsi.exe", "synthetic-ntqsi.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_INCREMENT_CLUSTER" in rule_ids
+    assert "NTQSI_KERNEL_TOKEN_THEFT_CLUSTER" in rule_ids
+
+
+def test_ntqsi_cve_2026_40369_review_clusters_require_multiple_indicators():
+    metadata = {
+        "exe_type": "PE64",
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "NtQuerySystemInformation"},
+            {"value": "VirtualAllocEx"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("single-ntqsi.exe", "single-ntqsi.exe")
+
+    rule_ids = {result["id"] for result in results}
+    assert "NTQSI_CLASS253_INCREMENT_CLUSTER" not in rule_ids
+    assert "NTQSI_KERNEL_TOKEN_THEFT_CLUSTER" not in rule_ids
+
+
 def test_run_review_methods_symbols_caps_evidence_at_limit():
     patterns = [f"pattern{i}" for i in range(EVIDENCE_LIMIT + 2)]
     functions_list = [f"symbol_pattern{i}" for i in range(EVIDENCE_LIMIT + 2)]

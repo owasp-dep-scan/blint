@@ -145,6 +145,33 @@ def test_parse_informative_strings_matches_punctuated_indicators_once():
     assert all(entry["category"] == "network_evasion_hint" for entry in informative)
 
 
+def test_parse_informative_strings_detects_windows_local_elevation_hints():
+    class _FakeParsed:
+        strings = [
+            "NtQuerySystemInformationEx",
+            "PsInitialSystemProcess",
+            "VirtualAllocEx",
+            "WriteProcessMemory",
+            "CreateRemoteThread",
+            "OpenProcessToken",
+            "harmless string",
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+
+    assert [entry["value"] for entry in informative] == [
+        "NtQuerySystemInformationEx",
+        "PsInitialSystemProcess",
+        "VirtualAllocEx",
+        "WriteProcessMemory",
+        "CreateRemoteThread",
+        "OpenProcessToken",
+    ]
+    assert all(
+        entry["category"] == "windows_local_elevation_hint" for entry in informative
+    )
+
+
 def test_parse_wasm_detects_dos_growth_loop_finding():
     wasm_file = TEST_DATA_DIR / "dos_growth_loop.wasm"
     metadata = parse(str(wasm_file))

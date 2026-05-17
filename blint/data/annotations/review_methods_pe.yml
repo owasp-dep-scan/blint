@@ -1,0 +1,37 @@
+---
+text: Review for exploit-oriented method and string clusters in PE binaries
+group: METHOD_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+  - gobinary
+rules:
+  - id: NTQSI_CLASS253_INCREMENT_CLUSTER
+    title: NtQuerySystemInformation class-253 increment primitive indicators
+    summary: Contains multiple indicators associated with class-253 arbitrary-kernel-increment PoCs or close derivatives.
+    description: |
+      This review looks for a clustered set of strings and symbols associated with public CVE-2026-40369 proof-of-concept material, including NtQuerySystemInformation class-253 wording and the per-process counter write descriptions that accompany zero-length-buffer trigger paths. It is a triage heuristic only and should be correlated with imports, disassembly, and provenance.
+    min_patterns: 3
+    include_informative_strings: true
+    patterns:
+      - NtQuerySystemInformation
+      - num_processes
+      - total_threads
+      - total_handles
+      - SystemProcessInformationExtension
+  - id: NTQSI_KERNEL_TOKEN_THEFT_CLUSTER
+    title: NtQuerySystemInformationEx kernel-walk and remote-injection cluster
+    summary: Contains multiple indicators consistent with kernel token-walk exploitation and post-elevation remote injection.
+    description: |
+      This review detects a combination of indicators seen in advanced CVE-2026-40369 research chains: NtQuerySystemInformationEx-based probing, references to PsInitialSystemProcess or EPROCESS-oriented traversal, and classic remote-injection APIs such as VirtualAllocEx, WriteProcessMemory, and CreateRemoteThread. The output is intentionally descriptive and is not proof that the binary is exploitable or malicious.
+    min_patterns: 5
+    include_informative_strings: true
+    patterns:
+      - NtQuerySystemInformationEx
+      - PsInitialSystemProcess
+      - System EPROCESS
+      - OpenProcessToken
+      - SeDebug
+      - VirtualAllocEx
+      - WriteProcessMemory
+      - CreateRemoteThread

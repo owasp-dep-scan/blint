@@ -32,8 +32,28 @@ NETWORK_EVASION_INDICATORS = (
     "sni",
 )
 
-# Backward-compatible alias used by parse_informative_strings.
-INFORMATIVE_STRING_HINTS = NETWORK_EVASION_INDICATORS
+WINDOWS_LOCAL_ELEVATION_INDICATORS = (
+    "ntquerysysteminformation",
+    "ntquerysysteminformationex",
+    "systemprocessinformationextension",
+    "class 253 arbitrary kernel increment",
+    "num_processes",
+    "total_threads",
+    "total_handles",
+    "psinitialsystemprocess",
+    "system eprocess",
+    "virtualallocex",
+    "writeprocessmemory",
+    "createremotethread",
+    "openprocesstoken",
+    "sedebug",
+)
+
+INFORMATIVE_STRING_CATALOGS = (
+    ("network_evasion_hint", NETWORK_EVASION_INDICATORS),
+    ("windows_local_elevation_hint", WINDOWS_LOCAL_ELEVATION_INDICATORS),
+)
+
 
 SYSCALL_INDICATORS = ["syscall", "int 0x80", "sysenter", "svc #", "smc #", "ecall"]
 
