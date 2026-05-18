@@ -185,6 +185,135 @@ def test_multi_pattern_rpc_artifact_reviews_do_not_fire_on_single_token_match():
     assert "RPC_GPSVC_ARTIFACTS" not in rule_ids
 
 
+def test_miniplasma_cloudfilter_reviews_trigger_on_clustered_indicators():
+    metadata = {
+        "exe_type": "PE64",
+        "imports": [
+            {"name": "cldapi.dll::CfAbortOperation"},
+            {"name": "kernel32.dll::GetNamedPipeServerSessionId"},
+            {"name": "advapi32.dll::CreateProcessAsUserW"},
+        ],
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "CfAbortOperation"},
+            {"value": "CfGetPlatformInfo"},
+            {"value": "cldapi.dll"},
+            {"value": "CloudFiles"},
+            {"value": "BlockedApps"},
+            {"value": "SetImpersonationToken"},
+            {"value": "CreateSymbolicLink"},
+            {"value": "SetSecurityDescriptor"},
+            {"value": r"Registry\User\.DEFAULT"},
+            {"value": "Volatile Environment"},
+            {"value": "WriteDac"},
+            {"value": "windir"},
+            {"value": "System32"},
+            {"value": "wermgr.exe"},
+            {"value": "QueueReporting"},
+            {"value": "MiniPlasmaWERPipe"},
+            {"value": "GetNamedPipeServerSessionId"},
+            {"value": "CreateProcessAsUser"},
+        ],
+        "disassembled_functions": {
+            "0x140010000::trigger_cloudfilter_race": {
+                "name": "trigger_cloudfilter_race",
+                "address": "0x140010000",
+                "assembly": "call NtThread.SetImpersonationToken\ncall CfAbortOperation\njmp trigger_cloudfilter_race",
+                "direct_calls": ["NtThread.SetImpersonationToken", "CfAbortOperation"],
+                "has_loop": True,
+                "instruction_metrics": {"jump_count": 1},
+                "instruction_count": 3,
+            },
+            "0x140010100::redirect_cloudfiles_policy": {
+                "name": "redirect_cloudfiles_policy",
+                "address": "0x140010100",
+                "assembly": "CloudFiles BlockedApps Volatile Environment",
+                "direct_calls": [
+                    "NtKey.CreateSymbolicLink",
+                    "SetSecurityDescriptor",
+                    "NtOpenKey",
+                ],
+                "instruction_metrics": {},
+                "instruction_count": 3,
+            },
+            "0x140010200::launch_from_wer_session": {
+                "name": "launch_from_wer_session",
+                "address": "0x140010200",
+                "assembly": "MiniPlasmaWERPipe QueueReporting wermgr.exe",
+                "direct_calls": [
+                    "GetNamedPipeServerSessionId",
+                    "CreateProcessAsUserW",
+                ],
+                "instruction_metrics": {},
+                "instruction_count": 2,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "synthetic-miniplasma.exe", "synthetic-miniplasma.exe"
+    )
+
+    rule_ids = {result["id"] for result in results}
+    assert "CLOUDFILTER_ABORT_API" in rule_ids
+    assert "WER_SESSION_PROCESS_LAUNCH_IMPORTS" in rule_ids
+    assert "CLOUDFILTER_ABORT_HYDRATION_LPE_CLUSTER" in rule_ids
+    assert "CLOUDFILTER_REGISTRY_POLICY_LINK_CLUSTER" in rule_ids
+    assert "WER_QUEUE_REPORTING_ENV_HIJACK_CLUSTER" in rule_ids
+    assert "CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN" in rule_ids
+    assert "CLOUDFILTER_ABORT_LOOP" in rule_ids
+    assert "CLOUDFILTER_REGISTRY_POLICY_LINK_CHAIN" in rule_ids
+    assert "WER_ENVIRONMENT_PROCESS_CHAIN" in rule_ids
+
+    abort_chain = next(
+        result
+        for result in results
+        if result["id"] == "CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN"
+    )
+    assert abort_chain["evidence"][0]["function"] == "trigger_cloudfilter_race"
+
+
+def test_miniplasma_reviews_require_clustered_or_behavioral_context():
+    metadata = {
+        "exe_type": "PE64",
+        "imports": [{"name": "cldapi.dll::CfAbortOperation"}],
+        "functions": [],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "CfAbortOperation"},
+            {"value": "CloudFiles"},
+        ],
+        "disassembled_functions": {
+            "0x140020000::ordinary_abort": {
+                "name": "ordinary_abort",
+                "address": "0x140020000",
+                "assembly": "call CfAbortOperation\nret",
+                "direct_calls": ["CfAbortOperation"],
+                "has_loop": False,
+                "instruction_metrics": {"jump_count": 0},
+                "instruction_count": 2,
+            }
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review(
+        "ordinary-cloudfilter.exe", "ordinary-cloudfilter.exe"
+    )
+    rule_ids = {result["id"] for result in results}
+
+    assert "CLOUDFILTER_ABORT_API" in rule_ids
+    assert "CLOUDFILTER_ABORT_HYDRATION_LPE_CLUSTER" not in rule_ids
+    assert "CLOUDFILTER_REGISTRY_POLICY_LINK_CLUSTER" not in rule_ids
+    assert "WER_QUEUE_REPORTING_ENV_HIJACK_CLUSTER" not in rule_ids
+    assert "CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN" not in rule_ids
+    assert "CLOUDFILTER_ABORT_LOOP" not in rule_ids
+
+
 def test_review_runner_emits_pii_read_special_case_results():
     metadata = {
         "exe_type": "genericbinary",
@@ -729,6 +858,29 @@ def test_run_review_methods_symbols_uses_informative_strings_per_rule_opt_in():
 
     assert "RULE_NO_OPT_IN" not in reviewer.results
     assert "RULE_WITH_OPT_IN" in reviewer.results
+
+
+def test_run_review_methods_symbols_matches_single_backslash_windows_paths():
+    reviewer = ReviewRunner()
+
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_WINDOWS_PATH": {
+                    "patterns": [
+                        r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
+                    ],
+                    "include_informative_strings": True,
+                }
+            }
+        ],
+        [],
+        informative_values=[
+            r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
+        ],
+    )
+
+    assert "RULE_WINDOWS_PATH" in reviewer.results
 
 
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():
