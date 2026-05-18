@@ -246,3 +246,27 @@ rules:
       - RpcImpersonateClient
       - DuplicateTokenEx
       - CreateProcessAsUser
+  - id: CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN
+    title: Function combines Cloud Filter abort operations and token impersonation
+    summary: A single function invokes CfAbortOperation together with anonymous-token or thread-token impersonation primitives.
+    description: |
+      This function-level review catches MiniPlasma-style abort-hydration trigger loops that pair Cloud Filter abort operations with rapid impersonation-token changes. Legitimate Cloud Files providers may call CfAbortOperation, but combining it with anonymous-token or thread impersonation APIs is a focused local-elevation triage signal.
+    check_type: function_analysis
+  - id: CLOUDFILTER_ABORT_LOOP
+    title: Function repeatedly invokes Cloud Filter abort operations
+    summary: A function calls CfAbortOperation and contains loop/jump evidence consistent with a race trigger.
+    description: |
+      This function calls CfAbortOperation from code that also appears to loop. The public MiniPlasma proof of concept repeatedly calls CfAbortOperation as part of a race condition trigger. This heuristic is intentionally behavioral and should be correlated with registry policy-link or impersonation evidence.
+    check_type: function_analysis
+  - id: CLOUDFILTER_REGISTRY_POLICY_LINK_CHAIN
+    title: Function manipulates CloudFiles policy registry links and security
+    summary: A function combines registry write/delete activity, security-descriptor changes, and symbolic-link style registry behavior.
+    description: |
+      This function-level review catches CloudFiles policy-key manipulation patterns associated with MiniPlasma-style chains, including registry symbolic-link creation and security descriptor changes around policy paths such as CloudFiles/BlockedApps. It is intended for triage and does not prove exploitability by itself.
+    check_type: function_analysis
+  - id: WER_ENVIRONMENT_PROCESS_CHAIN
+    title: Function combines WER session recovery and token-backed process launch
+    summary: A function recovers a named-pipe server session and launches a process through CreateProcessAsUser-style APIs.
+    description: |
+      This review detects the post-elevation helper shape used by MiniPlasma-style WER QueueReporting environment-hijack chains: recover the originating session through GetNamedPipeServerSessionId and launch a process using CreateProcessAsUser*. The API combination is rare but can appear in legitimate service brokers, so treat the result as a review signal.
+    check_type: function_analysis

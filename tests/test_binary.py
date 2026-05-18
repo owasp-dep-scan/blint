@@ -173,6 +173,33 @@ def test_parse_informative_strings_detects_windows_local_elevation_hints():
     )
 
 
+def test_parse_informative_strings_detects_miniplasma_cloudfilter_hints():
+    class _FakeParsed:
+        strings = [
+            "CfAbortOperation",
+            "cldapi.dll",
+            r"\\Registry\\User\\.DEFAULT\\Software\\Policies\\Microsoft\\CloudFiles\\BlockedApps",
+            "Volatile Environment",
+            "MiniPlasmaWERPipe",
+            "QueueReporting",
+            "harmless CloudFilesBackupSuffix",
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+
+    assert [entry["value"] for entry in informative] == [
+        "CfAbortOperation",
+        "cldapi.dll",
+        r"\\Registry\\User\\.DEFAULT\\Software\\Policies\\Microsoft\\CloudFiles\\BlockedApps",
+        "Volatile Environment",
+        "MiniPlasmaWERPipe",
+        "QueueReporting",
+    ]
+    assert all(
+        entry["category"] == "windows_local_elevation_hint" for entry in informative
+    )
+
+
 def test_parse_informative_strings_reuses_prepared_matchers(monkeypatch):
     class _FakeParsed:
         strings = ["IP_HDRINCL"]

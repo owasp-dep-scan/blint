@@ -65,6 +65,44 @@ MODULE_RESOLUTION_APIS = {
     "ldrloaddll",
 }
 
+CLOUD_FILTER_ABORT_APIS = {
+    "cfabortoperation",
+}
+CLOUD_FILTER_TOKEN_IMPERSONATION_APIS = {
+    "impersonateanonymoustoken",
+    "setthreadtoken",
+    "setimpersonationtoken",
+    "ntsetinformationthread",
+    "zwsetinformationthread",
+    "getanonymoustoken",
+}
+CLOUD_FILTER_REGISTRY_APIS = {
+    "ntcreatekey",
+    "ntopenkey",
+    "ntdeletekey",
+    "ntsetvaluekey",
+    "regcreatekey",
+    "regcreatekeyex",
+    "regopenkey",
+    "regopenkeyex",
+    "regdeletekey",
+    "regdeletekeyex",
+    "regdeletekeyvalue",
+    "regsetvalue",
+    "regsetvalueex",
+}
+CLOUD_FILTER_REGISTRY_SECURITY_APIS = {
+    "ntsetsecurityobject",
+    "regsetkeysecurity",
+    "setsecuritydescriptor",
+    "setsecurityinfo",
+    "setnamedsecurityinfo",
+}
+CLOUD_FILTER_REGISTRY_LINK_APIS = {
+    "createsymboliclink",
+    "ntcreatesymboliclinkobject",
+}
+
 ALLOC_APIS = {
     "virtualalloc",
     "virtualallocex",
@@ -152,6 +190,16 @@ def _function_has_any_direct_call(func_data: dict, api_names) -> bool:
         _normalize_direct_call_name(call_name) in normalized_api_names
         for call_name in func_data.get("direct_calls", [])
     )
+
+
+def _function_has_any_call_fragment(func_data: dict, api_names) -> bool:
+    """Return True when any normalized direct call contains a named API fragment."""
+    normalized_api_names = {name.strip().lower() for name in api_names}
+    for call_name in func_data.get("direct_calls", []):
+        normalized_call_name = _normalize_direct_call_name(call_name)
+        if any(api_name in normalized_call_name for api_name in normalized_api_names):
+            return True
+    return False
 
 
 def _function_has_indirect_target_hint(func_data: dict, api_name: str) -> bool:
@@ -410,6 +458,51 @@ def _evaluate_function_analysis(
             func_data,
             SYSTEM_BUILD_VERSION_IMMEDIATE_RE,
         ):
+            passed = True
+    elif rule_id == "CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN":
+        if _function_has_any_call_fragment(
+            func_data, CLOUD_FILTER_ABORT_APIS
+        ) and _function_has_any_call_fragment(
+            func_data, CLOUD_FILTER_TOKEN_IMPERSONATION_APIS
+        ):
+            passed = True
+    elif rule_id == "CLOUDFILTER_ABORT_LOOP":
+        if _function_has_any_call_fragment(func_data, CLOUD_FILTER_ABORT_APIS) and (
+            func_data.get("has_loop") or metrics.get("jump_count", 0) > 0
+        ):
+            passed = True
+    elif rule_id == "CLOUDFILTER_REGISTRY_POLICY_LINK_CHAIN":
+        has_registry_link = (
+            _function_has_any_call_fragment(func_data, CLOUD_FILTER_REGISTRY_LINK_APIS)
+            or "symboliclinkvalue" in assembly
+        )
+        has_registry_security = _function_has_any_call_fragment(
+            func_data, CLOUD_FILTER_REGISTRY_SECURITY_APIS
+        )
+        has_registry_write = _function_has_any_call_fragment(
+            func_data, CLOUD_FILTER_REGISTRY_APIS
+        )
+        has_policy_strings = all(
+            marker in assembly
+            for marker in ("cloudfiles", "blockedapps", "volatile environment")
+        )
+        if (has_registry_link and has_registry_security and has_registry_write) or (
+            has_policy_strings and (has_registry_link or has_registry_security)
+        ):
+            passed = True
+    elif rule_id == "WER_ENVIRONMENT_PROCESS_CHAIN":
+        has_pipe_session = _function_has_any_call_fragment(
+            func_data, {"getnamedpipeserversessionid"}
+        )
+        has_process_launch = _function_has_any_call_fragment(
+            func_data,
+            {"createprocessasuser", "createprocessasusera", "createprocessasuserw"},
+        )
+        has_wer_strings = any(
+            marker in assembly
+            for marker in ("queuereporting", "wermgr.exe", "miniplasmawerpipe")
+        )
+        if has_pipe_session and has_process_launch and has_wer_strings:
             passed = True
 
     return passed, related_function

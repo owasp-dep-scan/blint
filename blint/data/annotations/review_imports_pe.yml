@@ -93,6 +93,26 @@ rules:
       - WerStoreGetNextReportKey
       - WerStoreQueryReportMetadataV2
       - WerUnregister
+  - id: CLOUDFILTER_ABORT_API
+    title: Cloud Filter abort-operation APIs used
+    summary: Imports Cloud Filter APIs used to abort hydration or query Cloud Files platform support.
+    description: |
+      The binary imports cldapi Cloud Filter functions such as CfAbortOperation or CfGetPlatformInfo. These APIs are legitimate for Cloud Files providers, but CfAbortOperation is also a key primitive in MiniPlasma/CVE-2020-17103-adjacent local-elevation proof-of-concept material. Treat this as a capability signal and correlate it with registry policy-link, impersonation, or WER evidence.
+    patterns:
+      - CfAbortOperation
+      - CfGetPlatformInfo
+      - cldapi.dll
+  - id: WER_SESSION_PROCESS_LAUNCH_IMPORTS
+    title: WER/session process-launch helper imports used
+    summary: Imports APIs used to recover a named-pipe client session and launch a token-backed process.
+    description: |
+      The binary imports APIs that can support the WER QueueReporting environment-hijack stage seen in MiniPlasma-style research: GetNamedPipeServerSessionId to recover the caller session and CreateProcessAsUser* to launch under a duplicated or adjusted token. This clustered import review is descriptive and should be correlated with WER, named-pipe, or registry-environment evidence.
+    allow_shared_matches: true
+    min_patterns: 2
+    patterns:
+      - GetNamedPipeServerSessionId
+      - CreateProcessAsUserA
+      - CreateProcessAsUserW
   - id: MEMORY_API
     title: Windows Memory api used
     summary: Manipulates System Memory

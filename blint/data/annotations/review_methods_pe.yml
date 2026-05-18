@@ -35,3 +35,54 @@ rules:
       - VirtualAllocEx
       - WriteProcessMemory
       - CreateRemoteThread
+  - id: CLOUDFILTER_ABORT_HYDRATION_LPE_CLUSTER
+    title: Cloud Filter abort-hydration local-elevation cluster
+    summary: Contains multiple Cloud Filter abort-hydration and token-impersonation indicators associated with MiniPlasma-style local elevation research.
+    description: |
+      This review looks for a clustered set of strings, metadata names, or symbols associated with public MiniPlasma/CVE-2020-17103-adjacent proof-of-concept material: Cloud Filter abort-operation calls, cldapi usage, CloudFiles policy paths, and anonymous-token impersonation churn. It is a triage heuristic only; legitimate Cloud Files clients can call Cloud Filter APIs, so correlate this result with registry-link and WER evidence before drawing conclusions.
+    min_patterns: 5
+    include_informative_strings: true
+    patterns:
+      - CfAbortOperation
+      - CfGetPlatformInfo
+      - cldapi.dll
+      - AbortHydration
+      - CloudFiles
+      - BlockedApps
+      - SetImpersonationToken
+      - ImpersonateAnonymousToken
+      - GetAnonymousToken
+  - id: CLOUDFILTER_REGISTRY_POLICY_LINK_CLUSTER
+    title: CloudFiles registry policy symbolic-link manipulation cluster
+    summary: Contains multiple indicators for CloudFiles policy-key ACL changes and registry symbolic-link redirection.
+    description: |
+      This review detects a group of registry policy path, symbolic-link, and security-descriptor indicators used by MiniPlasma-style chains to redirect CloudFiles BlockedApps policy handling toward another .DEFAULT hive location. The rule requires multiple distinct indicators to avoid flagging ordinary registry tooling or benign CloudFiles references in isolation.
+    min_patterns: 5
+    include_informative_strings: true
+    patterns:
+      - CloudFiles
+      - BlockedApps
+      - CreateSymbolicLink
+      - SymbolicLinkValue
+      - SetSecurityDescriptor
+      - .DEFAULT
+      - Volatile Environment
+      - WriteDac
+      - WriteOwner
+  - id: WER_QUEUE_REPORTING_ENV_HIJACK_CLUSTER
+    title: WER QueueReporting environment-hijack cluster
+    summary: Contains multiple WER QueueReporting, windir redirection, fake System32, and token-backed process launch indicators.
+    description: |
+      This review looks for the post-trigger behavior used in the MiniPlasma PoC: altering .DEFAULT Volatile Environment values such as windir, staging a fake System32\wermgr.exe, activating the Windows Error Reporting QueueReporting task, synchronizing over a named pipe, and launching a process with a SYSTEM token/session. It is intentionally clustered because individual WER, Task Scheduler, or named-pipe strings can appear in legitimate administrative software.
+    min_patterns: 5
+    include_informative_strings: true
+    patterns:
+      - Volatile Environment
+      - windir
+      - System32
+      - wermgr.exe
+      - QueueReporting
+      - Microsoft\\Windows\\Windows Error Reporting\\QueueReporting
+      - MiniPlasmaWERPipe
+      - GetNamedPipeServerSessionId
+      - CreateProcessAsUser
