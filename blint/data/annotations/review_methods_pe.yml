@@ -82,7 +82,7 @@ rules:
       - System32
       - wermgr.exe
       - QueueReporting
-      - Microsoft\\Windows\\Windows Error Reporting\\QueueReporting
+      - Microsoft\Windows\Windows Error Reporting\QueueReporting
       - MiniPlasmaWERPipe
       - GetNamedPipeServerSessionId
       - CreateProcessAsUser

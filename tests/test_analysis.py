@@ -860,6 +860,29 @@ def test_run_review_methods_symbols_uses_informative_strings_per_rule_opt_in():
     assert "RULE_WITH_OPT_IN" in reviewer.results
 
 
+def test_run_review_methods_symbols_matches_single_backslash_windows_paths():
+    reviewer = ReviewRunner()
+
+    reviewer.run_review_methods_symbols(
+        [
+            {
+                "RULE_WINDOWS_PATH": {
+                    "patterns": [
+                        r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
+                    ],
+                    "include_informative_strings": True,
+                }
+            }
+        ],
+        [],
+        informative_values=[
+            r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
+        ],
+    )
+
+    assert "RULE_WINDOWS_PATH" in reviewer.results
+
+
 def test_safe_mermaid_label_sanitizes_parser_unsafe_chars():
     raw_label = ' unsafe extern "C" fn(*mut u8)\n\t\\windows\\path|core::fmt `tick` '
     normalized = _safe_mermaid_label(raw_label)
