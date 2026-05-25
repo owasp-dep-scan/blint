@@ -69,11 +69,6 @@ rules:
     allow_shared_matches: true
     include_informative_strings: true
     patterns:
-      - CVE-2026-28952
-      - CVE-2026-28897
-      - CVE-2026-28987
-      - CVE-2026-28943
-      - CVE-2026-28951
       - _zalloc_ro_mut
       - zalloc_ro_mut
       - ro_zone
@@ -83,8 +78,6 @@ rules:
       - kauth_cred
       - csops_audittoken
       - TPIDR_EL1
-      - Memory Integrity Enforcement
-      - Secure Page Table Monitor
       - SPTM
       - EMTE
       - kernelcache
