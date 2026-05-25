@@ -173,6 +173,31 @@ def test_parse_informative_strings_detects_windows_local_elevation_hints():
     )
 
 
+def test_parse_informative_strings_detects_apple_local_elevation_hints():
+    class _FakeParsed:
+        strings = [
+            "CVE-2026-28952",
+            "_zalloc_ro_mut",
+            "ucred",
+            "cr_uid",
+            "TPIDR_EL1",
+            "Secure Page Table Monitor",
+            "harmless string",
+        ]
+
+    informative = parse_informative_strings(_FakeParsed())
+
+    assert [entry["value"] for entry in informative] == [
+        "_zalloc_ro_mut",
+        "ucred",
+        "cr_uid",
+        "TPIDR_EL1",
+    ]
+    assert all(
+        entry["category"] == "apple_local_elevation_hint" for entry in informative
+    )
+
+
 def test_parse_informative_strings_detects_miniplasma_cloudfilter_hints():
     class _FakeParsed:
         strings = [

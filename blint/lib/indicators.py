@@ -69,9 +69,27 @@ WINDOWS_LOCAL_ELEVATION_INDICATORS = (
     "createprocessasuser",
 )
 
+APPLE_LOCAL_ELEVATION_INDICATORS = (
+    "_zalloc_ro_mut",
+    "_zalloc_ro_mut_atomic",
+    "zalloc_ro_mut",
+    "ro_zone",
+    "ucred",
+    "cr_uid",
+    "kauth_cred",
+    "csops_audittoken",
+    "tpidr_el1",
+    "sptm",
+    "emte",
+    "kernelcache",
+    "thread_set_allocation_name",
+    "thread_set_thread_name",
+)
+
 INFORMATIVE_STRING_CATALOGS = (
     ("network_evasion_hint", NETWORK_EVASION_INDICATORS),
     ("windows_local_elevation_hint", WINDOWS_LOCAL_ELEVATION_INDICATORS),
+    ("apple_local_elevation_hint", APPLE_LOCAL_ELEVATION_INDICATORS),
 )
 
 
