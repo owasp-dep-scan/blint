@@ -62,9 +62,9 @@ binary_type: MachO
 rules:
   - id: APPLE_MIE_COPYCAT_STRING_CLUSTER
     title: Apple MIE bypass copycat string cluster
-    summary: Contains multiple strings naming MIE, RO-zone writers, credential fields, or related public CVEs.
+    summary: Contains multiple strings naming MIE, RO-zone writers, credential fields, or related Apple kernel memory-integrity terminology.
     description: |
-      This binary contains multiple stable strings associated with public Apple Memory Integrity Enforcement bypass research, including _zalloc_ro_mut, RO-zone/ucred terminology, TPIDR_EL1, and related CVE identifiers. These strings are useful for triaging copycat proof-of-concept tooling, exploit test harnesses, or kernelcache analysis utilities.
+      This binary contains multiple stable strings associated with public Apple Memory Integrity Enforcement bypass research, including _zalloc_ro_mut, RO-zone/ucred terminology, TPIDR_EL1, and related Apple kernel memory-integrity terms. These strings are useful for triaging copycat proof-of-concept tooling, exploit test harnesses, or kernelcache analysis utilities.
     min_patterns: 3
     allow_shared_matches: true
     include_informative_strings: true
