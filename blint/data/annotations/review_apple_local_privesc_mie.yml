@@ -1,0 +1,97 @@
+---
+text: Review for Apple local privilege-escalation and MIE bypass copycat indicators in Mach-O binaries
+group: SYMBOL_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: APPLE_DARWIN_PRIVESC_STAGING_API_CLUSTER
+    title: Darwin privilege-escalation staging API cluster
+    summary: Combines process shaping, identity manipulation, and execution APIs often seen in local privilege-escalation tooling.
+    description: |
+      This Mach-O references multiple Darwin APIs commonly used to shape child processes, change effective credentials, or launch a post-elevation payload. The cluster is intended for triage of local privilege-escalation tooling and is not proof of exploitation by itself.
+    min_patterns: 3
+    allow_shared_matches: true
+    patterns:
+      - fork
+      - vfork
+      - posix_spawn
+      - execve
+      - system
+      - setuid
+      - seteuid
+      - setreuid
+      - setresuid
+      - setgid
+      - setegid
+      - setgroups
+  - id: APPLE_DARWIN_ROZONE_REACHABILITY_API_CLUSTER
+    title: Darwin RO-zone mutation reachability API cluster
+    summary: References code-signing or MAC-label mutation APIs that can reach protected kernel credential or policy update paths.
+    description: |
+      This Mach-O references multiple Darwin code-signing or MAC-label mutation APIs such as csops/csops_audittoken and mac_set_* entry points. Public MIE bypass analysis highlighted these surfaces as plausible routes to trusted RO-zone writers, so clustered use is a focused review signal.
+    min_patterns: 2
+    allow_shared_matches: true
+    patterns:
+      - csops
+      - csops_audittoken
+      - mac_set_proc
+      - mac_set_fd
+      - mac_set_link
+      - mac_set_file
+      - mac_set_pid
+  - id: APPLE_DARWIN_THREAD_LEAK_SURFACE_CLUSTER
+    title: Darwin thread metadata leak-surface API cluster
+    summary: References thread naming and Mach thread APIs associated with local kernel pointer-leak staging surfaces.
+    description: |
+      This Mach-O references thread-name or Mach thread APIs that overlap with pointer-chain leak surfaces discussed around the Apple MIE bypass patch set. Treat this as a weak triage signal that should be correlated with stronger RO-zone or credential-staging evidence.
+    min_patterns: 2
+    allow_shared_matches: true
+    patterns:
+      - pthread_setname_np
+      - mach_thread_self
+      - thread_info
+      - thread_get_state
+      - thread_set_state
+      - task_threads
+      - task_for_pid
+---
+text: Review for Apple local privilege-escalation and MIE bypass copycat strings in Mach-O binaries
+group: EXE_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: APPLE_MIE_COPYCAT_STRING_CLUSTER
+    title: Apple MIE bypass copycat string cluster
+    summary: Contains multiple strings naming MIE, RO-zone writers, credential fields, or related Apple kernel memory-integrity terminology.
+    description: |
+      This binary contains multiple stable strings associated with public Apple Memory Integrity Enforcement bypass research, including _zalloc_ro_mut, RO-zone/ucred terminology, TPIDR_EL1, and related Apple kernel memory-integrity terms. These strings are useful for triaging copycat proof-of-concept tooling, exploit test harnesses, or kernelcache analysis utilities.
+    min_patterns: 3
+    allow_shared_matches: true
+    include_informative_strings: true
+    patterns:
+      - _zalloc_ro_mut
+      - zalloc_ro_mut
+      - ro_zone
+      - RO zone
+      - ucred
+      - cr_uid
+      - kauth_cred
+      - csops_audittoken
+      - TPIDR_EL1
+      - SPTM
+      - EMTE
+      - kernelcache
+      - thread_set_allocation_name
+      - thread_set_thread_name
+---
+text: Review disassembled Apple kernelcache functions for MIE _zalloc_ro_mut pre-patch bounds checks
+group: FUNCTION_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS
+    title: Apple _zalloc_ro_mut pre-patch bounds-check shape
+    summary: The _zalloc_ro_mut disassembly has the target-plus-length overflow-check shape without the patched per-CPU bound checks.
+    description: |
+      This rule reviews disassembled Mach-O functions named _zalloc_ro_mut and flags the pre-patch Apple MIE bypass-relevant bounds-check shape: target+len arithmetic in x8/x4 into x9 followed by an overflow branch, without the post-patch TPIDR_EL1 per-CPU bound checks and paired ccmp validations. It is intended for kernelcache triage and does not apply to ordinary userland copycat binaries.
+    check_type: function_analysis

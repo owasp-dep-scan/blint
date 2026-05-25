@@ -4,6 +4,9 @@ from collections import defaultdict
 
 CLASS_253_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xfd|253)(?![a-z0-9])")
 SYSTEM_BUILD_VERSION_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xde|222)(?![a-z0-9])")
+ZALLOC_RO_MUT_TARGET_LEN_ADD_RE = re.compile(r"\badds?\s+x9\s*,\s*x8\s*,\s*x4\b")
+ZALLOC_RO_MUT_OVERFLOW_BRANCH_RE = re.compile(r"\bb\.?hs\b")
+ZALLOC_RO_MUT_PATCHED_CCMP_RE = re.compile(r"\bccmp\s+x9\s*,\s*x(?:10|11)\b")
 
 X86_INDIRECT_CALL_REGISTERS = {
     "rax",
@@ -218,6 +221,28 @@ def _function_has_dynamic_resolution_context(func_data: dict) -> bool:
     return _function_has_any_direct_call(
         func_data, DYNAMIC_RESOLVER_APIS
     ) and _function_has_any_direct_call(func_data, MODULE_RESOLUTION_APIS)
+
+
+def _function_name_is_zalloc_ro_mut(func_data: dict) -> bool:
+    """Return True only for the non-atomic _zalloc_ro_mut function."""
+    normalized_name = _normalize_function_symbol_name(func_data.get("name", ""))
+    return normalized_name == "zalloc_ro_mut"
+
+
+def _zalloc_ro_mut_has_patched_per_cpu_bounds(assembly: str) -> bool:
+    """Return True when the post-patch per-CPU bound-check sequence is present."""
+    return (
+        "tpidr_el1" in assembly
+        and len(ZALLOC_RO_MUT_PATCHED_CCMP_RE.findall(assembly)) >= 2
+    )
+
+
+def _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly: str) -> bool:
+    """Return True for the pre-patch target+len overflow-check shape."""
+    return bool(
+        ZALLOC_RO_MUT_TARGET_LEN_ADD_RE.search(assembly)
+        and ZALLOC_RO_MUT_OVERFLOW_BRANCH_RE.search(assembly)
+    )
 
 
 def _assembly_matches_any(assembly: str, patterns) -> bool:
@@ -503,6 +528,13 @@ def _evaluate_function_analysis(
             for marker in ("queuereporting", "wermgr.exe", "miniplasmawerpipe")
         )
         if has_pipe_session and has_process_launch and has_wer_strings:
+            passed = True
+    elif rule_id == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS":
+        if (
+            _function_name_is_zalloc_ro_mut(func_data)
+            and _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly)
+            and not _zalloc_ro_mut_has_patched_per_cpu_bounds(assembly)
+        ):
             passed = True
 
     return passed, related_function

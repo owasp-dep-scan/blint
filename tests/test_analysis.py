@@ -489,6 +489,133 @@ def test_ntqsi_disassembly_reviews_do_not_fire_on_generic_system_info_calls():
     assert "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY" not in rule_ids
 
 
+def test_apple_mie_annotation_pack_triggers_on_clustered_macho_indicators():
+    metadata = {
+        "exe_type": "MachO",
+        "functions": [],
+        "dynamic_symbols": [
+            {"name": "_fork"},
+            {"name": "_posix_spawn"},
+            {"name": "_setuid"},
+            {"name": "_csops"},
+            {"name": "_csops_audittoken"},
+            {"name": "_pthread_setname_np"},
+            {"name": "_thread_get_state"},
+        ],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "_zalloc_ro_mut"},
+            {"value": "ro_zone"},
+            {"value": "ucred"},
+            {"value": "cr_uid"},
+            {"value": "TPIDR_EL1"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("synthetic-mie-tool", "synthetic-mie-tool")
+
+    rule_ids = {result["id"] for result in results}
+    assert "APPLE_DARWIN_PRIVESC_STAGING_API_CLUSTER" in rule_ids
+    assert "APPLE_DARWIN_ROZONE_REACHABILITY_API_CLUSTER" in rule_ids
+    assert "APPLE_DARWIN_THREAD_LEAK_SURFACE_CLUSTER" in rule_ids
+    assert "APPLE_MIE_COPYCAT_STRING_CLUSTER" in rule_ids
+
+
+def test_apple_mie_annotation_pack_requires_clustered_macho_indicators():
+    metadata = {
+        "exe_type": "MachO",
+        "functions": [],
+        "dynamic_symbols": [
+            {"name": "_setuid"},
+            {"name": "_csops"},
+            {"name": "_pthread_setname_np"},
+        ],
+        "symtab_symbols": [],
+        "informative_strings": [
+            {"value": "_zalloc_ro_mut"},
+        ],
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("ordinary-macho", "ordinary-macho")
+
+    rule_ids = {result["id"] for result in results}
+    assert "APPLE_DARWIN_PRIVESC_STAGING_API_CLUSTER" not in rule_ids
+    assert "APPLE_DARWIN_ROZONE_REACHABILITY_API_CLUSTER" not in rule_ids
+    assert "APPLE_DARWIN_THREAD_LEAK_SURFACE_CLUSTER" not in rule_ids
+    assert "APPLE_MIE_COPYCAT_STRING_CLUSTER" not in rule_ids
+
+
+def test_apple_mie_zalloc_ro_mut_prepatch_disassembly_review():
+    metadata = {
+        "exe_type": "MachO",
+        "disassembled_functions": {
+            "0xfffffe000b4e3560::_zalloc_ro_mut": {
+                "name": "_zalloc_ro_mut",
+                "address": "0xfffffe000b4e3560",
+                "assembly": "\n".join(
+                    [
+                        "cmp x8, x29",
+                        "b.lo skip_stack_check",
+                        "and x9, x8, #0xffffffffffffc000",
+                        "adds x9, x8, x4",
+                        "b.hs range_check",
+                        "cmp x8, x10",
+                    ]
+                ),
+                "instruction_metrics": {},
+                "instruction_count": 6,
+            },
+            "0xfffffe000b4e84d0::_zalloc_ro_mut_patched_copy": {
+                "name": "_zalloc_ro_mut",
+                "address": "0xfffffe000b4e84d0",
+                "assembly": "\n".join(
+                    [
+                        "mrs x10, TPIDR_EL1",
+                        "adds x9, x8, x4",
+                        "b.hs per_cpu_check",
+                        "ldr x11, [x10, #0x158]",
+                        "ldr x10, [x10, #0xe8]",
+                        "cmp x8, x11",
+                        "ccmp x9, x11, #0x0, hs",
+                        "ccmp x9, x10, #0x2, hs",
+                        "b.ls panic",
+                    ]
+                ),
+                "instruction_metrics": {},
+                "instruction_count": 9,
+            },
+            "0xfffffe000b4e9000::_zalloc_ro_mut_atomic": {
+                "name": "_zalloc_ro_mut_atomic",
+                "address": "0xfffffe000b4e9000",
+                "assembly": "adds x9, x8, x4\nb.hs range_check",
+                "instruction_metrics": {},
+                "instruction_count": 2,
+            },
+        },
+    }
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = reviewer.process_review("kernelcache-macho", "kernelcache-macho")
+
+    zalloc_review = next(
+        result
+        for result in results
+        if result["id"] == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS"
+    )
+    assert zalloc_review["evidence"] == [
+        {
+            "function": "_zalloc_ro_mut",
+            "address": "0xfffffe000b4e3560",
+            "snippet": "cmp x8, x29",
+        }
+    ]
+
+
 def test_ntqsi_indirect_dynamic_disassembly_reviews_trigger_on_getprocaddress_style_variants():
     metadata = {
         "exe_type": "PE64",
