@@ -64,9 +64,7 @@ def main() -> None:
     mock_instrs = []
     addr = 0x1000
     for asm in x86_corpus[:12000]:
-        mock_instrs.append(
-            SimpleNamespace(assembly=asm, address=addr, bytes=b"\x90\x90\x90\x90")
-        )
+        mock_instrs.append(SimpleNamespace(assembly=asm, address=addr, bytes=b"\x90\x90\x90\x90"))
         addr += 4
     instr_addrs = [instr.address for instr in mock_instrs]
 
@@ -77,9 +75,7 @@ def main() -> None:
     _summarize("analyze_instructions", _timeit(run_analyze, args.repeat))
 
     if args.binary:
-        parse_samples = _timeit(
-            lambda: parse(args.binary, disassemble=True), args.repeat
-        )
+        parse_samples = _timeit(lambda: parse(args.binary, disassemble=True), args.repeat)
         _summarize("parse_disassemble", parse_samples)
 
 

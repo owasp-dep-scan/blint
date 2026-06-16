@@ -33,16 +33,12 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
-        if blint_options.sbom_output_dir and not os.path.exists(
-            blint_options.sbom_output_dir
-        ):
+        if blint_options.sbom_output_dir and not os.path.exists(blint_options.sbom_output_dir):
             os.makedirs(blint_options.sbom_output_dir)
     exe_files = gen_file_list(blint_options.src_dir_image)
     wasm_files = [f for f in exe_files if is_wasm_file(f)]
     if wasm_files:
-        LOG.info(
-            f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing"
-        )
+        LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
     android_files = []
     for src in blint_options.src_dir_image:
         if files := find_android_files(src):
@@ -176,9 +172,7 @@ class AnalysisRunner:
 
     def do_review(self, exe_name, f, metadata):
         """Performs a review of the given file."""
-        self.progress.update(
-            self.task, description="Checking methods against review rules"
-        )
+        self.progress.update(self.task, description="Checking methods against review rules")
         self.reviewer = ReviewRunner()
         self.reviewer.run_review(metadata)
         if self.reviewer.results:

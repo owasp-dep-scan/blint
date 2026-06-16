@@ -74,9 +74,7 @@ def demangle_symbolic_name(symbol, name_only=False):
     try:
         demangled_symbol = multi_demangle.demangle_symbol(
             symbol,
-            options=demangle_options_name_only
-            if name_only
-            else demangle_options_complete,
+            options=demangle_options_name_only if name_only else demangle_options_complete,
         )
         # demangling didn't work
         if symbol and symbol == demangled_symbol:
@@ -317,9 +315,7 @@ def blintdb_setup(args):
         return
     try:
         oras_client = oras.client.OrasClient()
-        target_url = (
-            args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
-        )
+        target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
         LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
         oras_client.pull(
             target=target_url,
@@ -426,9 +422,7 @@ def find_files(path, extns):
         for root, dirs, files in os.walk(path):
             filter_ignored_dirs(dirs)
             for file in files:
-                result += [
-                    os.path.join(root, file) for ext in extns if file.endswith(ext)
-                ]
+                result += [os.path.join(root, file) for ext in extns if file.endswith(ext)]
     return result
 
 
@@ -492,9 +486,7 @@ def print_findings_table(findings, files):
     table.add_column("Severity")
     for f in findings:
         severity = f.get("severity").upper()
-        severity_fmt = (
-            f"{'[bright_red]' if severity in ('CRITICAL', 'HIGH') else ''}{severity}"
-        )
+        severity_fmt = f"{'[bright_red]' if severity in ('CRITICAL', 'HIGH') else ''}{severity}"
         if len(files) > 1:
             table.add_row(
                 f.get("id"),

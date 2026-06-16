@@ -4,14 +4,10 @@ import importlib.util
 from pathlib import Path
 
 
-SCRIPT_PATH = (
-    Path(__file__).resolve().parent / "scripts" / "validate_blintdb_small_corpus.py"
-)
+SCRIPT_PATH = Path(__file__).resolve().parent / "scripts" / "validate_blintdb_small_corpus.py"
 
 
-spec = importlib.util.spec_from_file_location(
-    "validate_blintdb_small_corpus", SCRIPT_PATH
-)
+spec = importlib.util.spec_from_file_location("validate_blintdb_small_corpus", SCRIPT_PATH)
 validate_blintdb_small_corpus = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validate_blintdb_small_corpus)
 
@@ -92,9 +88,7 @@ def test_summarize_results_counts_exact_matches_and_hash_evidence():
     assert summary["ecosystems"]["meson"]["exact_normal"] == 1
     assert summary["ecosystems"]["meson"]["exact_deep"] == 2
     assert summary["ecosystems"]["meson"]["deep_hash_evidence"] == 1
-    assert summary["ecosystems"]["meson"]["provenance"]["status_counts"] == {
-        "success": 2
-    }
+    assert summary["ecosystems"]["meson"]["provenance"]["status_counts"] == {"success": 2}
     assert summary["totals"]["case_count"] == 2
     assert summary["totals"]["validated_case_count"] == 2
     assert summary["totals"]["exact_deep_rate"] == 1.0

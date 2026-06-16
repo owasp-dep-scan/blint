@@ -19,6 +19,20 @@ BLINT_LOGO = """
 """
 
 
+def _callgraph_algorithms():
+    """Return the registered callgraph match algorithm names."""
+    from blint.lib.callgraph.algorithms import available_algorithms
+
+    return available_algorithms()
+
+
+def _callgraph_default_algorithm():
+    """Return the default callgraph match algorithm name."""
+    from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM
+
+    return DEFAULT_ALGORITHM
+
+
 def build_args():
     """
     Constructs command line arguments for the blint tool
@@ -40,6 +54,7 @@ def build_parser():
         src_dir_boms=[],
         sbom_mode=False,
         db_mode=False,
+        callgraph_match_mode=False,
         quiet_mode=False,
     )
     parser.add_argument(
@@ -213,9 +228,122 @@ def build_parser():
         dest="use_blintdb",
         help=f"Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
     )
-    db_parser = subparsers.add_parser(
-        "db", help="Command to manage the pre-compiled database."
+    callgraph_match_parser = subparsers.add_parser(
+        "callgraph-match",
+        help="Match a source callgraph against a binary callgraph.",
     )
+    callgraph_match_parser.set_defaults(callgraph_match_mode=True)
+    callgraph_match_parser.add_argument(
+        "--source",
+        dest="source_callgraph",
+        required=True,
+        help="Path to a source-analysis callgraph JSON file.",
+    )
+    callgraph_match_parser.add_argument(
+        "--binary",
+        dest="match_binary",
+        help="Path to a binary to parse with disassembly. Used when "
+        "--binary-metadata is not supplied.",
+    )
+    callgraph_match_parser.add_argument(
+        "--binary-metadata",
+        dest="match_binary_metadata",
+        help="Path to a pre-generated blint *-metadata.json file.",
+    )
+    callgraph_match_parser.add_argument(
+        "-o",
+        "--output",
+        dest="match_output",
+        help="Write the full JSON match report to this path.",
+    )
+    callgraph_match_parser.add_argument(
+        "--min-confidence",
+        choices=["low", "medium", "high"],
+        default="low",
+        dest="match_min_confidence",
+        help="Minimum confidence for matches listed in the report. Defaults to low.",
+    )
+    callgraph_match_parser.add_argument(
+        "--algorithm",
+        choices=_callgraph_algorithms(),
+        default=_callgraph_default_algorithm(),
+        dest="match_algorithm",
+        help="Matching algorithm to use. Defaults to " f"{_callgraph_default_algorithm()}.",
+    )
+    callgraph_match_parser.add_argument(
+        "--no-propagation",
+        action="store_true",
+        default=False,
+        dest="match_no_propagation",
+        help="Disable structural propagation and report only name-based anchors.",
+    )
+    callgraph_match_parser.add_argument(
+        "--with-fingerprint",
+        action="store_true",
+        default=False,
+        dest="match_with_fingerprint",
+        help="Enable experimental Layer 2 structural fingerprint matching. Best "
+        "suited to densely resolved callgraphs; may reduce precision on sparse ones.",
+    )
+    callgraph_match_parser.add_argument(
+        "--min-votes",
+        type=int,
+        default=2,
+        dest="match_min_votes",
+        help="Layer 1: minimum agreeing matched neighbors to accept a propagated "
+        "match. Defaults to 2.",
+    )
+    callgraph_match_parser.add_argument(
+        "--margin",
+        type=int,
+        default=1,
+        dest="match_margin",
+        help="Layer 1: minimum vote lead over the runner-up. Defaults to 1.",
+    )
+    callgraph_match_parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=6,
+        dest="match_max_iterations",
+        help="Maximum propagation/fingerprint rounds. Defaults to 6.",
+    )
+    callgraph_match_parser.add_argument(
+        "--khop",
+        type=int,
+        default=2,
+        dest="match_khop",
+        help="Layer 2: hop radius for fingerprint context. Defaults to 2.",
+    )
+    callgraph_match_parser.add_argument(
+        "--fp-min-shared",
+        type=int,
+        default=2,
+        dest="match_fp_min_shared",
+        help="Layer 2: minimum shared anchored neighbor names. Defaults to 2.",
+    )
+    callgraph_match_parser.add_argument(
+        "--fp-min-score",
+        type=float,
+        default=0.34,
+        dest="match_fp_min_score",
+        help="Layer 2: minimum combined Jaccard score to accept. Defaults to 0.34.",
+    )
+    callgraph_match_parser.add_argument(
+        "--fp-margin",
+        type=float,
+        default=0.1,
+        dest="match_fp_margin",
+        help="Layer 2: minimum Jaccard lead over the runner-up. Defaults to 0.1.",
+    )
+    callgraph_match_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        dest="quiet_mode",
+        help="Disable logging and progress bars.",
+    )
+    db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
     db_parser.add_argument(
         "--download",
@@ -263,15 +391,19 @@ def parse_input(src):
     return [src]
 
 
-def handle_args():
+def handle_args(args=None):
     """Handles the command-line arguments.
 
     This function parses the command-line arguments and returns a BlintOptions object
 
+    Args:
+        args: Optional pre-parsed argument namespace. Parsed fresh when omitted.
+
     Returns:
         BlintOptions: A class containing the parsed command-line arguments
     """
-    args = build_args()
+    if args is None:
+        args = build_args()
     if not args.no_banner and args.subcommand_name != "sbom":
         print(BLINT_LOGO)
     if not args.src_dir_image:
@@ -302,9 +434,43 @@ def handle_args():
     return blint_options
 
 
+def run_callgraph_match_command(args):
+    """Run the callgraph-match subcommand from parsed CLI arguments."""
+    from blint.lib.callgraph.command import run_callgraph_match
+    from blint.lib.callgraph.match import MatchOptions
+
+    if args.quiet_mode:
+        LOG.disabled = True
+    options = MatchOptions(
+        enable_propagation=not args.match_no_propagation,
+        enable_fingerprint=args.match_with_fingerprint,
+        min_votes=args.match_min_votes,
+        margin=args.match_margin,
+        max_iterations=args.match_max_iterations,
+        khop=args.match_khop,
+        fp_min_shared=args.match_fp_min_shared,
+        fp_min_score=args.match_fp_min_score,
+        fp_margin=args.match_fp_margin,
+    )
+    run_callgraph_match(
+        source_callgraph=args.source_callgraph,
+        binary=args.match_binary,
+        binary_metadata=args.match_binary_metadata,
+        output=args.match_output,
+        min_confidence=args.match_min_confidence,
+        options=options,
+        algorithm=args.match_algorithm,
+        quiet=args.quiet_mode,
+    )
+
+
 def main():
     """Main function of the blint tool"""
-    blint_options = handle_args()
+    args = build_args()
+    if args.subcommand_name == "callgraph-match":
+        run_callgraph_match_command(args)
+        return
+    blint_options = handle_args(args)
     if blint_options.quiet_mode:
         LOG.disabled = True
     blintdb_setup(blint_options)

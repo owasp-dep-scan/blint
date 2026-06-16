@@ -103,9 +103,7 @@ def _sample_metadata():
         "llvm_target_tuple": "x86_64-pc-linux-gnu",
         "symtab_symbols": [{"name": "helper", "is_function": True}],
         "imports": [{"name": "puts", "is_imported": True, "is_function": True}],
-        "dynamic_symbols": [
-            {"name": "strlen", "is_imported": True, "is_function": True}
-        ],
+        "dynamic_symbols": [{"name": "strlen", "is_imported": True, "is_function": True}],
         "disassembled_functions": {
             "0x401000::helper": {
                 "name": "helper",
@@ -169,9 +167,7 @@ def test_process_exe_file_uses_blintdb_hash_matches(tmp_path, monkeypatch):
     db_file = tmp_path / "blint.db"
     _create_v2_blintdb(db_file)
     metadata = _sample_metadata()
-    sbom = SimpleNamespace(
-        metadata=SimpleNamespace(component=SimpleNamespace(components=[]))
-    )
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
 
     monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
     monkeypatch.setattr(

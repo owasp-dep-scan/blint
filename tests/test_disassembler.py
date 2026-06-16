@@ -52,15 +52,11 @@ def test_extract_register_usage_mixed_case_percent_prefixed():
 
 def test_extract_register_usage_push_pop():
     instr_asm_push = "push rax"
-    regs_read_push, regs_written_push = _extract_register_usage(
-        instr_asm_push, {}, "x86_64"
-    )
+    regs_read_push, regs_written_push = _extract_register_usage(instr_asm_push, {}, "x86_64")
     assert "rsp" in regs_read_push
     assert "rsp" in regs_written_push
     instr_asm_pop = "pop rbx"
-    regs_read_pop, regs_written_pop = _extract_register_usage(
-        instr_asm_pop, {}, "x86_64"
-    )
+    regs_read_pop, regs_written_pop = _extract_register_usage(instr_asm_pop, {}, "x86_64")
     assert "rsp" in regs_read_pop
     assert "rsp" in regs_written_pop
 
@@ -183,10 +179,8 @@ def test_analyze_instructions_loop_detection():
     target_instr = MagicMock()
     target_instr.address = 0x0FFF
     instr_addresses_with_target = instr_addresses + [target_instr.address]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = (
-        _analyze_instructions(
-            instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
-        )
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = _analyze_instructions(
+        instrs, func_addr, next_func_addr_in_sec, instr_addresses_with_target
     )
     instrs_corrected = []
     instr1_corrected = MagicMock()
@@ -194,13 +188,11 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = (
-        _analyze_instructions(
-            instrs_corrected,
-            func_addr,
-            next_func_addr_in_sec,
-            instr_addresses_corrected,
-        )
+    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = _analyze_instructions(
+        instrs_corrected,
+        func_addr,
+        next_func_addr_in_sec,
+        instr_addresses_corrected,
     )
     assert has_loop == True
 
@@ -442,9 +434,7 @@ def test_resolve_direct_calls_supports_callq_and_symbol_decorations():
     instr.address = 0x1000
     instr.bytes = b"\x90\x90"
 
-    direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x2000: "helper"}, "x86_64"
-    )
+    direct_calls, direct_targets = _resolve_direct_calls([instr], {0x2000: "helper"}, "x86_64")
 
     assert direct_calls == ["helper"]
     assert direct_targets == [
@@ -480,9 +470,7 @@ def test_resolve_direct_calls_preserves_unresolved_raw_target():
 
 def test_resolve_direct_calls_extracts_symbol_from_bracket_annotation():
     instr = MagicMock()
-    instr.assembly = (
-        "callq qword ptr [rip + 0x10] <std::panicking::begin_panic_handler>"
-    )
+    instr.assembly = "callq qword ptr [rip + 0x10] <std::panicking::begin_panic_handler>"
     instr.address = 0x1000
     instr.bytes = b"\x90\x90"
 
@@ -550,13 +538,9 @@ def test_disassemble_functions_skips_unknown_windows_target_before_nyxstone(
     def _unexpected_nyxstone(*_args, **_kwargs):
         raise AssertionError("Nyxstone should not be initialized for unknown targets")
 
-    monkeypatch.setattr(
-        disassembler_module, "Nyxstone", _unexpected_nyxstone, raising=False
-    )
+    monkeypatch.setattr(disassembler_module, "Nyxstone", _unexpected_nyxstone, raising=False)
 
-    result = disassemble_functions(
-        None, {"llvm_target_tuple": "unknown-pc-windows-msvc"}
-    )
+    result = disassemble_functions(None, {"llvm_target_tuple": "unknown-pc-windows-msvc"})
 
     assert result == {}
 
@@ -684,9 +668,7 @@ def test_resolve_direct_calls_x86_decimal_operand_prefers_relative_target():
     instr.address = 0x1000
     instr.bytes = b"\x90\x90"
 
-    direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x1012: "helper"}, "x86_64"
-    )
+    direct_calls, direct_targets = _resolve_direct_calls([instr], {0x1012: "helper"}, "x86_64")
 
     assert direct_calls == ["helper"]
     assert direct_targets == [
@@ -726,9 +708,7 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol():
     instr.address = 0x1000
     instr.bytes = b"\x90\x90"
 
-    direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x1012: "puts"}, "x86_64"
-    )
+    direct_calls, direct_targets = _resolve_direct_calls([instr], {0x1012: "puts"}, "x86_64")
 
     assert direct_calls == []
     assert direct_targets == [
@@ -748,9 +728,7 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol_without_sp
     instr.address = 0x1000
     instr.bytes = b"\x90\x90"
 
-    direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x1012: "puts"}, "x86_64"
-    )
+    direct_calls, direct_targets = _resolve_direct_calls([instr], {0x1012: "puts"}, "x86_64")
 
     assert direct_calls == []
     assert direct_targets == [
@@ -1180,9 +1158,7 @@ def test_resolve_direct_calls_windows_arm64_drops_noncanonical_register_target_c
 def test_macos_system_symbol_name_detection():
     assert _is_macos_system_symbol_name("/usr/lib/libSystem.B.dylib::_close") is True
     assert (
-        _is_macos_system_symbol_name(
-            "/System/Library/Frameworks/AppKit.framework/AppKit::NSApp"
-        )
+        _is_macos_system_symbol_name("/System/Library/Frameworks/AppKit.framework/AppKit::NSApp")
         is True
     )
     assert _is_macos_system_symbol_name("core::fmt::write") is False
@@ -1192,12 +1168,8 @@ def test_should_skip_symbol_list_for_disassembly_macho_and_pe():
     mock_macho = MagicMock(spec=lief.MachO.Binary)
     mock_pe = MagicMock(spec=lief.PE.Binary)
 
-    assert (
-        _should_skip_symbol_list_for_disassembly(mock_macho, "symtab_symbols") is True
-    )
-    assert (
-        _should_skip_symbol_list_for_disassembly(mock_macho, "dynamic_symbols") is True
-    )
+    assert _should_skip_symbol_list_for_disassembly(mock_macho, "symtab_symbols") is True
+    assert _should_skip_symbol_list_for_disassembly(mock_macho, "dynamic_symbols") is True
     assert _should_skip_symbol_list_for_disassembly(mock_macho, "imports") is True
     assert _should_skip_symbol_list_for_disassembly(mock_macho, "functions") is False
 
