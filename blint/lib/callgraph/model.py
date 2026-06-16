@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -150,14 +150,19 @@ def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph
 
     # rusi edges reference endpoints by id, drawing on two id spaces:
     # ``cg-node-*`` ids in the node list and ``decl-*`` ids in the declarations
-    # list. Build one id -> (qualified_name, local) resolver across both.
+    # list. Build one id -> (qualified_name, local) resolver across both. When the
+    # analyzer already emits a normalized ``canonical_name`` we prefer it as the
+    # authoritative join key instead of re-deriving it here.
     id_to_name: dict[str, str] = {}
+    id_to_canon: dict[str, str] = {}
     id_local: dict[str, bool] = {}
 
     for decl in payload.get("declarations") or []:
         qname = decl.get("qualified_name")
         if decl.get("id") and qname:
             id_to_name[decl["id"]] = qname
+            if decl.get("canonical_name"):
+                id_to_canon[decl["id"]] = decl["canonical_name"]
             id_local[decl["id"]] = True
 
     for raw in call_graph.get("nodes") or []:
@@ -165,6 +170,8 @@ def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph
         if not (raw.get("id") and qname):
             continue
         id_to_name[raw["id"]] = qname
+        if raw.get("canonical_name"):
+            id_to_canon[raw["id"]] = raw["canonical_name"]
         id_local[raw["id"]] = bool(raw.get("local"))
 
     def _ensure(node_id: str) -> Optional[str]:
@@ -173,6 +180,11 @@ def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph
         if not qname:
             return None
         canon = canonicalize(qname)
+        # Prefer the analyzer-provided canonical name, keeping the locally
+        # derived kind and generic flag for classification.
+        provided = id_to_canon.get(node_id)
+        if provided and provided != canon.value:
+            canon = replace(canon, value=provided)
         if not canon.value:
             return None
         graph.add_node(

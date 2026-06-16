@@ -76,6 +76,59 @@ class MatchOptions:
     fp_margin: float = 0.1
 
 
+# Named presets that bundle the individual knobs into intent-based choices.
+# ``balanced`` mirrors the defaults. ``precision`` favors high-confidence matches
+# by demanding stronger structural agreement and never running fingerprinting.
+# ``recall`` accepts more uncertain matches and enables Layer 2 fingerprinting.
+PROFILES = {
+    "precision": {
+        "enable_propagation": True,
+        "min_votes": 3,
+        "margin": 2,
+        "enable_fingerprint": False,
+    },
+    "balanced": {},
+    "recall": {
+        "enable_propagation": True,
+        "min_votes": 2,
+        "margin": 1,
+        "enable_fingerprint": True,
+        "khop": 2,
+        "fp_min_shared": 2,
+        "fp_min_score": 0.3,
+        "fp_margin": 0.05,
+    },
+}
+
+#: The profile used when none is requested.
+DEFAULT_PROFILE = "balanced"
+
+
+def options_for_profile(profile: str = DEFAULT_PROFILE, **overrides) -> "MatchOptions":
+    """Build :class:`MatchOptions` from a named profile plus explicit overrides.
+
+    Args:
+        profile: One of ``"precision"``, ``"balanced"``, or ``"recall"``.
+        overrides: Individual option values that take precedence over the
+            profile. Passing ``None`` for an override leaves the profile value
+            in place, so callers can forward unset CLI flags directly.
+
+    Returns:
+        A :class:`MatchOptions` instance.
+
+    Raises:
+        ValueError: If ``profile`` is not a known profile.
+    """
+    if profile not in PROFILES:
+        known = ", ".join(sorted(PROFILES))
+        raise ValueError(f"Unknown match profile '{profile}'. Available: {known}")
+    values = dict(PROFILES[profile])
+    for key, value in overrides.items():
+        if value is not None:
+            values[key] = value
+    return MatchOptions(**values)
+
+
 @dataclass
 class Match:
     """A single binary-to-source function mapping.
@@ -413,3 +466,45 @@ def build_report(
         },
         "matches": emitted,
     }
+
+
+@dataclass(frozen=True)
+class MatchReport:
+    """A typed, serializable result returned by the library match entry point.
+
+    Wraps the report ``dict`` produced by :func:`build_report` with convenient
+    typed accessors so integrators embedding blint do not have to index into raw
+    dictionaries. Use :meth:`to_dict` to obtain the JSON-serializable form.
+    """
+
+    algorithm: str
+    report: dict
+    result: MatchResult = field(repr=False, default_factory=MatchResult)
+
+    @property
+    def summary(self) -> dict:
+        return self.report.get("summary", {})
+
+    @property
+    def matches(self) -> list[dict]:
+        return self.report.get("matches", [])
+
+    @property
+    def coverage(self) -> float:
+        return float(self.summary.get("coverage", 0.0))
+
+    @property
+    def binary_matched(self) -> int:
+        return int(self.summary.get("binary_matched", 0))
+
+    @property
+    def anchors(self) -> int:
+        return int(self.summary.get("anchors", 0))
+
+    @property
+    def source_functions_identified(self) -> int:
+        return int(self.summary.get("source_functions_identified", 0))
+
+    def to_dict(self) -> dict:
+        """Return the JSON-serializable report dictionary."""
+        return self.report

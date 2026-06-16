@@ -62,6 +62,26 @@ def _binary_payload():
     }
 
 
+def test_source_loader_prefers_analyzer_canonical_name():
+    # When the analyzer emits canonical_name, it is used as the join key even if
+    # it differs from what blint would derive from qualified_name.
+    payload = {
+        "call_graph": {
+            "nodes": [
+                {
+                    "id": "cg-a",
+                    "qualified_name": "app::Type<T>::method::habc123def456789",
+                    "canonical_name": "app::Type::method",
+                    "local": True,
+                }
+            ],
+            "edges": [],
+        }
+    }
+    graph = load_source_callgraph(payload)
+    assert "app::Type::method" in graph.nodes
+
+
 def test_source_loader_collapses_on_canonical_name():
     graph = load_source_callgraph(_source_payload())
     assert len(graph) == len(_FUNCS)

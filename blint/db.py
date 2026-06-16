@@ -15,6 +15,13 @@ DB_QUERY_LIMIT = 50
 DB_EVIDENCE_LIMIT = 25
 SYMBOL_ONLY_MATCH_THRESHOLD = max(3, MIN_MATCH_SCORE // 2)
 MIN_FUNCTION_INSTRUCTION_COUNT_FOR_HASH_LOOKUP = 4
+# Minimum distinct canonical functions a source graph must share with the binary
+# before a callgraph-only match (no symbol or hash corroboration) is surfaced.
+CALLGRAPH_ONLY_MATCH_THRESHOLD = 8
+# Score contribution per shared canonical function, capped so a very large
+# overlap corroborates strongly without completely overwhelming other evidence.
+CALLGRAPH_MATCH_WEIGHT = 0.5
+CALLGRAPH_MATCH_SCORE_CAP = 60.0
 SYMBOL_SOURCES = (
     "functions",
     "ctor_functions",
@@ -52,9 +59,7 @@ def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection |
     return connection
 
 
-def _apply_runtime_pragmas(
-    connection: apsw.Connection, *, read_only: bool = True
-) -> None:
+def _apply_runtime_pragmas(connection: apsw.Connection, *, read_only: bool = True) -> None:
     pragmas = [
         "PRAGMA foreign_keys = ON",
         "PRAGMA temp_store = MEMORY",
@@ -76,11 +81,7 @@ def _clean_nonempty_values(values) -> list[str]:
     if not values:
         return []
     return sorted(
-        {
-            str(value).strip()
-            for value in values
-            if value is not None and str(value).strip()
-        }
+        {str(value).strip() for value in values if value is not None and str(value).strip()}
     )
 
 
@@ -198,6 +199,40 @@ def build_function_hash_index(metadata: dict | None) -> dict[str, list[str]]:
     return hash_index
 
 
+def build_callgraph_canon_names(metadata: dict | None) -> list[str]:
+    """Return the canonical function names of a binary's recovered callgraph.
+
+    The names are produced by the same canonicalization the source corpus uses,
+    so they join directly against the stored source callgraph nodes. Returns an
+    empty list when the binary has no callgraph (for example when disassembly
+    was not performed).
+    """
+    if not metadata or not metadata.get("callgraph"):
+        return []
+    # Imported lazily so importing blint.db never pulls in the matcher stack.
+    from blint.lib.callgraph.model import load_binary_callgraph
+
+    graph = load_binary_callgraph(metadata)
+    names = {node.canon.value for node in graph.nodes.values() if node.canon.value}
+    return sorted(names)
+
+
+def _blintdb_has_callgraph_tables(connection: apsw.Connection) -> bool:
+    """Return True when the database carries the callgraph corpus tables.
+
+    Shipped blintdb images may predate the callgraph corpus, so callers must
+    degrade gracefully when these tables are absent.
+    """
+    try:
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('SourceGraphs', 'CallGraphNodes')"
+        ).fetchall()
+    except apsw.Error:
+        return False
+    return len({row[0] for row in rows}) == 2
+
+
 def _build_binary_filters(binary_metadata: dict | None) -> tuple[str, list[str]]:
     if not binary_metadata:
         return "", []
@@ -207,9 +242,7 @@ def _build_binary_filters(binary_metadata: dict | None) -> tuple[str, list[str]]
         predicates.append("Binaries.binary_type = ?")
         params.append(str(binary_type))
     if llvm_target_tuple := binary_metadata.get("llvm_target_tuple"):
-        predicates.append(
-            "COALESCE(Binaries.llvm_target_tuple, Builds.llvm_target_tuple) = ?"
-        )
+        predicates.append("COALESCE(Binaries.llvm_target_tuple, Builds.llvm_target_tuple) = ?")
         params.append(str(llvm_target_tuple))
     if not predicates:
         return "", []
@@ -230,6 +263,7 @@ def _ensure_project_match(project_matches: dict, row) -> dict:
             "matched_symbol_sources": set(),
             "matched_instruction_hashes": set(),
             "matched_assembly_hashes": set(),
+            "matched_callgraph_functions": set(),
             "matched_symbol_rows": 0,
             "matched_function_rows": 0,
         },
@@ -259,6 +293,16 @@ def _merge_hash_rows(project_matches: dict, rows, hash_kind: str) -> None:
         match["matched_binary_names"].update(_decode_hex_csv(row.get("matched_binary_names_hex")))
         match[target_key].update(_decode_csv_set(row["matched_hashes"]))
         match["matched_function_rows"] += int(row["matched_row_count"] or 0)
+
+
+def _merge_callgraph_rows(project_matches: dict, rows) -> None:
+    for row in rows:
+        match = _ensure_project_match(project_matches, row)
+        matched = row.get("matched_callgraph_functions")
+        if matched:
+            match["matched_callgraph_functions"].update(
+                name for name in matched.split(",") if name
+            )
 
 
 def _execute(connection: apsw.Connection, query: str, params: list) -> list[dict]:
@@ -402,6 +446,52 @@ def _query_hash_batches(
     return found_matches
 
 
+def _query_project_callgraph_matches(
+    connection: apsw.Connection,
+    canon_names: list[str],
+    *,
+    limit: int = DB_QUERY_LIMIT,
+) -> list[dict]:
+    if not canon_names:
+        return []
+    placeholders = ",".join("?" for _ in canon_names)
+    params = [*canon_names, limit]
+    query = f"""
+        SELECT
+            SourceGraphs.project_id AS project_id,
+            SourceGraphs.name AS project_name,
+            SourceGraphs.purl AS project_purl,
+            COUNT(DISTINCT CallGraphNodes.canon_name) AS matched_callgraph_count,
+            group_concat(DISTINCT CallGraphNodes.canon_name) AS matched_callgraph_functions
+        FROM CallGraphNodes
+        JOIN SourceGraphs ON SourceGraphs.source_graph_id = CallGraphNodes.owner_id
+        WHERE SourceGraphs.purl IS NOT NULL
+            AND SourceGraphs.purl != ''
+            AND CallGraphNodes.graph_kind = 'source'
+            AND CallGraphNodes.canon_name IN ({placeholders})
+        GROUP BY SourceGraphs.source_graph_id
+        ORDER BY matched_callgraph_count DESC, SourceGraphs.source_graph_id ASC
+        LIMIT ?
+    """
+    return _execute(connection, query, params)
+
+
+def _query_callgraph_batches(
+    connection: apsw.Connection,
+    project_matches: dict,
+    canon_names: list[str],
+    *,
+    limit: int = DB_QUERY_LIMIT,
+) -> bool:
+    found_matches = False
+    for batch in _batched(_clean_nonempty_values(canon_names)):
+        rows = _query_project_callgraph_matches(connection, batch, limit=limit)
+        if rows:
+            found_matches = True
+            _merge_callgraph_rows(project_matches, rows)
+    return found_matches
+
+
 def _finalize_project_matches(
     project_matches: dict, *, target_binary_names: set[str] | None = None
 ) -> list[dict]:
@@ -415,6 +505,7 @@ def _finalize_project_matches(
         matched_binary_name_count = len(match["matched_binary_names"])
         matched_instruction_hash_count = len(match["matched_instruction_hashes"])
         matched_assembly_hash_count = len(match["matched_assembly_hashes"])
+        matched_callgraph_count = len(match["matched_callgraph_functions"])
         binary_name_match = bool(
             target_binary_names
             and target_binary_names.intersection(
@@ -425,11 +516,13 @@ def _finalize_project_matches(
         score += matched_instruction_hash_count * float(max(MIN_MATCH_SCORE, 12))
         score += matched_assembly_hash_count * float(max(MIN_MATCH_SCORE // 2, 6))
         score += float(min(len(match["matched_symbol_sources"]), 4))
+        score += min(matched_callgraph_count * CALLGRAPH_MATCH_WEIGHT, CALLGRAPH_MATCH_SCORE_CAP)
         if binary_name_match:
             score += float(max(MIN_MATCH_SCORE * 3, 18))
         if not (
             matched_instruction_hash_count
             or matched_assembly_hash_count
+            or matched_callgraph_count >= CALLGRAPH_ONLY_MATCH_THRESHOLD
             or score >= SYMBOL_ONLY_MATCH_THRESHOLD
         ):
             continue
@@ -446,13 +539,17 @@ def _finalize_project_matches(
                 "matched_symbol_sources": sorted(match["matched_symbol_sources"]),
                 "matched_symbols": sorted(match["matched_symbols"])[:DB_EVIDENCE_LIMIT],
                 "matched_instruction_hash_count": matched_instruction_hash_count,
-                "matched_instruction_hashes": sorted(
-                    match["matched_instruction_hashes"]
-                )[:DB_EVIDENCE_LIMIT],
+                "matched_instruction_hashes": sorted(match["matched_instruction_hashes"])[
+                    :DB_EVIDENCE_LIMIT
+                ],
                 "matched_assembly_hash_count": matched_assembly_hash_count,
-                "matched_assembly_hashes": sorted(
-                    match["matched_assembly_hashes"]
-                )[:DB_EVIDENCE_LIMIT],
+                "matched_assembly_hashes": sorted(match["matched_assembly_hashes"])[
+                    :DB_EVIDENCE_LIMIT
+                ],
+                "matched_callgraph_count": matched_callgraph_count,
+                "matched_callgraph_functions": sorted(match["matched_callgraph_functions"])[
+                    :DB_EVIDENCE_LIMIT
+                ],
                 "score": score,
             }
         )
@@ -463,6 +560,7 @@ def _finalize_project_matches(
             row["binary_name_match"],
             row["matched_instruction_hash_count"],
             row["matched_assembly_hash_count"],
+            row["matched_callgraph_count"],
             row["matched_symbol_count"],
             row["matched_binary_count"],
             row["project_purl"],
@@ -475,16 +573,19 @@ def lookup_project_matches(
     symbol_source_map: dict[str, list[str]] | None = None,
     *,
     function_hash_index: dict[str, list[str]] | None = None,
+    callgraph_canon_names: list[str] | None = None,
     binary_metadata: dict | None = None,
     db_file: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
-    """Lookup candidate project purls in blintdb v2 using symbols and function hashes."""
+    """Lookup candidate project purls in blintdb v2 using symbols, function hashes, and callgraph."""
     database_file = _resolve_db_file(db_file)
     if not database_file or not os.path.exists(database_file):
         return []
     if not is_supported_blintdb(database_file):
-        LOG.debug("Skipping blintdb lookup because the local database is not a supported v2 schema")
+        LOG.debug(
+            "Skipping blintdb lookup because the local database is not a supported v2 schema"
+        )
         return []
     normalized_source_map = {
         source: _clean_nonempty_values(names)
@@ -496,7 +597,8 @@ def lookup_project_matches(
         for key, values in (function_hash_index or {}).items()
         if _clean_nonempty_values(values)
     }
-    if not normalized_source_map and not normalized_hash_index:
+    normalized_canon_names = _clean_nonempty_values(callgraph_canon_names or [])
+    if not normalized_source_map and not normalized_hash_index and not normalized_canon_names:
         return []
     binary_filters, binary_filter_params = _build_binary_filters(binary_metadata)
     connection = get(database_file)
@@ -557,6 +659,13 @@ def lookup_project_matches(
                     project_matches,
                     normalized_source_map,
                 )
+        callgraph_found = False
+        if normalized_canon_names and _blintdb_has_callgraph_tables(connection):
+            callgraph_found = _query_callgraph_batches(
+                connection,
+                project_matches,
+                normalized_canon_names,
+            )
         matches = _finalize_project_matches(
             project_matches, target_binary_names=target_binary_names
         )
@@ -565,22 +674,22 @@ def lookup_project_matches(
         if name_matched_purls:
             strongest_name_match_score = max(match["score"] for match in name_matched_rows)
             strongest_name_match_hashes = max(
-                match["matched_instruction_hash_count"]
-                + match["matched_assembly_hash_count"]
+                match["matched_instruction_hash_count"] + match["matched_assembly_hash_count"]
                 for match in name_matched_rows
             )
             matches = [
                 match
                 for match in matches
                 if match["project_purl"] in name_matched_purls
+                or match["matched_callgraph_count"] >= CALLGRAPH_ONLY_MATCH_THRESHOLD
                 or (
-                    match["matched_instruction_hash_count"]
-                    + match["matched_assembly_hash_count"]
+                    match["matched_instruction_hash_count"] + match["matched_assembly_hash_count"]
                     >= max(8, strongest_name_match_hashes // 4)
-                    and match["score"] >= max(SYMBOL_ONLY_MATCH_THRESHOLD, strongest_name_match_score / 4)
+                    and match["score"]
+                    >= max(SYMBOL_ONLY_MATCH_THRESHOLD, strongest_name_match_score / 4)
                 )
             ]
-        if hash_found:
+        if hash_found or callgraph_found:
             return matches[:limit]
         return [
             match
@@ -596,6 +705,7 @@ def detect_binaries_utilized(
     *,
     symbol_source_map: dict[str, list[str]] | None = None,
     function_hash_index: dict[str, list[str]] | None = None,
+    callgraph_canon_names: list[str] | None = None,
     binary_metadata: dict | None = None,
     db_file: str | None = None,
     limit: int = 20,
@@ -615,6 +725,7 @@ def detect_binaries_utilized(
     matches = lookup_project_matches(
         symbol_source_map,
         function_hash_index=function_hash_index,
+        callgraph_canon_names=callgraph_canon_names,
         binary_metadata=binary_metadata,
         db_file=db_file,
         limit=limit,
@@ -635,6 +746,8 @@ def detect_binaries_utilized(
             "matched_instruction_hashes": match["matched_instruction_hashes"],
             "matched_assembly_hash_count": match["matched_assembly_hash_count"],
             "matched_assembly_hashes": match["matched_assembly_hashes"],
+            "matched_callgraph_count": match.get("matched_callgraph_count", 0),
+            "matched_callgraph_functions": match.get("matched_callgraph_functions", []),
         }
         for match in matches
         if match["project_purl"]

@@ -29,6 +29,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.db import (
+    build_callgraph_canon_names,
     build_function_hash_index,
     build_symbol_source_map,
     detect_binaries_utilized,
@@ -529,9 +530,11 @@ def process_exe_file(
         LOG.debug("Utilizing blintdb v2 for SBOM component matching")
         symbol_source_map = build_symbol_source_map(metadata)
         function_hash_index = build_function_hash_index(metadata)
+        callgraph_canon_names = build_callgraph_canon_names(metadata)
         binaries_detected, binary_evidence = detect_binaries_utilized(
             symbol_source_map=symbol_source_map,
             function_hash_index=function_hash_index,
+            callgraph_canon_names=callgraph_canon_names,
             binary_metadata=metadata,
         )
         if binaries_detected:
@@ -558,6 +561,10 @@ def process_exe_file(
                 ),
                 "blintdb_matched_assembly_hash_count": evidence.get("matched_assembly_hash_count"),
                 "blintdb_matched_assembly_hashes": evidence.get("matched_assembly_hashes", []),
+                "blintdb_matched_callgraph_count": evidence.get("matched_callgraph_count"),
+                "blintdb_matched_callgraph_functions": evidence.get(
+                    "matched_callgraph_functions", []
+                ),
             }
             comp = create_dynamic_component(
                 {"purl": binary_purl, "tag": "NEEDED"},

@@ -11,10 +11,9 @@ from rich.box import ROUNDED
 from rich.panel import Panel
 from rich.table import Table
 
-from blint.lib.binary import parse
-from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM, get_algorithm
-from blint.lib.callgraph.match import MatchOptions, build_report
-from blint.lib.callgraph.model import load_binary_callgraph, load_source_callgraph
+from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM
+from blint.lib.callgraph.api import match_files
+from blint.lib.callgraph.match import MatchOptions
 from blint.logger import LOG, console
 
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -24,15 +23,6 @@ _LAYER_EXPLANATION = {
     "propagation": "matched by call-neighbor agreement (structural)",
     "fingerprint": "matched by wider structural context (experimental)",
 }
-
-
-def _load_binary_metadata(binary: str, metadata: Optional[str]) -> dict:
-    """Return binary metadata, parsing the binary with disassembly if needed."""
-    if metadata:
-        return json.loads(Path(metadata).read_text(encoding="utf-8"))
-    if binary:
-        return parse(binary, disassemble=True)
-    raise ValueError("Pass either --binary-metadata or --binary")
 
 
 def _verdict(summary: dict) -> str:
@@ -172,7 +162,7 @@ def render_match_report(report: dict, *, evidence_limit: int = 12) -> None:
 
 
 def run_callgraph_match(
-    source_callgraph: str,
+    source_callgraph: Optional[str],
     binary: Optional[str],
     binary_metadata: Optional[str],
     output: Optional[str],
@@ -180,6 +170,9 @@ def run_callgraph_match(
     options: Optional[MatchOptions] = None,
     algorithm: str = DEFAULT_ALGORITHM,
     quiet: bool = False,
+    source_dir: Optional[str] = None,
+    language: str = "rust",
+    rusi_command: Optional[str] = None,
 ) -> dict:
     """Match a source callgraph against a binary and emit a report.
 
@@ -193,24 +186,27 @@ def run_callgraph_match(
         options: Matching parameters.
         algorithm: Name of the matching algorithm to run.
         quiet: Suppress the human-readable console summary.
+        source_dir: Path to a source tree to analyze instead of a precomputed
+            callgraph. Analyzed only for languages with a registered analyzer.
+        language: Source language; selects the source-directory analyzer (rusi
+            runs only for ``"rust"``).
+        rusi_command: Base rusi command used when ``source_dir`` is given.
 
     Returns:
         The match report as a ``dict``.
     """
-    metadata = _load_binary_metadata(binary or "", binary_metadata)
-    source_graph = load_source_callgraph(source_callgraph)
-    binary_graph = load_binary_callgraph(metadata)
-
-    matcher = get_algorithm(algorithm)
-    result = matcher.match(source_graph, binary_graph, options)
-    report = build_report(
-        source_graph,
-        binary_graph,
-        result,
+    match_report = match_files(
+        source_callgraph=source_callgraph,
+        source_dir=source_dir,
+        binary=binary,
+        binary_metadata=binary_metadata,
+        options=options,
+        algorithm=algorithm,
         min_confidence=min_confidence,
-        binary_file=metadata.get("file_path") or binary or binary_metadata,
+        language=language,
+        rusi_command=rusi_command,
     )
-    report["algorithm"] = matcher.name
+    report = match_report.to_dict()
 
     if not quiet:
         render_match_report(report)

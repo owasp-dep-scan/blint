@@ -236,8 +236,41 @@ def build_parser():
     callgraph_match_parser.add_argument(
         "--source",
         dest="source_callgraph",
-        required=True,
-        help="Path to a source-analysis callgraph JSON file.",
+        help="Path to a source-analysis callgraph JSON file. Alternatively use "
+        "--source-dir to analyze a source tree directly.",
+    )
+    callgraph_match_parser.add_argument(
+        "--source-dir",
+        dest="source_dir",
+        help="Path to a source tree to analyze (instead of --source). For Rust "
+        "this runs rusi for you; set --rusi-cmd or the RUSI_CMD environment "
+        "variable.",
+    )
+    callgraph_match_parser.add_argument(
+        "-l",
+        "--language",
+        dest="match_language",
+        default="rust",
+        help="Source language for --source-dir analysis. Defaults to rust. rusi "
+        "is invoked only when the language is rust.",
+    )
+    callgraph_match_parser.add_argument(
+        "--rusi-cmd",
+        dest="match_rusi_cmd",
+        default=None,
+        help="Base command used to invoke rusi when --source-dir is a Rust "
+        "project, for example 'cargo run -p rusi-cli --' or a path to a rusi "
+        "binary. Falls back to the RUSI_CMD environment variable.",
+    )
+    callgraph_match_parser.add_argument(
+        "--profile",
+        choices=["precision", "balanced", "recall"],
+        default="balanced",
+        dest="match_profile",
+        help="Confidence preset that sets the matching knobs. precision favors "
+        "high-confidence matches, recall enables structural fingerprinting, "
+        "balanced is the default. Individual --min-votes/--margin/--khop/--fp-* "
+        "flags override the preset.",
     )
     callgraph_match_parser.add_argument(
         "--binary",
@@ -268,7 +301,7 @@ def build_parser():
         choices=_callgraph_algorithms(),
         default=_callgraph_default_algorithm(),
         dest="match_algorithm",
-        help="Matching algorithm to use. Defaults to " f"{_callgraph_default_algorithm()}.",
+        help=f"Matching algorithm to use. Defaults to {_callgraph_default_algorithm()}.",
     )
     callgraph_match_parser.add_argument(
         "--no-propagation",
@@ -288,52 +321,52 @@ def build_parser():
     callgraph_match_parser.add_argument(
         "--min-votes",
         type=int,
-        default=2,
+        default=None,
         dest="match_min_votes",
         help="Layer 1: minimum agreeing matched neighbors to accept a propagated "
-        "match. Defaults to 2.",
+        "match. Overrides the --profile preset.",
     )
     callgraph_match_parser.add_argument(
         "--margin",
         type=int,
-        default=1,
+        default=None,
         dest="match_margin",
-        help="Layer 1: minimum vote lead over the runner-up. Defaults to 1.",
+        help="Layer 1: minimum vote lead over the runner-up. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "--max-iterations",
         type=int,
-        default=6,
+        default=None,
         dest="match_max_iterations",
-        help="Maximum propagation/fingerprint rounds. Defaults to 6.",
+        help="Maximum propagation/fingerprint rounds. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "--khop",
         type=int,
-        default=2,
+        default=None,
         dest="match_khop",
-        help="Layer 2: hop radius for fingerprint context. Defaults to 2.",
+        help="Layer 2: hop radius for fingerprint context. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "--fp-min-shared",
         type=int,
-        default=2,
+        default=None,
         dest="match_fp_min_shared",
-        help="Layer 2: minimum shared anchored neighbor names. Defaults to 2.",
+        help="Layer 2: minimum shared anchored neighbor names. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "--fp-min-score",
         type=float,
-        default=0.34,
+        default=None,
         dest="match_fp_min_score",
-        help="Layer 2: minimum combined Jaccard score to accept. Defaults to 0.34.",
+        help="Layer 2: minimum combined Jaccard score to accept. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "--fp-margin",
         type=float,
-        default=0.1,
+        default=None,
         dest="match_fp_margin",
-        help="Layer 2: minimum Jaccard lead over the runner-up. Defaults to 0.1.",
+        help="Layer 2: minimum Jaccard lead over the runner-up. Overrides the preset.",
     )
     callgraph_match_parser.add_argument(
         "-q",
@@ -342,6 +375,23 @@ def build_parser():
         default=False,
         dest="quiet_mode",
         help="Disable logging and progress bars.",
+    )
+    canonicalize_parser = subparsers.add_parser(
+        "canonicalize",
+        help="Show the canonical form of one or more function names.",
+    )
+    canonicalize_parser.set_defaults(canonicalize_mode=True)
+    canonicalize_parser.add_argument(
+        "names",
+        nargs="+",
+        help="Function names or raw mangled symbols to canonicalize.",
+    )
+    canonicalize_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="canonicalize_json",
+        help="Emit the result as JSON instead of a table.",
     )
     db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
@@ -437,13 +487,16 @@ def handle_args(args=None):
 def run_callgraph_match_command(args):
     """Run the callgraph-match subcommand from parsed CLI arguments."""
     from blint.lib.callgraph.command import run_callgraph_match
-    from blint.lib.callgraph.match import MatchOptions
+    from blint.lib.callgraph.match import options_for_profile
 
     if args.quiet_mode:
         LOG.disabled = True
-    options = MatchOptions(
-        enable_propagation=not args.match_no_propagation,
-        enable_fingerprint=args.match_with_fingerprint,
+    # Build options from the profile preset, letting any explicitly-set flag
+    # override the preset. Unset numeric flags arrive as None and are ignored.
+    options = options_for_profile(
+        args.match_profile,
+        enable_propagation=False if args.match_no_propagation else None,
+        enable_fingerprint=True if args.match_with_fingerprint else None,
         min_votes=args.match_min_votes,
         margin=args.match_margin,
         max_iterations=args.match_max_iterations,
@@ -452,16 +505,63 @@ def run_callgraph_match_command(args):
         fp_min_score=args.match_fp_min_score,
         fp_margin=args.match_fp_margin,
     )
-    run_callgraph_match(
-        source_callgraph=args.source_callgraph,
-        binary=args.match_binary,
-        binary_metadata=args.match_binary_metadata,
-        output=args.match_output,
-        min_confidence=args.match_min_confidence,
-        options=options,
-        algorithm=args.match_algorithm,
-        quiet=args.quiet_mode,
-    )
+    try:
+        run_callgraph_match(
+            source_callgraph=args.source_callgraph,
+            binary=args.match_binary,
+            binary_metadata=args.match_binary_metadata,
+            output=args.match_output,
+            min_confidence=args.match_min_confidence,
+            options=options,
+            algorithm=args.match_algorithm,
+            quiet=args.quiet_mode,
+            source_dir=args.source_dir,
+            language=args.match_language,
+            rusi_command=args.match_rusi_cmd,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        LOG.error("callgraph-match failed: %s", exc)
+        raise SystemExit(2) from exc
+
+
+def run_canonicalize_command(args):
+    """Run the canonicalize subcommand: show canonical forms of names."""
+    import json as _json
+
+    from blint.lib.callgraph.canon import canonicalize
+
+    results = []
+    for name in args.names:
+        canon = canonicalize(name)
+        results.append(
+            {
+                "input": name,
+                "canonical": canon.value,
+                "kind": canon.kind.value,
+                "is_generic": canon.is_generic,
+            }
+        )
+    if args.canonicalize_json:
+        print(_json.dumps(results, indent=2))
+        return
+    from rich.box import ROUNDED
+    from rich.table import Table
+
+    from blint.logger import console
+
+    table = Table(box=ROUNDED, title="Canonical names")
+    table.add_column("Input")
+    table.add_column("Canonical", style="cyan")
+    table.add_column("Kind", no_wrap=True)
+    table.add_column("Generic", no_wrap=True)
+    for row in results:
+        table.add_row(
+            row["input"],
+            row["canonical"] or "(empty)",
+            row["kind"],
+            "yes" if row["is_generic"] else "no",
+        )
+    console.print(table)
 
 
 def main():
@@ -469,6 +569,9 @@ def main():
     args = build_args()
     if args.subcommand_name == "callgraph-match":
         run_callgraph_match_command(args)
+        return
+    if args.subcommand_name == "canonicalize":
+        run_canonicalize_command(args)
         return
     blint_options = handle_args(args)
     if blint_options.quiet_mode:
