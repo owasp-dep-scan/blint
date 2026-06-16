@@ -100,11 +100,18 @@ registered without touching the loaders, the report format, or the command line.
 
 ## Running it
 
-The command is `blint callgraph-match`. It needs a source callgraph and a
-binary. The binary can be supplied as a path to a binary, in which case blint
+The command is `blint callgraph-match`. It needs a source input and a binary
+input. The binary can be supplied as a path to a binary, in which case blint
 disassembles it, or as a path to a previously generated blint metadata file.
 
-A typical run looks like this:
+The source input can be a precomputed source callgraph JSON file, or a source
+directory that blint analyzes for you. For a Rust source directory blint runs
+rusi, so you do not have to know its exact invocation. Supply the rusi command
+with `--rusi-cmd` or the `RUSI_CMD` environment variable. rusi is run only when
+the language is Rust; the language is set with `-l`/`--language` and defaults to
+rust.
+
+A typical run with a precomputed source callgraph looks like this:
 
 ```
 blint callgraph-match \
@@ -113,7 +120,23 @@ blint callgraph-match \
   --output match-report.json
 ```
 
+Or, letting blint run rusi over a source tree directly:
+
+```
+blint callgraph-match \
+  --source-dir path/to/crate-source \
+  --rusi-cmd "/path/to/rusi" \
+  --binary path/to/binary \
+  --output match-report.json
+```
+
 The configuration options are as follows.
+
+`--profile` selects a confidence preset, one of `precision`, `balanced`, or
+`recall`. `balanced` is the default. `precision` demands stronger structural
+agreement and never runs fingerprinting. `recall` enables Layer 2 fingerprinting
+and accepts more uncertain matches. The individual knob flags below override the
+preset when set.
 
 `--algorithm` selects the strategy, either `layered` or `anchors`. The default
 is `layered`.
@@ -139,6 +162,51 @@ two, two, 0.34, and 0.1, chosen to favor precision.
 the summary counters, the chosen algorithm, and the list of individual matches
 with their address, source function, confidence, matching method, and evidence
 type.
+
+## Library API
+
+Integrators who embed blint can match without driving the command line. The
+stable entry point is `blint.lib.callgraph.match_files`, which accepts either a
+source callgraph or a source directory, and either a binary or a metadata file,
+and returns a typed `MatchReport`:
+
+```python
+from blint.lib.callgraph import match_files, options_for_profile
+
+report = match_files(
+    source_dir="path/to/crate-source",   # or source_callgraph="callgraph.json"
+    binary="path/to/binary",              # or binary_metadata="metadata.json"
+    options=options_for_profile("precision"),
+    language="rust",
+    rusi_command="/path/to/rusi",
+)
+print(report.anchors, report.coverage, report.source_functions_identified)
+data = report.to_dict()  # JSON-serializable
+```
+
+`options_for_profile(profile, **overrides)` builds the matching options from a
+named preset with optional per-field overrides, mirroring the `--profile` flag.
+
+## Inspecting canonical names
+
+To debug why a function did or did not match, the `blint canonicalize` command
+shows how a name reduces to its canonical form:
+
+```
+blint canonicalize "<wasm_tools::dump::Dump as core::fmt::Debug>::fmt::h1a2b3c4d"
+```
+
+This prints the canonical name (`wasm_tools::dump::Dump::fmt`), the kind, and
+whether the original carried generics. Pass `--json` for machine-readable output.
+
+## Source-provided canonical names
+
+The rusi source analyzer emits a normalized `canonical_name` alongside each
+`qualified_name` in its callgraph nodes and declarations. When that field is
+present, blint uses it as the authoritative join key instead of re-deriving one,
+so the source and binary sides agree even as naming rules evolve. blint still
+derives canonical names itself for the binary side and for source callgraphs
+produced by tools that do not emit the field.
 
 ## The console output
 
@@ -167,6 +235,21 @@ how many canonical function names they share with a given binary. In testing,
 an unknown wasm-tools binary was correctly identified as
 `pkg:cargo/wasm-tools@1.247.0` by this overlap, with several thousand shared
 functions, while an unrelated decoy source graph was correctly excluded.
+
+## Using the corpus during SBOM generation
+
+When `blint sbom --use-blintdb` runs and the local blintdb database carries the
+callgraph corpus tables, blint adds callgraph matching to its existing symbol and
+function-hash component identification. It canonicalizes the binary's recovered
+callgraph function names and counts how many of them appear in each stored source
+graph. A strong overlap contributes to the component match score and is recorded
+on the matched component as `blintdb_matched_callgraph_count` and
+`blintdb_matched_callgraph_functions` evidence. This requires disassembly, so it
+is effective with `--deep` (which enables disassembly) or when matching
+pre-generated metadata that already contains a callgraph. blint degrades
+gracefully when the database predates the corpus tables, falling back to symbol
+and hash matching with no error. blint reads the database directly and keeps no
+runtime dependency on the blint-db package.
 
 ## Testing methodology
 
