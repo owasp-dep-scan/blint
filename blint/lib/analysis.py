@@ -58,9 +58,7 @@ if HAVE_RESOURCE_READER:
     with contextlib.suppress(NameError, FileNotFoundError):
         review_files = (
             resource.name
-            for resource in importlib.resources.files(
-                "blint.data.annotations"
-            ).iterdir()
+            for resource in importlib.resources.files("blint.data.annotations").iterdir()
             if resource.is_file() and resource.name.endswith(".yml")
         )
 if not review_files:
@@ -107,11 +105,7 @@ def get_resource(package, resource):
         # If we're in the context of a module, we could also use
         # ``__loader__.get_resource_reader(__name__).open_resource(resource)``.
         # We use open_binary() because it is simple.
-        return (
-            importlib.resources.files(package)
-            .joinpath(resource)
-            .open("r", encoding="utf-8")
-        )
+        return importlib.resources.files(package).joinpath(resource).open("r", encoding="utf-8")
 
     # Fall back to __file__.
 
@@ -219,9 +213,7 @@ def load_custom_rules(
 
     LOG.debug(f"Loading custom review rules from '{custom_dir_path}'")
     custom_path = Path(custom_dir_path)
-    custom_rule_files = list(custom_path.glob("*.yml")) + list(
-        custom_path.glob("*.yaml")
-    )
+    custom_rule_files = list(custom_path.glob("*.yml")) + list(custom_path.glob("*.yaml"))
 
     for rule_file_path in custom_rule_files:
         LOG.debug(f"Loading custom rules from {rule_file_path}")
@@ -248,9 +240,7 @@ def load_custom_rules(
                             method_rules_dict[rule_id] = rule
                             review_rules_cache[rule_id] = rule
                         else:
-                            LOG.warning(
-                                f"Rule in {rule_file_path} has no 'id'. Skipping."
-                            )
+                            LOG.warning(f"Rule in {rule_file_path} has no 'id'. Skipping.")
                             continue
 
                     for etype in exe_type_list:
@@ -502,9 +492,7 @@ def _build_mermaid_callgraph_text(callgraph: dict) -> str:
             continue
         node_name = node.get("name") or "unknown"
         node_addr = node.get("address") or ""
-        label = _safe_mermaid_label(
-            f"{node_name} ({node_addr})" if node_addr else node_name
-        )
+        label = _safe_mermaid_label(f"{node_name} ({node_addr})" if node_addr else node_name)
         lines.append(f'    N{node_id}["{label}"]')
     for edge in edges:
         src = edge.get("src")
@@ -554,9 +542,7 @@ def _filter_callgraph_by_min_confidence(callgraph: dict, min_confidence: str) ->
     return filtered
 
 
-def _iter_callgraph_exports(
-    callgraphs: list[dict], min_confidence: str = "low"
-) -> list[dict]:
+def _iter_callgraph_exports(callgraphs: list[dict], min_confidence: str = "low") -> list[dict]:
     """Builds stable per-binary export metadata with collision-safe file stems."""
     exports = []
     stem_counts = defaultdict(int)
@@ -658,9 +644,7 @@ def _build_graphml_tree(callgraph: dict) -> ET.Element:
         dst = edge.get("dst")
         if src is None or dst is None:
             continue
-        e = ET.SubElement(
-            graph, "edge", id=f"e{edge_index}", source=f"n{src}", target=f"n{dst}"
-        )
+        e = ET.SubElement(graph, "edge", id=f"e{edge_index}", source=f"n{src}", target=f"n{dst}")
         ET.SubElement(e, "data", key="edge_kind").text = edge.get("kind", "direct")
         ET.SubElement(e, "data", key="edge_count").text = str(edge.get("count", 1))
         edge_index += 1
@@ -818,24 +802,16 @@ def report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs=No
         fuzzables: A list of fuzzable methods.
 
     """
-    should_render_callgraphs = bool(
-        blint_options.render_mermaid_callgraph and callgraphs
-    )
-    should_export_graphml_callgraphs = bool(
-        blint_options.export_callgraph_graphml and callgraphs
-    )
-    should_export_gexf_callgraphs = bool(
-        blint_options.export_callgraph_gexf and callgraphs
-    )
+    should_render_callgraphs = bool(blint_options.render_mermaid_callgraph and callgraphs)
+    should_export_graphml_callgraphs = bool(blint_options.export_callgraph_graphml and callgraphs)
+    should_export_gexf_callgraphs = bool(blint_options.export_callgraph_gexf and callgraphs)
     should_emit_any_callgraph = (
         should_render_callgraphs
         or should_export_graphml_callgraphs
         or should_export_gexf_callgraphs
     )
     if not findings and not reviews and not should_emit_any_callgraph:
-        LOG.info(
-            f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!"
-        )
+        LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
         return
     if not findings and not reviews:
         LOG.info(

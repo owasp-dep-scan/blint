@@ -156,9 +156,7 @@ def extract_note_data(idx, note):
                 if isinstance(parsed_json, list):
                     dlopen_info = parsed_json
                 else:
-                    LOG.debug(
-                        f"DLOPEN_METADATA payload is not a list: {type(parsed_json)}"
-                    )
+                    LOG.debug(f"DLOPEN_METADATA payload is not a list: {type(parsed_json)}")
             except (orjson.JSONDecodeError, ValueError, TypeError) as e:
                 LOG.debug(f"Failed to parse DLOPEN_METADATA JSON payload: {e}")
 
@@ -439,9 +437,7 @@ def parse_wasm_metadata(exe_file: str, metadata: dict) -> dict:
     if (wasi := detections.get("wasi")) and wasi.get("detected"):
         build_info["runtime"] = "WASI"
         build_info["wasi_variants"] = wasi.get("variants", [])
-    if (js_interface := detections.get("js_interface")) and js_interface.get(
-        "detected"
-    ):
+    if (js_interface := detections.get("js_interface")) and js_interface.get("detected"):
         build_info["host_interface"] = "JavaScript"
     if build_info:
         metadata["build_info"] = build_info
@@ -470,9 +466,7 @@ def parse_strings(parsed_obj):
                 if s and "[]" not in s and "{}" not in s:
                     entropy = calculate_entropy(s)
                     secret_type = check_secret(s)
-                    if (
-                        entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH)
-                    ) or secret_type:
+                    if (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH)) or secret_type:
                         strings_list.append(
                             {
                                 "value": decode_base64(s) if s.endswith("==") else s,
@@ -507,9 +501,7 @@ def _prepare_informative_string_catalogs(catalogs):
 
     prepared = []
     for category, indicators in catalogs:
-        boundary_patterns, substring_indicators = _prepare_informative_string_matchers(
-            indicators
-        )
+        boundary_patterns, substring_indicators = _prepare_informative_string_matchers(indicators)
         prepared.append((category, boundary_patterns, substring_indicators))
     return tuple(prepared)
 
@@ -542,9 +534,9 @@ def parse_informative_strings(parsed_obj):
                 boundary_patterns,
                 substring_indicators,
             ) in PREPARED_INFORMATIVE_STRING_CATALOGS:
-                if any(
-                    indicator in lowered for indicator in substring_indicators
-                ) or any(pattern.search(lowered) for pattern in boundary_patterns):
+                if any(indicator in lowered for indicator in substring_indicators) or any(
+                    pattern.search(lowered) for pattern in boundary_patterns
+                ):
                     seen.add(lowered)
                     informative.append({"value": text, "category": category})
                     break
@@ -678,10 +670,7 @@ def parse_pe_data(parsed_obj):
             if directory.has_section:
                 if directory.section.has_characteristic:
                     section_chars = ", ".join(
-                        [
-                            enum_to_str(chara)
-                            for chara in directory.section.characteristics_lists
-                        ]
+                        [enum_to_str(chara) for chara in directory.section.characteristics_lists]
                     )
                 section_name = directory.section.name
                 section_entropy = directory.section.entropy
@@ -944,9 +933,7 @@ def parse_pe_exports(exports):
     exports_list = []
     if not exports or isinstance(exports, lief.lief_errors):
         return exports_list
-    if not (entries := exports.entries) or isinstance(
-        exports.entries, lief.lief_errors
-    ):
+    if not (entries := exports.entries) or isinstance(exports.entries, lief.lief_errors):
         return exports_list
     for entry in entries:
         metadata = {}
@@ -972,9 +959,7 @@ def _parse_unwind_flags(flags_int):
     """Decodes the integer flags into a list of readable names."""
     try:
         flag_obj = lief.PE.RuntimeFunctionX64.UNWIND_FLAGS(flags_int)
-        return [
-            f.name for f in lief.PE.RuntimeFunctionX64.UNWIND_FLAGS if f in flag_obj
-        ]
+        return [f.name for f in lief.PE.RuntimeFunctionX64.UNWIND_FLAGS if f in flag_obj]
     except Exception:
         return [str(flags_int)]
 
@@ -1094,9 +1079,7 @@ def parse_macho_symbols(symbols):
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 symbols_list.append(
                     {
-                        "name": (
-                            f"{libname}::{symbol_name}" if libname else symbol_name
-                        ),
+                        "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
                         "short_name": symbol_name,
                         "category": symbol.category,
                         "type": symbol.type,
@@ -1107,9 +1090,7 @@ def parse_macho_symbols(symbols):
                             "symbol": symbol_name,
                             "kind": symbol.export_info.kind,
                             "flags": str(symbol.export_info.flags),
-                            "offset": ADDRESS_FMT.format(
-                                symbol.export_info.node_offset
-                            ),
+                            "offset": ADDRESS_FMT.format(symbol.export_info.node_offset),
                             "address": ADDRESS_FMT.format(symbol.export_info.address),
                         }
                         if symbol.has_export_info
@@ -1142,9 +1123,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     vendor = "unknown"
     os_str = "unknown"
     env = ""
-    machine_type = (
-        metadata.get("machine_type") or metadata.get("cpu_type") or ""
-    ).upper()
+    machine_type = (metadata.get("machine_type") or metadata.get("cpu_type") or "").upper()
     endianness = metadata.get("endianness", "LSB").upper()
     arch_map = {
         "I386": "i686",
@@ -1218,10 +1197,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
             if "-sf.so" in interpreter:
                 env = "muslsf"
             elif arch == "arm":
-                if (
-                    "hard" in metadata.get("processor_flag", "").lower()
-                    or "-hf.so" in interpreter
-                ):
+                if "hard" in metadata.get("processor_flag", "").lower() or "-hf.so" in interpreter:
                     env = "musleabihf"
                 else:
                     env = "musleabi"
@@ -1229,10 +1205,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
                 env = "muslabi64"
         else:
             env = "gnu"
-            if (
-                arch.startswith("arm")
-                and "hard" in metadata.get("processor_flag", "").lower()
-            ):
+            if arch.startswith("arm") and "hard" in metadata.get("processor_flag", "").lower():
                 env = "gnueabihf"
     components = [arch, vendor, os_str]
     if env:
@@ -1302,9 +1275,7 @@ def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dic
     composition = {}
     dependencies = metadata.get("dynamic_entries", [])
     if isinstance(parsed_obj, lief.ELF.Binary):
-        composition["linking_type"] = (
-            "dynamic" if metadata.get("has_interpreter") else "static"
-        )
+        composition["linking_type"] = "dynamic" if metadata.get("has_interpreter") else "static"
     else:
         composition["linking_type"] = "dynamic" if dependencies else "static"
     composition["dependency_count"] = len(dependencies)
@@ -1333,9 +1304,7 @@ def standardize_keys(metadata: dict) -> dict:
     if "entrypoint" in metadata:
         metadata["entry_point"] = metadata["entrypoint"]
     elif "addressof_entrypoint" in metadata:
-        metadata["entry_point"] = int(
-            metadata["addressof_entrypoint"].replace("0x", ""), 16
-        )
+        metadata["entry_point"] = int(metadata["addressof_entrypoint"].replace("0x", ""), 16)
     if "imagebase" in metadata:
         metadata["image_base"] = metadata["imagebase"]
     return metadata
@@ -1346,9 +1315,7 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary):
     Adds various derived, high-level attributes to the metadata dictionary.
     """
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
-    metadata["security_properties"] = construct_security_properties(
-        metadata, parsed_obj
-    )
+    metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
     metadata["binary_composition"] = construct_binary_composition(metadata, parsed_obj)
     build_info = {}
     if go_formulation := metadata.get("go_formulation"):
@@ -1363,15 +1330,11 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary):
             f"{metadata['major_linker_version']}.{metadata['minor_linker_version']}"
         )
     if isinstance(parsed_obj, lief.ELF.Binary):
-        build_info["linking_type"] = (
-            "dynamic" if parsed_obj.has_interpreter else "static"
-        )
+        build_info["linking_type"] = "dynamic" if parsed_obj.has_interpreter else "static"
         if parsed_obj.has_section(".comment"):
             comment_section = parsed_obj.get_section(".comment")
             build_info["compiler_version"] = (
-                comment_section.content.tobytes()
-                .decode("ascii", "ignore")
-                .strip("\x00")
+                comment_section.content.tobytes().decode("ascii", "ignore").strip("\x00")
             )
     if build_info:
         metadata["build_info"] = build_info
@@ -1418,9 +1381,7 @@ def _default_confidence_for_kind(kind: str) -> str:
     return "high" if kind == "direct" else "medium" if kind == "tailcall" else "low"
 
 
-def _set_edge_confidence(
-    edge_confidence: dict, confidence_rank: dict, edge_key, confidence: str
-):
+def _set_edge_confidence(edge_confidence: dict, confidence_rank: dict, edge_key, confidence: str):
     existing = edge_confidence.get(edge_key)
     if not existing:
         edge_confidence[edge_key] = confidence
@@ -1498,12 +1459,8 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
             no_address_nodes.append(node)
 
     collapsed_nodes_raw = []
-    for address, group in sorted(
-        by_address.items(), key=lambda item: _address_sort_key(item[0])
-    ):
-        group_sorted = sorted(
-            group, key=lambda n: (n.get("name", ""), n.get("key", ""))
-        )
+    for address, group in sorted(by_address.items(), key=lambda item: _address_sort_key(item[0])):
+        group_sorted = sorted(group, key=lambda n: (n.get("name", ""), n.get("key", "")))
         canonical = dict(group_sorted[0])
         alias_names = sorted(
             {
@@ -1657,16 +1614,12 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                     _score_candidates(addr_to_ids.get(addr_int & ~1, []), 95)
                     _score_candidates(rva_to_ids.get(addr_int, []), 90)
                     if image_base_int:
-                        _score_candidates(
-                            addr_to_ids.get(addr_int + image_base_int, []), 85
-                        )
+                        _score_candidates(addr_to_ids.get(addr_int + image_base_int, []), 85)
                         _score_candidates(
                             addr_to_ids.get((addr_int + image_base_int) & ~1, []), 80
                         )
                         if addr_int >= image_base_int:
-                            _score_candidates(
-                                rva_to_ids.get(addr_int - image_base_int, []), 75
-                            )
+                            _score_candidates(rva_to_ids.get(addr_int - image_base_int, []), 75)
 
                     # Range containment fallback: recover caller->callee edges
                     # when target points inside a function body.
@@ -1674,17 +1627,13 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                     if containing_node_id is not None:
                         _score_candidates([containing_node_id], 70)
                     elif image_base_int:
-                        containing_node_id = _find_containing_node_id(
-                            addr_int + image_base_int
-                        )
+                        containing_node_id = _find_containing_node_id(addr_int + image_base_int)
                         if containing_node_id is not None:
                             _score_candidates([containing_node_id], 65)
 
             if target_name:
                 for idx, lookup_key in enumerate(_name_lookup_keys(target_name)):
-                    _score_candidates(
-                        name_to_ids.get(lookup_key, []), 50 if idx == 0 else 45
-                    )
+                    _score_candidates(name_to_ids.get(lookup_key, []), 50 if idx == 0 else 45)
 
             if candidate_scores:
                 max_score = max(candidate_scores.values())
@@ -1708,9 +1657,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
 
                 if primary_addr_int is not None:
                     primary_ids = set()
-                    for variant in _candidate_variants(
-                        primary_addr_int, image_base_int
-                    ):
+                    for variant in _candidate_variants(primary_addr_int, image_base_int):
                         primary_ids.update(addr_to_ids.get(variant, []))
                         primary_ids.update(addr_to_ids.get(variant & ~1, []))
                         primary_ids.update(rva_to_ids.get(variant, []))
@@ -1728,9 +1675,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                         if not rng:
                             continue
                         start_addr, end_addr = rng
-                        for variant in _candidate_variants(
-                            primary_addr_int, image_base_int
-                        ):
+                        for variant in _candidate_variants(primary_addr_int, image_base_int):
                             if start_addr <= variant <= end_addr:
                                 containing.append(cid)
                                 break
@@ -1744,8 +1689,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                             [
                                 cid
                                 for cid in containing
-                                if (node_ranges[cid][1] - node_ranges[cid][0])
-                                == min_width
+                                if (node_ranges[cid][1] - node_ranges[cid][0]) == min_width
                             ]
                         )
                         if len(narrowed) == 1:
@@ -1754,11 +1698,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                         else:
                             working = narrowed
 
-                if (
-                    selected_candidate is None
-                    and primary_addr_int is not None
-                    and working
-                ):
+                if selected_candidate is None and primary_addr_int is not None and working:
                     distance_map = {}
                     for cid in working:
                         rng = node_ranges.get(cid)
@@ -1767,18 +1707,12 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                         start_addr = rng[0]
                         distance_map[cid] = min(
                             abs(start_addr - variant)
-                            for variant in _candidate_variants(
-                                primary_addr_int, image_base_int
-                            )
+                            for variant in _candidate_variants(primary_addr_int, image_base_int)
                         )
                     if distance_map:
                         min_dist = min(distance_map.values())
                         narrowed = sorted(
-                            [
-                                cid
-                                for cid, dist in distance_map.items()
-                                if dist == min_dist
-                            ]
+                            [cid for cid, dist in distance_map.items() if dist == min_dist]
                         )
                         if len(narrowed) == 1:
                             selected_candidate = narrowed[0]
@@ -1802,9 +1736,9 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 if len(top_candidates) > 1:
                     reason = "ambiguous_address"
                 else:
-                    is_numeric_raw = isinstance(
-                        raw_operand, str
-                    ) and raw_operand.startswith(("#", "0x"))
+                    is_numeric_raw = isinstance(raw_operand, str) and raw_operand.startswith(
+                        ("#", "0x")
+                    )
                     if target_addr or target_addr_candidates:
                         reason = "address_space_miss"
                     elif target_name:
@@ -1835,9 +1769,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 edge_counts[edge_key] += 1
                 _set_edge_confidence(edge_confidence, confidence_rank, edge_key, "high")
             else:
-                reason = (
-                    "ambiguous_name" if len(candidate_ids) > 1 else "symbol_only_miss"
-                )
+                reason = "ambiguous_name" if len(candidate_ids) > 1 else "symbol_only_miss"
                 external_counts[(src_id, target_name, reason)] += 1
 
     edges = [
@@ -1850,9 +1782,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 (src, dst, kind), _default_confidence_for_kind(kind)
             ),
         }
-        for (src, dst, kind), count in sorted(
-            edge_counts.items(), key=lambda item: item[0]
-        )
+        for (src, dst, kind), count in sorted(edge_counts.items(), key=lambda item: item[0])
     ]
     external = [
         {
@@ -1920,9 +1850,7 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
         if disassemble and isinstance(
             parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
         ):
-            metadata["disassembled_functions"] = disassemble_functions(
-                parsed_obj, metadata
-            )
+            metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
     except (AttributeError, TypeError, ValueError) as e:
@@ -1988,9 +1916,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     elif runpath:
         metadata["has_runpath"] = True
     symtab_symbols = parsed_obj.symtab_symbols
-    metadata["static"] = bool(
-        symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors)
-    )
+    metadata["static"] = bool(symtab_symbols and not isinstance(symtab_symbols, lief.lief_errors))
     dynamic_entries = parsed_obj.dynamic_entries
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -2012,9 +1938,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dtor_functions"] = parse_functions(parsed_obj.dtor_functions)
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
-    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(
-        parsed_obj
-    )
+    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
 
     return metadata
@@ -2088,9 +2012,7 @@ def add_elf_symbols(metadata, parsed_obj):
                     symbol_version_auxiliary_cache[symbol_version_auxiliary.name] = True
                     metadata["symbols_version"].append(
                         {
-                            "name": demangle_symbolic_name(
-                                symbol_version_auxiliary.name
-                            ),
+                            "name": demangle_symbolic_name(symbol_version_auxiliary.name),
                             "hash": symbol_version_auxiliary.hash,
                             "value": entry.value,
                         }
@@ -2190,9 +2112,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     if hasattr(parsed_obj, "overlay"):
         overlay = parsed_obj.overlay
         overlay_str = (
-            codecs.decode(
-                overlay.tobytes(), encoding="utf-8", errors="backslashreplace"
-            )
+            codecs.decode(overlay.tobytes(), encoding="utf-8", errors="backslashreplace")
             .replace("\0", "")
             .replace("\r\n", "")
             .replace("\n", "")
@@ -2234,9 +2154,7 @@ def parse_go_buildinfo(
         build_info = parsed_obj.get_section("__go_buildinfo")
     if build_info and build_info.size:
         build_info_str = (
-            codecs.decode(
-                build_info.content.tobytes(), encoding="utf-8", errors="replace"
-            )
+            codecs.decode(build_info.content.tobytes(), encoding="utf-8", errors="replace")
             .replace("\0", "")
             .replace("\ufffd", "")
             .replace("\t", " ")
@@ -2271,9 +2189,7 @@ def parse_go_buildinfo(
             tmp_a = line.removeprefix("dep ").split(" ")
             deps[tmp_a[0]] = {
                 "version": tmp_a[1],
-                "hash": tmp_a[2]
-                if len(tmp_a) == 3 and tmp_a[2].startswith("h1:")
-                else None,
+                "hash": tmp_a[2] if len(tmp_a) == 3 and tmp_a[2].startswith("h1:") else None,
             }
         if line.startswith("build "):
             tmp_a = line.removeprefix("build ").split("=")
@@ -2424,13 +2340,8 @@ def analyze_import_deps(metadata):
                     {"from": main_binary_name, "to": lib_name, "symbols": [func_name]}
                 )
 
-            if (
-                lib_name
-                not in dep_graph["libraries"][main_binary_name]["imported_from"]
-            ):
-                dep_graph["libraries"][main_binary_name]["imported_from"].append(
-                    lib_name
-                )
+            if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
+                dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
     else:
         all_potential_imports = metadata.get("symtab_symbols", []) + metadata.get(
             "dynamic_symbols", []
@@ -2438,11 +2349,7 @@ def analyze_import_deps(metadata):
         needed_libs = set()
         if binary_type == "MachO":
             needed_libs.update(
-                [
-                    lib.get("name")
-                    for lib in metadata.get("libraries", [])
-                    if lib.get("name")
-                ]
+                [lib.get("name") for lib in metadata.get("libraries", []) if lib.get("name")]
             )
         else:
             needed_libs.update(
@@ -2481,17 +2388,11 @@ def analyze_import_deps(metadata):
                             continue
                     elif needed_libs:
                         lib_name = next(iter(needed_libs))
-                    elif (
-                        ".go" in full_name
-                        or ".s" in full_name
-                        or "internal" in full_name
-                    ):
+                    elif ".go" in full_name or ".s" in full_name or "internal" in full_name:
                         lib_name = full_name
                     else:
                         if main_binary_name not in full_name:
-                            LOG.debug(
-                                f"Symbol {full_name} is imported but no library info found."
-                            )
+                            LOG.debug(f"Symbol {full_name} is imported but no library info found.")
                         continue
                 if not lib_name:
                     continue
@@ -2504,13 +2405,10 @@ def analyze_import_deps(metadata):
                     }
 
                 if (
-                    func_name
-                    not in dep_graph["libraries"][lib_name]["imported_symbols"]
+                    func_name not in dep_graph["libraries"][lib_name]["imported_symbols"]
                     and func_name != lib_name
                 ):
-                    dep_graph["libraries"][lib_name]["imported_symbols"].append(
-                        func_name
-                    )
+                    dep_graph["libraries"][lib_name]["imported_symbols"].append(func_name)
 
                 dep_exists = False
                 for dep in dep_graph["dependencies"]:
@@ -2528,13 +2426,8 @@ def analyze_import_deps(metadata):
                         }
                     )
 
-                if (
-                    lib_name
-                    not in dep_graph["libraries"][main_binary_name]["imported_from"]
-                ):
-                    dep_graph["libraries"][main_binary_name]["imported_from"].append(
-                        lib_name
-                    )
+                if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
+                    dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
     if len(dep_graph["dependencies"]):
         LOG.debug(
             f"Generated import dependency graph with {len(dep_graph['dependencies'])} dependencies."
@@ -2623,21 +2516,15 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
         metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
         metadata["virtual_size"] = parsed_obj.virtual_size
         metadata["has_nx"] = parsed_obj.has_nx
-        metadata["imphash_pefile"] = lief.PE.get_imphash(
-            parsed_obj, lief.PE.IMPHASH_MODE.PEFILE
-        )
-        metadata["imphash_lief"] = lief.PE.get_imphash(
-            parsed_obj, lief.PE.IMPHASH_MODE.LIEF
-        )
+        metadata["imphash_pefile"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.PEFILE)
+        metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["sections"] = []
         ep = parsed_obj.optional_header.addressof_entrypoint
         for sec in parsed_obj.sections:
-            sec_size = max(
-                getattr(sec, "virtual_size", 0), getattr(sec, "sizeof_raw_data", 0)
-            )
+            sec_size = max(getattr(sec, "virtual_size", 0), getattr(sec, "sizeof_raw_data", 0))
             if sec.virtual_address <= ep < (sec.virtual_address + sec_size):
                 metadata["entry_point_section"] = sec.name
             sec_data = {
@@ -2647,17 +2534,14 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                 "raw_size": getattr(sec, "sizeof_raw_data", 0),
             }
             if hasattr(sec, "characteristics_lists"):
-                sec_data["characteristics"] = [
-                    enum_to_str(c) for c in sec.characteristics_lists
-                ]
+                sec_data["characteristics"] = [enum_to_str(c) for c in sec.characteristics_lists]
             metadata["sections"].append(sec_data)
         if parsed_obj.has_rich_header:
             rich = parsed_obj.rich_header
             metadata["rich_header"] = {
                 "key": hex(rich.key),
                 "entries": [
-                    {"id": e.id, "build_id": e.build_id, "count": e.count}
-                    for e in rich.entries
+                    {"id": e.id, "build_id": e.build_id, "count": e.count} for e in rich.entries
                 ],
             }
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
@@ -2689,29 +2573,22 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                     else:
                         text_section = section
         if rdata_section or text_section:
-            add_rdata_symbols(
-                metadata, rdata_section, text_section, parsed_obj.sections
-            )
+            add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
         metadata["exceptions"] = parse_pe_exceptions(parsed_obj.exceptions)
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
-        metadata["exception_functions"] = parse_functions(
-            parsed_obj.exception_functions
-        )
+        metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
         # Detect if this PE might be dotnet
         for i, dd in enumerate(parsed_obj.data_directories):
             if (
                 i == 14
-                and dd.type.value
-                == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
+                and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
                 and dd.size > 0
             ):
                 metadata["is_dotnet"] = True
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
-        metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(
-            parsed_obj
-        )
+        metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
         if tls:
@@ -2719,9 +2596,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
                 ADDRESS_FMT.format(cb).strip() for cb in getattr(tls, "callbacks", [])
             ]
             if hasattr(tls, "sizeof_zero_fill"):
-                metadata["tls_address_index"] = ADDRESS_FMT.format(
-                    tls.addressof_index
-                ).strip()
+                metadata["tls_address_index"] = ADDRESS_FMT.format(tls.addressof_index).strip()
                 metadata["tls_sizeof_zero_fill"] = tls.sizeof_zero_fill
                 metadata["tls_data_template_len"] = len(tls.data_template)
                 metadata["tls_characteristics"] = tls.characteristics
@@ -2834,16 +2709,12 @@ def add_pe_optional_headers(metadata, optional_header):
             metadata["is_driver"] = True
         metadata["subsystem"] = enum_to_str(optional_header.subsystem)
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
-        metadata["exe_type"] = (
-            "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
-        )
+        metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
         metadata["major_linker_version"] = optional_header.major_linker_version
         metadata["minor_linker_version"] = optional_header.minor_linker_version
         metadata["sizeof_code"] = optional_header.sizeof_code
         metadata["sizeof_initialized_data"] = optional_header.sizeof_initialized_data
-        metadata["sizeof_uninitialized_data"] = (
-            optional_header.sizeof_uninitialized_data
-        )
+        metadata["sizeof_uninitialized_data"] = optional_header.sizeof_uninitialized_data
         metadata["addressof_entrypoint"] = ADDRESS_FMT.format(
             optional_header.addressof_entrypoint
         ).strip()
@@ -2852,12 +2723,8 @@ def add_pe_optional_headers(metadata, optional_header):
         metadata["imagebase"] = optional_header.imagebase
         metadata["section_alignment"] = optional_header.section_alignment
         metadata["file_alignment"] = optional_header.file_alignment
-        metadata["major_operating_system_version"] = (
-            optional_header.major_operating_system_version
-        )
-        metadata["minor_operating_system_version"] = (
-            optional_header.minor_operating_system_version
-        )
+        metadata["major_operating_system_version"] = optional_header.major_operating_system_version
+        metadata["minor_operating_system_version"] = optional_header.minor_operating_system_version
         metadata["major_image_version"] = optional_header.major_image_version
         metadata["minor_image_version"] = optional_header.minor_image_version
         metadata["major_subsystem_version"] = optional_header.major_subsystem_version
@@ -2931,9 +2798,7 @@ def add_rdata_symbols(metadata, rdata_section, text_section, sections):
             data_sections.append(section)
     for section in data_sections:
         str_content = (
-            codecs.decode(
-                section.content.tobytes("A"), encoding="utf-8", errors="ignore"
-            )
+            codecs.decode(section.content.tobytes("A"), encoding="utf-8", errors="ignore")
             if section and section.content
             else ""
         )
@@ -2979,9 +2844,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     metadata["has_nx"] = parsed_obj.has_nx
     metadata["exe_type"] = "MachO"
     metadata = add_mach0_versions(exe_file, metadata, parsed_obj)
-    if parsed_obj.has_encryption_info and (
-        encryption_info := parsed_obj.encryption_info
-    ):
+    if parsed_obj.has_encryption_info and (encryption_info := parsed_obj.encryption_info):
         metadata["encryption_info"] = {
             "crypt_offset": encryption_info.crypt_offset,
             "crypt_size": encryption_info.crypt_size,
@@ -3005,9 +2868,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     metadata = add_mach0_commands(metadata, parsed_obj)
     metadata = add_mach0_functions(metadata, parsed_obj)
     metadata = add_mach0_signature(exe_file, metadata, parsed_obj)
-    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(
-        parsed_obj
-    )
+    metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
     return metadata
 
@@ -3025,9 +2886,7 @@ def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
     metadata["has_main"] = False
     metadata["has_thread_command"] = False
     if parsed_obj.main_command:
-        metadata["has_main_command"] = not isinstance(
-            parsed_obj.main_command, lief.lief_errors
-        )
+        metadata["has_main_command"] = not isinstance(parsed_obj.main_command, lief.lief_errors)
     if parsed_obj.thread_command:
         metadata["has_thread_command"] = not isinstance(
             parsed_obj.thread_command, lief.lief_errors
@@ -3049,21 +2908,15 @@ def add_mach0_versions(exe_file, metadata, parsed_obj):
     try:
         version = parsed_obj.version_min.version if parsed_obj.version_min else ""
         sdk = parsed_obj.version_min.sdk if parsed_obj.version_min else ""
-        source_version = (
-            parsed_obj.source_version.version if parsed_obj.source_version else ""
-        )
+        source_version = parsed_obj.source_version.version if parsed_obj.source_version else ""
         if source_version:
-            metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(
-                *source_version
-            )
+            metadata["source_version"] = "{:d}.{:d}.{:d}.{:d}.{:d}".format(*source_version)
         if version:
             metadata["version"] = "{:d}.{:d}.{:d}".format(*version)
         if sdk:
             metadata["sdk"] = "{:d}.{:d}.{:d}".format(*sdk)
     except (AttributeError, IndexError, TypeError) as e:
-        LOG.debug(
-            f"Caught {type(e)}: {e} while parsing {exe_file} Mach0 version metadata."
-        )
+        LOG.debug(f"Caught {type(e)}: {e} while parsing {exe_file} Mach0 version metadata.")
     return add_mach0_build_metadata(exe_file, metadata, parsed_obj)
 
 
@@ -3096,9 +2949,7 @@ def add_mach0_build_metadata(exe_file, metadata, parsed_obj):
                     }
                 )
     except (AttributeError, IndexError, TypeError) as e:
-        LOG.debug(
-            f"Caught {type(e)}: {e} while parsing {exe_file} Mach0 build version metadata."
-        )
+        LOG.debug(f"Caught {type(e)}: {e} while parsing {exe_file} Mach0 build version metadata.")
     return metadata
 
 
@@ -3148,9 +2999,7 @@ def add_mach0_header_data(exe_file, metadata, parsed_obj):
         header = parsed_obj.header
         flags_str = ", ".join([enum_to_str(s) for s in header.flags_list])
         metadata["magic"] = enum_to_str(header.magic)
-        metadata["is_neural_model"] = (
-            header.magic == lief.MachO.MACHO_TYPES.NEURAL_MODEL
-        )
+        metadata["is_neural_model"] = header.magic == lief.MachO.MACHO_TYPES.NEURAL_MODEL
         metadata["cpu_type"] = enum_to_str(header.cpu_type)
         metadata["cpu_subtype"] = header.cpu_subtype
         metadata["file_type"] = enum_to_str(header.file_type)

@@ -47,10 +47,7 @@ def test_parse_wasm_metadata(wasm_name):
     assert metadata["section_count"] > 0
     assert isinstance(metadata.get("wasm_imports"), list)
     assert metadata["imports"] == metadata["dynamic_entries"]
-    assert (
-        metadata["import_dependencies"]["libraries"][str(wasm_file)]["type"]
-        == "main_binary"
-    )
+    assert metadata["import_dependencies"]["libraries"][str(wasm_file)]["type"] == "main_binary"
     assert metadata["llvm_target_tuple"] == "wasm32-unknown-unknown"
     assert metadata["hashes"]["sha256"]
     assert metadata["wasm_report"]["file"] == str(wasm_file)
@@ -93,9 +90,7 @@ def test_parse_skips_disassembly_for_unsupported_lief_objects(monkeypatch, tmp_p
     def _unexpected_disassembly(*_args, **_kwargs):
         raise AssertionError("disassemble_functions should not be called")
 
-    monkeypatch.setattr(
-        "blint.lib.binary.disassemble_functions", _unexpected_disassembly
-    )
+    monkeypatch.setattr("blint.lib.binary.disassemble_functions", _unexpected_disassembly)
 
     metadata = parse(str(fixture), disassemble=True)
 
@@ -168,9 +163,7 @@ def test_parse_informative_strings_detects_windows_local_elevation_hints():
         "CreateRemoteThread",
         "OpenProcessToken",
     ]
-    assert all(
-        entry["category"] == "windows_local_elevation_hint" for entry in informative
-    )
+    assert all(entry["category"] == "windows_local_elevation_hint" for entry in informative)
 
 
 def test_parse_informative_strings_detects_apple_local_elevation_hints():
@@ -193,9 +186,7 @@ def test_parse_informative_strings_detects_apple_local_elevation_hints():
         "cr_uid",
         "TPIDR_EL1",
     ]
-    assert all(
-        entry["category"] == "apple_local_elevation_hint" for entry in informative
-    )
+    assert all(entry["category"] == "apple_local_elevation_hint" for entry in informative)
 
 
 def test_parse_informative_strings_detects_miniplasma_cloudfilter_hints():
@@ -220,9 +211,7 @@ def test_parse_informative_strings_detects_miniplasma_cloudfilter_hints():
         "MiniPlasmaWERPipe",
         "QueueReporting",
     ]
-    assert all(
-        entry["category"] == "windows_local_elevation_hint" for entry in informative
-    )
+    assert all(entry["category"] == "windows_local_elevation_hint" for entry in informative)
 
 
 def test_parse_informative_strings_reuses_prepared_matchers(monkeypatch):
@@ -832,9 +821,7 @@ def test_parse_adds_callgraph_when_disassembly_results_exist(monkeypatch):
     def _fake_disassemble_functions(_parsed_obj, _metadata):
         return fake_disassembly
 
-    monkeypatch.setattr(
-        "blint.lib.binary.disassemble_functions", _fake_disassemble_functions
-    )
+    monkeypatch.setattr("blint.lib.binary.disassemble_functions", _fake_disassemble_functions)
 
     metadata = parse("/bin/ls", disassemble=True)
 
@@ -843,9 +830,7 @@ def test_parse_adds_callgraph_when_disassembly_results_exist(monkeypatch):
     assert metadata["callgraph"]["edge_count"] == 1
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="symbolic is not available on windows"
-)
+@pytest.mark.skipif(sys.platform == "win32", reason="symbolic is not available on windows")
 def test_demangle():
     assert (
         demangle_symbolic_name(".rdata$.refptr.__mingw_initltsdrot_force")

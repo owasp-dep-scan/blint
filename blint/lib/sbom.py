@@ -29,6 +29,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.db import (
+    build_callgraph_canon_names,
     build_function_hash_index,
     build_symbol_source_map,
     detect_binaries_utilized,
@@ -174,13 +175,9 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components += process_android_file(
-                dependencies_dict, blint_options.deep_mode, f, sbom
-            )
+            components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
     if dependencies_dict:
-        dependencies += [
-            {"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()
-        ]
+        dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
     return create_sbom(
         components,
@@ -224,8 +221,7 @@ def create_sbom(
             sbom.metadata.component = sbom.metadata.component.components[0]
         else:
             root_depends_on = [
-                ac.bom_ref.model_dump(mode="python")
-                for ac in sbom.metadata.component.components
+                ac.bom_ref.model_dump(mode="python") for ac in sbom.metadata.component.components
             ]
             dependencies.append(
                 {
@@ -313,9 +309,7 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
     return lib_components
 
 
-def _add_to_parent_component(
-    metadata_components: list[Component], parent_component: Component
-):
+def _add_to_parent_component(metadata_components: list[Component], parent_component: Component):
     for mc in metadata_components:
         if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
             mode="python"
@@ -390,16 +384,12 @@ def process_exe_file(
             if isinstance(metadata.get(prop), bool):
                 value = value.lower()
             if value:
-                parent_component.properties.append(
-                    Property(name=f"internal:{prop}", value=value)
-                )
+                parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
     if metadata.get("notes"):
         for note in metadata.get("notes"):
             if note.get("version"):
                 parent_component.properties.append(
-                    Property(
-                        name=f"internal:{note.get('type')}", value=note.get("version")
-                    )
+                    Property(name=f"internal:{note.get('type')}", value=note.get("version"))
                 )
     # For PE, resources could have a dict called version_metadata with interesting properties
     if metadata.get("resources"):
@@ -540,15 +530,15 @@ def process_exe_file(
         LOG.debug("Utilizing blintdb v2 for SBOM component matching")
         symbol_source_map = build_symbol_source_map(metadata)
         function_hash_index = build_function_hash_index(metadata)
+        callgraph_canon_names = build_callgraph_canon_names(metadata)
         binaries_detected, binary_evidence = detect_binaries_utilized(
             symbol_source_map=symbol_source_map,
             function_hash_index=function_hash_index,
+            callgraph_canon_names=callgraph_canon_names,
             binary_metadata=metadata,
         )
         if binaries_detected:
-            LOG.debug(
-                f"Found {len(binaries_detected)} possible component matches for {exe}."
-            )
+            LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
         else:
             LOG.debug(f"Unable to identify a blintdb match for {exe}.")
         for binary_purl in sorted(binaries_detected):
@@ -557,17 +547,11 @@ def process_exe_file(
                 "blintdb_project_name": evidence.get("project_name"),
                 "blintdb_score": evidence.get("score"),
                 "blintdb_matched_binary_count": evidence.get("matched_binary_count"),
-                "blintdb_matched_binary_name_count": evidence.get(
-                    "matched_binary_name_count"
-                ),
-                "blintdb_matched_binary_names": evidence.get(
-                    "matched_binary_names", []
-                ),
+                "blintdb_matched_binary_name_count": evidence.get("matched_binary_name_count"),
+                "blintdb_matched_binary_names": evidence.get("matched_binary_names", []),
                 "blintdb_binary_name_match": evidence.get("binary_name_match"),
                 "blintdb_matched_symbol_count": evidence.get("matched_symbol_count"),
-                "blintdb_matched_symbol_sources": evidence.get(
-                    "matched_symbol_sources", []
-                ),
+                "blintdb_matched_symbol_sources": evidence.get("matched_symbol_sources", []),
                 "blintdb_matched_symbols": evidence.get("matched_symbols", []),
                 "blintdb_matched_instruction_hash_count": evidence.get(
                     "matched_instruction_hash_count"
@@ -575,11 +559,11 @@ def process_exe_file(
                 "blintdb_matched_instruction_hashes": evidence.get(
                     "matched_instruction_hashes", []
                 ),
-                "blintdb_matched_assembly_hash_count": evidence.get(
-                    "matched_assembly_hash_count"
-                ),
-                "blintdb_matched_assembly_hashes": evidence.get(
-                    "matched_assembly_hashes", []
+                "blintdb_matched_assembly_hash_count": evidence.get("matched_assembly_hash_count"),
+                "blintdb_matched_assembly_hashes": evidence.get("matched_assembly_hashes", []),
+                "blintdb_matched_callgraph_count": evidence.get("matched_callgraph_count"),
+                "blintdb_matched_callgraph_functions": evidence.get(
+                    "matched_callgraph_functions", []
                 ),
             }
             comp = create_dynamic_component(
@@ -670,9 +654,7 @@ def create_library_component(entry: Dict, exe: str) -> Component:
     return comp
 
 
-def create_dynamic_component(
-    entry: Dict, exe: str, evidence_metadata: dict = None
-) -> Component:
+def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = None) -> Component:
     """
     Creates a dynamic component object based on the entry information.
 
@@ -781,9 +763,7 @@ def process_dotnet_dependencies(
         hash_content = ""
         try:
             hash_content = codecs.encode(
-                base64.b64decode(
-                    v.get("sha512").removeprefix("sha512-"), validate=True
-                ),
+                base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
                 encoding="hex",
             )
         except binascii.Error:
@@ -794,13 +774,9 @@ def process_dotnet_dependencies(
             version=tmp_a[1],
             purl=purl,
             scope=Scope.required,
-            evidence=create_component_evidence(v.get("path"), 1.0)
-            if v.get("path")
-            else {},
+            evidence=create_component_evidence(v.get("path"), 1.0) if v.get("path") else {},
             properties=[
-                Property(
-                    name="internal:serviceable", value=str(v.get("serviceable")).lower()
-                ),
+                Property(name="internal:serviceable", value=str(v.get("serviceable")).lower()),
                 Property(name="internal:hash_path", value=v.get("hashPath")),
             ],
         )
@@ -926,22 +902,18 @@ def track_dependency(
         None
     """
     if parent_component:
-        if not dependencies_dict.get(
-            parent_component.bom_ref.model_dump(mode="python")
-        ):
-            dependencies_dict[parent_component.bom_ref.model_dump(mode="python")] = (
-                set()
-            )
+        if not dependencies_dict.get(parent_component.bom_ref.model_dump(mode="python")):
+            dependencies_dict[parent_component.bom_ref.model_dump(mode="python")] = set()
         for acomp in app_components:
             if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
                 dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = set()
             # Prevent self loops
-            if parent_component.bom_ref.model_dump(
+            if parent_component.bom_ref.model_dump(mode="python") != acomp.bom_ref.model_dump(
                 mode="python"
-            ) != acomp.bom_ref.model_dump(mode="python"):
-                dependencies_dict[
-                    parent_component.bom_ref.model_dump(mode="python")
-                ].add(acomp.bom_ref.model_dump(mode="python"))
+            ):
+                dependencies_dict[parent_component.bom_ref.model_dump(mode="python")].add(
+                    acomp.bom_ref.model_dump(mode="python")
+                )
     else:
         for acomp in app_components:
             if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):

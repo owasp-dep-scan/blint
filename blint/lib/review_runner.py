@@ -130,17 +130,12 @@ class ReviewRunner:
     def _methods_or_exe(self, metadata):
         """Reviews method-like lists in the metadata."""
         functions_list = [
-            re.sub(r"[*&()]", "", f.get("name", ""))
-            for f in metadata.get("functions", [])
+            re.sub(r"[*&()]", "", f.get("name", "")) for f in metadata.get("functions", [])
         ]
         if metadata.get("magic", "").startswith("PE"):
-            functions_list += [
-                f.get("name", "") for f in metadata.get("symtab_symbols", [])
-            ]
+            functions_list += [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
         if not functions_list and metadata.get("symtab_symbols"):
-            functions_list = [
-                f.get("name", "") for f in metadata.get("symtab_symbols", [])
-            ]
+            functions_list = [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
         informative_values = []
         for s in metadata.get("informative_strings", []):
             if isinstance(s, dict):
@@ -189,9 +184,7 @@ class ReviewRunner:
             reviews.append(aresult)
         return reviews
 
-    def run_review_methods_symbols(
-        self, review_list, functions_list, informative_values=None
-    ):
+    def run_review_methods_symbols(self, review_list, functions_list, informative_values=None):
         """Runs a review of methods and symbols based on the provided lists."""
         results = run_pattern_reviews(
             review_list,

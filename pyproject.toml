@@ -51,15 +51,20 @@ blint = 'blint.cli:main'
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.3",
-    "black>=26.3.1",
+    "ruff>=0.14.0",
     "flake8>=7.3.0",
     "pylint>=4.0.5",
     "pytest-cov>=7.1.0",
     "pyinstaller>=6.20.0"
 ]
 
-[tool.black]
+[tool.ruff]
 line-length = 99
+
+[tool.ruff.format]
+# Match the previous formatter defaults so existing files are not churned.
+quote-style = "double"
+indent-style = "space"
 
 [tool.poetry.group.extended.dependencies]
 nyxstone = "^0.1.1"

@@ -210,8 +210,7 @@ def _function_has_indirect_target_hint(func_data: dict, api_name: str) -> bool:
     normalized_api_name = api_name.strip().lower()
     return any(
         target.get("kind") in ("indirect_hint", "tailcall")
-        and _normalize_direct_call_name(target.get("target_name", ""))
-        == normalized_api_name
+        and _normalize_direct_call_name(target.get("target_name", "")) == normalized_api_name
         for target in func_data.get("direct_call_targets", [])
     )
 
@@ -231,10 +230,7 @@ def _function_name_is_zalloc_ro_mut(func_data: dict) -> bool:
 
 def _zalloc_ro_mut_has_patched_per_cpu_bounds(assembly: str) -> bool:
     """Return True when the post-patch per-CPU bound-check sequence is present."""
-    return (
-        "tpidr_el1" in assembly
-        and len(ZALLOC_RO_MUT_PATCHED_CCMP_RE.findall(assembly)) >= 2
-    )
+    return "tpidr_el1" in assembly and len(ZALLOC_RO_MUT_PATCHED_CCMP_RE.findall(assembly)) >= 2
 
 
 def _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly: str) -> bool:
@@ -311,9 +307,7 @@ def _collect_dynamic_resolver_helpers(disassembled_functions: dict) -> dict[str,
     return resolver_helpers
 
 
-def _find_called_resolver_helper(
-    func_data: dict, resolver_helpers: dict[str, str]
-) -> str:
+def _find_called_resolver_helper(func_data: dict, resolver_helpers: dict[str, str]) -> str:
     """Return the first called internal resolver helper name for this function."""
     for call_name in func_data.get("direct_calls", []):
         normalized_name = _normalize_function_symbol_name(call_name)
@@ -358,24 +352,18 @@ def _evaluate_function_metric(rule_obj: dict, func_data: dict) -> bool:
         return False
     if operator_str == "contains_all":
         if isinstance(value, list):
-            return all(
-                any(p.lower() in str(v).lower() for v in value) for p in patterns
-            )
+            return all(any(p.lower() in str(v).lower() for v in value) for p in patterns)
         if isinstance(value, str):
             return all(p.lower() in value.lower() for p in patterns)
     elif operator_str in ("contains_any", "contains"):
         if isinstance(value, list):
-            return any(
-                any(p.lower() in str(v).lower() for v in value) for p in patterns
-            )
+            return any(any(p.lower() in str(v).lower() for v in value) for p in patterns)
         if isinstance(value, str):
             return any(p.lower() in value.lower() for p in patterns)
     return False
 
 
-def _evaluate_function_analysis(
-    rule_id: str, func_data: dict, resolver_helpers: dict[str, str]
-):
+def _evaluate_function_analysis(rule_id: str, func_data: dict, resolver_helpers: dict[str, str]):
     """Evaluate rule-specific function_analysis heuristics."""
     metrics = func_data.get("instruction_metrics", {})
     icount = func_data.get("instruction_count", 0)
@@ -407,14 +395,10 @@ def _evaluate_function_analysis(
             passed = True
     elif rule_id == "SUSPICIOUS_MEMORY_ALLOC":
         has_alloc = any(api in c for c in direct_calls for api in ALLOC_APIS)
-        if has_alloc and (
-            func_data.get("has_indirect_call") or metrics.get("jump_count", 0) > 0
-        ):
+        if has_alloc and (func_data.get("has_indirect_call") or metrics.get("jump_count", 0) > 0):
             passed = True
     elif rule_id == "POTENTIAL_ANTI_DEBUG":
-        if "rdtsc" in assembly or any(
-            api in c for c in direct_calls for api in DEBUG_APIS
-        ):
+        if "rdtsc" in assembly or any(api in c for c in direct_calls for api in DEBUG_APIS):
             passed = True
     elif rule_id == "POTENTIAL_SHELLCODE_CHARS":
         if func_data.get("has_system_call") and func_data.get("has_indirect_call"):
@@ -487,9 +471,7 @@ def _evaluate_function_analysis(
     elif rule_id == "CLOUDFILTER_ABORT_TOKEN_IMPERSONATION_CHAIN":
         if _function_has_any_call_fragment(
             func_data, CLOUD_FILTER_ABORT_APIS
-        ) and _function_has_any_call_fragment(
-            func_data, CLOUD_FILTER_TOKEN_IMPERSONATION_APIS
-        ):
+        ) and _function_has_any_call_fragment(func_data, CLOUD_FILTER_TOKEN_IMPERSONATION_APIS):
             passed = True
     elif rule_id == "CLOUDFILTER_ABORT_LOOP":
         if _function_has_any_call_fragment(func_data, CLOUD_FILTER_ABORT_APIS) and (
@@ -504,12 +486,9 @@ def _evaluate_function_analysis(
         has_registry_security = _function_has_any_call_fragment(
             func_data, CLOUD_FILTER_REGISTRY_SECURITY_APIS
         )
-        has_registry_write = _function_has_any_call_fragment(
-            func_data, CLOUD_FILTER_REGISTRY_APIS
-        )
+        has_registry_write = _function_has_any_call_fragment(func_data, CLOUD_FILTER_REGISTRY_APIS)
         has_policy_strings = all(
-            marker in assembly
-            for marker in ("cloudfiles", "blockedapps", "volatile environment")
+            marker in assembly for marker in ("cloudfiles", "blockedapps", "volatile environment")
         )
         if (has_registry_link and has_registry_security and has_registry_write) or (
             has_policy_strings and (has_registry_link or has_registry_security)
@@ -524,8 +503,7 @@ def _evaluate_function_analysis(
             {"createprocessasuser", "createprocessasusera", "createprocessasuserw"},
         )
         has_wer_strings = any(
-            marker in assembly
-            for marker in ("queuereporting", "wermgr.exe", "miniplasmawerpipe")
+            marker in assembly for marker in ("queuereporting", "wermgr.exe", "miniplasmawerpipe")
         )
         if has_pipe_session and has_process_launch and has_wer_strings:
             passed = True

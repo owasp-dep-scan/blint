@@ -1,0 +1,22 @@
+{
+  "entries": {
+    "x86_64-unknown-linux-gnu": {
+      "metrics": {
+        "correct": 83,
+        "gold_anchors": 4056,
+        "hidden_with_gold": 2082,
+        "hide_fraction": 0.5,
+        "matcher": {
+          "margin": 1,
+          "max_iterations": 6,
+          "min_votes": 2
+        },
+        "precision": 0.415,
+        "recall": 0.0399,
+        "recovered": 200,
+        "surviving_anchors": 1974
+      }
+    }
+  },
+  "schema_version": 1
+}

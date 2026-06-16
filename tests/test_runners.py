@@ -104,9 +104,7 @@ def test_run_default_mode_renders_mermaid_callgraph(tmp_path, monkeypatch):
         },
     }
 
-    monkeypatch.setattr(
-        "blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)]
-    )
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
     monkeypatch.setattr(
         "blint.lib.runners.run_checks",
@@ -167,9 +165,7 @@ def test_run_default_mode_renders_mermaid_without_findings(tmp_path, monkeypatch
         },
     }
 
-    monkeypatch.setattr(
-        "blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)]
-    )
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
@@ -215,15 +211,11 @@ def test_run_default_mode_exports_graphml_and_gexf_callgraphs(tmp_path, monkeypa
                 },
             ],
             "edges": [{"src": 0, "dst": 1, "count": 2, "kind": "direct"}],
-            "external": [
-                {"src": 1, "target": "ext::api", "count": 1, "reason": "unresolved"}
-            ],
+            "external": [{"src": 1, "target": "ext::api", "count": 1, "reason": "unresolved"}],
         },
     }
 
-    monkeypatch.setattr(
-        "blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)]
-    )
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 

@@ -22,13 +22,9 @@ APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
 if (
     not APKANALYZER_CMD
     and ANDROID_HOME
-    and os.path.exists(
-        os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")
-    )
+    and os.path.exists(os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"))
 ):
-    APKANALYZER_CMD = os.path.join(
-        ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer"
-    )
+    APKANALYZER_CMD = os.path.join(ANDROID_HOME, "cmdline-tools", "latest", "bin", "apkanalyzer")
 elif check_command("apkanalyzer"):
     APKANALYZER_CMD = "apkanalyzer"
 
@@ -150,9 +146,7 @@ def collect_version_files_metadata(app_file, app_temp_dir):
             if version_data.startswith("task"):
                 version_data = "dynamic"
             if name:
-                component = create_version_component(
-                    app_file, group, name, rel_path, version_data
-                )
+                component = create_version_component(app_file, group, name, rel_path, version_data)
                 file_components.append(component)
     return file_components
 
@@ -287,9 +281,7 @@ def parse_so_file(app_file, app_temp_dir, sof):
         properties=[
             Property(name="internal:srcFile", value=rel_path),
             Property(name="internal:appFile", value=app_file),
-            Property(
-                name="internal:functions", value=SYMBOL_DELIMITER.join(set(functions))
-            ),
+            Property(name="internal:functions", value=SYMBOL_DELIMITER.join(set(functions))),
         ],
     )
     component.bom_ref = RefType(purl)
@@ -335,19 +327,11 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
         dex_metadata = parse_dex(adex)
         name = os.path.basename(adex).removesuffix(".dex")
         rel_path = os.path.relpath(adex, app_temp_dir)
-        group = (
-            parent_component.group
-            if parent_component and parent_component.group
-            else ""
-        )
+        group = parent_component.group if parent_component and parent_component.group else ""
         version = (
-            parent_component.version
-            if parent_component and parent_component.version
-            else None
+            parent_component.version if parent_component and parent_component.version else None
         )
-        component = create_dex_component(
-            app_file, dex_metadata, group, name, rel_path, version
-        )
+        component = create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
         file_components.append(component)
     return file_components
 
@@ -393,14 +377,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version)
             Property(
                 name="internal:classes",
                 value=SYMBOL_DELIMITER.join(
-                    set(
-                        sorted(
-                            [
-                                _clean_type(c.fullname)
-                                for c in dex_metadata.get("classes")
-                            ]
-                        )
-                    )
+                    set(sorted([_clean_type(c.fullname) for c in dex_metadata.get("classes")]))
                 ),
             ),
         ],
@@ -433,9 +410,7 @@ def collect_files_metadata(app_file, parent_component, deep_mode):
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     file_components += collect_so_files_metadata(app_file, app_temp_dir)
     if deep_mode:
-        file_components += collect_dex_files_metadata(
-            app_file, parent_component, app_temp_dir
-        )
+        file_components += collect_dex_files_metadata(app_file, parent_component, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)
     return file_components
 
@@ -448,9 +423,7 @@ def parse_apk_summary(data):
         name = parts[0]
         version = parts[-1]
         purl = f"pkg:android/{name}@{version}"
-        component = Component(
-            type=Type.application, name=name, version=version, purl=purl
-        )
+        component = Component(type=Type.application, name=name, version=version, purl=purl)
         component.bom_ref = RefType(purl)
         return component
     return None

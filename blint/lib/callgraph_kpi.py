@@ -38,21 +38,15 @@ def build_edge_indexes(callgraph: dict[str, Any]) -> tuple[set[str], set[str]]:
     external_index: set[str] = set()
 
     for edge in callgraph.get("edges") or []:
-        src = (
-            nodes[edge.get("src", -1)] if 0 <= edge.get("src", -1) < len(nodes) else {}
-        )
-        dst = (
-            nodes[edge.get("dst", -1)] if 0 <= edge.get("dst", -1) < len(nodes) else {}
-        )
+        src = nodes[edge.get("src", -1)] if 0 <= edge.get("src", -1) < len(nodes) else {}
+        dst = nodes[edge.get("dst", -1)] if 0 <= edge.get("dst", -1) < len(nodes) else {}
         src_ref = _edge_key(src.get("name", ""), src.get("address", ""))
         dst_ref = _edge_key(dst.get("name", ""), dst.get("address", ""))
         kind = edge.get("kind") or "direct"
         internal_index.add(f"{src_ref}->{dst_ref}::{kind}")
 
     for edge in callgraph.get("external") or []:
-        src = (
-            nodes[edge.get("src", -1)] if 0 <= edge.get("src", -1) < len(nodes) else {}
-        )
+        src = nodes[edge.get("src", -1)] if 0 <= edge.get("src", -1) < len(nodes) else {}
         src_ref = _edge_key(src.get("name", ""), src.get("address", ""))
         target = _normalize_external_target(edge.get("target") or "")
         reason = edge.get("reason") or ""
@@ -66,12 +60,8 @@ def extract_kpi(metadata: dict[str, Any]) -> dict[str, Any]:
     disassembled = metadata.get("disassembled_functions") or {}
     callgraph = metadata.get("callgraph") or {}
 
-    kinds = Counter(
-        edge.get("kind") or "direct" for edge in callgraph.get("edges") or []
-    )
-    reasons = Counter(
-        edge.get("reason") or "unknown" for edge in callgraph.get("external") or []
-    )
+    kinds = Counter(edge.get("kind") or "direct" for edge in callgraph.get("edges") or [])
+    reasons = Counter(edge.get("reason") or "unknown" for edge in callgraph.get("external") or [])
 
     return {
         "functions_total": len(disassembled),
@@ -122,9 +112,7 @@ def compare_kpi(
             actual = int(actual_group.get(name, 0))
             drop = expected - actual
             max_drop = (
-                int(group_drop.get(name, wildcard))
-                if isinstance(group_drop, dict)
-                else wildcard
+                int(group_drop.get(name, wildcard)) if isinstance(group_drop, dict) else wildcard
             )
             if drop > max_drop:
                 failures.append(
@@ -153,10 +141,7 @@ def evaluate_accuracy(
         expect_present = bool(item.get("expect_present", True))
 
         if label_type == "internal":
-            key = (
-                f"{item.get('src', '')}->{item.get('dst', '')}::"
-                f"{item.get('kind', 'direct')}"
-            )
+            key = f"{item.get('src', '')}->{item.get('dst', '')}::{item.get('kind', 'direct')}"
             present = key in internal_index
         elif label_type == "external":
             target = _normalize_external_target(item.get("target", ""))

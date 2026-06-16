@@ -166,10 +166,7 @@ ARM64_VFP_NEON_REGS = (
     | {f"q{i}" for i in range(32)}
 )
 ARM64_ALL_REGS = (
-    ARM64_GENERAL_REGS_64
-    | ARM64_GENERAL_REGS_32
-    | ARM64_SPECIAL_REGS
-    | ARM64_VFP_NEON_REGS
+    ARM64_GENERAL_REGS_64 | ARM64_GENERAL_REGS_32 | ARM64_SPECIAL_REGS | ARM64_VFP_NEON_REGS
 )
 ARM64_CALL_INST = {"bl", "blr", "blraa", "blrab"}
 ARM64_UNCONDITIONAL_JMP_INST = {"b", "br", "braa", "brab"}
@@ -205,9 +202,7 @@ MIPS_RET_INST = {"jr"}
 MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
 TERMINATING_INST = X86_RET_INST | ARM64_RET_INST | MIPS_RET_INST
 UNCONDITIONAL_JMP_INST_ALL = (
-    X86_UNCONDITIONAL_JMP_INST
-    | ARM64_UNCONDITIONAL_JMP_INST
-    | MIPS_UNCONDITIONAL_JMP_INST
+    X86_UNCONDITIONAL_JMP_INST | ARM64_UNCONDITIONAL_JMP_INST | MIPS_UNCONDITIONAL_JMP_INST
 )
 SORTED_ARM64_ALL_REGS = sorted(ARM64_ALL_REGS, key=len, reverse=True)
 
@@ -378,17 +373,13 @@ ARCH_REG_SET_MIPS = frozenset(SORTED_ALL_REGS_MIPS)
 ARCH_REG_SET_X86 = frozenset(ALL_REGS_X86)
 
 WIN_X64_VOLATILE_REGS = frozenset({"rax", "rcx", "rdx", "r8", "r9", "r10", "r11"})
-SYSV_X64_VOLATILE_REGS = frozenset(
-    {"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"}
-)
+SYSV_X64_VOLATILE_REGS = frozenset({"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"})
 CDECL_X86_VOLATILE_REGS = frozenset({"eax", "ecx", "edx"})
 X64_RETURN_REGS = frozenset({"rax"})
 X86_RETURN_REGS = frozenset({"eax"})
 
 _SREG_TO_CATEGORY_MAP = {
-    sreg.lower(): category
-    for category, sregs in APPLE_PROPRIETARY_SREGS.items()
-    for sreg in sregs
+    sreg.lower(): category for category, sregs in APPLE_PROPRIETARY_SREGS.items() for sreg in sregs
 }
 
 # A universal superset of padding, trap, and disassembler artifact mnemonics
@@ -521,9 +512,7 @@ def _hex_list(candidate_addrs: list[int]) -> list[str]:
 def _lookup_target_name(candidate_addrs: list[int], addr_to_name_map: dict) -> str:
     for candidate_addr in candidate_addrs:
         target_name = (
-            addr_to_name_map.get(candidate_addr)
-            or addr_to_name_map.get(candidate_addr & ~1)
-            or ""
+            addr_to_name_map.get(candidate_addr) or addr_to_name_map.get(candidate_addr & ~1) or ""
         )
         if target_name:
             return target_name
@@ -700,9 +689,7 @@ def _extract_register_usage(
     has_rep_prefix = False
     if mnemonic.startswith(("rep", "repe", "repne")):
         has_rep_prefix = True
-        mnemonic = (
-            mnemonic[4:] if len(mnemonic) > 3 and mnemonic[3] == "e" else mnemonic[3:]
-        )
+        mnemonic = mnemonic[4:] if len(mnemonic) > 3 and mnemonic[3] == "e" else mnemonic[3:]
     if mnemonic in implicit_regs_map:
         regs_read.update(implicit_regs_map[mnemonic].get("read", set()))
         regs_written.update(implicit_regs_map[mnemonic].get("write", set()))
@@ -841,23 +828,13 @@ def _extract_register_usage(
     elif is_mips:
         if mnemonic in MIPS_ARITH_LOGIC_3_OP or mnemonic in MIPS_SHIFT_3_OP:
             if num_operands >= 3:
-                regs_written.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[2], sorted_arch_regs)
-                )
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[2], sorted_arch_regs))
         elif mnemonic in MIPS_ARITH_LOGIC_2_OP_IMM or mnemonic in MIPS_SHIFT_2_OP_IMM:
             if num_operands >= 2:
-                regs_written.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
         elif mnemonic in MIPS_LOAD_STORE:
             if num_operands >= 2:
                 data_reg_op = operands[0]
@@ -872,51 +849,29 @@ def _extract_register_usage(
                     regs_read.update(base_addr_regs)
         elif mnemonic in MIPS_BRANCH_2_OP:
             if num_operands >= 2:
-                regs_read.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
         elif mnemonic in MIPS_MOVE:
             if num_operands >= 2:
-                regs_written.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
         elif mnemonic in ("mfhi", "mflo"):
             if num_operands >= 1:
-                regs_written.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
         elif mnemonic in MIPS_MULT_DIV:
             if num_operands >= 2:
-                regs_read.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
         elif mnemonic == "jr":
             if num_operands >= 1:
-                regs_read.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
         elif mnemonic in ("jalr", "bal"):
             if num_operands >= 1:
                 if num_operands == 2:
-                    regs_written.update(
-                        extract_regs_from_operand(operands[0], sorted_arch_regs)
-                    )
-                    regs_read.update(
-                        extract_regs_from_operand(operands[1], sorted_arch_regs)
-                    )
+                    regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                    regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
                 else:
-                    regs_read.update(
-                        extract_regs_from_operand(operands[0], sorted_arch_regs)
-                    )
+                    regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
     else:
         if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith("cmov"):
             if num_operands >= 2:
@@ -956,12 +911,8 @@ def _extract_register_usage(
                 regs_written.update(op_regs)
         elif mnemonic in ("cmp", "test"):
             if num_operands >= 2:
-                regs_read.update(
-                    extract_regs_from_operand(operands[0], sorted_arch_regs)
-                )
-                regs_read.update(
-                    extract_regs_from_operand(operands[1], sorted_arch_regs)
-                )
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
         elif mnemonic in ("push", "pop"):
             is_64bit = "64" in lower_arch
             stack_reg = "rsp" if is_64bit else "esp"
@@ -1058,13 +1009,9 @@ def _analyze_instructions(
     instr_address_set = set(instr_addresses)
     proprietary_instr_found = set()
     sreg_interactions = set()
-    is_apple_silicon = "aarch64" in lower_arch and isinstance(
-        parsed_obj, lief.MachO.Binary
-    )
+    is_apple_silicon = "aarch64" in lower_arch and isinstance(parsed_obj, lief.MachO.Binary)
     if parsed_instrs is None:
-        parsed_instrs = [
-            _parse_instruction_text(instr.assembly) for instr in instr_list
-        ]
+        parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
     for instr, parsed_instr in zip(instr_list, parsed_instrs):
         instr_assembly = instr.assembly
         if not parsed_instr.mnemonic:
@@ -1264,14 +1211,10 @@ def _resolve_operand_target_addresses(
         else:
             whole_operand_is_immediate = _parse_immediate_token(operand) is not None
             immediate_token = (
-                operand
-                if whole_operand_is_immediate
-                else _find_immediate_token(operand)
+                operand if whole_operand_is_immediate else _find_immediate_token(operand)
             )
             val = _parse_immediate_token(immediate_token)
-            is_hex_token = (
-                immediate_token.lower().lstrip("#").startswith(("0x", "+0x", "-0x"))
-            )
+            is_hex_token = immediate_token.lower().lstrip("#").startswith(("0x", "+0x", "-0x"))
             if val is not None and is_hex_token:
                 _append_unique_target_addr(target_addrs, val)
             elif val is not None:
@@ -1285,31 +1228,20 @@ def _resolve_operand_target_addresses(
                     stripped_token = immediate_token.lstrip("#")
                     if stripped_token.isdigit() and len(stripped_token) >= 5:
                         with contextlib.suppress(ValueError):
-                            _append_unique_target_addr(
-                                target_addrs, int(stripped_token, 16)
-                            )
-                    if whole_operand_is_immediate and immediate_token.startswith(
-                        ("+", "-")
-                    ):
+                            _append_unique_target_addr(target_addrs, int(stripped_token, 16))
+                    if whole_operand_is_immediate and immediate_token.startswith(("+", "-")):
                         _append_unique_target_addr(target_addrs, instr.address + val)
-                        _append_unique_target_addr(
-                            target_addrs, instr.address + 4 + val
-                        )
+                        _append_unique_target_addr(target_addrs, instr.address + 4 + val)
                     elif whole_operand_is_immediate:
                         # Unsigned AArch64 branch immediates are frequently emitted
                         # as PC-relative decimal deltas.
                         _append_unique_target_addr(target_addrs, instr.address + val)
-                        _append_unique_target_addr(
-                            target_addrs, instr.address + 4 + val
-                        )
+                        _append_unique_target_addr(target_addrs, instr.address + 4 + val)
                     _append_unique_target_addr(target_addrs, val)
                 elif (
                     whole_operand_is_immediate
                     and not is_mips
-                    and (
-                        mnemonic.startswith("call")
-                        or (is_windows and mnemonic.startswith("j"))
-                    )
+                    and (mnemonic.startswith("call") or (is_windows and mnemonic.startswith("j")))
                 ):
                     _append_unique_target_addr(
                         target_addrs, instr.address + len(instr.bytes) + val
@@ -1326,9 +1258,7 @@ def _resolve_operand_target_addresses(
 
 
 @lru_cache(maxsize=65536)
-def _extract_symbol_from_operand_cached(
-    operand: str, arch_reg_set: frozenset[str]
-) -> str:
+def _extract_symbol_from_operand_cached(operand: str, arch_reg_set: frozenset[str]) -> str:
     """Symbol extraction fallback for cases where numeric resolution fails."""
     operand = (operand or "").strip()
     if not operand:
@@ -1383,9 +1313,7 @@ def _parse_immediate_token(token: str):
     return None
 
 
-def _parse_x86_memory_operand_base_disp(
-    operand: str, arch_reg_set: set[str]
-) -> tuple[str, int]:
+def _parse_x86_memory_operand_base_disp(operand: str, arch_reg_set: set[str]) -> tuple[str, int]:
     """Parse simple x86 memory operands like [rax + 72] or [r12 + 0x48]."""
     operand = (operand or "").strip().lower()
     inner, _ = _extract_bracket_contents(operand)
@@ -1498,9 +1426,7 @@ def _extract_register_token_cached(operand: str, arch_reg_set: frozenset[str]) -
     return token if token in arch_reg_set else ""
 
 
-def _arm64_memory_operand_uses_index_register(
-    operand: str, arch_reg_set: set[str]
-) -> bool:
+def _arm64_memory_operand_uses_index_register(operand: str, arch_reg_set: set[str]) -> bool:
     """Return True when ARM64 memory operand address depends on an index register."""
     operand = (operand or "").strip().lower()
     inner, end_idx = _extract_bracket_contents(operand)
@@ -1548,8 +1474,8 @@ def _update_register_target(
 
     if is_aarch64 and mnemonic.startswith("ldr") and len(operands) >= 2:
         src = ",".join(part.strip() for part in operands[1:])
-        src_base_reg, src_displacement, has_mem_operand = (
-            _parse_arm64_memory_operand_base_disp(src, arch_reg_set)
+        src_base_reg, src_displacement, has_mem_operand = _parse_arm64_memory_operand_base_disp(
+            src, arch_reg_set
         )
         if has_mem_operand:
             if _arm64_memory_operand_uses_index_register(src, arch_reg_set):
@@ -1577,20 +1503,10 @@ def _update_register_target(
             reg_targets.pop(dst_reg, None)
             return
 
-    if (
-        mnemonic in {"mov", "movq", "movabs", "lea", "adr", "adrp"}
-        and len(operands) >= 2
-    ):
+    if mnemonic in {"mov", "movq", "movabs", "lea", "adr", "adrp"} and len(operands) >= 2:
         src = operands[1]
-        src_base_reg, src_displacement = _parse_x86_memory_operand_base_disp(
-            src, arch_reg_set
-        )
-        if (
-            is_windows
-            and src_base_reg
-            and src_base_reg != "rip"
-            and src_base_reg in reg_targets
-        ):
+        src_base_reg, src_displacement = _parse_x86_memory_operand_base_disp(src, arch_reg_set)
+        if is_windows and src_base_reg and src_base_reg != "rip" and src_base_reg in reg_targets:
             base_target = reg_targets[src_base_reg]
             next_hops = _get_chain_hops(base_target) + 1
             if next_hops > chain_hop_limit:
@@ -1643,8 +1559,7 @@ def _update_register_target(
                     base_candidates.append(int(base["target_address"], 16))
             if base_candidates:
                 adjusted = [
-                    val + imm if mnemonic == "add" else val - imm
-                    for val in base_candidates
+                    val + imm if mnemonic == "add" else val - imm for val in base_candidates
                 ]
                 adjusted = _filter_windows_arm64_indirect_candidates(
                     adjusted, is_windows, is_aarch64
@@ -1662,9 +1577,7 @@ def _update_register_target(
         reg_targets.pop(dst_reg, None)
 
 
-def _resolve_direct_calls(
-    instr_list, addr_to_name_map, arch_target="", parsed_instrs=None
-):
+def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target="", parsed_instrs=None):
     """Identifies direct calls and returns both legacy names and rich call targets."""
     potential_callees = []
     direct_call_targets = []
@@ -1675,9 +1588,7 @@ def _resolve_direct_calls(
     arch_reg_set = get_arch_reg_set(lower_arch)
     reg_targets = {}
     if parsed_instrs is None:
-        parsed_instrs = [
-            _parse_instruction_text(instr.assembly) for instr in instr_list
-        ]
+        parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
 
     for instr, parsed_instr in zip(instr_list, parsed_instrs):
         if not parsed_instr.mnemonic:
@@ -1718,21 +1629,15 @@ def _resolve_direct_calls(
             reg_token = _extract_register_token(operand, arch_reg_set)
             if reg_token and reg_token in reg_targets:
                 reg_target = reg_targets[reg_token]
-                reg_target_candidate_addrs = _extract_reg_target_candidate_addrs(
-                    reg_target
-                )
+                reg_target_candidate_addrs = _extract_reg_target_candidate_addrs(reg_target)
                 target_name = reg_target.get("target_name", "")
                 if not target_name:
                     target_name = _lookup_target_name(
                         reg_target_candidate_addrs,
                         addr_to_name_map,
                     )
-                exposed_target_addrs = list(
-                    reg_target.get("_target_address_candidates_int", [])
-                )
-                exposed_target_addr = (
-                    exposed_target_addrs[0] if exposed_target_addrs else None
-                )
+                exposed_target_addrs = list(reg_target.get("_target_address_candidates_int", []))
+                exposed_target_addr = exposed_target_addrs[0] if exposed_target_addrs else None
                 _append_call_target(
                     direct_call_targets,
                     kind="indirect_hint",
@@ -1747,9 +1652,7 @@ def _resolve_direct_calls(
             # unresolved bucketing without pretending the pointer slot is callee VA.
             if "[" in operand and "]" in operand:
                 target_name = ""
-                base_reg, displacement = _parse_x86_memory_operand_base_disp(
-                    operand, arch_reg_set
-                )
+                base_reg, displacement = _parse_x86_memory_operand_base_disp(operand, arch_reg_set)
                 if base_reg and base_reg in reg_targets:
                     reg_target = reg_targets[base_reg]
                     target_name = _lookup_target_name(
@@ -1825,9 +1728,7 @@ def _resolve_direct_calls(
                     target_addr = target_addrs[0] if target_addrs else None
                     target_name = reg_target.get("target_name", "")
                     if not target_name:
-                        target_name = _lookup_target_name(
-                            target_addrs, addr_to_name_map
-                        )
+                        target_name = _lookup_target_name(target_addrs, addr_to_name_map)
                     raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
                         _append_call_target(
@@ -1850,9 +1751,7 @@ def _resolve_direct_calls(
                     target_addr = target_addrs[0] if target_addrs else None
                     target_name = _lookup_target_name(target_addrs, addr_to_name_map)
                     if not target_name:
-                        target_name = _extract_symbol_from_operand(
-                            operand, arch_reg_set
-                        )
+                        target_name = _extract_symbol_from_operand(operand, arch_reg_set)
                     raw_operand = _raw_operand_text(operand)
                     if target_name or target_addr is not None or raw_operand:
                         _append_call_target(
@@ -1881,9 +1780,7 @@ def _classify_function(
         and all(
             mnem in ("jmp", "push", "sub")
             for mnem in [
-                i.split(None, 1)[0].lower()
-                for i in plain_assembly_text.split("\n")
-                if i.strip()
+                i.split(None, 1)[0].lower() for i in plain_assembly_text.split("\n") if i.strip()
             ]
         )
     ):
@@ -1910,9 +1807,7 @@ def _mem_bytes_len(b):
 def _try_disassemble(instance, byte_list, address, inst_count=0):
     """Helper to safely call Nyxstone and handle immediate failures."""
     try:
-        instructions = instance.disassemble_to_instructions(
-            byte_list, address, inst_count
-        )
+        instructions = instance.disassemble_to_instructions(byte_list, address, inst_count)
         return instructions if instructions else None
     except ValueError:
         return None
@@ -1955,9 +1850,7 @@ def disassemble_functions(
         elif "+pauth" not in features:
             features += ",+pauth"
     try:
-        LOG.debug(
-            f"Attempting to disassemble functions using Nyxstone for target: {arch_target}"
-        )
+        LOG.debug(f"Attempting to disassemble functions using Nyxstone for target: {arch_target}")
         nyxstone_instance = Nyxstone(
             target_triple=arch_target,
             cpu=cpu,
@@ -2009,9 +1902,7 @@ def disassemble_functions(
     if isinstance(parsed_obj, lief.ELF.Binary):
         code_segment = None
         for seg in parsed_obj.segments:
-            if seg.type == lief.ELF.Segment.TYPE.LOAD and seg.has(
-                lief.ELF.Segment.FLAGS.X
-            ):
+            if seg.type == lief.ELF.Segment.TYPE.LOAD and seg.has(lief.ELF.Segment.FLAGS.X):
                 code_segment = seg
                 break
         if code_segment and all_func_addrs_sorted:
@@ -2049,9 +1940,7 @@ def disassemble_functions(
         visited_addrs.add(original_func_addr)
         if not func_name:
             func_name = f"sub_{original_func_addr:x}"
-        if isinstance(parsed_obj, lief.MachO.Binary) and _is_macos_system_symbol_name(
-            func_name
-        ):
+        if isinstance(parsed_obj, lief.MachO.Binary) and _is_macos_system_symbol_name(func_name):
             continue
         func_addr = original_func_addr
         if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
@@ -2060,9 +1949,7 @@ def disassemble_functions(
         has_exact_size = True
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
             current_index = addr_to_index.get(func_addr)
-            if current_index is not None and current_index + 1 < len(
-                all_func_addrs_sorted
-            ):
+            if current_index is not None and current_index + 1 < len(all_func_addrs_sorted):
                 next_func_addr = all_func_addrs_sorted[current_index + 1]
                 size_to_disasm = next_func_addr - func_addr
             else:
@@ -2074,9 +1961,7 @@ def disassemble_functions(
         func_addr_va = func_addr
         if isinstance(parsed_obj, lief.PE.Binary):
             func_addr_va = func_addr + parsed_obj.optional_header.imagebase
-        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(
-            parsed_obj, "imagebase"
-        ):
+        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, "imagebase"):
             func_addr_va = func_addr + parsed_obj.imagebase
         lief_lookup_va = func_addr + base_delta
         func_addr_va_hex = hex(func_addr_va)
@@ -2089,9 +1974,7 @@ def disassemble_functions(
                 if sec_size == 0:
                     sec_size = sec.size
                 if sec_start <= func_addr < (sec_start + sec_size):
-                    if sec.has_characteristic(
-                        lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE
-                    ):
+                    if sec.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE):
                         is_executable = True
                     break
         if not is_executable:
@@ -2101,18 +1984,14 @@ def disassemble_functions(
             continue
         rebased_bytes_mv = None
         try:
-            result = parsed_obj.get_content_from_virtual_address(
-                lief_lookup_va, size_to_disasm
-            )
+            result = parsed_obj.get_content_from_virtual_address(lief_lookup_va, size_to_disasm)
             if not isinstance(result, lief.lief_errors):
                 rebased_bytes_mv = result
         except (SystemError, Exception):
             pass
         original_bytes_mv = None
         try:
-            result = parsed_obj.get_content_from_virtual_address(
-                func_addr_va, size_to_disasm
-            )
+            result = parsed_obj.get_content_from_virtual_address(func_addr_va, size_to_disasm)
             if not isinstance(result, lief.lief_errors):
                 original_bytes_mv = result
         except (SystemError, Exception):
@@ -2122,9 +2001,7 @@ def disassemble_functions(
                 f"Could not get bytes for function '{func_name}' at {func_addr_str} using any method."
             )
             continue
-        rebased_bytes_list = (
-            rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
-        )
+        rebased_bytes_list = rebased_bytes_mv.toreadonly() if rebased_bytes_mv is not None else []
         original_bytes_list = (
             original_bytes_mv.toreadonly() if original_bytes_mv is not None else []
         )
@@ -2136,9 +2013,9 @@ def disassemble_functions(
             if micromips_nyxstone_instance:
                 disassemblers_to_try.append((micromips_nyxstone_instance, "MicroMIPS"))
             for offset in range(4):
-                if offset >= _mem_bytes_len(
-                    original_bytes_list
-                ) and offset >= _mem_bytes_len(rebased_bytes_list):
+                if offset >= _mem_bytes_len(original_bytes_list) and offset >= _mem_bytes_len(
+                    rebased_bytes_list
+                ):
                     break
                 addr_to_try = func_addr_va + offset
                 for instance, mode_name in disassemblers_to_try:
@@ -2150,17 +2027,11 @@ def disassemble_functions(
                         if offset >= _mem_bytes_len(byte_source):
                             continue
                         bytes_to_try = byte_source[offset:]
-                        instr_list = _try_disassemble(
-                            instance, bytes_to_try, addr_to_try
-                        )
+                        instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)
                         if not instr_list:
-                            instr_list = _try_disassemble(
-                                instance, bytes_to_try, addr_to_try, 12
-                            )
+                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 12)
                         if not instr_list:
-                            instr_list = _try_disassemble(
-                                instance, bytes_to_try, addr_to_try, 2
-                            )
+                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 2)
                         if instr_list:
                             LOG.debug(
                                 f"Disassembled '{func_name}' in {mode_name} mode at offset +{offset} using {source_name} bytes."
@@ -2177,22 +2048,17 @@ def disassemble_functions(
                 continue
             plain_assembly_text = "\n".join(i.assembly for i in instr_list)
             end_index = _find_function_end_index(instr_list, has_exact_size)
-            truncated_instr_list = (
-                instr_list[: end_index + 1] if end_index != -1 else instr_list
-            )
+            truncated_instr_list = instr_list[: end_index + 1] if end_index != -1 else instr_list
             if not truncated_instr_list:
                 LOG.debug(
                     f"Instruction list for '{func_name}' became empty after truncation. Skipping."
                 )
                 continue
             lower_assembly = plain_assembly_text.lower()
-            assembly_hash = hashlib.sha256(
-                plain_assembly_text.encode("utf-8")
-            ).hexdigest()
+            assembly_hash = hashlib.sha256(plain_assembly_text.encode("utf-8")).hexdigest()
             instruction_count = len(truncated_instr_list)
             parsed_instrs = [
-                _parse_instruction_text(instr.assembly)
-                for instr in truncated_instr_list
+                _parse_instruction_text(instr.assembly) for instr in truncated_instr_list
             ]
             instr_addresses = [instr.address for instr in truncated_instr_list]
             next_func_boundary = func_addr_va + size_to_disasm
@@ -2221,16 +2087,12 @@ def disassemble_functions(
                 truncated_instr_list, addr_to_name_map, arch_target, parsed_instrs
             )
             joined_mnemonics = "\n".join(instruction_mnemonics)
-            instruction_hash = hashlib.sha256(
-                joined_mnemonics.encode("utf-8")
-            ).hexdigest()
+            instruction_hash = hashlib.sha256(joined_mnemonics.encode("utf-8")).hexdigest()
             has_system_call = any(
-                syscall_pattern in lower_assembly
-                for syscall_pattern in SYSCALL_INDICATORS
+                syscall_pattern in lower_assembly for syscall_pattern in SYSCALL_INDICATORS
             )
             has_security_feature = any(
-                feature_pattern in lower_assembly
-                for feature_pattern in SECURITY_INDICATORS
+                feature_pattern in lower_assembly for feature_pattern in SECURITY_INDICATORS
             )
             has_crypto_call = any(
                 f"{indicator} " in lower_assembly
@@ -2280,9 +2142,7 @@ def disassemble_functions(
             if num_failures < 10 or num_success > 10:
                 inst_count = 0
         except ValueError as e:
-            LOG.debug(
-                f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}"
-            )
+            LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     if not disassembly_results:
         LOG.debug("Disassembly was not successful.")
     return disassembly_results

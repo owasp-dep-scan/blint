@@ -83,9 +83,7 @@ def main() -> int:
     regressions: list[str] = []
     if args.baseline:
         baseline_path = Path(args.baseline)
-        baseline = (
-            _load_json(baseline_path) if baseline_path.exists() else {"entries": {}}
-        )
+        baseline = _load_json(baseline_path) if baseline_path.exists() else {"entries": {}}
         entries = baseline.setdefault("entries", {})
 
         if args.update_baseline:
@@ -121,9 +119,7 @@ def main() -> int:
 
     if args.labels:
         labels_payload = _load_json(Path(args.labels))
-        labels = ((labels_payload.get("entries") or {}).get(platform) or {}).get(
-            "assertions", []
-        )
+        labels = ((labels_payload.get("entries") or {}).get(platform) or {}).get("assertions", [])
         if labels:
             report["accuracy"] = evaluate_accuracy(metadata, labels)
 

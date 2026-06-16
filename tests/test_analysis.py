@@ -152,16 +152,12 @@ def test_pe_rpc_impersonation_reviews_trigger_on_imports_and_privilege_chains():
     assert token_review["evidence"][0]["function"] == "steal_rpc_token"
 
     process_review = next(
-        result
-        for result in results
-        if result["id"] == "RPC_IMPERSONATION_PROCESS_CHAIN"
+        result for result in results if result["id"] == "RPC_IMPERSONATION_PROCESS_CHAIN"
     )
     assert process_review["evidence"][0]["function"] == "launch_with_rpc_token"
 
     asuser_review = next(
-        result
-        for result in results
-        if result["id"] == "RPC_IMPERSONATION_ASUSER_PROCESS_CHAIN"
+        result for result in results if result["id"] == "RPC_IMPERSONATION_ASUSER_PROCESS_CHAIN"
     )
     assert asuser_review["evidence"][0]["function"] == "launch_asuser_from_rpc_token"
 
@@ -253,9 +249,7 @@ def test_miniplasma_cloudfilter_reviews_trigger_on_clustered_indicators():
 
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review(
-        "synthetic-miniplasma.exe", "synthetic-miniplasma.exe"
-    )
+    results = reviewer.process_review("synthetic-miniplasma.exe", "synthetic-miniplasma.exe")
 
     rule_ids = {result["id"] for result in results}
     assert "CLOUDFILTER_ABORT_API" in rule_ids
@@ -301,9 +295,7 @@ def test_miniplasma_reviews_require_clustered_or_behavioral_context():
 
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review(
-        "ordinary-cloudfilter.exe", "ordinary-cloudfilter.exe"
-    )
+    results = reviewer.process_review("ordinary-cloudfilter.exe", "ordinary-cloudfilter.exe")
     rule_ids = {result["id"] for result in results}
 
     assert "CLOUDFILTER_ABORT_API" in rule_ids
@@ -348,9 +340,7 @@ def test_review_runner_emits_loader_symbols_special_case_results_without_other_r
     reviewer.run_review(metadata)
     results = reviewer.process_review("loader.bin", "loader.bin")
 
-    loader_review = next(
-        result for result in results if result["id"] == "LOADER_SYMBOLS"
-    )
+    loader_review = next(result for result in results if result["id"] == "LOADER_SYMBOLS")
     assert loader_review["evidence"] == [
         {"pattern": "download_and_exec", "function": "download_and_exec"},
         {"pattern": "reflective_loader", "function": "reflective_loader"},
@@ -432,25 +422,19 @@ def test_ntqsi_disassembly_reviews_trigger_on_class253_and_buildinfo_patterns():
 
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review(
-        "synthetic-ntqsi-disasm.exe", "synthetic-ntqsi-disasm.exe"
-    )
+    results = reviewer.process_review("synthetic-ntqsi-disasm.exe", "synthetic-ntqsi-disasm.exe")
 
     rule_ids = {result["id"] for result in results}
     assert "NTQSI_CLASS253_ZERO_LENGTH_CALL" in rule_ids
     assert "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY" in rule_ids
 
     class253_review = next(
-        result
-        for result in results
-        if result["id"] == "NTQSI_CLASS253_ZERO_LENGTH_CALL"
+        result for result in results if result["id"] == "NTQSI_CLASS253_ZERO_LENGTH_CALL"
     )
     assert class253_review["evidence"][0]["function"] == "trigger_class253"
 
     buildinfo_review = next(
-        result
-        for result in results
-        if result["id"] == "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY"
+        result for result in results if result["id"] == "NTQSIEX_SYSTEM_BUILD_VERSION_QUERY"
     )
     assert buildinfo_review["evidence"][0]["function"] == "query_build_info"
 
@@ -480,9 +464,7 @@ def test_ntqsi_disassembly_reviews_do_not_fire_on_generic_system_info_calls():
 
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review(
-        "generic-ntqsi-disasm.exe", "generic-ntqsi-disasm.exe"
-    )
+    results = reviewer.process_review("generic-ntqsi-disasm.exe", "generic-ntqsi-disasm.exe")
 
     rule_ids = {result["id"] for result in results}
     assert "NTQSI_CLASS253_ZERO_LENGTH_CALL" not in rule_ids
@@ -603,9 +585,7 @@ def test_apple_mie_zalloc_ro_mut_prepatch_disassembly_review():
     results = reviewer.process_review("kernelcache-macho", "kernelcache-macho")
 
     zalloc_review = next(
-        result
-        for result in results
-        if result["id"] == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS"
+        result for result in results if result["id"] == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS"
     )
     assert zalloc_review["evidence"] == [
         {
@@ -790,9 +770,7 @@ def test_ntqsi_cross_function_resolver_chain_reviews_trigger_on_split_resolution
 
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
-    results = reviewer.process_review(
-        "synthetic-ntqsi-cross.exe", "synthetic-ntqsi-cross.exe"
-    )
+    results = reviewer.process_review("synthetic-ntqsi-cross.exe", "synthetic-ntqsi-cross.exe")
 
     rule_ids = {result["id"] for result in results}
     assert "NTQSI_CLASS253_CROSS_FUNCTION_RESOLVER_CHAIN" in rule_ids
@@ -994,17 +972,13 @@ def test_run_review_methods_symbols_matches_single_backslash_windows_paths():
         [
             {
                 "RULE_WINDOWS_PATH": {
-                    "patterns": [
-                        r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
-                    ],
+                    "patterns": [r"Microsoft\Windows\Windows Error Reporting\QueueReporting"],
                     "include_informative_strings": True,
                 }
             }
         ],
         [],
-        informative_values=[
-            r"Microsoft\Windows\Windows Error Reporting\QueueReporting"
-        ],
+        informative_values=[r"Microsoft\Windows\Windows Error Reporting\QueueReporting"],
     )
 
     assert "RULE_WINDOWS_PATH" in reviewer.results

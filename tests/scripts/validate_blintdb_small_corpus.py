@@ -98,9 +98,7 @@ def load_manifest(manifest_file: str | os.PathLike) -> dict[str, list[dict[str, 
             if not isinstance(entry, dict):
                 raise ValueError(f"Manifest entry for {ecosystem} must be an object")
             if not entry.get("selector"):
-                raise ValueError(
-                    f"Manifest entry for {ecosystem} is missing 'selector'"
-                )
+                raise ValueError(f"Manifest entry for {ecosystem} is missing 'selector'")
     return data
 
 
@@ -153,9 +151,7 @@ def _pythonpath(blint_root: Path, blint_db_root: Path) -> str:
 
 def _import_ecosystem_helpers(blint_root: Path, blint_db_root: Path):
     pythonpath = _pythonpath(blint_root, blint_db_root)
-    sys.path[:0] = [
-        part for part in pythonpath.split(os.pathsep) if part not in sys.path
-    ]
+    sys.path[:0] = [part for part in pythonpath.split(os.pathsep) if part not in sys.path]
     from blint_db.handlers.language_handlers.homebrew_handler import (  # pylint: disable=import-outside-toplevel
         find_homebrew_artifacts,
         homebrew_info,
@@ -308,8 +304,7 @@ def parse_blintdb_evidence(component: dict[str, Any]) -> dict[str, str]:
     return {
         prop["name"]: prop["value"]
         for prop in component.get("properties", [])
-        if isinstance(prop, dict)
-        and prop.get("name", "").startswith("internal:blintdb_")
+        if isinstance(prop, dict) and prop.get("name", "").startswith("internal:blintdb_")
     }
 
 
@@ -358,9 +353,7 @@ def validate_case(
         generic_components = extract_generic_components(sbom)
         generic_purls = [component.get("purl") for component in generic_components]
         exact_match = generic_purls == [expected_purl]
-        evidence = (
-            parse_blintdb_evidence(generic_components[0]) if generic_components else {}
-        )
+        evidence = parse_blintdb_evidence(generic_components[0]) if generic_components else {}
         instruction_hash_count = int(
             evidence.get("internal:blintdb_matched_instruction_hash_count", "0") or "0"
         )
@@ -392,34 +385,22 @@ def summarize_results(
     provenance = provenance or {}
     for ecosystem, ecosystem_results in results.items():
         exact_normal = sum(
-            1
-            for case in ecosystem_results
-            if case.get("normal") and case["normal"]["exact_match"]
+            1 for case in ecosystem_results if case.get("normal") and case["normal"]["exact_match"]
         )
         exact_deep = sum(
-            1
-            for case in ecosystem_results
-            if case.get("deep") and case["deep"]["exact_match"]
+            1 for case in ecosystem_results if case.get("deep") and case["deep"]["exact_match"]
         )
         hash_evidence = sum(
-            1
-            for case in ecosystem_results
-            if case.get("deep") and case["deep"]["hash_evidence"]
+            1 for case in ecosystem_results if case.get("deep") and case["deep"]["hash_evidence"]
         )
         validated_cases = sum(
-            1
-            for case in ecosystem_results
-            if case.get("validation_status") == "validated"
+            1 for case in ecosystem_results if case.get("validation_status") == "validated"
         )
         build_failed_cases = sum(
-            1
-            for case in ecosystem_results
-            if case.get("build_status") == "build_failed"
+            1 for case in ecosystem_results if case.get("build_status") == "build_failed"
         )
         no_artifacts_cases = sum(
-            1
-            for case in ecosystem_results
-            if case.get("build_status") == "no_artifacts"
+            1 for case in ecosystem_results if case.get("build_status") == "no_artifacts"
         )
         validation_errors = sum(
             1 for case in ecosystem_results if case.get("validation_status") == "error"
@@ -482,9 +463,7 @@ def main() -> int:
     elif default_triplet := default_vcpkg_triplet():
         os.environ["BLINT_DB_VCPKG_TRIPLET"] = default_triplet
     summary_file = (
-        Path(args.summary_file).resolve()
-        if args.summary_file
-        else output_dir / "summary.json"
+        Path(args.summary_file).resolve() if args.summary_file else output_dir / "summary.json"
     )
     helpers = _import_ecosystem_helpers(blint_root, blint_db_root)
     results: dict[str, list[dict[str, Any]]] = {}
@@ -505,9 +484,7 @@ def main() -> int:
                 bootstrap_path=bootstrap_path,
             )
         elif not db_file.exists():
-            raise RuntimeError(
-                f"Expected existing database file was not found: {db_file}"
-            )
+            raise RuntimeError(f"Expected existing database file was not found: {db_file}")
         run_metadata = load_run_metadata(metadata_file)
         provenance_by_ecosystem[ecosystem] = run_metadata
         outcomes_by_selector = build_outcomes_by_selector(run_metadata)
@@ -546,8 +523,7 @@ def main() -> int:
                     case_result = {
                         "selector": selector,
                         "project_name": project_name,
-                        "build_status": (build_outcome or {}).get("status")
-                        or "unknown",
+                        "build_status": (build_outcome or {}).get("status") or "unknown",
                         "build_failure": (build_outcome or {}).get("failure"),
                         "validation_status": "error",
                         "validation_error": error_record(exc),
@@ -574,8 +550,7 @@ def main() -> int:
     print(f"Wrote validation summary to {summary_file}")
     if (
         summary["totals"]["validated_case_count"] != summary["totals"]["case_count"]
-        or summary["totals"]["exact_normal"]
-        != summary["totals"]["validated_case_count"]
+        or summary["totals"]["exact_normal"] != summary["totals"]["validated_case_count"]
         or summary["totals"]["exact_deep"] != summary["totals"]["validated_case_count"]
     ):
         print(json.dumps(summary["totals"], indent=2))

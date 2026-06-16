@@ -7,9 +7,7 @@ def _sample_metadata():
             "0x10::alpha": {
                 "name": "alpha",
                 "address": "0x10",
-                "direct_call_targets": [
-                    {"target_name": "beta", "target_address": "0x20"}
-                ],
+                "direct_call_targets": [{"target_name": "beta", "target_address": "0x20"}],
             },
             "0x20::beta": {
                 "name": "beta",
