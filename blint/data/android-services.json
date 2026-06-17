@@ -1,0 +1,1008 @@
+{
+ "version": 3,
+ "description": "Android (java/jimple) service signatures. Network services (cloud, ai-llm, social, messaging, payment, storage, analytics, location, monitoring, http) tag device-data egress; 'methods' lists data-sending calls and 'ingressMethods' lists remote-content-fetch calls (data reaching the device). 'local:true' entries (ai-local) are on-device AI/ML runtimes with no network egress.",
+ "services": [
+  {
+   "name": "Amazon Web Services",
+   "category": "cloud",
+   "namespaces": [
+    "com.amazonaws.",
+    "software.amazon.awssdk."
+   ],
+   "hosts": [
+    "amazonaws.com",
+    "s3.amazonaws.com"
+   ],
+   "ingressMethods": [
+    "getObject",
+    "download",
+    "getObjectContent"
+   ]
+  },
+  {
+   "name": "Google Cloud Platform",
+   "category": "cloud",
+   "namespaces": [
+    "com.google.cloud.",
+    "com.google.api.services."
+   ],
+   "hosts": [
+    "googleapis.com",
+    "cloudfunctions.net",
+    "appspot.com",
+    "run.app"
+   ],
+   "ingressMethods": [
+    "get",
+    "download",
+    "readAllBytes",
+    "reader"
+   ]
+  },
+  {
+   "name": "Firebase",
+   "category": "cloud",
+   "namespaces": [
+    "com.google.firebase."
+   ],
+   "hosts": [
+    "firebaseio.com",
+    "firebasedatabase.app",
+    "firebasestorage.googleapis.com",
+    "firebaseremoteconfig.googleapis.com"
+   ],
+   "ingressMethods": [
+    "getBytes",
+    "getStream",
+    "getFile",
+    "getDownloadUrl"
+   ]
+  },
+  {
+   "name": "Microsoft Azure",
+   "category": "cloud",
+   "namespaces": [
+    "com.microsoft.azure.",
+    "com.azure."
+   ],
+   "hosts": [
+    "azure.com",
+    "azurewebsites.net",
+    "blob.core.windows.net"
+   ],
+   "ingressMethods": [
+    "download",
+    "downloadContent",
+    "openInputStream"
+   ]
+  },
+  {
+   "name": "Cloudinary",
+   "category": "cloud",
+   "namespaces": [
+    "com.cloudinary."
+   ],
+   "hosts": [
+    "cloudinary.com",
+    "api.cloudinary.com"
+   ],
+   "ingressMethods": [
+    "download"
+   ]
+  },
+  {
+   "name": "Dropbox",
+   "category": "cloud",
+   "namespaces": [
+    "com.dropbox.core."
+   ],
+   "hosts": [
+    "dropboxapi.com",
+    "content.dropboxapi.com"
+   ],
+   "ingressMethods": [
+    "download"
+   ]
+  },
+  {
+   "name": "Backblaze B2",
+   "category": "cloud",
+   "namespaces": [],
+   "hosts": [
+    "backblazeb2.com"
+   ]
+  },
+  {
+   "name": "DigitalOcean Spaces",
+   "category": "cloud",
+   "namespaces": [],
+   "hosts": [
+    "digitaloceanspaces.com"
+   ]
+  },
+  {
+   "name": "Alibaba Cloud",
+   "category": "cloud",
+   "namespaces": [
+    "com.alibaba.",
+    "com.aliyun.",
+    "com.taobao."
+   ],
+   "hosts": [
+    "aliyuncs.com",
+    "alipayobjects.com",
+    "alicdn.com"
+   ]
+  },
+  {
+   "name": "Baidu Cloud",
+   "category": "cloud",
+   "namespaces": [
+    "com.baidu.bce."
+   ],
+   "hosts": [
+    "baidubce.com",
+    "bcebos.com"
+   ]
+  },
+  {
+   "name": "Tencent Cloud",
+   "category": "cloud",
+   "namespaces": [
+    "com.tencent.cos.",
+    "com.tencent.qcloud."
+   ],
+   "hosts": [
+    "myqcloud.com",
+    "tencentcs.com"
+   ]
+  },
+  {
+   "name": "OpenAI",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.openai.",
+    "com.theokanning.openai."
+   ],
+   "hosts": [
+    "api.openai.com"
+   ]
+  },
+  {
+   "name": "Anthropic",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.anthropic."
+   ],
+   "hosts": [
+    "api.anthropic.com"
+   ]
+  },
+  {
+   "name": "Google Generative AI",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.google.ai.client.generativeai.",
+    "com.google.cloud.vertexai."
+   ],
+   "hosts": [
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com"
+   ]
+  },
+  {
+   "name": "Hugging Face",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "huggingface.co",
+    "api-inference.huggingface.co"
+   ]
+  },
+  {
+   "name": "Cohere",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "api.cohere.ai",
+    "api.cohere.com"
+   ]
+  },
+  {
+   "name": "Replicate",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "api.replicate.com"
+   ]
+  },
+  {
+   "name": "Mistral AI",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "api.mistral.ai"
+   ]
+  },
+  {
+   "name": "Perplexity",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "api.perplexity.ai"
+   ]
+  },
+  {
+   "name": "Stability AI",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "api.stability.ai"
+   ]
+  },
+  {
+   "name": "OpenRouter",
+   "category": "ai-llm",
+   "namespaces": [],
+   "hosts": [
+    "openrouter.ai"
+   ]
+  },
+  {
+   "name": "Google ML Kit / Cloud ML",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.google.mlkit.",
+    "com.google.android.gms.vision."
+   ],
+   "hosts": [
+    "vision.googleapis.com",
+    "speech.googleapis.com",
+    "translation.googleapis.com",
+    "ml.googleapis.com"
+   ]
+  },
+  {
+   "name": "AWS AI Services",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.amazonaws.services.rekognition.",
+    "com.amazonaws.services.comprehend.",
+    "com.amazonaws.services.polly.",
+    "com.amazonaws.services.transcribe.",
+    "com.amazonaws.services.textract."
+   ],
+   "hosts": [
+    "rekognition",
+    "comprehend"
+   ]
+  },
+  {
+   "name": "Azure Cognitive Services",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.microsoft.cognitiveservices."
+   ],
+   "hosts": [
+    "cognitiveservices.azure.com",
+    "api.cognitive.microsoft.com"
+   ]
+  },
+  {
+   "name": "Baidu AI",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.baidu.aip."
+   ],
+   "hosts": [
+    "aip.baidubce.com"
+   ]
+  },
+  {
+   "name": "iFlytek",
+   "category": "ai-llm",
+   "namespaces": [
+    "com.iflytek."
+   ],
+   "hosts": [
+    "iflytek.com",
+    "xfyun.cn"
+   ]
+  },
+  {
+   "name": "Meta / Facebook",
+   "category": "social",
+   "namespaces": [
+    "com.facebook."
+   ],
+   "hosts": [
+    "graph.facebook.com",
+    "facebook.com"
+   ]
+  },
+  {
+   "name": "Instagram",
+   "category": "social",
+   "namespaces": [],
+   "hosts": [
+    "graph.instagram.com",
+    "api.instagram.com"
+   ]
+  },
+  {
+   "name": "X / Twitter",
+   "category": "social",
+   "namespaces": [
+    "com.twitter."
+   ],
+   "hosts": [
+    "api.twitter.com",
+    "api.x.com"
+   ]
+  },
+  {
+   "name": "LinkedIn",
+   "category": "social",
+   "namespaces": [
+    "com.linkedin."
+   ],
+   "hosts": [
+    "api.linkedin.com"
+   ]
+  },
+  {
+   "name": "TikTok",
+   "category": "social",
+   "namespaces": [
+    "com.tiktok.",
+    "com.bytedance."
+   ],
+   "hosts": [
+    "open.tiktokapis.com",
+    "tiktokv.com"
+   ]
+  },
+  {
+   "name": "Snapchat",
+   "category": "social",
+   "namespaces": [
+    "com.snap.",
+    "com.snapchat."
+   ],
+   "hosts": [
+    "api.snapchat.com",
+    "accounts.snapchat.com"
+   ]
+  },
+  {
+   "name": "Pinterest",
+   "category": "social",
+   "namespaces": [
+    "com.pinterest."
+   ],
+   "hosts": [
+    "api.pinterest.com"
+   ]
+  },
+  {
+   "name": "Reddit",
+   "category": "social",
+   "namespaces": [
+    "com.reddit."
+   ],
+   "hosts": [
+    "oauth.reddit.com",
+    "api.reddit.com"
+   ]
+  },
+  {
+   "name": "VK",
+   "category": "social",
+   "namespaces": [
+    "com.vk."
+   ],
+   "hosts": [
+    "api.vk.com"
+   ]
+  },
+  {
+   "name": "Telegram",
+   "category": "social",
+   "namespaces": [
+    "org.telegram."
+   ],
+   "hosts": [
+    "api.telegram.org"
+   ]
+  },
+  {
+   "name": "Discord",
+   "category": "social",
+   "namespaces": [],
+   "hosts": [
+    "discord.com/api",
+    "discordapp.com/api"
+   ]
+  },
+  {
+   "name": "WeChat",
+   "category": "social",
+   "namespaces": [
+    "com.tencent.mm."
+   ],
+   "hosts": [
+    "api.weixin.qq.com"
+   ]
+  },
+  {
+   "name": "Twilio",
+   "category": "messaging",
+   "namespaces": [
+    "com.twilio."
+   ],
+   "hosts": [
+    "api.twilio.com"
+   ]
+  },
+  {
+   "name": "SendGrid",
+   "category": "messaging",
+   "namespaces": [
+    "com.sendgrid."
+   ],
+   "hosts": [
+    "api.sendgrid.com"
+   ]
+  },
+  {
+   "name": "Mailgun",
+   "category": "messaging",
+   "namespaces": [],
+   "hosts": [
+    "api.mailgun.net"
+   ]
+  },
+  {
+   "name": "Pusher",
+   "category": "messaging",
+   "namespaces": [
+    "com.pusher."
+   ],
+   "hosts": [
+    "pusher.com",
+    "pusherapp.com"
+   ]
+  },
+  {
+   "name": "Amazon SNS/SES",
+   "category": "messaging",
+   "namespaces": [],
+   "hosts": [
+    "sns.amazonaws.com",
+    "email.amazonaws.com"
+   ]
+  },
+  {
+   "name": "JPush / Aurora",
+   "category": "messaging",
+   "namespaces": [
+    "cn.jpush.",
+    "cn.jiguang."
+   ],
+   "hosts": [
+    "jpush.cn",
+    "jiguang.cn"
+   ]
+  },
+  {
+   "name": "Getui",
+   "category": "messaging",
+   "namespaces": [
+    "com.igexin."
+   ],
+   "hosts": [
+    "getui.com"
+   ]
+  },
+  {
+   "name": "Stripe",
+   "category": "payment",
+   "namespaces": [
+    "com.stripe."
+   ],
+   "hosts": [
+    "api.stripe.com"
+   ]
+  },
+  {
+   "name": "PayPal",
+   "category": "payment",
+   "namespaces": [
+    "com.paypal."
+   ],
+   "hosts": [
+    "api.paypal.com",
+    "api-m.paypal.com"
+   ]
+  },
+  {
+   "name": "Braintree",
+   "category": "payment",
+   "namespaces": [
+    "com.braintreepayments."
+   ],
+   "hosts": [
+    "api.braintreegateway.com"
+   ]
+  },
+  {
+   "name": "Razorpay",
+   "category": "payment",
+   "namespaces": [
+    "com.razorpay."
+   ],
+   "hosts": [
+    "api.razorpay.com"
+   ]
+  },
+  {
+   "name": "Adyen",
+   "category": "payment",
+   "namespaces": [
+    "com.adyen."
+   ],
+   "hosts": [
+    "checkout.adyen.com"
+   ]
+  },
+  {
+   "name": "Alipay",
+   "category": "payment",
+   "namespaces": [
+    "com.alipay."
+   ],
+   "hosts": [
+    "openapi.alipay.com",
+    "alipay.com"
+   ]
+  },
+  {
+   "name": "Supabase",
+   "category": "storage",
+   "namespaces": [
+    "io.supabase."
+   ],
+   "hosts": [
+    "supabase.co",
+    "supabase.in"
+   ]
+  },
+  {
+   "name": "MongoDB Atlas/Realm",
+   "category": "storage",
+   "namespaces": [
+    "io.realm.",
+    "com.mongodb."
+   ],
+   "hosts": [
+    "realm.mongodb.com",
+    "mongodb.net"
+   ]
+  },
+  {
+   "name": "Parse",
+   "category": "storage",
+   "namespaces": [
+    "com.parse."
+   ],
+   "hosts": [
+    "parseapi.back4app.com"
+   ]
+  },
+  {
+   "name": "Algolia",
+   "category": "storage",
+   "namespaces": [
+    "com.algolia."
+   ],
+   "hosts": [
+    "algolia.net",
+    "algolianet.com"
+   ]
+  },
+  {
+   "name": "Elasticsearch",
+   "category": "storage",
+   "namespaces": [],
+   "hosts": [
+    "found.io",
+    "es.amazonaws.com"
+   ]
+  },
+  {
+   "name": "UMeng",
+   "category": "analytics",
+   "namespaces": [
+    "com.umeng."
+   ],
+   "hosts": [
+    "umeng.com",
+    "umengcloud.com"
+   ]
+  },
+  {
+   "name": "Amap (Gaode)",
+   "category": "location",
+   "namespaces": [
+    "com.amap.api."
+   ],
+   "hosts": [
+    "amap.com",
+    "gaode.com"
+   ]
+  },
+  {
+   "name": "Baidu Map",
+   "category": "location",
+   "namespaces": [
+    "com.baidu.mapapi.",
+    "com.baidu.location."
+   ],
+   "hosts": [
+    "map.baidu.com"
+   ]
+  },
+  {
+   "name": "Datadog",
+   "category": "monitoring",
+   "namespaces": [
+    "com.datadog."
+   ],
+   "hosts": [
+    "datadoghq.com"
+   ]
+  },
+  {
+   "name": "New Relic",
+   "category": "monitoring",
+   "namespaces": [
+    "com.newrelic."
+   ],
+   "hosts": [
+    "newrelic.com"
+   ]
+  },
+  {
+   "name": "OkHttp",
+   "category": "http",
+   "namespaces": [
+    "okhttp3.",
+    "com.squareup.okhttp."
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "Retrofit",
+   "category": "http",
+   "namespaces": [
+    "retrofit2."
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "Volley",
+   "category": "http",
+   "namespaces": [
+    "com.android.volley."
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "Apache HttpClient",
+   "category": "http",
+   "namespaces": [
+    "org.apache.http.",
+    "org.apache.hc."
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "Ktor Client",
+   "category": "http",
+   "namespaces": [
+    "io.ktor.client."
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "HttpURLConnection",
+   "category": "http",
+   "namespaces": [
+    "java.net.HttpURLConnection",
+    "javax.net.ssl.HttpsURLConnection",
+    "java.net.URL"
+   ],
+   "hosts": [],
+   "methods": [
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "body",
+    "execute",
+    "enqueue",
+    "newCall",
+    "writeTo",
+    "send",
+    "upload",
+    "url",
+    "getOutputStream",
+    "openConnection"
+   ],
+   "ingressMethods": [
+    "get",
+    "getInputStream",
+    "openStream",
+    "body",
+    "string",
+    "bytes",
+    "read",
+    "download",
+    "getContent",
+    "content",
+    "execute",
+    "enqueue",
+    "newCall"
+   ]
+  },
+  {
+   "name": "llama.cpp",
+   "category": "ai-local",
+   "namespaces": [
+    "de.kherud.llama.",
+    "io.github.ggerganov."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "Ollama (local)",
+   "category": "ai-local",
+   "namespaces": [
+    "io.github.ollama4j."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ONNX Runtime",
+   "category": "ai-local",
+   "namespaces": [
+    "ai.onnxruntime.",
+    "com.microsoft.onnxruntime."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "TensorFlow Lite",
+   "category": "ai-local",
+   "namespaces": [
+    "org.tensorflow.lite."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "MediaPipe",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.mediapipe.tasks.genai.",
+    "com.google.mediapipe.tasks.text.",
+    "com.google.mediapipe.tasks.vision."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ExecuTorch",
+   "category": "ai-local",
+   "namespaces": [
+    "org.pytorch.executorch."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "PyTorch Mobile",
+   "category": "ai-local",
+   "namespaces": [
+    "org.pytorch."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "MLC LLM",
+   "category": "ai-local",
+   "namespaces": [
+    "ai.mlc."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "ML Kit GenAI (on-device)",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.mlkit.genai."
+   ],
+   "hosts": [],
+   "local": true
+  },
+  {
+   "name": "Google AI Edge",
+   "category": "ai-local",
+   "namespaces": [
+    "com.google.ai.edge."
+   ],
+   "hosts": [],
+   "local": true
+  }
+ ]
+}

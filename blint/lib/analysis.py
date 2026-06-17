@@ -56,11 +56,15 @@ except ImportError:
 review_files = []
 if HAVE_RESOURCE_READER:
     with contextlib.suppress(NameError, FileNotFoundError):
-        review_files = (
+        # Materialize to a list so it can be iterated more than once.
+        # load_default_rules() runs on every initialize_rules() call, and a
+        # one-shot generator here would be exhausted after the first load,
+        # leaving the review dicts empty on subsequent loads.
+        review_files = [
             resource.name
             for resource in importlib.resources.files("blint.data.annotations").iterdir()
             if resource.is_file() and resource.name.endswith(".yml")
-        )
+        ]
 if not review_files:
     review_methods_dir = Path(__file__).parent / "data" / "annotations"
     review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]

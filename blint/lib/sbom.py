@@ -34,7 +34,8 @@ from blint.db import (
     build_symbol_source_map,
     detect_binaries_utilized,
 )
-from blint.lib.android import collect_app_metadata
+from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
+from blint.lib.android_services import detect_services
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.utils import (
     camel_to_snake,
@@ -176,6 +177,8 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
+            if blint_options.deep_mode and blint_options.disassemble:
+                write_dex_callgraph(f, blint_options.sbom_output)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
@@ -733,7 +736,47 @@ def process_android_file(
         _add_to_parent_component(sbom.metadata.component.components, parent_component)
     if app_components:
         track_dependency(dependencies_dict, parent_component, app_components)
+        # Promote any known service / tracker SDKs bundled in the app into the
+        # CycloneDX services list.
+        services = detect_services(app_components)
+        if services:
+            existing = {s.bom_ref.root for s in (sbom.services or []) if s.bom_ref}
+            sbom.services = (sbom.services or []) + [
+                s for s in services if not s.bom_ref or s.bom_ref.root not in existing
+            ]
     return app_components
+
+
+def write_dex_callgraph(app_file: str, sbom_output: str) -> None:
+    """
+    Write a Dalvik callgraph sidecar next to the BOM.
+
+    Emitted when disassembly is requested (``--disassembly``), matching how
+    native binary callgraphs are produced. The callgraph is written as
+    ``<bom-stem>-<app>.dex-callgraph.json`` in the same JSON shape as blint's
+    native binary callgraph, so it can be loaded by the callgraph tooling and
+    exported to DOT / GraphML.
+    """
+    if not sbom_output:
+        return
+    try:
+        callgraph = build_app_dex_callgraph(app_file)
+    except Exception as e:  # callgraph emission must never fail SBOM generation
+        LOG.debug(f"Unable to build the dex callgraph for {app_file}: {e}")
+        return
+    if not callgraph.get("nodes"):
+        return
+    stem = os.path.splitext(sbom_output)[0]
+    app_name = os.path.basename(app_file)
+    out_file = f"{stem}-{app_name}.dex-callgraph.json"
+    try:
+        file_write(out_file, orjson.dumps(callgraph).decode(), log=LOG)
+        LOG.info(
+            f"Wrote dex callgraph ({len(callgraph['nodes'])} nodes, "
+            f"{len(callgraph['edges'])} edges) to {out_file}"
+        )
+    except OSError as e:
+        LOG.debug(f"Unable to write the dex callgraph to {out_file}: {e}")
 
 
 def process_dotnet_dependencies(

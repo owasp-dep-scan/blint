@@ -16,8 +16,8 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 - PE (Windows executables and DLLs)
 - Mach-O (macOS and iOS, x64 and arm64)
 - WASM (WebAssembly modules)
-- Android (APK, AAB, including DEX files in deep mode)
-- Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips.
+- Android (APK, APKM, AAB, including DEX files in deep mode)
+- Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips (native), and Dalvik (DEX).
 
 ## Key Features & Use Cases
 
@@ -25,8 +25,10 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 - **Software Bill-of-Materials (SBOM) Generation:** Creates CycloneDX SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
 - **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
   - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
+  - For the custom CycloneDX properties blint adds to the BOM, see the [Custom Properties Documentation](./docs/CUSTOM_PROPERTIES.md).
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
+- **Android Deep Analysis:** In deep mode blint parses the dex classes, detects bundled service and tracker SDKs, and runs a Dalvik behavioural review that decodes the bytecode and flags risky behaviours such as dynamic code loading, reflection, native command execution, weak cryptography, and cleartext networking. The findings are attached to the BOM as custom properties. When disassembly is enabled, blint also writes a Dalvik callgraph sidecar next to the BOM.
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
   - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
@@ -81,6 +83,12 @@ blint sbom -i /path/to/app.apk -o sbom.cdx.json
 
 ```shell
 docker run --rm -it -v /path/to:/app -w /app ghcr.io/owasp-dep-scan/blint:latest sbom -i /app/app.apk -o sbom.cdx.json
+```
+
+For Android deep analysis, enable deep mode so the dex classes are parsed. This is what makes service and tracker detection and the Dalvik behavioural review possible. Add `--disassembly` to also write the Dalvik callgraph sidecar next to the BOM. Both `.apk` single files and `.apkm` split bundles are supported.
+
+```shell
+blint sbom -i /path/to/app.apkm -o sbom.cdx.json --deep --disassembly
 ```
 
 ## Understanding the Output

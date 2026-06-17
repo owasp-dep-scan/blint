@@ -1,0 +1,6328 @@
+{
+ "version": 1,
+ "generated_from": "https://reports.exodus-privacy.eu.org/api/trackers + curated",
+ "trackers": [
+  {
+   "name": "AdColony",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "AdColony"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Adjust",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "Adjust",
+    "AdjustSdk"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Adjust",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "react-native-adjust",
+    "@adjustcom/adjust-web-sdk"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Adjust",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "adjust_sdk"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Amplitude",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "AmplitudeSwift",
+    "Amplitude_iOS"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Amplitude",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "@amplitude/analytics-browser",
+    "amplitude-js",
+    "@amplitude/analytics-react-native"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Amplitude",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "amplitude_flutter"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "AppLovin",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "AppLovinSDK"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "AppsFlyer",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "AppsFlyerLib",
+    "AppsFlyerTracker"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "AppsFlyer",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "react-native-appsflyer",
+    "appsflyer-capacitor-plugin"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "AppsFlyer",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "appsflyer_sdk"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Branch",
+   "categories": [
+    "analytics",
+    "identification"
+   ],
+   "namespaces": [
+    "BranchSDK",
+    "Branch"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Branch",
+   "categories": [
+    "analytics",
+    "identification"
+   ],
+   "namespaces": [
+    "react-native-branch",
+    "branch-sdk"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Braze",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "BrazeKit",
+    "Appboy_iOS_SDK"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Bugsnag",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "Bugsnag"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Bugsnag",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "@bugsnag/js",
+    "@bugsnag/react-native"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Chartboost",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "Chartboost"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Crashlytics",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "Crashlytics",
+    "FirebaseCrashlytics"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Facebook SDK",
+   "categories": [
+    "analytics",
+    "advertisement",
+    "profiling"
+   ],
+   "namespaces": [
+    "FBSDKCoreKit",
+    "FBSDKLoginKit",
+    "FBSDKShareKit",
+    "FBAudienceNetwork"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Facebook SDK",
+   "categories": [
+    "analytics",
+    "advertisement",
+    "profiling"
+   ],
+   "namespaces": [
+    "react-native-fbsdk-next",
+    "react-native-fbsdk"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Firebase",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "@react-native-firebase/analytics",
+    "firebase/analytics"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Firebase Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "FirebaseAnalytics",
+    "FIRAnalytics",
+    "Firebase.Analytics"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Firebase Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "firebase_analytics"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Flurry",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "FlurrySDK",
+    "Flurry"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "FullStory",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "@fullstory/browser",
+    "@fullstory/react-native"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Google Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "GoogleAnalytics",
+    "GAI"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Google Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "react-ga",
+    "react-ga4",
+    "react-gtm-module",
+    "gtag"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Google Mobile Ads (AdMob)",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "GoogleMobileAds",
+    "GADMobileAds"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Heap",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "@heap/heap-react-native",
+    "heap-api"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Hotjar",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "@hotjar/browser"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "ironSource",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "IronSource"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Mixpanel",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "Mixpanel"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Mixpanel",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "mixpanel",
+    "mixpanel-browser",
+    "mixpanel-react-native"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Mixpanel",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "mixpanel_flutter"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "OneSignal",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "OneSignal",
+    "OneSignalFramework"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "OneSignal",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "react-onesignal",
+    "onesignal-cordova-plugin",
+    "react-native-onesignal"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "PostHog",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "posthog-js",
+    "posthog-react-native",
+    "posthog-node"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Segment",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "Segment",
+    "Analytics.Analytics"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Segment",
+   "categories": [
+    "analytics",
+    "profiling"
+   ],
+   "namespaces": [
+    "@segment/analytics-next",
+    "@segment/analytics-react-native",
+    "analytics-node"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Sentry",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "Sentry"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Sentry",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "@sentry/browser",
+    "@sentry/react",
+    "@sentry/react-native",
+    "@sentry/node"
+   ],
+   "languages": [
+    "javascript",
+    "typescript"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Sentry",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "sentry_flutter",
+    "sentry"
+   ],
+   "languages": [
+    "dart"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Unity Ads",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "UnityAds"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "Vungle",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "VungleSDK",
+    "VungleAds"
+   ],
+   "languages": [
+    "swift",
+    "objc"
+   ],
+   "source": "curated"
+  },
+  {
+   "name": "360Dialog",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.threesixtydialog.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Aarki",
+   "categories": [
+    "advertisement",
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.aarki"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ABTasty",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.abtasty"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AccountKit",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.facebook.accountkit"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ACRA",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "org.acra.",
+    "ch.acra."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ACRCloud",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.acrcloud"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Actv8me",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification",
+    "profiling"
+   ],
+   "namespaces": [
+    "me.actv8"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Acuant",
+   "categories": [
+    "profiling"
+   ],
+   "namespaces": [
+    "com.acuant.acuantcamera"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ad Generation",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.socdm.d.adgeneration."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AD(X)",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adxcorp.ads",
+    "com.adxcorp.nativead"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ad4Screen",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.ad4screen.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdAdapted",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.adadapted.android.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adbrix",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.igaworks.adbrix"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdBuddiz",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.purplebrain.adbuddiz.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adcash",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adcash.mobileads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adcenix",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adcenix."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdColony",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adcolony.",
+    "com.jirbo.adcolony."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Add Apt Tr",
+   "categories": [],
+   "namespaces": [
+    "com.intentsoftware.addapptr."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdFalcon",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.noqoush.adfalcon.android.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdFit (Daum)",
+   "categories": [],
+   "namespaces": [
+    "com.kakao.adfit."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adform",
+   "categories": [],
+   "namespaces": [
+    "com.adform.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adfurikun",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "jp.tjkapp.adfurikunsdk.",
+    "com.glossomads.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdGateMedia",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adgatemedia."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdGem",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adgem.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adincube",
+   "categories": [],
+   "namespaces": [
+    "com.adincube.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adjoe",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "io.adjoe.sdk.",
+    "io.adjoe.protection."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adjust",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.adjust.sdk.",
+    "com.adjust.android.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adjust Unbotify",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.unbotify.mobile.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ADLIB",
+   "categories": [],
+   "namespaces": [
+    "com.mocoplex.adlib."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdLocus",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification",
+    "profiling"
+   ],
+   "namespaces": [
+    "com.adlocus."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdMarvel",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.admarvel."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Admitad",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "ru.tachos.admitadstatisticsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Admixer",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.admixer",
+    "net.admixer.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Admost",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "admost.sdk.",
+    "admost.adserver."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdMuing",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.admuing.danmaku."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adobe Experience Cloud",
+   "categories": [],
+   "namespaces": [
+    "com.adobe.marketing.mobile"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Adot",
+   "categories": [],
+   "namespaces": [
+    "com.adotmob"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "adPOPcorn",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.igaworks.adpopcorn",
+    "com.igaworks.ssp."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdsWizz",
+   "categories": [],
+   "namespaces": [
+    ".adswizz."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdTiming",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.aiming.mdt.",
+    "com.adtiming."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AdTrial",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adtrial.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AerServ",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.aerserv.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Airpush",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.airpush."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Akamai MAP",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.akamai.android.sdk.AkaMap"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Alimama (formerly AdsMogo)",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.adsmogo.",
+    "com.alimama."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Alohalytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "org.alohalytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Alooma",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.github.aloomaio.androidsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Alphonso",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "tv.alphonso.service"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Altamob",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.altamob.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AltBeacon",
+   "categories": [],
+   "namespaces": [
+    "org.altbeacon.beacon.",
+    "com.altbeacon.beacon.",
+    "org.altbeacon.bluetooth."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amazon Advertisement",
+   "categories": [],
+   "namespaces": [
+    "com.amazon.device.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amazon Analytics (Amazon insights)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.amazon.insights",
+    "com.amazonaws.mobileconnectors.pinpoint.analytics.",
+    "com.amazonaws.mobileconnectors.amazonmobileanalytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amazon Mobile Analytics (Amplify)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.amplifyframework.analytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amazon Mobile Associates",
+   "categories": [],
+   "namespaces": [
+    "com.amazon.device.associates"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AMoAd",
+   "categories": [],
+   "namespaces": [
+    "com.amoad."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amobee",
+   "categories": [],
+   "namespaces": [
+    "com.amobee."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Amplitude",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.amplitude."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Anagog",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.anagog.jedai"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Analytics by NPAW (Youbora Suite)",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.npaw.youbora."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Anvato (A Google Company)",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.anvato.androidsdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AnySDK",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.anysdk.framework.AnalyticsWrapper",
+    "com.anysdk.framework.AdsWrapper"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppAnalytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.appanalytics.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppBrain",
+   "categories": [],
+   "namespaces": [
+    "com.appbrain."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Appcelerator Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.appcelerator.aps.",
+    "org.appcelerator.titanium.analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Appdynamics",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.appdynamics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Applause",
+   "categories": [
+    "analytics",
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.applause.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppLovin (MAX and SparkLabs)",
+   "categories": [
+    "advertisement",
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.applovin"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppMetrica",
+   "categories": [],
+   "namespaces": [
+    "com.yandex.metrica."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppMonet",
+   "categories": [],
+   "namespaces": [
+    "com.monet."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Appnext",
+   "categories": [],
+   "namespaces": [
+    "com.appnext.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppNexus",
+   "categories": [],
+   "namespaces": [
+    "com.appnexus.opensdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Appodeal",
+   "categories": [],
+   "namespaces": [
+    "com.appodeal.ads.",
+    "com.appodealx."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Appodeal Stack",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.explorestack."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppSee",
+   "categories": [
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.appsee."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppsFlyer",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.appsflyer."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppsGeyser",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.appsgeyser.sdk",
+    "com.appsgeyser.multiTabApp.VideoPlayerActivity"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Apptentive",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.apptentive."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Apptimize",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.apptimize."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AppVador",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.appvador.ads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Apsalar",
+   "categories": [
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.apsalar.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Apteligent by VMWare (formerly Crittercism)",
+   "categories": [],
+   "namespaces": [
+    "com.crittercism.app.Crittercism"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Areametrics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.areametrics.areametricssdk",
+    "com.areametrics.nosdkandroid"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ATInternet",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.atinternet."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Audience Studio (Krux)",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.krux.androidsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Auditude",
+   "categories": [],
+   "namespaces": [
+    "com.auditude.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "AutoNavi / Amap",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.amap.api"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Axonix",
+   "categories": [],
+   "namespaces": [
+    "com.axonix.android.sdk",
+    "com.mobclix.android.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Backelite",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.backelite.android.",
+    "com.backelite.bkdroid."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Backtrace",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.github.backtrace-labs.",
+    "backtraceio.library."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu APPX",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.appx"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Location",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.location"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Map",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.mapapi"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Maps",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.BaiduMap"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Mobile Ads",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.mobads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Mobile Stat",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.baidu.mobstat"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Baidu Navigation",
+   "categories": [],
+   "namespaces": [
+    "com.baidu.navi"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Batch",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.batch.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bazaarvoice",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.bazaarvoice.bvandroidsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BeaconsInSpace (Fysical)",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.beaconsinspace.android.beacon.detector."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Beintoo",
+   "categories": [
+    "location",
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.beintoo.nucleon"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BidMachine",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "io.bidmachine."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bitly",
+   "categories": [],
+   "namespaces": [
+    "com.bitly.Bitly"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Blesh",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.blesh.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bluecats",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.bluecats.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BlueConic",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.blueconic"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BlueKai (acquired by Oracle)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.bluekai.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bolts",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.parse.bolts"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Branch",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.branch."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Braze (formerly Appboy)",
+   "categories": [
+    "location",
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.appboy"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Brightcove",
+   "categories": [],
+   "namespaces": [
+    "com.brightcove"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bugfender",
+   "categories": [
+    "analytics",
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.bugfender.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bugly",
+   "categories": [],
+   "namespaces": [
+    "com.tencent.bugly."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bugsee",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.bugsee.library.Bugsee"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BugSense",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.bugsense.trace."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Bugsnag",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.bugsnag."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Button",
+   "categories": [
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.usebutton.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "BuzzAd Benefit",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.buzzvil."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "CallDorado",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.calldorado.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Carnival",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.carnival.sdk",
+    "com.carnivalmobile"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Carto (formerly Nutiteq)",
+   "categories": [
+    "location",
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.nutiteq",
+    "com.carto"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cauly",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.fsn.cauly",
+    "com.trid.tridad",
+    "com.cauly.android.ad."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cedexis Radar",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.cedexis"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Chartbeat",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.chartbeat.androidsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ChartBoost",
+   "categories": [],
+   "namespaces": [
+    "com.chartboost.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cheetah Ads",
+   "categories": [],
+   "namespaces": [
+    "com.cmcm."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cifrasoft",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification"
+   ],
+   "namespaces": [
+    "com.cifrasoft."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "CleverTap",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.clevertap."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cloudmobi",
+   "categories": [],
+   "namespaces": [
+    "com.cloudtech."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Colocator",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "net.crowdconnected.androidcolocator"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ComScore",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.comscore."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Conversant",
+   "categories": [],
+   "namespaces": [
+    "com.conversantmedia",
+    "com.greystripe.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Conviva",
+   "categories": [],
+   "namespaces": [
+    "com.conviva."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "CoolaData",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.cooladata.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Coulus Coelib",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "coelib.c.couluslibrary"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Countly",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "ly.count.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Criteo",
+   "categories": [],
+   "namespaces": [
+    "com.criteo."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Cuebiq",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.cuebiq.cuebiqsdk.model.Collector",
+    "com.cuebiq.cuebiqsdk.receiver.CoverageReceiver"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "deltaDNA",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.deltadna"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Demdex",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.adobe.mobile.Analytics",
+    "com.adobe.mobile.Config."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Didomi",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.didomi.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Display",
+   "categories": [],
+   "namespaces": [
+    "io.display."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "DOV-E",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.dv.DVSDK"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Duapps",
+   "categories": [],
+   "namespaces": [
+    "com.duapps."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Dynamic Yield",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.dynamicyield."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Dynatrace",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.dynatrace.android.app",
+    "com.dynatrace.agent",
+    "com.dynatrace.tools"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Emarsys Predict",
+   "categories": [],
+   "namespaces": [
+    "com.emarsys.predict"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Enhance",
+   "categories": [],
+   "namespaces": [
+    "co.enhance.Enhance"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ensighten",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ensighten."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Esri ArcGIS",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.esri.arcgisruntime."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Estimote",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.estimote."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Eulerian",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.eulerian.android.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ExactTarget",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.exacttarget."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Exponea",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.infinario.android.infinariosdk.",
+    "com.exponea.sdk",
+    "com.sygic.aura."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Ads",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.facebook.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.facebook.appevents",
+    "com.facebook.marketing.",
+    "com.facebook.CampaignTrackingReceiver"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Audience",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.facebook.audiencenetwork"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Flipper",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.facebook.flipper"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Login",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.facebook.login"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Notifications",
+   "categories": [],
+   "namespaces": [
+    "com.facebook.notifications"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Places",
+   "categories": [],
+   "namespaces": [
+    "com.facebook.places"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Facebook Share",
+   "categories": [],
+   "namespaces": [
+    "com.facebook.share"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Factual",
+   "categories": [],
+   "namespaces": [
+    "com.factual.engine",
+    "com.factual.Factual"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "FidZup",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.fidzup."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Fiksu",
+   "categories": [],
+   "namespaces": [
+    "com.fiksu.asotracking"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "fineboost",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.fineboost."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Flowsense",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.flowsense.flowsensesdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Flurry",
+   "categories": [
+    "analytics",
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.flurry."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "FLUZO",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.fluzo.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "flymob",
+   "categories": [],
+   "namespaces": [
+    "com.flymob.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "FollowAnalytics",
+   "categories": [],
+   "namespaces": [
+    "com.followanalytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Footmarks",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.footmarks.footmarkssdkm2"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Foresee",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.foresee.sdk.ForeSee"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "FreeWheel",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "tv.freewheel.ad."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "fullstory",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.fullstory.instrumentation.",
+    "com.fullstory.util.",
+    "com.fullstory.jni.",
+    "com.fullstory.FS",
+    "com.fullstory.rust.",
+    "com.fullstory.FSSessionData"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Fyber",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.fyber."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Fyber SponsorPay",
+   "categories": [],
+   "namespaces": [
+    "com.sponsorpay"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "GameAnalytics",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.gameanalytics.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Gemius HeatMap",
+   "categories": [],
+   "namespaces": [
+    "com.gemius.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Geniee",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "jp.co.geniee.gnadsdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Gimbal",
+   "categories": [],
+   "namespaces": [
+    "com.gimbal.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "GIPHY Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.giphy.sdk.analytics",
+    "com.giphy.sdk.tracking"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Glispa Connect (Formerly Avocarrot)",
+   "categories": [],
+   "namespaces": [
+    "com.avocarrot.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Glympse",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.glympse.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "GOM Factory AdPie",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.gomfactory.adpie."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google AdMob",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.google.ads.",
+    "com.google.android.gms.ads.AdView",
+    "com.google.android.gms.ads.AdActivity",
+    "com.google.android.gms.ads.AdRequest",
+    "com.google.android.gms.ads.mediation",
+    "com.google.android.gms.ads.doubleclick",
+    "com.google.android.ads.",
+    "com.google.unity.ads.",
+    "com.google.android.gms.admob",
+    "com.google.firebase.firebase_ads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.google.android.apps.analytics.",
+    "com.google.android.gms.analytics.",
+    "com.google.analytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google Analytics Plugin (Cordova)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.danielcwilson.plugins.analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google CrashLytics",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "io.fabric.",
+    "com.crashlytics.",
+    "com.google.firebase.crashlytics",
+    "com.google.firebase.crash.",
+    "io.invertase.firebase.crashlytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google Firebase Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.google.firebase.analytics.FirebaseAnalytics",
+    "com.google.android.gms.measurement.",
+    "com.google.firebase.firebase_analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Google Tag Manager",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.google.tagmanager",
+    "com.google.android.gms.tagmanager"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "GPShopper",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.gpshopper"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Heap",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.heapanalytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "HelpShift",
+   "categories": [],
+   "namespaces": [
+    "com.helpshift"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Herow",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.connecthings.herow"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Heyzap (bought by Fyber)",
+   "categories": [],
+   "namespaces": [
+    "com.heyzap.sdk.ads.",
+    "com.heyzap.mediation."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "HockeyApp",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "net.hockeyapp."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Houndify",
+   "categories": [
+    "location",
+    "identification"
+   ],
+   "namespaces": [
+    "com.hound"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Huawei Mobile Services (HMS) Core",
+   "categories": [
+    "location",
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.huawei.hms.analytics",
+    "com.huawei.hms.location",
+    "com.huawei.hms.plugin.analytics",
+    "com.huawei.hms.plugin.ads",
+    "com.huawei.updatesdk.",
+    "com.huawei.agconnect.",
+    "com.huawei.hms.support.api.push.",
+    "com.huawei.hms.flutter.analytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Huq Sourcekit",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "io.huq.sourcekit."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "HyperTrack",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.hypertrack",
+    "com.hypertracklive.",
+    "io.hypertrack"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "HyprMX",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.hyprmx.android.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IAB Open Measurement",
+   "categories": [
+    "advertisement",
+    "identification"
+   ],
+   "namespaces": [
+    "com.iab.omid.library",
+    "com.prime31.util.IabHelperImpl",
+    "com.prime31.IAB."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IBM Digital Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.digitalanalytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IBM Mobile Marketing (Acoustic)",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ibm.mce.sdk.",
+    "co.acoustic.mobile.push.sdk.",
+    "com.xtify.mce.sdk.",
+    "com.xtify.android.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "In Loco",
+   "categories": [],
+   "namespaces": [
+    "com.inlocomedia.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IndoorAtlas",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.indooratlas.android.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "INFOnline",
+   "categories": [],
+   "namespaces": [
+    "de.infonline."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "InMarket",
+   "categories": [],
+   "namespaces": [
+    "com.inmarket"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Inmobi",
+   "categories": [],
+   "namespaces": [
+    "com.inmobi",
+    "in.inmobi."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Inneractive",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.inneractive.api.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Inrix",
+   "categories": [],
+   "namespaces": [
+    "com.inrix.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Insider",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.useinsider.insider"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Instabug",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.instabug."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Instreamatic (Adman)",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.instreamatic"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Integral Ad Science",
+   "categories": [],
+   "namespaces": [
+    "com.integralads.avid.library"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IPQualityScore",
+   "categories": [
+    "location",
+    "profiling"
+   ],
+   "namespaces": [
+    "com.ipqualityscore."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "IQzone",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.iqzone"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ironSource",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ironsource."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Janrain",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.janrain.android",
+    "com.janrain.android.engage",
+    "com.janrain.android.capture"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "JiGuang Aurora Mobile JPush",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "cn.jpush.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Jumio",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.jumio.MobileSDK"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "JumpTap",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.jumptap.adtag."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "JW Player",
+   "categories": [],
+   "namespaces": [
+    "com.longtailvideo.jwplayer."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Keen",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.keen.client."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "KIDOZ",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.kidoz.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Kiip",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "me.kiip.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Kissmetrics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.kissmetrics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Kochava",
+   "categories": [
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.kochava.base.",
+    "com.kochava.android.tracker.",
+    ".kochavaccpa."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Kontakt",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.kontakt.sdk.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "LeanPlum",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.leanplum."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Lenddo",
+   "categories": [
+    "location",
+    "identification",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.lenddo.mobile"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ligatus",
+   "categories": [],
+   "namespaces": [
+    ".LigatusManager",
+    ".LigatusViewClient",
+    "com.ligatus.android.adframework"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Lisnr",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.lisnr."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Localytics",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.localytics.android.",
+    "com.localytics.androidx",
+    "com.localytics.react."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Locuslabs",
+   "categories": [],
+   "namespaces": [
+    "com.locuslabs.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Loggly",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.github.tony19.timber.loggly",
+    "com.github.tony19.loggly",
+    "com.visiware.sync2ad.logger.loggly."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "LoopMe",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.loopme."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "LotaData",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.lotadata.moments."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Lotame",
+   "categories": [],
+   "namespaces": [
+    "com.lotame.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MAdvertise",
+   "categories": [],
+   "namespaces": [
+    "com.mngads.sdk",
+    "com.mngads.views",
+    "com.mngads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mail.ru",
+   "categories": [],
+   "namespaces": [
+    "ru.mail.mrgservice.advertising",
+    "ru.mail.mrgservice.analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "maio by i-mobile",
+   "categories": [],
+   "namespaces": [
+    "jp.maio.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mapbox",
+   "categories": [],
+   "namespaces": [
+    "com.mapbox.mapboxsdk.module.telemetry",
+    "com.mapbox.mapboxsdk.maps.TelemetryDefinition",
+    "com.mapbox.android.telemetry."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Marketo (an Adobe Company)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.marketo."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Matomo (Piwik)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "org.piwik",
+    "org.piwik.mobile",
+    "org.matomo"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MDOTM",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.mdotm.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "mediba",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.mediba.jp",
+    "mediba.ad.sdk.android.openx"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Metaps",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.metaps"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Metrics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.codahale.metrics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Microsoft Visual Studio App Center Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.microsoft.appcenter.analytics",
+    "com.microsoft.azure.mobile.analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Microsoft Visual Studio App Center Crashes",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.microsoft.appcenter.crashes"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Millennial Media",
+   "categories": [],
+   "namespaces": [
+    "com.millennialmedia."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mintegral",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mintegral.",
+    "com.mbridge.msdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MixPanel",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mixpanel."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Moat",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.moat.analytics.mobile."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MobFox",
+   "categories": [
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mobfox.",
+    "com.adsdk.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mobile Engagement",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ubikod.capptain.",
+    "com.microsoft.azure.engagement."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MobPower",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.mobpower."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mobvista",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mobvista."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MOCA",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.innoquant.moca"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "MoEngage",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.moengage."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Moodmedia",
+   "categories": [
+    "location",
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.moodmedia"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mopinion",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mopinion.mopinionsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Mozilla Telemetry",
+   "categories": [],
+   "namespaces": [
+    "org.mozilla.telemetry",
+    "org.mozilla.gecko.telemetry",
+    "mozilla.telemetry.glean.",
+    "org.mozilla.fenix.GleanMetrics",
+    "org.mozilla.fenix.components.metrics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "mParticle",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mparticle"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "myTarget",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.my.target."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "myTracker",
+   "categories": [],
+   "namespaces": [
+    "com.my.tracker."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "NativeX",
+   "categories": [],
+   "namespaces": [
+    "com.nativex"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "nend",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "net.nend.android",
+    "net.nend.unity."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "New Relic",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.newrelic.agent.",
+    "com.newrelic.mobile."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Nexage",
+   "categories": [],
+   "namespaces": [
+    "com.nexage.android.",
+    "org.nexage."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Nielsen",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.nielsen.app"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OfferToro",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.offertoro.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ogury Presage",
+   "categories": [],
+   "namespaces": [
+    "io.presage."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Omniture",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.omniture.",
+    "com.adobe.adms.measurement."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OneAudience",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.oneaudience.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OneSignal",
+   "categories": [],
+   "namespaces": [
+    "com.onesignal."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Ooyala",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.ooyala"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OpenBack",
+   "categories": [],
+   "namespaces": [
+    "com.openback"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OpenLocate",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.safegraph.",
+    "com.openlocate"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Opensignal",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.opensignal.datacollection."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OpenTelemetry (OpenCensus, OpenTracing)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.opencensus",
+    "io.opentelemetry"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OpenX",
+   "categories": [
+    "location",
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.openx.view.plugplay",
+    "com.openx.android_sdk_openx"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Optimizely",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.optimizely."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OtherLevels",
+   "categories": [],
+   "namespaces": [
+    "com.otherlevels."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OutBrain",
+   "categories": [],
+   "namespaces": [
+    "com.outbrain."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "OzTAM",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "au.com.oztam."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pangle",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.bytedance",
+    "com.pgl",
+    "com.pangle.global"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Parse.ly",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.parsely.parselyandroid"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pendo",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "sdk.insert.io.",
+    "sdk.pendo.io."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Persona.ly",
+   "categories": [],
+   "namespaces": [
+    "ly.persona.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pilgrim by Foursquare",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.foursquare.pilgrim",
+    "com.foursquare.pilgrimsdk.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pincrux",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.pincrux."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PingStart",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.pingstart.adsdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Placed",
+   "categories": [],
+   "namespaces": [
+    "com.placed.client"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Placer",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.placer.client.Placer"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PlaytestCloud Event Tracking",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.playtestcloud.Analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Plexure",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "co.vmob.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Point Inside",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.pointinside"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "POKKT",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.pokkt.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pollfish",
+   "categories": [
+    "profiling"
+   ],
+   "namespaces": [
+    "com.pollfish"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Prebid Mobile",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "org.prebid.mobile"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PredicIO",
+   "categories": [
+    "advertisement",
+    "analytics",
+    "location",
+    "identification"
+   ],
+   "namespaces": [
+    "com.telescope.android",
+    "io.predic.tracker"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Proximi.io",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "io.proximi.proximiiolibrary"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PubMatic",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.pubmatic.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PubNative",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "net.pubnative"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pusher",
+   "categories": [],
+   "namespaces": [
+    "com.pusher.client."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "PushSpring",
+   "categories": [],
+   "namespaces": [
+    "com.pushspring.sdk.PushSpring"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pushwoosh",
+   "categories": [],
+   "namespaces": [
+    "com.pushwoosh"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Pyze",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.pyze."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Qualtrics",
+   "categories": [],
+   "namespaces": [
+    "com.qualtrics.digital."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Quantcast",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.quantcast.measurement.service."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Radar",
+   "categories": [],
+   "namespaces": [
+    "io.radar.sdk.Radar"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Radius Networks",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.radiusnetworks"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Raygun",
+   "categories": [
+    "analytics",
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.mindscapehq.android.raygun4android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Receptiv (formerly Mediabrix)",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.mediabrix.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Repro",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.repro.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Retency",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.retency.sdk.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Reveal Mobile",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.stepleaderdigital.reveal"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Revmob",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.revmob.ads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "RjFun",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.rjfun.cordova.ad",
+    "com.rjfun.cordova.admob"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Rollbar",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.rollbar.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Roximity",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.roximity.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Rubicon Project",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.rfm.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "S4M",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.sam4mobile.",
+    ".S4MAnalytic"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Salesforce Marketing Cloud",
+   "categories": [],
+   "namespaces": [
+    "com.salesforce.marketingcloud"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SAP CDC (Gigya)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.gigya."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Scandit",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.scandit."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Schibsted",
+   "categories": [],
+   "namespaces": [
+    ".schibsted."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ScoreLoop",
+   "categories": [],
+   "namespaces": [
+    "com.scoreloop.client.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Segment",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.segment.analytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sense360",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.sense360.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sensoro",
+   "categories": [],
+   "namespaces": [
+    "com.sensoro.beacon.kit.",
+    "com.sensoro.cloud"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sensors Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.sensorsdata.analytics.android.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sentiance",
+   "categories": [],
+   "namespaces": [
+    "com.sentiance.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sentry",
+   "categories": [
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "io.sentry.",
+    "com.joshdholtz.sentry"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ShallWeAD",
+   "categories": [],
+   "namespaces": [
+    "com.jm.co.shallwead.sdk.",
+    "com.co.shallwead.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Shopkick",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.shopkick.sdk.api.",
+    "com.shopkick.fetchers."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Signal360",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.signal360.sdk.core.",
+    "com.sonicnotify.sdk.core.",
+    "com.rnsignal360"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SignalFrame",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.wirelessregistry.observersdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SilverPush",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.silverpush."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Singlespot",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.sptproximitykit."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Singular",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.singular.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sizmek",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    ".sizmek."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SK planet Tad",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.skplanet.tad"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Smaato",
+   "categories": [],
+   "namespaces": [
+    "com.smaato."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Smart",
+   "categories": [],
+   "namespaces": [
+    "com.smartadserver."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SmartLook",
+   "categories": [
+    "location",
+    "profiling"
+   ],
+   "namespaces": [
+    "com.smartlook.sdk.smartlook."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Snap Ad Kit",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.snap.adkit",
+    "com.snap.appadskit"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Snapchat Login Kit",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.snapchat.kit.sdk.SnapLogin"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Snowplow",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.snowplowanalytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Solar2D (Corona)",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ansca.corona"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Soomla",
+   "categories": [],
+   "namespaces": [
+    "com.soomla."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Split",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "io.split.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Splunk MINT",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.splunk.mint"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Square Metrics",
+   "categories": [],
+   "namespaces": [
+    "com.beaconinside.proximitysdk.ProximityService"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Startapp",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.startapp."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "SuperAwesome",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "tv.superawesome.sdk",
+    "tv.superawesome.lib."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Supersonic Ads",
+   "categories": [],
+   "namespaces": [
+    "com.supersonic.adapters.supersonicads",
+    "com.supersonicads.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Swirl",
+   "categories": [],
+   "namespaces": [
+    "com.swirl"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Swrve",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.swrve.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Sync2Ad",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.visiware.sync2ad.dmp."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Synerise",
+   "categories": [
+    "advertisement",
+    "identification",
+    "profiling"
+   ],
+   "namespaces": [
+    "com.synerise.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Taboola",
+   "categories": [],
+   "namespaces": [
+    "com.taboola."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "TagCommander (Commanders Act.)",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tagcommander."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "TalkingData",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.talkingdata.sdk.",
+    "com.tendcloud.tenddata.",
+    "com.talkingdata.appanalytics.",
+    "com.talkingdata.adtracking.",
+    "com.tendcloud.appcpa.",
+    "com.apptalkingdata.push.",
+    "com.gametalkingdata.push."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tamoco",
+   "categories": [
+    "analytics",
+    "location"
+   ],
+   "namespaces": [
+    "com.tamoco.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tapdaq",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.tapdaq.sdk.",
+    "com.tapdaq.adapters."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tapjoy",
+   "categories": [],
+   "namespaces": [
+    "com.tapjoy."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Taplytics",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.taplytics.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tappx",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.tappx.sdk.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "TapResearch",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tapr.sdk.",
+    "com.tapr.internal.",
+    "com.tapr.helpers."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tapstream",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tapstream.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Teads",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "tv.teads.",
+    "teads.tv."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tealeaf",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tl.uic.Tealeaf"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tealium",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    ".tealium."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Teemo",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.databerries.",
+    "com.geolocstation."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "TeleQuid",
+   "categories": [],
+   "namespaces": [
+    "com.telequid."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tencent Map LBS",
+   "categories": [],
+   "namespaces": [
+    "com.tencent.lbs"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tencent MobWin",
+   "categories": [],
+   "namespaces": [
+    "com.tencent.mobwin"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tencent MTA",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tencent.mta"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tencent Stats",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tencent.stat",
+    "com.tencent.wxop.stat"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tencent Weiyun",
+   "categories": [],
+   "namespaces": [
+    "com.tencent.weiyun"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tenjin",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tenjin.android."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "ThinkingData Analytics",
+   "categories": [
+    "identification",
+    "analytics"
+   ],
+   "namespaces": [
+    "cn.thinkingdata."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tinder Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tinder.analytics",
+    "com.tinder.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "TNK Factory",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.tnkfactory.ad"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Treasure Data",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.treasuredata"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tune",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.tune",
+    "com.mobileapptracker"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tutela",
+   "categories": [],
+   "namespaces": [
+    "com.tutelatechnologies.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Tutucloud",
+   "categories": [],
+   "namespaces": [
+    "org.lasque.tusdk.core",
+    "org.lasque.tusdkpulse.core"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Twine Data",
+   "categories": [],
+   "namespaces": [
+    "com.twine.sdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Twitter MoPub",
+   "categories": [
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.mopub."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Uber Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.ubercab.analytics.",
+    "com.ubercab.library.metrics.analytics.",
+    "com.ubercab.client.core.analytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Umeng Analytics",
+   "categories": [],
+   "namespaces": [
+    "com.umeng.analytics"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Umeng Feedback",
+   "categories": [],
+   "namespaces": [
+    "com.umeng.fb"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Unacast Pure",
+   "categories": [
+    "location"
+   ],
+   "namespaces": [
+    "com.pure.internal.",
+    "com.pure.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Unity3d Ads",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.unity3d.services",
+    "com.unity3d.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Upsight",
+   "categories": [
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.upsight.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Urbanairship",
+   "categories": [],
+   "namespaces": [
+    "com.urbanairship"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "UserExperior",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics",
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.userexperior"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "UXCam",
+   "categories": [
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.uxcam."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Vdopia",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.vdopia.client.android.",
+    "com.vdopia.ads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Vectaury",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "io.vectaury."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Veloxity",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "net.veloxity."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Verizon Ads",
+   "categories": [
+    "location",
+    "advertisement",
+    "identification",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.verizon.ads",
+    "com.verizondigitalmedia.mobile.",
+    "com.oath.mobile."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Verve",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.vervewireless.advert."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Virgo Mobile",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.virgo.ads."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "VKontakte SDK",
+   "categories": [
+    "identification"
+   ],
+   "namespaces": [
+    "com.vk.sdk.",
+    "com.vk.api.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Vpon",
+   "categories": [
+    "advertisement",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.vpon.ads",
+    "com.vpadn.analytics",
+    "com.vpadn.ads.",
+    "com.vpadn.widget."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Vungle",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.vungle.publisher.",
+    "com.vungle.warren."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Weborama",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.weborama."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Webtrekk",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.webtrekk.webtrekksdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Webtrends",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.webtrends.mobile.analytics.",
+    "com.webtrends.mobile.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "WeChat Location",
+   "categories": [],
+   "namespaces": [
+    "com.tencent.map.geolocation",
+    "com.tencent.mm.plugin.location.",
+    "com.tencent.mm.plugin.location_soso.",
+    "com.tencent.mm.plugin.location_google"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Widespace",
+   "categories": [],
+   "namespaces": [
+    "com.widespace."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Wootric",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.wootric.androidsdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "X-Mode",
+   "categories": [
+    "location",
+    "analytics"
+   ],
+   "namespaces": [
+    "io.xmode.BcnConfig",
+    "io.xmode.locationsdk",
+    "io.mysdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Yandex Ad",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.yandex.mobile.ads"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Yinzcam Sobek",
+   "categories": [
+    "location",
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.yinzcam.sobek"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Yoadx",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.yoadx.yoadx."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "YOC VIS.X",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.yoc.visx"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "YouAppi",
+   "categories": [],
+   "namespaces": [
+    "com.youappi.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Yueying Crash SDK",
+   "categories": [
+    "analytics",
+    "crash-reporting"
+   ],
+   "namespaces": [
+    "com.uc.crashsdk",
+    "com.uc2.crashsdk"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "YuMe",
+   "categories": [
+    "advertisement"
+   ],
+   "namespaces": [
+    "com.yume.android"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Zapr",
+   "categories": [
+    "location",
+    "advertisement",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.redbricklane.zapr"
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Zendrive",
+   "categories": [
+    "location",
+    "profiling",
+    "analytics"
+   ],
+   "namespaces": [
+    "com.zendrive.sdk."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  },
+  {
+   "name": "Zoho Analytics",
+   "categories": [
+    "analytics"
+   ],
+   "namespaces": [
+    "com.zoho.zanalytics."
+   ],
+   "languages": [
+    "java"
+   ],
+   "source": "exodus-privacy"
+  }
+ ]
+}
