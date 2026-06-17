@@ -1124,13 +1124,9 @@ secrets_regex = {
         re.compile(r'(?:\s|=|:|"|^)AP[\dABCDEF][a-zA-Z0-9]{8,}'),
     ],
     "aws": [
-        re.compile(
-            r"(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"
-        ),
+        re.compile(r"(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}"),
         re.compile(r"""(?i)aws(.{0,20})?['"][0-9a-zA-Z/+]{40}['"]"""),
-        re.compile(
-            r"""amzn.mws.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""
-        ),
+        re.compile(r"""amzn.mws.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""),
         re.compile(r"da2-[a-z0-9]{26}"),
         re.compile(r"s3.amazonaws.com"),
         re.compile(r"ec2-[0-9a-z.-_]+.compute(-1)?.amazonaws.com"),
@@ -1140,9 +1136,7 @@ secrets_regex = {
         re.compile(r"[0-9a-z.-_]+.s3-website[0-9a-z.-_]+.amazonaws.com"),
         re.compile(r"[0-9a-z]+.execute-api.[0-9a-z.\-_]+.amazonaws.com"),
     ],
-    "github": [
-        re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")
-    ],
+    "github": [re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")],
     "slack": [re.compile(r"""xox[baprs]-([0-9a-zA-Z]{10,48})?""")],
     "EC": [re.compile(r"""-----BEGIN EC PRIVATE KEY-----""")],
     "DSA": [re.compile(r"""-----BEGIN DSA PRIVATE KEY-----""")],
@@ -1178,12 +1172,8 @@ secrets_regex = {
     "dynatrace": [re.compile(r"""dt0[a-zA-Z][0-9]{2}\.[A-Z0-9]{24}\.[A-Z0-9]{64}""")],
     "url": [
         re.compile(r"""(http(s)?|s3)://"""),
-        re.compile(
-            r"""[a-zA-Z]{3,10}://[^/\s:@]{3,20}:[^/\s:@]{3,20}@.{1,100}["'\s]"""
-        ),
-        re.compile(
-            r"(ftp|jdbc:mysql)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"
-        ),
+        re.compile(r"""[a-zA-Z]{3,10}://[^/\s:@]{3,20}:[^/\s:@]{3,20}@.{1,100}["'\s]"""),
+        re.compile(r"(ftp|jdbc:mysql)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"),
     ],
     "authorization": [
         re.compile(r"(authorization)\s*:\s*(bearer|token|basic)\s+[0-9a-z.\-_]{6,}"),
@@ -1287,15 +1277,11 @@ class BlintOptions:
             if self.stdout_mode:
                 self.sbom_output = sys.stdout
             elif not self.sbom_output:
-                self.sbom_output = os.path.join(
-                    self.reports_dir, "sbom-binary-postbuild.cdx.json"
-                )
+                self.sbom_output = os.path.join(self.reports_dir, "sbom-binary-postbuild.cdx.json")
                 self.sbom_output_dir = os.path.join(self.reports_dir)
             elif os.path.isdir(self.sbom_output):
                 self.sbom_output_dir = self.sbom_output
-                self.sbom_output = os.path.join(
-                    self.sbom_output, "sbom-binary-postbuild.cdx.json"
-                )
+                self.sbom_output = os.path.join(self.sbom_output, "sbom-binary-postbuild.cdx.json")
             else:
                 self.sbom_output_dir = os.path.dirname(self.sbom_output)
 

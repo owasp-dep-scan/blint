@@ -150,7 +150,7 @@ this filter.
 `--with-fingerprint` turns on the experimental Layer 2 fingerprinting.
 
 `--min-votes` and `--margin` control Layer 1. `--min-votes` is the number of
-agreeing matched neighbors required to accept a match, default two.  `--margin`
+agreeing matched neighbors required to accept a match, default two. `--margin`
 is how far the best candidate must lead the runner up, default one.
 
 `--khop`, `--fp-min-shared`, `--fp-min-score`, and `--fp-margin` control Layer 2.

@@ -396,7 +396,7 @@ def find_android_files(path):
     :param path: Project directory
     :return: List of android files
     """
-    app_extns = [".apk", ".aab"]
+    app_extns = [".apk", ".aab", ".apkm", ".apks", ".xapk"]
     return find_files(path, app_extns)
 
 

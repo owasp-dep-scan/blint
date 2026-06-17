@@ -78,9 +78,7 @@ class BomLinkElementType(RootModel[str]):
 
 
 class BomLink(RootModel[Union[BomLinkDocumentType, BomLinkElementType]]):
-    root: Annotated[
-        Union[BomLinkDocumentType, BomLinkElementType], Field(title="BOM-Link")
-    ]
+    root: Annotated[Union[BomLinkDocumentType, BomLinkElementType], Field(title="BOM-Link")]
 
 
 class Phase(Enum):
@@ -99,9 +97,7 @@ class Lifecycles(BaseModel):
     )
     phase: Annotated[
         Phase,
-        Field(
-            description="A pre-defined phase in the product lifecycle.", title="Phase"
-        ),
+        Field(description="A pre-defined phase in the product lifecycle.", title="Phase"),
     ]
 
 
@@ -109,14 +105,10 @@ class Lifecycles1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        str, Field(description="The name of the lifecycle phase", title="Name")
-    ]
+    name: Annotated[str, Field(description="The name of the lifecycle phase", title="Name")]
     description: Annotated[
         Optional[str],
-        Field(
-            description="The description of the lifecycle phase", title="Description"
-        ),
+        Field(description="The description of the lifecycle phase", title="Description"),
     ] = None
 
 
@@ -134,9 +126,7 @@ class OrganizationalContact(BaseModel):
     ] = None
     name: Annotated[
         Optional[str],
-        Field(
-            description="The name of a contact", examples=["Contact name"], title="Name"
-        ),
+        Field(description="The name of a contact", examples=["Contact name"], title="Name"),
     ] = None
     email: Annotated[
         Optional[EmailStr],
@@ -322,9 +312,7 @@ class Issue(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    type: Annotated[
-        Type2, Field(description="Specifies the type of issue", title="Issue Type")
-    ]
+    type: Annotated[Type2, Field(description="Specifies the type of issue", title="Issue Type")]
     id: Annotated[
         Optional[str],
         Field(
@@ -341,9 +329,7 @@ class Issue(BaseModel):
     ] = None
     source: Annotated[
         Optional[Source],
-        Field(
-            description="The source of the issue where it is documented", title="Source"
-        ),
+        Field(description="The source of the issue where it is documented", title="Source"),
     ] = None
     references: Annotated[
         Optional[List[str]],
@@ -361,9 +347,7 @@ class IdentifiableAction(BaseModel):
     )
     timestamp: Annotated[
         Optional[datetime],
-        Field(
-            description="The timestamp in which the action occurred", title="Timestamp"
-        ),
+        Field(description="The timestamp in which the action occurred", title="Timestamp"),
     ] = None
     name: Annotated[
         Optional[str],
@@ -467,9 +451,7 @@ class Copyright(BaseModel):
     )
     text: Annotated[
         str,
-        Field(
-            description="The textual content of the copyright.", title="Copyright Text"
-        ),
+        Field(description="The textual content of the copyright.", title="Copyright Text"),
     ]
 
 
@@ -565,9 +547,7 @@ class Frame(BaseModel):
     ] = None
     column: Annotated[
         Optional[int],
-        Field(
-            description="The column the code that is called resides.", title="Column"
-        ),
+        Field(description="The column the code that is called resides.", title="Column"),
     ] = None
     fullFilename: Annotated[
         Optional[str],
@@ -890,9 +870,7 @@ class VersionRange(RootModel[str]):
 class Range(RootModel[VersionRange]):
     root: Annotated[
         VersionRange,
-        Field(
-            description="Deprecated definition. use definition `versionRange` instead."
-        ),
+        Field(description="Deprecated definition. use definition `versionRange` instead."),
     ]
 
 
@@ -965,9 +943,7 @@ class Contents1(BaseModel):
     ] = None
     url: Annotated[
         Optional[str],
-        Field(
-            description="The URL to where the data can be retrieved.", title="Data URL"
-        ),
+        Field(description="The URL to where the data can be retrieved.", title="Data URL"),
     ] = None
     properties: Annotated[
         Optional[List[Property]],
@@ -982,9 +958,9 @@ class Graphic(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        Optional[str], Field(description="The name of the graphic.", title="Name")
-    ] = None
+    name: Annotated[Optional[str], Field(description="The name of the graphic.", title="Name")] = (
+        None
+    )
     image: Annotated[
         Optional[Attachment],
         Field(
@@ -1046,9 +1022,7 @@ class Risk(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        Optional[str], Field(description="The name of the risk.", title="Name")
-    ] = None
+    name: Annotated[Optional[str], Field(description="The name of the risk.", title="Name")] = None
     mitigationStrategy: Annotated[
         Optional[str],
         Field(
@@ -1071,9 +1045,7 @@ class FairnessAssessment(BaseModel):
     ] = None
     benefits: Annotated[
         Optional[str],
-        Field(
-            description="Expected benefits to the identified groups.", title="Benefits"
-        ),
+        Field(description="Expected benefits to the identified groups.", title="Benefits"),
     ] = None
     harms: Annotated[
         Optional[str],
@@ -1130,12 +1102,8 @@ class Co2Measure(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    value: Annotated[
-        float, Field(description="Quantity of carbon dioxide (CO2).", title="Value")
-    ]
-    unit: Annotated[
-        Unit1, Field(description="Unit of carbon dioxide (CO2).", title="Unit")
-    ]
+    value: Annotated[float, Field(description="Quantity of carbon dioxide (CO2).", title="Value")]
+    unit: Annotated[Unit1, Field(description="Unit of carbon dioxide (CO2).", title="Unit")]
 
 
 class EnergySource(Enum):
@@ -1925,9 +1893,7 @@ class Conformance(BaseModel):
     ] = None
     rationale: Annotated[
         Optional[str],
-        Field(
-            description="The rationale for the conformance score.", title="Rationale"
-        ),
+        Field(description="The rationale for the conformance score.", title="Rationale"),
     ] = None
     mitigationStrategies: Annotated[
         Optional[List[RefLinkType]],
@@ -1992,9 +1958,7 @@ class Contents(BaseModel):
     ] = None
     url: Annotated[
         Optional[str],
-        Field(
-            description="The URL to where the data can be retrieved.", title="Data URL"
-        ),
+        Field(description="The URL to where the data can be retrieved.", title="Data URL"),
     ] = None
 
 
@@ -2055,9 +2019,7 @@ class Swid(BaseModel):
     ]
     version: Annotated[
         Optional[str],
-        Field(
-            description="Maps to the version of a SoftwareIdentity.", title="Version"
-        ),
+        Field(description="Maps to the version of a SoftwareIdentity.", title="Version"),
     ] = "0.0"
     tagVersion: Annotated[
         Optional[int],
@@ -2077,9 +2039,9 @@ class Swid(BaseModel):
             title="Attachment text",
         ),
     ] = None
-    url: Annotated[
-        Optional[str], Field(description="The URL to the SWID file.", title="URL")
-    ] = None
+    url: Annotated[Optional[str], Field(description="The URL to the SWID file.", title="URL")] = (
+        None
+    )
 
 
 class Hash(BaseModel):
@@ -2645,9 +2607,7 @@ class Patch(BaseModel):
     ] = None
     resolves: Annotated[
         Optional[List[Issue]],
-        Field(
-            description="A collection of issues the patch resolves", title="Resolves"
-        ),
+        Field(description="A collection of issues the patch resolves", title="Resolves"),
     ] = None
 
 
@@ -2850,9 +2810,7 @@ class Versions(BaseModel):
     )
     version: Annotated[
         Version,
-        Field(
-            description="A single version of a component or service.", title="Version"
-        ),
+        Field(description="A single version of a component or service.", title="Version"),
     ]
     range: Annotated[
         Optional[VersionRange],
@@ -2876,9 +2834,7 @@ class Versions1(BaseModel):
     )
     version: Annotated[
         Optional[Version],
-        Field(
-            description="A single version of a component or service.", title="Version"
-        ),
+        Field(description="A single version of a component or service.", title="Version"),
     ] = None
     range: Annotated[
         VersionRange,
@@ -2997,9 +2953,7 @@ class EnergyProvider(BaseModel):
     ] = None
     organization: Annotated[
         OrganizationalEntity,
-        Field(
-            description="The organization that provides energy.", title="Organization"
-        ),
+        Field(description="The organization that provides energy.", title="Organization"),
     ]
     energySource: Annotated[
         EnergySource,
@@ -3028,9 +2982,7 @@ class Step(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        Optional[str], Field(description="A name for the step.", title="Name")
-    ] = None
+    name: Annotated[Optional[str], Field(description="A name for the step.", title="Name")] = None
     description: Annotated[
         Optional[str],
         Field(description="A description of the step.", title="Description"),
@@ -3271,9 +3223,7 @@ class RelatedCryptoMaterialProperties(BaseModel):
     ] = None
     size: Annotated[
         Optional[int],
-        Field(
-            description="The size of the cryptographic asset (in bits).", title="Size"
-        ),
+        Field(description="The size of the cryptographic asset (in bits).", title="Size"),
     ] = None
     format: Annotated[
         Optional[str],
@@ -3602,9 +3552,7 @@ class Workspace(BaseModel):
     ] = None
     description: Annotated[
         Optional[str],
-        Field(
-            description="A description of the resource instance.", title="Description"
-        ),
+        Field(description="A description of the resource instance.", title="Description"),
     ] = None
     resourceReferences: Annotated[
         Optional[List[ResourceReferenceChoice]],
@@ -3647,9 +3595,7 @@ class Workspace(BaseModel):
         Optional[Volume],
         Field(
             description="Information about the actual volume instance allocated to the workspace.",
-            examples=[
-                "see https://kubernetes.io/docs/concepts/storage/persistent-volumes/"
-            ],
+            examples=["see https://kubernetes.io/docs/concepts/storage/persistent-volumes/"],
             title="Volume",
         ),
     ] = None
@@ -3972,9 +3918,7 @@ class OutputType1(BaseModel):
         Optional[ResourceReferenceChoice],
         Field(
             description="Component or service that received the output from the task (e.g., reference to an artifactory service with data flow value of `outbound`)",
-            examples=[
-                "a log file described as an `externalReference` within its target domain."
-            ],
+            examples=["a log file described as an `externalReference` within its target domain."],
             title="Target",
         ),
     ] = None
@@ -4025,9 +3969,7 @@ class OutputType2(BaseModel):
         Optional[ResourceReferenceChoice],
         Field(
             description="Component or service that received the output from the task (e.g., reference to an artifactory service with data flow value of `outbound`)",
-            examples=[
-                "a log file described as an `externalReference` within its target domain."
-            ],
+            examples=["a log file described as an `externalReference` within its target domain."],
             title="Target",
         ),
     ] = None
@@ -4078,9 +4020,7 @@ class OutputType3(BaseModel):
         Optional[ResourceReferenceChoice],
         Field(
             description="Component or service that received the output from the task (e.g., reference to an artifactory service with data flow value of `outbound`)",
-            examples=[
-                "a log file described as an `externalReference` within its target domain."
-            ],
+            examples=["a log file described as an `externalReference` within its target domain."],
             title="Target",
         ),
     ] = None
@@ -4168,9 +4108,7 @@ class Datum(BaseModel):
             title="Sensitive Data",
         ),
     ] = None
-    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = (
-        None
-    )
+    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = None
 
 
 class ServiceData(BaseModel):
@@ -4203,9 +4141,7 @@ class ServiceData(BaseModel):
             title="Description",
         ),
     ] = None
-    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = (
-        None
-    )
+    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = None
     source: Annotated[
         Optional[List[Union[str, BomLinkElementType]]],
         Field(
@@ -4268,9 +4204,7 @@ class ComponentData(BaseModel):
             title="Dataset Description",
         ),
     ] = None
-    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = (
-        None
-    )
+    governance: Annotated[Optional[DataGovernance], Field(title="Data Governance")] = None
 
 
 class EnvironmentalConsiderations(BaseModel):
@@ -4318,9 +4252,7 @@ class Trigger(BaseModel):
     ] = None
     description: Annotated[
         Optional[str],
-        Field(
-            description="A description of the resource instance.", title="Description"
-        ),
+        Field(description="A description of the resource instance.", title="Description"),
     ] = None
     resourceReferences: Annotated[
         Optional[List[ResourceReferenceChoice]],
@@ -4553,9 +4485,7 @@ class Signatories(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        Optional[str], Field(description="The signatory's name.", title="Name")
-    ] = None
+    name: Annotated[Optional[str], Field(description="The signatory's name.", title="Name")] = None
     role: Annotated[
         Optional[str],
         Field(description="The signatory's role within an organization.", title="Role"),
@@ -4584,9 +4514,7 @@ class Signatories1(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    name: Annotated[
-        Optional[str], Field(description="The signatory's name.", title="Name")
-    ] = None
+    name: Annotated[Optional[str], Field(description="The signatory's name.", title="Name")] = None
     role: Annotated[
         Optional[str],
         Field(description="The signatory's role within an organization.", title="Role"),
@@ -4619,9 +4547,7 @@ class Affirmation(BaseModel):
         Optional[str],
         Field(
             description="The brief statement affirmed by an individual regarding all declarations.\n*- Notes This could be an affirmation of acceptance by a third-party auditor or receiving individual of a file.",
-            examples=[
-                "I certify, to the best of my knowledge, that all information is correct."
-            ],
+            examples=["I certify, to the best of my knowledge, that all information is correct."],
             title="Statement",
         ),
     ] = None
@@ -4655,9 +4581,7 @@ class Service(BaseModel):
     ] = None
     provider: Annotated[
         Optional[OrganizationalEntity],
-        Field(
-            description="The organization that provides the service.", title="Provider"
-        ),
+        Field(description="The organization that provides the service.", title="Provider"),
     ] = None
     group: Annotated[
         Optional[str],
@@ -4723,9 +4647,7 @@ class Service(BaseModel):
             title="Data",
         ),
     ] = None
-    licenses: Annotated[Optional[LicenseChoice], Field(title="Service License(s)")] = (
-        None
-    )
+    licenses: Annotated[Optional[LicenseChoice], Field(title="Service License(s)")] = None
     externalReferences: Annotated[
         Optional[List[ExternalReference]],
         Field(
@@ -4978,9 +4900,7 @@ class Task(BaseModel):
     ] = None
     description: Annotated[
         Optional[str],
-        Field(
-            description="A description of the resource instance.", title="Description"
-        ),
+        Field(description="A description of the resource instance.", title="Description"),
     ] = None
     resourceReferences: Annotated[
         Optional[List[ResourceReferenceChoice]],
@@ -5161,9 +5081,7 @@ class Workflow(BaseModel):
     ] = None
     description: Annotated[
         Optional[str],
-        Field(
-            description="A description of the resource instance.", title="Description"
-        ),
+        Field(description="A description of the resource instance.", title="Description"),
     ] = None
     resourceReferences: Annotated[
         Optional[List[ResourceReferenceChoice]],
@@ -5708,9 +5626,7 @@ class Component(BaseModel):
         Optional[List[Hash]],
         Field(description="The hashes of the component.", title="Component Hashes"),
     ] = None
-    licenses: Annotated[
-        Optional[LicenseChoice], Field(title="Component License(s)")
-    ] = None
+    licenses: Annotated[Optional[LicenseChoice], Field(title="Component License(s)")] = None
     copyright: Annotated[
         Optional[str],
         Field(
@@ -6061,9 +5977,7 @@ class Annotator3(BaseModel):
         Optional[Component],
         Field(description="The tool or component that created the annotation"),
     ] = None
-    service: Annotated[
-        Service, Field(description="The service that created the annotation")
-    ]
+    service: Annotated[Service, Field(description="The service that created the annotation")]
 
 
 class Annotations(BaseModel):
@@ -6099,9 +6013,7 @@ class Annotations(BaseModel):
             title="Timestamp",
         ),
     ]
-    text: Annotated[
-        str, Field(description="The textual content of the annotation.", title="Text")
-    ]
+    text: Annotated[str, Field(description="The textual content of the annotation.", title="Text")]
     signature: Annotated[
         Optional[Signature],
         Field(
