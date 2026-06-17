@@ -1,0 +1,249 @@
+---
+text: Behavioural review for Android Dalvik (dex) bytecode
+group: METHOD_REVIEWS
+exe_type: dexbinary
+rules:
+  - id: ANDROID_DYNAMIC_CODE_LOADING
+    title: Loads code dynamically at runtime
+    severity: high
+    summary: Loads additional dex code at runtime
+    description: |
+      The application loads code dynamically through a dex class loader, which
+      is a common dropper and packer technique.
+    patterns:
+      - "Ldalvik/system/DexClassLoader;"
+      - "Ldalvik/system/PathClassLoader;"
+      - "Ldalvik/system/InMemoryDexClassLoader;"
+      - "Ldalvik/system/BaseDexClassLoader;"
+  - id: ANDROID_REFLECTION
+    title: Uses Java reflection to resolve classes or methods
+    severity: medium
+    summary: Resolves classes or methods through reflection
+    description: |
+      The application uses Java reflection, which is frequently used to hide
+      sensitive API usage from static analysis.
+    patterns:
+      - "Ljava/lang/Class;->forName"
+      - "Ljava/lang/Class;->getDeclaredMethod"
+      - "Ljava/lang/Class;->getMethod"
+      - "Ljava/lang/reflect/Method;->invoke"
+      - "Ljava/lang/reflect/Field;->set"
+  - id: ANDROID_NATIVE_EXEC
+    title: Executes native commands or loads native libraries
+    severity: high
+    summary: Executes native commands or loads native libraries
+    description: |
+      The application executes native commands or loads native libraries, which
+      can be used to run code outside the managed runtime.
+    patterns:
+      - "Ljava/lang/Runtime;->exec"
+      - "Ljava/lang/ProcessBuilder;->start"
+      - "Ljava/lang/System;->load"
+      - "Ljava/lang/System;->loadLibrary"
+      - "Ljava/lang/Runtime;->load"
+  - id: ANDROID_WEAK_CRYPTO
+    title: Uses weak or broken cryptographic primitives
+    severity: high
+    summary: References weak or broken cryptographic primitives
+    description: |
+      The application references weak algorithms or the insecure ECB cipher
+      mode. Weak primitives such as DES, RC4, MD5, and SHA-1 should be avoided.
+    include_informative_strings: true
+    patterns:
+      - "AES/ECB"
+      - "DES/ECB"
+      - "DES/"
+      - "DESede"
+      - "RC4"
+      - "RC2"
+      - "MD5"
+      - "SHA-1"
+  - id: ANDROID_CLEARTEXT_TRAFFIC
+    title: References cleartext (http://) endpoints
+    severity: medium
+    summary: References cleartext http endpoints
+    description: |
+      The application references cleartext http endpoints, which expose traffic
+      to interception.
+    include_informative_strings: true
+    patterns:
+      - "http://"
+  - id: ANDROID_WEBVIEW_UNSAFE
+    title: Configures a WebView with unsafe settings
+    severity: medium
+    summary: Configures a WebView with unsafe settings
+    description: |
+      The application enables JavaScript, a JavaScript bridge, or file access on
+      a WebView, which broadens the WebView attack surface.
+    patterns:
+      - "Landroid/webkit/WebSettings;->setJavaScriptEnabled"
+      - "Landroid/webkit/WebView;->addJavascriptInterface"
+      - "Landroid/webkit/WebSettings;->setAllowFileAccess"
+      - "Landroid/webkit/WebSettings;->setAllowUniversalAccessFromFileURLs"
+  - id: ANDROID_RAW_SQL
+    title: Executes raw SQL that may be injectable
+    severity: low
+    summary: Executes raw SQL queries
+    description: |
+      The application executes raw SQL, which can be injectable when built from
+      untrusted input.
+    patterns:
+      - "Landroid/database/sqlite/SQLiteDatabase;->rawQuery"
+      - "Landroid/database/sqlite/SQLiteDatabase;->execSQL"
+  - id: ANDROID_DEVICE_IDENTIFIERS
+    title: Reads persistent device identifiers
+    severity: medium
+    summary: Reads persistent device identifiers
+    description: |
+      The application reads persistent identifiers such as IMEI or subscriber
+      id, which can be used for tracking.
+    patterns:
+      - "Landroid/telephony/TelephonyManager;->getDeviceId"
+      - "Landroid/telephony/TelephonyManager;->getImei"
+      - "Landroid/telephony/TelephonyManager;->getSubscriberId"
+      - "Landroid/telephony/TelephonyManager;->getSimSerialNumber"
+      - "Landroid/telephony/TelephonyManager;->getLine1Number"
+  - id: ANDROID_SMS_ACCESS
+    title: Sends or reads SMS messages
+    severity: high
+    summary: Sends SMS messages
+    description: |
+      The application sends SMS messages, which can incur cost or be abused by
+      premium SMS fraud.
+    patterns:
+      - "Landroid/telephony/SmsManager;->sendTextMessage"
+      - "Landroid/telephony/SmsManager;->sendMultipartTextMessage"
+  - id: ANDROID_INSTALLED_APPS_ENUM
+    title: Enumerates other installed applications
+    severity: low
+    summary: Enumerates installed applications
+    description: |
+      The application enumerates other installed applications, which is a
+      fingerprinting and profiling signal.
+    patterns:
+      - "Landroid/content/pm/PackageManager;->getInstalledPackages"
+      - "Landroid/content/pm/PackageManager;->getInstalledApplications"
+  - id: ANDROID_ROOT_DETECTION
+    title: Probes for root or superuser binaries
+    severity: info
+    summary: Probes for root or superuser binaries
+    description: |
+      The application looks for su binaries or superuser packages, which is
+      common in both protection logic and evasive malware.
+    include_informative_strings: true
+    patterns:
+      - "/system/bin/su"
+      - "/system/xbin/su"
+      - "Superuser.apk"
+      - "/sbin/su"
+  - id: ANDROID_REMOTE_AI_SERVICE
+    title: Calls a remote AI or LLM inference service
+    severity: medium
+    summary: Sends data to a remote AI or LLM service
+    description: |
+      The application references a remote large language model or AI inference
+      SDK or endpoint. Prompts and context sent to these services leave the
+      device, so review what data is included.
+    include_informative_strings: true
+    patterns:
+      - "Lcom/openai/"
+      - "Lcom/aallam/openai/"
+      - "Lcom/anthropic/"
+      - "Lcom/google/ai/client/generativeai/"
+      - "Lcom/google/firebase/vertexai/"
+      - "Lcom/google/cloud/vertexai/"
+      - "Lcom/cohere/"
+      - "Lcom/mistralai/"
+      - "api.openai.com"
+      - "api.anthropic.com"
+      - "generativelanguage.googleapis.com"
+      - "api.cohere.ai"
+      - "api.mistral.ai"
+      - "api.groq.com"
+      - "api.x.ai"
+      - "openrouter.ai"
+      - "api.perplexity.ai"
+      - "api.together.xyz"
+      - "api.replicate.com"
+      - "api-inference.huggingface.co"
+      - "bedrock-runtime."
+      - ".openai.azure.com"
+  - id: ANDROID_ON_DEVICE_AI
+    title: Runs on-device AI or ML inference
+    severity: info
+    summary: Runs on-device AI or ML inference
+    description: |
+      The application bundles an on-device inference framework or model. This
+      keeps inference local, which is relevant to privacy and to model supply
+      chain review.
+    include_informative_strings: true
+    patterns:
+      - "Lorg/tensorflow/lite/"
+      - "Lcom/google/mlkit/"
+      - "Lcom/google/android/gms/vision/"
+      - "Lai/onnxruntime/"
+      - "Lorg/pytorch/"
+      - "Lcom/google/mediapipe/"
+      - "Lcom/google/android/gms/tflite/"
+      - "Lcom/meta/executorch/"
+      - ".tflite"
+      - ".onnx"
+      - ".gguf"
+      - ".ggml"
+      - "libtensorflowlite"
+      - "libonnxruntime"
+      - "libllama"
+  - id: ANDROID_TRACKER_SDK
+    title: Embeds an analytics or attribution tracker SDK
+    severity: low
+    summary: Embeds an analytics or attribution tracker
+    description: |
+      The application bundles an analytics, crash reporting, or attribution SDK
+      that reports usage and device data to a third party.
+    include_informative_strings: true
+    patterns:
+      - "Lcom/google/firebase/analytics/"
+      - "Lcom/google/android/gms/analytics/"
+      - "Lcom/google/firebase/crashlytics/"
+      - "Lcom/facebook/appevents/"
+      - "Lcom/appsflyer/"
+      - "Lcom/adjust/sdk/"
+      - "Lcom/amplitude/"
+      - "Lcom/mixpanel/android/"
+      - "Lcom/segment/analytics/"
+      - "Lio/branch/referral/"
+      - "Lcom/flurry/"
+      - "Lio/sentry/"
+      - "Lcom/microsoft/appcenter/analytics/"
+      - "Lcom/onesignal/"
+      - "app-measurement.com"
+      - "graph.facebook.com"
+      - "api.amplitude.com"
+      - "api.mixpanel.com"
+      - "api2.branch.io"
+      - "t.appsflyer.com"
+      - "app.adjust.com"
+  - id: ANDROID_AD_NETWORK
+    title: Embeds an advertising or adware SDK
+    severity: low
+    summary: Embeds an advertising SDK
+    description: |
+      The application bundles an advertising or adware SDK. Aggressive ad
+      networks can degrade privacy and inject content.
+    patterns:
+      - "Lcom/google/android/gms/ads/"
+      - "Lcom/google/ads/"
+      - "Lcom/applovin/"
+      - "Lcom/unity3d/ads/"
+      - "Lcom/unity3d/services/"
+      - "Lcom/ironsource/"
+      - "Lcom/vungle/"
+      - "Lcom/chartboost/"
+      - "Lcom/mbridge/msdk/"
+      - "Lcom/bytedance/sdk/openadsdk/"
+      - "Lcom/inmobi/"
+      - "Lcom/tapjoy/"
+      - "Lcom/facebook/ads/"
+      - "Lcom/fyber/"
+      - "Lcom/startapp/"
+      - "Lcom/adcolony/"
