@@ -1,7 +1,7 @@
 import plistlib
 import zipfile
 
-import pytest
+import os
 
 from blint.lib.ios import (
     collect_ios_app,
@@ -57,7 +57,7 @@ def test_collect_ios_app_enumerates_binaries(tmp_path):
     assert app["bundle_info"]["bundle_version"] == "1.2.3"
     # Bundle-relative paths, not extraction temp paths.
     main = app["binaries"][0]
-    assert main["bundle_path"] == "DemoApp.app/DemoApp"
+    assert main["bundle_path"] == os.path.join("DemoApp.app", "DemoApp")
 
 
 def test_collect_ios_app_rejects_non_zip(tmp_path):
@@ -82,8 +82,8 @@ def test_enrich_with_bundle_context_sets_path_and_ids():
         "executable": "DemoApp",
     }
     enrich_with_bundle_context(metadata, bundle_info, "main", "DemoApp.app/DemoApp")
-    assert metadata["name"] == "DemoApp.app/DemoApp"
-    assert metadata["file_path"] == "DemoApp.app/DemoApp"
+    assert metadata["name"] == os.path.join("DemoApp.app", "DemoApp")
+    assert metadata["file_path"] == os.path.join("DemoApp.app", "DemoApp")
     assert metadata["bundle_identifier"] == "com.example.demo"
     assert metadata["ios_bundle"]["role"] == "main"
     # The raw executable key is not leaked into the context.
