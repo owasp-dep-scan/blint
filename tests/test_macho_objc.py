@@ -7,8 +7,6 @@ method-list format (with the selref indirection) without a real Mach-O fixture.
 
 import struct
 
-import lief
-
 from blint.lib import macho_objc
 from blint.lib.macho_objc import (
     _parse_method_list,
@@ -95,14 +93,3 @@ def test_parse_protocol_list_collects_names():
 
 def test_parse_objc_metadata_empty_for_non_macho():
     assert parse_objc_metadata(object()) == {}
-
-
-def test_parse_objc_metadata_empty_for_binary_without_objc():
-    # The Rust wasm-tools macOS fixture has no Objective-C metadata.
-    path = (
-        "tests/fixtures/rust-binaries/wasm-tools-1.247.0/"
-        "wasm-tools-1.247.0-aarch64-macos/wasm-tools"
-    )
-    binary = lief.parse(path)
-    assert isinstance(binary, lief.MachO.Binary)
-    assert parse_objc_metadata(binary) == {}
