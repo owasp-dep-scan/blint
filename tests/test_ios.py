@@ -82,7 +82,7 @@ def test_enrich_with_bundle_context_sets_path_and_ids():
         "executable": "DemoApp",
     }
     enrich_with_bundle_context(metadata, bundle_info, "main", "DemoApp.app/DemoApp")
-    assert metadata["name"] == os.path.join("DemoApp.app", "DemoApp")
+    assert metadata["name"] == "DemoApp.app/DemoApp"
     assert metadata["file_path"] == os.path.join("DemoApp.app", "DemoApp")
     assert metadata["bundle_identifier"] == "com.example.demo"
     assert metadata["ios_bundle"]["role"] == "main"
