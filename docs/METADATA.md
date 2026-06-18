@@ -131,6 +131,28 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `rpath`: A runtime search path for libraries.
   - `code_signature`: Information about the binary's digital signature, crucial for Apple's security model.
 
+- **Encryption (`is_encrypted`, `encryption_info`):** Derived from `LC_ENCRYPTION_INFO(_64)`. `is_encrypted` is `true` when `crypt_id` is non-zero (FairPlay-protected App Store binaries); developer, ad-hoc, and enterprise builds report `false`. `encryption_info` carries `crypt_id`, `crypt_offset`, and `crypt_size`. An encrypted `__TEXT` segment cannot be meaningfully disassembled without on-device decryption.
+
+- **Objective-C metadata (`objc_metadata`):** Recovered by walking the raw `__objc_*` sections (LIEF's community build does not expose this). Chained-fixup pointers are resolved via relocation targets, and external class pointers via the dyld binding table. Present only when the binary contains Objective-C metadata.
+  - `class_count`, `protocol_count`, `selector_count`: summary counters.
+  - `classes`: each entry has `name`, `superclass` (internal class name or external framework class), `method_count`, `methods` (selector names), and optional `protocols`.
+  - `protocols`: declared protocols with their `name` and `methods`.
+  - `selectors`: distinct selectors referenced at message-send sites (`__objc_selrefs`).
+  - `external_classes`: framework/runtime classes the binary links against (e.g. `CLLocationManager`, `CTTelephonyNetworkInfo`). Selectors and external classes feed the capability review, surfacing iOS privacy capabilities.
+
+> **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`). When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
+
+### For iOS/macOS Apps (`.ipa`)
+
+An `.ipa` is a zip archive containing a `Payload/<App>.app/` bundle. blint unpacks it and analyzes every Mach-O it contains — the main executable, embedded frameworks and dylibs (`Frameworks/`), and app extensions (`PlugIns/*.appex`) — each producing its own `*-metadata.json`. The application context from the bundle's `Info.plist` is attached to each binary's metadata.
+
+| Attribute            | Description                                                                                                                                                                                                           |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ios_bundle`         | Bundle context: `bundle_identifier`, `bundle_name`, `bundle_version`, `bundle_build`, `minimum_os_version`, `platform_name`, `application_category`, `role` (`main`/`framework`/`dylib`/`plugin`), and `bundle_path`. |
+| `bundle_identifier`  | Convenience top-level copy of the app's `CFBundleIdentifier`.                                                                                                                                                         |
+| `bundle_version`     | Convenience top-level copy of `CFBundleShortVersionString`.                                                                                                                                                           |
+| `minimum_os_version` | Minimum supported OS version from the bundle.                                                                                                                                                                         |
+
 ### For WASM Binaries
 
 WASM (WebAssembly) binaries are parsed via `wasm_tools` and then normalized into blint's common metadata model.

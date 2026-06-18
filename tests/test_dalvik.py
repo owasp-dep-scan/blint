@@ -126,3 +126,87 @@ def test_opcode_table_format_units_consistent():
     # Every format's unit count equals the leading digit of its id.
     for _, fmt in OPCODES.values():
         assert FORMAT_UNITS[fmt] == int(fmt[0])
+
+
+def test_const_high16_value_is_shifted():
+    # const/high16 v0, #0x4080 -> the operand is the high 16 bits: 0x40800000.
+    inst = decode(bytes([0x15, 0x00, 0x80, 0x40]))[0]
+    assert inst.name == "const/high16"
+    assert inst.literal == 0x40800000
+
+
+def test_const_wide_high16_value_is_shifted():
+    # const-wide/high16 v0, #0x4000 -> high 16 bits of a 64-bit value (<<48).
+    inst = decode(bytes([0x19, 0x00, 0x00, 0x40]))[0]
+    assert inst.name == "const-wide/high16"
+    assert inst.literal == 0x4000 << 48
+
+
+def test_const_high16_negative():
+    # 0x8000 sign-extends to -0x8000, then shifts to 0x80000000 (as a signed int).
+    inst = decode(bytes([0x15, 0x00, 0x00, 0x80]))[0]
+    assert inst.literal == -0x8000 << 16
+
+
+def test_proto_pool_resolves_const_method_type():
+    # const-method-type v0, proto@1 (0xFF, 21c) -> resolves against the proto pool.
+    pools = DexPools(strings=[], types=[], fields=[], methods=[], protos=["()V", "(I)Z"])
+    inst = decode(bytes([0xFF, 0x00, 0x01, 0x00]), pools)[0]
+    assert inst.name == "const-method-type"
+    assert inst.target == "(I)Z"
+
+
+def test_method_handle_and_call_site_placeholders():
+    # With empty handle/call-site tables, indices resolve to readable placeholders.
+    pools = DexPools(strings=[], types=[], fields=[], methods=[])
+    # const-method-handle v0, method_handle@3 (0xFE)
+    mh = decode(bytes([0xFE, 0x00, 0x03, 0x00]), pools)[0]
+    assert mh.target == "method_handle@3"
+    # invoke-custom {}, call_site@2 (0xFC, 35c)
+    ic = decode(bytes([0xFC, 0x00, 0x02, 0x00, 0x00, 0x00]), pools)[0]
+    assert ic.name == "invoke-custom"
+    assert ic.target == "call_site@2"
+
+
+def test_packed_switch_payload_decoded_entries():
+    import struct
+
+    # size=2, first_key=0, targets +5 and +7 (relative to the switch instruction).
+    data = (
+        bytes([0x00, 0x01, 0x02, 0x00])
+        + struct.pack("<i", 0)
+        + struct.pack("<i", 5)
+        + struct.pack("<i", 7)
+    )
+    inst = decode(data)[0]
+    assert inst.payload is not None
+    assert inst.payload.kind == "packed-switch"
+    assert [(e.key, e.target) for e in inst.payload.switch] == [(0, 5), (1, 7)]
+
+
+def test_sparse_switch_payload_decoded_entries():
+    import struct
+
+    # size=2, keys [10, 20], targets [+3, +9].
+    data = (
+        bytes([0x00, 0x02, 0x02, 0x00])
+        + struct.pack("<i", 10)
+        + struct.pack("<i", 20)
+        + struct.pack("<i", 3)
+        + struct.pack("<i", 9)
+    )
+    inst = decode(data)[0]
+    assert inst.payload.kind == "sparse-switch"
+    assert [(e.key, e.target) for e in inst.payload.switch] == [(10, 3), (20, 9)]
+
+
+def test_fill_array_data_payload_decoded_bytes():
+    import struct
+
+    # element_width=1, count=3, data bytes 0xAA 0xBB 0xCC (+1 pad byte to even).
+    data = bytes([0x00, 0x03, 0x01, 0x00]) + struct.pack("<I", 3) + bytes([0xAA, 0xBB, 0xCC, 0x00])
+    inst = decode(data)[0]
+    assert inst.payload.kind == "fill-array-data"
+    assert inst.payload.element_width == 1
+    assert inst.payload.element_count == 3
+    assert inst.payload.data == bytes([0xAA, 0xBB, 0xCC])

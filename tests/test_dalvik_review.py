@@ -27,11 +27,45 @@ def test_build_review_metadata_splits_targets_and_strings():
     assert md["informative_strings"] == ["http://x"]
 
 
+def test_embedded_fill_array_data_strings_recovered():
+    import struct
+
+    # fill-array-data v0, +3 with payload spelling "http://evil.test" in bytes.
+    text = b"http://evil.test"
+    head = bytes([0x26, 0x00]) + struct.pack("<i", 3)
+    payload = bytes([0x00, 0x03, 0x01, 0x00]) + struct.pack("<I", len(text)) + text
+    if len(payload) % 2:
+        payload += b"\x00"
+    bytecode = head + payload
+    md = build_review_metadata({"methods": [_method(0, bytecode)]}, pools=_pools([]))
+    # The string staged as array data (never in the string pool) is recovered.
+    assert "http://evil.test" in md["informative_strings"]
+
+
 def test_detects_reflection_invoke():
     bytecode = bytes([0x71, 0x10, 0x00, 0x00, 0x00, 0x00])
     pools = _pools(["Ljava/lang/Class;->forName(Ljava/lang/String;)Ljava/lang/Class;"])
     findings = analyze_dex({"methods": [_method(0, bytecode)]}, pools=pools)
     assert "ANDROID_REFLECTION" in {f.id for f in findings}
+
+
+def test_dynamic_invocation_via_invoke_polymorphic():
+    # invoke-polymorphic {v0}, method@0, proto@0 (0xFA, 45cc) -> resolves to the
+    # MethodHandle descriptor in the method pool (Phase 0 decodes this correctly).
+    bytecode = bytes([0xFA, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+    pools = _pools(
+        ["Ljava/lang/invoke/MethodHandle;->invoke([Ljava/lang/Object;)Ljava/lang/Object;"]
+    )
+    findings = analyze_dex({"methods": [_method(0, bytecode)]}, pools=pools)
+    assert "ANDROID_DYNAMIC_INVOCATION" in {f.id for f in findings}
+
+
+def test_dynamic_invocation_via_invoke_custom_call_site():
+    # invoke-custom {}, call_site@0 (0xFC, 35c). Phase 0 resolves this to the
+    # call-site table (a "call_site@N" token), not a bogus method descriptor.
+    bytecode = bytes([0xFC, 0x00, 0x00, 0x00, 0x00, 0x00])
+    findings = analyze_dex({"methods": [_method(0, bytecode)]}, pools=_pools([]))
+    assert "ANDROID_DYNAMIC_INVOCATION" in {f.id for f in findings}
 
 
 def test_native_exec_detected():

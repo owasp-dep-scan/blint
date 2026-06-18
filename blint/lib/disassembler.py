@@ -30,6 +30,7 @@ from blint.lib.indicators import (
     SECURITY_INDICATORS,
     SYSCALL_INDICATORS,
 )
+from blint.lib.utils import demangle_symbolic_name
 from blint.logger import LOG
 
 FUNCTION_SYMBOLS = (
@@ -420,6 +421,49 @@ def _has_supported_nyxstone_target(arch_target: str) -> bool:
     if not normalized_target:
         return False
     return normalized_target.split("-", 1)[0].lower() not in ("", "unknown")
+
+
+# Object-format / OS markers that Nyxstone's LLVM backend rejects because it
+# only initializes the ELF streamer. Instruction decoding itself is identical
+# across object formats, so we remap these triples onto an ELF-compatible OS
+# while preserving the architecture (and any endianness/sub-arch suffix).
+_NON_ELF_TRIPLE_MARKERS = (
+    "apple",
+    "macos",
+    "macosx",
+    "darwin",
+    "ios",
+    "tvos",
+    "watchos",
+    "bridgeos",
+    "driverkit",
+    "windows",
+    "msvc",
+    "macho",
+    "coff",
+    "win32",
+    "uefi",
+)
+
+
+@lru_cache(maxsize=None)
+def _to_nyxstone_triple(arch_target: str) -> str:
+    """Return an ELF-compatible target triple that Nyxstone can initialize.
+
+    Nyxstone only supports the ELF object format, so MachO (``*-apple-*``) and
+    PE/COFF (``*-windows-msvc``) triples fail to initialize even though the
+    underlying instruction set is fully supported. For those, we substitute an
+    ELF triple that keeps the architecture component intact. ELF triples (and
+    bare architectures) are returned unchanged.
+    """
+    normalized = (arch_target or "").strip()
+    if not normalized:
+        return normalized
+    lowered = normalized.lower()
+    if not any(marker in lowered for marker in _NON_ELF_TRIPLE_MARKERS):
+        return normalized
+    arch = normalized.split("-", 1)[0]
+    return f"{arch}-unknown-linux-gnu"
 
 
 class ParsedInstruction(NamedTuple):
@@ -1179,7 +1223,71 @@ def _build_addr_to_name_map(metadata, parsed_obj=None):
                     if not sym_name:
                         continue
                     addr_to_name_map[int(reloc.address)] = sym_name
+    elif isinstance(parsed_obj, lief.MachO.Binary):
+        import_map = metadata.get("import_call_addresses")
+        if not isinstance(import_map, dict):
+            import_map = build_macho_import_address_map(parsed_obj)
+        for addr_str, name in import_map.items():
+            with contextlib.suppress(ValueError, TypeError):
+                addr_to_name_map.setdefault(int(addr_str, 16), name)
     return addr_to_name_map
+
+
+def build_macho_import_address_map(parsed_obj) -> dict:
+    """Map MachO __stubs and GOT/binding slot addresses to imported symbol names.
+
+    MachO has no ELF-style PLT/GOT relocations, so imported calls otherwise land
+    on anonymous ``sub_*`` stub nodes. Two address families are resolved here:
+
+    * GOT / lazy-symbol-pointer slots, via the dyld binding table. Swift code on
+      AArch64 calls imports through authenticated indirect branches that load the
+      target from one of these slots (``adrp x16, got; ldr x16, [x16]; blraa``),
+      which the register tracker resolves to the slot address.
+    * ``__stubs`` entries, via the indirect symbol table indexed by the section's
+      ``reserved1`` field, for the ``bl <stub>`` direct-call form.
+
+    Names are demangled so Swift/C++ call sites surface readable APIs. Returns a
+    dict mapping hex slot/stub address strings to demangled imported names.
+    """
+    import_map: dict[str, str] = {}
+    # Binding table: slot address -> imported symbol name (covers __got and
+    # lazy/non-lazy symbol pointer sections).
+    with contextlib.suppress(AttributeError, TypeError):
+        for binding in parsed_obj.bindings:
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                symbol = binding.symbol
+                if symbol is None:
+                    continue
+                sym_name = (symbol.name or "").strip()
+                if not sym_name:
+                    continue
+                import_map[hex(int(binding.address))] = demangle_symbolic_name(sym_name)
+
+    # __stubs sections: stub N maps to indirect_symbols[reserved1 + N].
+    indirect_symbols = []
+    with contextlib.suppress(AttributeError, TypeError):
+        indirect_symbols = list(parsed_obj.dynamic_symbol_command.indirect_symbols)
+    if not indirect_symbols:
+        return import_map
+    for section in parsed_obj.sections:
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            if section.type != lief.MachO.Section.TYPE.SYMBOL_STUBS:
+                continue
+            entry_size = section.reserved2 or 0
+            if entry_size <= 0:
+                continue
+            base_index = section.reserved1
+            stub_count = section.size // entry_size
+            for i in range(stub_count):
+                idx = base_index + i
+                if idx >= len(indirect_symbols):
+                    break
+                sym_name = (indirect_symbols[idx].name or "").strip()
+                if not sym_name:
+                    continue
+                stub_addr = hex(section.virtual_address + i * entry_size)
+                import_map.setdefault(stub_addr, demangle_symbolic_name(sym_name))
+    return import_map
 
 
 def _append_unique_target_addr(target_addrs: list[int], addr_val):
@@ -1849,16 +1957,24 @@ def disassemble_functions(
             features = "+pauth"
         elif "+pauth" not in features:
             features += ",+pauth"
+    # Nyxstone's LLVM backend only supports the ELF object format, so MachO and
+    # PE triples must be remapped to an ELF-compatible triple for initialization.
+    # The original arch_target is retained for the architecture-specific decode
+    # heuristics below (and isinstance(parsed_obj, ...) format checks).
+    nyxstone_triple = _to_nyxstone_triple(arch_target)
     try:
-        LOG.debug(f"Attempting to disassemble functions using Nyxstone for target: {arch_target}")
+        LOG.debug(
+            f"Attempting to disassemble functions using Nyxstone for target: {arch_target}"
+            f" (nyxstone triple: {nyxstone_triple})"
+        )
         nyxstone_instance = Nyxstone(
-            target_triple=arch_target,
+            target_triple=nyxstone_triple,
             cpu=cpu,
             features=features,
             immediate_style=immediate_style,
         )
     except ValueError as e:
-        LOG.error(f"Failed to initialize Nyxstone for target '{arch_target}': {e}")
+        LOG.error(f"Failed to initialize Nyxstone for target '{nyxstone_triple}': {e}")
         return disassembly_results
     mips16_nyxstone_instance = None
     micromips_nyxstone_instance = None
@@ -1867,7 +1983,7 @@ def disassemble_functions(
         try:
             mips16_features = (features + ",+mips16").strip(",")
             mips16_nyxstone_instance = Nyxstone(
-                target_triple=arch_target,
+                target_triple=nyxstone_triple,
                 cpu=cpu,
                 features=mips16_features,
                 immediate_style=immediate_style,
@@ -1879,13 +1995,18 @@ def disassemble_functions(
         try:
             micromips_features = (features + ",+micromips").strip(",")
             micromips_nyxstone_instance = Nyxstone(
-                target_triple=arch_target,
+                target_triple=nyxstone_triple,
                 cpu=cpu,
                 features=micromips_features,
                 immediate_style=immediate_style,
             )
         except ValueError as e:
             LOG.warning(f"Failed to initialize microMIPS disassembler: {e}")
+    # Resolve MachO import slot/stub addresses once and surface them on the
+    # metadata so the callgraph builder can classify these as external import
+    # edges instead of misattributing them to internal range-containment nodes.
+    if isinstance(parsed_obj, lief.MachO.Binary) and "import_call_addresses" not in metadata:
+        metadata["import_call_addresses"] = build_macho_import_address_map(parsed_obj)
     addr_to_name_map = _build_addr_to_name_map(metadata, parsed_obj)
     all_func_addrs = []
     for func_list_key in FUNCTION_SYMBOLS:

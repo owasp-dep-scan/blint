@@ -1271,7 +1271,10 @@ class BlintOptions:
             self.sources = [os.getcwd()]
         if not self.reports_dir:
             self.reports_dir = os.getcwd()
-        if self.sbom_mode and self.use_blintdb and self.deep_mode:
+        # In SBOM mode, deep analysis implies disassembly (function-hash lookup,
+        # dex callgraph export, etc.). There is no separate --disassemble flag
+        # for the sbom command - --deep is the single switch.
+        if self.sbom_mode and self.deep_mode:
             self.disassemble = True
         if self.sbom_mode:
             if self.stdout_mode:

@@ -23,9 +23,12 @@ def test_detect_services_and_trackers():
     assert "Stripe" in services
     assert services["Stripe"].group == "payment"
     assert services["Stripe"].bom_ref.root == "service:Stripe"
-    assert services["Stripe"].data[0].flow.value == "unknown"
+    # payment is an interactive service -> data flows both ways.
+    assert services["Stripe"].data[0].flow.value == "bi-directional"
     # Sentry is sourced from the tracker dictionary.
     assert "Sentry" in services
+    # crash-reporting trackers exfiltrate device data -> outbound.
+    assert services["Sentry"].data[0].flow.value == "outbound"
     kinds = {p.name: p.value for p in services["Sentry"].properties}
     assert kinds["internal:serviceKind"] == "tracker"
     assert kinds["internal:detection"] == "static"

@@ -389,6 +389,9 @@ def find_exe_files(src):
     return result
 
 
+ANDROID_APP_EXTNS = (".apk", ".aab", ".apkm", ".apks", ".xapk")
+
+
 def find_android_files(path):
     """
     Method to find android app files
@@ -396,8 +399,17 @@ def find_android_files(path):
     :param path: Project directory
     :return: List of android files
     """
-    app_extns = [".apk", ".aab", ".apkm", ".apks", ".xapk"]
-    return find_files(path, app_extns)
+    return find_files(path, list(ANDROID_APP_EXTNS))
+
+
+def is_android_app(path):
+    """
+    Return True if the given path is an android app file (apk/aab/bundle).
+
+    :param path: File path
+    :return: bool
+    """
+    return isinstance(path, str) and path.lower().endswith(ANDROID_APP_EXTNS)
 
 
 def find_bom_files(path):

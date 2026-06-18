@@ -14,7 +14,8 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 
 - ELF (for GNU and musl libc)
 - PE (Windows executables and DLLs)
-- Mach-O (macOS and iOS, x64 and arm64)
+- Mach-O (macOS and iOS, x64 and arm64), including Objective-C and Swift metadata
+- iOS/macOS apps (`.ipa`): the main executable, embedded frameworks, dylibs, and app extensions are all analyzed
 - WASM (WebAssembly modules)
 - Android (APK, APKM, AAB, including DEX files in deep mode)
 - Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips (native), and Dalvik (DEX).
@@ -29,6 +30,7 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
 - **Android Deep Analysis:** In deep mode blint parses the dex classes, detects bundled service and tracker SDKs, and runs a Dalvik behavioural review that decodes the bytecode and flags risky behaviours such as dynamic code loading, reflection, native command execution, weak cryptography, and cleartext networking. The findings are attached to the BOM as custom properties. When disassembly is enabled, blint also writes a Dalvik callgraph sidecar next to the BOM.
+- **iOS/macOS App Analysis:** Point blint at an `.ipa` and it unpacks the app bundle, reads the `Info.plist` context (bundle id, version, minimum OS, FairPlay encryption status), and analyzes the main executable along with every embedded framework, dylib, and app extension. For Mach-O binaries, blint recovers Objective-C metadata (classes, superclasses, methods, protocols, and referenced selectors) and demangles Swift symbols, then surfaces iOS privacy capabilities such as location, camera, microphone, contacts, photos, telephony, motion, biometrics, and device fingerprinting.
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
   - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
@@ -73,6 +75,15 @@ Analyze a Go or Rust binary and get suggestions for fuzzing targets:
 
 ```shell
 blint -i /path/to/my-binary --suggest-fuzzable
+```
+
+Analyze an iOS/macOS app (`.ipa`). blint unpacks the bundle and writes a separate
+`*-metadata.json` for the main executable and each embedded framework, dylib, and
+app extension. Add `--disassemble` for instruction-level analysis (Objective-C and
+Swift call sites are resolved to imported APIs):
+
+```shell
+blint -i /path/to/app.ipa -o /tmp/blint --disassemble
 ```
 
 Generate a CycloneDX SBOM for an Android application:

@@ -107,6 +107,12 @@ class ReviewRunner:
         """Reviews symbols in the metadata."""
         symbols_list = [f.get("name", "") for f in metadata.get("dynamic_symbols", [])]
         symbols_list += [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
+        # Objective-C runtime metadata: referenced selectors and external class
+        # names are strong capability signals (e.g. CTTelephonyNetworkInfo,
+        # AVCaptureSession) that never appear as plain symbols.
+        if objc_metadata := metadata.get("objc_metadata"):
+            symbols_list += objc_metadata.get("selectors", [])
+            symbols_list += objc_metadata.get("external_classes", [])
         LOG.debug(f"Reviewing {len(symbols_list)} symbols")
         if self.review_symbols_list:
             self.run_review_methods_symbols(self.review_symbols_list, symbols_list)

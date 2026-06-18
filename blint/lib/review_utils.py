@@ -50,6 +50,7 @@ def run_pattern_reviews(
             if found_cid[cid] >= evidence_limit:
                 continue
             patterns = rule_obj.get("patterns") or []
+            exclude_patterns = [p.lower() for p in (rule_obj.get("exclude_patterns") or [])]
             min_patterns = coerce_min_patterns(rule_obj.get("min_patterns", 1))
             allow_shared_matches = coerce_rule_bool(rule_obj.get("allow_shared_matches"))
             include_informative_strings = coerce_rule_bool(
@@ -69,6 +70,8 @@ def run_pattern_reviews(
                     continue
                 for candidate in searchable_values:
                     candidate_lower = candidate.lower()
+                    if exclude_patterns and any(ex in candidate_lower for ex in exclude_patterns):
+                        continue
                     if (
                         pattern.lower() in candidate_lower
                         and (allow_shared_matches or not found_function.get(candidate_lower))
