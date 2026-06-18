@@ -18,10 +18,42 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Optional
 
 from blint.lib.dalvik import DexPools, disassemble_method
+from blint.lib.dalvik_dataflow import analyze
 from blint.logger import LOG
 
 # The exe type that ties the dex review metadata to the android annotation rules.
 DEX_EXE_TYPE = "dexbinary"
+
+# Opcodes for const-string / const-string/jumbo and fill-array-data.
+_CONST_STRING_OPCODES = frozenset({0x1A, 0x1B})
+_FILL_ARRAY_DATA_OPCODE = 0x26
+# Cap the per-method instruction count for the (more expensive) data-flow pass so
+# a pathological method cannot dominate review time.
+_DATAFLOW_MAX_INSTRUCTIONS = 4000
+# Minimum run length for an embedded byte sequence to be treated as a string.
+_MIN_EMBEDDED_STRING_LEN = 4
+
+
+def _embedded_strings(data: bytes) -> List[str]:
+    """Extract printable ASCII runs from raw ``fill-array-data`` bytes.
+
+    Obfuscated apps frequently stage URLs, class names and keys as ``byte[]`` /
+    ``char[]`` array data rather than string constants, so these never appear in
+    the dex string pool. Recovering them gives the review rules something to
+    match on.
+    """
+    runs: List[str] = []
+    current: List[str] = []
+    for byte in data:
+        if 0x20 <= byte < 0x7F:
+            current.append(chr(byte))
+        else:
+            if len(current) >= _MIN_EMBEDDED_STRING_LEN:
+                runs.append("".join(current))
+            current = []
+    if len(current) >= _MIN_EMBEDDED_STRING_LEN:
+        runs.append("".join(current))
+    return runs
 
 
 @dataclass
@@ -50,7 +82,10 @@ def build_review_metadata(metadata: dict, pools: Optional[DexPools] = None) -> d
 
     The resolved invoke and field descriptors become the ``functions`` list and
     the resolved string constants become ``informative_strings``, which is what
-    the METHOD review rules match against.
+    the METHOD review rules match against. Printable strings staged as
+    ``fill-array-data`` are recovered via the data-flow pass and folded into
+    ``informative_strings`` as well, so obfuscated payloads carried as byte/char
+    arrays are still visible to the rules.
 
     Args:
         metadata: A ``parse_dex`` metadata dict (lief methods + constant pools).
@@ -75,18 +110,38 @@ def build_review_metadata(metadata: dict, pools: Optional[DexPools] = None) -> d
         except Exception as e:  # a malformed method must not abort the dex review
             LOG.debug(f"Failed to disassemble a dex method: {e}")
             continue
+        has_array_data = False
         for inst in instructions:
+            if inst.opcode == _FILL_ARRAY_DATA_OPCODE:
+                has_array_data = True
             if inst.target is None:
                 continue
-            if inst.name.startswith("const-string"):
+            if inst.opcode in _CONST_STRING_OPCODES:
                 strings.add(inst.target)
             else:
                 targets.add(inst.target)
+        # Recover embedded array data only for methods that carry it, bounding
+        # the cost of the data-flow pass on large methods.
+        if has_array_data and len(instructions) <= _DATAFLOW_MAX_INSTRUCTIONS:
+            strings.update(_collect_embedded_strings(instructions))
     return {
         "exe_type": DEX_EXE_TYPE,
         "functions": [{"name": t} for t in sorted(targets)],
         "informative_strings": sorted(strings),
     }
+
+
+def _collect_embedded_strings(instructions) -> set:
+    """Printable strings recovered from a method's ``fill-array-data`` payloads."""
+    found: set = set()
+    try:
+        df = analyze(instructions)
+    except Exception as e:  # analysis is best-effort; never break the review
+        LOG.debug(f"Data-flow analysis failed for a dex method: {e}")
+        return found
+    for fill in df.array_fills:
+        found.update(_embedded_strings(fill.data))
+    return found
 
 
 def analyze_dex(metadata: dict, pools: Optional[DexPools] = None) -> List[Finding]:

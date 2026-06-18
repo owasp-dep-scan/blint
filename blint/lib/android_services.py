@@ -7,8 +7,10 @@ matches those class names against bundled dictionaries of known service SDKs
 ``service`` entries for the ones present in the app.
 
 Detection here is presence-based: it records that the SDK is bundled in the app,
-not whether it is reachable at runtime. The data-flow direction is therefore
-reported as ``unknown``; reachability-aware tooling (atom) can refine this.
+not whether it is reachable at runtime. The data-flow direction is inferred from
+the SDK's category (see :data:`_CATEGORY_FLOW`) and reflects the SDK's intended
+direction rather than an observed flow; reachability-aware tooling (atom) can
+refine this.
 """
 
 import importlib.resources
@@ -26,6 +28,46 @@ from blint.cyclonedx.spec import (
     ServiceData,
 )
 from blint.logger import LOG
+
+
+# Data-flow direction inferred from a service/tracker category. Detection is
+# presence-based, so these encode the *intended* direction of the SDK rather
+# than an observed flow:
+#   - bi-directional: interactive services that send inputs and receive results
+#     (AI/ML inference, messaging, social, cloud, payment, storage, ad networks
+#     that both report data and fetch creatives).
+#   - outbound: data-collection categories whose purpose is to exfiltrate device
+#     data (analytics, profiling, location, identification, crash reporting).
+_CATEGORY_FLOW = {
+    "ai-llm": DataFlowDirection.bi_directional,
+    "ai-local": DataFlowDirection.bi_directional,
+    "social": DataFlowDirection.bi_directional,
+    "cloud": DataFlowDirection.bi_directional,
+    "messaging": DataFlowDirection.bi_directional,
+    "payment": DataFlowDirection.bi_directional,
+    "storage": DataFlowDirection.bi_directional,
+    "http": DataFlowDirection.bi_directional,
+    "advertisement": DataFlowDirection.bi_directional,
+    "analytics": DataFlowDirection.outbound,
+    "monitoring": DataFlowDirection.outbound,
+    "location": DataFlowDirection.outbound,
+    "profiling": DataFlowDirection.outbound,
+    "identification": DataFlowDirection.outbound,
+    "crash-reporting": DataFlowDirection.outbound,
+}
+
+
+def _flow_for_category(category: str, is_tracker: bool) -> DataFlowDirection:
+    """Resolve the data-flow direction for a detected service/tracker category.
+
+    Known categories map per :data:`_CATEGORY_FLOW`. Unmapped trackers default to
+    ``outbound`` (their purpose is data collection); unmapped services fall back
+    to ``unknown`` since their direction cannot be inferred from presence alone.
+    """
+    flow = _CATEGORY_FLOW.get((category or "").lower())
+    if flow is not None:
+        return flow
+    return DataFlowDirection.outbound if is_tracker else DataFlowDirection.unknown
 
 
 def _load_dictionary(resource: str, key: str) -> list:
@@ -81,7 +123,7 @@ def _build_service(
         group=category,
         data=[
             ServiceData(
-                flow=DataFlowDirection.unknown,
+                flow=_flow_for_category(category, is_tracker),
                 classification=DataClassification(category),
             )
         ],

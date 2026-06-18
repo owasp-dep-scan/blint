@@ -14,18 +14,22 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 42,
+        "external_edges": 1737,
         "external_reason_buckets": {
+          "address_space_miss:indirect_hint": 2,
+          "import": 1681,
+          "import:indirect_hint": 2,
+          "import:tailcall": 10,
           "unresolved:tailcall": 42
         },
         "functions_total": 11807,
         "functions_with_direct_targets": 10814,
         "internal_edge_kinds": {
-          "direct": 48129,
-          "indirect_hint": 313,
-          "tailcall": 4026
+          "direct": 46778,
+          "indirect_hint": 311,
+          "tailcall": 4016
         },
-        "internal_edges": 52468
+        "internal_edges": 51105
       }
     },
     "aarch64-pc-windows-msvc": {
@@ -85,6 +89,40 @@
           "tailcall": 1548
         },
         "internal_edges": 56690
+      }
+    },
+    "x86_64-apple-macosx": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 5030,
+        "external_reason_buckets": {
+          "address_space_miss:indirect_hint": 126,
+          "address_space_miss:tailcall": 60,
+          "import": 1613,
+          "symbol_only_miss:indirect_hint": 15,
+          "symbol_only_miss:tailcall": 2543,
+          "unresolved:indirect_hint": 642,
+          "unresolved:tailcall": 31
+        },
+        "functions_total": 11202,
+        "functions_with_direct_targets": 8944,
+        "internal_edge_kinds": {
+          "direct": 32158,
+          "indirect_hint": 149,
+          "tailcall": 592
+        },
+        "internal_edges": 32899
       }
     },
     "x86_64-pc-windows-msvc": {

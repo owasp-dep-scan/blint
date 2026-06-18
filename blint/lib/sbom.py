@@ -177,7 +177,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
-            if blint_options.deep_mode and blint_options.disassemble:
+            if blint_options.disassemble:
                 write_dex_callgraph(f, blint_options.sbom_output)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]

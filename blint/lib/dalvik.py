@@ -9,10 +9,13 @@ method can be inspected for analysis.
 
 The opcode table and instruction formats follow the public Dalvik specification
 (https://source.android.com/docs/core/runtime/dalvik-bytecode and
-.../instruction-formats). Decoding is purely structural: it yields the opcode,
-mnemonic, register operands and any literal / branch / constant-pool index for
-each instruction. Resolving pool indices to names is left to the caller, which
-has the dex string/type/method/field tables.
+.../instruction-formats). This module is the structural layer: it yields the
+opcode, mnemonic, register operands and any literal / branch / constant-pool
+index for each instruction, resolves pool indices to descriptors via
+:class:`DexPools`, and decodes switch / array-data payloads into structured form
+(:class:`Payload`). Semantic analysis on top of this stream - per-opcode operand
+roles, control-flow and data-flow - lives in the ``dalvik_semantics``,
+``dalvik_cfg`` and ``dalvik_dataflow`` modules.
 """
 
 from dataclasses import dataclass, field
@@ -282,17 +285,19 @@ INDEX_POOL_BY_OPCODE: dict[int, str] = {
     0x23: "type",  # new-array
     0x24: "type",  # filled-new-array
     0x25: "type",  # filled-new-array/range
-    0xFE: "method",  # const-method-handle
-    0xFF: "proto",  # const-method-type
+    0xFE: "method_handle",  # const-method-handle indexes the method-handle table
+    0xFF: "proto",  # const-method-type indexes the proto table
 }
 # iget/iput (0x52-0x5f) and sget/sput (0x60-0x6d) reference the field pool.
 INDEX_POOL_BY_OPCODE.update({op: "field" for op in range(0x52, 0x60)})
 INDEX_POOL_BY_OPCODE.update({op: "field" for op in range(0x60, 0x6E)})
-# invoke-* (0x6e-0x72, 0x74-0x78) and the polymorphic/custom calls (0xfa-0xfd)
-# reference the method pool.
+# invoke-* (0x6e-0x72, 0x74-0x78) reference the method pool. invoke-polymorphic
+# (0xfa/0xfb) also names a concrete method (its second operand is a proto).
 INDEX_POOL_BY_OPCODE.update({op: "method" for op in range(0x6E, 0x73)})
 INDEX_POOL_BY_OPCODE.update({op: "method" for op in range(0x74, 0x79)})
-INDEX_POOL_BY_OPCODE.update({op: "method" for op in (0xFA, 0xFB, 0xFC, 0xFD)})
+INDEX_POOL_BY_OPCODE.update({op: "method" for op in (0xFA, 0xFB)})
+# invoke-custom (0xfc/0xfd) names a call site, not a method.
+INDEX_POOL_BY_OPCODE.update({op: "call_site" for op in (0xFC, 0xFD)})
 
 
 def _clean_descriptor(value) -> str:
@@ -320,12 +325,20 @@ class DexPools:
         fields: List[str],
         methods: List[str],
         protos: Optional[List[str]] = None,
+        method_handles: Optional[List[str]] = None,
+        call_sites: Optional[List[str]] = None,
     ) -> None:
         self.strings = strings
         self.types = types
         self.fields = fields
         self.methods = methods
         self.protos = protos or []
+        # The method-handle and call-site tables are not exposed by LIEF; they
+        # are populated from a raw-dex parse when available, and otherwise left
+        # empty (such indices then resolve to ``method_handle@N`` / ``call_site@N``
+        # placeholders via :meth:`resolve`).
+        self.method_handles = method_handles or []
+        self.call_sites = call_sites or []
 
     @classmethod
     def from_dex(cls, dexfile) -> "DexPools":
@@ -339,7 +352,8 @@ class DexPools:
         types = [_clean_descriptor(t) for t in getattr(dexfile, "types", [])]
         fields = [cls._render_field(f) for f in getattr(dexfile, "fields", [])]
         methods = [cls._render_method(m) for m in getattr(dexfile, "methods", [])]
-        return cls(strings, types, fields, methods)
+        protos = [cls._render_proto(p) for p in getattr(dexfile, "prototypes", [])]
+        return cls(strings, types, fields, methods, protos)
 
     @classmethod
     def from_metadata(cls, metadata: dict) -> "DexPools":
@@ -347,14 +361,15 @@ class DexPools:
         Build pools from a ``parse_dex`` metadata dict.
 
         ``parse_dex`` already materializes the ``strings`` / ``types`` /
-        ``fields`` / ``methods`` lists in index order, so this avoids re-parsing
-        the dex file when the metadata is already in hand.
+        ``fields`` / ``methods`` / ``prototypes`` lists in index order, so this
+        avoids re-parsing the dex file when the metadata is already in hand.
         """
         strings = [str(s) for s in (metadata.get("strings") or [])]
         types = [_clean_descriptor(t) for t in (metadata.get("types") or [])]
         fields = [cls._render_field(f) for f in (metadata.get("fields") or [])]
         methods = [cls._render_method(m) for m in (metadata.get("methods") or [])]
-        return cls(strings, types, fields, methods)
+        protos = [cls._render_proto(p) for p in (metadata.get("prototypes") or [])]
+        return cls(strings, types, fields, methods, protos)
 
     @staticmethod
     def _render_field(fieldobj) -> str:
@@ -377,17 +392,32 @@ class DexPools:
         except (AttributeError, RuntimeError, TypeError):
             return getattr(methodobj, "name", "") or ""
 
-    def _lookup(self, pool: List[str], index: int) -> Optional[str]:
+    @staticmethod
+    def _render_proto(protoobj) -> str:
+        """Render a prototype as a ``(params)ret`` shorty-style signature."""
+        try:
+            params = "".join(_clean_descriptor(p) for p in protoobj.parameters_type)
+            ret = _clean_descriptor(protoobj.return_type)
+            return f"({params}){ret}"
+        except (AttributeError, RuntimeError, TypeError):
+            return ""
+
+    @staticmethod
+    def _lookup(pool: List[str], index: int) -> Optional[str]:
         if 0 <= index < len(pool):
             return pool[index]
         return None
 
     def resolve(self, opcode: int, fmt: str, index: int) -> Optional[str]:
-        """Resolve a constant-pool index to its descriptor for the given opcode."""
+        """Resolve a constant-pool index to its descriptor for the given opcode.
+
+        ``fmt`` is accepted for symmetry with the decoder but the pool is
+        determined solely by the opcode (a format id such as ``21c`` is shared by
+        opcodes that index different pools).
+        """
+        del fmt  # the pool is opcode-determined; see INDEX_POOL_BY_OPCODE
         pool = INDEX_POOL_BY_OPCODE.get(opcode)
         if pool is None:
-            # Fall back on the format's declared kind (e.g. 22c is always type
-            # for instance-of/new-array, already handled above; const ops below).
             return None
         if pool == "string":
             return self._lookup(self.strings, index)
@@ -399,7 +429,39 @@ class DexPools:
             return self._lookup(self.methods, index)
         if pool == "proto":
             return self._lookup(self.protos, index)
+        if pool == "method_handle":
+            return self._lookup(self.method_handles, index) or f"method_handle@{index}"
+        if pool == "call_site":
+            return self._lookup(self.call_sites, index) or f"call_site@{index}"
         return None
+
+
+@dataclass
+class SwitchEntry:
+    """A single ``key -> branch target`` mapping of a switch payload."""
+
+    key: int
+    # Branch target as a signed code-unit offset relative to the switch
+    # instruction (not the payload), per the Dalvik specification.
+    target: int
+
+
+@dataclass
+class Payload:
+    """
+    A decoded payload pseudo-instruction (switch table or array data).
+
+    ``kind`` is one of ``"packed-switch"``, ``"sparse-switch"`` or
+    ``"fill-array-data"``. ``switch`` carries the key/target table for the two
+    switch kinds; ``element_width`` / ``element_count`` / ``data`` carry the
+    array contents for fill-array-data.
+    """
+
+    kind: str
+    switch: List[SwitchEntry] = field(default_factory=list)
+    element_width: int = 0
+    element_count: int = 0
+    data: bytes = b""
 
 
 @dataclass
@@ -417,6 +479,7 @@ class Instruction:
     index: Optional[int] = None  # constant-pool index
     proto_index: Optional[int] = None  # second index for polymorphic calls
     target: Optional[str] = None  # resolved descriptor for the pool index
+    payload: Optional["Payload"] = None  # decoded switch / array-data payload
 
     def to_smali(self) -> str:
         """Render the instruction in a smali-like textual form."""
@@ -458,21 +521,60 @@ def _sign(value: int, bits: int) -> int:
     return (value & (sign_bit - 1)) - (value & sign_bit)
 
 
-def _payload_units(ident: int, data: bytes, unit: int, total_units: int) -> int:
-    """Compute the code-unit length of a payload pseudo-instruction."""
+def _u32(data: bytes, unit: int) -> int:
+    """Read an unsigned 32-bit value spanning two code units at ``unit``."""
+    return _u16(data, unit) | (_u16(data, unit + 1) << 16)
+
+
+def _decode_payload(
+    ident: int, data: bytes, unit: int, total_units: int
+) -> tuple[int, Optional[Payload]]:
+    """
+    Decode a payload pseudo-instruction into its length and structured contents.
+
+    Returns ``(length_in_code_units, payload)``. ``payload`` is ``None`` for an
+    unrecognized identifier or a truncated payload, in which case the length is
+    ``1`` so the decoder can advance past the bad unit and stay aligned.
+    """
     if unit + 2 > total_units:
-        return 1
+        return 1, None
     size = _u16(data, unit + 1)
     if ident == PACKED_SWITCH_PAYLOAD:
-        return size * 2 + 4
+        length = size * 2 + 4
+        if unit + length > total_units:
+            return 1, None
+        first_key = _sign(_u32(data, unit + 2), 32)
+        entries = [
+            SwitchEntry(key=first_key + i, target=_sign(_u32(data, unit + 4 + i * 2), 32))
+            for i in range(size)
+        ]
+        return length, Payload(kind="packed-switch", switch=entries)
     if ident == SPARSE_SWITCH_PAYLOAD:
-        return size * 4 + 2
-    # fill-array-data-payload: ident, element_width, 32-bit size, then data.
-    element_width = size  # the code unit after ident is the element width here
-    if unit + 4 > total_units:
-        return 1
-    count = _u16(data, unit + 2) | (_u16(data, unit + 3) << 16)
-    return (count * element_width + 1) // 2 + 4
+        length = size * 4 + 2
+        if unit + length > total_units:
+            return 1, None
+        keys = [_sign(_u32(data, unit + 2 + i * 2), 32) for i in range(size)]
+        targets = [_sign(_u32(data, unit + 2 + size * 2 + i * 2), 32) for i in range(size)]
+        entries = [SwitchEntry(key=k, target=t) for k, t in zip(keys, targets)]
+        return length, Payload(kind="sparse-switch", switch=entries)
+    if ident == FILL_ARRAY_DATA_PAYLOAD:
+        # ident, element_width (size above), 32-bit element count, then raw data.
+        element_width = size
+        if unit + 4 > total_units:
+            return 1, None
+        count = _u32(data, unit + 2)
+        length = (count * element_width + 1) // 2 + 4
+        if unit + length > total_units:
+            return 1, None
+        start = (unit + 4) * 2
+        raw = bytes(data[start : start + count * element_width])
+        return length, Payload(
+            kind="fill-array-data",
+            element_width=element_width,
+            element_count=count,
+            data=raw,
+        )
+    return 1, None
 
 
 def _decode_operands(inst: Instruction, data: bytes, unit: int) -> None:
@@ -503,7 +605,11 @@ def _decode_operands(inst: Instruction, data: bytes, unit: int) -> None:
         inst.literal = _sign(_u16(data, unit + 1), 16)
     elif fmt == "21h":
         inst.registers = [high]
-        inst.literal = _sign(_u16(data, unit + 1), 16)
+        # 21h is the "high 16 bits" form: the 16-bit operand holds the high bits
+        # of the constant. const/high16 (0x15) places them in bits 16-31;
+        # const-wide/high16 (0x19) places them in bits 48-63.
+        raw = _sign(_u16(data, unit + 1), 16)
+        inst.literal = raw << (48 if inst.opcode == 0x19 else 16)
     elif fmt == "21c":
         inst.registers = [high]
         inst.index = _u16(data, unit + 1)
@@ -597,14 +703,21 @@ def decode(
         opcode = unit0 & 0xFF
         if opcode == 0x00 and (unit0 >> 8) != 0:
             ident = unit0
-            length = _payload_units(ident, data, unit, total_units)
+            length, payload = _decode_payload(ident, data, unit, total_units)
             name = {
                 PACKED_SWITCH_PAYLOAD: "packed-switch-payload",
                 SPARSE_SWITCH_PAYLOAD: "sparse-switch-payload",
                 FILL_ARRAY_DATA_PAYLOAD: "fill-array-data-payload",
             }.get(ident, "unknown-payload")
             instructions.append(
-                Instruction(offset=unit, opcode=opcode, name=name, fmt="payload", length=length)
+                Instruction(
+                    offset=unit,
+                    opcode=opcode,
+                    name=name,
+                    fmt="payload",
+                    length=length,
+                    payload=payload,
+                )
             )
             unit += max(length, 1)
             continue

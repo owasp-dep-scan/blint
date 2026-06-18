@@ -639,3 +639,227 @@ rules:
       - AVMediaTypeVideo
       - AVVideoCodecJPEG
       - AVVideoCodecKey
+  - id: DYNAMIC_CODE_LOADING
+    title: Dynamic library loading functions used
+    summary: Can Load Code at Runtime
+    description: |
+      The binary resolves and loads code at runtime via the dynamic linker (dlopen/dlsym) or Foundation bundle loading. This allows functionality to be added after the binary ships and is commonly used by plugin systems, but is also abused to load code that evades static analysis.
+    patterns:
+      - dlopen
+      - dlsym
+      - dlclose
+      - _dyld_register_func_for_add_image
+      - NSBundle
+      - bundleWithPath
+      - NSLinkModule
+      - DynamicLinkLibrary
+  - id: PROCESS_EXECUTION
+    title: Process execution functions used
+    summary: Can Execute Other Programs
+    description: |
+      The binary can spawn and execute other programs or shell commands through NSTask, the POSIX spawn/exec family, or popen/system. This is expected for developer tooling but is also a hallmark of droppers and command execution payloads.
+    patterns:
+      - NSTask
+      - posix_spawn
+      - execve
+      - execvp
+      - execlp
+      - _popen
+      - _system
+      - vfork
+      - _fork
+  - id: ENVIRONMENT_ACCESS
+    title: Environment variable access functions used
+    summary: Can Read & Modify Environment
+    description: |
+      The binary reads or modifies process environment variables (getenv/setenv) or inspects ProcessInfo. Environment access is routine but is also used for sandbox detection, configuration overrides, and locating injected libraries.
+    patterns:
+      - getenv
+      - setenv
+      - unsetenv
+      - _environ
+      - NSProcessInfo
+      - ProcessInfo
+  - id: KEYCHAIN_API
+    title: Keychain Services functions used
+    summary: Can Access Credentials in Keychain
+    description: |
+      The binary reads or writes secrets in the macOS/iOS Keychain via Security framework APIs. Legitimate for credential storage, but also a target for credential theft.
+    patterns:
+      - SecItemAdd
+      - SecItemCopyMatching
+      - SecItemUpdate
+      - SecItemDelete
+      - SecKeychainAddGenericPassword
+      - SecKeychainFindGenericPassword
+      - SecKeychainItemCopyContent
+  - id: CRYPTO_API
+    title: Cryptographic functions used
+    summary: Can Perform Cryptography
+    description: |
+      The binary performs cryptographic operations via CommonCrypto, the Security framework key APIs, or CryptoKit. Used for legitimate encryption, hashing, and signing, and also by ransomware and obfuscation routines.
+    patterns:
+      - CCCrypt
+      - CCCryptorCreate
+      - CC_SHA256
+      - CC_SHA1
+      - CC_MD5
+      - SecKeyCreateSignature
+      - SecKeyCreateEncryptedData
+      - SecKeyCreateDecryptedData
+      - CryptoKit
+  - id: PASTEBOARD_API
+    title: Pasteboard (clipboard) functions used
+    summary: Can Read & Write the Clipboard
+    description: |
+      The binary reads from or writes to the system pasteboard. Clipboard access is used by productivity tools and also by spyware harvesting copied secrets such as passwords and crypto wallet addresses.
+    patterns:
+      - NSPasteboard
+      - UIPasteboard
+      - PNpasteboard
+  - id: SCREEN_CAPTURE_API
+    title: Screen capture functions used
+    summary: Can Capture the Screen
+    description: |
+      The binary can capture screen contents via Core Graphics or ScreenCaptureKit. Legitimate for screenshot and screen-sharing tools, and a common surveillance capability in spyware.
+    patterns:
+      - CGDisplayCreateImage
+      - CGWindowListCreateImage
+      - CGDisplayStream
+      - SCStream
+      - SCShareableContent
+  - id: INPUT_MONITORING_API
+    title: Input monitoring functions used
+    summary: Can Monitor Keyboard & Mouse Input
+    description: |
+      The binary installs event taps or HID input monitors to observe keyboard and mouse events system-wide. This underpins accessibility tools and automation, and is the core mechanism of keyloggers.
+    patterns:
+      - CGEventTapCreate
+      - CGEventTapEnable
+      - IOHIDManagerCreate
+      - IOHIDManagerRegisterInputValueCallback
+  - id: PERSISTENCE_LOGIN_ITEM
+    title: Login item / service persistence functions used
+    summary: Can Persist via Login Items or Services
+    description: |
+      The binary registers itself to run automatically via login items or the ServiceManagement framework. Expected for background agents, and a common persistence technique for malware.
+    patterns:
+      - SMLoginItemSetEnabled
+      - SMAppService
+      - LSSharedFileListInsertItemURL
+      - SMJobBless
+  - id: LOCATION_ACCESS
+    title: Location services used
+    summary: Can Access Device Location
+    description: |
+      The app uses Core Location to read the device's geographic position. A common, privacy-sensitive capability that requires user consent and is frequently abused by stalkerware.
+    patterns:
+      - CLLocationManager
+      - startUpdatingLocation
+      - requestWhenInUseAuthorization
+      - requestAlwaysAuthorization
+      - CLGeocoder
+  - id: CAMERA_ACCESS
+    title: Camera capture used
+    summary: Can Access the Camera
+    description: |
+      The app captures still images or video from the device camera via AVFoundation or the image picker. Privacy-sensitive; a surveillance capability when combined with background execution.
+    patterns:
+      - AVCaptureDevice
+      - AVCapturePhotoOutput
+      - UIImagePickerController
+      - requestAccessForMediaType
+  - id: MICROPHONE_ACCESS
+    title: Microphone / audio recording used
+    summary: Can Record Audio
+    description: |
+      The app records audio or requests microphone permission. Privacy-sensitive; core to audio surveillance.
+    patterns:
+      - AVAudioRecorder
+      - requestRecordPermission
+      - setActive
+      - AVAudioSession
+  - id: CONTACTS_ACCESS
+    title: Contacts access used
+    summary: Can Access Contacts
+    description: |
+      The app reads the user's address book via the Contacts framework. Sensitive personal data commonly exfiltrated by spyware.
+    patterns:
+      - CNContactStore
+      - CNContactFetchRequest
+      - ABAddressBookCreate
+  - id: PHOTOS_ACCESS
+    title: Photo library access used
+    summary: Can Access Photos
+    description: |
+      The app reads or modifies the user's photo library through the Photos framework.
+    patterns:
+      - PHPhotoLibrary
+      - PHAsset
+      - PHImageManager
+  - id: TELEPHONY_INFO
+    title: Telephony information accessed
+    summary: Can Read Carrier & Telephony Info
+    description: |
+      The app inspects carrier and cellular network information via CoreTelephony. Used for analytics and also for device/SIM fingerprinting.
+    patterns:
+      - CTTelephonyNetworkInfo
+      - CTCarrier
+      - serviceSubscriberCellularProviders
+  - id: MOTION_SENSORS
+    title: Motion and fitness sensors used
+    summary: Can Read Motion Sensors
+    description: |
+      The app reads accelerometer, gyroscope or pedometer data via Core Motion. Used for fitness and games, and for inferring user activity.
+    patterns:
+      - CMMotionManager
+      - CMPedometer
+      - CMAltimeter
+      - startAccelerometerUpdates
+  - id: BIOMETRIC_AUTH
+    title: Biometric / local authentication used
+    summary: Can Use Face ID / Touch ID
+    description: |
+      The app authenticates the user locally with Touch ID/Face ID via LocalAuthentication.
+    patterns:
+      - LAContext
+      - evaluatePolicy
+      - LAPolicyDeviceOwnerAuthentication
+  - id: HEALTH_DATA
+    title: Health data access used
+    summary: Can Access Health Data
+    description: |
+      The app reads or writes HealthKit data, among the most sensitive personal data categories.
+    patterns:
+      - HKHealthStore
+      - HKQuery
+      - requestAuthorizationToShareTypes
+  - id: BLUETOOTH_ACCESS
+    title: Bluetooth used
+    summary: Can Use Bluetooth
+    description: |
+      The app communicates over Bluetooth LE via Core Bluetooth, acting as central and/or peripheral. Used for accessories and for proximity-based tracking.
+    patterns:
+      - CBCentralManager
+      - CBPeripheralManager
+      - scanForPeripheralsWithServices
+  - id: DEVICE_FINGERPRINTING
+    title: Device identifier access used
+    summary: Can Read Device Identifiers
+    description: |
+      The app reads stable device identifiers (vendor ID, advertising ID, device name). Used for analytics/attribution and for cross-app tracking and fingerprinting.
+    patterns:
+      - identifierForVendor
+      - advertisingIdentifier
+      - ASIdentifierManager
+      - deviceToken
+  - id: WEBVIEW_JS_EXECUTION
+    title: Web view JavaScript execution used
+    summary: Can Execute JavaScript in Web Views
+    description: |
+      The app hosts web content and injects or evaluates JavaScript via WKWebView. A code-execution surface; injected scripts can exfiltrate page data or bridge to native code.
+    patterns:
+      - WKWebView
+      - evaluateJavaScript
+      - WKUserScript
+      - addScriptMessageHandler

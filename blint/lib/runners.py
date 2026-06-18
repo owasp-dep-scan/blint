@@ -1,13 +1,16 @@
 import logging
 import os
+import shutil
 import sys
 
 from rich.progress import Progress
 
 from blint.config import BlintOptions
 from blint.cyclonedx.spec import CycloneDX
+from blint.lib.android import analyze_android_app
 from blint.lib.analysis import initialize_rules, report, run_checks, run_prefuzz
 from blint.lib.binary import is_wasm_file, parse
+from blint.lib.ios import collect_ios_app, enrich_with_bundle_context, is_ios_app
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
 from blint.lib.utils import (
@@ -15,6 +18,7 @@ from blint.lib.utils import (
     find_android_files,
     gen_file_list,
     get_hex_truncation_count,
+    is_android_app,
     reset_hex_truncation_count,
 )
 from blint.logger import LOG
@@ -120,10 +124,58 @@ class AnalysisRunner:
         self.progress.update(
             self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]"
         )
-        should_disassemble = blint_options.disassemble and not is_wasm_file(f)
-        if blint_options.disassemble and not should_disassemble:
-            LOG.debug(f"Skipping disassembly for wasm file {f}")
-        metadata = parse(f, should_disassemble)
+        wants_callgraph_outputs = (
+            blint_options.render_mermaid_callgraph
+            or blint_options.export_callgraph_graphml
+            or blint_options.export_callgraph_gexf
+        )
+        if is_android_app(f):
+            metadata = self._process_android_file(f)
+            if metadata is None:
+                LOG.warning(f"No dex bytecode could be read from android app {f}; skipping")
+                self.progress.advance(self.task)
+                return
+        elif is_ios_app(f):
+            self._process_ios_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            return
+        else:
+            should_disassemble = blint_options.disassemble and not is_wasm_file(f)
+            if blint_options.disassemble and not should_disassemble:
+                LOG.debug(f"Skipping disassembly for wasm file {f}")
+            metadata = parse(f, should_disassemble)
+        self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+        self.progress.advance(self.task)
+
+    def _process_ios_file(self, f, blint_options, wants_callgraph_outputs):
+        """Unpack an iOS/macOS app (.ipa) and analyse each contained Mach-O.
+
+        One archive yields several binaries (the main executable plus embedded
+        frameworks, dylibs and app extensions); each is parsed through the normal
+        native path and enriched with the app-bundle context.
+        """
+        app = collect_ios_app(f)
+        if app is None:
+            return
+        try:
+            for entry in app["binaries"]:
+                bin_path = entry["path"]
+                role = entry["role"]
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
+                )
+                should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
+                metadata = parse(bin_path, should_disassemble)
+                enrich_with_bundle_context(
+                    metadata, app["bundle_info"], role, entry.get("bundle_path")
+                )
+                self._finalize_metadata(bin_path, metadata, blint_options, wants_callgraph_outputs)
+        finally:
+            shutil.rmtree(app["temp_dir"], ignore_errors=True)
+
+    def _finalize_metadata(self, f, metadata, blint_options, wants_callgraph_outputs):
+        """Export metadata and run checks/reviews/fuzzing for a parsed binary."""
         exe_name = metadata.get("name", f)
         wasm_report = metadata.get("wasm_report")
         metadata_to_export = dict(metadata)
@@ -140,11 +192,6 @@ class AnalysisRunner:
                 wasm_report,
                 f"{os.path.basename(exe_name)}-wasm-report",
             )
-        wants_callgraph_outputs = (
-            blint_options.render_mermaid_callgraph
-            or blint_options.export_callgraph_graphml
-            or blint_options.export_callgraph_gexf
-        )
         if wants_callgraph_outputs and metadata.get("callgraph"):
             self.callgraphs.append(
                 {
@@ -156,7 +203,10 @@ class AnalysisRunner:
             self.task,
             description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules",
         )
-        if finding := run_checks(f, metadata):
+        # Native security-property checks (PAC, CET, etc.) are meaningless for
+        # Dalvik apps and would fire spuriously; the dex review supplies the
+        # relevant behavioural findings instead.
+        if metadata.get("exe_type") != "dexbinary" and (finding := run_checks(f, metadata)):
             self.findings += finding
         if not blint_options.no_reviews:
             self.do_review(exe_name, f, metadata)
@@ -168,7 +218,19 @@ class AnalysisRunner:
                     "methods": fuzzdata,
                 }
             )
-        self.progress.advance(self.task)
+
+    def _process_android_file(self, f):
+        """Disassemble an android app's dex bytecode into review metadata.
+
+        The Dalvik disassembler always runs for android apps (it is the only way
+        to get reviewable behaviour out of them) and the merged dex callgraph is
+        always embedded in the metadata, mirroring the native disassembly path.
+        Returns ``None`` when no dex could be read.
+        """
+        self.progress.update(
+            self.task, description=f"Disassembling [bold]{os.path.basename(f)}[/bold]"
+        )
+        return analyze_android_app(f, build_cg=True)
 
     def do_review(self, exe_name, f, metadata):
         """Performs a review of the given file."""

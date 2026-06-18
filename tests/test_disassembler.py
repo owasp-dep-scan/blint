@@ -11,8 +11,33 @@ from blint.lib.disassembler import (
     _is_macos_system_symbol_name,
     _resolve_direct_calls,
     _should_skip_symbol_list_for_disassembly,
+    _to_nyxstone_triple,
     disassemble_functions,
 )
+
+
+@pytest.mark.parametrize(
+    "triple,expected",
+    [
+        # MachO / PE triples are remapped to an ELF-compatible triple because
+        # Nyxstone only initializes the ELF MC layer.
+        ("aarch64-apple-macosx", "aarch64-unknown-linux-gnu"),
+        ("arm64-apple-ios", "arm64-unknown-linux-gnu"),
+        ("x86_64-apple-macosx", "x86_64-unknown-linux-gnu"),
+        ("x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"),
+        ("i686-pc-windows-msvc", "i686-unknown-linux-gnu"),
+        ("aarch64-apple-macosx-macho", "aarch64-unknown-linux-gnu"),
+        # ELF triples and bare architectures pass through unchanged.
+        ("aarch64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"),
+        ("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"),
+        ("aarch64", "aarch64"),
+        ("mipsel-unknown-linux-musl", "mipsel-unknown-linux-musl"),
+        ("aarch64-unknown-linux-android", "aarch64-unknown-linux-android"),
+        ("", ""),
+    ],
+)
+def test_to_nyxstone_triple(triple, expected):
+    assert _to_nyxstone_triple(triple) == expected
 
 
 def test_extract_register_usage_mov():

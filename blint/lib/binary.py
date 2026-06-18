@@ -22,6 +22,7 @@ from blint.config import (
 )
 from blint.lib.disassembler import disassemble_functions
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
+from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.utils import (
     calculate_entropy,
     calculate_hashes,
@@ -1566,6 +1567,23 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
         with contextlib.suppress(ValueError):
             image_base_int = int(image_base, 16)
 
+    # MachO import slot/stub addresses resolved during disassembly. Calls whose
+    # target lands on one of these are external imports (Foundation, libswiftCore,
+    # libc, ...), not internal edges; classifying them here avoids the
+    # range-containment fallback misattributing them to whichever function happens
+    # to span the GOT/stub address.
+    import_call_addresses = {}
+    for addr_str, name in (metadata.get("import_call_addresses") or {}).items():
+        with contextlib.suppress(ValueError, TypeError):
+            import_call_addresses[int(addr_str, 16)] = name
+
+    def _resolve_import_name(addr_int):
+        for variant in (addr_int, addr_int & ~1):
+            name = import_call_addresses.get(variant)
+            if name:
+                return name
+        return None
+
     # We aggregate counts by (src, dst, kind) and track confidence separately
     # because the same edge can be observed through multiple heuristics.
     edge_counts = Counter()
@@ -1604,6 +1622,23 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 numeric_candidates.append(target_addr)
             if isinstance(target_addr_candidates, list):
                 numeric_candidates.extend(target_addr_candidates)
+
+            # External import calls take priority over internal heuristics: a
+            # target on a known GOT/stub slot is a call out to a dynamic library,
+            # never an internal edge.
+            if import_call_addresses:
+                import_name = None
+                for candidate in numeric_candidates:
+                    if not isinstance(candidate, str) or not candidate:
+                        continue
+                    with contextlib.suppress(ValueError):
+                        import_name = _resolve_import_name(int(candidate, 16))
+                    if import_name:
+                        break
+                if import_name:
+                    reason = "import" if edge_kind == "direct" else f"import:{edge_kind}"
+                    external_counts[(src_id, import_name, reason)] += 1
+                    continue
 
             for candidate in numeric_candidates:
                 if not isinstance(candidate, str) or not candidate:
@@ -1841,6 +1876,8 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata = add_pe_metadata(exe_file, metadata, parsed_obj)
         elif isinstance(parsed_obj, lief.MachO.Binary):
             metadata = add_mach0_metadata(exe_file, metadata, parsed_obj)
+            if objc_metadata := parse_objc_metadata(parsed_obj):
+                metadata["objc_metadata"] = objc_metadata
         metadata = standardize_keys(metadata)
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
@@ -2891,6 +2928,19 @@ def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
         metadata["has_thread_command"] = not isinstance(
             parsed_obj.thread_command, lief.lief_errors
         )
+    # FairPlay DRM: App Store binaries encrypt __TEXT (cryptid=1). Developer,
+    # ad-hoc and enterprise builds are unencrypted (cryptid=0). An encrypted
+    # binary cannot be meaningfully disassembled without on-device decryption.
+    with contextlib.suppress(AttributeError, TypeError):
+        enc = parsed_obj.encryption_info
+        if enc is not None and not isinstance(enc, lief.lief_errors):
+            crypt_id = getattr(enc, "crypt_id", 0)
+            metadata["is_encrypted"] = bool(crypt_id)
+            metadata["encryption_info"] = {
+                "crypt_id": crypt_id,
+                "crypt_offset": getattr(enc, "crypt_offset", 0),
+                "crypt_size": getattr(enc, "crypt_size", 0),
+            }
     return metadata
 
 

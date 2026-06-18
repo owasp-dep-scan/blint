@@ -28,6 +28,28 @@ rules:
       - "Ljava/lang/Class;->getMethod"
       - "Ljava/lang/reflect/Method;->invoke"
       - "Ljava/lang/reflect/Field;->set"
+  - id: ANDROID_DYNAMIC_INVOCATION
+    title: Uses MethodHandle / invoke-dynamic dynamic invocation
+    severity: medium
+    summary: Invokes methods through MethodHandles or invoke-dynamic
+    description: |
+      The application invokes methods through the java.lang.invoke MethodHandle /
+      VarHandle API or invoke-custom (invoke-dynamic) call sites. Like classic
+      reflection, this resolves call targets at runtime and is increasingly used
+      by obfuscators and packers to hide sensitive API usage from static
+      analysis. blint resolves these polymorphic and custom call sites directly
+      from the bytecode.
+    patterns:
+      - "Ljava/lang/invoke/MethodHandle;->invoke"
+      - "Ljava/lang/invoke/MethodHandles"
+      - "Ljava/lang/invoke/MethodHandles$Lookup;"
+      - "Ljava/lang/invoke/VarHandle;"
+      - "Ljava/lang/invoke/CallSite;"
+      # invoke-custom call sites and const-method-handle operands, resolved to
+      # call_site@N / method_handle@N (the call-site and method-handle tables are
+      # not exposed by LIEF, so the index is surfaced as a stable token).
+      - "call_site@"
+      - "method_handle@"
   - id: ANDROID_NATIVE_EXEC
     title: Executes native commands or loads native libraries
     severity: high
@@ -68,6 +90,19 @@ rules:
     include_informative_strings: true
     patterns:
       - "http://"
+    # XML/SVG/schema namespace URIs are identifiers, not network endpoints.
+    exclude_patterns:
+      - "http://www.w3.org/"
+      - "http://schemas.android.com/"
+      - "http://schemas.microsoft.com/"
+      - "http://www.apache.org/"
+      - "http://java.sun.com/"
+      - "http://xml.org/"
+      - "http://ns.adobe.com/"
+      - "http://purl.org/"
+      - "http://www.inkscape.org/"
+      - "http://localhost"
+      - "http://127.0.0.1"
   - id: ANDROID_WEBVIEW_UNSAFE
     title: Configures a WebView with unsafe settings
     severity: medium

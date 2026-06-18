@@ -11,7 +11,7 @@ from custom_json_diff.lib.utils import file_read
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
 from blint.lib.binary import parse, parse_dex
-from blint.lib.dalvik_review import analyze_dex
+from blint.lib.dalvik_review import DEX_EXE_TYPE, analyze_dex, build_review_metadata
 from blint.lib.utils import (
     check_command,
     create_component_evidence,
@@ -608,6 +608,78 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
         )
         file_components.append(component)
     return file_components
+
+
+def _iter_app_dex_files(app_file):
+    """
+    Yield ``(dex_path, app_temp_dir)`` for every dex inside an app or bundle.
+
+    Bundles (.apkm/.apks/.xapk) are unzipped to locate their inner apks; each
+    apk (or the app itself) is then unzipped to a temp dir whose dex files are
+    yielded. The caller is responsible for nothing - all temp dirs are cleaned
+    up once iteration completes.
+    """
+    bundle_temp_dir = None
+    app_temp_dirs = []
+    try:
+        if app_file.endswith(BUNDLE_EXTENSIONS):
+            bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
+            unzip_unsafe(app_file, bundle_temp_dir)
+            targets = sorted(find_files(bundle_temp_dir, [".apk"]))
+        else:
+            targets = [app_file]
+        for apk in targets:
+            app_temp_dir = tempfile.mkdtemp(prefix="blint_android_dex")
+            app_temp_dirs.append(app_temp_dir)
+            unzip_unsafe(apk, app_temp_dir)
+            for adex in sorted(find_files(app_temp_dir, [".dex"])):
+                yield adex, app_temp_dir
+    finally:
+        for d in app_temp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+        if bundle_temp_dir:
+            shutil.rmtree(bundle_temp_dir, ignore_errors=True)
+
+
+def analyze_android_app(app_file, build_cg=False):
+    """
+    Build review-ready metadata for an android app in the default analysis mode.
+
+    Extracts every dex from the app (or bundle), disassembles their methods and
+    aggregates the resolved invoke/field descriptors and string constants into a
+    single ``dexbinary`` metadata dict that the shared :class:`ReviewRunner`
+    consumes. When ``build_cg`` is set, a merged Dalvik callgraph is attached.
+
+    Returns:
+        A metadata dict with ``exe_type``/``functions``/``informative_strings``
+        (and optionally ``callgraph``), or ``None`` when no dex could be read.
+    """
+    functions: set = set()
+    strings: set = set()
+    dex_count = 0
+    for adex, _ in _iter_app_dex_files(app_file):
+        try:
+            review_metadata = build_review_metadata(parse_dex(adex))
+        except Exception as e:  # a malformed dex must not abort the whole app
+            LOG.debug(f"Failed to build review metadata for {adex}: {e}")
+            continue
+        dex_count += 1
+        functions.update(fn.get("name", "") for fn in review_metadata.get("functions", []))
+        strings.update(review_metadata.get("informative_strings", []))
+    if not dex_count:
+        return None
+    metadata = {
+        "name": os.path.basename(app_file),
+        "exe_type": DEX_EXE_TYPE,
+        "functions": [{"name": fn} for fn in sorted(f for f in functions if f)],
+        "informative_strings": sorted(s for s in strings if s),
+    }
+    if build_cg:
+        try:
+            metadata["callgraph"] = build_app_dex_callgraph(app_file)
+        except Exception as e:  # callgraph is best-effort
+            LOG.debug(f"Failed to build dex callgraph for {app_file}: {e}")
+    return metadata
 
 
 def build_app_dex_callgraph(app_file):

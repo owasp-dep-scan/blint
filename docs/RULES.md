@@ -27,6 +27,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `summary` (Required): A brief summary of what the rule detects.
 - `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
 - `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. By default, one matching pattern is enough to trigger the rule; use `min_patterns` to require more than one distinct pattern match.
+- `exclude_patterns` (Optional for pattern-based review groups): A list of strings (case-insensitive). Any candidate value containing one of these substrings is skipped before `patterns` are evaluated, so it can neither trigger the rule nor appear as evidence. Useful for suppressing well-known false positives — for example the `ANDROID_CLEARTEXT_TRAFFIC` rule searches for `http://` but excludes XML/SVG/schema namespace URIs (`http://www.w3.org/`, `http://schemas.android.com/`, …) and loopback hosts, which are identifiers rather than network endpoints.
 - `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct patterns from `patterns` that must match before the rule triggers. Each matched pattern must map to a distinct symbol/function/import name (a single name is consumed once per rule). Defaults to `1`.
 - `allow_shared_matches` (Optional for pattern-based review groups): If `true`, matched symbol/function/import names used by this rule are not consumed globally and may also satisfy other rules in the same review pass. Defaults to `false`.
 - `include_informative_strings` (Optional for `METHOD_REVIEWS` and `EXE_REVIEWS`): If `true`, blint also matches this rule's `patterns` against `informative_strings[*].value` when present in metadata. This is useful for cluster rules that rely on stable operational constants (for example `/dev/net/tun`, `IP_HDRINCL`, `BPF_SOCK_OPS_*`) that may not appear as symbols.
@@ -160,6 +161,28 @@ rules:
 ```
 
 `include_informative_strings` can be combined with `min_patterns` to create high-signal capability clusters while reducing noise from single-token matches.
+
+Use `exclude_patterns` to suppress known false positives from broad patterns. The candidate is skipped entirely if it contains any excluded substring, so it neither triggers the rule nor shows up as evidence:
+
+```yaml
+---
+text: Review for cleartext http endpoints
+group: METHOD_REVIEWS
+exe_type: dexbinary
+rules:
+  - id: ANDROID_CLEARTEXT_TRAFFIC
+    title: References cleartext (http://) endpoints
+    summary: References cleartext http endpoints
+    include_informative_strings: true
+    patterns:
+      - "http://"
+    # XML/SVG/schema namespace URIs are identifiers, not network endpoints.
+    exclude_patterns:
+      - "http://www.w3.org/"
+      - "http://schemas.android.com/"
+      - "http://localhost"
+      - "http://127.0.0.1"
+```
 
 ### Example 4: `FUNCTION_REVIEWS` (Malware Analysis Indicators)
 

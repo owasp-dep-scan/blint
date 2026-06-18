@@ -189,7 +189,8 @@ def build_parser():
         default=False,
         dest="deep_mode",
         help="Enable deep mode to collect more used symbols and modules "
-        "aggressively. Slow operation. When combined with --use-blintdb, disassembly is enabled automatically to use function-hash lookup.",
+        "aggressively. Slow operation. Enables disassembly automatically "
+        "(function-hash lookup with --use-blintdb, dex callgraph export for android apps).",
     )
     sbom_parser.add_argument(
         "--stdout",

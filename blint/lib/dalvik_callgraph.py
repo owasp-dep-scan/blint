@@ -16,7 +16,8 @@ visualization and interchange.
 from typing import Iterable, List, Optional
 from xml.sax.saxutils import escape, quoteattr
 
-from blint.lib.dalvik import DexPools, disassemble_method
+from blint.lib.dalvik import INDEX_POOL_BY_OPCODE, DexPools, disassemble_method
+from blint.lib.dalvik_semantics import is_invoke
 from blint.logger import LOG
 
 
@@ -72,7 +73,11 @@ def build_callgraph(metadata: dict, pools: Optional[DexPools] = None) -> dict:
             LOG.debug(f"Failed to disassemble a dex method for callgraph: {e}")
             continue
         for inst in instructions:
-            if inst.index is None or not inst.name.startswith("invoke"):
+            # Only method-pool invokes name a callee index. invoke-custom names a
+            # call site (a different table), so it does not yield a method edge.
+            if inst.index is None or not is_invoke(inst):
+                continue
+            if INDEX_POOL_BY_OPCODE.get(inst.opcode) != "method":
                 continue
             callee_idx = inst.index
             _ensure(callee_idx)
