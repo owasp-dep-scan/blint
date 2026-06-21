@@ -70,12 +70,10 @@ def get_hex_truncation_count() -> int:
 
 
 def demangle_symbolic_name(symbol, name_only=False):
-    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust."""
+    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust and Swift."""
     try:
-        demangled_symbol = multi_demangle.demangle_symbol(
-            symbol,
-            options=demangle_options_name_only if name_only else demangle_options_complete,
-        )
+        options = demangle_options_name_only if name_only else demangle_options_complete
+        demangled_symbol = multi_demangle.demangle_symbol(symbol, options=options)
         # demangling didn't work
         if symbol and symbol == demangled_symbol:
             for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
@@ -410,6 +408,19 @@ def is_android_app(path):
     :return: bool
     """
     return isinstance(path, str) and path.lower().endswith(ANDROID_APP_EXTNS)
+
+
+IOS_APP_EXTNS = (".ipa",)
+
+
+def find_ios_files(path):
+    """
+    Method to find iOS/macOS app archive files (``.ipa``).
+
+    :param path: Project directory
+    :return: List of iOS app files
+    """
+    return find_files(path, list(IOS_APP_EXTNS))
 
 
 def find_bom_files(path):

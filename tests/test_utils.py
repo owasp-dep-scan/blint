@@ -5,10 +5,22 @@ import orjson
 import blint.lib.utils as utils
 from blint.lib.utils import (
     calculate_entropy,
+    demangle_symbolic_name,
     export_metadata,
     get_hex_truncation_count,
     reset_hex_truncation_count,
 )
+
+
+def test_demangle_swift_symbol():
+    # The demangler recognises both the bare Swift mangling and the Mach-O
+    # underscore-prefixed form (`_$s…`) directly.
+    assert demangle_symbolic_name("$s4main3fooyyF") == "main.foo() -> ()"
+    assert demangle_symbolic_name("_$s4main3fooyyF") == "main.foo() -> ()"
+
+
+def test_demangle_leaves_plain_symbols_unchanged():
+    assert demangle_symbolic_name("CCCryptorCreate") == "CCCryptorCreate"
 
 
 class _UnserializableThing:

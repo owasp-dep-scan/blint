@@ -8,7 +8,7 @@ These properties are specific to the AppThreat tools. They are not part of the C
 
 The properties described here are written by three tools that share one BOM.
 
-blint parses the binary and Android artifacts and writes the component inventory together with the `internal:` and `internal.` properties. When deep mode is enabled it also parses the dex classes, which is what makes service detection and behavioural review possible. When disassembly is enabled it additionally writes a Dalvik callgraph sidecar next to the BOM.
+blint parses the binary, Android, and iOS/macOS (`.ipa`) artifacts and writes the component inventory together with the `internal:` and `internal.` properties. When deep mode is enabled it also parses the dex classes (Android) and the linked dylibs of each Mach-O (iOS), which is what makes service detection and behavioural review possible. When disassembly is enabled it additionally writes callgraph sidecars next to the BOM: a Dalvik callgraph for android apps and a native Mach-O callgraph per embedded binary for iOS/macOS apps.
 
 atom-tools runs blint and atom, then merges the reachability evidence from atom into the BOM. It promotes the services that the application actually reaches into the `services` array and attaches reachability counts to them.
 
@@ -59,6 +59,25 @@ These properties appear on the components that represent the files inside the ap
 | `internal:appFile`   | file component                 | single value   | On every file component                      | The originating application file, which ties a split or nested artifact back to its parent.                        |
 | `internal:functions` | dex or shared object component | delimited list | In deep mode for dex, and for shared objects | The method or function names extracted from the artifact. For dex this is the smali style method signature.        |
 | `internal:classes`   | dex component                  | delimited list | In deep mode for dex files                   | The class names defined in the dex file. This is the signal that service detection and behavioural review consume. |
+
+## iOS / macOS application properties
+
+These properties appear when blint generates a BOM for an iOS/macOS app archive (`.ipa`). The parent application component is identified by the bundle's `CFBundleIdentifier` and uses a `pkg:ios/<bundle-identifier>@<version>` purl. Each embedded Mach-O binary (the main executable, frameworks, dylibs, and app extensions) becomes a component keyed by its bundle-relative path (`pkg:ios/<identifier>@<version>?path=<bundle-path>`).
+
+| Property                       | Object                | Value type   | When emitted                                                    | What it captures                                                                                                                                                                                                                       |
+| ------------------------------ | --------------------- | ------------ | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal:bundleName`          | application component | single value | When the `Info.plist` declares `CFBundleName`                   | The bundle short name.                                                                                                                                                                                                                 |
+| `internal:bundleDisplayName`   | application component | single value | When `CFBundleDisplayName` is present                           | The user-facing app name shown on the home screen.                                                                                                                                                                                     |
+| `internal:bundleBuild`         | application component | single value | When `CFBundleVersion` is present                               | The build number, which orders builds more reliably than the display version.                                                                                                                                                          |
+| `internal:minimumOSVersion`    | application component | single value | When `MinimumOSVersion` is present                              | The lowest OS version the app supports, which bounds the platform hardening that can be assumed.                                                                                                                                       |
+| `internal:platformName`        | application component | single value | When `DTPlatformName` is present                                | The build platform, for example `iphoneos`.                                                                                                                                                                                            |
+| `internal:platformVersion`     | application component | single value | When `DTPlatformVersion` is present                             | The SDK platform version the app was built against.                                                                                                                                                                                    |
+| `internal:applicationCategory` | application component | single value | When `LSApplicationCategoryType` is present                     | The App Store application category.                                                                                                                                                                                                    |
+| `internal:role`                | binary component      | single value | On every embedded Mach-O component                              | The binary's role in the bundle: `main`, `framework`, `dylib`, or `plugin`.                                                                                                                                                            |
+| `internal:bundleIdentifier`    | binary component      | single value | When an embedded framework / extension has its own `Info.plist` | The real product identifier of a bundled dependency, distinct from the host app identifier.                                                                                                                                            |
+| `internal:provenance`          | library component     | single value | On linked-dylib components in deep mode                         | `apple-platform` for OS-provided frameworks (`/System`, `/usr/lib`, ...) or `bundled` for `@rpath`/`@executable_path` third-party libraries. Apple platform libraries are also scoped `excluded` so consumers can filter the OS noise. |
+
+The main executable also carries the binary symbol and import properties documented in the next section, and (in deep mode) its linked dylibs become library components depending on it.
 
 ## Native binary symbol properties
 
@@ -134,6 +153,10 @@ The chen tag namespaces that drive the atom-tools service and tracker attributio
 ## The Dalvik callgraph sidecar
 
 When disassembly is enabled, blint writes a callgraph next to the BOM rather than inside it, because a full callgraph is large. The file is named `<bom-stem>-<app>.dex-callgraph.json` and uses the same node and edge shape as the native binary callgraph that blint produces for ELF, PE, and Mach-O. Each node carries the method index, the resolved descriptor, and a flag that records whether the method has a body in the analyzed dex. Each edge is a caller to callee pair derived from the invoke instructions. The callgraph can be loaded by the blint callgraph tooling and exported to DOT or GraphML. atom-tools records the path to this sidecar in the report it writes so that the callgraph can be located alongside the other artifacts.
+
+## The iOS/macOS callgraph sidecars
+
+For an iOS/macOS app archive, disassembly is performed per embedded Mach-O, so blint writes one callgraph sidecar per binary that yields a graph. Each file is named `<bom-stem>-<app>-<bundle-path>.callgraph.json` (the bundle-relative path is slugified into the filename) and uses the same node and edge shape as the native ELF/PE/Mach-O callgraph. FairPlay-encrypted binaries are skipped because their `__TEXT` cannot be disassembled. As with the Dalvik sidecar, these files can be loaded by the blint callgraph tooling and exported to DOT, GraphML, or GEXF.
 
 ## Using these properties
 

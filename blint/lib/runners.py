@@ -16,6 +16,7 @@ from blint.lib.sbom import generate
 from blint.lib.utils import (
     export_metadata,
     find_android_files,
+    find_ios_files,
     gen_file_list,
     get_hex_truncation_count,
     is_android_app,
@@ -44,10 +45,13 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
     if wasm_files:
         LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
     android_files = []
+    ios_files = []
     for src in blint_options.src_dir_image:
         if files := find_android_files(src):
             android_files += files
-    return generate(blint_options, exe_files, android_files)
+        if files := find_ios_files(src):
+            ios_files += files
+    return generate(blint_options, exe_files, android_files, ios_files)
 
 
 def run_default_mode(blint_options: BlintOptions) -> None:

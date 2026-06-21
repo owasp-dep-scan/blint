@@ -136,6 +136,23 @@ rules:
       - pathContentOfSymbolicLink
 ```
 
+### Mobile (MASVS) rules for iOS/macOS
+
+The shipped annotation file `blint/data/annotations/review_ios_masvs.yml` adds a
+set of OWASP MASVS-aligned rules for Mach-O binaries (`exe_type: MachO`). It
+combines a `SYMBOL_REVIEWS` block (matched against symbols, recovered selectors,
+and external classes) and an `EXE_REVIEWS` block that sets
+`include_informative_strings: true` to also match embedded strings and injected
+tokens. Rule IDs include `IOS_WEAK_CRYPTO`, `IOS_CERT_PINNING`,
+`IOS_WEBVIEW_JS_BRIDGE`, `IOS_INSECURE_STORAGE`, `IOS_PASTEBOARD_WRITE`,
+`IOS_JAILBREAK_DETECTION`, and `IOS_INSECURE_TRANSPORT_ATS`.
+
+The App Transport Security policy lives in the app `Info.plist` rather than the
+Mach-O, so blint projects a weakened policy into the main binary's
+`informative_strings` as `ATS_*` tokens (e.g. `ATS_NSAllowsArbitraryLoads`) that
+`IOS_INSECURE_TRANSPORT_ATS` matches. This is the recommended pattern for any
+rule that needs to reason over bundle-level metadata.
+
 ### Example 3: `METHOD_REVIEWS` (Pattern Clusters with Shared Matches)
 
 This rule requires at least two distinct pattern hits before it triggers and allows overlapping rules to reuse the same matched symbol names.
