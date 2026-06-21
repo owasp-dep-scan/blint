@@ -133,25 +133,37 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
 
 - **Encryption (`is_encrypted`, `encryption_info`):** Derived from `LC_ENCRYPTION_INFO(_64)`. `is_encrypted` is `true` when `crypt_id` is non-zero (FairPlay-protected App Store binaries); developer, ad-hoc, and enterprise builds report `false`. `encryption_info` carries `crypt_id`, `crypt_offset`, and `crypt_size`. An encrypted `__TEXT` segment cannot be meaningfully disassembled without on-device decryption.
 
-- **Objective-C metadata (`objc_metadata`):** Recovered by walking the raw `__objc_*` sections (LIEF's community build does not expose this). Chained-fixup pointers are resolved via relocation targets, and external class pointers via the dyld binding table. Present only when the binary contains Objective-C metadata.
+- **Objective-C metadata (`objc_metadata`):** Recovered by walking the raw `__objc_*` sections (LIEF's community build does not expose this). Internal pointers are resolved via relocation targets, with a chained-fixup fallback that decodes raw `dyld` chained pointers (validated against mapped section ranges) when no relocation map is present; external class pointers are resolved via the dyld binding table. Present only when the binary contains 64-bit Objective-C metadata (32-bit armv7/i386 layouts are skipped).
   - `class_count`, `protocol_count`, `selector_count`: summary counters.
   - `classes`: each entry has `name`, `superclass` (internal class name or external framework class), `method_count`, `methods` (selector names), and optional `protocols`.
   - `protocols`: declared protocols with their `name` and `methods`.
   - `selectors`: distinct selectors referenced at message-send sites (`__objc_selrefs`).
   - `external_classes`: framework/runtime classes the binary links against (e.g. `CLLocationManager`, `CTTelephonyNetworkInfo`). Selectors and external classes feed the capability review, surfacing iOS privacy capabilities.
+  - `method_imps`: recovered method implementations as `{name, address}`, where `name` is the readable `-[Class selector]` form and `address` is the implementation's virtual address. These seed and label the `functions` list (see below) so message handlers are disassembled and named even in stripped binaries.
 
-> **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`). When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
+- **Function recovery (`functions`):** For stripped release builds (the common case for shipped iOS/macOS apps) the symbol table exposes little beyond `__mh_execute_header`. blint augments the function list from the `LC_FUNCTION_STARTS` table — every entry point is recovered, reusing a surviving symbol name when one exists and synthesising a `sub_<address>` name otherwise. Recovered Objective-C implementations then upgrade matching `sub_<address>` entries to their `-[Class selector]` names. This is what allows disassembly and callgraph construction to work on stripped apps.
+
+- **Skipped disassembly (`disassembly_skipped`):** When `--disassemble` is requested for a FairPlay-encrypted binary (`is_encrypted` is `true`), disassembly is skipped and this field is set to `fairplay_encrypted` rather than producing meaningless instructions from the encrypted `__TEXT`.
+
+> **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`), including the Mach-O underscore-prefixed manglings (`_$s…`/`_$S…`/`_T0…`) which the bundled demangler recognises directly. When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
 
 ### For iOS/macOS Apps (`.ipa`)
 
 An `.ipa` is a zip archive containing a `Payload/<App>.app/` bundle. blint unpacks it and analyzes every Mach-O it contains — the main executable, embedded frameworks and dylibs (`Frameworks/`), and app extensions (`PlugIns/*.appex`) — each producing its own `*-metadata.json`. The application context from the bundle's `Info.plist` is attached to each binary's metadata.
 
-| Attribute            | Description                                                                                                                                                                                                           |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ios_bundle`         | Bundle context: `bundle_identifier`, `bundle_name`, `bundle_version`, `bundle_build`, `minimum_os_version`, `platform_name`, `application_category`, `role` (`main`/`framework`/`dylib`/`plugin`), and `bundle_path`. |
-| `bundle_identifier`  | Convenience top-level copy of the app's `CFBundleIdentifier`.                                                                                                                                                         |
-| `bundle_version`     | Convenience top-level copy of `CFBundleShortVersionString`.                                                                                                                                                           |
-| `minimum_os_version` | Minimum supported OS version from the bundle.                                                                                                                                                                         |
+| Attribute            | Description                                                                                                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ios_bundle`         | Bundle context: `bundle_identifier`, `bundle_name`, `bundle_version`, `bundle_build`, `minimum_os_version`, `platform_name`, `application_category`, `role` (`main`/`framework`/`dylib`/`plugin`), `bundle_path`, and the optional `app_transport_security` and `url_schemes` keys described below. |
+| `bundle_identifier`  | Convenience top-level copy of the app's `CFBundleIdentifier`.                                                                                                                                                                                                                                       |
+| `bundle_version`     | Convenience top-level copy of `CFBundleShortVersionString`.                                                                                                                                                                                                                                         |
+| `minimum_os_version` | Minimum supported OS version from the bundle.                                                                                                                                                                                                                                                       |
+
+The bundle context can also carry two security-relevant keys parsed from the `Info.plist`:
+
+- `app_transport_security`: present only when the App Transport Security policy weakens the secure default. Carries `allows_arbitrary_loads`, `allows_arbitrary_loads_media`, `allows_arbitrary_loads_web`, and an `insecure_exception_domains` list. For the main executable these are also projected into `informative_strings` as `ATS_*` tokens so the rule engine can flag a weakened transport posture (rule `IOS_INSECURE_TRANSPORT_ATS`).
+- `url_schemes`: the custom URL schemes the app registers (`CFBundleURLTypes`), useful as deep-link / inter-app entry points.
+
+Embedded framework and app-extension binaries are additionally enriched with their _own_ `Info.plist` identity (`bundle_identifier`, `bundle_version`) so the SBOM can report the real product version of a bundled dependency rather than inheriting the host app's version.
 
 ### For WASM Binaries
 

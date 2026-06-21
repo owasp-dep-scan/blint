@@ -2,6 +2,7 @@ import base64
 import binascii
 import codecs
 import os
+import shutil
 import sys
 import uuid
 from datetime import datetime
@@ -37,7 +38,9 @@ from blint.db import (
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_services import detect_services
 from blint.lib.binary import is_wasm_file, parse
+from blint.lib.ios import collect_ios_app
 from blint.lib.utils import (
+    calculate_hashes,
     camel_to_snake,
     create_component_evidence,
     find_bom_files,
@@ -109,16 +112,20 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX:
+def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=None) -> CycloneDX:
     """
     Generates an SBOM for the given source directories.
 
     Args:
         blint_options (BlintOptions): A BlintOptions object containing the SBOM generation options.
+        exe_files (list): Native binaries to analyse.
+        android_files (list): Android app archives to analyse.
+        ios_files (list): iOS/macOS app archives (``.ipa``) to analyse.
     Returns:
         CycloneDX: Generated CycloneDX SBOM
     """
-    if not android_files and not exe_files:
+    ios_files = ios_files or []
+    if not android_files and not exe_files and not ios_files:
         return False
     symbols_purl_map = {}
     if blint_options.src_dir_boms:
@@ -179,6 +186,17 @@ def generate(blint_options: BlintOptions, exe_files, android_files) -> CycloneDX
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
             if blint_options.disassemble:
                 write_dex_callgraph(f, blint_options.sbom_output)
+        if ios_files:
+            task = progress.add_task(
+                f"[green] Parsing {len(ios_files)} iOS apps",
+                total=len(ios_files),
+                start=True,
+            )
+        for f in ios_files:
+            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
+            components += process_ios_file(dependencies_dict, blint_options.deep_mode, f, sbom)
+            if blint_options.disassemble:
+                write_ios_callgraphs(f, blint_options.sbom_output)
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
@@ -747,6 +765,187 @@ def process_android_file(
     return app_components
 
 
+def _ios_purl(bundle_identifier: str, version: str, qualifiers: dict | None = None) -> str:
+    """Build a ``pkg:ios`` PackageURL string for an app bundle component."""
+    return PackageURL(
+        type="ios",
+        name=bundle_identifier,
+        version=version or None,
+        qualifiers=qualifiers or {},
+    ).to_string()
+
+
+def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
+    """Build the parent application component for an iOS/macOS app bundle.
+
+    The component is identified by the bundle's ``CFBundleIdentifier`` and
+    version, mirroring how the android path derives the parent from the
+    manifest package name.
+    """
+    identifier = bundle_info.get("bundle_identifier")
+    name = identifier or bundle_info.get("bundle_name") or os.path.basename(app_file)
+    version = str(bundle_info.get("bundle_version") or "")
+    if not name:
+        return None
+    purl = _ios_purl(name, version)
+    component = Component(type=Type.application, name=name, version=version, purl=purl)
+    component.bom_ref = RefType(purl)
+    scalar_props = {
+        "internal:bundleName": bundle_info.get("bundle_name"),
+        "internal:bundleDisplayName": bundle_info.get("bundle_display_name"),
+        "internal:bundleBuild": bundle_info.get("bundle_build"),
+        "internal:minimumOSVersion": bundle_info.get("minimum_os_version"),
+        "internal:platformName": bundle_info.get("platform_name"),
+        "internal:platformVersion": bundle_info.get("platform_version"),
+        "internal:applicationCategory": bundle_info.get("application_category"),
+    }
+    component.properties = [
+        Property(name=key, value=str(value)) for key, value in scalar_props.items() if value
+    ]
+    return component
+
+
+def ios_binary_component(entry: dict, bundle_info: dict) -> Component:
+    """Build a component for a single Mach-O binary inside an app bundle.
+
+    The main executable is reported as an application sub-component while
+    embedded frameworks, dylibs and app-extension binaries are reported as
+    libraries. Embedded frameworks and extensions are identified by their own
+    ``Info.plist`` (real product identifier and version) when available, falling
+    back to the host app's identity; components are keyed by their
+    bundle-relative path so they remain unique within the bundle.
+    """
+    bundle_path = entry.get("bundle_path") or os.path.basename(entry["path"])
+    role = entry.get("role", "framework")
+    name = os.path.basename(bundle_path)
+    # purls are canonical and must not embed Windows separators; the bundle path
+    # is logically POSIX-style regardless of the extraction host.
+    purl_path = bundle_path.replace("\\", "/")
+    # Prefer the binary's own bundle identity (set for frameworks / appex);
+    # fall back to the host application's identity and version.
+    identifier = entry.get("bundle_identifier") or bundle_info.get("bundle_identifier") or name
+    version = str(entry.get("bundle_version") or bundle_info.get("bundle_version") or "")
+    comp_type = Type.application if role == "main" else Type.library
+    purl = _ios_purl(identifier, version, {"path": purl_path})
+    properties = [
+        Property(name="internal:srcFile", value=bundle_path),
+        Property(name="internal:role", value=role),
+    ]
+    if entry.get("bundle_identifier"):
+        properties.append(Property(name="internal:bundleIdentifier", value=identifier))
+    component = Component(
+        type=comp_type,
+        name=name,
+        version=version,
+        purl=purl,
+        scope=Scope.required,
+        evidence=create_component_evidence(bundle_path, 0.8),
+        properties=properties,
+    )
+    component.bom_ref = RefType(purl)
+    hashes = calculate_hashes(entry["path"])
+    if hashes.get("sha256"):
+        component.hashes = [Hash(alg=HashAlg.SHA_256, content=hashes["sha256"])]
+    return component
+
+
+# Install-path prefixes of dylibs provided by the iOS/macOS platform (the OS or
+# the toolchain). These are not third-party supply-chain dependencies.
+_APPLE_PLATFORM_DYLIB_PREFIXES = (
+    "/System/",
+    "/usr/lib/",
+    "/Library/Apple/",
+)
+
+
+def is_apple_platform_library(install_name: str) -> bool:
+    """Return True for a dylib install name provided by the Apple platform.
+
+    Apps link many Apple frameworks (Foundation, UIKit, libSystem, ...) by
+    absolute install path. These ship with the OS rather than being bundled in
+    the ``.ipa``, so they are platform-provided rather than supply-chain
+    dependencies and are tagged accordingly in the SBOM.
+    """
+    if not install_name:
+        return False
+    return install_name.startswith(_APPLE_PLATFORM_DYLIB_PREFIXES)
+
+
+def ios_binary_libraries(bin_path: str) -> list[Component]:
+    """Build linked-dylib components for one Mach-O, tagging their provenance.
+
+    Each ``LC_LOAD_DYLIB`` becomes a library component. Apple platform
+    frameworks are tagged ``internal:provenance=apple-platform`` and scoped
+    ``excluded`` so SBOM consumers can filter the OS-provided noise from the
+    bundled (``@rpath`` / ``@executable_path``) third-party dependencies, which
+    are tagged ``internal:provenance=bundled``.
+    """
+    lib_components: list[Component] = []
+    metadata = parse(bin_path)
+    for lib_entry in metadata.get("libraries", []) or []:
+        comp = create_library_component(lib_entry, bin_path)
+        install_name = lib_entry.get("name", "")
+        if is_apple_platform_library(install_name):
+            comp.scope = Scope.excluded
+            provenance = "apple-platform"
+        else:
+            provenance = "bundled"
+        if comp.properties is None:
+            comp.properties = []
+        comp.properties.append(Property(name="internal:provenance", value=provenance))
+        lib_components.append(comp)
+    return lib_components
+
+
+def process_ios_file(
+    dependencies_dict: dict[str, set],
+    deep_mode: bool,
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process an iOS/macOS app (``.ipa``) and update the SBOM.
+
+    The archive is unpacked and each embedded Mach-O binary (the main
+    executable, frameworks, dylibs and app extensions) becomes a component
+    depending on the app-bundle parent, mirroring the android app path.
+
+    Args:
+        dependencies_dict (dict[str, set]): Existing dependencies dictionary.
+        deep_mode (bool): Flag indicating whether to include per-binary library
+            components extracted from the Mach-O load commands.
+        f (str): The ``.ipa`` file to process.
+        sbom (CycloneDX): Software Bill-of-Materials object to be updated.
+
+    Returns:
+        list: The components discovered in the app.
+    """
+    app = collect_ios_app(f)
+    if app is None:
+        return []
+    components: list[Component] = []
+    try:
+        parent_component = ios_parent_component(app["bundle_info"], f)
+        if parent_component:
+            if not sbom.metadata.component.components:
+                sbom.metadata.component.components = []
+            _add_to_parent_component(sbom.metadata.component.components, parent_component)
+        binary_components: list[Component] = []
+        for entry in app["binaries"]:
+            comp = ios_binary_component(entry, app["bundle_info"])
+            binary_components.append(comp)
+            components.append(comp)
+            if deep_mode:
+                lib_components = ios_binary_libraries(entry["path"])
+                components += lib_components
+                if lib_components:
+                    track_dependency(dependencies_dict, comp, lib_components)
+        if parent_component and binary_components:
+            track_dependency(dependencies_dict, parent_component, binary_components)
+    finally:
+        shutil.rmtree(app["temp_dir"], ignore_errors=True)
+    return components
+
+
 def write_dex_callgraph(app_file: str, sbom_output: str) -> None:
     """
     Write a Dalvik callgraph sidecar next to the BOM.
@@ -777,6 +976,60 @@ def write_dex_callgraph(app_file: str, sbom_output: str) -> None:
         )
     except OSError as e:
         LOG.debug(f"Unable to write the dex callgraph to {out_file}: {e}")
+
+
+def _callgraph_sidecar_slug(bundle_path: str) -> str:
+    """Turn a bundle-relative path into a filesystem-safe sidecar name segment.
+
+    Both POSIX (``/``) and Windows (``\\``) separators are flattened regardless
+    of the host OS so the emitted file name is deterministic everywhere.
+    """
+    slug = bundle_path.replace("\\", "_").replace("/", "_").replace(" ", "_")
+    return slug or "binary"
+
+
+def write_ios_callgraphs(app_file: str, sbom_output: str) -> None:
+    """
+    Write native Mach-O callgraph sidecars for an iOS/macOS app next to the BOM.
+
+    Emitted when disassembly is requested (``--disassemble``), mirroring the
+    Dalvik sidecar produced for android apps. One file is written per embedded
+    Mach-O that yields a callgraph, named
+    ``<bom-stem>-<app>-<bundle-path>.callgraph.json`` in the same JSON shape as
+    blint's native binary callgraph, so it can be loaded by the callgraph
+    tooling and exported to DOT / GraphML / GEXF. FairPlay-encrypted binaries
+    (whose ``__TEXT`` cannot be disassembled) are skipped.
+    """
+    if not sbom_output:
+        return
+    app = collect_ios_app(app_file)
+    if app is None:
+        return
+    stem = os.path.splitext(sbom_output)[0]
+    app_name = os.path.basename(app_file)
+    try:
+        for entry in app["binaries"]:
+            bin_path = entry["path"]
+            bundle_path = entry.get("bundle_path") or os.path.basename(bin_path)
+            try:
+                metadata = parse(bin_path, disassemble=True)
+            except Exception as e:  # callgraph emission must never fail SBOM generation
+                LOG.debug(f"Unable to disassemble {bundle_path} in {app_file}: {e}")
+                continue
+            callgraph = metadata.get("callgraph")
+            if not isinstance(callgraph, dict) or not callgraph.get("nodes"):
+                continue
+            out_file = f"{stem}-{app_name}-{_callgraph_sidecar_slug(bundle_path)}.callgraph.json"
+            try:
+                file_write(out_file, orjson.dumps(callgraph).decode(), log=LOG)
+                LOG.info(
+                    f"Wrote callgraph for {bundle_path} ({len(callgraph['nodes'])} nodes, "
+                    f"{len(callgraph['edges'])} edges) to {out_file}"
+                )
+            except OSError as e:
+                LOG.debug(f"Unable to write the callgraph to {out_file}: {e}")
+    finally:
+        shutil.rmtree(app["temp_dir"], ignore_errors=True)
 
 
 def process_dotnet_dependencies(

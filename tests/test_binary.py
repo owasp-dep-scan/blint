@@ -6,14 +6,80 @@ import pytest
 import blint.lib.binary as binary_module
 
 from blint.lib.binary import (
+    _parse_address,
     build_disassembly_callgraph_metadata,
     construct_llvm_target_tuple,
     demangle_symbolic_name,
     is_shared_library,
+    merge_macho_function_starts,
+    merge_macho_objc_functions,
     parse,
     parse_informative_strings,
     parse_macho_symbols,
 )
+
+
+class _FakeFunctionStart:
+    def __init__(self, address):
+        self.address = address
+
+
+class _FakeFunctionStarts:
+    def __init__(self, addresses):
+        self.functions = [_FakeFunctionStart(a) for a in addresses]
+
+
+class _FakeBinaryWithStarts:
+    def __init__(self, addresses):
+        self.function_starts = _FakeFunctionStarts(addresses)
+
+
+def test_parse_address_handles_int_hex_and_invalid():
+    assert _parse_address(0x4000) == 0x4000
+    assert _parse_address("0x4000") == 0x4000
+    assert _parse_address("16384") == 16384
+    assert _parse_address("not-an-address") is None
+    assert _parse_address(None) is None
+
+
+def test_merge_function_starts_adds_unnamed_and_reuses_symbol_names():
+    # __mh_execute_header is the only function lief recovered for a stripped
+    # binary; function_starts has the real entry points.
+    functions = [{"index": 0, "name": "__mh_execute_header", "address": "0x4000", "size": 0}]
+    symtab = [{"short_name": "main", "address": "0x5000"}]
+    parsed = _FakeBinaryWithStarts([0x4000, 0x5000, 0x6000])
+    merged = merge_macho_function_starts(functions, symtab, parsed)
+    by_addr = {f["address"]: f["name"] for f in merged}
+    # The pre-existing entry is preserved, the symbol-named entry is labelled,
+    # and the unknown entry is synthesised as sub_<address>.
+    assert by_addr["0x4000"] == "__mh_execute_header"
+    assert by_addr["0x5000"] == "main"
+    assert by_addr["0x6000"] == "sub_6000"
+    assert len(merged) == 3
+
+
+def test_merge_objc_functions_upgrades_synthesised_names():
+    functions = [
+        {"index": 0, "name": "sub_6000", "address": "0x6000", "size": 0},
+    ]
+    metadata = {
+        "functions": functions,
+        "objc_metadata": {
+            "method_imps": [
+                {"name": "-[Foo bar]", "address": 0x6000},  # upgrades sub_6000
+                {"name": "-[Foo baz]", "address": 0x7000},  # newly added
+            ]
+        },
+    }
+    merge_macho_objc_functions(metadata)
+    by_addr = {f["address"]: f["name"] for f in metadata["functions"]}
+    assert by_addr["0x6000"] == "-[Foo bar]"
+    assert by_addr["0x7000"] == "-[Foo baz]"
+
+
+def test_merge_objc_functions_noop_without_metadata():
+    metadata = {"functions": [{"name": "x", "address": "0x10"}]}
+    assert merge_macho_objc_functions(metadata) is metadata
 
 
 TEST_DATA_DIR = Path(__file__).resolve().parent / "data"

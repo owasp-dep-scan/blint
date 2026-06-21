@@ -1,0 +1,133 @@
+---
+text: Mobile (MASVS) capability and weakness review for iOS/macOS Mach-O binaries
+group: SYMBOL_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_WEAK_CRYPTO
+    title: Weak or broken cryptography in use
+    summary: Uses Weak Cryptography
+    description: |
+      The binary references cryptographic primitives that are considered weak or
+      broken: MD5/SHA-1 digests, DES/3DES/RC4 ciphers, or ECB block mode. These
+      offer no meaningful protection for confidentiality or integrity and should
+      be replaced with SHA-256+/AES-GCM. Maps to OWASP MASVS-CRYPTO-1.
+    patterns:
+      - CC_MD5
+      - CC_MD4
+      - CC_MD2
+      - CC_SHA1
+      - kCCAlgorithmDES
+      - kCCAlgorithm3DES
+      - kCCAlgorithmRC4
+      - kCCOptionECBMode
+      - CCCryptorCreateWithMode
+  - id: IOS_CERT_PINNING
+    title: TLS certificate or public-key pinning present
+    summary: Pins TLS Certificates
+    description: |
+      The binary evaluates server trust directly or uses a pinning library
+      (TrustKit, AFNetworking's AFSecurityPolicy, Alamofire ServerTrust). Pinning
+      hardens TLS against compromised or rogue certificate authorities. Its
+      presence is a positive control; its absence in an app handling sensitive
+      data is worth reviewing. Maps to OWASP MASVS-NETWORK-2.
+    patterns:
+      - SecTrustEvaluate
+      - SecPolicyCreateSSL
+      - setSSLPinningMode
+      - AFSecurityPolicy
+      - TrustKit
+      - pinnedCertificates
+      - evaluateServerTrust
+      - ServerTrustPolicy
+      - certificatePinning
+  - id: IOS_WEBVIEW_JS_BRIDGE
+    title: Web view JavaScript bridge in use
+    summary: Bridges Native and JavaScript
+    description: |
+      The binary exposes a native<->JavaScript bridge through WKWebView
+      (addScriptMessageHandler / evaluateJavaScript) or the deprecated UIWebView
+      (stringByEvaluatingJavaScriptFromString). Bridges that pass untrusted web
+      content into native handlers can lead to data exposure or code execution
+      and warrant input-validation review. Maps to OWASP MASVS-PLATFORM-2.
+    patterns:
+      - addScriptMessageHandler
+      - stringByEvaluatingJavaScriptFromString
+      - evaluateJavaScript
+      - WKUserContentController
+      - JSContext
+      - javaScriptEnabled
+      - UIWebView
+  - id: IOS_INSECURE_STORAGE
+    title: Potentially insecure local data storage
+    summary: May Store Data Insecurely
+    description: |
+      The binary writes data via APIs that do not encrypt at rest by default,
+      such as NSUserDefaults, plain file writes (writeToFile / NSData writes) or
+      NSKeyedArchiver. Storing credentials, tokens or PII through these instead
+      of the Keychain leaves it readable on a compromised or backed-up device.
+      Maps to OWASP MASVS-STORAGE-1.
+    min_patterns: 2
+    patterns:
+      - NSUserDefaults
+      - standardUserDefaults
+      - "writeToFile:atomically:"
+      - "writeToURL:atomically:"
+      - NSKeyedArchiver
+      - dataWithContentsOfFile
+  - id: IOS_PASTEBOARD_WRITE
+    title: General pasteboard (clipboard) usage
+    summary: Writes to the System Pasteboard
+    description: |
+      The binary uses the general (system-wide) UIPasteboard, which is readable
+      by any other app on the device. Copying sensitive values such as passwords
+      or tokens to it can leak them to unrelated apps. Maps to OWASP
+      MASVS-STORAGE-2.
+    patterns:
+      - generalPasteboard
+      - UIPasteboardNameGeneral
+      - pasteboardWithName
+---
+text: Mobile (MASVS) string and behaviour review for iOS/macOS Mach-O binaries
+group: EXE_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_JAILBREAK_DETECTION
+    title: Jailbreak detection routines present
+    summary: Detects Jailbroken Devices
+    description: |
+      The binary references file system paths, URL schemes or libraries that are
+      characteristic of jailbroken devices (Cydia, MobileSubstrate, apt, an SSH
+      daemon, or shell binaries). This indicates a runtime integrity / anti-
+      tampering check. Its presence is a positive control; the checks themselves
+      are bypassable and should not be relied on alone. Maps to OWASP
+      MASVS-RESILIENCE-1.
+    include_informative_strings: true
+    patterns:
+      - /Applications/Cydia.app
+      - cydia://
+      - /Library/MobileSubstrate
+      - MobileSubstrate.dylib
+      - /bin/bash
+      - /bin/sh
+      - /usr/sbin/sshd
+      - /etc/apt
+      - /private/var/lib/apt
+      - /private/var/stash
+      - frida
+      - cynject
+  - id: IOS_INSECURE_TRANSPORT_ATS
+    title: App Transport Security weakened
+    summary: Weakens Secure Transport
+    description: |
+      The app's Info.plist weakens App Transport Security, either globally
+      (NSAllowsArbitraryLoads) or per host (NSExceptionAllowsInsecureHTTPLoads),
+      permitting cleartext HTTP or downgraded TLS connections. This exposes
+      traffic to interception and tampering. Maps to OWASP MASVS-NETWORK-1.
+    include_informative_strings: true
+    patterns:
+      - ATS_NSAllowsArbitraryLoads
+      - ATS_NSAllowsArbitraryLoadsForMedia
+      - ATS_NSAllowsArbitraryLoadsInWebContent
+      - ATS_NSExceptionAllowsInsecureHTTPLoads

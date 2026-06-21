@@ -4,6 +4,8 @@ import zipfile
 import os
 
 from blint.lib.ios import (
+    _ats_tokens,
+    _summarize_ats,
     collect_ios_app,
     enrich_with_bundle_context,
     is_ios_app,
@@ -88,3 +90,43 @@ def test_enrich_with_bundle_context_sets_path_and_ids():
     assert metadata["ios_bundle"]["role"] == "main"
     # The raw executable key is not leaked into the context.
     assert "executable" not in metadata["ios_bundle"]
+
+
+def test_summarize_ats_flags_arbitrary_loads():
+    ats = _summarize_ats({"NSAllowsArbitraryLoads": True})
+    assert ats["allows_arbitrary_loads"] is True
+
+
+def test_summarize_ats_flags_insecure_exception_domains():
+    ats = _summarize_ats(
+        {
+            "NSExceptionDomains": {
+                "insecure.example.com": {"NSExceptionAllowsInsecureHTTPLoads": True},
+                "secure.example.com": {"NSExceptionRequiresForwardSecrecy": True},
+            }
+        }
+    )
+    assert ats["insecure_exception_domains"] == ["insecure.example.com"]
+
+
+def test_summarize_ats_returns_none_for_secure_default():
+    assert _summarize_ats({"NSExceptionDomains": {}}) is None
+    assert _summarize_ats(None) is None
+
+
+def test_ats_tokens_emitted_for_weakened_policy():
+    tokens = _ats_tokens({"allows_arbitrary_loads": True, "insecure_exception_domains": ["x.com"]})
+    assert "ATS_NSAllowsArbitraryLoads" in tokens
+    assert "ATS_NSExceptionAllowsInsecureHTTPLoads" in tokens
+    assert _ats_tokens(None) == []
+
+
+def test_enrich_injects_ats_tokens_into_informative_strings():
+    metadata = {"name": "x", "informative_strings": []}
+    bundle_info = {"app_transport_security": {"allows_arbitrary_loads": True}}
+    enrich_with_bundle_context(metadata, bundle_info, "main", "DemoApp.app/DemoApp")
+    assert "ATS_NSAllowsArbitraryLoads" in metadata["informative_strings"]
+    # Non-main binaries do not get the bundle-level ATS tokens.
+    other = {"name": "y"}
+    enrich_with_bundle_context(other, bundle_info, "framework", "DemoApp.app/Frameworks/F")
+    assert "ATS_NSAllowsArbitraryLoads" not in (other.get("informative_strings") or [])

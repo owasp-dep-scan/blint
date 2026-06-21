@@ -1878,13 +1878,23 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata = add_mach0_metadata(exe_file, metadata, parsed_obj)
             if objc_metadata := parse_objc_metadata(parsed_obj):
                 metadata["objc_metadata"] = objc_metadata
+                metadata = merge_macho_objc_functions(metadata)
         metadata = standardize_keys(metadata)
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
         metadata["import_dependencies"] = analyze_import_deps(metadata)
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
-        if disassemble and isinstance(
+        if disassemble and metadata.get("is_encrypted"):
+            # FairPlay-encrypted App Store binaries have an encrypted __TEXT
+            # segment; disassembling it would yield meaningless instructions.
+            # Report the reason clearly instead of producing noise.
+            metadata["disassembly_skipped"] = "fairplay_encrypted"
+            LOG.warning(
+                f"Skipping disassembly of FairPlay-encrypted binary {exe_file}; "
+                "decrypt on-device (e.g. with a dump tool) before analysis."
+            )
+        elif disassemble and isinstance(
             parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
@@ -3062,6 +3072,115 @@ def add_mach0_header_data(exe_file, metadata, parsed_obj):
     return metadata
 
 
+def _parse_address(value) -> int | None:
+    """Parse an address that may be an int or a hex/decimal string."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        with contextlib.suppress(ValueError):
+            return int(value.strip(), 0)
+    return None
+
+
+def merge_macho_function_starts(functions, symtab_symbols, parsed_obj):
+    """Augment the function list with ``LC_FUNCTION_STARTS`` entry points.
+
+    iOS/macOS release binaries are typically stripped, leaving lief's aggregated
+    ``functions`` list with little more than ``__mh_execute_header``. The
+    ``LC_FUNCTION_STARTS`` load command records the entry address of every
+    function regardless of symbol stripping. We merge those addresses in,
+    reusing any name already known for the address (from a surviving symbol) and
+    synthesising a ``sub_<address>`` name otherwise, so the disassembler can
+    recover and link the full set of functions.
+    """
+    functions = list(functions or [])
+    known_addresses = set()
+    for fn in functions:
+        addr = _parse_address(fn.get("address"))
+        if addr is not None:
+            known_addresses.add(addr)
+
+    # Address -> best available symbol name, used to label recovered entries.
+    address_names = {}
+    for symbol in symtab_symbols or []:
+        addr = _parse_address(symbol.get("address"))
+        name = symbol.get("short_name") or symbol.get("name")
+        if addr and name and addr not in address_names:
+            address_names[addr] = name
+
+    start_addresses = []
+    with contextlib.suppress(AttributeError, TypeError):
+        fs = parsed_obj.function_starts
+        if fs is not None and not isinstance(fs, lief.lief_errors):
+            for entry in fs.functions:
+                addr = entry.address if hasattr(entry, "address") else entry
+                if isinstance(addr, int):
+                    start_addresses.append(addr)
+
+    next_index = len(functions)
+    for addr in sorted(set(start_addresses)):
+        if addr in known_addresses:
+            continue
+        known_addresses.add(addr)
+        functions.append(
+            {
+                "index": next_index,
+                "name": address_names.get(addr, f"sub_{addr:x}"),
+                "address": ADDRESS_FMT.format(addr).strip(),
+                "size": 0,
+                "flags": None,
+            }
+        )
+        next_index += 1
+    return functions
+
+
+def merge_macho_objc_functions(metadata):
+    """Seed/label functions from recovered Objective-C method implementations.
+
+    Each recovered implementation address is added as a function (when not
+    already present) and, when an entry was only synthesised as ``sub_<addr>``
+    from ``LC_FUNCTION_STARTS``, its name is upgraded to the readable
+    ``-[Class selector]`` form.
+    """
+    objc_metadata = metadata.get("objc_metadata")
+    if not objc_metadata:
+        return metadata
+    method_imps = objc_metadata.get("method_imps")
+    if not method_imps:
+        return metadata
+
+    functions = list(metadata.get("functions") or [])
+    by_address = {}
+    for fn in functions:
+        addr = _parse_address(fn.get("address"))
+        if addr is not None:
+            by_address[addr] = fn
+
+    next_index = len(functions)
+    for imp in method_imps:
+        addr = imp.get("address")
+        name = imp.get("name")
+        if not isinstance(addr, int) or not name:
+            continue
+        existing = by_address.get(addr)
+        if existing is None:
+            entry = {
+                "index": next_index,
+                "name": name,
+                "address": ADDRESS_FMT.format(addr).strip(),
+                "size": 0,
+                "flags": None,
+            }
+            functions.append(entry)
+            by_address[addr] = entry
+            next_index += 1
+        elif str(existing.get("name", "")).startswith("sub_"):
+            existing["name"] = name
+    metadata["functions"] = functions
+    return metadata
+
+
 def add_mach0_functions(metadata, parsed_obj):
     """Extracts MachO functions and symbols from the parsed object and adds them to the metadata.
 
@@ -3087,6 +3206,15 @@ def add_mach0_functions(metadata, parsed_obj):
                 if s["category"] == lief.MachO.Symbol.CATEGORY.LOCAL
             )
         ]
+
+    # Stripped release builds (the common case for shipped iOS/macOS apps)
+    # expose almost no local symbols, so lief's aggregated ``functions`` may
+    # contain only ``__mh_execute_header``. Recover the real entry points from
+    # the ``LC_FUNCTION_STARTS`` table so disassembly and callgraph
+    # construction have a complete set of functions to work with.
+    metadata["functions"] = merge_macho_function_starts(
+        metadata["functions"], metadata["symtab_symbols"], parsed_obj
+    )
 
     if exe_type:
         metadata["exe_type"] = exe_type

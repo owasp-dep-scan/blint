@@ -42,11 +42,23 @@ _MAX_PROTOCOLS = 10000
 _MAX_STRING = 512
 
 
+# Mach-O ABI64 flag in the cpu_type field; set for arm64/x86_64 binaries.
+_CPU_ARCH_ABI64 = 0x01000000
+
+
 class _MachoReader:
     """Reads bytes/pointers from a Mach-O by virtual address."""
 
     def __init__(self, parsed_obj):
         self._obj = parsed_obj
+        self.imagebase = 0
+        with contextlib.suppress(Exception):
+            self.imagebase = parsed_obj.imagebase
+        # 64-bit pointer width is assumed everywhere below; 32-bit binaries use
+        # a different runtime struct layout and are handled by the caller.
+        self.is_64 = True
+        with contextlib.suppress(Exception):
+            self.is_64 = bool(int(parsed_obj.header.cpu_type.value) & _CPU_ARCH_ABI64)
         # address -> resolved target for internal (rebased) pointers.
         self.ptr_map = {}
         with contextlib.suppress(Exception):
@@ -58,6 +70,14 @@ class _MachoReader:
             for binding in parsed_obj.bindings:
                 if binding.symbol is not None and binding.symbol.name:
                     self.bind_map[binding.address] = binding.symbol.name
+        # Virtual-address ranges of the mapped sections, used to validate
+        # pointers recovered from the raw chained-fixup fallback.
+        self._va_ranges = []
+        with contextlib.suppress(Exception):
+            for section in parsed_obj.sections:
+                start = section.virtual_address
+                if start:
+                    self._va_ranges.append((start, start + section.size))
 
     def bytes_at(self, va, size):
         with contextlib.suppress(Exception):
@@ -74,9 +94,43 @@ class _MachoReader:
         data = self.bytes_at(va, 4)
         return struct.unpack("<i", data)[0] if data else None
 
+    def u64(self, va):
+        data = self.bytes_at(va, 8)
+        return struct.unpack("<Q", data)[0] if data else None
+
+    def _in_image(self, va):
+        return any(start <= va < end for start, end in self._va_ranges)
+
+    def _decode_chained_pointer(self, va):
+        """Recover a pointer target from a raw chained-fixup slot.
+
+        Modern arm64(e) binaries store ``__objc_*`` pointers as dyld chained
+        fixups rather than plain rebased pointers, so ``relocations`` is empty
+        and ``ptr_map`` misses. The encoded entry packs the target as an offset
+        from the image base; the exact field width varies by pointer format
+        (auth vs rebase), so we try the documented offset widths and accept the
+        first interpretation that lands inside a mapped section.
+        """
+        raw = self.u64(va)
+        if not raw:
+            return None
+        candidates = (
+            raw,  # already a full virtual address
+            self.imagebase + (raw & 0xFFFFFFFF),  # arm64e auth: low 32-bit offset
+            self.imagebase + (raw & 0xFFFFFFFFF),  # 64-bit rebase: 36-bit offset
+            raw & 0x7FFFFFFFFF,  # masked direct virtual address
+        )
+        for candidate in candidates:
+            if candidate and self._in_image(candidate):
+                return candidate
+        return None
+
     def ptr(self, va):
         """Resolved pointer stored at ``va`` (rebase target), or None."""
-        return self.ptr_map.get(va)
+        target = self.ptr_map.get(va)
+        if target is not None:
+            return target
+        return self._decode_chained_pointer(va)
 
     def cstring(self, va):
         if not va:
@@ -101,37 +155,51 @@ def _section_map(parsed_obj):
     return sections
 
 
-def _parse_method_list(reader, mlist_va):
-    """Return the list of method (selector) names for a method_list_t."""
+def _iter_method_entries(reader, mlist_va):
+    """Yield ``(name, imp)`` for each method in a method_list_t.
+
+    ``name`` is the selector string and ``imp`` is the resolved virtual address
+    of the method implementation (or ``None`` when it cannot be recovered, as is
+    the case for protocol method descriptions which carry no implementation).
+    Both the modern "small" relative-offset format and the legacy pointer format
+    are supported.
+    """
     if not mlist_va:
-        return []
+        return
     entsize_and_flags = reader.u32(mlist_va)
     count = reader.u32(mlist_va + 4)
     if entsize_and_flags is None or not count:
-        return []
+        return
     count = min(count, _MAX_METHODS_PER_LIST)
     is_small = bool(entsize_and_flags & _SMALL_METHOD_FLAG)
     entsize = entsize_and_flags & _ENTSIZE_MASK
     if entsize <= 0:
         entsize = 12 if is_small else 24
-    names = []
     entries_base = mlist_va + 8
     for i in range(count):
         entry = entries_base + i * entsize
         if is_small:
-            # nameOffset is self-relative and points at a selref slot whose
-            # pointer resolves to the selector string.
+            # name/types/imp are stored as three self-relative int32 offsets.
+            # nameOffset points at a selref slot whose pointer resolves to the
+            # selector string; impOffset points directly at the implementation.
             name_off = reader.i32(entry)
             if name_off is None:
                 continue
             selref = reader.ptr(entry + name_off)
             name = reader.cstring(selref) if selref else ""
+            imp_off = reader.i32(entry + 8)
+            imp = (entry + 8 + imp_off) if imp_off else None
         else:
             sel_ptr = reader.ptr(entry)
             name = reader.cstring(sel_ptr) if sel_ptr else ""
+            imp = reader.ptr(entry + 16)
         if name:
-            names.append(name)
-    return names
+            yield name, imp
+
+
+def _parse_method_list(reader, mlist_va):
+    """Return the list of method (selector) names for a method_list_t."""
+    return [name for name, _imp in _iter_method_entries(reader, mlist_va)]
 
 
 def _parse_protocol_list(reader, plist_va):
@@ -168,7 +236,7 @@ def _superclass_name(reader, class_va):
     return reader.cstring(reader.ptr((ro & ~7) + _RO_NAME))
 
 
-def _parse_class(reader, class_va):
+def _parse_class(reader, class_va, method_imps=None):
     data = reader.ptr(class_va + _CLASS_DATA)
     if data is None:
         return None
@@ -176,7 +244,14 @@ def _parse_class(reader, class_va):
     name = reader.cstring(reader.ptr(ro + _RO_NAME))
     if not name:
         return None
-    methods = _parse_method_list(reader, reader.ptr(ro + _RO_BASE_METHODS))
+    methods = []
+    for sel, imp in _iter_method_entries(reader, reader.ptr(ro + _RO_BASE_METHODS)):
+        methods.append(sel)
+        # Record recovered implementation addresses so the disassembler can seed
+        # functions with readable ``-[Class selector]`` names even when the
+        # symbol table has been stripped.
+        if imp is not None and method_imps is not None:
+            method_imps.append({"name": f"-[{name} {sel}]", "address": imp})
     protocols = _parse_protocol_list(reader, reader.ptr(ro + _RO_BASE_PROTOCOLS))
     entry = {
         "name": name,
@@ -189,13 +264,13 @@ def _parse_class(reader, class_va):
     return entry
 
 
-def _parse_pointer_array_section(sections, name):
+def _parse_pointer_array_section(sections, name, ptr_size=8):
     """Yield (slot_va) for each pointer slot in a pointer-array section."""
     section = sections.get(name)
     if section is None:
         return
-    for i in range(section.size // 8):
-        yield section.virtual_address + i * 8
+    for i in range(section.size // ptr_size):
+        yield section.virtual_address + i * ptr_size
 
 
 def parse_objc_metadata(parsed_obj) -> dict:
@@ -210,20 +285,28 @@ def parse_objc_metadata(parsed_obj) -> dict:
         return {}
 
     reader = _MachoReader(parsed_obj)
+    # The struct offsets and pointer arithmetic below follow the 64-bit objc4
+    # runtime ABI. 32-bit (armv7/i386) binaries use a different layout; rather
+    # than emit wrong data we skip them (they are legacy, iOS 11+ is 64-bit).
+    if not reader.is_64:
+        LOG.debug("Skipping ObjC metadata parsing for 32-bit Mach-O binary")
+        return {}
+    ptr_size = 8
+    method_imps = []
     classes = []
-    for slot in _parse_pointer_array_section(sections, "__objc_classlist"):
+    for slot in _parse_pointer_array_section(sections, "__objc_classlist", ptr_size):
         if len(classes) >= _MAX_CLASSES:
             break
         class_va = reader.ptr(slot)
         if not class_va:
             continue
         with contextlib.suppress(Exception):
-            parsed = _parse_class(reader, class_va)
+            parsed = _parse_class(reader, class_va, method_imps)
             if parsed:
                 classes.append(parsed)
 
     protocols = []
-    for slot in _parse_pointer_array_section(sections, "__objc_protolist"):
+    for slot in _parse_pointer_array_section(sections, "__objc_protolist", ptr_size):
         proto_va = reader.ptr(slot)
         if not proto_va:
             continue
@@ -238,7 +321,7 @@ def parse_objc_metadata(parsed_obj) -> dict:
     # _OBJC_CLASS_$_*) are strong capability signals at message-send sites.
     selectors = []
     seen_sel = set()
-    for slot in _parse_pointer_array_section(sections, "__objc_selrefs"):
+    for slot in _parse_pointer_array_section(sections, "__objc_selrefs", ptr_size):
         sel = reader.cstring(reader.ptr(slot))
         if sel and sel not in seen_sel:
             seen_sel.add(sel)
@@ -261,6 +344,16 @@ def parse_objc_metadata(parsed_obj) -> dict:
         len(protocols),
         len(selectors),
     )
+    # Deduplicate recovered implementations by address (the same imp can appear
+    # in both a class and its metaclass method list).
+    seen_imp = set()
+    unique_imps = []
+    for entry in method_imps:
+        addr = entry["address"]
+        if addr and addr not in seen_imp:
+            seen_imp.add(addr)
+            unique_imps.append(entry)
+
     return {
         "class_count": len(classes),
         "protocol_count": len(protocols),
@@ -269,4 +362,5 @@ def parse_objc_metadata(parsed_obj) -> dict:
         "protocols": protocols,
         "selectors": selectors,
         "external_classes": external_classes,
+        "method_imps": unique_imps,
     }

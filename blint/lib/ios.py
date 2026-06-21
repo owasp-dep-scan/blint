@@ -54,7 +54,49 @@ def _read_bundle_info(app_dir: str) -> dict:
             info[meta_key] = plist[plist_key]
     if executable := plist.get("CFBundleExecutable"):
         info["executable"] = executable
+    if ats := _summarize_ats(plist.get("NSAppTransportSecurity")):
+        info["app_transport_security"] = ats
+    # URL schemes the app registers to handle (deep links / inter-app entry
+    # points worth surfacing for analysis).
+    schemes = []
+    for url_type in plist.get("CFBundleURLTypes") or []:
+        if isinstance(url_type, dict):
+            schemes += url_type.get("CFBundleURLSchemes") or []
+    if schemes:
+        info["url_schemes"] = sorted(set(schemes))
     return info
+
+
+def _summarize_ats(ats) -> dict | None:
+    """Summarise the ``NSAppTransportSecurity`` policy from an Info.plist.
+
+    App Transport Security enforces secure (HTTPS, TLS 1.2+) connections by
+    default. Apps can weaken it globally with ``NSAllowsArbitraryLoads`` or per
+    host via exception domains that disable forward secrecy, downgrade TLS, or
+    permit insecure HTTP loads. We capture the weakening flags so they can be
+    reported.
+    """
+    if not isinstance(ats, dict):
+        return None
+    summary = {
+        "allows_arbitrary_loads": bool(ats.get("NSAllowsArbitraryLoads")),
+        "allows_arbitrary_loads_media": bool(ats.get("NSAllowsArbitraryLoadsForMedia")),
+        "allows_arbitrary_loads_web": bool(ats.get("NSAllowsArbitraryLoadsInWebContent")),
+    }
+    insecure_domains = []
+    for domain, policy in (ats.get("NSExceptionDomains") or {}).items():
+        if not isinstance(policy, dict):
+            continue
+        if policy.get("NSExceptionAllowsInsecureHTTPLoads") or policy.get(
+            "NSThirdPartyExceptionAllowsInsecureHTTPLoads"
+        ):
+            insecure_domains.append(domain)
+    if insecure_domains:
+        summary["insecure_exception_domains"] = sorted(insecure_domains)
+    # Only report when something actually weakens the default secure posture.
+    if any(summary.values()):
+        return summary
+    return None
 
 
 def _collect_bundle_binaries(app_dir: str, bundle_info: dict) -> list[dict]:
@@ -68,18 +110,25 @@ def _collect_bundle_binaries(app_dir: str, bundle_info: dict) -> list[dict]:
 
     payload_dir = os.path.dirname(app_dir)
 
-    def _add(path: str, role: str):
+    def _add(path: str, role: str, component_info: dict | None = None):
         if not path or path in seen:
             return
         if os.path.isfile(path) and is_exe(path):
             seen.add(path)
-            binaries.append(
-                {
-                    "path": path,
-                    "role": role,
-                    "bundle_path": os.path.relpath(path, payload_dir),
-                }
-            )
+            entry = {
+                "path": path,
+                "role": role,
+                "bundle_path": os.path.relpath(path, payload_dir),
+            }
+            # Each embedded framework / extension carries its own Info.plist
+            # with the real product identifier and version; surfacing it lets
+            # the SBOM identify the dependency precisely rather than inheriting
+            # the host app's version.
+            if component_info:
+                for key in ("bundle_identifier", "bundle_version", "bundle_name"):
+                    if component_info.get(key):
+                        entry[key] = component_info[key]
+            binaries.append(entry)
 
     # Main executable from CFBundleExecutable (fall back to the .app basename).
     executable = bundle_info.get("executable") or os.path.splitext(os.path.basename(app_dir))[0]
@@ -92,7 +141,7 @@ def _collect_bundle_binaries(app_dir: str, bundle_info: dict) -> list[dict]:
             full = os.path.join(frameworks_dir, entry)
             if entry.endswith(".framework") and os.path.isdir(full):
                 fw_exe = os.path.splitext(entry)[0]
-                _add(os.path.join(full, fw_exe), "framework")
+                _add(os.path.join(full, fw_exe), "framework", _read_bundle_info(full))
             elif entry.endswith(".dylib"):
                 _add(full, "dylib")
 
@@ -104,7 +153,7 @@ def _collect_bundle_binaries(app_dir: str, bundle_info: dict) -> list[dict]:
             if entry.endswith(".appex") and os.path.isdir(appex):
                 appex_info = _read_bundle_info(appex)
                 appex_exe = appex_info.get("executable") or os.path.splitext(entry)[0]
-                _add(os.path.join(appex, appex_exe), "plugin")
+                _add(os.path.join(appex, appex_exe), "plugin", appex_info)
 
     return binaries
 
@@ -166,4 +215,26 @@ def enrich_with_bundle_context(
     for key in ("bundle_identifier", "bundle_version", "minimum_os_version"):
         if key in bundle_info:
             metadata.setdefault(key, bundle_info[key])
+    # The App Transport Security policy lives in the Info.plist rather than the
+    # Mach-O, so inject stable tokens into the binary's informative strings to
+    # let the rule engine flag a weakened secure-transport posture.
+    if role == "main":
+        for token in _ats_tokens(bundle_info.get("app_transport_security")):
+            metadata.setdefault("informative_strings", []).append(token)
     return metadata
+
+
+def _ats_tokens(ats: dict | None) -> list[str]:
+    """Translate an ATS summary into match tokens for the rule engine."""
+    if not ats:
+        return []
+    tokens = []
+    if ats.get("allows_arbitrary_loads"):
+        tokens.append("ATS_NSAllowsArbitraryLoads")
+    if ats.get("allows_arbitrary_loads_media"):
+        tokens.append("ATS_NSAllowsArbitraryLoadsForMedia")
+    if ats.get("allows_arbitrary_loads_web"):
+        tokens.append("ATS_NSAllowsArbitraryLoadsInWebContent")
+    if ats.get("insecure_exception_domains"):
+        tokens.append("ATS_NSExceptionAllowsInsecureHTTPLoads")
+    return tokens
