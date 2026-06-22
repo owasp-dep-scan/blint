@@ -1,0 +1,34 @@
+---
+text: Sensitive data-access capability review for iOS/macOS Mach-O binaries
+group: SYMBOL_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_CALENDAR_REMINDERS_ACCESS
+    title: Calendar / reminders access
+    summary: Can Access Calendar and Reminders
+    category: privacy-access
+    severity: info
+    description: |
+      The binary references EventKit (EKEventStore) used to read calendar events
+      and reminders. These reveal the user's schedule, locations and the people
+      they meet, and are permission-gated personal data.
+    patterns:
+      - EKEventStore
+      - requestFullAccessToEvents
+      - requestFullAccessToReminders
+      - predicateForEventsWithStartDate
+  - id: IOS_USER_TRACKING_REQUEST
+    title: App Tracking Transparency request
+    summary: Requests Tracking Authorization
+    category: privacy-tracking
+    severity: medium
+    description: |
+      The binary requests tracking authorization via ATTrackingManager. This
+      indicates the app intends to track the user across apps and websites,
+      typically to access the advertising identifier (IDFA) for cross-app
+      tracking, and requires an NSUserTrackingUsageDescription consent string.
+    patterns:
+      - ATTrackingManager
+      - requestTrackingAuthorization
+      - trackingAuthorizationStatus

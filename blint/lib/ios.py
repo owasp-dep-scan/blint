@@ -31,6 +31,42 @@ _INFO_PLIST_KEYS = {
     "LSApplicationCategoryType": "application_category",
 }
 
+# Filename of the app privacy manifest (iOS 17+ / required since May 2024). It is
+# a binary/XML plist declaring tracking, tracking domains, the categories of data
+# the app collects, and the "required reason" APIs the app (or an embedded SDK)
+# uses. See Apple's "Describing use of required reason API" documentation.
+_PRIVACY_MANIFEST_NAME = "PrivacyInfo.xcprivacy"
+
+# Required-reason API categories mapped to lowercase symbol/selector markers that
+# indicate the API is referenced by the binary. Apple requires each category in
+# use to be declared in the privacy manifest; undeclared use is reportable
+# (App Store warning ITMS-91053). Markers are kept high-signal to limit noise.
+_REQUIRED_REASON_API_MARKERS = {
+    "NSPrivacyAccessedAPICategoryUserDefaults": (
+        "nsuserdefaults",
+        "standarduserdefaults",
+    ),
+    "NSPrivacyAccessedAPICategoryFileTimestamp": (
+        "getattrlistbulk",
+        "nsfilemodificationdate",
+        "nsfilecreationdate",
+        "contentmodificationdatekey",
+        "creationdatekey",
+    ),
+    "NSPrivacyAccessedAPICategorySystemBootTime": (
+        "systemuptime",
+        "mach_absolute_time",
+        "kern.boottime",
+    ),
+    "NSPrivacyAccessedAPICategoryDiskSpace": (
+        "nsfilesystemfreesize",
+        "nsfilesystemsize",
+        "volumeavailablecapacitykey",
+        "volumetotalcapacitykey",
+    ),
+    "NSPrivacyAccessedAPICategoryActiveKeyboards": ("activeinputmodes",),
+}
+
 
 def is_ios_app(path) -> bool:
     """Return True when the path points to an iOS/macOS app archive (.ipa)."""
@@ -64,7 +100,91 @@ def _read_bundle_info(app_dir: str) -> dict:
             schemes += url_type.get("CFBundleURLSchemes") or []
     if schemes:
         info["url_schemes"] = sorted(set(schemes))
+    info.update(_collect_privacy_signals(plist))
     return info
+
+
+def _collect_privacy_signals(plist: dict) -> dict:
+    """Extract privacy-relevant declarations from an Info.plist.
+
+    These declarations describe the app's data-access posture independently of
+    its code: the sensitive resources it is provisioned to access (the
+    ``NS...UsageDescription`` consent strings), the other apps it can probe for
+    via ``canOpenURL`` (``LSApplicationQueriesSchemes``) and the local-network
+    services it discovers (``NSBonjourServices``).
+    """
+    signals: dict = {}
+    usage = sorted(
+        key for key in plist if isinstance(key, str) and key.endswith("UsageDescription")
+    )
+    if usage:
+        signals["privacy_usage_descriptions"] = usage
+    query_schemes = [
+        str(s) for s in (plist.get("LSApplicationQueriesSchemes") or []) if isinstance(s, str)
+    ]
+    if query_schemes:
+        signals["query_schemes"] = sorted(set(query_schemes))
+    bonjour = [str(s) for s in (plist.get("NSBonjourServices") or []) if isinstance(s, str)]
+    if bonjour:
+        signals["bonjour_services"] = sorted(set(bonjour))
+    return signals
+
+
+def _read_privacy_manifest(app_dir: str) -> dict | None:
+    """Read and aggregate the app privacy manifest(s) for a ``.app`` bundle.
+
+    The main bundle, each embedded framework and each app extension may ship its
+    own ``PrivacyInfo.xcprivacy``. We union their declarations so the reported
+    posture reflects the whole app (third-party SDKs included): whether any
+    component declares tracking, the set of tracking domains, the collected data
+    types and the required-reason API categories declared in use.
+    """
+    paths: list[str] = []
+    root_manifest = os.path.join(app_dir, _PRIVACY_MANIFEST_NAME)
+    if os.path.isfile(root_manifest):
+        paths.append(root_manifest)
+    for sub in ("Frameworks", "PlugIns"):
+        sub_dir = os.path.join(app_dir, sub)
+        if not os.path.isdir(sub_dir):
+            continue
+        for root, _dirs, files in os.walk(sub_dir):
+            if _PRIVACY_MANIFEST_NAME in files:
+                paths.append(os.path.join(root, _PRIVACY_MANIFEST_NAME))
+    if not paths:
+        return None
+
+    tracking = False
+    tracking_domains: set[str] = set()
+    data_types: set[str] = set()
+    api_categories: set[str] = set()
+    for path in paths:
+        try:
+            with open(path, "rb") as fp:
+                manifest = plistlib.load(fp)
+        except (OSError, ValueError, plistlib.InvalidFileException) as e:
+            LOG.debug(f"Could not read privacy manifest at {path}: {e}")
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        tracking = tracking or bool(manifest.get("NSPrivacyTracking"))
+        tracking_domains.update(
+            str(d) for d in (manifest.get("NSPrivacyTrackingDomains") or []) if isinstance(d, str)
+        )
+        for entry in manifest.get("NSPrivacyCollectedDataTypes") or []:
+            if isinstance(entry, dict) and entry.get("NSPrivacyCollectedDataType"):
+                data_types.add(str(entry["NSPrivacyCollectedDataType"]))
+        for entry in manifest.get("NSPrivacyAccessedAPITypes") or []:
+            if isinstance(entry, dict) and entry.get("NSPrivacyAccessedAPIType"):
+                api_categories.add(str(entry["NSPrivacyAccessedAPIType"]))
+
+    return {
+        "present": True,
+        "manifest_count": len(paths),
+        "tracking": tracking,
+        "tracking_domains": sorted(tracking_domains),
+        "collected_data_types": sorted(data_types),
+        "accessed_api_categories": sorted(api_categories),
+    }
 
 
 def _summarize_ats(ats) -> dict | None:
@@ -188,6 +308,8 @@ def collect_ios_app(app_file: str) -> dict | None:
 
     app_dir = app_dirs[0]
     bundle_info = _read_bundle_info(app_dir)
+    if manifest := _read_privacy_manifest(app_dir):
+        bundle_info["privacy_manifest"] = manifest
     binaries = _collect_bundle_binaries(app_dir, bundle_info)
     if not binaries:
         LOG.warning(f"No Mach-O binaries found in iOS app {app_file}; skipping")
@@ -218,10 +340,76 @@ def enrich_with_bundle_context(
     # The App Transport Security policy lives in the Info.plist rather than the
     # Mach-O, so inject stable tokens into the binary's informative strings to
     # let the rule engine flag a weakened secure-transport posture.
+    # Likewise, the privacy posture (consent strings, app-probing schemes,
+    # Bonjour services, the privacy manifest) lives outside the Mach-O. Inject
+    # stable tokens so the rule engine can flag the app's data-access surface and
+    # any required-reason APIs used without a matching manifest declaration.
     if role == "main":
         for token in _ats_tokens(bundle_info.get("app_transport_security")):
             metadata.setdefault("informative_strings", []).append(token)
+        privacy_tokens = _privacy_tokens(bundle_info)
+        privacy_tokens += _undeclared_required_reason_tokens(metadata, bundle_info)
+        for token in privacy_tokens:
+            metadata.setdefault("informative_strings", []).append(token)
     return metadata
+
+
+def _privacy_tokens(bundle_info: dict) -> list[str]:
+    """Translate the Info.plist / privacy-manifest posture into match tokens."""
+    tokens: list[str] = []
+    for key in bundle_info.get("privacy_usage_descriptions") or []:
+        tokens.append(f"PRIV_{key}")
+    if bundle_info.get("query_schemes"):
+        tokens.append("PRIV_LSApplicationQueriesSchemes")
+        # A large query list is a strong app-presence-probing signal on its own.
+        if len(bundle_info["query_schemes"]) >= 5:
+            tokens.append("PRIV_ManyApplicationQueriesSchemes")
+    if bundle_info.get("bonjour_services"):
+        tokens.append("PRIV_NSBonjourServices")
+    manifest = bundle_info.get("privacy_manifest")
+    if manifest:
+        if manifest.get("tracking"):
+            tokens.append("PRIV_NSPrivacyTracking")
+        if manifest.get("tracking_domains"):
+            tokens.append("PRIV_NSPrivacyTrackingDomains")
+        for category in manifest.get("accessed_api_categories") or []:
+            tokens.append(f"PRIV_{category}")
+    else:
+        tokens.append("PRIV_PrivacyManifestMissing")
+    return tokens
+
+
+def _undeclared_required_reason_tokens(metadata: dict, bundle_info: dict) -> list[str]:
+    """Emit tokens for required-reason APIs used without a manifest declaration.
+
+    Scans the binary's symbols and Objective-C runtime references for markers of
+    Apple's required-reason API categories and compares them against the
+    categories declared in the (aggregated) privacy manifest. Each category used
+    but not declared yields a ``PRIV_UNDECLARED_<category>`` token.
+    """
+    haystack = _symbol_haystack(metadata)
+    if not haystack:
+        return []
+    manifest = bundle_info.get("privacy_manifest") or {}
+    declared = set(manifest.get("accessed_api_categories") or [])
+    tokens: list[str] = []
+    for category, markers in _REQUIRED_REASON_API_MARKERS.items():
+        if category in declared:
+            continue
+        if any(marker in haystack for marker in markers):
+            tokens.append(f"PRIV_UNDECLARED_{category}")
+    return tokens
+
+
+def _symbol_haystack(metadata: dict) -> str:
+    """Build a lowercase blob of symbol and ObjC-runtime names for matching."""
+    names: list[str] = []
+    for key in ("dynamic_symbols", "symtab_symbols"):
+        names += [sym.get("name", "") for sym in metadata.get(key) or []]
+    if objc := metadata.get("objc_metadata"):
+        names += objc.get("selectors") or []
+        names += objc.get("external_classes") or []
+    return "\n".join(name for name in names if name).lower()
 
 
 def _ats_tokens(ats: dict | None) -> list[str]:

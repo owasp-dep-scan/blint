@@ -1,0 +1,81 @@
+---
+text: Privacy side-channel API review for iOS/macOS Mach-O binaries
+group: SYMBOL_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_APP_PRESENCE_PROBE
+    title: Installed-app presence probing
+    summary: Probes for Installed Apps
+    category: privacy-sidechannel
+    severity: medium
+    description: |
+      The binary calls canOpenURL, which (combined with the schemes listed in
+      LSApplicationQueriesSchemes) lets it detect which other apps are installed
+      without any permission. Enumerating installed apps is a side channel for
+      profiling users (interests, finance, dating, messaging) and is restricted
+      by App Store policy when used for tracking.
+    patterns:
+      - canOpenURL
+  - id: IOS_LOCAL_NETWORK_SCAN
+    title: Local network / Bonjour scanning
+    summary: Scans the Local Network
+    category: privacy-sidechannel
+    severity: medium
+    description: |
+      The binary discovers services and devices on the local network using
+      NWBrowser or NSNetServiceBrowser (Bonjour). Local-network scanning reveals
+      nearby devices (speakers, TVs, IoT, computers) and is a strong signal of
+      the user's home/office environment. It requires the local-network
+      permission and should be justified.
+    patterns:
+      - NWBrowser
+      - NSNetServiceBrowser
+      - netServiceBrowser
+      - CFNetServiceBrowser
+  - id: IOS_KEYCHAIN_PERSISTENCE
+    title: Identifier persistence across reinstalls
+    summary: Persists Data Across Reinstalls
+    category: privacy-fingerprint
+    severity: medium
+    description: |
+      The binary stores Keychain items with an always-available accessibility
+      class (kSecAttrAccessibleAlways / AfterFirstUnlock). Because Keychain
+      items survive app deletion, this is frequently used to persist a device or
+      install identifier across uninstall/reinstall, defeating the privacy
+      expectation that removing an app clears its local state.
+    patterns:
+      - kSecAttrAccessibleAlways
+      - kSecAttrAccessibleAlwaysThisDeviceOnly
+      - kSecAttrAccessibleAfterFirstUnlock
+---
+text: Privacy side-channel posture review for iOS/macOS app bundles
+group: EXE_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_MANY_QUERY_SCHEMES
+    title: Large installed-app query list declared
+    summary: Declares Many App Query Schemes
+    category: privacy-sidechannel
+    severity: medium
+    include_informative_strings: true
+    description: |
+      The app declares a large LSApplicationQueriesSchemes list, enabling it to
+      probe for many specific apps via canOpenURL. A broad query list is a
+      strong indicator of installed-app enumeration for user profiling rather
+      than legitimate single-app interoperation.
+    patterns:
+      - PRIV_ManyApplicationQueriesSchemes
+  - id: IOS_LOCAL_NETWORK_DECLARED
+    title: Local-network service discovery declared
+    summary: Declares Bonjour Service Discovery
+    category: privacy-sidechannel
+    severity: info
+    include_informative_strings: true
+    description: |
+      The app's Info.plist declares NSBonjourServices, indicating it browses for
+      services on the local network. Combined with local-network access this
+      exposes the user's nearby devices and environment.
+    patterns:
+      - PRIV_NSBonjourServices

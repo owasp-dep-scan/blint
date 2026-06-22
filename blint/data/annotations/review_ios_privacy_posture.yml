@@ -1,0 +1,76 @@
+---
+text: Privacy manifest and consent posture review for iOS/macOS app bundles
+group: EXE_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_TRACKING_DECLARED
+    title: Cross-app tracking declared in privacy manifest
+    summary: Declares Cross-App Tracking
+    category: privacy-tracking
+    severity: medium
+    include_informative_strings: true
+    description: |
+      The app's privacy manifest sets NSPrivacyTracking to true and/or lists
+      NSPrivacyTrackingDomains, declaring that it (or an embedded SDK) tracks
+      users across apps and websites. Connections to the declared tracking
+      domains are blocked unless the user grants tracking permission.
+    patterns:
+      - PRIV_NSPrivacyTracking
+      - PRIV_NSPrivacyTrackingDomains
+  - id: IOS_PRIVACY_MANIFEST_MISSING
+    title: Privacy manifest absent
+    summary: Ships Without a Privacy Manifest
+    category: privacy-posture
+    severity: info
+    include_informative_strings: true
+    description: |
+      The app bundle ships without a PrivacyInfo.xcprivacy manifest. Since May
+      2024 Apple requires apps (and many SDKs) to declare data collection,
+      tracking and required-reason API usage in a privacy manifest. Its absence
+      means the app's data practices are undeclared and may trigger App Store
+      review warnings.
+    patterns:
+      - PRIV_PrivacyManifestMissing
+  - id: IOS_UNDECLARED_REQUIRED_REASON_API
+    title: Required-reason API used without declaration
+    summary: Uses Undeclared Required-Reason APIs
+    category: privacy-posture
+    severity: medium
+    include_informative_strings: true
+    description: |
+      The binary references one of Apple's "required reason" APIs (user defaults,
+      file timestamps, system boot time, disk space, or active keyboards) for a
+      category that is not declared in the privacy manifest. Apple requires an
+      approved reason to be declared for each such category in use; undeclared
+      use corresponds to App Store warning ITMS-91053.
+    patterns:
+      - PRIV_UNDECLARED_NSPrivacyAccessedAPICategoryUserDefaults
+      - PRIV_UNDECLARED_NSPrivacyAccessedAPICategoryFileTimestamp
+      - PRIV_UNDECLARED_NSPrivacyAccessedAPICategorySystemBootTime
+      - PRIV_UNDECLARED_NSPrivacyAccessedAPICategoryDiskSpace
+      - PRIV_UNDECLARED_NSPrivacyAccessedAPICategoryActiveKeyboards
+  - id: IOS_SENSITIVE_PERMISSIONS_DECLARED
+    title: Sensitive data permissions declared
+    summary: Declares Sensitive Data Permissions
+    category: privacy-access
+    severity: info
+    include_informative_strings: true
+    description: |
+      The app's Info.plist declares consent strings for high-sensitivity data
+      sources (location, contacts, camera, microphone, photos, health, motion,
+      Bluetooth, local network or tracking). The presence of a consent string
+      means the app (or a bundled SDK) is provisioned to access that data, even
+      if the corresponding API calls are obfuscated or loaded dynamically.
+    patterns:
+      - PRIV_NSLocationWhenInUseUsageDescription
+      - PRIV_NSLocationAlwaysAndWhenInUseUsageDescription
+      - PRIV_NSContactsUsageDescription
+      - PRIV_NSCameraUsageDescription
+      - PRIV_NSMicrophoneUsageDescription
+      - PRIV_NSPhotoLibraryUsageDescription
+      - PRIV_NSHealthShareUsageDescription
+      - PRIV_NSMotionUsageDescription
+      - PRIV_NSBluetoothAlwaysUsageDescription
+      - PRIV_NSLocalNetworkUsageDescription
+      - PRIV_NSUserTrackingUsageDescription

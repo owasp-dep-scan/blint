@@ -38,7 +38,8 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `check_field` (Required for `function_flag` and `function_metric`): The path to the field within the `disassembled_functions` dictionary for the function being analyzed (e.g., `has_system_call`, `instruction_metrics.xor_count`).
 - `operator` (Required for `function_metric`): Supports comparison operators (`>`, `>=`, `<`, `<=`, `==`, `!=`), `contains_all`, `contains_any` (or simply `contains`).
 - `threshold` (Required only for `function_metric` with comparison operators): The numerical value to compare the `check_field` against using the `operator`.
-- `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`). This might influence reporting or filtering.
+- `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`, `info`). This might influence reporting or filtering.
+- `category` (Optional): A free-form grouping label carried through to the finding (e.g., `privacy-fingerprint`, `privacy-tracking`, `privacy-sidechannel`, `privacy-access`, `privacy-posture`). When any review in a run carries a category, blint adds a `Category` column to the capability table so related findings (such as the iOS privacy rules) group together; the value is also emitted in the JSON report.
 
 ## Sample Rules
 
@@ -152,6 +153,34 @@ Mach-O, so blint projects a weakened policy into the main binary's
 `informative_strings` as `ATS_*` tokens (e.g. `ATS_NSAllowsArbitraryLoads`) that
 `IOS_INSECURE_TRANSPORT_ATS` matches. This is the recommended pattern for any
 rule that needs to reason over bundle-level metadata.
+
+### Privacy and fingerprinting rules for iOS/macOS
+
+Four further annotation files add privacy-focused detections for Mach-O
+binaries, each rule carrying a `category` and `severity`:
+
+- `review_ios_fingerprint.yml` — passive device fingerprinting that needs no
+  permission: low-level platform identifiers, hardware/GPU attributes
+  (`sysctl`, Metal), display metrics, font enumeration, network-interface
+  enumeration, and device attestation (`DeviceCheck`/App Attest).
+- `review_ios_sidechannel.yml` — side channels such as installed-app probing
+  (`canOpenURL`), local-network/Bonjour scanning, and Keychain persistence that
+  survives reinstalls; plus an `EXE_REVIEWS` block for the bundle-level posture.
+- `review_ios_privacy_access.yml` — permission-gated access not covered by the
+  generic Mach-O capability rules (EventKit, App Tracking Transparency).
+- `review_ios_privacy_posture.yml` — an `EXE_REVIEWS` block reasoning over the
+  app's `Info.plist` and `PrivacyInfo.xcprivacy` posture: declared tracking, a
+  missing privacy manifest, undeclared "required reason" API usage
+  (App Store warning ITMS-91053), large app-query lists, and sensitive consent
+  strings.
+
+Bundle-level signals that do not appear in the Mach-O are projected into the
+main binary's `informative_strings` as `PRIV_*` tokens (mirroring the `ATS_*`
+mechanism above) — for example `PRIV_NSPrivacyTracking`,
+`PRIV_PrivacyManifestMissing`, `PRIV_LSApplicationQueriesSchemes`, and
+`PRIV_UNDECLARED_<category>` for required-reason APIs used without a matching
+manifest declaration. The corresponding `EXE_REVIEWS` rules set
+`include_informative_strings: true` to match them.
 
 ### Example 3: `METHOD_REVIEWS` (Pattern Clusters with Shared Matches)
 
