@@ -790,6 +790,7 @@ def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
     purl = _ios_purl(name, version)
     component = Component(type=Type.application, name=name, version=version, purl=purl)
     component.bom_ref = RefType(purl)
+    manifest = bundle_info.get("privacy_manifest") or {}
     scalar_props = {
         "internal:bundleName": bundle_info.get("bundle_name"),
         "internal:bundleDisplayName": bundle_info.get("bundle_display_name"),
@@ -798,9 +799,23 @@ def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
         "internal:platformName": bundle_info.get("platform_name"),
         "internal:platformVersion": bundle_info.get("platform_version"),
         "internal:applicationCategory": bundle_info.get("application_category"),
+        # Privacy posture surfaced for at-a-glance triage.
+        "internal:privacyManifestPresent": "true" if manifest.get("present") else "false",
+        "internal:privacyTracking": "true" if manifest.get("tracking") else None,
+    }
+    list_props = {
+        "internal:privacyUsageDescriptions": bundle_info.get("privacy_usage_descriptions"),
+        "internal:appQuerySchemes": bundle_info.get("query_schemes"),
+        "internal:bonjourServices": bundle_info.get("bonjour_services"),
+        "internal:privacyTrackingDomains": manifest.get("tracking_domains"),
+        "internal:privacyCollectedDataTypes": manifest.get("collected_data_types"),
+        "internal:privacyAccessedAPICategories": manifest.get("accessed_api_categories"),
     }
     component.properties = [
         Property(name=key, value=str(value)) for key, value in scalar_props.items() if value
+    ]
+    component.properties += [
+        Property(name=key, value=", ".join(values)) for key, values in list_props.items() if values
     ]
     return component
 

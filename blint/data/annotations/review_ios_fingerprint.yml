@@ -1,0 +1,98 @@
+---
+text: Device fingerprinting surface review for iOS/macOS Mach-O binaries
+group: SYMBOL_REVIEWS
+exe_type: MachO
+binary_type: MachO
+rules:
+  - id: IOS_PLATFORM_IDENTIFIER
+    title: Low-level platform identifier read
+    summary: Reads a Low-Level Platform Identifier
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary reads low-level identifiers that stay constant across launches:
+      the IOKit platform UUID/serial number or the kernel host name. Unlike the
+      vendor identifier, these are not reset by app removal and provide durable
+      device recognition that does not require any permission.
+    patterns:
+      - IOPlatformUUID
+      - IOPlatformSerialNumber
+      - kern.hostname
+      - gethostname
+  - id: IOS_DEVICE_ATTESTATION
+    title: Device attestation / persistent device state
+    summary: Uses Device Attestation
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary uses DeviceCheck (DCDevice) or App Attest
+      (DCAppAttestService). DeviceCheck persists a small amount of per-device
+      state that survives app reinstalls and factory resets, which can be used
+      for fraud detection but also for durable device recognition. Its presence
+      is worth noting in a privacy review.
+    patterns:
+      - DCAppAttestService
+      - DCDevice
+      - generateAssertion
+      - attestKey
+  - id: IOS_HARDWARE_FINGERPRINT
+    title: Low-level hardware fingerprinting
+    summary: Fingerprints Device Hardware
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary queries low-level hardware and system attributes through sysctl
+      and the GPU/Metal stack (model identifier, CPU type, GPU name and feature
+      set). Individually innocuous, combined these attributes form a stable
+      device fingerprint that does not require any permission to read.
+    min_patterns: 2
+    patterns:
+      - sysctlbyname
+      - sysctl
+      - hw.machine
+      - hw.model
+      - MTLCreateSystemDefaultDevice
+      - recommendedMaxWorkingSetSize
+      - supportsFamily
+  - id: IOS_DISPLAY_FINGERPRINT
+    title: Display characteristics fingerprinting
+    summary: Reads Display Characteristics
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary reads fine-grained display characteristics (native pixel
+      bounds, native scale, refresh rate). These vary by exact device model and
+      contribute entropy to a device fingerprint.
+    min_patterns: 2
+    patterns:
+      - nativeBounds
+      - nativeScale
+      - maximumFramesPerSecond
+      - mainScreen
+  - id: IOS_NETWORK_INTERFACE_ENUM
+    title: Network interface enumeration
+    summary: Enumerates Network Interfaces
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary enumerates local network interfaces and addresses via
+      getifaddrs / if_nametoindex. This exposes local IP addresses and interface
+      topology that can be used to infer network environment and aid
+      fingerprinting.
+    patterns:
+      - getifaddrs
+      - if_nametoindex
+      - freeifaddrs
+  - id: IOS_FONT_ENUMERATION
+    title: Installed font enumeration
+    summary: Enumerates Installed Fonts
+    category: privacy-fingerprint
+    severity: info
+    description: |
+      The binary enumerates the installed font families. The set of installed
+      fonts is a classic fingerprinting vector that requires no permission.
+    min_patterns: 2
+    patterns:
+      - familyNames
+      - fontNamesForFamilyName
+      - UIFont

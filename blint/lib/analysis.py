@@ -446,25 +446,25 @@ def print_reviews_table(reviews, files):
         files: A list of file names associated with the reviews.
 
     """
+    # Surface the rule category column only when at least one review carries one
+    # (e.g. the privacy/fingerprinting rules), so existing reports are unchanged.
+    has_category = any(r.get("category") for r in reviews)
     table = create_findings_table(files, "BLint Capability Review")
+    if has_category:
+        table.add_column("Category")
     table.add_column("Capabilities")
     table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:
         evidences = [e.get("function") for e in r.get("evidence")]
         evidences = list(islice(evidences, EVIDENCE_LIMIT))
+        row = [r.get("id")]
         if len(files) > 1:
-            table.add_row(
-                r.get("id"),
-                os.path.basename(r.get("exe_name")),
-                r.get("summary"),
-                "\n".join(evidences),
-            )
-        else:
-            table.add_row(
-                r.get("id"),
-                r.get("summary"),
-                "\n".join(evidences),
-            )
+            row.append(os.path.basename(r.get("exe_name")))
+        if has_category:
+            row.append(r.get("category") or "")
+        row.append(r.get("summary"))
+        row.append("\n".join(evidences))
+        table.add_row(*row)
     console.print(table)
 
 
