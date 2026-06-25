@@ -863,3 +863,30 @@ rules:
       - evaluateJavaScript
       - WKUserScript
       - addScriptMessageHandler
+  - id: APPLE_MACOS_XPC_SERVICE_USAGE
+    title: macOS XPC Service Usage
+    summary: Binary uses XPC APIs to communicate between processes
+    description: |
+      This Mach-O binary references symbols, classes, or selectors related to macOS XPC inter-process communication.
+      If it exposes a privileged helper service, it must validate the client's code signature to prevent
+      privilege escalation via trust cache bypass (e.g. Find My XPC / CDHash bypass).
+    patterns:
+      - xpc_connection_create_mach_service
+      - xpc_connection_create
+      - xpc_main
+      - NSXPCListener
+      - NSXPCConnection
+      - NSXPCInterface
+      - xpc_connection_get_audit_token
+      - xpc_dictionary_get_audit_token
+  - id: APPLE_MACOS_XPC_CONNECTION_HARDENING
+    title: macOS XPC Connection Hardening
+    summary: Binary uses APIs to validate XPC client identity/signature
+    description: |
+      This binary references APIs like xpc_connection_set_peer_code_signing_requirement or SecCodeCheckValidity,
+      which are used to validate the code signing requirements of peer/guest processes connecting via XPC.
+      This is a critical mitigation against connection impersonation vulnerabilities.
+    patterns:
+      - xpc_connection_set_peer_code_signing_requirement
+      - SecCodeCopyGuestWithAttributes
+      - SecCodeCheckValidity
