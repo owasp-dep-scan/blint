@@ -1,4 +1,4 @@
-name: Build Linux Binaries
+name: Build Linux Musl Binaries
 
 on:
   push:
@@ -11,43 +11,47 @@ on:
   workflow_dispatch:
 permissions: {}
 jobs:
-  Blint-GNU-Build:
+  Blint-Musl-Build:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
-            binary_name: blint-linux-amd64
+            binary_name: blint-linux-musl-amd64
           - os: ubuntu-24.04-arm
-            binary_name: blint-linux-arm64
+            binary_name: blint-linux-musl-arm64
     permissions:
       contents: write
       packages: write
       id-token: write
+    # Alpine 3.20 ships LLVM 18, matching the GNU/PyPI build toolchain.
+    container: alpine:3.20
     steps:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
       with:
         path: blint
         persist-credentials: false
-    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
-      with:
-        python-version: '3.13'
-    - name: Linux packages
+    - name: Install packages
       run: |
-        sudo apt-get update
-        sudo apt-get install zlib1g-dev libzstd-dev llvm-18 llvm-18-dev
+        apk update
+        apk add --no-cache \
+          python3 python3-dev py3-pip \
+          build-base cmake make git \
+          musl-dev libffi-dev openssl-dev zlib-dev zstd-dev xz \
+          llvm18-dev llvm18-static clang18 \
+          ncurses-dev libxml2-dev
+    # nyxstone ships only sdists, so it must be compiled against LLVM 18.
     - name: Install poetry
-      id: poetry
       run: |
-        python3 -m pip install --upgrade pip
-        python3 -m pip install setuptools pyinstaller poetry
+        python3 -m pip install --break-system-packages --upgrade pip
+        python3 -m pip install --break-system-packages setuptools pyinstaller poetry
         cd blint
         poetry config virtualenvs.create false
         poetry install --all-groups --all-extras --no-cache
       env:
-        NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
-    - name: Binary gnu build
+        NYXSTONE_LLVM_PREFIX: /usr/lib/llvm18
+    - name: Binary musl build
       run: |
         cd blint
         pyinstaller blint/cli.py --noconfirm --log-level=WARN \
@@ -79,4 +83,4 @@ jobs:
       with:
         files: |
           blint/dist/${{ matrix.binary_name }}
-          blint/dist/${{ matrix.binary_name }}.sha256    
+          blint/dist/${{ matrix.binary_name }}.sha256
