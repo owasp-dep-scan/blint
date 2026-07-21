@@ -25,34 +25,50 @@ jobs:
       contents: write
       packages: write
       id-token: write
-    # Alpine 3.20 ships LLVM 18, matching the GNU/PyPI build toolchain.
-    container: alpine:3.20
     steps:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
       with:
         path: blint
         persist-credentials: false
-    - name: Install packages
-      run: |
-        apk update
-        apk add --no-cache \
-          python3 python3-dev py3-pip \
-          build-base cmake make git \
-          musl-dev libffi-dev openssl-dev zlib-dev zstd-dev xz \
-          llvm18-dev llvm18-static clang18 \
+    # Run Alpine as a chroot on the host runner (rather than a container) so the
+    # JavaScript actions above/below keep running on the host node. Alpine
+    # containers cannot host JS actions on arm64 runners.
+    - uses: jirutka/setup-alpine@ae3b3ddba35054804fc4a3507b519fa7e8152050  # v1.4.1
+      with:
+        branch: v3.20
+        packages: >
+          python3 python3-dev py3-pip
+          build-base cmake make git
+          musl-dev libffi-dev openssl-dev zlib-dev zstd-dev xz
+          llvm18-dev llvm18-static clang18
           ncurses-dev libxml2-dev
-    # nyxstone ships only sdists, so it must be compiled against LLVM 18.
-    - name: Install poetry
+    # nyxstone ships only sdists and must be compiled against LLVM 18. Its
+    # source declares `constexpr uint64_t PAGE_SIZE`, which collides with the
+    # PAGE_SIZE macro exposed by musl's headers, so patch a local #undef in
+    # before building it, then let poetry reuse the already-installed copy.
+    - name: Build nyxstone (patched for musl) and install deps
+      shell: alpine.sh {0}
       run: |
+        set -euo pipefail
+        export NYXSTONE_LLVM_PREFIX=/usr/lib/llvm18
         python3 -m pip install --break-system-packages --upgrade pip
-        python3 -m pip install --break-system-packages setuptools pyinstaller poetry
+        python3 -m pip install --break-system-packages setuptools pyinstaller poetry pybind11
+        NYX_SRC=$(mktemp -d)
+        python3 -m pip download --no-binary :all: --no-deps --no-build-isolation \
+          nyxstone==0.1.8 -d "$NYX_SRC"
+        tar -xzf "$NYX_SRC"/nyxstone-*.tar.gz -C "$NYX_SRC"
+        sed -i 's|constexpr uint64_t PAGE_SIZE { 0x1000 };|#undef PAGE_SIZE\n                constexpr uint64_t PAGE_SIZE { 0x1000 };|' \
+          "$NYX_SRC"/nyxstone-*/nyxstone-cpp/src/nyxstone.cpp
+        python3 -m pip install --break-system-packages --no-build-isolation \
+          "$NYX_SRC"/nyxstone-*/
         cd blint
         poetry config virtualenvs.create false
+        # nyxstone is already installed (patched); poetry will reuse it.
         poetry install --all-groups --all-extras --no-cache
-      env:
-        NYXSTONE_LLVM_PREFIX: /usr/lib/llvm18
     - name: Binary musl build
+      shell: alpine.sh {0}
       run: |
+        set -euo pipefail
         cd blint
         pyinstaller blint/cli.py --noconfirm --log-level=WARN \
           --nowindow \
