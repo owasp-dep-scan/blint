@@ -19,7 +19,7 @@ jobs:
         include:
           - os: macos-14
             binary_name: blint-darwin-arm64
-          - os: macos-13
+          - os: macos-15-intel
             binary_name: blint-darwin-amd64
     permissions:
       contents: write
