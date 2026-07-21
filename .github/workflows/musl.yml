@@ -42,6 +42,8 @@ jobs:
           -e PYTHONIOENCODING=utf-8 \
           -e LANG=en_US.utf-8 \
           -e BINARY_NAME=${{ matrix.binary_name }} \
+          -e HOST_UID="$(id -u)" \
+          -e HOST_GID="$(id -g)" \
           alpine:3.20 sh -euc '
             apk add --no-cache \
               python3 python3-dev py3-pip \
@@ -87,6 +89,10 @@ jobs:
             "./dist/$BINARY_NAME" --help >/dev/null
             "./dist/$BINARY_NAME" -i "dist/$BINARY_NAME" -o /tmp/reports
             sha256sum "./dist/$BINARY_NAME" > "./dist/$BINARY_NAME.sha256"
+
+            # Files are created as root in the container; hand them back to the
+            # host runner user so the upload/release steps can read them.
+            chown -R "$HOST_UID:$HOST_GID" dist build *.spec 2>/dev/null || true
           '
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
