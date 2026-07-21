@@ -61,7 +61,7 @@ jobs:
             # with the PAGE_SIZE macro from musl headers; patch a local #undef
             # in before building it.
             NYX_SRC=$(mktemp -d)
-            python3 -m pip download --break-system-packages --no-binary :all: --no-deps \
+            python3 -m pip download --no-binary :all: --no-deps \
               --no-build-isolation nyxstone==0.1.8 -d "$NYX_SRC"
             tar -xzf "$NYX_SRC"/nyxstone-*.tar.gz -C "$NYX_SRC"
             sed -i "s|constexpr uint64_t PAGE_SIZE { 0x1000 };|#undef PAGE_SIZE\n                constexpr uint64_t PAGE_SIZE { 0x1000 };|" \
