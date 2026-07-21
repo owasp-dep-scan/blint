@@ -53,20 +53,25 @@ jobs:
               ncurses-dev libxml2-dev
 
             export NYXSTONE_LLVM_PREFIX=/usr/lib/llvm18
-            python3 -m pip install --break-system-packages --upgrade pip
-            python3 -m pip install --break-system-packages setuptools pyinstaller poetry pybind11
+
+            # Work inside a venv so we do not fight Alpine'\''s externally-managed
+            # system Python (poetry cannot uninstall apk-provided packages).
+            python3 -m venv /opt/venv
+            . /opt/venv/bin/activate
+            pip install --upgrade pip
+            pip install setuptools pyinstaller poetry pybind11
 
             # nyxstone ships only sdists and must be compiled against LLVM 18.
             # Its source declares `constexpr uint64_t PAGE_SIZE`, which collides
             # with the PAGE_SIZE macro from musl headers; patch a local #undef
             # in before building it.
             NYX_SRC=$(mktemp -d)
-            python3 -m pip download --no-binary :all: --no-deps \
-              --no-build-isolation nyxstone==0.1.8 -d "$NYX_SRC"
+            pip download --no-binary :all: --no-deps --no-build-isolation \
+              nyxstone==0.1.8 -d "$NYX_SRC"
             tar -xzf "$NYX_SRC"/nyxstone-*.tar.gz -C "$NYX_SRC"
             sed -i "s|constexpr uint64_t PAGE_SIZE { 0x1000 };|#undef PAGE_SIZE\n                constexpr uint64_t PAGE_SIZE { 0x1000 };|" \
               "$NYX_SRC"/nyxstone-*/nyxstone-cpp/src/nyxstone.cpp
-            python3 -m pip install --break-system-packages --no-build-isolation "$NYX_SRC"/nyxstone-*/
+            pip install --no-build-isolation "$NYX_SRC"/nyxstone-*/
 
             poetry config virtualenvs.create false
             # Skip the extended group so poetry does not recompile the unpatched
