@@ -30,65 +30,64 @@ jobs:
       with:
         path: blint
         persist-credentials: false
-    # Run Alpine as a chroot on the host runner (rather than a container) so the
-    # JavaScript actions above/below keep running on the host node. Alpine
-    # containers cannot host JS actions on arm64 runners.
-    - uses: jirutka/setup-alpine@ae3b3ddba35054804fc4a3507b519fa7e8152050  # v1.4.1
-      with:
-        branch: v3.20
-        packages: >
-          python3 python3-dev py3-pip
-          build-base cmake make git
-          musl-dev libffi-dev openssl-dev zlib-dev zstd-dev xz
-          llvm18-dev llvm18-static clang18
-          ncurses-dev libxml2-dev
-    # nyxstone ships only sdists and must be compiled against LLVM 18. Its
-    # source declares `constexpr uint64_t PAGE_SIZE`, which collides with the
-    # PAGE_SIZE macro exposed by musl's headers, so patch a local #undef in
-    # before building it, then let poetry reuse the already-installed copy.
-    - name: Build nyxstone (patched for musl) and install deps
-      shell: alpine.sh {0}
-      run: |
-        set -euo pipefail
-        export NYXSTONE_LLVM_PREFIX=/usr/lib/llvm18
-        python3 -m pip install --break-system-packages --upgrade pip
-        python3 -m pip install --break-system-packages setuptools pyinstaller poetry pybind11
-        NYX_SRC=$(mktemp -d)
-        python3 -m pip download --no-binary :all: --no-deps --no-build-isolation \
-          nyxstone==0.1.8 -d "$NYX_SRC"
-        tar -xzf "$NYX_SRC"/nyxstone-*.tar.gz -C "$NYX_SRC"
-        sed -i 's|constexpr uint64_t PAGE_SIZE { 0x1000 };|#undef PAGE_SIZE\n                constexpr uint64_t PAGE_SIZE { 0x1000 };|' \
-          "$NYX_SRC"/nyxstone-*/nyxstone-cpp/src/nyxstone.cpp
-        python3 -m pip install --break-system-packages --no-build-isolation \
-          "$NYX_SRC"/nyxstone-*/
-        cd blint
-        poetry config virtualenvs.create false
-        # nyxstone is already installed (patched); poetry will reuse it.
-        poetry install --all-groups --all-extras --no-cache
+    # Build inside an Alpine 3.20 container that matches the runner arch
+    # natively (no QEMU). Checkout / upload / release stay on the host so the
+    # JavaScript actions keep working, which they cannot do inside an Alpine
+    # container on arm64 runners.
     - name: Binary musl build
-      shell: alpine.sh {0}
       run: |
-        set -euo pipefail
-        cd blint
-        pyinstaller blint/cli.py --noconfirm --log-level=WARN \
-          --nowindow \
-          --onefile \
-          --name ${{ matrix.binary_name }} \
-          --add-data="blint/data:blint/data" \
-          --add-data="blint/data/annotations:blint/data/annotations" \
-          --collect-submodules blint \
-          --collect-submodules multi-demangle \
-          --collect-submodules oras \
-          --collect-all nyxstone \
-          --hidden-import nyxstone_cpp \
-          --noupx
-        # Confirm the bundled disassembler is available in the frozen binary
-        ./dist/${{ matrix.binary_name }} --help >/dev/null
-        ./dist/${{ matrix.binary_name }} -i dist/${{ matrix.binary_name }} -o /tmp/reports
-        sha256sum ./dist/${{ matrix.binary_name }} > ./dist/${{ matrix.binary_name }}.sha256
-      env:
-        PYTHONIOENCODING: utf-8
-        LANG: en_US.utf-8
+        docker run --rm \
+          -v "${{ github.workspace }}/blint:/src" \
+          -w /src \
+          -e PYTHONIOENCODING=utf-8 \
+          -e LANG=en_US.utf-8 \
+          -e BINARY_NAME=${{ matrix.binary_name }} \
+          alpine:3.20 sh -euc '
+            apk add --no-cache \
+              python3 python3-dev py3-pip \
+              build-base cmake make git \
+              musl-dev libffi-dev openssl-dev zlib-dev zstd-dev xz \
+              llvm18-dev llvm18-static clang18 \
+              ncurses-dev libxml2-dev
+
+            export NYXSTONE_LLVM_PREFIX=/usr/lib/llvm18
+            python3 -m pip install --break-system-packages --upgrade pip
+            python3 -m pip install --break-system-packages setuptools pyinstaller poetry pybind11
+
+            # nyxstone ships only sdists and must be compiled against LLVM 18.
+            # Its source declares `constexpr uint64_t PAGE_SIZE`, which collides
+            # with the PAGE_SIZE macro from musl headers; patch a local #undef
+            # in before building it.
+            NYX_SRC=$(mktemp -d)
+            python3 -m pip download --break-system-packages --no-binary :all: --no-deps \
+              --no-build-isolation nyxstone==0.1.8 -d "$NYX_SRC"
+            tar -xzf "$NYX_SRC"/nyxstone-*.tar.gz -C "$NYX_SRC"
+            sed -i "s|constexpr uint64_t PAGE_SIZE { 0x1000 };|#undef PAGE_SIZE\n                constexpr uint64_t PAGE_SIZE { 0x1000 };|" \
+              "$NYX_SRC"/nyxstone-*/nyxstone-cpp/src/nyxstone.cpp
+            python3 -m pip install --break-system-packages --no-build-isolation "$NYX_SRC"/nyxstone-*/
+
+            poetry config virtualenvs.create false
+            # Skip the extended group so poetry does not recompile the unpatched
+            # nyxstone over the patched build we just installed.
+            poetry install --all-extras --without extended --no-cache
+
+            pyinstaller blint/cli.py --noconfirm --log-level=WARN \
+              --nowindow \
+              --onefile \
+              --name "$BINARY_NAME" \
+              --add-data="blint/data:blint/data" \
+              --add-data="blint/data/annotations:blint/data/annotations" \
+              --collect-submodules blint \
+              --collect-submodules multi-demangle \
+              --collect-submodules oras \
+              --collect-all nyxstone \
+              --hidden-import nyxstone_cpp \
+              --noupx
+            # Confirm the bundled disassembler is available in the frozen binary
+            "./dist/$BINARY_NAME" --help >/dev/null
+            "./dist/$BINARY_NAME" -i "dist/$BINARY_NAME" -o /tmp/reports
+            sha256sum "./dist/$BINARY_NAME" > "./dist/$BINARY_NAME.sha256"
+          '
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         path: ./blint/dist
