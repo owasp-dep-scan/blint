@@ -306,9 +306,26 @@ def _merge_callgraph_rows(project_matches: dict, rows) -> None:
 
 
 def _execute(connection: apsw.Connection, query: str, params: list) -> list[dict]:
+    """Run a parameterised query and return each row as a dict.
+
+    The cursor is advanced with next() before calling getdescription() so the
+    column names are read while the statement is in the RUN state. SQLite cannot
+    report column names for a GROUP BY that produces zero rows -- the VDBE
+    program completes without ever entering the result loop -- so
+    getdescription() on a finished cursor raises ExecutionCompleteError. Pulling
+    the first row first makes the empty case a plain StopIteration instead.
+    See https://github.com/rogerbinns/apsw/issues/160.
+    """
     cursor = connection.execute(query, params)
+    try:
+        first = next(cursor)
+    except StopIteration:
+        LOG.debug("blintdb query returned no rows for params: %s", params)
+        return []
     columns = [description[0] for description in cursor.getdescription()]
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    rows = [dict(zip(columns, first))]
+    rows.extend(dict(zip(columns, row)) for row in cursor)
+    return rows
 
 
 def _query_project_symbol_matches(

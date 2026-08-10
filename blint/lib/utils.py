@@ -9,7 +9,7 @@ import string
 import tempfile
 import zipfile
 from enum import Enum
-from importlib.metadata import distribution
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import Dict
 
@@ -595,9 +595,16 @@ def check_command(cmd):
 
 def get_version():
     """
-    Returns the version of depscan
+    Returns the version of blint.
+
+    Falls back to "dev" when the package metadata is not available, such as
+    running tests directly from a source checkout without an installed
+    distribution.
     """
-    return distribution("blint").version
+    try:
+        return distribution("blint").version
+    except PackageNotFoundError:
+        return "dev"
 
 
 def cleanup_dict_lief_errors(old_dict):

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import orjson
+from importlib.metadata import PackageNotFoundError
 
 import blint.lib.utils as utils
 from blint.lib.utils import (
@@ -8,6 +9,7 @@ from blint.lib.utils import (
     demangle_symbolic_name,
     export_metadata,
     get_hex_truncation_count,
+    get_version,
     reset_hex_truncation_count,
 )
 
@@ -93,3 +95,17 @@ def test_calculate_entropy_accepts_bytes_like_payloads():
     entropy = calculate_entropy(b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09")
     assert isinstance(entropy, float)
     assert entropy >= 0
+
+
+def test_get_version_returns_string_when_installed():
+    version = get_version()
+    assert isinstance(version, str)
+    assert version
+
+
+def test_get_version_falls_back_when_metadata_missing(monkeypatch):
+    def _raise(_name):
+        raise PackageNotFoundError("blint")
+
+    monkeypatch.setattr(utils, "distribution", _raise)
+    assert get_version() == "dev"
