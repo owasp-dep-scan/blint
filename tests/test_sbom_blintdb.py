@@ -2,6 +2,7 @@ import sqlite3
 from types import SimpleNamespace
 
 from blint.config import BlintOptions
+from blint import db as db_module
 from blint.db import detect_binaries_utilized, lookup_project_matches
 from blint.lib.sbom import process_exe_file
 
@@ -204,3 +205,101 @@ def test_blint_options_auto_enable_disassembly_for_deep_blintdb_sbom():
     )
 
     assert options.disassemble is True
+
+
+# --- Regression tests for apsw ExecutionCompleteError on zero-row queries ---
+#
+# apsw raises ExecutionCompleteError from cursor.getdescription() when an
+# aggregate (GROUP BY) query completes without yielding any rows. The stdlib
+# sqlite3 driver never exhibits this (cursor.description is always available),
+# so these tests deliberately open the database through apsw (via blint.db.get)
+# to exercise the real code path that ``blint sbom --use-blintdb`` uses.
+
+
+def test_execute_returns_empty_for_zero_row_aggregate(tmp_path):
+    """_execute must return [] (not raise) for a GROUP BY with no matching rows."""
+    db_file = tmp_path / "blint.db"
+    _create_v2_blintdb(db_file)
+    connection = db_module.get(str(db_file))
+    assert connection is not None
+    try:
+        rows = db_module._execute(
+            connection,
+            "SELECT binary_id, COUNT(*) FROM Symbols WHERE name = ? GROUP BY binary_id",
+            ["this_symbol_does_not_exist"],
+        )
+        assert rows == []
+    finally:
+        connection.close()
+
+
+def test_execute_returns_rows_for_matching_aggregate(tmp_path):
+    """_execute still returns dict rows when the GROUP BY query has matches."""
+    db_file = tmp_path / "blint.db"
+    _create_v2_blintdb(db_file)
+    connection = db_module.get(str(db_file))
+    assert connection is not None
+    try:
+        rows = db_module._execute(
+            connection,
+            "SELECT binary_id, COUNT(*) AS cnt FROM Symbols WHERE name = ? GROUP BY binary_id",
+            ["helper"],
+        )
+        assert len(rows) == 2
+        assert {row["binary_id"] for row in rows} == {1, 2}
+        assert all(row["cnt"] == 1 for row in rows)
+    finally:
+        connection.close()
+
+
+def test_lookup_project_matches_with_no_matching_symbols(tmp_path):
+    """A lookup whose symbols match nothing must return [] without crashing."""
+    db_file = tmp_path / "blint.db"
+    _create_v2_blintdb(db_file)
+
+    matches = lookup_project_matches(
+        {"symtab_symbols": ["does_not_exist", "also_missing"]},
+        binary_metadata={
+            "binary_type": "ELF",
+            "llvm_target_tuple": "x86_64-pc-linux-gnu",
+        },
+        db_file=str(db_file),
+    )
+    assert matches == []
+
+
+def test_lookup_project_matches_with_no_matching_hashes(tmp_path):
+    """A hash lookup that matches nothing exercises the GROUP BY zero-row path."""
+    db_file = tmp_path / "blint.db"
+    _create_v2_blintdb(db_file)
+
+    matches = lookup_project_matches(
+        function_hash_index={
+            "instruction_hashes": ["0" * 64],
+            "assembly_hashes": ["0" * 64],
+        },
+        binary_metadata={
+            "binary_type": "ELF",
+            "llvm_target_tuple": "x86_64-pc-linux-gnu",
+        },
+        db_file=str(db_file),
+    )
+    assert matches == []
+
+
+def test_detect_binaries_utilized_with_no_matches(tmp_path):
+    """detect_binaries_utilized must degrade to empty results, not crash."""
+    db_file = tmp_path / "blint.db"
+    _create_v2_blintdb(db_file)
+
+    detected, evidence = detect_binaries_utilized(
+        symbol_source_map={"symtab_symbols": ["nonexistent_symbol"]},
+        function_hash_index={"instruction_hashes": ["0" * 64]},
+        binary_metadata={
+            "binary_type": "ELF",
+            "llvm_target_tuple": "x86_64-pc-linux-gnu",
+        },
+        db_file=str(db_file),
+    )
+    assert detected == set()
+    assert evidence == {}
