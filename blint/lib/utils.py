@@ -135,6 +135,26 @@ def is_base64(s):
         return False
 
 
+def coerce_to_text(value) -> str:
+    """Decode a string extracted from a binary into text.
+
+    LIEF returns ``bytes`` rather than ``str`` for extracted strings that are not
+    valid UTF-8, which is the majority of them in practice. Callers that assumed
+    ``str`` silently discarded those entries, so decoding happens here instead.
+    latin-1 is the fallback because it maps every byte to a codepoint without
+    loss, keeping entropy calculations and secret regexes meaningful.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw.decode("latin-1")
+    return ""
+
+
 def decode_base64(s):
     """
     This function decodes a Base64 encoded string. It first removes any newline
@@ -769,7 +789,15 @@ def json_serializer(obj):
 
 
 def enum_to_str(enum_obj) -> str:
-    """Converts a lief enum object to its string name."""
+    """Converts a lief enum object to its string name.
+
+    When a binary carries a value that is absent from LIEF's enum, LIEF returns
+    the raw integer instead of an enum member. Such values are rendered as
+    ``UNKNOWN(<value>)`` so a consumer can tell them apart from a real symbolic
+    name; a bare number is indistinguishable from one that merely looks numeric.
+    """
+    if isinstance(enum_obj, int) and not isinstance(enum_obj, bool):
+        return f"UNKNOWN({enum_obj})"
     return str(enum_obj).rsplit(".", maxsplit=1)[-1]
 
 

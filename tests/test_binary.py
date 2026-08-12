@@ -994,3 +994,110 @@ def test_parse_pe_symbols_populates_section_id_without_a_named_section():
 
     symbols_list, _ = parse_pe_symbols([_StubSymbol(name="main", section_idx=1)])
     assert symbols_list[0]["id"] == "section<1>"
+
+
+def test_coerce_to_text_decodes_bytes_strings():
+    """LIEF returns bytes for strings that are not valid UTF-8."""
+    from blint.lib.utils import coerce_to_text
+
+    assert coerce_to_text("already text") == "already text"
+    assert coerce_to_text(b"plain ascii") == "plain ascii"
+    assert coerce_to_text("café".encode()) == "café"
+    # Undecodable bytes must survive via latin-1 rather than being dropped.
+    assert coerce_to_text(b"\xf1\xf9value") == "\xf1\xf9value"
+    assert coerce_to_text(bytearray(b"abcdef")) == "abcdef"
+    assert coerce_to_text(None) == ""
+    assert coerce_to_text(123) == ""
+
+
+def test_parse_strings_keeps_byte_entries():
+    """Regression: 93% of ELF strings were bytes and were silently discarded.
+
+    `"[]" not in s` raises TypeError on bytes, and the per-entry except dropped
+    every such string.
+    """
+    from blint.lib.binary import parse_strings
+
+    class _Stub:
+        # High entropy (> SECRET_MIN_ENTROPY) so it survives the value filter,
+        # and undecodable as UTF-8 so it arrives as bytes.
+        strings = [b"\xf1aB3$xY9-zQ7!mN2#pL5&", "plain-text-value"]
+
+    values = {entry["value"] for entry in parse_strings(_Stub())}
+    assert any("aB3$xY9-zQ7" in v for v in values), values
+
+
+def test_is_string_bearing_section_excludes_code_and_debug():
+    from blint.lib.binary import is_string_bearing_section
+
+    class _Section:
+        def __init__(self, name):
+            self.name = name
+
+    for name in (".rdata", ".data", "__cstring", "__const", ".rodata", "__objc_methname"):
+        assert is_string_bearing_section(_Section(name)), name
+    # Executable code and DWARF debug sections produce only noise.
+    for name in (".text", "__text", ".debug_info", "__debug_str", "/19", ".pdata", ""):
+        assert not is_string_bearing_section(_Section(name)), name
+
+
+def test_binary_strings_falls_back_to_section_scan_without_strings_property():
+    """PE and Mach-O have no `strings` property; only ELF does."""
+    from blint.lib.binary import binary_strings
+
+    class _Section:
+        name = ".rdata"
+        content = b"\x00\x01\\\\.\\ThrottleStop\x00short\x00another-visible-string\x00"
+
+    class _PEStub:
+        sections = [_Section()]
+
+    values = binary_strings(_PEStub())
+    assert "\\\\.\\ThrottleStop" in values
+    assert "another-visible-string" in values
+    # Below the minimum length, so excluded.
+    assert "short" not in values
+
+
+def test_binary_strings_prefers_the_lief_strings_property():
+    from blint.lib.binary import binary_strings
+
+    class _ELFStub:
+        strings = ["from-lief"]
+        sections = []
+
+    assert binary_strings(_ELFStub()) == ["from-lief"]
+
+
+def test_binary_strings_extracts_utf16le_windows_text():
+    from blint.lib.binary import binary_strings
+
+    class _Section:
+        name = ".rdata"
+        content = "\\\\.\\ThrottleStop".encode("utf-16-le")
+
+    class _PEStub:
+        sections = [_Section()]
+
+    assert "\\\\.\\ThrottleStop" in binary_strings(_PEStub())
+
+
+def test_coerce_to_text_never_raises_for_any_byte_sequence():
+    """The latin-1 fallback must be total, so no decode error reaches a caller.
+
+    latin-1 maps all 256 byte values to codepoints and therefore cannot fail;
+    this pins that guarantee against a future change to a lossy codec.
+    """
+    import itertools
+
+    from blint.lib.utils import coerce_to_text
+
+    for value in range(256):
+        assert isinstance(coerce_to_text(bytes([value])), str)
+    # Two-byte sequences cover truncated multi-byte UTF-8 introducers.
+    for pair in itertools.product((0x00, 0x7F, 0x80, 0xC3, 0xE0, 0xF0, 0xF8, 0xFF), repeat=2):
+        assert isinstance(coerce_to_text(bytes(pair)), str)
+    # The result must be JSON-serialisable: latin-1 never yields lone surrogates.
+    import orjson
+
+    orjson.dumps({"value": coerce_to_text(bytes(range(256)))})
