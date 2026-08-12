@@ -284,6 +284,22 @@ def create_sbom(
     return sbom
 
 
+def purl_field(value) -> str | None:
+    """Coerce a purl version or qualifier value to a non-empty string.
+
+    PackageURL normalizes versions and qualifier values by calling ``strip()`` on
+    them, so a non-string raises AttributeError. Binary metadata routinely holds
+    numbers here: LIEF reports an ELF symbol version auxiliary ``hash`` as an int.
+    Returns None for values that should be omitted from the purl entirely.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    value = value.strip()
+    return value or None
+
+
 def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
     """
     Creates a list of Component objects from symbols version.
@@ -315,8 +331,12 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
             type=pkg_type,
             namespace=group or None,
             name=name,
-            version=version,
-            qualifiers={"hash": symbol["hash"]} if symbol.get("hash") else {},
+            version=purl_field(version),
+            qualifiers=(
+                {"hash": hash_value}
+                if (hash_value := purl_field(symbol.get("hash")))
+                else {}
+            ),
         ).to_string()
         comp = Component(
             type=Type.library,
@@ -657,16 +677,17 @@ def create_library_component(entry: Dict, exe: str) -> Component:
         Component: The created component object.
     """
     name = os.path.basename(entry["name"])
+    version = purl_field(entry.get("version"))
     qualifiers = {}
-    if entry.get("compatibility_version"):
-        qualifiers["compatibility_version"] = entry["compatibility_version"]
+    if compatibility_version := purl_field(entry.get("compatibility_version")):
+        qualifiers["compatibility_version"] = compatibility_version
     purl = PackageURL(
-        type="file", name=name, version=entry["version"], qualifiers=qualifiers
+        type="file", name=name, version=version, qualifiers=qualifiers
     ).to_string()
     comp = Component(
         type=Type.library,
         name=name,
-        version=entry["version"],
+        version=version,
         purl=purl,
         evidence=create_component_evidence(exe, 0.8),
         properties=[
