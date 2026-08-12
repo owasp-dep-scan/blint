@@ -942,3 +942,55 @@ def test_demangle():
         )
         == "core::ptr::drop_in_place<&core::option::Option<usize>>"
     )
+
+
+class _StubSymbol:
+    """Minimal stand-in for a LIEF COFF/PE symbol."""
+
+    def __init__(self, name="sym", **attributes):
+        self.name = name
+        self.section = None
+        self.value = 0
+        self.size = 0
+        self.base_type = None
+        self.complex_type = None
+        self.storage_class = None
+        for key, value in attributes.items():
+            setattr(self, key, value)
+
+
+def test_format_symbol_section_index_reads_modern_and_legacy_attributes():
+    """LIEF 1.0 renamed COFF Symbol.section_number to section_idx."""
+    from blint.lib.binary import format_symbol_section_index
+
+    assert format_symbol_section_index(_StubSymbol(section_idx=3)) == "section<3>"
+    # Older LIEF releases only expose the legacy name.
+    assert format_symbol_section_index(_StubSymbol(section_number=3)) == "section<3>"
+    # section_idx wins when both are present.
+    assert (
+        format_symbol_section_index(_StubSymbol(section_idx=1, section_number=9)) == "section<1>"
+    )
+    # Absolute/debug indices are negative but still valid.
+    assert format_symbol_section_index(_StubSymbol(section_idx=-2)) == "section<-2>"
+
+
+def test_format_symbol_section_index_returns_empty_for_unusable_values():
+    from blint.lib.binary import format_symbol_section_index
+
+    assert format_symbol_section_index(_StubSymbol()) == ""
+    assert format_symbol_section_index(_StubSymbol(section_idx=None)) == ""
+    assert format_symbol_section_index(_StubSymbol(section_idx="1")) == ""
+    # A bool is an int subclass but is never a section index.
+    assert format_symbol_section_index(_StubSymbol(section_idx=True)) == ""
+
+
+def test_parse_pe_symbols_populates_section_id_without_a_named_section():
+    """Regression: every symbol lacking a named section got an empty id.
+
+    On a real Windows binary this silently emptied the id of all 30k symbols
+    while logging one caught AttributeError each.
+    """
+    from blint.lib.binary import parse_pe_symbols
+
+    symbols_list, _ = parse_pe_symbols([_StubSymbol(name="main", section_idx=1)])
+    assert symbols_list[0]["id"] == "section<1>"

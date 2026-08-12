@@ -831,6 +831,23 @@ def parse_pe_authenticode(parsed_obj):
         return {}
 
 
+def format_symbol_section_index(symbol) -> str:
+    """Render a COFF/PE symbol's section index for symbols with no named section.
+
+    LIEF 1.0 moved PE symbols to the COFF module and renamed this field from
+    ``section_number`` to ``section_idx``; ``lief.PE.Symbol`` no longer exists.
+    Both names are read so the output is stable across LIEF versions. File
+    records and absolute symbols legitimately have no section, which is why this
+    returns an empty string rather than raising.
+    """
+    for attribute in ("section_idx", "section_number"):
+        index = getattr(symbol, attribute, None)
+        if isinstance(index, bool) or not isinstance(index, int):
+            continue
+        return f"section<{index:d}>"
+    return ""
+
+
 def parse_pe_symbols(symbols):
     """
     Parses the symbols and determines the executable type.
@@ -852,7 +869,7 @@ def parse_pe_symbols(symbols):
             if symbol.section and symbol.section.name:
                 section_nb_str = symbol.section.name
             else:
-                section_nb_str = "section<{:d}>".format(symbol.section_number)
+                section_nb_str = format_symbol_section_index(symbol)
         except (AttributeError, TypeError) as e:
             LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol} PE symbol.")
             section_nb_str = ""
