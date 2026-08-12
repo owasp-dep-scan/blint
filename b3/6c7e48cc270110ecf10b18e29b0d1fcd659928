@@ -1,0 +1,22 @@
+tests/test_binary.py
+  s_f051e496e50601::t_8d96e04eaf9b65 945-996
+blint/lib/binary.py
+  s_f051e496e50601::t_2680bd386c13eb 834-850
+  s_f051e496e50601::t_4b5831ad61fb77 872
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b36c7e48cc270110ecf10b18e29b0d1fcd659928",
+  "prompts": {},
+  "sessions": {
+    "s_f051e496e50601": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d1dd54d-7da4-4e2c-a0f2-b14cbb2a8188",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
