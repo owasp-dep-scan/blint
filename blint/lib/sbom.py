@@ -70,7 +70,7 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Compon
     purl_type = "nuget" if name.endswith(".dll") else "generic"
     if purl_type == "nuget":
         name = name.replace(".dll", "")
-    purl = f"pkg:{purl_type}/{name}"
+    purl = PackageURL(type=purl_type, name=name).to_string()
     pkg_type = Type.library if purl_type not in ("generic",) else Type.application
     if symbols_purl_map and symbols_purl_map.get(purl):
         purl = symbols_purl_map[purl]
@@ -311,11 +311,13 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
                     group = "gnu"
         if pkg_type == "nuget":
             name = name.replace(".dll", "")
-        purl = f"pkg:{pkg_type}/{group}/{name}" if group else f"pkg:{pkg_type}/{name}"
-        if version:
-            purl = f"{purl}@{version}"
-        if symbol.get("hash"):
-            purl = f"{purl}?hash={symbol.get('hash')}"
+        purl = PackageURL(
+            type=pkg_type,
+            namespace=group or None,
+            name=name,
+            version=version,
+            qualifiers={"hash": symbol["hash"]} if symbol.get("hash") else {},
+        ).to_string()
         comp = Component(
             type=Type.library,
             group=group,
@@ -655,9 +657,12 @@ def create_library_component(entry: Dict, exe: str) -> Component:
         Component: The created component object.
     """
     name = os.path.basename(entry["name"])
-    purl = f"pkg:file/{name}@{entry['version']}"
+    qualifiers = {}
     if entry.get("compatibility_version"):
-        purl = f"{purl}?compatibility_version={entry['compatibility_version']}"
+        qualifiers["compatibility_version"] = entry["compatibility_version"]
+    purl = PackageURL(
+        type="file", name=name, version=entry["version"], qualifiers=qualifiers
+    ).to_string()
     comp = Component(
         type=Type.library,
         name=name,
@@ -690,7 +695,9 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
     group = None
     version = None
     name = entry.get("name", "").removeprefix("$ORIGIN/") if entry.get("name") else None
-    purl = entry.get("purl", f"pkg:file/{name}")
+    purl = entry.get("purl")
+    if not purl and name:
+        purl = PackageURL(type="file", name=name).to_string()
     if not name and purl:
         try:
             purl_obj = PackageURL.from_string(purl)
@@ -725,7 +732,8 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
     comp.properties = properties
     if entry.get("tag") == "NEEDED":
         comp.scope = Scope.required
-    comp.bom_ref = RefType(purl)
+    if purl:
+        comp.bom_ref = RefType(purl)
     return comp
 
 
