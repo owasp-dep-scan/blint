@@ -1,0 +1,21 @@
+blint/lib/sbom.py
+  s_f051e496e50601::t_6e3ecc293e0815 287-302,334-339,680,682-683,685,690
+tests/test_sbom_purl.py
+  s_f051e496e50601::t_3eca3c5b98ac59 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "38f6b818699959a6f4a0fbcec459d35df4a984a9",
+  "prompts": {},
+  "sessions": {
+    "s_f051e496e50601": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7d1dd54d-7da4-4e2c-a0f2-b14cbb2a8188",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
