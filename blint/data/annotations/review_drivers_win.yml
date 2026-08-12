@@ -1,0 +1,62 @@
+---
+text: Review for Windows kernel driver access control posture
+group: BINARY_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+rules:
+  - id: DRIVER_INSECURE_DEVICE_OBJECT
+    title: Driver exposes a hardware primitive with no access control
+    summary: A hardware or physical-memory primitive is reachable through a device object created without a security descriptor, and the image imports no access-check API.
+    description: |
+      This driver imports a primitive that grants direct hardware or physical-memory reach (Hal*BusData*,
+      MmMapIoSpace, ZwMapViewOfSection, MmGetPhysicalAddress) or executes MSR instructions, creates a device
+      object through IoCreateDevice rather than IoCreateDeviceSecure / WdmlibIoCreateDeviceSecure, carries no
+      SDDL security descriptor string, and imports none of the access-check APIs (SeSinglePrivilegeCheck,
+      SeAccessCheck, ZwQueryInformationToken, IoValidateDeviceIoControlAccess). Together these mean any process
+      able to open the device's symbolic link reaches the primitive, with no authorization boundary anywhere in
+      the image. This is the statically decidable form of the missing-access-control flaw described in the
+      LnvMSRIO.sys research (CVE-2025-8061 and the follow-up PCI configuration space findings), where the
+      handlers performed only NULL and length checks. blint is a static tool and cannot confirm reachability
+      the way runtime IOCTL probing can, so confirm the dispatch path before treating this as exploitable.
+    check_type: binary_analysis
+  - id: DRIVER_IOCTL_WEAK_DECLARED_ACCESS
+    title: Driver IOCTL declares weaker access than its operation requires
+    summary: A recovered control code declares FILE_ANY_ACCESS, or a read/write code pair declares read-only access on both halves.
+    description: |
+      One or more control codes recovered from this driver's dispatch routine declare access rights weaker than
+      the operation appears to need. FILE_ANY_ACCESS lets a handle opened without write permission reach the
+      handler at all. A consecutive read/write function-code pair that declares FILE_READ_ACCESS on both halves
+      means the write half is reachable from a read-only handle; this is the flaw in ThrottleStop.sys
+      (CVE-2025-7771), where the physical-memory write code 0x8000649C still declares FILE_READ_ACCESS. The
+      declared access in CTL_CODE is only enforced against the handle's granted access, so an under-declared
+      write primitive widens the set of callers that can reach it. Control codes are recovered heuristically
+      from compare immediates, so verify each against the dispatch routine.
+    check_type: binary_analysis
+  - id: BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS
+    title: User-mode image drives a kernel device with vendor-range control codes
+    summary: A user-mode PE opens a device object and issues IOCTLs whose device type is in the custom or vendor-reserved range.
+    description: |
+      This user-mode image imports both a device-open API (CreateFileW / NtCreateFile) and a device-control
+      API (DeviceIoControl / NtDeviceIoControlFile), and its code references control codes whose device type
+      falls in the FILE_DEVICE_UNKNOWN or vendor-reserved range rather than a documented Microsoft device
+      type. That is the shape of a bring-your-own-vulnerable-driver client: it talks to a third-party driver's
+      private interface rather than to a standard Windows device class. The CVE-2025-7771 proof-of-concept
+      (ThrottleStop.sys) matches this exactly, opening \\.\ThrottleStop and issuing 0x80006498 / 0x8000649C
+      for arbitrary physical memory read and write. Cross-reference the recovered codes and the driver they
+      target: legitimate vendor control panels and diagnostic utilities talk to their own drivers the same
+      way, so this rule identifies the interaction pattern rather than proving malicious intent.
+    check_type: binary_analysis
+  - id: BYOVD_DRIVER_LOADER_SERVICE_INSTALL
+    title: User-mode image installs or loads a kernel-mode driver
+    summary: A user-mode PE creates or starts a kernel service, or calls NtLoadDriver directly.
+    description: |
+      This user-mode image can register and start a kernel-mode service (OpenSCManager plus
+      CreateService / StartService) or loads a driver directly through NtLoadDriver / ZwLoadDriver. This is
+      the loading step of a bring-your-own-vulnerable-driver chain, in which an attacker who already holds
+      administrative rights drops a signed but vulnerable driver and starts it to obtain a kernel read/write
+      primitive, defeating HVCI, PPL and EDR protections. Installers, hypervisors, anti-cheat and security
+      products legitimately do this, so weight the finding by whether the same image also matches
+      BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS, which would indicate it both loads a driver and drives its
+      private IOCTL interface.
+    check_type: binary_analysis

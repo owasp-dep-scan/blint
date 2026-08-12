@@ -270,3 +270,15 @@ rules:
     description: |
       This review detects the post-elevation helper shape used by MiniPlasma-style WER QueueReporting environment-hijack chains: recover the originating session through GetNamedPipeServerSessionId and launch a process using CreateProcessAsUser*. The API combination is rare but can appear in legitimate service brokers, so treat the result as a review signal.
     check_type: function_analysis
+  - id: BYOVD_PORT_IO_MSR_INSTRUCTIONS
+    title: Function executes privileged MSR or port I/O instructions
+    summary: A function contains rdmsr/wrmsr, port I/O, or cache/control-register instructions.
+    description: |
+      This function contains privileged instructions such as rdmsr, wrmsr, in, out, rdpmc, invd or wbinvd, or writes to a control register. These primitives are compiler intrinsics rather than imported APIs, so they leave no import edge and are only visible in the instruction stream. A driver that exposes MSR read/write to user mode enables a full KASLR bypass and ring-0 code execution via IA32_LSTAR, which is the primitive at the centre of CVE-2025-8061 (LnvMSRIO.sys). Legitimate power-management and overclocking drivers use these instructions too, so confirm whether the MSR index and value are caller-controlled.
+    check_type: function_analysis
+  - id: BYOVD_PCI_CONFIG_UNVALIDATED_DISPATCH
+    title: Function reaches PCI configuration access with no access check
+    summary: A function calls Hal*BusData* while performing no privilege or access check of its own.
+    description: |
+      This function calls HalGetBusDataByOffset or HalSetBusDataByOffset and contains no call to any privilege or access-checking API. In LnvMSRIO.sys (CVE-2025-8061 research) the equivalent handler validated only that the input pointers were non-NULL and that InputBufferLength was exactly 8 bytes, then passed the caller-supplied bus/device/function and register offset straight to the HAL. Review whether the immediate caller establishes authorization, since this rule only observes a single function.
+    check_type: function_analysis

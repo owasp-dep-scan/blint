@@ -2,6 +2,7 @@ import re
 
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
+    review_binary_dict,
     review_entries_dict,
     review_exe_dict,
     review_functions_dict,
@@ -10,6 +11,7 @@ from blint.lib.analysis import (
     review_rules_cache,
     review_symbols_dict,
 )
+from blint.lib.binary_reviews import review_binary_metadata
 from blint.lib.function_reviews import review_disassembled_functions
 from blint.lib.review_utils import (
     build_loader_symbol_review_results,
@@ -30,6 +32,7 @@ class ReviewRunner:
         self.review_imports_list = []
         self.review_entries_list = []
         self.review_functions_list = []
+        self.review_binary_list = []
 
     def run_review(self, metadata):
         """
@@ -57,6 +60,7 @@ class ReviewRunner:
             or self.review_imports_list
             or self.review_entries_list
             or self.review_functions_list
+            or self.review_binary_list
         ):
             return self._review_lists(metadata)
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
@@ -83,6 +87,8 @@ class ReviewRunner:
             self._review_entries(metadata)
         if self.review_functions_list:
             self._review_functions(metadata)
+        if self.review_binary_list:
+            self._review_binary(metadata)
         self.results |= build_pii_review_results(metadata, EVIDENCE_LIMIT)
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
@@ -133,6 +139,15 @@ class ReviewRunner:
         )
         self.results |= results
 
+    def _review_binary(self, metadata):
+        """Reviews whole-binary characteristics such as driver access control."""
+        results = review_binary_metadata(
+            self.review_binary_list,
+            metadata,
+            EVIDENCE_LIMIT,
+        )
+        self.results |= results
+
     def _methods_or_exe(self, metadata):
         """Reviews method-like lists in the metadata."""
         functions_list = [
@@ -172,6 +187,7 @@ class ReviewRunner:
         self.review_imports_list = review_imports_dict.get(exe_type)
         self.review_entries_list = review_entries_dict.get(exe_type)
         self.review_functions_list = review_functions_dict.get(exe_type)
+        self.review_binary_list = review_binary_dict.get(exe_type)
 
     def process_review(self, f, exe_name):
         """Processes the review results for the given executable and review."""

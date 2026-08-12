@@ -106,6 +106,41 @@ CLOUD_FILTER_REGISTRY_LINK_APIS = {
     "ntcreatesymboliclinkobject",
 }
 
+# MSR and port I/O are compiler intrinsics, so they are only visible as
+# instructions. `in`/`out` need word boundaries to avoid matching operands.
+PRIVILEGED_HW_INSTRUCTION_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\brdmsr\b",
+        r"\bwrmsr\b",
+        r"\brdpmc\b",
+        r"\binvd\b",
+        r"\bwbinvd\b",
+        r"\bin\s+(?:al|ax|eax)\s*,",
+        r"\bout\s+(?:dx|0x[0-9a-f]+)\s*,",
+        r"\bmov\s+cr[0-8]\s*,",
+    )
+)
+
+PCI_CONFIG_APIS = {
+    "halgetbusdatabyoffset",
+    "halsetbusdatabyoffset",
+    "halgetbusdata",
+    "halsetbusdata",
+}
+
+ACCESS_CHECK_APIS = {
+    "sesingleprivilegecheck",
+    "seaccesscheck",
+    "seprivilegecheck",
+    "zwqueryinformationtoken",
+    "ntqueryinformationtoken",
+    "iovalidatedeviceiocontrolaccess",
+    "obreferenceobjectbyhandle",
+    "rtlvalidsecuritydescriptor",
+    "rtlvalidrelativesecuritydescriptor",
+}
+
 ALLOC_APIS = {
     "virtualalloc",
     "virtualallocex",
@@ -506,6 +541,14 @@ def _evaluate_function_analysis(rule_id: str, func_data: dict, resolver_helpers:
             marker in assembly for marker in ("queuereporting", "wermgr.exe", "miniplasmawerpipe")
         )
         if has_pipe_session and has_process_launch and has_wer_strings:
+            passed = True
+    elif rule_id == "BYOVD_PORT_IO_MSR_INSTRUCTIONS":
+        if _assembly_matches_any(assembly, PRIVILEGED_HW_INSTRUCTION_PATTERNS):
+            passed = True
+    elif rule_id == "BYOVD_PCI_CONFIG_UNVALIDATED_DISPATCH":
+        if _function_has_any_call_fragment(
+            func_data, PCI_CONFIG_APIS
+        ) and not _function_has_any_call_fragment(func_data, ACCESS_CHECK_APIS):
             passed = True
     elif rule_id == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS":
         if (

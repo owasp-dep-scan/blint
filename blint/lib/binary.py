@@ -21,6 +21,7 @@ from blint.config import (
     get_int_from_env,
 )
 from blint.lib.disassembler import disassemble_functions
+from blint.lib.driver_ioctl import collect_driver_ioctls, is_kernel_driver
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.utils import (
@@ -1900,6 +1901,9 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
+            if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
+                if driver_ioctls := collect_driver_ioctls(metadata["disassembled_functions"]):
+                    metadata["driver_ioctls"] = driver_ioctls
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)
