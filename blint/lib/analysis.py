@@ -76,6 +76,7 @@ review_symbols_dict = defaultdict(list)
 review_imports_dict = defaultdict(list)
 review_entries_dict = defaultdict(list)
 review_functions_dict = defaultdict(list)
+review_binary_dict = defaultdict(list)
 
 review_rules_cache = {
     "PII_READ": {
@@ -192,6 +193,8 @@ def load_default_rules():
                         review_entries_dict[etype].append(method_rules_dict)
                     elif group == "FUNCTION_REVIEWS":
                         review_functions_dict[etype].append(method_rules_dict)
+                    elif group == "BINARY_REVIEWS":
+                        review_binary_dict[etype].append(method_rules_dict)
 
 
 def load_custom_rules(
@@ -203,6 +206,7 @@ def load_custom_rules(
     review_imports_dict,
     review_entries_dict,
     review_functions_dict,
+    review_binary_dict,
 ):
     """
     Loads custom review rules from a specified directory.
@@ -261,6 +265,8 @@ def load_custom_rules(
                             review_entries_dict[etype].append(method_rules_dict)
                         elif group == "FUNCTION_REVIEWS":
                             review_functions_dict[etype].append(method_rules_dict)
+                        elif group == "BINARY_REVIEWS":
+                            review_binary_dict[etype].append(method_rules_dict)
                         else:
                             LOG.warning(
                                 f"Unknown group '{methods_reviews_groups.get('group')}' in {rule_file_path}. Skipping block."
@@ -280,6 +286,7 @@ def initialize_rules(blint_options: BlintOptions):
     review_imports_dict.clear()
     review_entries_dict.clear()
     review_functions_dict.clear()
+    review_binary_dict.clear()
     review_rules_cache.clear()
     review_rules_cache.update(
         {
@@ -309,6 +316,7 @@ def initialize_rules(blint_options: BlintOptions):
         review_imports_dict,
         review_entries_dict,
         review_functions_dict,
+        review_binary_dict,
     )
 
 

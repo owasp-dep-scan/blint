@@ -21,6 +21,7 @@ from blint.config import (
     get_int_from_env,
 )
 from blint.lib.disassembler import disassemble_functions
+from blint.lib.driver_ioctl import collect_driver_ioctls, is_kernel_driver
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.utils import (
@@ -29,6 +30,7 @@ from blint.lib.utils import (
     camel_to_snake,
     check_secret,
     cleanup_dict_lief_errors,
+    coerce_to_text,
     decode_base64,
     demangle_symbolic_name,
     enum_to_str,
@@ -176,11 +178,17 @@ def extract_note_data(idx, note):
         version = [str(i) for i in note.version]
         version_str = ".".join(version)
     else:
-        with contextlib.suppress(AttributeError):
-            note_details = note.details
-            version = note_details.version
-            abi = str(note_details.abi)
-            version_str = f"{version[0]}.{version[1]}.{version[2]}"
+        # LIEF 1.0 dropped Note.details and instead returns concrete subclasses,
+        # so ABI notes expose `abi` and `version` directly. Reading `details`
+        # raised AttributeError for every note, making this branch dead code.
+        with contextlib.suppress(AttributeError, IndexError, TypeError):
+            note_version = getattr(note, "version", None)
+            note_abi = getattr(note, "abi", None)
+            if note_abi is not None:
+                abi = str(note_abi)
+            if note_version is not None:
+                version = [str(i) for i in note_version]
+                version_str = ".".join(version[:3])
 
     if not version_str and build_id:
         version_str = build_id
@@ -447,6 +455,95 @@ def parse_wasm_metadata(exe_file: str, metadata: dict) -> dict:
     return metadata
 
 
+# Only lief.ELF.Binary exposes a `strings` property; PE and Mach-O do not, so
+# those formats are scanned directly. Six characters is long enough to exclude
+# instruction-encoding noise while keeping short but meaningful values such as
+# device paths and SDDL fragments.
+MIN_EXTRACTED_STRING_LEN = 6
+MAX_EXTRACTED_STRINGS = 50000
+# Sections that hold program string literals, by PE and Mach-O convention.
+STRING_BEARING_SECTIONS = {
+    ".rdata",
+    ".data",
+    ".rsrc",
+    ".idata",
+    ".sdata",
+    "__cstring",
+    "__const",
+    "__data",
+    "__ustring",
+    "__oslogstring",
+    "__cfstring",
+    "__literal4",
+    "__literal8",
+    "__literal16",
+}
+STRING_BEARING_SECTION_PREFIXES = ("__objc_", ".rodata")
+ASCII_STRING_RE = re.compile(rb"[\x20-\x7e]{%d,}" % MIN_EXTRACTED_STRING_LEN)
+# Windows binaries hold most user-visible text as UTF-16LE.
+UTF16LE_STRING_RE = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % MIN_EXTRACTED_STRING_LEN)
+
+
+def is_string_bearing_section(section) -> bool:
+    """Return True for sections that carry program strings.
+
+    An allow list is used rather than a deny list because scanning everything is
+    actively harmful: executable sections yield printable fragments of
+    instruction encodings, and DWARF debug sections are enormous. On ripgrep's
+    Windows build those two sources produced 17k junk values, including
+    ``33333333`` reported as an IP address, while the real strings live in
+    ``.rdata``.
+    """
+    name = (getattr(section, "name", "") or "").lower()
+    if not name:
+        return False
+    if name in STRING_BEARING_SECTIONS:
+        return True
+    return any(name.startswith(prefix) for prefix in STRING_BEARING_SECTION_PREFIXES)
+
+
+def extract_section_strings(parsed_obj) -> list:
+    """Extract printable strings from section content.
+
+    Used for formats LIEF has no ``strings`` property for. Without this, every
+    string-based review silently finds nothing on PE and Mach-O binaries.
+    """
+    results = []
+    seen = set()
+    sections = getattr(parsed_obj, "sections", None)
+    if not sections or isinstance(sections, lief.lief_errors):
+        return results
+    for section in sections:
+        if len(results) >= MAX_EXTRACTED_STRINGS:
+            break
+        if not is_string_bearing_section(section):
+            continue
+        try:
+            content = bytes(section.content)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if not content:
+            continue
+        for pattern, is_wide in ((ASCII_STRING_RE, False), (UTF16LE_STRING_RE, True)):
+            for match in pattern.finditer(content):
+                if len(results) >= MAX_EXTRACTED_STRINGS:
+                    break
+                raw = match.group()
+                value = raw.decode("utf-16-le", "ignore") if is_wide else raw.decode("latin-1")
+                if value and value not in seen:
+                    seen.add(value)
+                    results.append(value)
+    return results
+
+
+def binary_strings(parsed_obj) -> list:
+    """Return the raw strings of a binary regardless of its format."""
+    strings = getattr(parsed_obj, "strings", None)
+    if strings and not isinstance(strings, lief.lief_errors):
+        return list(strings)
+    return extract_section_strings(parsed_obj)
+
+
 def parse_strings(parsed_obj):
     """
     Parse strings from a parsed object.
@@ -459,11 +556,14 @@ def parse_strings(parsed_obj):
     """
     strings_list = []
     with contextlib.suppress(AttributeError):
-        strings = parsed_obj.strings
+        strings = binary_strings(parsed_obj)
         if isinstance(strings, lief.lief_errors):
             return strings_list
-        for s in strings:
+        for raw_string in strings:
             try:
+                # LIEF yields bytes for entries that are not valid UTF-8; the
+                # majority of extracted strings are bytes in practice.
+                s = coerce_to_text(raw_string)
                 if s and "[]" not in s and "{}" not in s:
                     entropy = calculate_entropy(s)
                     secret_type = check_secret(s)
@@ -518,11 +618,12 @@ def parse_informative_strings(parsed_obj):
     informative = []
     seen = set()
     with contextlib.suppress(AttributeError):
-        strings = parsed_obj.strings
+        strings = binary_strings(parsed_obj)
         if isinstance(strings, lief.lief_errors):
             return informative
-        for value in strings:
-            if not isinstance(value, str):
+        for raw_value in strings:
+            value = coerce_to_text(raw_value)
+            if not value:
                 continue
             text = value.strip()
             if not text:
@@ -830,6 +931,23 @@ def parse_pe_authenticode(parsed_obj):
         return {}
 
 
+def format_symbol_section_index(symbol) -> str:
+    """Render a COFF/PE symbol's section index for symbols with no named section.
+
+    LIEF 1.0 moved PE symbols to the COFF module and renamed this field from
+    ``section_number`` to ``section_idx``; ``lief.PE.Symbol`` no longer exists.
+    Both names are read so the output is stable across LIEF versions. File
+    records and absolute symbols legitimately have no section, which is why this
+    returns an empty string rather than raising.
+    """
+    for attribute in ("section_idx", "section_number"):
+        index = getattr(symbol, attribute, None)
+        if isinstance(index, bool) or not isinstance(index, int):
+            continue
+        return f"section<{index:d}>"
+    return ""
+
+
 def parse_pe_symbols(symbols):
     """
     Parses the symbols and determines the executable type.
@@ -844,34 +962,40 @@ def parse_pe_symbols(symbols):
     """
     symbols_list = []
     exe_type = ""
-    for symbol in symbols:
-        if not symbol:
-            continue
-        try:
-            if symbol.section and symbol.section.name:
-                section_nb_str = symbol.section.name
-            else:
-                section_nb_str = "section<{:d}>".format(symbol.section_number)
-        except (AttributeError, TypeError) as e:
-            LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol} PE symbol.")
-            section_nb_str = ""
-        try:
-            if not exe_type:
-                exe_type = guess_exe_type(symbol.name.lower())
-            if symbol.name:
-                symbols_list.append(
-                    {
-                        "name": demangle_symbolic_name(symbol.name),
-                        "value": symbol.value,
-                        "size": symbol.size,
-                        "id": section_nb_str,
-                        "base_type": enum_to_str(symbol.base_type),
-                        "complex_type": enum_to_str(symbol.complex_type),
-                        "storage_class": enum_to_str(symbol.storage_class),
-                    }
-                )
-        except (IndexError, AttributeError, ValueError, RuntimeError):
-            pass
+    # Toolchains emit COFF storage classes that are absent from LIEF's enum (the
+    # GNU toolchain uses 106, which the Microsoft PE/COFF spec leaves unassigned).
+    # LIEF returns the raw int and warns once per symbol, so the warning is
+    # suppressed around the loop rather than thousands of times inside it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for symbol in symbols:
+            if not symbol:
+                continue
+            try:
+                if symbol.section and symbol.section.name:
+                    section_nb_str = symbol.section.name
+                else:
+                    section_nb_str = format_symbol_section_index(symbol)
+            except (AttributeError, TypeError) as e:
+                LOG.debug(f"Caught {type(e)}: {e} while parsing {symbol} PE symbol.")
+                section_nb_str = ""
+            try:
+                if not exe_type:
+                    exe_type = guess_exe_type(symbol.name.lower())
+                if symbol.name:
+                    symbols_list.append(
+                        {
+                            "name": demangle_symbolic_name(symbol.name),
+                            "value": symbol.value,
+                            "size": symbol.size,
+                            "id": section_nb_str,
+                            "base_type": enum_to_str(symbol.base_type),
+                            "complex_type": enum_to_str(symbol.complex_type),
+                            "storage_class": enum_to_str(symbol.storage_class),
+                        }
+                    )
+            except (IndexError, AttributeError, ValueError, RuntimeError):
+                pass
     return symbols_list, exe_type
 
 
@@ -1880,6 +2004,11 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
                 metadata["objc_metadata"] = objc_metadata
                 metadata = merge_macho_objc_functions(metadata)
         metadata = standardize_keys(metadata)
+        # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
+        # strings at all, which silently disabled secret and string-based reviews
+        # for those formats.
+        if "strings" not in metadata:
+            metadata["strings"] = parse_strings(parsed_obj)
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
         metadata["import_dependencies"] = analyze_import_deps(metadata)
@@ -1900,6 +2029,9 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
+            if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
+                if driver_ioctls := collect_driver_ioctls(metadata["disassembled_functions"]):
+                    metadata["driver_ioctls"] = driver_ioctls
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)

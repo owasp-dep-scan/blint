@@ -4343,3 +4343,57 @@ rules:
       - MmMapIoSpace
       - IoAllocateMdl
       - MmMapLockedPages
+  - id: BYOVD_PCI_CONFIG_READ
+    title: Potential BYOVD PCI Configuration Space Read Capability
+    summary: The driver imports HAL APIs that read the configuration space of arbitrary PCI devices.
+    description: |
+      This rule detects imports of HalGetBusDataByOffset / HalGetBusData and related bus-resource APIs.
+      These read the PCI configuration space of any bus, device and function on the system. When a driver
+      exposes this over an IOCTL without validating the caller-supplied BDF, an unprivileged process can
+      enumerate the full hardware topology and read Base Address Registers, disclosing the physical memory
+      layout of every device (GPU framebuffer, NIC descriptor rings, TPM registers). This reconnaissance
+      runs entirely through a signed driver and is invisible to syscall-based telemetry. Legitimate vendor
+      drivers also use these APIs, so treat this as a review signal rather than proof of a vulnerability.
+    patterns:
+      - HalGetBusDataByOffset
+      - HalGetBusData
+      - HalGetInterruptVector
+      - HalAssignSlotResources
+  - id: BYOVD_PCI_CONFIG_WRITE
+    title: Potential BYOVD PCI Configuration Space Write Capability
+    summary: The driver imports HAL APIs that write the configuration space of arbitrary PCI devices.
+    description: |
+      This rule detects imports of HalSetBusDataByOffset / HalSetBusData, which write to the PCI
+      configuration space of any device on the system. This is a materially more severe capability than
+      the read counterpart: clearing the Bus Master Enable bit in a device Command Register (offset 0x04)
+      silently disables DMA for that device, including network adapters relied on by endpoint security
+      tooling, and rewriting Base Address Registers can remap device MMIO. Combined with a physical memory
+      write primitive it forms a reliable DMA attack chain. Verify that the driver validates the caller
+      supplied bus/device/function and register offset, and that the device object is access controlled.
+    patterns:
+      - HalSetBusDataByOffset
+      - HalSetBusData
+  - id: BYOVD_PROCESS_TAMPERING_PRIMITIVE
+    title: Potential BYOVD Cross-Process Memory and Handle Primitive
+    summary: The driver imports kernel APIs that attach to, open handles into, or read and write the memory of arbitrary processes.
+    description: |
+      This rule detects the kernel process-manipulation cluster: PsLookupProcessByProcessId to resolve an
+      arbitrary PID to an EPROCESS, KeStackAttachProcess / KeUnstackDetachProcess to enter another process's
+      address space, ZwOpenProcess and ObOpenObjectByPointer to manufacture handles, and MmIsAddressValid or
+      MmCopyVirtualMemory to probe and move memory. A driver that exposes any of these over an IOCTL without
+      validating the target PID gives an unprivileged caller read/write access to protected processes. This is
+      the primitive behind driver-assisted EDR termination and token theft, and it is distinct from physical
+      memory mapping: it needs no MmMapIoSpace and leaves no physical address in the request. Anti-cheat,
+      backup, endpoint security and virtualisation drivers legitimately import these APIs, so confirm whether
+      the target process is caller-controlled and whether the dispatch path performs any access check.
+    patterns:
+      - PsLookupProcessByProcessId
+      - PsLookupThreadByThreadId
+      - KeStackAttachProcess
+      - KeUnstackDetachProcess
+      - MmCopyVirtualMemory
+      - ObOpenObjectByPointer
+      - ZwOpenProcess
+      - ZwTerminateProcess
+      - PsTerminateSystemThread
+      - PsSetCreateProcessNotifyRoutine
