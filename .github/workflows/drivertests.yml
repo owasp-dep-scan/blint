@@ -31,10 +31,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      # build.cmd resolves the MSVC environment itself through vswhere. The
+      # runner image moves between Visual Studio versions - windows-latest now
+      # carries VS 2026, whose install path is ...\18\Enterprise rather than
+      # ...\2022\Enterprise - so the toolset must be located, not assumed.
       - name: Build fixture
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
           call contrib\win-driver-fixture\build.cmd %CD%\out\blint_test_driver.sys
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2

@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from blint.config import BlintOptions  # noqa: E402
-from blint.lib.analysis import initialize_rules  # noqa: E402
+from blint.lib.analysis import initialize_rules, review_methods_dict  # noqa: E402
 from blint.lib.binary import parse  # noqa: E402
 from blint.lib.review_runner import ReviewRunner  # noqa: E402
 
@@ -32,6 +32,11 @@ DRIVER_RULE_PREFIXES = ("DRIVER_", "BYOVD_")
 
 def sweep(driver_paths: list) -> dict:
     """Run the driver rules over each image and tally the hits."""
+    # Without this the rule tables are empty, every review returns nothing, and
+    # the sweep reports a clean zero-hit run that means nothing at all.
+    initialize_rules(BlintOptions())
+    if not review_methods_dict:
+        raise RuntimeError("no rules were loaded; a zero-hit result would be meaningless")
     hits = Counter()
     interface_hits = Counter()
     analysed = 0
