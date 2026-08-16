@@ -1,0 +1,22 @@
+blint/lib/driver_ioctl.py
+  s_a9d483aca464dc::t_c22a5458f031a2 147-153,402-415,418
+tests/test_driver_ioctl.py
+  s_a9d483aca464dc::t_cd65ace46b6eaa 1023-1038
+  s_a9d483aca464dc::t_96f3d7350fa2da 1039-1040
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37cb786e34cb7e6818a5ae7e7ff8f116d8dcd1e4",
+  "prompts": {},
+  "sessions": {
+    "s_a9d483aca464dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88f4cfc8-db29-4393-ad8e-2038d446343b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
