@@ -1,0 +1,130 @@
+name: windows driver tests
+
+# Exercises the Windows kernel driver analysis against real compiler output and
+# real signed drivers, neither of which the unit tests or the LOLDrivers harness
+# can reach: the unit tests use hand-written assembly, and the LOLDrivers dataset
+# publishes import lists rather than binaries.
+
+on:
+  pull_request:
+    paths:
+      - 'blint/lib/driver_ioctl.py'
+      - 'blint/lib/binary_reviews.py'
+      - 'blint/data/annotations/review_drivers_win.yml'
+      - 'contrib/win-driver-fixture/**'
+      - '.github/workflows/drivertests.yml'
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+permissions: {}
+
+jobs:
+  build-fixture:
+    # Builds the driver-shaped fixture whose control codes are known ahead of
+    # time. MSVC is preinstalled on the runner; no WDK is needed.
+    name: build driver fixture
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # build.cmd resolves the MSVC environment itself through vswhere. The
+      # runner image moves between Visual Studio versions - windows-latest now
+      # carries VS 2026, whose install path is ...\18\Enterprise rather than
+      # ...\2022\Enterprise - so the toolset must be located, not assumed.
+      - name: Build fixture
+        shell: cmd
+        run: |
+          mkdir out
+          call contrib\win-driver-fixture\build.cmd %CD%\out\blint_test_driver.sys
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: blint-test-driver
+          path: out/blint_test_driver.sys
+          if-no-files-found: error
+
+  verify-recovery:
+    # The analysis runs on Linux because nyxstone, and therefore disassembly, is
+    # only installed there (the Windows job in bintests.yml uses
+    # --without=extended).
+    name: verify IOCTL recovery
+    needs: build-fixture
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: blint-test-driver
+          path: out
+      - name: Linux packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zlib1g-dev libzstd-dev llvm-18 llvm-18-dev
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install blint
+        run: |
+          python3 -m pip install poetry
+          poetry install --all-groups --all-extras
+        env:
+          NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
+      - name: Verify recovery against ground truth
+        run: |
+          poetry run python contrib/win-driver-fixture/verify_recovery.py \
+            out/blint_test_driver.sys | tee recovery.txt
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo '### Driver IOCTL recovery'
+            echo '```'
+            cat recovery.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  inbox-driver-precision:
+    # A false-positive sweep over the signed Microsoft drivers already present on
+    # the runner. LOLDrivers measures recall only - every sample in it is known
+    # vulnerable - so it cannot tell you how noisy a rule is. These can, and the
+    # binaries never leave the runner, so nothing is redistributed.
+    #
+    # Import- and string-based rules only: no nyxstone on Windows, so the
+    # disassembly-dependent rules stay silent here by construction.
+    name: inbox driver false-positive sweep
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install blint
+        run: |
+          python3 -m pip install poetry
+          poetry install --without=extended --all-extras
+      - name: Sweep inbox drivers
+        shell: bash
+        run: |
+          poetry run python contrib/win-driver-fixture/inbox_sweep.py \
+            --drivers-dir "C:/Windows/System32/drivers" --limit 250 | tee sweep.txt
+      - name: Summarise
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### Inbox driver false-positive sweep'
+            echo '```'
+            cat sweep.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

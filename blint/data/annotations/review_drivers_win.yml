@@ -33,6 +33,21 @@ rules:
       write primitive widens the set of callers that can reach it. Control codes are recovered heuristically
       from compare immediates, so verify each against the dispatch routine.
     check_type: binary_analysis
+  - id: DRIVER_IOCTL_METHOD_NEITHER
+    title: Driver IOCTL takes raw user pointers with no probe API in the image
+    summary: A recovered control code uses METHOD_NEITHER, and the driver imports no ProbeForRead or ProbeForWrite.
+    description: |
+      One or more control codes recovered from this driver declare METHOD_NEITHER, the transfer method in
+      which the I/O manager performs no copying and no mapping: the handler receives the caller's
+      Type3InputBuffer and UserBuffer as raw user-mode pointers. It is then the driver's own responsibility
+      to validate them inside a try/except with ProbeForRead and ProbeForWrite before any dereference. This
+      image imports neither probe routine, nor MmProbeAndLockPages, so nothing in it can be performing that
+      validation, and a caller can hand the driver an arbitrary kernel address to read or write. That is a
+      direct arbitrary-read/write primitive of the kind bring-your-own-vulnerable-driver chains look for.
+      The probe check is import-based, so a driver that validates through an inlined or statically linked
+      routine will still be reported; control codes are recovered heuristically, so confirm the method bits
+      of each reported code against the dispatch routine.
+    check_type: binary_analysis
   - id: BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS
     title: User-mode image drives a kernel device with vendor-range control codes
     summary: A user-mode PE opens a device object and issues IOCTLs whose device type is in the custom or vendor-reserved range.

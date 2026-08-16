@@ -1,0 +1,11 @@
+; Import library stub for the kernel routines ioctl_driver.c references.
+; `lib /def:ntoskrnl.def` turns this into an import library, which is all the
+; linker needs to produce a PE that imports ntoskrnl.exe - no WDK involved.
+LIBRARY ntoskrnl.exe
+EXPORTS
+IoCreateDevice
+IoCreateSymbolicLink
+IoDeleteDevice
+RtlInitUnicodeString
+MmMapIoSpace
+MmUnmapIoSpace
