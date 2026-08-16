@@ -144,11 +144,13 @@ SWITCH_BOUND_JUMP_RE = re.compile(r"^\s*(?:ja|jae|jnbe|jnb)\b")
 # next to each other in arithmetic code.
 SWITCH_MAX_CASE_SPAN = 0x400
 
-# The step between successive cases once the compiler has divided the index by
-# four. Without that division the index is a raw code delta, and the cases can
-# sit at any offset in the span - including ones that vary the method bits - so
-# enumerating the span would invent codes the driver does not accept. Only the
-# scaled form is enumerated; see extract_switch_ioctl_codes.
+# Successive function codes are four apart, so a switch over a contiguous run of
+# them steps by four. Whether the compiler divided the index by four first only
+# changes the units the range check is expressed in:
+#
+#     MSVC   lea eax, [rcx + <-base>] / cmp eax, 60   span in code units, 16 cases
+#     clang  lea eax, [rcx + <-base>] / rol eax, 30 / cmp eax, 15
+#                                                    span in index units, 16 cases
 CONTROL_CODE_STRIDE = 4
 
 # Runs of control codes in .rdata/.data are dispatch tables walked in a loop, so
@@ -397,10 +399,23 @@ def extract_switch_ioctl_codes(func_data: dict) -> list:
         span, scaled = _bounded_case_span(lines, index + 1, base_match.group("reg"))
         if span is None:
             continue
-        if not scaled:
+        if scaled:
+            # The span counts cases directly.
+            cases = span + 1
+        elif span % CONTROL_CODE_STRIDE == 0:
+            # The span is the largest case delta in code units. Being a multiple
+            # of four means the highest case is a whole number of function codes
+            # above the base, so the range is function-code aligned throughout.
+            cases = span // CONTROL_CODE_STRIDE + 1
+        else:
+            # A span that is not a multiple of four means at least one case
+            # varies the method or access bits, and those cannot be located
+            # without reading the jump table. A real clang build lowered a
+            # four-case dispatch this way, with cases at deltas 0, 4, 8 and 15;
+            # stepping by four would have missed the last and invented one at 12.
             add(base)
             continue
-        for step in range(span + 1):
+        for step in range(cases):
             add(base + step * CONTROL_CODE_STRIDE)
     return codes
 

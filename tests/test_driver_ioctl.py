@@ -1020,3 +1020,21 @@ def test_range_tested_code_is_kept_when_nothing_corroborates_the_off_by_one():
     }
     codes = {entry["code"] for entry in collect_driver_ioctls(disassembled)["ioctls"]}
     assert "0x80003444" in codes
+
+
+def test_msvc_style_span_in_code_units_is_enumerated():
+    """MSVC leaves the index unscaled and bounds it in code units.
+
+    Taken from a real MSVC build of contrib/win-driver-fixture: sixteen cases
+    four apart give `cmp eax, 60`, not `cmp eax, 15`. A span that is a multiple
+    of four puts the highest case a whole number of function codes above the
+    base, so the range is function-code aligned and can be stepped out.
+    """
+    base = 0x80002440
+    func_data = {
+        "assembly": (
+            f"lea eax, [rcx + {(-base) & 0xFFFFFFFF}]\nxor ebx, ebx\ncmp eax, 60\nja default\n"
+        )
+    }
+    codes = extract_switch_ioctl_codes(func_data)
+    assert codes == [base + step * 4 for step in range(16)]
