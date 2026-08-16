@@ -988,7 +988,7 @@ def test_method_neither_rule_is_wired_into_the_real_rule_pipeline():
 
 
 def test_binary_search_range_boundary_is_not_a_control_code():
-    """Regression from a real clang build of tests/fixtures/win-drivers.
+    """Regression from a real clang build of contrib/win-driver-fixture.
 
     Dispatching on widely spaced codes lowers to a binary search, which compares
     against the boundary *below* a real code. Before the branch kind was taken

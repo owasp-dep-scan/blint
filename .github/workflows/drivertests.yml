@@ -11,7 +11,7 @@ on:
       - 'blint/lib/driver_ioctl.py'
       - 'blint/lib/binary_reviews.py'
       - 'blint/data/annotations/review_drivers_win.yml'
-      - 'tests/fixtures/win-drivers/**'
+      - 'contrib/win-driver-fixture/**'
       - '.github/workflows/drivertests.yml'
   workflow_dispatch:
 concurrency:
@@ -36,7 +36,7 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
-          call tests\fixtures\win-drivers\build.cmd %CD%\out\blint_test_driver.sys
+          call contrib\win-driver-fixture\build.cmd %CD%\out\blint_test_driver.sys
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: blint-test-driver
@@ -75,7 +75,7 @@ jobs:
           NYXSTONE_LLVM_PREFIX: /usr/lib/llvm-18
       - name: Verify recovery against ground truth
         run: |
-          poetry run python tests/fixtures/win-drivers/verify_recovery.py \
+          poetry run python contrib/win-driver-fixture/verify_recovery.py \
             out/blint_test_driver.sys | tee recovery.txt
       - name: Summarise
         if: always()
@@ -113,7 +113,7 @@ jobs:
       - name: Sweep inbox drivers
         shell: bash
         run: |
-          poetry run python tests/fixtures/win-drivers/inbox_sweep.py \
+          poetry run python contrib/win-driver-fixture/inbox_sweep.py \
             --drivers-dir "C:/Windows/System32/drivers" --limit 250 | tee sweep.txt
       - name: Summarise
         if: always()
