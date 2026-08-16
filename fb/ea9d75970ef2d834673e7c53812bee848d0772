@@ -1,0 +1,35 @@
+contrib/win-driver-fixture/verify_recovery.py
+  s_a9d483aca464dc::t_24e2d5ce2e5a4e 1-153
+contrib/win-driver-fixture/README.md
+  s_a9d483aca464dc::t_24e2d5ce2e5a4e 1-54
+tests/test_driver_ioctl.py
+  s_a9d483aca464dc::t_195dfd4d9270a3 991
+.github/workflows/drivertests.yml
+  s_a9d483aca464dc::t_24e2d5ce2e5a4e 14,39,78,116
+contrib/win-driver-fixture/ioctl_driver.c
+  s_a9d483aca464dc::t_24e2d5ce2e5a4e 1-243
+contrib/win-driver-fixture/inbox_sweep.py
+  s_a9d483aca464dc::t_24e2d5ce2e5a4e 1-104
+contrib/README.md
+  s_a9d483aca464dc::t_8beb460368a3ee 30-41
+contrib/win-driver-fixture/build.cmd
+  s_a9d483aca464dc::t_822839def126d4 1-19
+contrib/win-driver-fixture/ntoskrnl.def
+  s_a9d483aca464dc::t_3a212d350ff508 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fbea9d75970ef2d834673e7c53812bee848d0772",
+  "prompts": {},
+  "sessions": {
+    "s_a9d483aca464dc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88f4cfc8-db29-4393-ad8e-2038d446343b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
