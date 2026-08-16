@@ -81,25 +81,54 @@ VENDOR_FUNCTION_CODE_FLOOR = 0x800
 DISPATCH_MNEMONIC_RE = re.compile(r"^\s*(?:cmp|sub|add|xor)\b")
 CLIENT_MNEMONIC_RE = re.compile(r"^\s*mov\b")
 
+# What the branch after a compare says about the immediate. `cmp code, X` /
+# `je handler` tests for one control code. `cmp code, X` / `ja higher_half` is a
+# binary search splitting the case range, and there X is a boundary - typically
+# one below a real code - rather than a code the driver accepts. A clang-built
+# driver dispatching on widely spaced codes emits exactly that, putting
+# 0x80003443 in the results next to the real 0x80003444.
+EQUALITY_BRANCH_RE = re.compile(r"^\s*(?:je|jz|jne|jnz)\b")
+RANGE_BRANCH_RE = re.compile(r"^\s*(?:ja|jae|jb|jbe|jna|jnae|jnb|jnbe|jg|jge|jl|jle)\b")
+
 # An immediate operand in any of the three rendering styles described above
 # IMMEDIATE_RE, used by the switch-lowering patterns below.
 _IMMEDIATE_TOKEN = r"#?(?:0x[0-9a-f]+|[0-9][0-9a-f]*h|[0-9]+)"
 
-# A compare chain is only one of the two shapes a `switch (IoControlCode)` takes.
-# Once a dispatch routine handles more than a handful of codes, MSVC stops
-# emitting one compare per case and lowers the switch to a subtract-and-range
-# check feeding a jump table:
+# A compare chain is only one of the shapes a `switch (IoControlCode)` takes.
+# Once a dispatch routine handles more than a handful of codes, the compiler
+# stops emitting one compare per case and lowers the switch to a
+# subtract-and-range check feeding a jump table:
 #
 #     sub  eax, 0x80006498     ; index = code - lowest case
 #     cmp  eax, 0x24           ; how far the case range extends
 #     ja   default_case        ; unsigned bounds check
 #
 # Only the base survives as an immediate, so a compare-only scan recovers a
-# single control code and silently misses every other case in the table. The
-# range check tells us how far the case span reaches, which is enough to
-# enumerate the siblings.
+# single control code and silently misses every other case in the table.
+#
+# Three lowerings of the same subtraction, all seen in real driver builds:
+#
+#     sub eax, 0x80002400              MSVC, subtract the base
+#     add eax, 0x7fffdc00              the same thing as an addition of -base
+#     lea eax, [rcx + 2147474432]      clang, which folds it into an address
+#
+# The LEA form computes the index into a different register than it reads, so
+# the destination is what the range check compares and what has to be tracked.
 SWITCH_BASE_RE = re.compile(
     rf"^\s*(?P<op>sub|add)\s+(?P<reg>[a-z][a-z0-9]*)\s*,\s*(?P<imm>{_IMMEDIATE_TOKEN})\s*$"
+)
+SWITCH_BASE_LEA_RE = re.compile(
+    rf"^\s*(?P<op>lea)\s+(?P<reg>[a-z][a-z0-9]*)\s*,\s*"
+    rf"\[\s*[a-z][a-z0-9]*\s*\+\s*(?P<imm>{_IMMEDIATE_TOKEN})\s*\]\s*$"
+)
+
+# Control codes for consecutive function codes are 4 apart, so a compiler that
+# wants a dense jump table divides the index by four first. `ror reg, 2`,
+# `rol reg, 30` and `shr reg, 2` are the forms of that division. Its presence is
+# what says the switch steps a whole function code at a time.
+SWITCH_INDEX_SCALE_RE = re.compile(
+    r"^\s*(?:ror\s+[a-z][a-z0-9]*\s*,\s*2|rol\s+[a-z][a-z0-9]*\s*,\s*30"
+    r"|shr\s+[a-z][a-z0-9]*\s*,\s*2)\s*$"
 )
 SWITCH_RANGE_RE = re.compile(
     rf"^\s*cmp\s+(?P<reg>[a-z][a-z0-9]*)\s*,\s*(?P<imm>{_IMMEDIATE_TOKEN})\s*$"
@@ -115,10 +144,11 @@ SWITCH_BOUND_JUMP_RE = re.compile(r"^\s*(?:ja|jae|jnbe|jnb)\b")
 # next to each other in arithmetic code.
 SWITCH_MAX_CASE_SPAN = 0x400
 
-# Cases in a control-code switch differ by whole function codes, so successive
-# cases are 4 apart; the two low bits are the transfer method, which a driver
-# does not vary across a contiguous case range. Enumerating every index in the
-# span instead of every fourth one would invent three bogus codes per real one.
+# The step between successive cases once the compiler has divided the index by
+# four. Without that division the index is a raw code delta, and the cases can
+# sit at any offset in the span - including ones that vary the method bits - so
+# enumerating the span would invent codes the driver does not accept. Only the
+# scaled form is enumerated; see extract_switch_ioctl_codes.
 CONTROL_CODE_STRIDE = 4
 
 # Runs of control codes in .rdata/.data are dispatch tables walked in a loop, so
@@ -328,10 +358,17 @@ def extract_switch_ioctl_codes(func_data: dict) -> list:
 
     A compare chain names every case explicitly, but the subtract-and-range-check
     lowering names only the lowest one. The range check bounds the case span, so
-    the remaining cases are recovered by stepping one function code at a time
-    from the base. Holes in a sparse switch cannot be told from real cases
-    without reading the jump table itself, so these are reported at low
-    confidence: the span is an upper bound on the surface, not an exact set.
+    the remaining cases can be stepped out from the base.
+
+    Only a switch whose index the compiler divided by four is enumerated. That
+    division is what makes each index exactly one function code, so every index
+    in the span is a control code the driver could accept. Without it the index
+    is a raw delta, the real cases can sit anywhere in the span - including at
+    offsets that vary the method bits - and enumerating it would invent codes the
+    driver does not accept, so only the base is reported. Even when enumerated,
+    holes in a sparse switch cannot be told from real cases without reading the
+    jump table, so the span is an upper bound on the surface rather than an exact
+    set, and these codes never claim high confidence.
     """
     assembly = func_data.get("assembly", "").lower()
     if not assembly:
@@ -339,51 +376,65 @@ def extract_switch_ioctl_codes(func_data: dict) -> list:
     lines = assembly.split("\n")
     codes = []
     seen = set()
+
+    def add(code):
+        if code not in seen and is_plausible_ioctl(code):
+            seen.add(code)
+            codes.append(code)
+
     for index, line in enumerate(lines):
-        base_match = SWITCH_BASE_RE.match(line)
+        base_match = SWITCH_BASE_RE.match(line) or SWITCH_BASE_LEA_RE.match(line)
         if not base_match:
             continue
         immediate = _parse_immediate(base_match.group("imm"))
         if immediate is None:
             continue
-        # MSVC emits the subtraction either way round: `sub eax, BASE` or the
-        # equivalent `add eax, -BASE` rendered as an unsigned 32-bit immediate.
+        # `sub` names the base outright. `add` and `lea` add its two's
+        # complement instead, so there the base is the negated immediate.
         base = immediate if base_match.group("op") == "sub" else (-immediate) & 0xFFFFFFFF
         if not is_plausible_ioctl(base):
             continue
-        span = _bounded_case_span(lines, index + 1, base_match.group("reg"))
+        span, scaled = _bounded_case_span(lines, index + 1, base_match.group("reg"))
         if span is None:
             continue
-        for offset in range(0, span + 1, CONTROL_CODE_STRIDE):
-            code = base + offset
-            if code in seen or not is_plausible_ioctl(code):
-                continue
-            seen.add(code)
-            codes.append(code)
+        if not scaled:
+            add(base)
+            continue
+        for step in range(span + 1):
+            add(base + step * CONTROL_CODE_STRIDE)
     return codes
 
 
 def _bounded_case_span(lines: list, start: int, register: str):
-    """Return the case span of a switch range check, or None if there is none.
+    """Return (case span, index was scaled) for a switch range check.
 
-    The range check has to compare the same register the base was subtracted
-    from and has to be followed by an unsigned above-branch to the default case.
-    Without both, a `sub` and a `cmp` that merely sit near each other in
+    The span is None unless the range check compares the same register the base
+    was computed into and is followed by an unsigned above-branch to the default
+    case. Without both, a `sub` and a `cmp` that merely sit near each other in
     arithmetic code would be read as a dispatch table.
+
+    The second value reports whether the compiler divided the index by four
+    before the range check, which is what decides whether the span can be
+    enumerated at all.
     """
-    for offset in range(start, min(start + 3, len(lines))):
-        range_match = SWITCH_RANGE_RE.match(lines[offset])
+    scaled = False
+    for offset in range(start, min(start + 4, len(lines))):
+        line = lines[offset]
+        if SWITCH_INDEX_SCALE_RE.match(line):
+            scaled = True
+            continue
+        range_match = SWITCH_RANGE_RE.match(line)
         if not range_match:
             continue
         if range_match.group("reg") != register:
-            return None
+            return None, scaled
         span = _parse_immediate(range_match.group("imm"))
         if span is None or span <= 0 or span > SWITCH_MAX_CASE_SPAN:
-            return None
+            return None, scaled
         if offset + 1 < len(lines) and SWITCH_BOUND_JUMP_RE.match(lines[offset + 1]):
-            return span
-        return None
-    return None
+            return span, scaled
+        return None, scaled
+    return None, scaled
 
 
 def collect_ioctl_tables(sections) -> list:
@@ -454,25 +505,45 @@ def _immediates_in_line(line: str) -> list:
 
 def _extract_codes(func_data: dict, mnemonic_re) -> list:
     """Recover plausible control codes from instructions matching a mnemonic."""
+    return [code for code, _ in _extract_codes_detailed(func_data, mnemonic_re)]
+
+
+def _extract_codes_detailed(func_data: dict, mnemonic_re) -> list:
+    """Recover control codes along with how the following branch used each one.
+
+    Returns (code, is_range_boundary) pairs. A code is a range boundary when its
+    compare is followed by an inequality branch, which means the value splits a
+    case range rather than naming a control code.
+    """
     assembly = func_data.get("assembly", "").lower()
     if not assembly:
         return []
+    lines = assembly.split("\n")
     codes = []
     seen = set()
-    for line in assembly.split("\n"):
+    for index, line in enumerate(lines):
         if not mnemonic_re.match(line):
             continue
+        following = lines[index + 1] if index + 1 < len(lines) else ""
+        is_boundary = bool(RANGE_BRANCH_RE.match(following)) and not EQUALITY_BRANCH_RE.match(
+            following
+        )
         for value in _immediates_in_line(line):
             if value in seen or not is_plausible_ioctl(value):
                 continue
             seen.add(value)
-            codes.append(value)
+            codes.append((value, is_boundary))
     return codes
 
 
 def extract_ioctl_codes(func_data: dict) -> list:
     """Recover control codes a driver dispatch routine compares against."""
     return _extract_codes(func_data, DISPATCH_MNEMONIC_RE)
+
+
+def extract_ioctl_codes_detailed(func_data: dict) -> list:
+    """Recover dispatch control codes with their (code, is_range_boundary) role."""
+    return _extract_codes_detailed(func_data, DISPATCH_MNEMONIC_RE)
 
 
 def extract_client_ioctl_codes(func_data: dict) -> list:
@@ -563,6 +634,9 @@ def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
     candidates = []
     device_type_counts = {}
 
+    boundary_only = set()
+    attested = set()
+
     def record(code, function_name, address, source):
         device_type_counts.setdefault((code >> 16) & 0xFFFF, set()).add(code)
         candidates.append((code, function_name, address, source))
@@ -570,7 +644,8 @@ def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
     for func_key, func_data in (disassembled_functions or {}).items():
         function_name = func_data.get("name", func_key)
         address = func_data.get("address")
-        for code in extract_ioctl_codes(func_data):
+        for code, is_boundary in extract_ioctl_codes_detailed(func_data):
+            (boundary_only if is_boundary else attested).add(code)
             record(code, function_name, address, "compare")
         for code in extract_switch_ioctl_codes(func_data):
             record(code, function_name, address, "switch")
@@ -578,10 +653,19 @@ def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
     for code in collect_ioctl_tables(sections):
         record(code, None, None, "table")
 
+    # A binary search over the case range compares against the boundary below a
+    # real code. Dropping a boundary value only when the code just above it was
+    # also recovered keeps a genuine control code that merely happens to be
+    # range-tested, since nothing then corroborates the off-by-one reading.
+    all_codes = {code for code, _, _, _ in candidates}
+    range_boundaries = {
+        code for code in boundary_only - attested if code + 1 in all_codes
+    }
+
     ioctls = []
     seen_codes = set()
     for code, function_name, address, source in candidates:
-        if code in seen_codes:
+        if code in seen_codes or code in range_boundaries:
             continue
         seen_codes.add(code)
         device_type = (code >> 16) & 0xFFFF

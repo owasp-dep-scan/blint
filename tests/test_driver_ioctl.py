@@ -655,25 +655,56 @@ def test_dll_qualified_imports_are_matched():
 
 
 def test_switch_lowering_recovers_sibling_case_codes():
-    """MSVC lowers a large IOCTL switch to sub/cmp/ja, naming only the base."""
+    """A scaled index means each case is one function code, so the span enumerates.
+
+    The `shr eax, 2` is the compiler dividing the code delta by four; without it
+    the indices are raw deltas and the cases could sit anywhere in the span.
+    """
     base = THROTTLESTOP_PHYS_READ
     func_data = {
         "assembly": (
-            f"mov eax, [rbx+0x18]\nsub eax, {base:#x}\ncmp eax, 0x8\nja default_case\n"
+            f"mov eax, [rbx+0x18]\nsub eax, {base:#x}\nshr eax, 2\ncmp eax, 0x2\nja default_case\n"
         )
     }
     codes = extract_switch_ioctl_codes(func_data)
-    # The span covers three function codes: the base and its two siblings.
     assert codes == [base, base + 4, base + 8]
     # 0x8000649C is the documented physical-memory write code, reachable only
     # through the case span and invisible to a compare-only scan.
     assert THROTTLESTOP_PHYS_WRITE in codes
 
 
+def test_switch_lowering_recovers_a_clang_style_lea_base():
+    """clang folds the subtraction into `lea reg, [reg + two's complement]`.
+
+    Observed in a real clang-built driver: `lea eax, [rcx + 2147474432]` followed
+    by `rol eax, 30`, which is the same division by four as `shr eax, 2`.
+    """
+    base = THROTTLESTOP_PHYS_READ
+    complement = (-base) & 0xFFFFFFFF
+    func_data = {
+        "assembly": f"lea eax, [rcx + {complement}]\nrol eax, 30\ncmp eax, 1\nja default\n"
+    }
+    assert extract_switch_ioctl_codes(func_data) == [base, base + 4]
+
+
 def test_switch_lowering_accepts_the_add_of_a_negative_base():
     base = THROTTLESTOP_PHYS_READ
-    func_data = {"assembly": f"add eax, {(-base) & 0xFFFFFFFF:#x}\ncmp eax, 0x4\njae default\n"}
+    func_data = {
+        "assembly": f"add eax, {(-base) & 0xFFFFFFFF:#x}\nror eax, 2\ncmp eax, 0x1\njae default\n"
+    }
     assert extract_switch_ioctl_codes(func_data) == [base, base + 4]
+
+
+def test_unscaled_switch_reports_only_the_base():
+    """Without the divide-by-four the span cannot be enumerated safely.
+
+    A real clang build lowered a four-case dispatch this way, with the cases at
+    indices 0, 4, 8 and 15 - the last varying the method bits. Stepping the span
+    by four would have missed that case and invented one at index 12.
+    """
+    base = THROTTLESTOP_PHYS_READ
+    func_data = {"assembly": f"lea eax, [rcx + {(-base) & 0xFFFFFFFF}]\ncmp eax, 15\nja default\n"}
+    assert extract_switch_ioctl_codes(func_data) == [base]
 
 
 def test_switch_lowering_requires_the_full_range_check_shape():
@@ -705,7 +736,9 @@ def test_switch_recovered_codes_are_not_reported_as_high_confidence():
         "0x140001500::Dispatch": {
             "name": "Dispatch",
             "address": "0x140001500",
-            "assembly": f"sub eax, {THROTTLESTOP_PHYS_READ:#x}\ncmp eax, 0x8\nja default\n",
+            "assembly": (
+                f"sub eax, {THROTTLESTOP_PHYS_READ:#x}\nshr eax, 2\ncmp eax, 0x2\nja default\n"
+            ),
         },
     }
     result = collect_driver_ioctls(disassembled)
@@ -952,3 +985,38 @@ def test_method_neither_rule_is_wired_into_the_real_rule_pipeline():
     assert results["DRIVER_INSECURE_DEVICE_OBJECT"]["evidence"][0]["device_names"] == [
         "\\Device\\Vulnerable"
     ]
+
+
+def test_binary_search_range_boundary_is_not_a_control_code():
+    """Regression from a real clang build of tests/fixtures/win-drivers.
+
+    Dispatching on widely spaced codes lowers to a binary search, which compares
+    against the boundary *below* a real code. Before the branch kind was taken
+    into account, 0x80003443 was reported alongside the real 0x80003444.
+    """
+    disassembled = {
+        "0x140001500::Dispatch": {
+            "name": "Dispatch",
+            "address": "0x140001500",
+            "assembly": (
+                "cmp eax, 0x80003443\nja higher_half\n"
+                "cmp eax, 0x80003444\nje loc_handler\n"
+                "cmp eax, 0x80002954\nje loc_other\n"
+            ),
+        }
+    }
+    codes = {entry["code"] for entry in collect_driver_ioctls(disassembled)["ioctls"]}
+    assert codes == {"0x80003444", "0x80002954"}
+
+
+def test_range_tested_code_is_kept_when_nothing_corroborates_the_off_by_one():
+    """Only the shape `boundary, boundary+1` is dropped, not every range test."""
+    disassembled = {
+        "0x140001500::Dispatch": {
+            "name": "Dispatch",
+            "address": "0x140001500",
+            "assembly": "cmp eax, 0x80003444\njbe loc_low\ncmp eax, 0x80002954\nje loc_other\n",
+        }
+    }
+    codes = {entry["code"] for entry in collect_driver_ioctls(disassembled)["ioctls"]}
+    assert "0x80003444" in codes
