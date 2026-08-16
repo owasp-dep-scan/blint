@@ -21,7 +21,12 @@ from blint.config import (
     get_int_from_env,
 )
 from blint.lib.disassembler import disassemble_functions
-from blint.lib.driver_ioctl import collect_driver_ioctls, is_kernel_driver
+from blint.lib.driver_ioctl import (
+    IOCTL_TABLE_SECTIONS,
+    classify_driver_strings,
+    collect_driver_ioctls,
+    is_kernel_driver,
+)
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.utils import (
@@ -2030,8 +2035,19 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
-                if driver_ioctls := collect_driver_ioctls(metadata["disassembled_functions"]):
+                if driver_ioctls := collect_driver_ioctls(
+                    metadata["disassembled_functions"],
+                    sections=_pe_data_section_bytes(parsed_obj),
+                ):
                     metadata["driver_ioctls"] = driver_ioctls
+        # The kernel object namespace paths are recovered from strings, so unlike
+        # the IOCTL surface they are available whether or not the image was
+        # disassembled. They are collected for every PE, not just drivers: for a
+        # driver they name the objects its IOCTLs are reached through, and for a
+        # user-mode image the `\\.\` paths name the driver it talks to.
+        if isinstance(parsed_obj, lief.PE.Binary):
+            if driver_interface := classify_driver_strings(metadata):
+                metadata["driver_interface"] = driver_interface
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)
@@ -2669,6 +2685,31 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     except (AttributeError, Exception) as e:
         LOG.debug(f"Error parsing Load Configuration: {e}")
     return lc_info
+
+
+def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
+    """Return the raw bytes of the PE data sections that can hold IOCTL tables.
+
+    Only the sections the table scan looks at are read, so a large image does not
+    pay to copy its code and resource sections into memory as well.
+
+    Args:
+        parsed_obj: The parsed PE binary.
+
+    Returns:
+        list: (section name, bytes) pairs, empty if the content is unreadable.
+    """
+    sections = []
+    try:
+        for section in parsed_obj.sections:
+            name = (section.name or "").rstrip("\x00")
+            if name.lower() not in IOCTL_TABLE_SECTIONS:
+                continue
+            if content := section.content:
+                sections.append((name, bytes(content)))
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Unable to read PE section content for IOCTL table scan: {e}")
+    return sections
 
 
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):

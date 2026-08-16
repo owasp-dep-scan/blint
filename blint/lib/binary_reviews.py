@@ -10,7 +10,11 @@ object without a security descriptor is the "no authorization check" flaw.
 import re
 from collections import defaultdict
 
-from blint.lib.driver_ioctl import collect_client_ioctls, is_kernel_driver
+from blint.lib.driver_ioctl import (
+    USER_BUFFER_PROBE_IMPORTS,
+    collect_client_ioctls,
+    is_kernel_driver,
+)
 
 # Primitives that grant a caller direct hardware or physical-memory reach.
 HARDWARE_PRIMITIVE_IMPORTS = {
@@ -168,6 +172,16 @@ def _has_hardware_primitive(import_names: set, metadata: dict):
     return ""
 
 
+def _device_object_names(metadata: dict) -> dict:
+    """Return the device names and symbolic links recovered from the strings."""
+    interface = metadata.get("driver_interface") or {}
+    names = {}
+    for key in ("device_names", "symbolic_links"):
+        if values := interface.get(key):
+            names[key] = values
+    return names
+
+
 def _evaluate_binary_analysis(rule_id: str, metadata: dict):
     """Evaluate rule-specific whole-binary heuristics. Returns evidence list."""
     import_names = _collect_import_names(metadata)
@@ -185,16 +199,18 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict):
         string_values = _collect_string_values(metadata)
         if any(marker in value for marker in SDDL_MARKERS for value in string_values):
             return []
-        return [
-            {
-                "primitive": primitive,
-                "detail": (
-                    "Device object is created without a security descriptor and the image "
-                    "imports no access-check API, so the primitive is reachable by any "
-                    "caller able to open the device."
-                ),
-            }
-        ]
+        evidence = {
+            "primitive": primitive,
+            "detail": (
+                "Device object is created without a security descriptor and the image "
+                "imports no access-check API, so the primitive is reachable by any "
+                "caller able to open the device."
+            ),
+        }
+        # Naming the object turns the finding into something a reviewer can act
+        # on directly, rather than knowing only that some device is exposed.
+        evidence.update(_device_object_names(metadata))
+        return [evidence]
 
     if rule_id == "BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS":
         # Only meaningful for user-mode images; a driver calling these is normal.
@@ -205,8 +221,13 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict):
         client_codes = collect_client_ioctls(metadata.get("disassembled_functions") or {})
         if not client_codes:
             return []
-        return [
-            {
+        # The `\\.\` paths name the driver being driven, which is what decides
+        # whether this is a vendor utility talking to its own driver or a client
+        # reaching for someone else's.
+        target_devices = (metadata.get("driver_interface") or {}).get("client_device_paths")
+        evidence = []
+        for entry in client_codes:
+            item = {
                 "code": entry["code"],
                 "device_type": entry["device_type"],
                 "function_code": entry["function_code"],
@@ -214,8 +235,10 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict):
                 "access": entry["access"],
                 "function": entry["function"],
             }
-            for entry in client_codes
-        ]
+            if target_devices:
+                item["target_devices"] = target_devices
+            evidence.append(item)
+        return evidence
 
     if rule_id == "BYOVD_DRIVER_LOADER_SERVICE_INSTALL":
         if is_kernel_driver(metadata):
@@ -258,6 +281,36 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict):
                     }
                 )
         return evidence
+
+    if rule_id == "DRIVER_IOCTL_METHOD_NEITHER":
+        if not is_kernel_driver(metadata):
+            return []
+        driver_ioctls = metadata.get("driver_ioctls") or {}
+        neither = [
+            entry
+            for entry in driver_ioctls.get("ioctls", [])
+            if entry["method"] == "METHOD_NEITHER"
+        ]
+        if not neither:
+            return []
+        # A driver that probes the caller's buffers is doing the required work,
+        # so only an image with no probe API anywhere is reported.
+        if import_names & USER_BUFFER_PROBE_IMPORTS:
+            return []
+        return [
+            {
+                "code": entry["code"],
+                "function": entry["function"],
+                "access": entry["access"],
+                "confidence": entry.get("confidence"),
+                "detail": (
+                    "Control code uses METHOD_NEITHER, so the handler receives raw "
+                    "user-mode pointers, and the image imports no ProbeForRead / "
+                    "ProbeForWrite to validate them."
+                ),
+            }
+            for entry in neither
+        ]
 
     return []
 

@@ -428,6 +428,18 @@ def process_exe_file(
                 value = value.lower()
             if value:
                 parent_component.properties.append(Property(name=f"internal:{prop}", value=value))
+    # A driver's control codes and the device object they are reached through are
+    # the part of its attack surface a consumer of the SBOM most needs, and they
+    # are lost entirely if only the `is_driver` flag is carried across.
+    if driver_ioctls := metadata.get("driver_ioctls"):
+        if codes := [entry["code"] for entry in driver_ioctls.get("ioctls", [])]:
+            parent_component.properties.append(
+                Property(name="internal:driver_ioctl_codes", value=", ".join(codes))
+            )
+    for key, values in (metadata.get("driver_interface") or {}).items():
+        parent_component.properties.append(
+            Property(name=f"internal:{key}", value=", ".join(values))
+        )
     if metadata.get("notes"):
         for note in metadata.get("notes"):
             if note.get("version"):

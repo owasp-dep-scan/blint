@@ -1,10 +1,15 @@
 """Tests for Windows driver IOCTL surface recovery and driver review rules."""
 
+import struct
+
 from blint.lib.binary_reviews import review_binary_metadata
 from blint.lib.driver_ioctl import (
+    classify_driver_strings,
     collect_driver_ioctls,
+    collect_ioctl_tables,
     decode_ioctl,
     extract_ioctl_codes,
+    extract_switch_ioctl_codes,
     find_dispatch_handlers,
     is_plausible_ioctl,
 )
@@ -644,3 +649,306 @@ def test_dll_qualified_imports_are_matched():
     results = review_binary_metadata(DRIVER_REVIEW_RULES_ALL, metadata, 10)
     assert "DRIVER_INSECURE_DEVICE_OBJECT" in results
     assert results["DRIVER_INSECURE_DEVICE_OBJECT"][0]["primitive"] == "halgetbusdatabyoffset"
+
+
+# --- Jump-table switch dispatch -------------------------------------------
+
+
+def test_switch_lowering_recovers_sibling_case_codes():
+    """MSVC lowers a large IOCTL switch to sub/cmp/ja, naming only the base."""
+    base = THROTTLESTOP_PHYS_READ
+    func_data = {
+        "assembly": (
+            f"mov eax, [rbx+0x18]\nsub eax, {base:#x}\ncmp eax, 0x8\nja default_case\n"
+        )
+    }
+    codes = extract_switch_ioctl_codes(func_data)
+    # The span covers three function codes: the base and its two siblings.
+    assert codes == [base, base + 4, base + 8]
+    # 0x8000649C is the documented physical-memory write code, reachable only
+    # through the case span and invisible to a compare-only scan.
+    assert THROTTLESTOP_PHYS_WRITE in codes
+
+
+def test_switch_lowering_accepts_the_add_of_a_negative_base():
+    base = THROTTLESTOP_PHYS_READ
+    func_data = {"assembly": f"add eax, {(-base) & 0xFFFFFFFF:#x}\ncmp eax, 0x4\njae default\n"}
+    assert extract_switch_ioctl_codes(func_data) == [base, base + 4]
+
+
+def test_switch_lowering_requires_the_full_range_check_shape():
+    base = THROTTLESTOP_PHYS_READ
+    # No bounds jump: ordinary arithmetic, not a switch.
+    assert not extract_switch_ioctl_codes(
+        {"assembly": f"sub eax, {base:#x}\ncmp eax, 0x8\nje loc\n"}
+    )
+    # Range check on a different register.
+    assert not extract_switch_ioctl_codes(
+        {"assembly": f"sub eax, {base:#x}\ncmp ecx, 0x8\nja loc\n"}
+    )
+    # An implausibly wide span is not a dispatch table.
+    assert not extract_switch_ioctl_codes(
+        {"assembly": f"sub eax, {base:#x}\ncmp eax, 0x9000\nja loc\n"}
+    )
+    # A base that is not a plausible control code is ignored.
+    assert not extract_switch_ioctl_codes({"assembly": "sub eax, 0x1234\ncmp eax, 0x8\nja loc\n"})
+
+
+def test_switch_recovered_codes_are_not_reported_as_high_confidence():
+    """A case span is an upper bound, so it must not outrank a literal compare."""
+    disassembled = {
+        "0x140001000::DriverEntry": {
+            "name": "DriverEntry",
+            "address": "0x140001000",
+            "assembly": "lea rax, [rip+0x900]\nmov qword ptr [rcx+0xe0], rax\nret",
+        },
+        "0x140001500::Dispatch": {
+            "name": "Dispatch",
+            "address": "0x140001500",
+            "assembly": f"sub eax, {THROTTLESTOP_PHYS_READ:#x}\ncmp eax, 0x8\nja default\n",
+        },
+    }
+    result = collect_driver_ioctls(disassembled)
+    entries = {entry["code"]: entry for entry in result["ioctls"]}
+    # The base appears as a literal immediate, so it keeps the confidence a
+    # compare earns. The siblings exist only because the case span implies them.
+    assert entries["0x80006498"]["source"] == "compare"
+    assert entries["0x80006498"]["confidence"] == "high"
+    assert entries["0x8000649C"]["source"] == "switch"
+    assert entries["0x8000649C"]["confidence"] == "medium"
+
+
+# --- Data-section dispatch tables -----------------------------------------
+
+
+def _packed_table(codes):
+    return struct.pack(f"<{len(codes)}I", *codes)
+
+
+def test_data_section_table_scan_recovers_loop_driven_dispatch_tables():
+    """A table walked in a loop is never compared, so disassembly cannot see it."""
+    codes = [0x80006498, 0x8000649C, 0x800064A0, 0x800064A4]
+    sections = [(".rdata", b"\x00" * 16 + _packed_table(codes) + b"\x00" * 16)]
+    assert collect_ioctl_tables(sections) == codes
+
+
+def test_data_section_table_scan_requires_a_run_and_a_shared_device_type():
+    # Two entries is below the minimum run length.
+    assert not collect_ioctl_tables([(".rdata", _packed_table([0x80006498, 0x8000649C]))])
+    # Mixed device types are not one table.
+    assert not collect_ioctl_tables(
+        [(".rdata", _packed_table([0x80006498, 0x9C40A108, 0x800064A0]))]
+    )
+    # Only the data sections that hold tables are scanned.
+    assert not collect_ioctl_tables(
+        [(".text", _packed_table([0x80006498, 0x8000649C, 0x800064A0]))]
+    )
+
+
+def test_data_section_table_scan_ignores_rva_tables_and_utf16_text():
+    """The two shapes that would otherwise flood the results with false codes."""
+    rva_table = _packed_table([0x00011000, 0x00011080, 0x00011100, 0x00011180])
+    utf16_text = "\\Device\\ThrottleStop".encode("utf-16-le")
+    assert not collect_ioctl_tables([(".rdata", rva_table), (".data", utf16_text)])
+
+
+def test_table_recovered_codes_never_claim_compare_confidence():
+    """A table entry is corroborated by its run, but was never seen compared."""
+    codes = [0x80006498, 0x8000649C, 0x800064A0]
+    result = collect_driver_ioctls({}, sections=[(".rdata", _packed_table(codes))])
+    assert {entry["code"] for entry in result["ioctls"]} == {
+        "0x80006498",
+        "0x8000649C",
+        "0x800064A0",
+    }
+    assert all(entry["source"] == "table" for entry in result["ioctls"])
+    assert all(entry["confidence"] == "medium" for entry in result["ioctls"])
+    # No function owns a table entry, so the field is present but unset.
+    assert all(entry["function"] is None for entry in result["ioctls"])
+
+
+# --- 32-bit dispatch slot -------------------------------------------------
+
+
+def test_dispatch_detection_handles_the_x86_driver_object_layout():
+    """A 32-bit driver stores through 0x38 + slot*4, not 0x70 + slot*8."""
+    handlers = find_dispatch_handlers(
+        {
+            "0x401000::DriverEntry": {
+                "name": "DriverEntry",
+                "address": "0x401000",
+                "assembly": "mov dword ptr [ecx+0x70], eax\nret",
+            }
+        }
+    )
+    assert [(h["slot"], h["layout"]) for h in handlers] == [("IRP_MJ_DEVICE_CONTROL", "x86")]
+
+
+def test_x86_dispatch_detection_rejects_stack_frame_stores():
+    assert not find_dispatch_handlers(
+        {
+            "0x401000::f": {
+                "name": "f",
+                "address": "0x401000",
+                "assembly": "mov dword ptr [ebp+0x70], eax\nmov eax, dword ptr [ecx+0x70]\nret",
+            }
+        }
+    )
+
+
+# --- Kernel object namespace strings --------------------------------------
+
+
+def test_classify_driver_strings_buckets_kernel_object_paths():
+    metadata = {
+        "strings": [
+            {"value": "\\Device\\ThrottleStop"},
+            {"value": "\\DosDevices\\ThrottleStop"},
+            {"value": "\\??\\GLOBALROOT"},
+            {"value": "\\\\.\\ThrottleStop"},
+            {"value": "just some text"},
+        ]
+    }
+    result = classify_driver_strings(metadata)
+    assert result["device_names"] == ["\\Device\\ThrottleStop"]
+    assert result["symbolic_links"] == ["\\??\\GLOBALROOT", "\\DosDevices\\ThrottleStop"]
+    assert result["client_device_paths"] == ["\\\\.\\ThrottleStop"]
+
+
+def test_classify_driver_strings_drops_runtime_templates():
+    """A format string names an object that never exists under that name."""
+    metadata = {"strings": ["\\Device\\%ls", "\\DosDevices\\%s", "\\Device\\Real"]}
+    assert classify_driver_strings(metadata) == {"device_names": ["\\Device\\Real"]}
+    # A literal percent is not a template.
+    assert classify_driver_strings({"strings": ["\\Device\\100%%Real"]})["device_names"]
+
+
+def test_classify_driver_strings_returns_empty_when_nothing_matches():
+    assert classify_driver_strings({"strings": ["hello", "C:\\Windows\\System32"]}) == {}
+    assert classify_driver_strings({}) == {}
+
+
+def test_insecure_device_object_evidence_names_the_device():
+    metadata = {
+        "exe_type": "PE64",
+        "subsystem": "NATIVE",
+        "imports": [{"name": "IoCreateDevice"}, {"name": "MmMapIoSpace"}],
+        "driver_interface": {
+            "device_names": ["\\Device\\ThrottleStop"],
+            "symbolic_links": ["\\DosDevices\\ThrottleStop"],
+        },
+    }
+    evidence = review_binary_metadata(DRIVER_REVIEW_RULES_ALL, metadata, 10)[
+        "DRIVER_INSECURE_DEVICE_OBJECT"
+    ][0]
+    assert evidence["device_names"] == ["\\Device\\ThrottleStop"]
+    assert evidence["symbolic_links"] == ["\\DosDevices\\ThrottleStop"]
+
+
+# --- METHOD_NEITHER -------------------------------------------------------
+
+
+METHOD_NEITHER_RULES = [{"DRIVER_IOCTL_METHOD_NEITHER": {"check_type": "binary_analysis"}}]
+
+# Function 0x900, METHOD_NEITHER (low two bits set), FILE_ANY_ACCESS.
+NEITHER_CODE = (0x8000 << 16) | (0x900 << 2) | 3
+
+
+def _method_neither_metadata(imports):
+    disassembled = {
+        "0x140001500::Dispatch": {
+            "name": "Dispatch",
+            "address": "0x140001500",
+            "assembly": f"cmp eax, {NEITHER_CODE:#x}\nje loc_a\n",
+        }
+    }
+    return {
+        "exe_type": "PE64",
+        "subsystem": "NATIVE",
+        "imports": [{"name": name} for name in imports],
+        "disassembled_functions": disassembled,
+        "driver_ioctls": collect_driver_ioctls(disassembled),
+    }
+
+
+def test_method_neither_rule_fires_without_a_probe_import():
+    metadata = _method_neither_metadata(["IoCreateDevice", "MmMapIoSpace"])
+    evidence = review_binary_metadata(METHOD_NEITHER_RULES, metadata, 10)[
+        "DRIVER_IOCTL_METHOD_NEITHER"
+    ]
+    assert [entry["code"] for entry in evidence] == [f"0x{NEITHER_CODE:08X}"]
+
+
+def test_method_neither_rule_suppressed_by_probe_import():
+    metadata = _method_neither_metadata(["IoCreateDevice", "ntoskrnl.exe::ProbeForWrite"])
+    assert "DRIVER_IOCTL_METHOD_NEITHER" not in review_binary_metadata(
+        METHOD_NEITHER_RULES, metadata, 10
+    )
+
+
+def test_method_neither_rule_ignores_buffered_codes_and_user_mode_images():
+    buffered = {
+        "exe_type": "PE64",
+        "subsystem": "NATIVE",
+        "imports": [{"name": "IoCreateDevice"}],
+        "driver_ioctls": collect_driver_ioctls(
+            {
+                "0x1500::Dispatch": {
+                    "name": "Dispatch",
+                    "address": "0x1500",
+                    "assembly": f"cmp eax, {THROTTLESTOP_PHYS_READ:#x}\n",
+                }
+            }
+        ),
+    }
+    assert "DRIVER_IOCTL_METHOD_NEITHER" not in review_binary_metadata(
+        METHOD_NEITHER_RULES, buffered, 10
+    )
+    user_mode = dict(_method_neither_metadata(["MmMapIoSpace"]), subsystem="WINDOWS_GUI")
+    user_mode["imports"] = [{"name": "CreateFileW"}]
+    assert "DRIVER_IOCTL_METHOD_NEITHER" not in review_binary_metadata(
+        METHOD_NEITHER_RULES, user_mode, 10
+    )
+
+
+def test_exploit_client_evidence_names_the_target_device():
+    metadata = {
+        "exe_type": "PE64",
+        "imports": [{"name": "CreateFileW"}, {"name": "DeviceIoControl"}],
+        "driver_interface": {"client_device_paths": ["\\\\.\\ThrottleStop"]},
+        "disassembled_functions": {
+            "0x401000::exploit": {
+                "name": "exploit",
+                "address": "0x401000",
+                "assembly": f"mov edx, {THROTTLESTOP_PHYS_WRITE:#x}\ncall DeviceIoControl\n",
+            }
+        },
+    }
+    evidence = review_binary_metadata(DRIVER_REVIEW_RULES_ALL, metadata, 10)[
+        "BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS"
+    ]
+    assert evidence[0]["target_devices"] == ["\\\\.\\ThrottleStop"]
+
+
+def test_method_neither_rule_is_wired_into_the_real_rule_pipeline():
+    """Locks the YAML definition and the BINARY_REVIEWS registration together."""
+    from blint.config import BlintOptions
+    from blint.lib.analysis import initialize_rules
+    from blint.lib.review_runner import ReviewRunner
+
+    initialize_rules(BlintOptions())
+
+    metadata = _method_neither_metadata(["ntoskrnl.exe::IoCreateDevice", "MmMapIoSpace"])
+    metadata["magic"] = "PE32+"
+    metadata["driver_interface"] = {"device_names": ["\\Device\\Vulnerable"]}
+
+    reviewer = ReviewRunner()
+    reviewer.run_review(metadata)
+    results = {result["id"]: result for result in reviewer.process_review("v.sys", "v.sys")}
+
+    assert "DRIVER_IOCTL_METHOD_NEITHER" in results
+    assert results["DRIVER_IOCTL_METHOD_NEITHER"]["evidence"][0]["code"] == f"0x{NEITHER_CODE:08X}"
+    # The device the reviewer would have to open is carried on the finding.
+    assert results["DRIVER_INSECURE_DEVICE_OBJECT"]["evidence"][0]["device_names"] == [
+        "\\Device\\Vulnerable"
+    ]
