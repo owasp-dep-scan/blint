@@ -51,6 +51,9 @@ jobs:
         # The host only needs pytest to drive them.
         run: python3 -m pip install pytest
       - name: Run the corpus tests
-        run: pytest tests/test_elf_abi_corpus.py -v -p no:cacheprovider
+        # -o addopts="" drops the coverage flags from pyproject.toml, which
+        # would otherwise require pytest-cov on a host that only drives
+        # containers and has nothing worth measuring.
+        run: pytest tests/test_elf_abi_corpus.py -v -p no:cacheprovider -o addopts=""
         env:
           BLINT_CORPUS_TESTS: '1'
