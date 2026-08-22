@@ -1,0 +1,3031 @@
+{
+ "aarch64-linux": {
+  "binary_type": "ELF",
+  "dynamic_entries": [
+   {
+    "name": "libgcc_s.so.1",
+    "tag": "NEEDED",
+    "value": 1
+   },
+   {
+    "name": "libpthread.so.0",
+    "tag": "NEEDED",
+    "value": 337
+   },
+   {
+    "name": "libm.so.6",
+    "tag": "NEEDED",
+    "value": 671
+   },
+   {
+    "name": "libdl.so.2",
+    "tag": "NEEDED",
+    "value": 685
+   },
+   {
+    "name": "libc.so.6",
+    "tag": "NEEDED",
+    "value": 702
+   },
+   {
+    "name": "ld-linux-aarch64.so.1",
+    "tag": "NEEDED",
+    "value": 1576
+   }
+  ],
+  "dynamic_symbols": [
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_exit",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memmove",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "munmap",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "rename",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "open64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIPInfo",
+    "type": "FUNC",
+    "version": "GCC_4.2.0(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "closedir",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "execvp",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigemptyset",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetDataRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "opendir",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "exit",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "bcmp",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dirfd",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetRegionStart",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recvmsg",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getstack",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memset",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "clock_gettime",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_create",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setname_np",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_memalign",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetGR",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getguardsize",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__fxstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "poll",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setpgid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chroot",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setflags",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setpgroup",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "open",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__errno_location",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "environ",
+    "type": "OBJECT",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_getattr_np",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcpy",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetTextRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaddset",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "read",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__fxstatat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getpid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "log",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(6)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "malloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fdopendir",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pause",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mkdir",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgroups",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "isatty",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "abort",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Resume",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "calloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "writev",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fork",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaltstack",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_setstacksize",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mmap64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__libc_start_main",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "openat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dl_iterate_phdr",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__cxa_thread_atexit_impl",
+    "type": "FUNC",
+    "version": "GLIBC_2.18(7)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readdir64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__cxa_finalize",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "write",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__xstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_getaffinity",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sysconf",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "close",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_yield",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_detach",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_create",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sendmsg",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "socketpair",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "lseek64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "gnu_get_libc_version",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitpid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getenv",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__xpg_strerror_r",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setsigdefault",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup2",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setuid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__environ",
+    "type": "OBJECT",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dlsym",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_delete",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaction",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "syscall",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "strlen",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "signal",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_adddup2",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Backtrace",
+    "type": "FUNC",
+    "version": "GCC_3.3(9)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__stack_chk_guard",
+    "type": "OBJECT",
+    "version": "GLIBC_2.17(10)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__lxstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fcntl",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlink",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlinkat",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getauxval",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "ioctl",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readlink",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chdir",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__stack_chk_fail",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getcwd",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "free",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pipe2",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realpath",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcmp",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetLanguageSpecificData",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_self",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnp",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setspecific",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setsid",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recv",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mprotect",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(2)"
+   }
+  ],
+  "exe_type": "genericbinary",
+  "has_interpreter": true,
+  "interpreter": "/lib/ld-linux-aarch64.so.1",
+  "is_targeting_android": false,
+  "machine_type": "AARCH64",
+  "name": "wasm-tools-aarch64-linux"
+ },
+ "x86_64-linux": {
+  "binary_type": "ELF",
+  "dynamic_entries": [
+   {
+    "name": "libgcc_s.so.1",
+    "tag": "NEEDED",
+    "value": 1642
+   },
+   {
+    "name": "libpthread.so.0",
+    "tag": "NEEDED",
+    "value": 1682
+   },
+   {
+    "name": "libm.so.6",
+    "tag": "NEEDED",
+    "value": 1721
+   },
+   {
+    "name": "libdl.so.2",
+    "tag": "NEEDED",
+    "value": 1731
+   },
+   {
+    "name": "libc.so.6",
+    "tag": "NEEDED",
+    "value": 1742
+   },
+   {
+    "name": "ld-linux-x86-64.so.2",
+    "tag": "NEEDED",
+    "value": 1871
+   }
+  ],
+  "dynamic_symbols": [
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__libc_start_main",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__cxa_finalize",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcpy",
+    "type": "FUNC",
+    "version": "GLIBC_2.14(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "bcmp",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memmove",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcmp",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memset",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "isatty",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "close",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__tls_get_addr",
+    "type": "FUNC",
+    "version": "GLIBC_2.3(5)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "log",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(6)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "read",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__errno_location",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dlsym",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(7)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "syscall",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "open",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "poll",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sysconf",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "munmap",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mmap64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mprotect",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Resume",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dl_iterate_phdr",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "opendir",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chdir",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "rename",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "open64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "openat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.4(9)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mkdir",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetTextRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetDataRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chroot",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getenv",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "strlen",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "malloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_memalign",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "free",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "write",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "calloc",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "ioctl",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recv",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fcntl",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "writev",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "clock_gettime",
+    "type": "FUNC",
+    "version": "GLIBC_2.17(10)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recvmsg",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getpid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sendmsg",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "socketpair",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fork",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_adddup2",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setpgroup",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setflags",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_destroy",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigemptyset",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaddset",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setsigdefault",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "environ",
+    "type": "OBJECT",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnp",
+    "type": "FUNC",
+    "version": "GLIBC_2.15(11)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_exit",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup2",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgroups",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setuid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setpgid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setsid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "signal",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "execvp",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_init",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_setstacksize",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_create",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pipe2",
+    "type": "FUNC",
+    "version": "GLIBC_2.9(12)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Backtrace",
+    "type": "FUNC",
+    "version": "GCC_3.3(13)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitpid",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dirfd",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "lseek64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "abort",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_self",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_getattr_np",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getstack",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaction",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pause",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getcwd",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlink",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "exit",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_getaffinity",
+    "type": "FUNC",
+    "version": "GLIBC_2.3.4(14)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_yield",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realpath",
+    "type": "FUNC",
+    "version": "GLIBC_2.3(15)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readlink",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "statx",
+    "type": "FUNC",
+    "version": "GLIBC_2.28(16)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getrandom",
+    "type": "FUNC",
+    "version": "GLIBC_2.25(17)"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__cxa_thread_atexit_impl",
+    "type": "FUNC",
+    "version": "GLIBC_2.18(18)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_create",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_delete",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setspecific",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fdopendir",
+    "type": "FUNC",
+    "version": "GLIBC_2.4(9)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readdir64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlinkat",
+    "type": "FUNC",
+    "version": "GLIBC_2.4(9)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "gnu_get_libc_version",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getauxval",
+    "type": "FUNC",
+    "version": "GLIBC_2.16(19)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaltstack",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getguardsize",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setname_np",
+    "type": "FUNC",
+    "version": "GLIBC_2.12(20)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_detach",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__xpg_strerror_r",
+    "type": "FUNC",
+    "version": "GLIBC_2.3.4(14)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "closedir",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetLanguageSpecificData",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIPInfo",
+    "type": "FUNC",
+    "version": "GCC_4.2.0(21)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetRegionStart",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetGR",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(8)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__fxstatat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.4(9)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__fxstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__lxstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__xstat64",
+    "type": "FUNC",
+    "version": "GLIBC_2.2.5(2)"
+   }
+  ],
+  "exe_type": "genericbinary",
+  "has_interpreter": true,
+  "interpreter": "/lib64/ld-linux-x86-64.so.2",
+  "is_targeting_android": false,
+  "machine_type": "X86_64",
+  "name": "wasm-tools-x86_64-linux"
+ },
+ "x86_64-musl": {
+  "binary_type": "ELF",
+  "dynamic_entries": [
+   {
+    "name": "libgcc_s.so.1",
+    "tag": "NEEDED",
+    "value": 1445
+   },
+   {
+    "name": "libc.so",
+    "tag": "NEEDED",
+    "value": 1459
+   }
+  ],
+  "dynamic_symbols": [
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "munmap",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setsigdefault",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "closedir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dirfd",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setpgroup",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "poll",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chroot",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_create",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readlink",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_exit",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup2",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pipe2",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIPInfo",
+    "type": "FUNC",
+    "version": "GCC_4.2.0(2)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitpid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recv",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "writev",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_self",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_adddup2",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "write",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaction",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "rename",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "calloc",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dl_iterate_phdr",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "dup",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_init",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcpy",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetDataRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_addchdir_np",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realpath",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getcwd",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__xpg_strerror_r",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "realloc",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_delete",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaltstack",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_key_create",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetRegionStart",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "readdir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "bcmp",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mkdir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigemptyset",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetGR",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "open",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__libc_start_main",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "stat",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sigaddset",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "syscall",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetTextRelBase",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getpid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_init",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "chdir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_getaffinity",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "clock_gettime",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlink",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "free",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_init",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "abort",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnp",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Resume",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getstack",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_detach",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "ioctl",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "lseek",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sendmsg",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "socketpair",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pause",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "execvp",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "waitid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mprotect",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setuid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "mmap",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_getattr_np",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memset",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "recvmsg",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setgroups",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "opendir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "malloc",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__tls_get_addr",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "read",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memcmp",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "isatty",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "log",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_environ",
+    "type": "OBJECT",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "environ",
+    "type": "OBJECT",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawn_file_actions_destroy",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_memalign",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fstat",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "lstat",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_setstacksize",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__errno_location",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sched_yield",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getenv",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "close",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_destroy",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setspecific",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setpgid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_Backtrace",
+    "type": "FUNC",
+    "version": "GCC_3.3(4)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getrandom",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "getauxval",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "setsid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "strlen",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_destroy",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_attr_getguardsize",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "pthread_setname_np",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "memmove",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "___environ",
+    "type": "OBJECT",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "posix_spawnattr_setflags",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "signal",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "gettid",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__environ",
+    "type": "OBJECT",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "exit",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fdopendir",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "openat",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_GetLanguageSpecificData",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fork",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "fcntl",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "_Unwind_SetIP",
+    "type": "FUNC",
+    "version": "GCC_3.0(3)"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "unlinkat",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "GLOBAL",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "sysconf",
+    "type": "FUNC",
+    "version": "* Global *"
+   },
+   {
+    "binding": "WEAK",
+    "is_exported": false,
+    "is_imported": true,
+    "name": "__cxa_finalize",
+    "type": "FUNC",
+    "version": "* Global *"
+   }
+  ],
+  "exe_type": "genericbinary",
+  "has_interpreter": true,
+  "interpreter": "/lib/ld-musl-x86_64.so.1",
+  "is_targeting_android": false,
+  "machine_type": "X86_64",
+  "name": "wasm-tools-x86_64-musl"
+ }
+}

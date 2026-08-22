@@ -162,6 +162,9 @@ The generated `summary.json` includes per-ecosystem provenance copied from the l
 - `BLINT_MAX_HEX_BYTES`: Maximum number of raw bytes converted to hex when metadata contains undecodable byte sequences. Default is `4096`.
   - `0` disables truncation.
   - When truncation happens, blint appends `...<truncated:N_bytes>` to preserve context without producing huge JSON fields.
+- `BLINT_RESOLVE_LINK_CLOSURE`: Set to `1` to resolve each ELF binary's dynamic dependency closure the way the loader would, reporting libraries that cannot be found, imported symbols nothing in the closure defines, and search paths that let an untrusted directory answer first. Off by default, because resolution reads the filesystem the scan runs on and is only meaningful when that filesystem is the binary's intended runtime. Results land in the `link_closure` metadata block.
+  - `BLINT_LINK_ROOT`: Filesystem root to resolve against. Point this at an unpacked container image or sysroot rather than at the scanning host. Default is `/`.
+  - `BLINT_LINK_SEARCH_PATH`: Extra directories treated as if they were in `LD_LIBRARY_PATH`, separated by the platform path separator.
 
 ## Command-Line Reference
 

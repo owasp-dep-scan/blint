@@ -21,6 +21,17 @@ from blint.config import (
     get_int_from_env,
 )
 from blint.lib.disassembler import disassemble_functions
+from blint.lib.elf_abi import analyze_elf_abi
+from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
+from blint.lib.elf_linkmap import resolve_link_closure
+from blint.lib.import_attribution import (
+    UNATTRIBUTED_LIBRARY,
+    analyze_link_hygiene,
+    attribute_call_target,
+    build_symbol_provider_map,
+    is_library_name,
+    symbol_lookup_names,
+)
 from blint.lib.driver_ioctl import (
     IOCTL_TABLE_SECTIONS,
     classify_driver_strings,
@@ -44,6 +55,19 @@ from blint.logger import DEBUG, LOG
 
 MIN_ENTROPY = get_float_from_env("SECRET_MIN_ENTROPY", 0.39)
 MIN_LENGTH = get_int_from_env("SECRET_MIN_LENGTH", 80)
+
+# Resolving the dynamic link closure walks the scanning host's filesystem, so it
+# is only correct when that host is the binary's intended runtime. Enable it with
+# BLINT_RESOLVE_LINK_CLOSURE=1, optionally against an unpacked image root.
+RESOLVE_LINK_CLOSURE = os.getenv("BLINT_RESOLVE_LINK_CLOSURE", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+LINK_CLOSURE_ROOT = os.getenv("BLINT_LINK_ROOT", "/")
+LINK_CLOSURE_SEARCH_PATHS = [
+    p for p in os.getenv("BLINT_LINK_SEARCH_PATH", "").split(os.pathsep) if p
+]
 
 
 # Enable lief logging in debug mode
@@ -662,6 +686,7 @@ def parse_symbols(symbols):
     """
     symbols_list = []
     exe_type = ""
+    skipped = defaultdict(int)
     for symbol in symbols:
         try:
             symbol_version = symbol.symbol_version if symbol.has_version else ""
@@ -671,38 +696,54 @@ def parse_symbols(symbols):
                 is_imported = True
             if symbol.exported and not isinstance(symbol.exported, lief.lief_errors):
                 is_exported = True
+            # A symbol with no mangling has no demangled form, and the parser
+            # returns an empty string rather than an error for that case. Only
+            # the error branch was handled, so every plain C symbol came through
+            # nameless -- taking the raw name whenever the demangled one is
+            # falsy covers both.
             symbol_name = symbol.demangled_name
-            if isinstance(symbol_name, lief.lief_errors):
-                symbol_name = demangle_symbolic_name(symbol.name)
-            else:
-                symbol_name = demangle_symbolic_name(symbol_name)
+            if isinstance(symbol_name, lief.lief_errors) or not symbol_name:
+                symbol_name = symbol.name
+            symbol_name = demangle_symbolic_name(symbol_name)
+            # The linkage name is what appears in another object's export table,
+            # so it is the only key that matches a C++ symbol across binaries.
+            # It is recorded only when demangling actually changed the name.
+            raw_name = symbol.name if isinstance(symbol.name, str) else ""
             exe_type = guess_exe_type(symbol_name)
             visibility = ""
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 visibility = enum_to_str(symbol.visibility)
-            symbols_list.append(
-                {
-                    "name": symbol_name,
-                    "type": enum_to_str(symbol.type),
-                    "value": ADDRESS_FMT.format(symbol.value).strip()
-                    if symbol.value > 0
-                    else symbol.value,
-                    "visibility": visibility,
-                    "binding": enum_to_str(symbol.binding),
-                    "is_imported": is_imported,
-                    "is_exported": is_exported,
-                    "information": symbol.information,
-                    "is_function": symbol.is_function,
-                    "is_static": symbol.is_static,
-                    "is_variable": symbol.is_variable,
-                    "version": str(symbol_version),
-                    "shndx": symbol.shndx,
-                    "size": symbol.size if symbol.size > 0 else None,
-                }
-            )
-        except (AttributeError, IndexError, TypeError):
+            symbol_entry = {
+                "name": symbol_name,
+                "type": enum_to_str(symbol.type),
+                "value": ADDRESS_FMT.format(symbol.value).strip()
+                if symbol.value > 0
+                else symbol.value,
+                "visibility": visibility,
+                "binding": enum_to_str(symbol.binding),
+                "is_imported": is_imported,
+                "is_exported": is_exported,
+                "information": symbol.information,
+                "is_function": symbol.is_function,
+                "is_static": symbol.is_static,
+                "is_variable": symbol.is_variable,
+                "version": str(symbol_version),
+                "shndx": symbol.shndx,
+                "size": symbol.size if symbol.size > 0 else None,
+            }
+            if raw_name and raw_name != symbol_name:
+                symbol_entry["raw_name"] = raw_name
+            symbols_list.append(symbol_entry)
+        except (AttributeError, IndexError, TypeError) as e:
+            skipped[type(e).__name__] += 1
             continue
+    if skipped:
+        # Dropping symbols quietly understates every symbol-derived result, from
+        # the SBOM component list to the ABI floor, so report the loss once with
+        # the failure kinds that caused it rather than per symbol.
+        detail = ", ".join(f"{count} {kind}" for kind, count in sorted(skipped.items()))
+        LOG.warning("Skipped %d unreadable symbols (%s).", sum(skipped.values()), detail)
     return symbols_list, exe_type
 
 
@@ -1718,6 +1759,11 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
     edge_counts = Counter()
     edge_confidence = {}
     external_counts = Counter()
+    # The displayed target of an external edge is the raw operand when there is
+    # one, which hides any symbol name the resolver did recover. Attribution
+    # needs that name, so it is kept alongside rather than re-derived from the
+    # display string.
+    external_symbol_names = {}
 
     confidence_rank = {"low": 1, "medium": 2, "high": 3}
 
@@ -1767,6 +1813,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 if import_name:
                     reason = "import" if edge_kind == "direct" else f"import:{edge_kind}"
                     external_counts[(src_id, import_name, reason)] += 1
+                    external_symbol_names[(src_id, import_name, reason)] = import_name
                     continue
 
             for candidate in numeric_candidates:
@@ -1914,6 +1961,8 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 if edge_kind != "direct":
                     reason = f"{reason}:{edge_kind}"
                 external_counts[(src_id, ext_target, reason)] += 1
+                if target_name:
+                    external_symbol_names[(src_id, ext_target, reason)] = target_name
 
     for src_id, direct_calls in direct_calls_by_src.items():
         if direct_call_targets_by_src.get(src_id):
@@ -1935,6 +1984,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
             else:
                 reason = "ambiguous_name" if len(candidate_ids) > 1 else "symbol_only_miss"
                 external_counts[(src_id, target_name, reason)] += 1
+                external_symbol_names[(src_id, target_name, reason)] = target_name
 
     edges = [
         {
@@ -1948,18 +1998,30 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
         }
         for (src, dst, kind), count in sorted(edge_counts.items(), key=lambda item: item[0])
     ]
-    external = [
-        {
+    # An external edge says a call leaves the binary but not where it goes.
+    # Naming the library turns the unresolved bucket into capability evidence:
+    # "calls something we could not resolve" becomes "calls into libcrypto".
+    external_provider_map, external_sources = build_symbol_provider_map(metadata)
+    external = []
+    attributed_external = 0
+    for (src, target, reason), count in sorted(external_counts.items(), key=lambda item: item[0]):
+        entry = {
             "src": src,
             "target": target,
             "count": count,
             "reason": reason,
             "confidence": "low",
         }
-        for (src, target, reason), count in sorted(
-            external_counts.items(), key=lambda item: item[0]
-        )
-    ]
+        symbol_name = external_symbol_names.get((src, target, reason), target)
+        if library := attribute_call_target(
+            symbol_name, external_provider_map, is_macho=metadata.get("binary_type") == "MachO"
+        ):
+            entry["library"] = library
+            # The target is unresolved as an internal edge, but the library it
+            # lands in is known from the import evidence rather than guessed.
+            entry["confidence"] = "medium"
+            attributed_external += 1
+        external.append(entry)
 
     return {
         "version": 2,
@@ -1968,6 +2030,8 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
         "nodes": nodes,
         "edges": edges,
         "external": external,
+        "external_attribution_sources": external_sources,
+        "attributed_external_count": attributed_external,
     }
 
 
@@ -2017,6 +2081,10 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
         metadata["import_dependencies"] = analyze_import_deps(metadata)
+        # Judging a dependency unused requires knowing which library each symbol
+        # came from, so this has to follow the attribution pass.
+        if link_hygiene := analyze_link_hygiene(metadata, metadata["import_dependencies"]):
+            metadata["link_hygiene"] = link_hygiene
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
         if disassemble and metadata.get("is_encrypted"):
@@ -2135,6 +2203,21 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
+    # The ABI, runtime-loading and link-closure passes all read the symbol and
+    # dynamic-entry buckets populated above, so they have to run last.
+    metadata["abi_analysis"] = analyze_elf_abi(metadata)
+    metadata["runtime_loading"] = summarize_runtime_loading(metadata)
+    metadata["recovered_dependencies"] = recover_runtime_dependencies(metadata, parsed_obj)
+    if RESOLVE_LINK_CLOSURE:
+        # Resolution reads the filesystem the scan is running on, which is only
+        # meaningful when that filesystem is the binary's intended runtime, so
+        # it stays opt-in rather than firing on every parse.
+        metadata["link_closure"] = resolve_link_closure(
+            metadata,
+            exe_file,
+            root=LINK_CLOSURE_ROOT,
+            extra_search_paths=LINK_CLOSURE_SEARCH_PATHS,
+        )
 
     return metadata
 
@@ -2208,12 +2291,26 @@ def add_elf_symbols(metadata, parsed_obj):
                     metadata["symbols_version"].append(
                         {
                             "name": demangle_symbolic_name(symbol_version_auxiliary.name),
-                            "hash": symbol_version_auxiliary.hash,
+                            # Only the auxiliary entries of a version
+                            # *requirement* carry a hash. The entries a library
+                            # emits for the versions it defines do not, and
+                            # reading the attribute unconditionally aborted the
+                            # whole table for every versioned shared object.
+                            "hash": getattr(symbol_version_auxiliary, "hash", None),
                             "value": entry.value,
                         }
                     )
     except (AttributeError, TypeError) as e:
-        LOG.debug(f"Caught {type(e)}: {e} while parsing elf symbols.")
+        # Naming the attribute matters: this path goes silent when the parser
+        # library renames a field, and an empty symbols_version block is
+        # indistinguishable from a binary that genuinely has none.
+        LOG.warning(
+            "Symbol version table unavailable for %s (%s: %s). Version-derived "
+            "components and the ABI floor will be missing from this result.",
+            metadata.get("name", "binary"),
+            type(e).__name__,
+            e,
+        )
         metadata["symbols_version"] = []
     return metadata
 
@@ -2541,54 +2638,41 @@ def analyze_import_deps(metadata):
         all_potential_imports = metadata.get("symtab_symbols", []) + metadata.get(
             "dynamic_symbols", []
         )
-        needed_libs = set()
-        if binary_type == "MachO":
-            needed_libs.update(
-                [lib.get("name") for lib in metadata.get("libraries", []) if lib.get("name")]
-            )
-        else:
-            needed_libs.update(
-                [
-                    entry["name"]
-                    for entry in metadata.get("imports", [])
-                    if entry.get("tag") == "NEEDED"
-                ]
-            )
+        # ELF records imported symbols and needed libraries as two unrelated
+        # lists, so attribution needs the resolved closure. Without it a symbol
+        # stays unattributed: assigning it to an arbitrary needed library
+        # invents a dependency edge that downstream tools treat as fact.
+        provider_map, provider_sources = build_symbol_provider_map(metadata)
+        unattributed_count = 0
         for sym_entry in all_potential_imports:
             if sym_entry.get("is_imported", False):
                 full_name = sym_entry.get("name", "")
                 if not full_name:
                     continue
                 func_name = full_name
-                if "::" in full_name:
-                    lib_name, func_name = full_name.split("::", 1)
+                # Only Mach-O prefixes a symbol with its library, and even
+                # there the prefix must look like one: `::` is also the
+                # namespace separator in C++ and Rust, so splitting blindly
+                # turns `APT::PackageContainer::begin` into a dependency on a
+                # library called `APT`.
+                macho_library, separator, macho_symbol = full_name.partition("::")
+                if binary_type == "MachO" and separator and is_library_name(macho_library):
+                    lib_name = macho_library.rsplit("/", 1)[-1]
+                    func_name = macho_symbol
+                elif lib_name := next(
+                    (
+                        provider_map[key]
+                        for key in symbol_lookup_names(sym_entry)
+                        if key in provider_map
+                    ),
+                    "",
+                ):
+                    pass
+                elif ".go" in full_name or ".s" in full_name or "internal" in full_name:
+                    lib_name = full_name
                 else:
-                    if binary_type == "MachO" and "::" in full_name:
-                        last_colon_pos = full_name.rindex("::")
-                        lib_part_with_path = full_name[:last_colon_pos]
-                        func_name = full_name[last_colon_pos + 2 :]
-                        lib_name_from_path = (
-                            lib_part_with_path.split("/")[-1].split("::")[0]
-                            if "::" in lib_part_with_path.split("/")[-1]
-                            else lib_part_with_path.split("/")[-1]
-                        )
-                        if lib_name_from_path in needed_libs:
-                            lib_name = lib_name_from_path
-                        elif needed_libs:
-                            lib_name = next(iter(needed_libs))
-                        else:
-                            LOG.debug(
-                                f"MachO Symbol {full_name} has no clear library in path or NEEDED list."
-                            )
-                            continue
-                    elif needed_libs:
-                        lib_name = next(iter(needed_libs))
-                    elif ".go" in full_name or ".s" in full_name or "internal" in full_name:
-                        lib_name = full_name
-                    else:
-                        if main_binary_name not in full_name:
-                            LOG.debug(f"Symbol {full_name} is imported but no library info found.")
-                        continue
+                    lib_name = UNATTRIBUTED_LIBRARY
+                    unattributed_count += 1
                 if not lib_name:
                     continue
 
@@ -2623,6 +2707,17 @@ def analyze_import_deps(metadata):
 
                 if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
                     dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+        dep_graph["attribution_sources"] = provider_sources
+        dep_graph["unattributed_symbol_count"] = unattributed_count
+        if unattributed_count and not provider_sources:
+            # Worth stating plainly: the graph is a symbol list, not a
+            # dependency graph, until the closure is resolved.
+            LOG.debug(
+                "%d imported symbols could not be attributed to a library. Set "
+                "BLINT_RESOLVE_LINK_CLOSURE=1 to resolve the dependency closure "
+                "and attribute them.",
+                unattributed_count,
+            )
     if len(dep_graph["dependencies"]):
         LOG.debug(
             f"Generated import dependency graph with {len(dep_graph['dependencies'])} dependencies."
