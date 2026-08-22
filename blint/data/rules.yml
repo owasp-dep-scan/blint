@@ -246,3 +246,94 @@
   exe_types:
     - PE32
     - PE64
+- id: CHECK_LIBC_PORTABILITY
+  title: Depends on C Library Implementation Internals
+  description: |
+    The binary imports interfaces that are specific to one C library implementation rather than defined by a standard. Examples include loader introspection (`dl_iterate_phdr`, `dladdr`, `dlinfo`), backtrace support, allocator internals (`malloc_usable_size`, `mallinfo`), stdio internals (`fopencookie`) and the non-portable pthread extensions.
+    These symbols have no equivalent in other C libraries, so the binary cannot be rebuilt against a different runtime, run in a distroless or musl-based image, or bundled as a portable artifact without a compatibility layer. The effect is usually discovered at deployment rather than at build time, because the link succeeds and only the load or the first call fails.
+    Where the dependency is deliberate, record it as a supported runtime constraint. Where it is incidental — the most common case is a diagnostic path that pulls in `backtrace` — gate it behind a build option so the default build stays portable.
+  severity: info
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - gobinary
+    - mips-executable
+- id: CHECK_ABI_FLOOR
+  title: Requires a Newer Runtime Than the Deployment Baseline
+  description: |
+    Every versioned symbol a binary imports carries a minimum version of the library that provides it. The highest such version across all imports is the floor: the binary will not start on any host whose runtime is older, and the failure is a load-time error naming a version node rather than anything actionable.
+    This finding fires when that floor is higher than the configured baseline. A single import raising the floor is common and usually accidental — building on a newer distribution than the one being targeted is enough to do it.
+    Fix it by building against the oldest runtime you intend to support, or by pinning the affected symbols to an older version node. The `internal:abi_determining_symbols` property on the component records exactly which imports set the floor.
+  severity: medium
+  baseline_version: "2.28"
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - mips-executable
+- id: CHECK_RUNTIME_LOADING
+  title: Loads Libraries That Are Not Declared Dependencies
+  description: |
+    The binary opens shared libraries at runtime by name. Those libraries never appear in the dynamic dependency table, so a dependency list, an SBOM, or a vulnerability scan built from that table alone omits them entirely — and they are frequently the components that matter most, since drivers, codecs, authentication modules and cryptographic providers are almost always loaded on demand.
+    There is a second consequence: a library resolved by name at runtime is subject to the full library search path at the moment of the call, which is a wider trust boundary than the one that applied at link time.
+    Declare these dependencies explicitly so downstream consumers can see them, and prefer an absolute path over a bare name when the location is known.
+  severity: info
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - gobinary
+    - mips-executable
+- id: CHECK_LINK_CLOSURE
+  title: Dynamic Dependencies Cannot Be Fully Resolved
+  description: |
+    Resolving the dependency closure the way the loader would left either a required library that nothing on the search path supplies, or imported symbols that no library in the closure defines. Both are load-time failures: the process will not start, and the error names one missing symbol rather than the missing library behind it.
+    A missing library usually means a packaging gap — a runtime dependency the package metadata does not declare. Unresolved symbols usually mean a version skew: a library is present, but an older build of it than the one the binary was linked against.
+    This check only runs when closure resolution is enabled, and its result describes the filesystem it resolved against. Point it at the image the binary actually ships in rather than at a build host.
+  severity: high
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - mips-executable
+- id: CHECK_SEARCH_PATH
+  title: Library Search Path Includes an Untrusted Directory
+  description: |
+    An `RPATH` or `RUNPATH` entry is relative, empty, or points inside a world-writable directory. Any of these lets a directory outside the package decide which library the loader binds first, which turns library loading into an arbitrary code execution path for whoever can write there.
+    An empty entry in the list is the sharpest form of this: the loader reads it as the current working directory, so the binary loads whatever happens to be alongside it when it is run.
+    Remove the entry, or replace it with an absolute path under a directory only root can write to. Where the library genuinely lives next to the binary, use `$ORIGIN` so the path is resolved relative to the executable rather than to the caller's working directory.
+  severity: high
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - gobinary
+    - mips-executable
+- id: CHECK_UNUSED_DEPENDENCIES
+  title: Declared Dependency Is Never Used
+  description: |
+    The binary declares a dependency on a library from which it imports no symbol. The loader will still map the library and everything that library itself needs, so the dependency costs startup time and resident memory, appears in every dependency list and SBOM built from the binary, and produces vulnerability matches against code the program never calls.
+    This almost always comes from the link line rather than the source: a library passed to the linker is recorded as a dependency whether or not anything from it is referenced, and the entry is then inherited by everything that links against the result. Distributions that link with `--as-needed` by default are largely free of it, which is why the same source can be clean on one platform and not another.
+    Link with `-Wl,--as-needed` so the linker records only the libraries that actually resolve a symbol, or remove the library from the link line.
+  severity: low
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - MachO
+    - mips-executable
+- id: CHECK_UNDECLARED_DEPENDENCIES
+  title: Used Library Is Not a Declared Dependency
+  description: |
+    The binary imports symbols from a library it does not declare a dependency on. It works today because some other dependency pulls that library in, so the loader happens to have it mapped by the time the symbol is bound.
+    That is not a contract. If the intermediate library drops its own dependency, switches to a different implementation, or is itself linked with `--as-needed`, this binary stops resolving for reasons unconnected to any change made to it. The failure appears at load time and names a symbol rather than the library behind it, so it is slow to diagnose.
+    It also understates the dependency list: the library is a real component of this binary and will be missing from any SBOM, licence review, or vulnerability scan built from the declared dependencies.
+    Add the library to the link line so the dependency is recorded explicitly.
+  severity: medium
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - MachO
+    - mips-executable

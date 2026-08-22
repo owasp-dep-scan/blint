@@ -19,16 +19,23 @@ from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_fro
 
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
+    check_abi_floor,
     check_authenticode,
     check_canary,
     check_codesign,
     check_dll_characteristics,
+    check_libc_portability,
+    check_link_closure,
     check_nx,
     check_pie,
     check_relro,
     check_rpath,
+    check_runtime_loading,
+    check_search_path,
     check_security_property,
     check_trust_info,
+    check_undeclared_dependencies,
+    check_unused_dependencies,
     check_virtual_size,
 )
 from blint.lib.utils import (

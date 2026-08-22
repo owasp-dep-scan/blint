@@ -300,10 +300,123 @@ def purl_field(value) -> str | None:
     return value or None
 
 
+def components_from_abi_requirements(abi_analysis: dict) -> list[Component]:
+    """Create components from the ABI floor each version provider imposes.
+
+    The version recorded here is the highest version node any *imported* symbol
+    binds to, which is the actual minimum the binary needs at runtime. Deriving
+    it from the imports rather than from the version definition table avoids two
+    errors that table alone produces: attributing a version to a provider no
+    symbol uses, and reporting a version lower than the one really required.
+
+    Args:
+        abi_analysis (dict): The ``abi_analysis`` block from parsed metadata.
+
+    Returns:
+        list[Component]: list of components
+    """
+    lib_components: list[Component] = []
+    for requirement in abi_analysis.get("requirements") or []:
+        provider = requirement.get("provider") or ""
+        version = requirement.get("min_version") or None
+        name = requirement.get("package_name") or provider.lower()
+        group = requirement.get("package_group") or ""
+        if not name:
+            continue
+        purl = PackageURL(
+            type="generic",
+            namespace=group or None,
+            name=name,
+            version=purl_field(version),
+        ).to_string()
+        properties = [
+            Property(name="internal:abi_provider", value=provider),
+            Property(
+                name="internal:abi_symbol_count",
+                value=str(requirement.get("symbol_count", 0)),
+            ),
+        ]
+        if determining := requirement.get("determining_symbols"):
+            # Recording which imports set the floor lets a reader verify a
+            # surprising version requirement instead of taking it on trust.
+            properties.append(
+                Property(
+                    name="internal:abi_determining_symbols",
+                    value=", ".join(determining[:8]),
+                )
+            )
+        comp = Component(
+            type=Type.library,
+            group=group,
+            name=name,
+            version=version,
+            purl=purl,
+            # A floor derived from the imports is much stronger evidence than a
+            # name split, but it is still a floor rather than the exact version
+            # installed, so it stays short of full confidence.
+            evidence=create_component_evidence(
+                f"{provider}_{version}" if version else provider, 0.8
+            ),
+            properties=properties,
+        )
+        comp.bom_ref = RefType(purl)
+        lib_components.append(comp)
+    return lib_components
+
+
+def components_from_recovered_dependencies(recovered: list[dict]) -> list[Component]:
+    """Create components for libraries the binary loads at runtime.
+
+    These never appear in the dynamic dependency table, so without them a plugin
+    host or a driver loader produces an SBOM that omits precisely the components
+    that determine what it can do. They are marked optional because the binary
+    runs without them, in a reduced form.
+
+    Args:
+        recovered (list[dict]): The ``recovered_dependencies`` metadata block.
+
+    Returns:
+        list[Component]: list of components
+    """
+    confidence_scores = {"high": 0.6, "medium": 0.4, "low": 0.2}
+    lib_components: list[Component] = []
+    for entry in recovered or []:
+        name = entry.get("name") or ""
+        if not name:
+            continue
+        # Strip the extension and version suffix so the component name matches
+        # what a package ecosystem calls the library.
+        base = name.split(".so")[0].removesuffix(".dylib").removesuffix(".dll")
+        pkg_type = "nuget" if name.endswith(".dll") else "generic"
+        purl = PackageURL(type=pkg_type, name=base).to_string()
+        comp = Component(
+            type=Type.library,
+            name=base,
+            purl=purl,
+            scope=Scope.optional,
+            evidence=create_component_evidence(
+                name, confidence_scores.get(entry.get("confidence"), 0.2)
+            ),
+            properties=[
+                Property(name="internal:soname", value=name),
+                Property(name="internal:load_kind", value="runtime"),
+                Property(
+                    name="internal:evidence",
+                    value="; ".join(entry.get("evidence") or []),
+                ),
+            ],
+        )
+        comp.bom_ref = RefType(purl)
+        lib_components.append(comp)
+    return lib_components
+
+
 def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
     """
     Creates a list of Component objects from symbols version.
-    This style of detection is quite imprecise since the version is just a min specifier.
+    This style of detection is quite imprecise since the version is just a min
+    specifier. It is a fallback for binaries where the per-symbol version
+    information needed by ``components_from_abi_requirements`` is unavailable.
 
     Args:
         symbols_version (list[dict]): A list of symbols version.
@@ -456,9 +569,65 @@ def process_exe_file(
                 )
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
-        # Attempt to detect library components from the symbols version block
-        # If this is unsuccessful then store the information as a property
-        lib_components += components_from_symbols_version(symbols_version)
+        abi_analysis: dict = metadata.get("abi_analysis") or {}
+        # The ABI floor computed from the imported symbols supersedes the
+        # version-node heuristic, which cannot tell which nodes are actually
+        # bound. Fall back to it only when no floor could be derived.
+        abi_components = components_from_abi_requirements(abi_analysis)
+        if abi_components:
+            lib_components += abi_components
+        else:
+            lib_components += components_from_symbols_version(symbols_version)
+        lib_components += components_from_recovered_dependencies(
+            metadata.get("recovered_dependencies")
+        )
+        for prop_name, prop_value in (
+            ("abi_libc", abi_analysis.get("libc")),
+            ("abi_min_glibc_version", abi_analysis.get("min_glibc_version")),
+            (
+                "abi_portability_notes",
+                " ".join(abi_analysis.get("portability_notes") or []),
+            ),
+        ):
+            if prop_value:
+                parent_component.properties.append(
+                    Property(name=f"internal:{prop_name}", value=str(prop_value))
+                )
+        if link_hygiene := metadata.get("link_hygiene"):
+            # A declared dependency nothing imports from still lands in every
+            # downstream inventory and vulnerability match, so the SBOM is the
+            # right place to say which ones they are.
+            if unused := link_hygiene.get("unused_dependencies"):
+                parent_component.properties.append(
+                    Property(
+                        name="internal:unused_dependencies",
+                        value=", ".join(entry["name"] for entry in unused),
+                    )
+                )
+            if undeclared := link_hygiene.get("undeclared_dependencies"):
+                parent_component.properties.append(
+                    Property(
+                        name="internal:undeclared_dependencies",
+                        value=", ".join(entry["name"] for entry in undeclared),
+                    )
+                )
+        if link_closure := metadata.get("link_closure"):
+            # A closure that does not resolve is a deployment fact the SBOM
+            # consumer cannot recover from the component list alone.
+            if missing := link_closure.get("missing"):
+                parent_component.properties.append(
+                    Property(
+                        name="internal:missing_dependencies",
+                        value=", ".join(entry["name"] for entry in missing),
+                    )
+                )
+            if link_closure.get("unresolved_symbol_count"):
+                parent_component.properties.append(
+                    Property(
+                        name="internal:unresolved_symbol_count",
+                        value=str(link_closure["unresolved_symbol_count"]),
+                    )
+                )
         if not lib_components and symbols_version:
             parent_component.properties.append(
                 Property(

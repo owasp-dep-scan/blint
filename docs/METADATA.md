@@ -59,6 +59,12 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
     - **Content**: This attribute parses the embedded JSON note to list these "hidden" dependencies, including the library name (`soname`), its necessity (`required`, `recommended`, or `suggested`), and the specific application feature it enables.
     - **Use Case**: Critical for discovering the full dependency tree of modular applications (like media players or system daemons) that would otherwise appear to have very few dependencies during static analysis.
 
+- **ABI Requirements (`abi_analysis`):** The runtime the binary requires and the ABI features that constrain where it can run. See [`abi_analysis`](#abi_analysis) below.
+
+- **Runtime Loading (`runtime_loading`, `recovered_dependencies`):** Libraries the binary opens at runtime rather than linking against, recovered from the image itself rather than from a declarative note. See [`runtime_loading` and `recovered_dependencies`](#runtime_loading-and-recovered_dependencies) below.
+
+- **Link Closure (`link_closure`, optional):** The result of resolving the dependency graph the way the dynamic loader would. See [`link_closure`](#link_closure) below.
+
 ### For PE Binaries
 
 PE (Portable Executable) files are the standard for Windows.
@@ -248,6 +254,10 @@ Symbols are names for locations in memory, typically corresponding to functions 
 
 Each symbol entry contains details like its `name`, `type` (`FUNC` or `OBJECT`), `binding` (`GLOBAL`, `LOCAL`, `WEAK`), and whether it is `is_imported` or `is_exported`.
 
+- **`name`** is the demangled form where one exists, which is what a reader wants to see.
+- **`raw_name`** is the linkage name, present only when demangling changed it. This is the name that appears in another object's export table, so it is the only key that matches a C++ or Rust symbol across binaries. It is what [symbol attribution](#symbol-attribution) and version-aware database lookups match on.
+- **`version`** is the symbol version node the symbol binds to, such as `GLIBC_2.28`. See [`abi_analysis`](#abi_analysis).
+
 ### Function Lists: `functions`, `ctor_functions`, `dtor_functions`
 
 While symbol tables provide the names, these lists represent a curated set of functions that LIEF identifies as code entry points.
@@ -288,7 +298,7 @@ These attributes provide detailed lists of third-party libraries and packages co
 | `go_dependencies`     | A list of Go packages used to build the binary, extracted from the embedded `.go.buildinfo` section. Includes package names, exact versions, and checksums (`h1:` hashes). | **Gold Standard for SCA.** Allows for precise identification of Go libraries and their versions, enabling direct mapping to known vulnerabilities (CVEs) in those packages.                                                                    |
 | `rust_dependencies`   | A list of Rust crates used to build the binary, extracted from the `.dep-v0` section created by the `cargo-auditable` feature. Includes crate name, version, and kind.     | Similar to Go, this enables precise SCA for Rust applications, mapping crates to known CVEs. **Limitation**: This section is only present if the developer explicitly enables the `cargo-auditable` feature during compilation.                |
 | `dotnet_dependencies` | A structured list of NuGet packages and their versions, extracted from the `deps.json` file embedded in the PE overlay of self-contained .NET applications.                | Provides precise SCA for .NET applications, allowing for vulnerability mapping. **Limitation**: This is only available for .NET Core/5+ applications published in "self-contained" mode and is not present in framework-dependent deployments. |
-| `import_dependencies` | A structured graph detailing which shared libraries (`.dll`, `.so`, `.dylib`) are imported by the main binary and which specific symbols are used from each library.       | Provides a clear, high-level view of runtime dependencies. Helps identify the use of sensitive APIs (e.g., crypto, networking) and from which library they originate. This is a foundational element for behavior analysis.                    |
+| `import_dependencies` | A structured graph detailing which shared libraries (`.dll`, `.so`, `.dylib`) are imported by the main binary and which specific symbols are used from each library. See [Symbol attribution](#symbol-attribution) for what the attribution is based on per format. | Provides a clear, high-level view of runtime dependencies. Helps identify the use of sensitive APIs (e.g., crypto, networking) and from which library they originate. This is a foundational element for behavior analysis.                    |
 
 ---
 
@@ -304,7 +314,8 @@ When disassembly output is available, blint derives a deterministic top-level ca
 - `node_count` / `edge_count`: Number of internal nodes and internal edges.
 - `nodes`: Stable list of functions with `{id, key, name, address, aliases}` where `aliases` includes other names sharing the same entry address.
 - `edges`: Internal call edges as `{src, dst, count, kind, confidence}` where `kind` is one of `direct`, `tailcall`, `indirect_hint`.
-- `external`: Unresolved or ambiguous call targets as `{src, target, count, reason, confidence}`.
+- `external`: Unresolved or ambiguous call targets as `{src, target, count, reason, confidence}`, plus `library` when the target can be attributed to the library that supplies it.
+- `external_attribution_sources` / `attributed_external_count`: What the library attribution was based on, and how many external edges carry one.
 
 Notes:
 
@@ -312,7 +323,128 @@ Notes:
 - `confidence` indicates edge trust level (`high`, `medium`, `low`) for analyst triage.
 - Duplicate call instructions are preserved via edge `count`.
 - Address/name collisions and misses are surfaced in `external` with reason buckets such as `ambiguous_address`, `ambiguous_name`, and `address_space_miss`.
+- An external edge carries a `library` only when the resolver recovered a symbol name for the target and that name is a known import. Edges whose target is a register-indirect operand cannot be attributed, so `library` is absent on most of them. Where it is present, `confidence` is raised from `low` to `medium`: the target is still unresolved as an internal edge, but the library it reaches is evidence rather than a guess.
 - Same-address symbol aliases are collapsed into a canonical node to reduce false ambiguity while preserving alias visibility.
+
+### `abi_analysis`
+
+ELF only. Describes the runtime the binary requires and the ABI features that constrain where it can be deployed. Every value is derived from the _imported_ symbols, not from the version definition table, because a version node appearing in `.gnu.version_r` does not mean any symbol binds to it.
+
+| Property                                  | Description                                                                                                                                                                                         |
+| :---------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `libc`                                    | The C library the binary is linked against: `glibc`, `musl`, `bionic`, or empty when it cannot be determined. Inferred from the interpreter first, then from the version providers and `DT_NEEDED`. |
+| `min_glibc_version`                       | The minimum glibc the binary can run on, as a dotted version. Empty when no glibc version node is bound.                                                                                            |
+| `requirements`                            | One entry per version provider. See the table below.                                                                                                                                                |
+| `features`                                | Symbol-level ABI features: `ifunc_symbols`, `imported_ifunc_symbols`, `tls_symbols`, `unique_symbols`, and `implementation_specific_imports`. Each is a capped list of symbol names.                |
+| `uses_symbol_versioning`                  | True when any imported symbol carries a version node.                                                                                                                                               |
+| `uses_ifunc`                              | True when the binary defines or imports an indirect function, which requires a loader that runs IFUNC resolvers.                                                                                    |
+| `uses_tls`                                | True when thread-local storage symbols are present.                                                                                                                                                 |
+| `uses_unique_symbols`                     | True when the binary defines `STB_GNU_UNIQUE` symbols, which prevent the object from being unloaded.                                                                                                |
+| `uses_private_symbol_versions`            | True when a symbol binds to a private version node such as `GLIBC_PRIVATE`. These are internal interfaces with no stability promise.                                                                |
+| `private_version_providers`               | The private providers bound, e.g. `["GLIBC_PRIVATE"]`.                                                                                                                                              |
+| `uses_implementation_specific_interfaces` | True when the binary imports C library internals that have no portable equivalent (loader introspection, allocator internals, backtrace support, non-portable pthread extensions).                  |
+| `is_statically_linked`                    | True when there is no interpreter and no `DT_NEEDED` entry.                                                                                                                                         |
+| `portability_notes`                       | Human-readable sentences summarizing the above, suitable for direct display.                                                                                                                        |
+
+Each entry in `requirements` describes one version provider:
+
+| Property                         | Description                                                                                                                                                 |
+| :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                       | The version node provider, e.g. `GLIBC`, `GLIBCXX`, `LIBPAM_EXTENSION`, `GLIBC_PRIVATE`.                                                                    |
+| `min_version`                    | The **highest** version node any imported symbol binds to — that is, the minimum the runtime must supply. Empty for providers whose nodes carry no version. |
+| `determining_symbols`            | The imported symbols that set `min_version`. Use these to trace an unexpectedly high floor back to the single import responsible.                           |
+| `symbol_count`                   | How many imported symbols bind to this provider.                                                                                                            |
+| `versions`                       | Every distinct version bound for this provider, sorted numerically.                                                                                         |
+| `package_name` / `package_group` | Package coordinates for the provider where known, e.g. `libc` / `gnu` for `GLIBC`. Used to build the SBOM component.                                        |
+
+### `runtime_loading` and `recovered_dependencies`
+
+Libraries opened through `dlopen` never appear in `DT_NEEDED`, so a dependency list built from the dynamic table alone omits them. `dlopen_dependencies` covers the case where the project embeds a declarative note; these two attributes cover everything else by recovering the information from the image.
+
+`runtime_loading` describes the behaviour:
+
+| Property          | Description                                                                                                                                |
+| :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| `entry_points`    | The runtime-loading functions the binary imports (`dlopen`, `dlmopen`, `android_dlopen_ext`, `LoadLibraryW`, `dlsym`, …).                  |
+| `loads_libraries` | True when at least one entry point actually opens a library. `dlsym` alone operates on a handle the caller already has and does not count. |
+| `call_sites`      | Maps each entry point to the functions that call it. Populated only with `--disassemble`.                                                  |
+| `call_site_count` | Total number of call sites across all entry points.                                                                                        |
+
+`recovered_dependencies` lists the libraries themselves. Names already present in `DT_NEEDED`, `libraries`, or `dlopen_dependencies` are excluded, since those are not gaps.
+
+| Property     | Description                                                                                                                             |
+| :----------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`       | The soname as it appears in the binary, e.g. `libgpm.so.2`.                                                                             |
+| `confidence` | `high` when the name is a literal in a read-only data section and looks like a library, `medium` for weaker placement, `low` otherwise. |
+| `evidence`   | Why the candidate was accepted: which loading entry point is imported, which section the literal is in, and any absolute path found.    |
+| `paths`      | Absolute paths found for the library, when the binary hardcodes one.                                                                    |
+| `sections`   | The sections the name was found in.                                                                                                     |
+
+Format templates such as `%s/libfoo.so` are excluded: they are assembled at runtime and are not themselves names. This keeps the pass conservative — it under-reports rather than inventing dependencies.
+
+### `link_closure`
+
+**Opt-in.** Resolving the closure reads the filesystem the scan runs on, which is only meaningful when that filesystem is the binary's intended runtime. Enable it with:
+
+| Environment variable         | Description                                                                                                   |
+| :--------------------------- | :------------------------------------------------------------------------------------------------------------ |
+| `BLINT_RESOLVE_LINK_CLOSURE` | Set to `1`, `true`, or `yes` to run the resolution.                                                           |
+| `BLINT_LINK_ROOT`            | Filesystem root to resolve against. Point this at an unpacked image or sysroot rather than the scanning host. |
+| `BLINT_LINK_SEARCH_PATH`     | Extra directories treated as if they were in `LD_LIBRARY_PATH`, separated by the platform path separator.     |
+
+Resolution follows the loader's documented search order: `DT_RPATH` (ignored when `DT_RUNPATH` is present), then `LD_LIBRARY_PATH`, then `DT_RUNPATH`, then the default directories for the machine type plus anything configured in `/etc/ld.so.conf`. The `$ORIGIN`, `$LIB` and `$PLATFORM` tokens are expanded as the loader expands them.
+
+| Property                  | Description                                                                                                                                                                                  |
+| :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolved`                | Each object that would be mapped, with `path`, `found_via` (which kind of search path answered), `needed_by`, `relation` (`direct` or `transitive`), and `export_count`.                     |
+| `missing`                 | Sonames nothing on the search path supplies. Each is a load-time failure and usually indicates an undeclared packaging dependency.                                                           |
+| `unresolved_symbols`      | Imported symbols no object in the closure defines, capped at 64 entries. Weak imports are excluded, since going unresolved is their intended behaviour.                                      |
+| `unresolved_symbol_count` | The full count, before the cap.                                                                                                                                                              |
+| `symbol_providers`        | Maps each resolved symbol name to the soname that supplies it. This is the edge-level dependency data `dynamic_entries` cannot give you.                                                     |
+| `risky_search_paths`      | `DT_RPATH` / `DT_RUNPATH` entries that are relative, empty (which the loader reads as the working directory), or under a world-writable directory. Each carries `path`, `kind`, and `issue`. |
+| `complete`                | True only when nothing is missing and no symbol is unresolved.                                                                                                                               |
+| `root`                    | The filesystem root the result describes.                                                                                                                                                    |
+
+The closure is capped at 256 objects so a pathological dependency graph cannot stall a run.
+
+### Symbol attribution
+
+`import_dependencies` maps each imported symbol to the library that supplies it. How much evidence exists for that depends entirely on the format:
+
+| Format | Evidence | Available |
+| :----- | :------- | :-------- |
+| PE     | The import table is organised by DLL, so every import names its library. | Always |
+| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`. | Always |
+| ELF    | The dynamic symbol table and the `DT_NEEDED` list are unrelated flat lists. The connection only exists once the dependency closure is resolved and each library's exports are read. | Only with [`link_closure`](#link_closure) enabled |
+
+Two fields record what the result rests on:
+
+| Property                     | Description                                                                                                                              |
+| :--------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
+| `attribution_sources`        | Which evidence was used: `import_table`, `load_commands`, `link_closure`. Empty means none was available.                                |
+| `unattributed_symbol_count`  | How many imported symbols could not be tied to a library. These are collected under a synthetic `unattributed` entry in `libraries`.      |
+
+**An ELF binary analysed without closure resolution attributes nothing.** That is deliberate. Assigning a symbol to an arbitrary declared library produces a dependency edge that is indistinguishable downstream from a correct one, and a wrong edge is worse than an honest gap.
+
+C++ and Rust symbols are matched on their linkage name, which blint records as `raw_name` on the symbol whenever demangling changed it. A provider's export table holds mangled names, so the demangled name alone never matches.
+
+Note that `::` is a library separator only in Mach-O, and only when the prefix looks like a library. Everywhere else it separates namespace components, and `APT::PackageContainer::begin` is one symbol rather than a dependency on `APT`.
+
+### `link_hygiene`
+
+Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when nothing could be attributed, because with no evidence every dependency looks unused.
+
+| Property                     | Description                                                                                                                                                       |
+| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unused_dependencies`        | Declared libraries from which no symbol is imported, each with a `name` and a `reason`. Linking with `--as-needed` removes them.                                  |
+| `undeclared_dependencies`    | Libraries supplying symbols without being declared, with `symbol_count` and a sample of `symbols`. These work only for as long as some other dependency keeps them mapped. |
+| `attribution_sources`        | The evidence the result is based on, as above.                                                                                                                    |
+| `unattributed_symbol_count`  | Imports not tied to any library. A high count means the findings are based on partial evidence.                                                                   |
+| `declared_count`             | How many direct dependencies were declared.                                                                                                                       |
+
+`unused_dependencies` answers a similar question to `ldd -u`, but not an identical one. `ldd -u` relocates the whole closure and counts a library as used if anything in it binds to the library, so a library this binary never calls still counts as used when some other dependency calls it. blint reports **direct** use, which is what `--as-needed` acts on. Everything `ldd -u` reports unused will also be reported here; the reverse does not hold.
+
+Over-linking is largely a property of the distribution rather than the project: builds that pass `--as-needed` are almost free of it, while those that do not accumulate it as link lines are inherited between libraries.
 
 ### `security_properties`
 
