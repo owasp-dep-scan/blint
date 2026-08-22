@@ -18,23 +18,35 @@ The images span the packaging families that matter:
 - openSUSE Tumbleweed, which tracks a much newer glibc
 - Alpine, which is musl and therefore has no symbol versioning at all
 
-These are skipped when Docker is unavailable, so a normal test run is
-unaffected. Each image is pulled and analysed once per session.
+Each image is pulled and blint is installed into it, so a full run takes several
+minutes and depends on the network and on registry availability. That is the
+wrong shape for a check gating every pull request, so these are opt-in: set
+``BLINT_CORPUS_TESTS=1``. They also skip when Docker is absent or its daemon
+cannot run Linux containers.
 
-Run them explicitly with:
+Run them with:
 
-    pytest tests/test_elf_abi_corpus.py -v
+    BLINT_CORPUS_TESTS=1 pytest tests/test_elf_abi_corpus.py -v
 
 Select one distribution with:
 
-    pytest tests/test_elf_abi_corpus.py -k alpine -v
+    BLINT_CORPUS_TESTS=1 pytest tests/test_elf_abi_corpus.py -k alpine -v
+
+The `corpus` workflow runs them on a schedule and on demand.
 """
 
 import json
+import os
 import shutil
 import subprocess
 
 import pytest
+
+# These tests pull five container images and install blint into each, so they
+# take minutes and depend on the network and on registry availability. That is
+# the wrong shape for a check that gates every pull request, but the right shape
+# for periodic validation, so they are opt-in.
+CORPUS_ENABLED = os.getenv("BLINT_CORPUS_TESTS", "").lower() in ("1", "true", "yes")
 
 
 class Distro:
@@ -89,30 +101,54 @@ DISTROS = [
 ]
 
 
-def docker_available() -> bool:
+def linux_docker_available() -> bool:
+    """Return True when Docker is present and can run Linux containers.
+
+    Checking that the daemon responds is not enough. Windows runners have a
+    working Docker whose daemon is in Windows-container mode, where pulling any
+    of these images fails with "no matching manifest for linux/amd64".
+    """
     if not shutil.which("docker"):
         return False
     try:
-        return subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0
+        completed = subprocess.run(
+            ["docker", "info", "--format", "{{.OSType}}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
     except (OSError, subprocess.SubprocessError):
         return False
+    return completed.returncode == 0 and completed.stdout.strip() == "linux"
 
 
-pytestmark = pytest.mark.skipif(
-    not docker_available(), reason="Docker is required for the corpus tests"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not CORPUS_ENABLED,
+        reason="set BLINT_CORPUS_TESTS=1 to run the container corpus tests",
+    ),
+    pytest.mark.skipif(
+        not linux_docker_available(),
+        reason="Docker with a Linux daemon is required for the corpus tests",
+    ),
+]
 
 
 def run_probe(distro: Distro, repo_root: str) -> dict:
     """Install blint in the image and run the probe, returning its report."""
     command = (
         f"{distro.setup} >/dev/null 2>&1; "
+        # The checkout is bind-mounted, and an editable install writes build
+        # metadata back into it. With several images installing in sequence
+        # against the same mount they corrupt each other's state, so each
+        # container builds from its own copy.
+        "cp -r /blint /tmp/blint-src && "
         # --break-system-packages is needed on the images that mark their system
         # Python as externally managed, and is rejected by older pip, so the
         # plain form is the fallback.
-        f"{distro.python} -m pip install --break-system-packages -q -e /blint "
-        f">/dev/null 2>&1 || {distro.python} -m pip install -q -e /blint >/dev/null 2>&1; "
-        f"{distro.python} /blint/tests/data/elf_corpus_probe.py 2>/dev/null"
+        f"({distro.python} -m pip install --break-system-packages -q -e /tmp/blint-src "
+        f">/dev/null 2>&1 || {distro.python} -m pip install -q -e /tmp/blint-src >/dev/null 2>&1); "
+        f"{distro.python} /tmp/blint-src/tests/data/elf_corpus_probe.py 2>/dev/null"
     )
     completed = subprocess.run(
         [
@@ -122,7 +158,8 @@ def run_probe(distro: Distro, repo_root: str) -> dict:
             "--platform",
             "linux/amd64",
             "-v",
-            f"{repo_root}:/blint",
+            # Read-only: nothing in the container should write to the checkout.
+            f"{repo_root}:/blint:ro",
             "-w",
             "/tmp",
             distro.image,

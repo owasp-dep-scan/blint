@@ -1,0 +1,56 @@
+name: ELF corpus tests
+
+# The corpus tests analyse five distribution images in place and check every
+# result against readelf, nm and ldd inside the same container. They are the
+# only coverage of real-world ELF variety -- version node shapes, library
+# layouts, musl versus glibc -- but they pull images and install blint into
+# each, so a run takes minutes and depends on registry availability. That is
+# the wrong shape for a check gating every pull request, so they run here on a
+# schedule and on demand instead, where a transient registry failure can be
+# re-run without blocking anyone.
+
+on:
+  schedule:
+    # Weekly, early Monday UTC.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+  push:
+    paths:
+      # Run on changes to the analysis these tests cover, so a regression is
+      # caught on merge rather than at the end of the week.
+      - 'blint/lib/elf_abi.py'
+      - 'blint/lib/elf_dlopen.py'
+      - 'blint/lib/elf_linkmap.py'
+      - 'blint/lib/import_attribution.py'
+      - 'tests/test_elf_abi_corpus.py'
+      - 'tests/data/elf_corpus_probe.py'
+      - '.github/workflows/corpus.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  corpus:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        # The probe runs inside the containers, which install blint themselves.
+        # The host only needs pytest to drive them.
+        run: python3 -m pip install pytest
+      - name: Run the corpus tests
+        run: pytest tests/test_elf_abi_corpus.py -v -p no:cacheprovider
+        env:
+          BLINT_CORPUS_TESTS: '1'

@@ -13,6 +13,7 @@ contract the calling test depends on.
 import glob
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -22,7 +23,9 @@ import traceback
 # inside the image the filesystem being resolved against is the right one.
 os.environ["BLINT_RESOLVE_LINK_CLOSURE"] = "1"
 
-sys.path.insert(0, "/blint")
+# Resolve the checkout from this file's location rather than a fixed path, so
+# the probe works wherever the container copied the source to.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from blint.lib.binary import parse
 from blint.lib.elf_abi import parse_version_node, version_sort_key
