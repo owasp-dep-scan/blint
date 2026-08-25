@@ -1,0 +1,183 @@
+---
+text: Review for side-loaded and passively-triggered implant characteristics
+group: BINARY_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+rules:
+  - id: PE_IMPERSONATES_SYSTEM_MODULE
+    title: Unsigned image claims a Microsoft system module name under another publisher
+    summary: The version resource names a Windows system DLL while attributing the file to a different company, and the file is unsigned.
+    description: |
+      This image's version resource gives OriginalFilename as a module Microsoft ships with Windows,
+      but names a different company in CompanyName, ProductName or LegalCopyright, and carries no
+      valid Authenticode signature. The three facts contradict each other: a genuine copy of that
+      module is signed by Microsoft, and a genuine third-party library does not claim Microsoft's
+      filename. Producing this combination requires deliberately editing the version resource, which
+      is the preparation step for DLL side-loading and for search-order hijacking - the forged
+      resource is what makes the file survive a cursory look at its properties dialog. SLEEPWALKER
+      does exactly this, shipping as dpapi.dll with the version resource of the ESET Management
+      Agent so that it looks in place beside ERAAgent.exe. Confirm against the vendor's published
+      hashes before acting: a repackaged or resource-patched build of legitimate software can reach
+      the same state without malicious intent.
+    check_type: binary_analysis
+  - id: PE_STUB_EXPORT_THUNK_TABLE
+    title: Export table is a uniform array of stubs rather than implementations
+    summary: Every export sits at the same small stride from the next and none is a real forwarded export.
+    description: |
+      All of this library's exports are spaced an identical, small number of bytes apart, so each is
+      a fixed-size stub rather than a separately compiled function; and none is a genuine forwarded
+      export, which is the supported way to re-export another module's API. Distinct API functions
+      do not have identical sizes, so this layout is generated rather than compiled. It is the shape
+      of a proxy DLL: the export table exists to satisfy the loader's import resolution for whatever
+      process side-loads the file, while the real behaviour runs from DllMain or from the first stub
+      that is called. SLEEPWALKER's seven DPAPI exports sit exactly 10 bytes apart, each jumping
+      through a pointer table that is never populated. Small hand-written shims and some link-time
+      wrappers can also produce uniform stubs, so read the export bodies before concluding; weight
+      the finding by whether the image also matches PE_IMPERSONATES_SYSTEM_MODULE.
+    check_type: binary_analysis
+  - id: PE_UNRESOLVED_SIBLING_MODULE_LOAD
+    title: Image names a module that is absent from its import table
+    summary: A DLL, EXE or SYS filename appears in the image but is not a declared dependency, so it is resolved through LoadLibrary at runtime.
+    description: |
+      This image imports LoadLibrary and names a module that does not appear anywhere in its import
+      table or dynamic entries, is not a documented Windows module or api-set contract, and whose
+      name is a near-miss of a module Microsoft ships with Windows. That module is resolved at
+      runtime, so it is not recorded as a dependency, does not appear in an SBOM built from the
+      import table, and need not exist on disk when the file is analysed. Runtime loading is
+      entirely ordinary for optional features and plugins; naming the thing you load so that it
+      reads as a companion of an OS component is not. SLEEPWALKER's stub exports attempt to load
+      dpapisvc.dll - a plausible-looking sibling of the real dpapi.dll that does not exist - and
+      terminate the process when the load fails, which doubles as a guard against running outside
+      the intended host. Check whether the named module ships with the product, and whether the code
+      path handles its absence or exits.
+
+      The comparison is deliberately against Microsoft module names only, not against the image's
+      own name. Products legitimately name satellite and resource DLLs after themselves
+      (CodeCoverage.exe loading codecoveragemessages.dll) and per-architecture builds name variants
+      of their own file (msalruntime_x86.dll beside msalruntime.dll); including those was every
+      false positive this rule produced on a 400-binary benign corpus.
+    check_type: binary_analysis
+  - id: PE_HOST_PROCESS_NAME_GATE
+    title: Library gates its behaviour on the name of the process that loaded it
+    summary: A DLL queries its own module or command line and compares it against an executable name it assembles at runtime.
+    description: |
+      This library queries GetModuleFileName or GetCommandLine and compares the result against an
+      executable name that does not appear in its strings, because it is rebuilt from arithmetic at
+      runtime. A library that acts only when a specific host process loaded it has been written for
+      one placement, which is the defining property of a side-loading payload rather than of a
+      reusable component. The runtime construction of the name compounds this: a legitimate
+      host-process check has no reason to hide which host it is checking for, and hiding it defeats
+      both string scanning and a reviewer grepping the file. It also serves as sandbox evasion,
+      since the payload stays inert when loaded by a test harness. SLEEPWALKER rebuilds
+      "ERAAgent.exe" this way and does nothing at all unless that is its host.
+    check_type: binary_analysis
+  - id: PASSIVE_MULTI_TRANSPORT_LISTENER
+    title: Image accepts inbound data over several transports with no outbound destination
+    summary: Three or more independent receive transports are present, and the image contains no URL, hostname or routable address to contact.
+    description: |
+      This image can be reached over three or more independent inbound transports - some combination
+      of TCP accept, UDP receive, named-pipe server, ICMP, raw or promiscuous sockets, and device
+      channels - while containing no URL, hostname or routable IP address anywhere in its strings and
+      importing no client-side HTTP or download API. A server implements one such transport, or
+      occasionally two for a documented protocol; implementing several is not serving a protocol but
+      maximising the chance that at least one channel is reachable through whatever filtering sits in
+      front of the host. Combined with the absence of any destination, it describes a component that
+      waits to be contacted rather than reporting in. That is the design of a passive backdoor, and
+      it is why such an implant generates no outbound traffic for network monitoring to notice and no
+      infrastructure for a responder to pivot on. Multi-protocol test tools, network diagnostics and
+      packet-capture utilities legitimately match this shape, so identify the program before acting.
+    check_type: binary_analysis
+  - id: COVERT_CHANNEL_DEVICE_ACCESS
+    title: Image opens a hypervisor or IPC channel that bypasses the network stack
+    summary: A device object such as \\.\VMCI, vsock or hvsocket is opened, moving data without traversing the network stack.
+    description: |
+      This image opens a device object that carries data between a virtual machine and its host, or
+      between guests, without using the network stack: VMware's VMCI, a virtio vsock, or a Hyper-V
+      socket. Traffic through such a channel is not seen by host or network firewalls, does not
+      appear in proxy logs or flow records, and crosses the guest/host boundary that segmentation is
+      meant to enforce. For virtualisation tooling and guest agents this is expected behaviour and
+      the whole point of the interface. In anything else it is an exfiltration and command path
+      chosen specifically because it is not monitored - SLEEPWALKER accepts commands and returns data
+      over \\.\VMCI as one of its transports, alongside TCP, UDP, ICMP and named pipes. Establish
+      whether the image is part of the hypervisor's own guest tooling.
+
+      Named pipes are deliberately not reported here. `\\.\pipe\...` is ordinary Windows IPC used by
+      SQL Server clients, code-coverage collectors and the .NET diagnostics channel, so treating it
+      as a covert channel says nothing useful; a pipe counts as one inbound transport for
+      PASSIVE_MULTI_TRANSPORT_LISTENER instead.
+    check_type: binary_analysis
+  - id: RUNTIME_CONSTRUCTED_SECURITY_STRINGS
+    title: Security-relevant resource names are assembled at runtime rather than stored
+    summary: Device paths, registry keys or object manager paths were recovered from stack arithmetic instead of the image's strings.
+    description: |
+      blint recovered device paths, registry keys or object-manager paths that this image builds on
+      its stack from arithmetic, one word at a time, instead of storing them as literals. These names
+      do not appear in the image's strings at all, so string scanning, YARA rules written against
+      literals, and a reviewer reading the file will all miss them. There is no performance or
+      portability reason to construct a constant path this way; compilers do not do it to string
+      literals, and it costs more code than storing the string. The purpose is to keep the resource
+      name out of static analysis, which makes the set of hidden names a direct statement of what the
+      author expected to be looked for. Treat each recovered value as evidence to confirm against
+      the reconstruction: the recovery is a linear pass with no control-flow awareness, so a value
+      assembled across a branch or a loop may be partial.
+    check_type: binary_analysis
+  - id: HOST_AUTHENTICATION_DOWNGRADE
+    title: Image can weaken host authentication through the registry
+    summary: The image writes registry values that lower authentication requirements for anonymous or remote access.
+    description: |
+      This image can write registry values whose only effect is to lower an authentication boundary
+      for the whole host: EveryoneIncludesAnonymous, which grants anonymous logons the rights of the
+      Everyone group; NullSessionPipes and NullSessionShares, which permit unauthenticated access to
+      named pipes and shares; RestrictAnonymous and LmCompatibilityLevel, which govern anonymous
+      enumeration and which NTLM levels are accepted; or the SMB signing values. Unlike a generic
+      "writes to the registry" observation, each of these names a specific control being relaxed, and
+      the change applies to every process on the machine rather than only to this one. An implant
+      makes these edits so its own channel can be reached without credentials - SLEEPWALKER sets
+      EveryoneIncludesAnonymous and adds its pipe to NullSessionPipes so its named-pipe transport
+      accepts unauthenticated sessions. Hardening tools and domain configuration utilities also write
+      these values, in the opposite direction; confirm which way the image sets them.
+    check_type: binary_analysis
+  - id: EMBEDDED_ENCRYPTED_PAYLOAD
+    title: Image carries an encrypted region beside the primitives needed to read it
+    summary: A contiguous high-entropy region occupying at least a quarter of a writable data section, in an image that also carries identifiable cryptographic constants.
+    description: |
+      A contiguous region of writable initialised data has near-maximum entropy, matches no known
+      constant table or substitution box, occupies at least a quarter of its section, and is far
+      larger than any key or hash - while the same image carries constants that identify real
+      cryptographic primitives. Together these mean the image contains data it can decrypt and a
+      reviewer cannot read: a configuration block, an embedded second stage, or an encrypted task
+      program. This is what allows a small binary to hold no readable strings, no visible C2 address
+      and no obvious behaviour, and still act on instructions. SLEEPWALKER's is roughly 2KB at .data
+      offset 0x80 - 81% of the section - holding its AES-256-CCM key, nonce and encrypted bootstrap
+      program, in a file whose only other notable strings are a forged version resource.
+
+      Two restrictions keep this specific. Regions accounted for by an identified constant table are
+      excluded, so what is reported is the material blint could not name. And only writable sections
+      are considered: read-only data is where programs legitimately keep compressed resources,
+      certificates and self-extracting installer payloads, whereas a blob the program intends to
+      modify in place is what decrypting in place looks like. An implant keeping its payload in
+      .rdata is therefore missed by this rule, though the region still appears under
+      `crypto_material.opaque_regions` in the metadata.
+    check_type: binary_analysis
+  - id: CUSTOM_COMMAND_DISPATCH_TABLE
+    title: Image builds a table of code pointers indexed at runtime
+    summary: Eight or more distinct code addresses are stored into consecutive slots of one object, in an image that can make memory executable and that already matched another implant rule.
+    description: |
+      A single function stores eight or more distinct code addresses into consecutive slots of one
+      object, and the image imports VirtualProtect, VirtualAlloc or CreateThread. A table of
+      function pointers assembled at runtime and selected by an index is an interpreter dispatch
+      table. Building one lets a program accept commands as opcodes rather than as strings or API
+      calls, so the command set appears in neither the imports nor the strings, and no signature
+      written against either will describe it. SLEEPWALKER's table holds the handlers for its
+      23-instruction bytecode language.
+
+      This rule is not independent evidence, and is reported only when another rule in this group
+      already matched. Ordinary C++ interface and virtual-table construction produces an identical
+      shape: on a 180-binary benign corpus the same heuristic matched ripgrep, coreclr, msdia140,
+      sos.dll and the SQL Server native client, with pointer counts up to 26 - above the 18 of the
+      implant it was written for. No threshold separates those populations, so the count is not a
+      discriminator. What the rule contributes is location: once something else establishes that an
+      image is an implant, this names the function where its command handling is defined, which is
+      the next thing a reviewer needs. The corroborating rules are listed in the evidence.
+    check_type: binary_analysis
