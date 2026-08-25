@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import Any
 
 from blint.logger import LOG
 
@@ -30,17 +31,17 @@ def coerce_min_patterns(value) -> int:
 
 
 def run_pattern_reviews(
-    review_list,
-    candidate_values,
-    evidence_limit,
+    review_list: list[dict[str, Any]] | None,
+    candidate_values: list[str],
+    evidence_limit: int,
     *,
-    informative_values=None,
-):
+    informative_values: list[str] | None = None,
+) -> defaultdict[str, list[dict[str, str]]]:
     """Run pattern-based METHOD/EXE/SYMBOL/IMPORT/ENTRY reviews."""
-    results = defaultdict(list)
-    found_cid = defaultdict(int)
-    found_pattern = defaultdict(int)
-    found_function = {}
+    results: defaultdict[str, list[dict[str, str]]] = defaultdict(list)
+    found_cid: defaultdict[str, int] = defaultdict(int)
+    found_pattern: defaultdict[str, int] = defaultdict(int)
+    found_function: dict[str, bool] = {}
     informative_values = informative_values or []
     if not review_list:
         return results
@@ -61,9 +62,9 @@ def run_pattern_reviews(
                 if include_informative_strings
                 else candidate_values
             )
-            rule_results = []
-            rule_matched_patterns = set()
-            rule_matched_values = {}
+            rule_results: list[dict[str, str]] = []
+            rule_matched_patterns: set[str] = set()
+            rule_matched_values: dict[str, bool] = {}
 
             for pattern in patterns:
                 if found_pattern[pattern] >= evidence_limit or found_cid[cid] >= evidence_limit:
@@ -98,21 +99,27 @@ def run_pattern_reviews(
     return results
 
 
-def build_special_symbol_review(symbol_names, cid, evidence_limit):
+def build_special_symbol_review(
+    symbol_names: list[str], cid: str, evidence_limit: int
+) -> defaultdict[str, list[dict[str, str]]]:
     """Build simple pattern=function evidence for special-case symbol reviews."""
-    results = defaultdict(list)
+    results: defaultdict[str, list[dict[str, str]]] = defaultdict(list)
     for symbol_name in symbol_names[0:evidence_limit]:
         results[cid].append({"pattern": symbol_name, "function": symbol_name})
     return results
 
 
-def build_pii_review_results(metadata, evidence_limit):
+def build_pii_review_results(
+    metadata: dict[str, Any], evidence_limit: int
+) -> defaultdict[str, list[dict[str, str]]]:
     """Build the legacy PII_READ review result set from metadata."""
     pii_names = [f.get("name", "") for f in metadata.get("pii_symbols", [])]
     return build_special_symbol_review(pii_names, "PII_READ", evidence_limit)
 
 
-def build_loader_symbol_review_results(metadata, evidence_limit):
+def build_loader_symbol_review_results(
+    metadata: dict[str, Any], evidence_limit: int
+) -> defaultdict[str, list[dict[str, str]]]:
     """Build the legacy LOADER_SYMBOLS review result set from metadata."""
     loader_names = [f.get("name", "") for f in metadata.get("first_stage_symbols", [])]
     return build_special_symbol_review(loader_names, "LOADER_SYMBOLS", evidence_limit)

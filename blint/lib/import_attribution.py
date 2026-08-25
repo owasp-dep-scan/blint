@@ -216,7 +216,7 @@ def declared_libraries(metadata: dict) -> list[str]:
     return declared
 
 
-def _meaningful_symbols(symbols) -> list[str]:
+def _meaningful_symbols(symbols: list) -> list[str]:
     """Drop the symbols that no library actually provides."""
     return [name for name in symbols or [] if name not in UNPROVIDED_SYMBOLS]
 
@@ -259,7 +259,7 @@ def analyze_link_hygiene(metadata: dict, dep_graph: dict) -> dict:
             continue
         if library == UNATTRIBUTED_LIBRARY:
             continue
-        used[library.rsplit("/", 1)[-1]] = _meaningful_symbols(entry.get("imported_symbols"))
+        used[library.rsplit("/", 1)[-1]] = _meaningful_symbols(entry.get("imported_symbols") or [])
 
     unused = []
     for library in declared:

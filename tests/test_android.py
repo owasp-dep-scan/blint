@@ -1,5 +1,6 @@
 from pathlib import Path
-from xml.etree import ElementTree
+
+from defusedxml.ElementTree import fromstring
 
 from blint.lib.android import (
     build_manifest_properties,
@@ -28,7 +29,7 @@ android:compileSdkVersion="37" package="com.example.app">
 
 
 def _manifest_attributes():
-    root = ElementTree.fromstring(SAMPLE_MANIFEST)
+    root = fromstring(SAMPLE_MANIFEST)
     ns = "{http://schemas.android.com/apk/res/android}"
     return {
         "package": root.get("package", ""),
@@ -51,7 +52,7 @@ def test_parse_summary():
 
 
 def test_find_main_activity():
-    root = ElementTree.fromstring(SAMPLE_MANIFEST)
+    root = fromstring(SAMPLE_MANIFEST)
     assert find_main_activity(root) == "com.example.app.MainActivity"
 
 

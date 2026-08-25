@@ -14,6 +14,7 @@ grades each candidate by how much evidence supports it.
 """
 
 import re
+from collections.abc import Iterator
 
 from blint.logger import LOG
 
@@ -142,7 +143,7 @@ def _candidate_strings(metadata: dict, parsed_obj=None) -> list[dict]:
     """
     candidates: dict[str, dict] = {}
 
-    def record(value: str, section: str):
+    def record(value: str, section: str) -> None:
         soname, full_path = _normalize_candidate(value)
         if not soname:
             return
@@ -162,7 +163,7 @@ def _candidate_strings(metadata: dict, parsed_obj=None) -> list[dict]:
     return list(candidates.values())
 
 
-def _iter_section_strings(parsed_obj):
+def _iter_section_strings(parsed_obj) -> Iterator[tuple[str, list[str]]]:
     """Yield ``(section_name, values)`` of NUL-terminated strings per section.
 
     Library names are stored as C strings, so splitting on NUL recovers each one

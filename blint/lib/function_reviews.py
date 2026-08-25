@@ -1,5 +1,7 @@
 import re
 from collections import defaultdict
+from collections.abc import Iterator
+from typing import Any
 
 
 CLASS_253_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xfd|253)(?![a-z0-9])")
@@ -8,7 +10,7 @@ ZALLOC_RO_MUT_TARGET_LEN_ADD_RE = re.compile(r"\badds?\s+x9\s*,\s*x8\s*,\s*x4\b"
 ZALLOC_RO_MUT_OVERFLOW_BRANCH_RE = re.compile(r"\bb\.?hs\b")
 ZALLOC_RO_MUT_PATCHED_CCMP_RE = re.compile(r"\bccmp\s+x9\s*,\s*x(?:10|11)\b")
 
-X86_INDIRECT_CALL_REGISTERS = {
+X86_INDIRECT_CALL_REGISTERS: set[str] = {
     "rax",
     "rbx",
     "rcx",
@@ -31,9 +33,9 @@ for _reg_idx in range(8, 16):
     X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}d")
     X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}w")
     X86_INDIRECT_CALL_REGISTERS.add(f"r{_reg_idx}b")
-ARM64_INDIRECT_CALL_REGISTERS = {f"x{idx}" for idx in range(31)} | {"xzr"}
+ARM64_INDIRECT_CALL_REGISTERS: set[str] = {f"x{idx}" for idx in range(31)} | {"xzr"}
 
-ZERO_LENGTH_ARG_SETUP_PATTERNS = tuple(
+ZERO_LENGTH_ARG_SETUP_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(pattern)
     for pattern in (
         r"\b(?:xor|sub)\s+r8d,\s*r8d\b",
@@ -48,11 +50,11 @@ ZERO_LENGTH_ARG_SETUP_PATTERNS = tuple(
     )
 )
 
-DYNAMIC_RESOLVER_APIS = {
+DYNAMIC_RESOLVER_APIS: set[str] = {
     "getprocaddress",
     "ldrgetprocedureaddress",
 }
-MODULE_RESOLUTION_APIS = {
+MODULE_RESOLUTION_APIS: set[str] = {
     "getmodulehandle",
     "getmodulehandlea",
     "getmodulehandlew",
@@ -68,10 +70,10 @@ MODULE_RESOLUTION_APIS = {
     "ldrloaddll",
 }
 
-CLOUD_FILTER_ABORT_APIS = {
+CLOUD_FILTER_ABORT_APIS: set[str] = {
     "cfabortoperation",
 }
-CLOUD_FILTER_TOKEN_IMPERSONATION_APIS = {
+CLOUD_FILTER_TOKEN_IMPERSONATION_APIS: set[str] = {
     "impersonateanonymoustoken",
     "setthreadtoken",
     "setimpersonationtoken",
@@ -79,7 +81,7 @@ CLOUD_FILTER_TOKEN_IMPERSONATION_APIS = {
     "zwsetinformationthread",
     "getanonymoustoken",
 }
-CLOUD_FILTER_REGISTRY_APIS = {
+CLOUD_FILTER_REGISTRY_APIS: set[str] = {
     "ntcreatekey",
     "ntopenkey",
     "ntdeletekey",
@@ -94,21 +96,21 @@ CLOUD_FILTER_REGISTRY_APIS = {
     "regsetvalue",
     "regsetvalueex",
 }
-CLOUD_FILTER_REGISTRY_SECURITY_APIS = {
+CLOUD_FILTER_REGISTRY_SECURITY_APIS: set[str] = {
     "ntsetsecurityobject",
     "regsetkeysecurity",
     "setsecuritydescriptor",
     "setsecurityinfo",
     "setnamedsecurityinfo",
 }
-CLOUD_FILTER_REGISTRY_LINK_APIS = {
+CLOUD_FILTER_REGISTRY_LINK_APIS: set[str] = {
     "createsymboliclink",
     "ntcreatesymboliclinkobject",
 }
 
 # MSR and port I/O are compiler intrinsics, so they are only visible as
 # instructions. `in`/`out` need word boundaries to avoid matching operands.
-PRIVILEGED_HW_INSTRUCTION_PATTERNS = tuple(
+PRIVILEGED_HW_INSTRUCTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(pattern)
     for pattern in (
         r"\brdmsr\b",
@@ -122,14 +124,14 @@ PRIVILEGED_HW_INSTRUCTION_PATTERNS = tuple(
     )
 )
 
-PCI_CONFIG_APIS = {
+PCI_CONFIG_APIS: set[str] = {
     "halgetbusdatabyoffset",
     "halsetbusdatabyoffset",
     "halgetbusdata",
     "halsetbusdata",
 }
 
-ACCESS_CHECK_APIS = {
+ACCESS_CHECK_APIS: set[str] = {
     "sesingleprivilegecheck",
     "seaccesscheck",
     "seprivilegecheck",
@@ -141,7 +143,7 @@ ACCESS_CHECK_APIS = {
     "rtlvalidrelativesecuritydescriptor",
 }
 
-ALLOC_APIS = {
+ALLOC_APIS: set[str] = {
     "virtualalloc",
     "virtualallocex",
     "heapalloc",
@@ -171,7 +173,7 @@ ALLOC_APIS = {
     "ntresumethread",
     "ntqueueapcvalues",
 }
-DEBUG_APIS = {
+DEBUG_APIS: set[str] = {
     "isdebuggerpresent",
     "checkremotedebuggerpresent",
     "outputdebugstring",
@@ -221,7 +223,7 @@ def _function_has_direct_call(func_data: dict, api_name: str) -> bool:
     )
 
 
-def _function_has_any_direct_call(func_data: dict, api_names) -> bool:
+def _function_has_any_direct_call(func_data: dict, api_names: set[str]) -> bool:
     """Return True when any normalized direct call matches one of the APIs."""
     normalized_api_names = {name.strip().lower() for name in api_names}
     return any(
@@ -230,7 +232,7 @@ def _function_has_any_direct_call(func_data: dict, api_names) -> bool:
     )
 
 
-def _function_has_any_call_fragment(func_data: dict, api_names) -> bool:
+def _function_has_any_call_fragment(func_data: dict, api_names: set[str]) -> bool:
     """Return True when any normalized direct call contains a named API fragment."""
     normalized_api_names = {name.strip().lower() for name in api_names}
     for call_name in func_data.get("direct_calls", []):
@@ -276,7 +278,7 @@ def _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly: str) -> bool:
     )
 
 
-def _assembly_matches_any(assembly: str, patterns) -> bool:
+def _assembly_matches_any(assembly: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
     """Return True when the assembly text matches any compiled regex pattern."""
     return any(pattern.search(assembly) for pattern in patterns)
 
@@ -303,7 +305,7 @@ def _looks_like_indirect_call_line(line: str) -> bool:
     )
 
 
-def _iter_indirect_call_windows(assembly: str, window_size: int = 8):
+def _iter_indirect_call_windows(assembly: str, window_size: int = 8) -> Iterator[str]:
     """Yield short instruction windows ending at each indirect call site."""
     lines = [line.strip().lower() for line in assembly.splitlines() if line.strip()]
     for idx, line in enumerate(lines):
@@ -313,7 +315,7 @@ def _iter_indirect_call_windows(assembly: str, window_size: int = 8):
 
 
 def _function_has_indirect_call_window(
-    func_data: dict, selector_pattern, require_zero_length: bool = False
+    func_data: dict, selector_pattern: re.Pattern[str], require_zero_length: bool = False
 ) -> bool:
     """Return True when an indirect-call instruction window matches the selector pattern."""
     if not func_data.get("has_indirect_call"):
@@ -332,7 +334,7 @@ def _function_has_indirect_call_window(
 
 def _collect_dynamic_resolver_helpers(disassembled_functions: dict) -> dict[str, str]:
     """Map normalized helper names to display names for resolver-like internal helpers."""
-    resolver_helpers = {}
+    resolver_helpers: dict[str, str] = {}
     for func_data in disassembled_functions.values():
         if _function_has_dynamic_resolution_context(func_data):
             function_name = func_data.get("name", "")
@@ -359,7 +361,7 @@ def _evaluate_function_metric(rule_obj: dict, func_data: dict) -> bool:
     patterns = rule_obj.get("patterns")
     if not check_field or not operator_str:
         return False
-    value = func_data
+    value: Any = func_data
     for key in check_field.split("."):
         if isinstance(value, dict):
             value = value.get(key)
@@ -398,7 +400,9 @@ def _evaluate_function_metric(rule_obj: dict, func_data: dict) -> bool:
     return False
 
 
-def _evaluate_function_analysis(rule_id: str, func_data: dict, resolver_helpers: dict[str, str]):
+def _evaluate_function_analysis(
+    rule_id: str, func_data: dict, resolver_helpers: dict[str, str]
+) -> tuple[bool, str]:
     """Evaluate rule-specific function_analysis heuristics."""
     metrics = func_data.get("instruction_metrics", {})
     icount = func_data.get("instruction_count", 0)
@@ -562,14 +566,14 @@ def _evaluate_function_analysis(rule_id: str, func_data: dict, resolver_helpers:
 
 
 def review_disassembled_functions(
-    review_functions_list, disassembled_functions: dict, evidence_limit: int
-):
+    review_functions_list: list[dict[str, Any]], disassembled_functions: dict, evidence_limit: int
+) -> dict[str, list]:
     """Run all FUNCTION_REVIEWS against disassembled function metadata."""
     if not disassembled_functions:
         return {}
 
-    results = defaultdict(list)
-    found_cid = defaultdict(int)
+    results: defaultdict[str, list] = defaultdict(list)
+    found_cid: defaultdict[str, int] = defaultdict(int)
     resolver_helpers = _collect_dynamic_resolver_helpers(disassembled_functions)
 
     for review_group in review_functions_list:

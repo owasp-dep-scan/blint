@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from __future__ import annotations
 
 import argparse
 import os
@@ -19,21 +20,21 @@ BLINT_LOGO = """
 """
 
 
-def _callgraph_algorithms():
+def _callgraph_algorithms() -> list[str]:
     """Return the registered callgraph match algorithm names."""
     from blint.lib.callgraph.algorithms import available_algorithms
 
     return available_algorithms()
 
 
-def _callgraph_default_algorithm():
+def _callgraph_default_algorithm() -> str:
     """Return the default callgraph match algorithm name."""
     from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM
 
     return DEFAULT_ALGORITHM
 
 
-def build_args():
+def build_args() -> argparse.Namespace:
     """
     Constructs command line arguments for the blint tool
     """
@@ -41,7 +42,7 @@ def build_args():
     return parser.parse_args()
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="blint",
         description="Binary linter and SBOM generator.",
@@ -422,7 +423,7 @@ def build_parser():
     return parser
 
 
-def parse_input(src):
+def parse_input(src: str | list[str]) -> list[str]:
     """Parses the input source.
 
     This function takes the input source as a list and parses it to extract the
@@ -442,7 +443,7 @@ def parse_input(src):
     return [src]
 
 
-def handle_args(args=None):
+def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
     """Handles the command-line arguments.
 
     This function parses the command-line arguments and returns a BlintOptions object
@@ -485,7 +486,7 @@ def handle_args(args=None):
     return blint_options
 
 
-def run_callgraph_match_command(args):
+def run_callgraph_match_command(args: argparse.Namespace) -> None:
     """Run the callgraph-match subcommand from parsed CLI arguments."""
     from blint.lib.callgraph.command import run_callgraph_match
     from blint.lib.callgraph.match import options_for_profile
@@ -525,13 +526,13 @@ def run_callgraph_match_command(args):
         raise SystemExit(2) from exc
 
 
-def run_canonicalize_command(args):
+def run_canonicalize_command(args: argparse.Namespace) -> None:
     """Run the canonicalize subcommand: show canonical forms of names."""
     import json as _json
 
     from blint.lib.callgraph.canon import canonicalize
 
-    results = []
+    results: list[dict[str, str | bool]] = []
     for name in args.names:
         canon = canonicalize(name)
         results.append(
@@ -557,15 +558,15 @@ def run_canonicalize_command(args):
     table.add_column("Generic", no_wrap=True)
     for row in results:
         table.add_row(
-            row["input"],
-            row["canonical"] or "(empty)",
-            row["kind"],
+            str(row["input"]),
+            str(row["canonical"] or "(empty)"),
+            str(row["kind"]),
             "yes" if row["is_generic"] else "no",
         )
     console.print(table)
 
 
-def main():
+def main() -> None:
     """Main function of the blint tool"""
     args = build_args()
     if args.subcommand_name == "callgraph-match":
