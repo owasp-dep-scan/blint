@@ -14,6 +14,7 @@ its codes at runtime will be missed.
 
 import re
 import struct
+from collections.abc import Iterable, Iterator
 
 # DRIVER_OBJECT.MajorFunction lives at offset 0x70 on x64 and each slot is a
 # pointer, so the device-control dispatch slots are at fixed offsets. The
@@ -25,26 +26,26 @@ MAJOR_FUNCTION_OFFSET_X86 = 0x38
 IRP_MJ_DEVICE_CONTROL = 0x0E
 IRP_MJ_INTERNAL_DEVICE_CONTROL = 0x0F
 
-DISPATCH_SLOTS = {
+DISPATCH_SLOTS: dict[int, str] = {
     MAJOR_FUNCTION_OFFSET_X64 + IRP_MJ_DEVICE_CONTROL * 8: "IRP_MJ_DEVICE_CONTROL",
     MAJOR_FUNCTION_OFFSET_X64
     + IRP_MJ_INTERNAL_DEVICE_CONTROL * 8: "IRP_MJ_INTERNAL_DEVICE_CONTROL",
 }
 
-DISPATCH_SLOTS_X86 = {
+DISPATCH_SLOTS_X86: dict[int, str] = {
     MAJOR_FUNCTION_OFFSET_X86 + IRP_MJ_DEVICE_CONTROL * 4: "IRP_MJ_DEVICE_CONTROL",
     MAJOR_FUNCTION_OFFSET_X86
     + IRP_MJ_INTERNAL_DEVICE_CONTROL * 4: "IRP_MJ_INTERNAL_DEVICE_CONTROL",
 }
 
-TRANSFER_METHODS = {
+TRANSFER_METHODS: dict[int, str] = {
     0: "METHOD_BUFFERED",
     1: "METHOD_IN_DIRECT",
     2: "METHOD_OUT_DIRECT",
     3: "METHOD_NEITHER",
 }
 
-REQUIRED_ACCESS = {
+REQUIRED_ACCESS: dict[int, str] = {
     0: "FILE_ANY_ACCESS",
     1: "FILE_READ_ACCESS",
     2: "FILE_WRITE_ACCESS",
@@ -159,11 +160,11 @@ CONTROL_CODE_STRIDE = 4
 # short enough to catch small tables and long enough that a coincidental run of
 # unrelated constants is unlikely.
 IOCTL_TABLE_MIN_RUN = 3
-IOCTL_TABLE_SECTIONS = (".rdata", ".data")
+IOCTL_TABLE_SECTIONS: tuple[str, ...] = (".rdata", ".data")
 
 # Kernel object namespace prefixes, matched case-insensitively against the
 # extracted strings to name the objects a driver's IOCTLs are reached through.
-DRIVER_OBJECT_PATH_PREFIXES = {
+DRIVER_OBJECT_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "device_names": ("\\device\\",),
     "symbolic_links": ("\\dosdevices\\", "\\??\\"),
     "client_device_paths": ("\\\\.\\",),
@@ -176,7 +177,7 @@ FORMAT_SPECIFIER_RE = re.compile(r"%(?!%)[-+ #0-9.*]*[hlLwIq]*[diouxXeEfgGcCsSpn
 # a copied or mapped buffer, so the handler must validate them itself with
 # ProbeForRead / ProbeForWrite. Importing neither means nothing in the image can
 # be doing that validation.
-USER_BUFFER_PROBE_IMPORTS = {
+USER_BUFFER_PROBE_IMPORTS: set[str] = {
     "probeforread",
     "probeforwrite",
     "mmprobeandlockpages",
@@ -224,9 +225,11 @@ _DISPATCH_STORE_TEMPLATE_X86 = (
 )
 
 
-def _dispatch_store_patterns(slots=None, template=None):
+def _dispatch_store_patterns(
+    slots: dict[int, str] | None = None, template: str | None = None
+) -> dict[str, re.Pattern[str]]:
     """Build one assembly regex per device-control dispatch slot."""
-    patterns = {}
+    patterns: dict[str, re.Pattern[str]] = {}
     for offset, slot_name in (slots or DISPATCH_SLOTS).items():
         patterns[slot_name] = re.compile(
             (template or _DISPATCH_STORE_TEMPLATE).format(
@@ -244,11 +247,11 @@ DISPATCH_STORE_PATTERNS_X86 = _dispatch_store_patterns(
 )
 
 # A kernel driver runs in the native subsystem; user-mode PE files do not.
-NATIVE_SUBSYSTEM_MARKERS = ("native",)
+NATIVE_SUBSYSTEM_MARKERS: tuple[str, ...] = ("native",)
 
 # Imports that only a kernel-mode image resolves, used as a fallback when the
 # subsystem field is missing or unhelpful.
-KERNEL_ONLY_IMPORTS = {
+KERNEL_ONLY_IMPORTS: set[str] = {
     "iocreatedevice",
     "iocreatedevicesecure",
     "iocreatesymboliclink",
@@ -277,7 +280,7 @@ def is_kernel_driver(metadata: dict) -> bool:
     subsystem = str(metadata.get("subsystem", "")).lower()
     if any(marker in subsystem for marker in NATIVE_SUBSYSTEM_MARKERS):
         return True
-    import_names = set()
+    import_names: set[str] = set()
     for entry in metadata.get("imports", []) or []:
         name = entry.get("name") if isinstance(entry, dict) else entry
         if not name:
@@ -311,14 +314,14 @@ def is_plausible_ioctl(code: int) -> bool:
     return VENDOR_DEVICE_TYPE_FLOOR <= device_type <= VENDOR_DEVICE_TYPE_CEILING
 
 
-def find_dispatch_handlers(disassembled_functions: dict) -> list:
+def find_dispatch_handlers(disassembled_functions: dict) -> list[dict]:
     """Find functions that install an IRP_MJ_DEVICE_CONTROL dispatch routine.
 
     Both the x64 and the x86 DRIVER_OBJECT layouts are matched, since a driver
     built for 32-bit Windows stores through a different offset and stride and
     would otherwise look like it never installs a dispatch routine at all.
     """
-    handlers = []
+    handlers: list[dict] = []
     for func_key, func_data in disassembled_functions.items():
         assembly = func_data.get("assembly", "").lower()
         if not assembly:
@@ -340,7 +343,7 @@ def find_dispatch_handlers(disassembled_functions: dict) -> list:
     return handlers
 
 
-def _parse_immediate(token: str):
+def _parse_immediate(token: str) -> int | None:
     """Parse one immediate operand in any of the disassembler's integer bases."""
     if not token:
         return None
@@ -355,7 +358,7 @@ def _parse_immediate(token: str):
         return None
 
 
-def extract_switch_ioctl_codes(func_data: dict) -> list:
+def extract_switch_ioctl_codes(func_data: dict) -> list[int]:
     """Recover the case values of a jump-table `switch (IoControlCode)`.
 
     A compare chain names every case explicitly, but the subtract-and-range-check
@@ -376,10 +379,10 @@ def extract_switch_ioctl_codes(func_data: dict) -> list:
     if not assembly:
         return []
     lines = assembly.split("\n")
-    codes = []
-    seen = set()
+    codes: list[int] = []
+    seen: set[int] = set()
 
-    def add(code):
+    def add(code: int) -> None:
         if code not in seen and is_plausible_ioctl(code):
             seen.add(code)
             codes.append(code)
@@ -420,7 +423,7 @@ def extract_switch_ioctl_codes(func_data: dict) -> list:
     return codes
 
 
-def _bounded_case_span(lines: list, start: int, register: str):
+def _bounded_case_span(lines: list, start: int, register: str) -> tuple[int | None, bool]:
     """Return (case span, index was scaled) for a switch range check.
 
     The span is None unless the range check compares the same register the base
@@ -452,7 +455,7 @@ def _bounded_case_span(lines: list, start: int, register: str):
     return None, scaled
 
 
-def collect_ioctl_tables(sections) -> list:
+def collect_ioctl_tables(sections: Iterable[tuple[str, bytes]] | None) -> list[int]:
     """Recover control codes stored as a dispatch table in a data section.
 
     A driver that walks an array of ``{code, handler}`` entries never compares
@@ -464,8 +467,8 @@ def collect_ioctl_tables(sections) -> list:
     lookalikes: tables of RVAs, whose high half is a low section-relative value,
     and UTF-16 text, whose high half is ASCII.
     """
-    codes = []
-    seen = set()
+    codes: list[int] = []
+    seen: set[int] = set()
     for name, data in sections or ():
         if not data or str(name).lower() not in IOCTL_TABLE_SECTIONS:
             continue
@@ -473,7 +476,7 @@ def collect_ioctl_tables(sections) -> list:
         if usable < IOCTL_TABLE_MIN_RUN * 4:
             continue
         words = struct.unpack_from(f"<{usable // 4}I", bytes(data), 0)
-        run = []
+        run: list[int] = []
         for word in words:
             device_type = (word >> 16) & 0xFFFF
             plausible = is_plausible_ioctl(word) and device_type >= VENDOR_DEVICE_TYPE_FLOOR
@@ -496,14 +499,14 @@ def _flush_table_run(run: list, codes: list, seen: set) -> None:
             codes.append(code)
 
 
-def _immediates_in_line(line: str) -> list:
+def _immediates_in_line(line: str) -> list[int]:
     """Return integer immediates in one instruction, in either base.
 
     Memory operands are stripped first so stack displacements cannot be mistaken
     for control codes.
     """
     stripped = MEMORY_OPERAND_RE.sub("", line)
-    values = []
+    values: list[int] = []
     for match in IMMEDIATE_RE.finditer(stripped):
         token = match.group(1)
         try:
@@ -518,12 +521,14 @@ def _immediates_in_line(line: str) -> list:
     return values
 
 
-def _extract_codes(func_data: dict, mnemonic_re) -> list:
+def _extract_codes(func_data: dict, mnemonic_re: re.Pattern[str]) -> list[int]:
     """Recover plausible control codes from instructions matching a mnemonic."""
     return [code for code, _ in _extract_codes_detailed(func_data, mnemonic_re)]
 
 
-def _extract_codes_detailed(func_data: dict, mnemonic_re) -> list:
+def _extract_codes_detailed(
+    func_data: dict, mnemonic_re: re.Pattern[str]
+) -> list[tuple[int, bool]]:
     """Recover control codes along with how the following branch used each one.
 
     Returns (code, is_range_boundary) pairs. A code is a range boundary when its
@@ -534,8 +539,8 @@ def _extract_codes_detailed(func_data: dict, mnemonic_re) -> list:
     if not assembly:
         return []
     lines = assembly.split("\n")
-    codes = []
-    seen = set()
+    codes: list[tuple[int, bool]] = []
+    seen: set[int] = set()
     for index, line in enumerate(lines):
         if not mnemonic_re.match(line):
             continue
@@ -551,30 +556,30 @@ def _extract_codes_detailed(func_data: dict, mnemonic_re) -> list:
     return codes
 
 
-def extract_ioctl_codes(func_data: dict) -> list:
+def extract_ioctl_codes(func_data: dict) -> list[int]:
     """Recover control codes a driver dispatch routine compares against."""
     return _extract_codes(func_data, DISPATCH_MNEMONIC_RE)
 
 
-def extract_ioctl_codes_detailed(func_data: dict) -> list:
+def extract_ioctl_codes_detailed(func_data: dict) -> list[tuple[int, bool]]:
     """Recover dispatch control codes with their (code, is_range_boundary) role."""
     return _extract_codes_detailed(func_data, DISPATCH_MNEMONIC_RE)
 
 
-def extract_client_ioctl_codes(func_data: dict) -> list:
+def extract_client_ioctl_codes(func_data: dict) -> list[int]:
     """Recover control codes a user-mode client passes to DeviceIoControl."""
     return _extract_codes(func_data, CLIENT_MNEMONIC_RE)
 
 
-def collect_client_ioctls(disassembled_functions: dict) -> list:
+def collect_client_ioctls(disassembled_functions: dict) -> list[dict]:
     """Collect vendor-range control codes issued by a user-mode client.
 
     Returns one entry per distinct code, with the function that references it.
     """
     if not disassembled_functions:
         return []
-    results = []
-    seen = set()
+    results: list[dict] = []
+    seen: set[int] = set()
     for func_key, func_data in disassembled_functions.items():
         for code in extract_client_ioctl_codes(func_data):
             if code in seen:
@@ -588,7 +593,7 @@ def collect_client_ioctls(disassembled_functions: dict) -> list:
     return results
 
 
-def _iter_metadata_strings(metadata: dict):
+def _iter_metadata_strings(metadata: dict) -> Iterator[str]:
     """Yield every extracted string value in the metadata, original case kept."""
     for key in ("strings", "informative_strings"):
         for item in metadata.get(key, []) or []:
@@ -616,8 +621,12 @@ def classify_driver_strings(metadata: dict) -> dict:
     link that makes it reachable from user mode, and ``\\\\.\\`` is the form a
     user-mode client opens. Returns an empty dict when nothing matches.
     """
-    buckets = {"device_names": [], "symbolic_links": [], "client_device_paths": []}
-    seen = set()
+    buckets: dict[str, list[str]] = {
+        "device_names": [],
+        "symbolic_links": [],
+        "client_device_paths": [],
+    }
+    seen: set[str] = set()
     for value in _iter_metadata_strings(metadata):
         trimmed = value.strip()
         lowered = trimmed.lower()
@@ -632,7 +641,9 @@ def classify_driver_strings(metadata: dict) -> dict:
     return result
 
 
-def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
+def collect_driver_ioctls(
+    disassembled_functions: dict, sections: Iterable[tuple[str, bytes]] | None = None
+) -> dict:
     """Summarise the device-control attack surface of a Windows driver.
 
     Returns an empty dict when nothing driver-like is found, so callers can skip
@@ -646,13 +657,13 @@ def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
 
     # First pass: collect candidates so device-type clustering can inform
     # confidence before anything is reported.
-    candidates = []
-    device_type_counts = {}
+    candidates: list[tuple] = []
+    device_type_counts: dict[int, set[int]] = {}
 
-    boundary_only = set()
-    attested = set()
+    boundary_only: set[int] = set()
+    attested: set[int] = set()
 
-    def record(code, function_name, address, source):
+    def record(code: int, function_name, address, source: str) -> None:
         device_type_counts.setdefault((code >> 16) & 0xFFFF, set()).add(code)
         candidates.append((code, function_name, address, source))
 
@@ -673,12 +684,10 @@ def collect_driver_ioctls(disassembled_functions: dict, sections=None) -> dict:
     # also recovered keeps a genuine control code that merely happens to be
     # range-tested, since nothing then corroborates the off-by-one reading.
     all_codes = {code for code, _, _, _ in candidates}
-    range_boundaries = {
-        code for code in boundary_only - attested if code + 1 in all_codes
-    }
+    range_boundaries = {code for code in boundary_only - attested if code + 1 in all_codes}
 
-    ioctls = []
-    seen_codes = set()
+    ioctls: list[dict] = []
+    seen_codes: set[int] = set()
     for code, function_name, address, source in candidates:
         if code in seen_codes or code in range_boundaries:
             continue
@@ -724,7 +733,7 @@ def _flag_weak_access(ioctls: list) -> None:
     (CVE-2025-7771), where the physical-memory *write* code 0x8000649C still
     declares FILE_READ_ACCESS and is therefore reachable from a read-only handle.
     """
-    by_function = {}
+    by_function: dict[tuple[str, int], dict] = {}
     for entry in ioctls:
         if entry["access"] == "FILE_ANY_ACCESS":
             entry["weak_access"] = "FILE_ANY_ACCESS"

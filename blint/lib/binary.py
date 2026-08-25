@@ -8,7 +8,6 @@ import sys
 import warnings
 import zlib
 from collections import Counter, defaultdict
-from typing import Tuple
 
 import lief
 import orjson
@@ -89,7 +88,7 @@ RUST_PANIC_REGEX_WIN = re.compile(
 DLOPEN_NOTE_TYPE = 0x407C0C0A
 
 
-def is_shared_library(parsed_obj):
+def is_shared_library(parsed_obj: lief.Binary | None) -> bool:
     """
     Checks if the given parsed binary object represents a shared library.
 
@@ -120,7 +119,7 @@ def is_shared_library(parsed_obj):
     return False
 
 
-def parse_notes(parsed_obj):
+def parse_notes(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parses the notes from the given parsed binary object.
 
@@ -134,7 +133,7 @@ def parse_notes(parsed_obj):
         - The description is truncated to 16 words and appended with "..." if
             it exceeds 16 words.
     """
-    data = []
+    data: list[dict] = []
     notes = parsed_obj.notes
     if isinstance(notes, lief.lief_errors):
         return data
@@ -142,7 +141,7 @@ def parse_notes(parsed_obj):
     return data
 
 
-def extract_note_data(idx, note):
+def extract_note_data(idx: int, note) -> dict:
     """
     Extracts metadata from a note object and returns a dictionary.
 
@@ -241,14 +240,14 @@ def extract_note_data(idx, note):
     return result
 
 
-def consolidate_dlopen_dependencies(notes_data: list) -> list:
+def consolidate_dlopen_dependencies(notes_data: list[dict]) -> list[dict]:
     """
     Aggregates DLOPEN_METADATA notes into a flat list of dependencies.
     Resolves priorities if the same library is mentioned multiple times.
     """
     prio_map = {"suggested": 1, "recommended": 2, "required": 3}
 
-    deps_map = {}
+    deps_map: dict[str, dict] = {}
 
     for note in notes_data:
         if note.get("type") != "DLOPEN_METADATA" or not note.get("dlopen_info"):
@@ -282,7 +281,7 @@ def consolidate_dlopen_dependencies(notes_data: list) -> list:
                 if desc:
                     deps_map[soname]["descriptions"].add(desc)
 
-    results = []
+    results: list[dict] = []
     for soname, data in deps_map.items():
         results.append(
             {
@@ -296,7 +295,7 @@ def consolidate_dlopen_dependencies(notes_data: list) -> list:
     return sorted(results, key=lambda x: x["name"])
 
 
-def integer_to_hex_str(e):
+def integer_to_hex_str(e: int) -> str:
     """
     Converts an integer to a hexadecimal string representation.
 
@@ -309,7 +308,7 @@ def integer_to_hex_str(e):
     return "{:02x}".format(e)
 
 
-def parse_relro(parsed_obj):
+def parse_relro(parsed_obj: lief.ELF.Binary) -> str:
     """
     Determines the Relocation Read-Only (RELRO) protection level.
 
@@ -332,7 +331,7 @@ def parse_relro(parsed_obj):
     return "full" if bind_now or now else "partial"
 
 
-def parse_functions(functions):
+def parse_functions(functions) -> list[dict]:
     """
     Parses a list of functions and returns a list of dictionaries.
 
@@ -491,7 +490,7 @@ def parse_wasm_metadata(exe_file: str, metadata: dict) -> dict:
 MIN_EXTRACTED_STRING_LEN = 6
 MAX_EXTRACTED_STRINGS = 50000
 # Sections that hold program string literals, by PE and Mach-O convention.
-STRING_BEARING_SECTIONS = {
+STRING_BEARING_SECTIONS: set[str] = {
     ".rdata",
     ".data",
     ".rsrc",
@@ -507,7 +506,7 @@ STRING_BEARING_SECTIONS = {
     "__literal8",
     "__literal16",
 }
-STRING_BEARING_SECTION_PREFIXES = ("__objc_", ".rodata")
+STRING_BEARING_SECTION_PREFIXES: tuple[str, ...] = ("__objc_", ".rodata")
 ASCII_STRING_RE = re.compile(rb"[\x20-\x7e]{%d,}" % MIN_EXTRACTED_STRING_LEN)
 # Windows binaries hold most user-visible text as UTF-16LE.
 UTF16LE_STRING_RE = re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % MIN_EXTRACTED_STRING_LEN)
@@ -531,14 +530,14 @@ def is_string_bearing_section(section) -> bool:
     return any(name.startswith(prefix) for prefix in STRING_BEARING_SECTION_PREFIXES)
 
 
-def extract_section_strings(parsed_obj) -> list:
+def extract_section_strings(parsed_obj) -> list[str]:
     """Extract printable strings from section content.
 
     Used for formats LIEF has no ``strings`` property for. Without this, every
     string-based review silently finds nothing on PE and Mach-O binaries.
     """
-    results = []
-    seen = set()
+    results: list[str] = []
+    seen: set[str] = set()
     sections = getattr(parsed_obj, "sections", None)
     if not sections or isinstance(sections, lief.lief_errors):
         return results
@@ -565,7 +564,7 @@ def extract_section_strings(parsed_obj) -> list:
     return results
 
 
-def binary_strings(parsed_obj) -> list:
+def binary_strings(parsed_obj) -> list[str]:
     """Return the raw strings of a binary regardless of its format."""
     strings = getattr(parsed_obj, "strings", None)
     if strings and not isinstance(strings, lief.lief_errors):
@@ -573,7 +572,7 @@ def binary_strings(parsed_obj) -> list:
     return extract_section_strings(parsed_obj)
 
 
-def parse_strings(parsed_obj):
+def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parse strings from a parsed object.
 
@@ -583,7 +582,7 @@ def parse_strings(parsed_obj):
     Returns:
         list: A list of dictionaries with keys: value, entropy, secret type
     """
-    strings_list = []
+    strings_list: list[dict] = []
     with contextlib.suppress(AttributeError):
         strings = binary_strings(parsed_obj)
         if isinstance(strings, lief.lief_errors):
@@ -609,7 +608,9 @@ def parse_strings(parsed_obj):
     return strings_list
 
 
-def _prepare_informative_string_matchers(indicators):
+def _prepare_informative_string_matchers(
+    indicators: tuple[str, ...],
+) -> tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]:
     """Normalize informative string indicators into reusable matcher groups."""
     boundary_patterns = []
     substring_indicators = []
@@ -626,7 +627,9 @@ def _prepare_informative_string_matchers(indicators):
     return tuple(boundary_patterns), tuple(substring_indicators)
 
 
-def _prepare_informative_string_catalogs(catalogs):
+def _prepare_informative_string_catalogs(
+    catalogs,
+) -> tuple[tuple[str, tuple[re.Pattern[str], ...], tuple[str, ...]], ...]:
     """Compile informative-string catalogs into reusable matcher bundles."""
 
     prepared = []
@@ -641,11 +644,11 @@ PREPARED_INFORMATIVE_STRING_CATALOGS = _prepare_informative_string_catalogs(
 )
 
 
-def parse_informative_strings(parsed_obj):
+def parse_informative_strings(parsed_obj: lief.Binary) -> list[dict]:
     """Extracts stable, non-secret string hints useful for capability clustering."""
 
-    informative = []
-    seen = set()
+    informative: list[dict] = []
+    seen: set[str] = set()
     with contextlib.suppress(AttributeError):
         strings = binary_strings(parsed_obj)
         if isinstance(strings, lief.lief_errors):
@@ -674,7 +677,7 @@ def parse_informative_strings(parsed_obj):
     return informative
 
 
-def parse_symbols(symbols):
+def parse_symbols(symbols) -> tuple[list[dict], str]:
     """
     Parse symbols from a list of symbols.
 
@@ -684,9 +687,9 @@ def parse_symbols(symbols):
     Returns:
         tuple[list[dict], str]: A tuple containing the symbols_list and exe_type
     """
-    symbols_list = []
+    symbols_list: list[dict] = []
     exe_type = ""
-    skipped = defaultdict(int)
+    skipped: defaultdict[str, int] = defaultdict(int)
     for symbol in symbols:
         try:
             symbol_version = symbol.symbol_version if symbol.has_version else ""
@@ -747,7 +750,7 @@ def parse_symbols(symbols):
     return symbols_list, exe_type
 
 
-def detect_exe_type(parsed_obj, metadata):
+def detect_exe_type(parsed_obj: lief.Binary, metadata: dict) -> str:
     """
     Detects the type of the parsed binary object based on its characteristics
     and metadata.
@@ -764,8 +767,8 @@ def detect_exe_type(parsed_obj, metadata):
             return "gobinary"
         if (
             parsed_obj.has_section(".note.gnu.build-id")
-            or "musl" in metadata.get("interpreter")
-            or "ld-linux" in metadata.get("interpreter")
+            or "musl" in metadata.get("interpreter")  # type: ignore[operator]
+            or "ld-linux" in metadata.get("interpreter")  # type: ignore[operator]
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -775,7 +778,7 @@ def detect_exe_type(parsed_obj, metadata):
     return ""
 
 
-def guess_exe_type(symbol_name):
+def guess_exe_type(symbol_name: str) -> str:
     """
     Guess the executable type based on the symbol name.
 
@@ -795,7 +798,7 @@ def guess_exe_type(symbol_name):
     return exe_type
 
 
-def parse_pe_data(parsed_obj):
+def parse_pe_data(parsed_obj: lief.PE.Binary) -> list[dict]:
     """
     Parses the data directories from the given parsed PE binary object.
 
@@ -805,7 +808,7 @@ def parse_pe_data(parsed_obj):
     Returns:
         list[dict]: A list of dictionaries, each representing a data directory.
     """
-    data_list = []
+    data_list: list[dict] = []
     data_directories = parsed_obj.data_directories
     if not data_directories or isinstance(data_directories, lief.lief_errors):
         return data_list
@@ -835,7 +838,7 @@ def parse_pe_data(parsed_obj):
     return data_list
 
 
-def process_pe_resources(parsed_obj):
+def process_pe_resources(parsed_obj: lief.PE.Binary) -> dict:
     """
     Processes the resources of the parsed PE (Portable Executable) binary object
     and returns metadata about the resources.
@@ -892,7 +895,7 @@ def process_pe_resources(parsed_obj):
     return resources
 
 
-def process_pe_signature(parsed_obj):
+def process_pe_signature(parsed_obj: lief.PE.Binary) -> list[dict]:
     """
     Processes the signatures of the parsed PE (Portable Executable) binary
     object and returns information about the signatures.
@@ -934,7 +937,7 @@ def process_pe_signature(parsed_obj):
     return signature_list
 
 
-def parse_pe_authenticode(parsed_obj):
+def parse_pe_authenticode(parsed_obj: lief.PE.Binary) -> dict:
     """
     Parses the Authenticode information from the given parsed PE.
 
@@ -994,7 +997,7 @@ def format_symbol_section_index(symbol) -> str:
     return ""
 
 
-def parse_pe_symbols(symbols):
+def parse_pe_symbols(symbols) -> tuple[list[dict], str]:
     """
     Parses the symbols and determines the executable type.
 
@@ -1045,7 +1048,7 @@ def parse_pe_symbols(symbols):
     return symbols_list, exe_type
 
 
-def parse_pe_imports(imports, imagebase):
+def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
     """
     Parses the imports and returns lists of imported symbols and DLLs.
 
@@ -1057,7 +1060,7 @@ def parse_pe_imports(imports, imagebase):
             - imports_list (list[dict])
             - dll_list (list[dict])
     """
-    imports_list = []
+    imports_list: list[dict] = []
     dlls = set()
     if not imports or isinstance(imports, lief.lief_errors):
         return imports_list, []
@@ -1090,7 +1093,7 @@ def parse_pe_imports(imports, imagebase):
     return imports_list, dll_list
 
 
-def parse_pe_exports(exports):
+def parse_pe_exports(exports) -> list[dict]:
     """
     Parses the exports and returns a list of exported symbols.
 
@@ -1101,7 +1104,7 @@ def parse_pe_exports(exports):
         list[dict]: A list of exported symbol dictionaries.
 
     """
-    exports_list = []
+    exports_list: list[dict] = []
     if not exports or isinstance(exports, lief.lief_errors):
         return exports_list
     if not (entries := exports.entries) or isinstance(exports.entries, lief.lief_errors):
@@ -1126,7 +1129,7 @@ def parse_pe_exports(exports):
     return exports_list
 
 
-def _parse_unwind_flags(flags_int):
+def _parse_unwind_flags(flags_int: int) -> list[str]:
     """Decodes the integer flags into a list of readable names."""
     try:
         flag_obj = lief.PE.RuntimeFunctionX64.UNWIND_FLAGS(flags_int)
@@ -1135,7 +1138,7 @@ def _parse_unwind_flags(flags_int):
         return [str(flags_int)]
 
 
-def _get_unwind_reg_name(reg_int):
+def _get_unwind_reg_name(reg_int: int) -> str:
     """Maps the register integer to its name."""
     try:
         return lief.PE.RuntimeFunctionX64.UNWIND_REG(reg_int).name
@@ -1143,7 +1146,7 @@ def _get_unwind_reg_name(reg_int):
         return str(reg_int)
 
 
-def _parse_x64_opcode(opcode):
+def _parse_x64_opcode(opcode) -> dict | None:
     if not opcode:
         return None
 
@@ -1162,7 +1165,7 @@ def _parse_x64_opcode(opcode):
     return data
 
 
-def _parse_x64_unwind_info(ei):
+def _parse_x64_unwind_info(ei) -> dict:
     f_reg = _get_unwind_reg_name(ei.frame_reg) if hasattr(ei, "frame_reg") else None
     info = {
         "version": ei.version,
@@ -1178,7 +1181,7 @@ def _parse_x64_unwind_info(ei):
     return info
 
 
-def parse_pe_exceptions(exceptions):
+def parse_pe_exceptions(exceptions) -> list[dict]:
     exceptions_list = []
     for exc in exceptions:
         em = {
@@ -1212,7 +1215,7 @@ def parse_pe_exceptions(exceptions):
     return exceptions_list
 
 
-def parse_macho_symbols(symbols):
+def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
     """
     Parses the symbols and determines the executable type.
 
@@ -1224,7 +1227,7 @@ def parse_macho_symbols(symbols):
             - symbols_list (list): A list of symbol dictionaries.
             - exe_type (str): The determined executable type.
     """
-    symbols_list = []
+    symbols_list: list[dict] = []
     exe_type = ""
     if not symbols or isinstance(symbols, lief.lief_errors):
         return symbols_list, exe_type
@@ -1443,7 +1446,7 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
 
 def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dict:
     """Summarizes the binary's composition."""
-    composition = {}
+    composition: dict = {}
     dependencies = metadata.get("dynamic_entries", [])
     if isinstance(parsed_obj, lief.ELF.Binary):
         composition["linking_type"] = "dynamic" if metadata.get("has_interpreter") else "static"
@@ -1481,7 +1484,7 @@ def standardize_keys(metadata: dict) -> dict:
     return metadata
 
 
-def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary):
+def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> dict:
     """
     Adds various derived, high-level attributes to the metadata dictionary.
     """
@@ -1552,7 +1555,9 @@ def _default_confidence_for_kind(kind: str) -> str:
     return "high" if kind == "direct" else "medium" if kind == "tailcall" else "low"
 
 
-def _set_edge_confidence(edge_confidence: dict, confidence_rank: dict, edge_key, confidence: str):
+def _set_edge_confidence(
+    edge_confidence: dict, confidence_rank: dict, edge_key: tuple, confidence: str
+) -> None:
     existing = edge_confidence.get(edge_key)
     if not existing:
         edge_confidence[edge_key] = confidence
@@ -1641,8 +1646,8 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
             }
         )
         canonical["alias_names"] = alias_names
-        merged_direct_calls = []
-        merged_targets = []
+        merged_direct_calls: list = []
+        merged_targets: list = []
         for item in group_sorted:
             merged_direct_calls.extend(item.get("direct_calls") or [])
             merged_targets.extend(item.get("direct_call_targets") or [])
@@ -1693,9 +1698,9 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 addr_int = int(node["address"], 16)
                 addr_to_ids[addr_int].append(node_id)
                 node_addr_ints.append((addr_int, node_id))
-        if node.get("rva_or_address"):
+        if rva_or_address := node.get("rva_or_address"):
             with contextlib.suppress(ValueError):
-                rva_to_ids[int(node.get("rva_or_address"), 16)].append(node_id)
+                rva_to_ids[int(rva_or_address, 16)].append(node_id)
 
     for src_id, node in enumerate(nodes_raw):
         direct_call_targets_by_src[src_id] = node.get("direct_call_targets") or []
@@ -1756,9 +1761,9 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
 
     # We aggregate counts by (src, dst, kind) and track confidence separately
     # because the same edge can be observed through multiple heuristics.
-    edge_counts = Counter()
-    edge_confidence = {}
-    external_counts = Counter()
+    edge_counts: Counter[tuple[int, int, str]] = Counter()
+    edge_confidence: dict[tuple, str] = {}
+    external_counts: Counter[tuple[int, str, str]] = Counter()
     # The displayed target of an external edge is the raw operand when there is
     # one, which hides any symbol name the resolver did recover. Attribution
     # needs that name, so it is kept alongside rather than re-derived from the
@@ -1781,7 +1786,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
             # Higher score means stronger matching evidence. Scores are designed
             # as a strict ladder so deterministic tie-breakers can resolve only
             # genuinely equivalent candidates.
-            candidate_scores = defaultdict(int)
+            candidate_scores: defaultdict[int, int] = defaultdict(int)
             primary_addr_int = None
             with contextlib.suppress(ValueError):
                 if target_addr:
@@ -2035,14 +2040,14 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
     }
 
 
-def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def parse(exe_file: str, disassemble: bool = False) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
 
     :param: exe_file Binary file
     :return Metadata dict
     """
-    metadata = {"file_path": exe_file}
+    metadata: dict = {"file_path": exe_file}
     try:
         if is_wasm_file(exe_file):
             metadata = parse_wasm_metadata(exe_file, metadata)
@@ -2121,7 +2126,7 @@ def parse(exe_file, disassemble=False):  # pylint: disable=too-many-locals,too-m
     return cleanup_dict_lief_errors(metadata)
 
 
-def add_elf_metadata(exe_file, metadata, parsed_obj):
+def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary) -> dict:
     """Adds ELF metadata to the given metadata dictionary.
 
     Args:
@@ -2222,7 +2227,7 @@ def add_elf_metadata(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_elf_header(header, metadata):
+def add_elf_header(header, metadata: dict) -> dict:
     """Adds ELF header data to the metadata dictionary.
 
     Args:
@@ -2267,7 +2272,7 @@ def add_elf_header(header, metadata):
     return metadata
 
 
-def add_elf_symbols(metadata, parsed_obj):
+def add_elf_symbols(metadata: dict, parsed_obj: lief.ELF.Binary) -> dict:
     """Extracts ELF symbols version information and adds it to the metadata dictionary.
 
     Args:
@@ -2281,7 +2286,7 @@ def add_elf_symbols(metadata, parsed_obj):
         symbols_version = parsed_obj.symbols_version
         if symbols_version and not isinstance(symbols_version, lief.lief_errors):
             metadata["symbols_version"] = []
-            symbol_version_auxiliary_cache = {}
+            symbol_version_auxiliary_cache: dict = {}
             for entry in symbols_version:
                 symbol_version_auxiliary = entry.symbol_version_auxiliary
                 if symbol_version_auxiliary and not symbol_version_auxiliary_cache.get(
@@ -2315,7 +2320,7 @@ def add_elf_symbols(metadata, parsed_obj):
     return metadata
 
 
-def add_elf_dynamic_entries(dynamic_entries, metadata):
+def add_elf_dynamic_entries(dynamic_entries, metadata: dict) -> dict:
     """Extracts ELF dynamic entries and adds them to the metadata dictionary.
 
     Args:
@@ -2367,7 +2372,7 @@ def add_elf_dynamic_entries(dynamic_entries, metadata):
     return metadata
 
 
-def determine_elf_flags(header):
+def determine_elf_flags(header) -> str:
     """Determines the ELF flags based on the given ELF header.
     Args:
         header: The ELF header.
@@ -2426,7 +2431,7 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
 
 def parse_go_buildinfo(
     parsed_obj: lief.Binary,
-) -> Tuple[dict[str, dict[str, str]], dict[str, str]]:
+) -> tuple[dict[str, dict[str, str | None]], dict[str, str]]:
     """
     Parse the go build info section to extract go dependencies
     Args:
@@ -2490,7 +2495,7 @@ def parse_go_buildinfo(
     return deps, formulation
 
 
-def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list:
+def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list[dict]:
     """
     Heuristically recover Rust dependencies by scanning for panic messages in the binary sections.
     This is useful when cargo-auditable data is stripped or missing.
@@ -2533,7 +2538,7 @@ def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list:
     ]
 
 
-def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
+def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parse the rust build info section that are cargo-auditable to extract rust dependencies.
     Falls back to panic message parsing if auditable data is not present.
@@ -2564,7 +2569,7 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list:
     return deps
 
 
-def analyze_import_deps(metadata):
+def analyze_import_deps(metadata: dict) -> dict:
     """
     Analyzes the import dependencies from the metadata dictionary.
 
@@ -2594,7 +2599,7 @@ def analyze_import_deps(metadata):
               }
     """
     LOG.debug("Analyzing import dependencies...")
-    dep_graph = {"libraries": {}, "dependencies": []}
+    dep_graph: dict = {"libraries": {}, "dependencies": []}
     main_binary_name = metadata.get("name")
     if not main_binary_name:
         return {}
@@ -2730,7 +2735,7 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     Parses the Load Configuration to extract Guard flags, Code Integrity,
     Enclaves, and Volatile Metadata.
     """
-    lc_info = {}
+    lc_info: dict = {}
     if not parsed_obj.has_configuration:
         return lc_info
     try:
@@ -2807,7 +2812,7 @@ def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
     return sections
 
 
-def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
+def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
     """Adds PE metadata to the given metadata dictionary.
 
     Args:
@@ -2953,7 +2958,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary):
     return metadata
 
 
-def add_pe_header_data(metadata, parsed_obj):
+def add_pe_header_data(metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
     """Adds PE header data to the metadata dictionary.
 
     Args:
@@ -3005,7 +3010,7 @@ def add_pe_header_data(metadata, parsed_obj):
     return metadata
 
 
-def add_pe_optional_headers(metadata, optional_header):
+def add_pe_optional_headers(metadata: dict, optional_header: lief.PE.OptionalHeader) -> dict:
     """Adds PE optional headers data to the metadata dictionary.
 
     Args:
@@ -3057,7 +3062,7 @@ def add_pe_optional_headers(metadata, optional_header):
     return metadata
 
 
-def add_rdata_symbols(metadata, rdata_section, text_section, sections):
+def add_rdata_symbols(metadata: dict, rdata_section, text_section, sections) -> dict:
     """Adds rdata symbols to the metadata dictionary.
 
     Args:
@@ -3141,7 +3146,7 @@ def add_rdata_symbols(metadata, rdata_section, text_section, sections):
     return metadata
 
 
-def add_mach0_metadata(exe_file, metadata, parsed_obj):
+def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Adds MachO metadata to the given metadata dictionary.
 
     Args:
@@ -3188,7 +3193,7 @@ def add_mach0_metadata(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
+def add_mach0_commands(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO commands metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -3222,7 +3227,7 @@ def add_mach0_commands(metadata, parsed_obj: lief.MachO.Binary):
     return metadata
 
 
-def add_mach0_versions(exe_file, metadata, parsed_obj):
+def add_mach0_versions(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO version metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -3248,7 +3253,7 @@ def add_mach0_versions(exe_file, metadata, parsed_obj):
     return add_mach0_build_metadata(exe_file, metadata, parsed_obj)
 
 
-def add_mach0_build_metadata(exe_file, metadata, parsed_obj):
+def add_mach0_build_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO build version metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -3281,7 +3286,7 @@ def add_mach0_build_metadata(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_libraries(exe_file, metadata, parsed_obj):
+def add_mach0_libraries(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Processes the libraries of a MachO binary and adds them to the metadata dictionary.
 
     Args:
@@ -3312,7 +3317,7 @@ def add_mach0_libraries(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_header_data(exe_file, metadata, parsed_obj):
+def add_mach0_header_data(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO header data from the parsed object and adds it to the metadata dictionary.
 
     Args:
@@ -3350,7 +3355,9 @@ def _parse_address(value) -> int | None:
     return None
 
 
-def merge_macho_function_starts(functions, symtab_symbols, parsed_obj):
+def merge_macho_function_starts(
+    functions: list[dict], symtab_symbols: list[dict], parsed_obj: lief.MachO.Binary
+) -> list[dict]:
     """Augment the function list with ``LC_FUNCTION_STARTS`` entry points.
 
     iOS/macOS release binaries are typically stripped, leaving lief's aggregated
@@ -3403,7 +3410,7 @@ def merge_macho_function_starts(functions, symtab_symbols, parsed_obj):
     return functions
 
 
-def merge_macho_objc_functions(metadata):
+def merge_macho_objc_functions(metadata: dict) -> dict:
     """Seed/label functions from recovered Objective-C method implementations.
 
     Each recovered implementation address is added as a function (when not
@@ -3449,7 +3456,7 @@ def merge_macho_objc_functions(metadata):
     return metadata
 
 
-def add_mach0_functions(metadata, parsed_obj):
+def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO functions and symbols from the parsed object and adds them to the metadata.
 
     Args:
@@ -3491,7 +3498,7 @@ def add_mach0_functions(metadata, parsed_obj):
     return metadata
 
 
-def add_mach0_signature(exe_file, metadata, parsed_obj):
+def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO code signature metadata from the parsed object and adds it to the metadata.
 
     Args:
@@ -3533,9 +3540,9 @@ def add_mach0_signature(exe_file, metadata, parsed_obj):
     return metadata
 
 
-def parse_dex(dex_file):
+def parse_dex(dex_file: str) -> dict:
     """Parse dex files"""
-    metadata = {"file_path": dex_file}
+    metadata: dict = {"file_path": dex_file}
     try:
         dexfile_obj = lief.DEX.parse(dex_file)
         if isinstance(dexfile_obj, lief.lief_errors):

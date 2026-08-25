@@ -2,8 +2,9 @@ import logging
 import os
 import shutil
 import sys
+from typing import Any, Literal
 
-from rich.progress import Progress
+from rich.progress import Progress, TaskID
 
 from blint.config import BlintOptions
 from blint.cyclonedx.spec import CycloneDX
@@ -25,7 +26,7 @@ from blint.lib.utils import (
 from blint.logger import LOG
 
 
-def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX:
+def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
     automatically.
@@ -85,21 +86,25 @@ def run_default_mode(blint_options: BlintOptions) -> None:
 class AnalysisRunner:
     """Class to analyze binaries."""
 
-    def __init__(self):
-        self.findings = []
-        self.reviews = []
-        self.fuzzables = []
-        self.callgraphs = []
-        self.progress = Progress(
+    def __init__(self) -> None:
+        self.findings: list[dict[str, Any]] = []
+        self.reviews: list[dict[str, Any]] = []
+        self.fuzzables: list[dict[str, Any]] = []
+        self.callgraphs: list[dict[str, Any]] = []
+        self.progress: Progress = Progress(
             transient=True,
             redirect_stderr=True,
             redirect_stdout=True,
             refresh_per_second=1,
         )
-        self.task = None
-        self.reviewer = None
+        self.task: TaskID | None = None
+        self.reviewer: ReviewRunner | None = None
 
-    def start(self, blint_options, exe_files):
+    def start(
+        self, blint_options: BlintOptions, exe_files: list[str]
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+    ]:
         """Starts the analysis process for the given source files.
 
         This function takes the command-line arguments and the reports
@@ -121,10 +126,11 @@ class AnalysisRunner:
                 self._process_files(f, blint_options)
         return self.findings, self.reviews, self.fuzzables, self.callgraphs
 
-    def _process_files(self, f, blint_options):
+    def _process_files(self, f: str, blint_options: BlintOptions) -> None:
         """
         Processes the given file and generates findings.
         """
+        assert self.task is not None
         self.progress.update(
             self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]"
         )
@@ -151,13 +157,16 @@ class AnalysisRunner:
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self.progress.advance(self.task)
 
-    def _process_ios_file(self, f, blint_options, wants_callgraph_outputs):
+    def _process_ios_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
         """Unpack an iOS/macOS app (.ipa) and analyse each contained Mach-O.
 
         One archive yields several binaries (the main executable plus embedded
         frameworks, dylibs and app extensions); each is parsed through the normal
         native path and enriched with the app-bundle context.
         """
+        assert self.task is not None
         app = collect_ios_app(f)
         if app is None:
             return
@@ -178,8 +187,15 @@ class AnalysisRunner:
         finally:
             shutil.rmtree(app["temp_dir"], ignore_errors=True)
 
-    def _finalize_metadata(self, f, metadata, blint_options, wants_callgraph_outputs):
+    def _finalize_metadata(
+        self,
+        f: str,
+        metadata: dict[str, Any],
+        blint_options: BlintOptions,
+        wants_callgraph_outputs: bool,
+    ) -> None:
         """Export metadata and run checks/reviews/fuzzing for a parsed binary."""
+        assert self.task is not None
         exe_name = metadata.get("name", f)
         wasm_report = metadata.get("wasm_report")
         metadata_to_export = dict(metadata)
@@ -223,7 +239,7 @@ class AnalysisRunner:
                 }
             )
 
-    def _process_android_file(self, f):
+    def _process_android_file(self, f: str) -> dict[str, Any] | None:
         """Disassemble an android app's dex bytecode into review metadata.
 
         The Dalvik disassembler always runs for android apps (it is the only way
@@ -231,13 +247,15 @@ class AnalysisRunner:
         always embedded in the metadata, mirroring the native disassembly path.
         Returns ``None`` when no dex could be read.
         """
+        assert self.task is not None
         self.progress.update(
             self.task, description=f"Disassembling [bold]{os.path.basename(f)}[/bold]"
         )
         return analyze_android_app(f, build_cg=True)
 
-    def do_review(self, exe_name, f, metadata):
+    def do_review(self, exe_name: str, f: str, metadata: dict[str, Any]) -> None:
         """Performs a review of the given file."""
+        assert self.task is not None
         self.progress.update(self.task, description="Checking methods against review rules")
         self.reviewer = ReviewRunner()
         self.reviewer.run_review(metadata)

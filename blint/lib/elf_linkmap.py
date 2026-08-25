@@ -158,7 +158,7 @@ class LinkResolver:
         platform = MACHINE_PLATFORM.get(machine_type.upper(), machine_type.lower())
         entries: list[dict] = []
 
-        def add(paths, kind):
+        def add(paths: list[str], kind: str) -> None:
             for raw in paths:
                 expanded = _expand_tokens(raw, origin, lib_dir, platform)
                 entries.append({"path": expanded, "kind": kind, "raw": raw})

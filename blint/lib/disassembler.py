@@ -411,7 +411,7 @@ except ImportError:
 
 
 @lru_cache(maxsize=None)
-def _normalize_arch_target(arch_target):
+def _normalize_arch_target(arch_target: str) -> str:
     return (arch_target or "").lower()
 
 
@@ -625,7 +625,7 @@ def _append_call_target(
 
 
 @lru_cache(maxsize=None)
-def get_arch_reg_set(arch_target):
+def get_arch_reg_set(arch_target: str) -> frozenset[str]:
     """Returns the appropriate set of registers based on the architecture."""
     lower_arch = _normalize_arch_target(arch_target)
     if "aarch64" in lower_arch or "arm64" in lower_arch:
@@ -636,7 +636,7 @@ def get_arch_reg_set(arch_target):
 
 
 @lru_cache(maxsize=None)
-def _get_implicit_regs_map(arch_target):
+def _get_implicit_regs_map(arch_target: str) -> dict[str, dict[str, set[str]]]:
     """Selects the appropriate implicit registers map based on architecture."""
     lower_arch = _normalize_arch_target(arch_target)
     if "64" in lower_arch and "aarch64" not in lower_arch:
@@ -648,7 +648,7 @@ def _get_implicit_regs_map(arch_target):
     return IMPLICIT_REGS_X86
 
 
-def _find_function_end_index(instr_list, has_exact_size=False):
+def _find_function_end_index(instr_list: list, has_exact_size: bool = False) -> int:
     """
     Scans a list of instructions to find the true end of a function.
     If exact size is known, it strips trailing compiler padding/traps.
@@ -677,7 +677,7 @@ def _find_function_end_index(instr_list, has_exact_size=False):
     return len(instr_list) - 1
 
 
-def _get_abi_volatile_regs(parsed_obj, arch_target):
+def _get_abi_volatile_regs(parsed_obj, arch_target: str) -> frozenset[str]:
     """
     Determines the set of volatile (caller-saved) registers based on the
     binary type and architecture.
@@ -694,7 +694,9 @@ def _get_abi_volatile_regs(parsed_obj, arch_target):
         return CDECL_X86_VOLATILE_REGS
 
 
-def extract_regs_from_operand(op, sorted_arch_regs=ARCH_REG_SET_X86):
+def extract_regs_from_operand(
+    op: str, sorted_arch_regs: frozenset[str] = ARCH_REG_SET_X86
+) -> set[str]:
     if not op:
         return set()
     return {
@@ -705,20 +707,20 @@ def extract_regs_from_operand(op, sorted_arch_regs=ARCH_REG_SET_X86):
 
 
 def _extract_register_usage(
-    instr_assembly,
+    instr_assembly: str,
     parsed_obj=None,
-    arch_target="",
-    sorted_arch_regs=None,
+    arch_target: str = "",
+    sorted_arch_regs: frozenset[str] | None = None,
     parsed_instr=None,
-):
+) -> tuple[list[str], list[str]]:
     """
     Performs a first-pass analysis to extract approximate register read/write usage
     from the instruction assembly string.
     """
     lower_arch = _normalize_arch_target(arch_target)
     implicit_regs_map = _get_implicit_regs_map(lower_arch)
-    regs_read = set()
-    regs_written = set()
+    regs_read: set[str] = set()
+    regs_written: set[str] = set()
     if parsed_instr is None:
         parsed_instr = _parse_instruction_text(instr_assembly)
     if not parsed_instr.mnemonic:
@@ -1007,14 +1009,26 @@ def _extract_register_usage(
 
 
 def _analyze_instructions(
-    instr_list,
-    func_addr,
-    next_func_addr_in_sec,
-    instr_addresses,
+    instr_list: list,
+    func_addr: int,
+    next_func_addr_in_sec: int,
+    instr_addresses: list,
     parsed_obj=None,
-    arch_target="",
-    parsed_instrs=None,
-):
+    arch_target: str = "",
+    parsed_instrs: list | None = None,
+) -> tuple[
+    dict,
+    list[str],
+    bool,
+    bool,
+    list[str],
+    list[str],
+    list,
+    list[str],
+    list[str],
+    list[str],
+    bool,
+]:
     """Analyzes the list of instructions for metrics, loops, and indirect calls."""
     lower_arch = _normalize_arch_target(arch_target)
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
@@ -1045,8 +1059,8 @@ def _analyze_instructions(
     has_indirect_call = False
     has_loop = False
     has_pac = False
-    all_regs_read = set()
-    all_regs_written = set()
+    all_regs_read: set[str] = set()
+    all_regs_written: set[str] = set()
     used_simd_reg_types = set()
     instructions_with_registers = []
     arch_reg_set = get_arch_reg_set(lower_arch)
@@ -1161,7 +1175,7 @@ def _analyze_instructions(
         all_regs_read.update(regs_read)
         all_regs_written.update(regs_written)
         if regs_read or regs_written:
-            reg_data = {"position": len(instruction_mnemonics) - 1}
+            reg_data: dict = {"position": len(instruction_mnemonics) - 1}
             if regs_read:
                 reg_data["regs_read"] = regs_read
             if regs_written:
@@ -1184,7 +1198,7 @@ def _analyze_instructions(
     )
 
 
-def _build_addr_to_name_map(metadata, parsed_obj=None):
+def _build_addr_to_name_map(metadata: dict, parsed_obj=None) -> dict[int, str]:
     """Builds a lookup map from address (int) to name from metadata functions."""
     addr_to_name_map = {}
     for func_list_key in FUNCTION_SYMBOLS:
@@ -1290,7 +1304,7 @@ def build_macho_import_address_map(parsed_obj) -> dict:
     return import_map
 
 
-def _append_unique_target_addr(target_addrs: list[int], addr_val):
+def _append_unique_target_addr(target_addrs: list[int], addr_val) -> None:
     if isinstance(addr_val, int) and addr_val >= 0 and addr_val not in target_addrs:
         target_addrs.append(addr_val)
 
@@ -1302,7 +1316,7 @@ def _resolve_operand_target_addresses(
     is_aarch64: bool,
     is_mips: bool,
     is_windows: bool,
-):
+) -> list[int]:
     """Parse operand forms and return normalized numeric target candidates."""
     operand = (operand or "").strip().rstrip(",")
     target_addrs = []
@@ -1404,12 +1418,12 @@ def _extract_symbol_from_operand_cached(operand: str, arch_reg_set: frozenset[st
     return ""
 
 
-def _extract_symbol_from_operand(operand: str, arch_reg_set: set[str]) -> str:
+def _extract_symbol_from_operand(operand: str, arch_reg_set: frozenset[str] | set[str]) -> str:
     return _extract_symbol_from_operand_cached(operand or "", frozenset(arch_reg_set))
 
 
 @lru_cache(maxsize=65536)
-def _parse_immediate_token(token: str):
+def _parse_immediate_token(token: str) -> int | None:
     token = (token or "").strip().lstrip("#")
     if not token:
         return None
@@ -1421,7 +1435,9 @@ def _parse_immediate_token(token: str):
     return None
 
 
-def _parse_x86_memory_operand_base_disp(operand: str, arch_reg_set: set[str]) -> tuple[str, int]:
+def _parse_x86_memory_operand_base_disp(
+    operand: str, arch_reg_set: frozenset[str] | set[str]
+) -> tuple[str, int]:
     """Parse simple x86 memory operands like [rax + 72] or [r12 + 0x48]."""
     operand = (operand or "").strip().lower()
     inner, _ = _extract_bracket_contents(operand)
@@ -1450,7 +1466,7 @@ def _parse_x86_memory_operand_base_disp(operand: str, arch_reg_set: set[str]) ->
 
 
 def _parse_arm64_memory_operand_base_disp(
-    operand: str, arch_reg_set: set[str]
+    operand: str, arch_reg_set: frozenset[str] | set[str]
 ) -> tuple[str, int, bool]:
     """Parse ARM64 memory operands like [x8, #0x18], [x8], or [x8], #0x20."""
     operand = (operand or "").strip().lower()
@@ -1496,9 +1512,9 @@ def _extract_reg_target_candidate_addrs(reg_target: dict) -> list[int]:
     for candidate in reg_target.get("target_address_candidates", []):
         with contextlib.suppress(ValueError, TypeError):
             _append_unique_target_addr(out, int(candidate, 16))
-    if not out and reg_target.get("target_address"):
+    if not out and (target_addr_str := reg_target.get("target_address")):
         with contextlib.suppress(ValueError, TypeError):
-            _append_unique_target_addr(out, int(reg_target.get("target_address"), 16))
+            _append_unique_target_addr(out, int(target_addr_str, 16))
     return out
 
 
@@ -1515,7 +1531,7 @@ def _get_chain_hops(reg_target: dict) -> int:
     return 0
 
 
-def _extract_register_token(operand: str, arch_reg_set: set[str]) -> str:
+def _extract_register_token(operand: str, arch_reg_set: frozenset[str] | set[str]) -> str:
     return _extract_register_token_cached(operand or "", frozenset(arch_reg_set))
 
 
@@ -1534,7 +1550,9 @@ def _extract_register_token_cached(operand: str, arch_reg_set: frozenset[str]) -
     return token if token in arch_reg_set else ""
 
 
-def _arm64_memory_operand_uses_index_register(operand: str, arch_reg_set: set[str]) -> bool:
+def _arm64_memory_operand_uses_index_register(
+    operand: str, arch_reg_set: frozenset[str] | set[str]
+) -> bool:
     """Return True when ARM64 memory operand address depends on an index register."""
     operand = (operand or "").strip().lower()
     inner, end_idx = _extract_bracket_contents(operand)
@@ -1560,7 +1578,7 @@ def _filter_windows_arm64_indirect_candidates(
 def _update_register_target(
     instr,
     reg_targets: dict,
-    arch_reg_set: set[str],
+    arch_reg_set: frozenset[str] | set[str],
     is_aarch64: bool,
     is_mips: bool,
     is_windows: bool,
@@ -1685,16 +1703,21 @@ def _update_register_target(
         reg_targets.pop(dst_reg, None)
 
 
-def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target="", parsed_instrs=None):
+def _resolve_direct_calls(
+    instr_list: list,
+    addr_to_name_map: dict[int, str],
+    arch_target: str = "",
+    parsed_instrs: list | None = None,
+) -> tuple[list, list]:
     """Identifies direct calls and returns both legacy names and rich call targets."""
-    potential_callees = []
-    direct_call_targets = []
+    potential_callees: list[str] = []
+    direct_call_targets: list[dict] = []
     lower_arch = _normalize_arch_target(arch_target)
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
     is_mips = "mips" in lower_arch
     is_windows = "windows" in lower_arch
     arch_reg_set = get_arch_reg_set(lower_arch)
-    reg_targets = {}
+    reg_targets: dict = {}
     if parsed_instrs is None:
         parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
 
@@ -1874,12 +1897,12 @@ def _resolve_direct_calls(instr_list, addr_to_name_map, arch_target="", parsed_i
 
 
 def _classify_function(
-    instruction_metrics,
-    instruction_count,
-    plain_assembly_text,
-    has_system_call,
-    has_indirect_call,
-):
+    instruction_metrics: dict,
+    instruction_count: int,
+    plain_assembly_text: str,
+    has_system_call: bool,
+    has_indirect_call: bool,
+) -> str:
     """Classifies the function based on metrics and other flags."""
     function_type = ""
     if (
@@ -1904,7 +1927,7 @@ def _classify_function(
     return function_type
 
 
-def _mem_bytes_len(b):
+def _mem_bytes_len(b) -> int | None:
     if isinstance(b, list):
         return len(b)
     if hasattr(b, "nbytes"):
@@ -1912,7 +1935,7 @@ def _mem_bytes_len(b):
     return None
 
 
-def _try_disassemble(instance, byte_list, address, inst_count=0):
+def _try_disassemble(instance, byte_list, address: int, inst_count: int = 0) -> list | None:
     """Helper to safely call Nyxstone and handle immediate failures."""
     try:
         instructions = instance.disassemble_to_instructions(byte_list, address, inst_count)
@@ -1922,8 +1945,13 @@ def _try_disassemble(instance, byte_list, address, inst_count=0):
 
 
 def disassemble_functions(
-    parsed_obj, metadata, arch_target="", cpu="", features="", immediate_style=0
-):
+    parsed_obj,
+    metadata: dict,
+    arch_target: str = "",
+    cpu: str = "",
+    features: str = "",
+    immediate_style: int = 0,
+) -> dict:
     """
     Disassembles functions found in the metadata dictionary using Nyxstone.
     Retrieves section content directly from the parsed_obj.
@@ -1939,12 +1967,12 @@ def disassemble_functions(
     Returns:
         dict: A dictionary mapping function names/addresses to their disassembly results.
     """
-    disassembly_results = {}
+    disassembly_results: dict = {}
     if not NYXSTONE_AVAILABLE:
         LOG.debug("Nyxstone is not available. Cannot perform disassembly.")
         return disassembly_results
     if not arch_target:
-        arch_target = metadata.get("llvm_target_tuple")
+        arch_target = str(metadata.get("llvm_target_tuple") or "")
     arch_target = (arch_target or "").strip()
     if not _has_supported_nyxstone_target(arch_target):
         LOG.debug(
@@ -2134,8 +2162,13 @@ def disassemble_functions(
             if micromips_nyxstone_instance:
                 disassemblers_to_try.append((micromips_nyxstone_instance, "MicroMIPS"))
             for offset in range(4):
-                if offset >= _mem_bytes_len(original_bytes_list) and offset >= _mem_bytes_len(
-                    rebased_bytes_list
+                original_len = _mem_bytes_len(original_bytes_list)
+                rebased_len = _mem_bytes_len(rebased_bytes_list)
+                if (
+                    original_len is not None
+                    and rebased_len is not None
+                    and offset >= original_len
+                    and offset >= rebased_len
                 ):
                     break
                 addr_to_try = func_addr_va + offset
@@ -2145,7 +2178,8 @@ def disassemble_functions(
                         (original_bytes_list, "original"),
                     ]
                     for byte_source, source_name in bytes_sets:
-                        if offset >= _mem_bytes_len(byte_source):
+                        source_len = _mem_bytes_len(byte_source)
+                        if source_len is not None and offset >= source_len:
                             continue
                         bytes_to_try = byte_source[offset:]
                         instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)

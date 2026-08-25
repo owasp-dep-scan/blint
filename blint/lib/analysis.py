@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 from itertools import islice
 from pathlib import Path
-from typing import Optional
+from typing import Any, Literal, Optional
 from xml.etree import ElementTree as ET
 
 import yaml
@@ -60,7 +60,7 @@ try:
 except ImportError:
     HAVE_RESOURCE_READER = False
 
-review_files = []
+review_files: list[str] = []
 if HAVE_RESOURCE_READER:
     with contextlib.suppress(NameError, FileNotFoundError):
         # Materialize to a list so it can be iterated more than once.
@@ -76,16 +76,16 @@ if not review_files:
     review_methods_dir = Path(__file__).parent / "data" / "annotations"
     review_files = [p.as_posix() for p in Path(review_methods_dir).rglob("*.yml")]
 
-rules_dict = {}
-review_exe_dict = defaultdict(list)
-review_methods_dict = defaultdict(list)
-review_symbols_dict = defaultdict(list)
-review_imports_dict = defaultdict(list)
-review_entries_dict = defaultdict(list)
-review_functions_dict = defaultdict(list)
-review_binary_dict = defaultdict(list)
+rules_dict: dict[str, Any] = {}
+review_exe_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_methods_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_symbols_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_imports_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_entries_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_functions_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_binary_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 
-review_rules_cache = {
+review_rules_cache: dict[str, Any] = {
     "PII_READ": {
         "id": "PII_READ",
         "title": "Detect PII Read Operations",
@@ -109,7 +109,7 @@ DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 EVIDENCE_LIMIT = get_int_from_env("EVIDENCE_LIMIT", 5)
 
 
-def get_resource(package, resource):
+def get_resource(package: str, resource: str):
     """Return a file handle on a named resource in a Package."""
 
     # Prefer ResourceReader APIs, as they are newest.
@@ -127,7 +127,7 @@ def get_resource(package, resource):
 
     # Undefined __file__ will raise NameError on variable access.
     try:
-        package_path = os.path.abspath(os.path.dirname(mod.__file__))
+        package_path = os.path.abspath(os.path.dirname(mod.__file__))  # type: ignore[type-var,arg-type]
     except NameError:
         package_path = None
 
@@ -156,7 +156,7 @@ for tmp_data in raw_rules:
         rules_dict[rule.get("id")] = rule
 
 
-def load_default_rules():
+def load_default_rules() -> None:
     """Load default rules from package resources."""
     with get_resource("blint.data", "rules.yml") as fp:
         raw_rules = fp.read().split("---")
@@ -206,15 +206,15 @@ def load_default_rules():
 
 def load_custom_rules(
     custom_dir_path: Optional[str],
-    review_rules_cache,
-    review_exe_dict,
-    review_methods_dict,
-    review_symbols_dict,
-    review_imports_dict,
-    review_entries_dict,
-    review_functions_dict,
-    review_binary_dict,
-):
+    review_rules_cache: dict[str, Any],
+    review_exe_dict: defaultdict[str, list[dict[str, Any]]],
+    review_methods_dict: defaultdict[str, list[dict[str, Any]]],
+    review_symbols_dict: defaultdict[str, list[dict[str, Any]]],
+    review_imports_dict: defaultdict[str, list[dict[str, Any]]],
+    review_entries_dict: defaultdict[str, list[dict[str, Any]]],
+    review_functions_dict: defaultdict[str, list[dict[str, Any]]],
+    review_binary_dict: defaultdict[str, list[dict[str, Any]]],
+) -> None:
     """
     Loads custom review rules from a specified directory.
     """
@@ -282,7 +282,7 @@ def load_custom_rules(
             LOG.error(f"Error loading custom rules from {rule_file_path}: {e}")
 
 
-def initialize_rules(blint_options: BlintOptions):
+def initialize_rules(blint_options: BlintOptions) -> None:
     """
     Loads default and custom rules based on blint_options.
     """
@@ -327,7 +327,7 @@ def initialize_rules(blint_options: BlintOptions):
     )
 
 
-def run_checks(f, metadata):
+def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     """Runs the checks on the provided metadata using the loaded rules.
 
     Args:
@@ -338,7 +338,7 @@ def run_checks(f, metadata):
         A list of result dictionaries representing the outcomes of the checks.
 
     """
-    results = []
+    results: list[dict[str, Any]] = []
     if not rules_dict:
         LOG.warning("No rules loaded!")
         return results
@@ -355,7 +355,13 @@ def run_checks(f, metadata):
     return results
 
 
-def run_rule(f, metadata, rule_obj, exe_type, cid):
+def run_rule(
+    f: str,
+    metadata: dict[str, Any],
+    rule_obj: dict[str, Any],
+    exe_type: str | None,
+    cid: str,
+) -> dict[str, Any] | Literal[""]:
     """
     Runs a rule on a file with the provided metadata, rule object, executable
     type, and component ID.
@@ -378,7 +384,12 @@ def run_rule(f, metadata, rule_obj, exe_type, cid):
     return ""
 
 
-def process_result(metadata, aresult, exe_type, result):
+def process_result(
+    metadata: dict[str, Any],
+    aresult: dict[str, Any],
+    exe_type: str | None,
+    result: bool | str,
+) -> dict[str, Any]:
     """Processes the result by modifying the provided result dictionary.
 
     Args:
@@ -399,7 +410,7 @@ def process_result(metadata, aresult, exe_type, result):
     return aresult
 
 
-def run_prefuzz(metadata):
+def run_prefuzz(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     """Runs the pre-fuzzing process on the given metadata.
 
     Generates a list of fuzzable methods from the provided metadata by
@@ -453,7 +464,7 @@ def run_prefuzz(metadata):
     return fuzzables
 
 
-def print_reviews_table(reviews, files):
+def print_reviews_table(reviews: list[dict[str, Any]], files: list[str]) -> None:
     """Prints the capability review table.
 
     Args:
@@ -470,11 +481,11 @@ def print_reviews_table(reviews, files):
     table.add_column("Capabilities")
     table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:
-        evidences = [e.get("function") for e in r.get("evidence")]
+        evidences = [e.get("function") for e in r.get("evidence") or []]
         evidences = list(islice(evidences, EVIDENCE_LIMIT))
         row = [r.get("id")]
         if len(files) > 1:
-            row.append(os.path.basename(r.get("exe_name")))
+            row.append(os.path.basename(r.get("exe_name") or ""))
         if has_category:
             row.append(r.get("category") or "")
         row.append(r.get("summary"))
@@ -564,7 +575,7 @@ def _filter_callgraph_by_min_confidence(callgraph: dict, min_confidence: str) ->
 def _iter_callgraph_exports(callgraphs: list[dict], min_confidence: str = "low") -> list[dict]:
     """Builds stable per-binary export metadata with collision-safe file stems."""
     exports = []
-    stem_counts = defaultdict(int)
+    stem_counts: defaultdict[str, int] = defaultdict(int)
     for entry in callgraphs:
         if not isinstance(entry, dict):
             continue
@@ -810,7 +821,14 @@ def _inject_mermaid_into_html(html_file: Path, rendered_callgraphs: list[dict]) 
     html_file.write_text(html_text, encoding="utf-8")
 
 
-def report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs=None):
+def report(
+    blint_options: BlintOptions,
+    exe_files: list[str],
+    findings: list[dict[str, Any]],
+    reviews: list[dict[str, Any]],
+    fuzzables: list[dict[str, Any]],
+    callgraphs: list[dict[str, Any]] | None = None,
+) -> None:
     """Generates a report based on the analysis results.
 
     Args:
@@ -867,24 +885,24 @@ def report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs=No
         LOG.debug("No suggestion available for fuzzing")
     # Try console output as html
     html_file = Path(blint_options.reports_dir) / "blint-output.html"
-    console.save_html(html_file, theme=MONOKAI)
+    console.save_html(str(html_file), theme=MONOKAI)
     if should_render_callgraphs:
         rendered_callgraphs = _render_mermaid_callgraphs(
             blint_options.reports_dir,
-            callgraphs,
+            callgraphs or [],
             min_confidence=blint_options.callgraph_min_confidence,
         )
         _inject_mermaid_into_html(html_file, rendered_callgraphs)
     if should_export_graphml_callgraphs:
         _render_graphml_callgraphs(
             blint_options.reports_dir,
-            callgraphs,
+            callgraphs or [],
             min_confidence=blint_options.callgraph_min_confidence,
         )
     if should_export_gexf_callgraphs:
         _render_gexf_callgraphs(
             blint_options.reports_dir,
-            callgraphs,
+            callgraphs or [],
             min_confidence=blint_options.callgraph_min_confidence,
         )
     LOG.debug(f"HTML report written to {html_file}")

@@ -3,7 +3,7 @@
 Add new indicator lists here to keep behavior-tuning constants in one place.
 """
 
-NETWORK_EVASION_INDICATORS = (
+NETWORK_EVASION_INDICATORS: tuple[str, ...] = (
     "bpf_sock_ops",
     "sock_ops",
     "bpf_map_lookup_elem",
@@ -32,7 +32,7 @@ NETWORK_EVASION_INDICATORS = (
     "sni",
 )
 
-WINDOWS_LOCAL_ELEVATION_INDICATORS = (
+WINDOWS_LOCAL_ELEVATION_INDICATORS: tuple[str, ...] = (
     "ntquerysysteminformation",
     "ntquerysysteminformationex",
     "systemprocessinformationextension",
@@ -69,7 +69,7 @@ WINDOWS_LOCAL_ELEVATION_INDICATORS = (
     "createprocessasuser",
 )
 
-APPLE_LOCAL_ELEVATION_INDICATORS = (
+APPLE_LOCAL_ELEVATION_INDICATORS: tuple[str, ...] = (
     "_zalloc_ro_mut",
     "_zalloc_ro_mut_atomic",
     "zalloc_ro_mut",
@@ -86,16 +86,16 @@ APPLE_LOCAL_ELEVATION_INDICATORS = (
     "thread_set_thread_name",
 )
 
-INFORMATIVE_STRING_CATALOGS = (
+INFORMATIVE_STRING_CATALOGS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("network_evasion_hint", NETWORK_EVASION_INDICATORS),
     ("windows_local_elevation_hint", WINDOWS_LOCAL_ELEVATION_INDICATORS),
     ("apple_local_elevation_hint", APPLE_LOCAL_ELEVATION_INDICATORS),
 )
 
 
-SYSCALL_INDICATORS = ["syscall", "int 0x80", "sysenter", "svc #", "smc #", "ecall"]
+SYSCALL_INDICATORS: list[str] = ["syscall", "int 0x80", "sysenter", "svc #", "smc #", "ecall"]
 
-SECURITY_INDICATORS = [
+SECURITY_INDICATORS: list[str] = [
     "endbr64",
     "endbr32",
     "setssbsy",
@@ -126,7 +126,7 @@ SECURITY_INDICATORS = [
     "st4g",
 ]
 
-CRYPTO_INDICATORS = [
+CRYPTO_INDICATORS: list[str] = [
     "aesenc",
     "aesenclast",
     "aesdec",
@@ -167,7 +167,7 @@ CRYPTO_INDICATORS = [
 ]
 
 # https://docs.nvidia.com/cuda/cuda-binary-utilities/index.html#turing-turing-instruction-set-table
-GPU_INDICATORS = [
+GPU_INDICATORS: list[str] = [
     "acqbulk",
     "acqshminit",
     "atom",

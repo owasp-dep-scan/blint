@@ -15,6 +15,7 @@ local storage models, unique symbols and interposable weak definitions.
 """
 
 import re
+from collections.abc import Iterator
 
 from blint.logger import LOG
 
@@ -193,7 +194,7 @@ def parse_version_node(node: str) -> tuple[str, str]:
     return node, ""
 
 
-def version_sort_key(version: str) -> tuple:
+def version_sort_key(version: str) -> tuple[tuple[int, int, str], ...]:
     """Return a tuple that orders dotted version strings numerically.
 
     ``2.34`` must sort above ``2.9``, which a lexical comparison gets wrong.
@@ -209,7 +210,7 @@ def version_sort_key(version: str) -> tuple:
     return tuple(parts)
 
 
-def _iter_versioned_imports(metadata: dict):
+def _iter_versioned_imports(metadata: dict) -> Iterator[tuple[str, str]]:
     """Yield ``(symbol_name, version_node)`` for every imported versioned symbol.
 
     Only imported symbols matter for an ABI floor. A versioned symbol that the

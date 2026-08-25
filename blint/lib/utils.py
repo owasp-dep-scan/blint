@@ -11,7 +11,7 @@ import zipfile
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
-from typing import Dict
+from typing import Any
 
 import lief
 import multi_demangle
@@ -27,6 +27,7 @@ from rich.table import Table
 from blint.config import (
     BLINT_MAX_HEX_BYTES,
     BLINTDB_HOME,
+    BlintOptions,
     BLINTDB_IMAGE_URL,
     BLINTDB_LOC,
     BLINTDB_REFRESH,
@@ -47,15 +48,15 @@ from blint.logger import LOG, console
 
 setup_logger(quiet=True, debug=False)
 
-CHARSET = string.digits + string.ascii_letters + r"""!&@"""
+CHARSET: str = string.digits + string.ascii_letters + r"""!&@"""
 
 # Known files compressed with ar
-KNOWN_AR_EXTNS = (".a", ".rlib", ".lib")
+KNOWN_AR_EXTNS: tuple[str, ...] = (".a", ".rlib", ".lib")
 
 demangle_options_complete = multi_demangle.DemangleOptions.complete()
 demangle_options_name_only = multi_demangle.DemangleOptions.name_only()
 
-_HEX_TRUNCATION_TOTAL = 0
+_HEX_TRUNCATION_TOTAL: int = 0
 
 
 def reset_hex_truncation_count() -> None:
@@ -69,7 +70,7 @@ def get_hex_truncation_count() -> int:
     return _HEX_TRUNCATION_TOTAL
 
 
-def demangle_symbolic_name(symbol, name_only=False):
+def demangle_symbolic_name(symbol: str, name_only: bool = False) -> str:
     """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust and Swift."""
     try:
         options = demangle_options_name_only if name_only else demangle_options_complete
@@ -117,7 +118,7 @@ def demangle_symbolic_name(symbol, name_only=False):
         return symbol
 
 
-def is_base64(s):
+def is_base64(s: str) -> bool:
     """
     Checks if the given string is a valid Base64 encoded string.
 
@@ -155,7 +156,7 @@ def coerce_to_text(value) -> str:
     return ""
 
 
-def decode_base64(s):
+def decode_base64(s: str) -> str:
     """
     This function decodes a Base64 encoded string. It first removes any newline
     characters from the input string. Then, it checks if the string is a valid
@@ -181,7 +182,7 @@ def decode_base64(s):
     return s
 
 
-def is_camel_case(s):
+def is_camel_case(s: str) -> bool:
     """
     Checks if the given string follows the camel case naming convention.
 
@@ -201,7 +202,7 @@ def is_camel_case(s):
     return s != s.lower() and s != s.upper() and "_" not in s
 
 
-def calculate_entropy(data):
+def calculate_entropy(data: str | bytes | bytearray | memoryview) -> float:
     """
     This function calculates the entropy of the given data to measure its
     randomness or predictability. It first performs checks to handle special
@@ -240,7 +241,7 @@ def calculate_entropy(data):
     if not data:
         return entropy
 
-    char_count = {}
+    char_count: dict[str, int] = {}
     for char in data:
         char_count[char] = char_count.get(char, 0) + 1
 
@@ -262,7 +263,7 @@ def calculate_entropy(data):
     return round(entropy, 2) if punctuation_found else min(0.38, round(entropy, 2))
 
 
-def check_secret(data):
+def check_secret(data: str) -> str:
     """
     This function checks if the given data contains any secrets. It first checks
     if any strings from the allowlist are present in the data. If so, it returns
@@ -288,7 +289,7 @@ def check_secret(data):
     return ""
 
 
-def is_binary_string(content):
+def is_binary_string(content: bytes) -> bool:
     """
     Method to check if the given content is a binary string
     """
@@ -296,7 +297,7 @@ def is_binary_string(content):
     return bool(content.translate(None, textchars))
 
 
-def is_ignored_file(file_name):
+def is_ignored_file(file_name: str) -> bool:
     """
     Method to find if the given file can be ignored
     :param file_name: File to compare
@@ -311,7 +312,7 @@ def is_ignored_file(file_name):
     return any(file_name.endswith(ie) for ie in ignore_files)
 
 
-def blintdb_setup(args):
+def blintdb_setup(args: BlintOptions) -> None:
     """
     This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg' using oras client
     and puts it into $BLINTDB_LOC path.
@@ -347,7 +348,7 @@ def blintdb_setup(args):
         LOG.error(f"Blintdb Download failed: {e}")
 
 
-def is_exe(src):
+def is_exe(src: str) -> bool:
     """
     Detect if the source is a binary file
 
@@ -368,20 +369,19 @@ def is_exe(src):
     return False
 
 
-def filter_ignored_dirs(dirs):
+def filter_ignored_dirs(dirs: list[str]) -> None:
     """
     Method to filter directory list to remove ignored directories
 
     Args:
         dirs: Directories
-
-    Returns:
-        list: Filtered list of directories
     """
-    return [dirs.remove(d) for d in list(dirs) if d.lower() in ignore_directories]
+    for d in list(dirs):
+        if d.lower() in ignore_directories:
+            dirs.remove(d)
 
 
-def find_exe_files(src):
+def find_exe_files(src: str) -> list[str]:
     """
     Method to find files with given extension
 
@@ -407,10 +407,10 @@ def find_exe_files(src):
     return result
 
 
-ANDROID_APP_EXTNS = (".apk", ".aab", ".apkm", ".apks", ".xapk")
+ANDROID_APP_EXTNS: tuple[str, ...] = (".apk", ".aab", ".apkm", ".apks", ".xapk")
 
 
-def find_android_files(path):
+def find_android_files(path: str) -> list[str]:
     """
     Method to find android app files
 
@@ -420,7 +420,7 @@ def find_android_files(path):
     return find_files(path, list(ANDROID_APP_EXTNS))
 
 
-def is_android_app(path):
+def is_android_app(path: str) -> bool:
     """
     Return True if the given path is an android app file (apk/aab/bundle).
 
@@ -430,10 +430,10 @@ def is_android_app(path):
     return isinstance(path, str) and path.lower().endswith(ANDROID_APP_EXTNS)
 
 
-IOS_APP_EXTNS = (".ipa",)
+IOS_APP_EXTNS: tuple[str, ...] = (".ipa",)
 
 
-def find_ios_files(path):
+def find_ios_files(path: str) -> list[str]:
     """
     Method to find iOS/macOS app archive files (``.ipa``).
 
@@ -443,7 +443,7 @@ def find_ios_files(path):
     return find_files(path, list(IOS_APP_EXTNS))
 
 
-def find_bom_files(path):
+def find_bom_files(path: str) -> list[str]:
     """
     Method to find BOM files
 
@@ -454,7 +454,7 @@ def find_bom_files(path):
     return find_files(path, app_extns)
 
 
-def find_files(path, extns):
+def find_files(path: str, extns: list[str]) -> list[str]:
     """
     Method to find files matching an extension
     """
@@ -469,7 +469,7 @@ def find_files(path, extns):
     return result
 
 
-def bom_strip(manifest):
+def bom_strip(manifest: bytes) -> bytes:
     """
     Function to delete UTF-8 BOM character in "string"
 
@@ -483,7 +483,7 @@ def bom_strip(manifest):
     return manifest[3:] if manifest[:3] == utf8_bom else manifest
 
 
-def parse_pe_manifest(manifest):
+def parse_pe_manifest(manifest: bytes) -> dict[str, Any]:
     """
     Method to parse xml pe manifest
 
@@ -505,14 +505,14 @@ def parse_pe_manifest(manifest):
         return {}
 
 
-def is_fuzzable_name(name_str):
+def is_fuzzable_name(name_str: str | None) -> bool:
     """
     This function checks if a given name string is fuzzable.
     """
     return any(n.lower() in name_str for n in fuzzable_names) if name_str else False
 
 
-def print_findings_table(findings, files):
+def print_findings_table(findings: list[dict[str, Any]], files: list[str]) -> None:
     """
     Prints the findings in a formatted table.
 
@@ -528,7 +528,7 @@ def print_findings_table(findings, files):
     table.add_column("Title")
     table.add_column("Severity")
     for f in findings:
-        severity = f.get("severity").upper()
+        severity = (f.get("severity") or "").upper()
         severity_fmt = f"{'[bright_red]' if severity in ('CRITICAL', 'HIGH') else ''}{severity}"
         if len(files) > 1:
             table.add_row(
@@ -598,13 +598,13 @@ def gen_file_list(src: list[str]) -> list[str]:
     return files
 
 
-def unzip_unsafe(zf, to_dir):
+def unzip_unsafe(zf: str, to_dir: str) -> None:
     """Method to unzip the file in an unsafe manne"""
     with zipfile.ZipFile(zf, "r") as zip_ref:
         zip_ref.extractall(to_dir)
 
 
-def check_command(cmd):
+def check_command(cmd: str) -> bool:
     """
     Method to check if command is available
     :return True if command is available in PATH. False otherwise
@@ -613,7 +613,7 @@ def check_command(cmd):
     return cpath is not None
 
 
-def get_version():
+def get_version() -> str:
     """
     Returns the version of blint.
 
@@ -627,7 +627,7 @@ def get_version():
         return "dev"
 
 
-def cleanup_dict_lief_errors(old_dict):
+def cleanup_dict_lief_errors(old_dict: dict[Any, Any]) -> dict[Any, Any]:
     """
     Removes lief_errors from a dictionary recursively.
 
@@ -642,6 +642,7 @@ def cleanup_dict_lief_errors(old_dict):
     for key, value in old_dict.items():
         if isinstance(value, lief.lief_errors):
             continue
+        entry: dict | list
         if isinstance(value, dict):
             entry = cleanup_dict_lief_errors(value)
         elif isinstance(value, list):
@@ -652,7 +653,7 @@ def cleanup_dict_lief_errors(old_dict):
     return new_dict
 
 
-def cleanup_list_lief_errors(d):
+def cleanup_list_lief_errors(d: list[Any]) -> list[Any]:
     """
     Cleans up a list by removing lief errors recursively.
 
@@ -664,6 +665,7 @@ def cleanup_list_lief_errors(d):
     for dl in d:
         if isinstance(dl, lief.lief_errors):
             continue
+        entry: dict | list
         if isinstance(dl, dict):
             entry = cleanup_dict_lief_errors(dl)
         elif isinstance(dl, list):
@@ -675,7 +677,7 @@ def cleanup_list_lief_errors(d):
 
 
 def create_component_evidence(
-    method_value: str, confidence: float, evidence_metadata: dict = None
+    method_value: str, confidence: float, evidence_metadata: dict[str, Any] | None = None
 ) -> ComponentEvidence:
     """
     Creates component evidence based on the provided method value.
@@ -723,9 +725,21 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                 for entry in archive:
                     # This workarounds a bug in ar that returns multiple names
                     file_name = entry.name.split("\n")[0].removesuffix("/")
-                    if os.path.sep in file_name:
-                        file_name = file_name.rsplit(os.path.sep, 1)[-1]
+                    # ar members use "/" natively; normalize Windows separators
+                    # so a crafted "..\" or drive-prefixed member name cannot
+                    # escape to_dir regardless of the host platform.
+                    file_name = file_name.replace("\\", "/")
+                    if "/" in file_name:
+                        file_name = file_name.rsplit("/", 1)[-1]
+                    if file_name in ("", ".", ".."):
+                        continue
                     afile = os.path.join(to_dir, file_name)
+                    # Defense in depth: never let a crafted member name write
+                    # outside the extraction directory.
+                    if not os.path.abspath(afile).startswith(
+                        os.path.abspath(to_dir) + os.sep
+                    ):
+                        continue
                     with open(afile, "wb") as output:
                         output.write(archive.open(entry, "rb").read())
                         files_list.append(afile)
@@ -735,7 +749,7 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
     return files_list
 
 
-def export_metadata(directory: str, metadata: Dict, mtype: str):
+def export_metadata(directory: str, metadata: dict[str, Any], mtype: str) -> None:
     """
     Exports metadata to file.
     """
@@ -752,7 +766,7 @@ def export_metadata(directory: str, metadata: Dict, mtype: str):
         )
 
 
-def json_serializer(obj):
+def json_serializer(obj: Any) -> Any:
     """JSON serializer to help serialize problematic types such as bytes"""
     if isinstance(obj, bytes):
         try:
@@ -801,7 +815,7 @@ def enum_to_str(enum_obj) -> str:
     return str(enum_obj).rsplit(".", maxsplit=1)[-1]
 
 
-def calculate_hashes(file_path: str) -> dict:
+def calculate_hashes(file_path: str) -> dict[str, str]:
     """Calculates MD5, SHA1, and SHA256 hashes for a file."""
     hashes = {}
     try:

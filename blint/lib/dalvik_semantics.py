@@ -123,12 +123,12 @@ def register_roles(inst: Instruction) -> Tuple[List[int], List[int]]:
         return [], list(regs)
 
     defs, uses = _arithmetic_roles(op, regs)
-    if defs is not None:
+    if defs is not None and uses is not None:
         return defs, uses
     return _other_roles(op, regs)
 
 
-def _arithmetic_roles(op: int, regs: List[int]):
+def _arithmetic_roles(op: int, regs: List[int]) -> tuple[list[int] | None, list[int] | None]:
     """Roles for the regular ALU / conversion / move / const families.
 
     Returns ``(defs, uses)`` or ``(None, None)`` when ``op`` is not handled here
@@ -163,7 +163,7 @@ def _arithmetic_roles(op: int, regs: List[int]):
     return None, None
 
 
-def _other_roles(op: int, regs: List[int]):
+def _other_roles(op: int, regs: List[int]) -> tuple[list[int], list[int]]:
     """Roles for non-ALU opcodes (moves, const, mem access, compares, ifs)."""
     r0 = regs[0]
     wide_dest = op in _WIDE_DEST

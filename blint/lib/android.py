@@ -4,14 +4,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from typing import Any
 from xml.etree import ElementTree
 
 from custom_json_diff.lib.utils import file_read
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring as defused_fromstring
 
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
 from blint.lib.binary import parse, parse_dex
-from blint.lib.dalvik_review import DEX_EXE_TYPE, analyze_dex, build_review_metadata
+from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
 from blint.lib.utils import (
     check_command,
     create_component_evidence,
@@ -30,7 +34,7 @@ ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 # Split bundle archives. APKMirror bundles (.apkm) and split bundles
 # (.apks/.xapk) are zip archives that contain a base apk along with
 # configuration splits.
-BUNDLE_EXTENSIONS = (".apkm", ".apks", ".xapk")
+BUNDLE_EXTENSIONS: tuple[str, ...] = (".apkm", ".apks", ".xapk")
 
 ANDROID_HOME = os.getenv("ANDROID_HOME")
 APKANALYZER_CMD = os.getenv("APKANALYZER_CMD")
@@ -44,7 +48,9 @@ elif check_command("apkanalyzer"):
     APKANALYZER_CMD = "apkanalyzer"
 
 
-def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
+def exec_tool(
+    args: list[str], cwd: str | None = None, stdout: int = subprocess.PIPE
+) -> subprocess.CompletedProcess | None:
     """
     Convenience method to invoke cli tools
 
@@ -69,7 +75,9 @@ def exec_tool(args, cwd=None, stdout=subprocess.PIPE):
         return None
 
 
-def collect_app_metadata(app_file, deep_mode):
+def collect_app_metadata(
+    app_file: str, deep_mode: bool
+) -> tuple[Component | None, list[Component]]:
     """
     Collect various metadata about an android app.
 
@@ -83,7 +91,9 @@ def collect_app_metadata(app_file, deep_mode):
     return parent_component, components
 
 
-def collect_bundle_metadata(app_file, deep_mode):
+def collect_bundle_metadata(
+    app_file: str, deep_mode: bool
+) -> tuple[Component | None, list[Component]]:
     """
     Collect metadata for a split bundle (``.apkm``, ``.apks``, ``.xapk``).
 
@@ -100,7 +110,7 @@ def collect_bundle_metadata(app_file, deep_mode):
     """
     bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
     file_components = []
-    parent_component = None
+    parent_component: Component | None = None
     try:
         unzip_unsafe(app_file, bundle_temp_dir)
         bundle_info = read_bundle_info(bundle_temp_dir)
@@ -119,7 +129,7 @@ def collect_bundle_metadata(app_file, deep_mode):
     return parent_component, file_components
 
 
-def read_bundle_info(bundle_temp_dir):
+def read_bundle_info(bundle_temp_dir: str) -> dict:
     """
     Read the ``info.json`` metadata bundled inside an apkm file.
 
@@ -139,7 +149,7 @@ def read_bundle_info(bundle_temp_dir):
         return {}
 
 
-def select_base_apk(apk_files):
+def select_base_apk(apk_files: list[str]) -> str | None:
     """
     Pick the base apk from the list of apks contained within a bundle.
 
@@ -159,7 +169,9 @@ def select_base_apk(apk_files):
     return apk_files[0] if apk_files else None
 
 
-def apk_parent_component(app_file, manifest_apk=None, bundle_info=None):
+def apk_parent_component(
+    app_file: str, manifest_apk: str | None = None, bundle_info: dict | None = None
+) -> Component | None:
     """
     Build the parent application component for an apk.
 
@@ -183,7 +195,7 @@ def apk_parent_component(app_file, manifest_apk=None, bundle_info=None):
     return apk_summary_fallback(manifest_apk)
 
 
-def read_manifest_attributes(apk_file):
+def read_manifest_attributes(apk_file: str) -> dict:
     """
     Decode the ``AndroidManifest.xml`` of an apk and return key attributes.
 
@@ -204,11 +216,13 @@ def read_manifest_attributes(apk_file):
     if not raw_xml:
         return {}
     try:
-        root = ElementTree.fromstring(raw_xml)
-    except ElementTree.ParseError as e:
+        # Manifests come from untrusted archives, so entity expansion is blocked
+        # the same way the PE manifest path already does.
+        root = defused_fromstring(raw_xml)
+    except (ElementTree.ParseError, DefusedXmlException) as e:
         LOG.debug(f"Unable to parse the decoded manifest for {apk_file}: {e}")
         return {}
-    attributes = {
+    attributes: dict = {
         "package": root.get("package", ""),
         "versionName": root.get(f"{ANDROID_NS}versionName", ""),
         "versionCode": root.get(f"{ANDROID_NS}versionCode", ""),
@@ -236,7 +250,7 @@ def read_manifest_attributes(apk_file):
     return attributes
 
 
-def find_main_activity(root):
+def find_main_activity(root: ElementTree.Element) -> str:
     """
     Locate the launcher activity declared in the manifest.
 
@@ -254,11 +268,13 @@ def find_main_activity(root):
                 "android.intent.action.MAIN" in actions
                 and "android.intent.category.LAUNCHER" in categories
             ):
-                return activity.get(f"{ANDROID_NS}name", "")
+                return activity.get(f"{ANDROID_NS}name", "") or ""
     return ""
 
 
-def build_parent_component(manifest, app_file, bundle_info=None):
+def build_parent_component(
+    manifest: dict, app_file: str, bundle_info: dict | None = None
+) -> Component | None:
     """
     Build the parent application component from decoded manifest attributes.
 
@@ -282,7 +298,7 @@ def build_parent_component(manifest, app_file, bundle_info=None):
     return component
 
 
-def build_manifest_properties(manifest, bundle_info=None):
+def build_manifest_properties(manifest: dict, bundle_info: dict | None = None) -> list[Property]:
     """
     Build the component properties from decoded manifest and bundle metadata.
 
@@ -318,7 +334,7 @@ def build_manifest_properties(manifest, bundle_info=None):
     return properties
 
 
-def apk_summary_fallback(app_file):
+def apk_summary_fallback(app_file: str) -> Component | None:
     """
     Build the parent component using the ``apkanalyzer`` command line tool.
 
@@ -344,7 +360,7 @@ def apk_summary_fallback(app_file):
     return parent_component
 
 
-def apk_summary(app_file):
+def apk_summary(app_file: str) -> Component | None:
     """
     Retrieve the parent component using apk summary
     """
@@ -354,7 +370,7 @@ def apk_summary(app_file):
     return parse_apk_summary(cp.stdout) if cp and cp.returncode == 0 else None
 
 
-def apk_features(app_file):
+def apk_features(app_file: str) -> str | None:
     """
     Retrieve the app features
     """
@@ -364,7 +380,7 @@ def apk_features(app_file):
     return strip_apk_data(cp.stdout.strip()) if cp and cp.returncode == 0 else ""
 
 
-def apk_permissions(app_file):
+def apk_permissions(app_file: str) -> str | None:
     """
     Retrieve the app permissions
     """
@@ -374,7 +390,7 @@ def apk_permissions(app_file):
     return strip_apk_data(cp.stdout.strip()) if cp and cp.returncode == 0 else ""
 
 
-def strip_apk_data(data):
+def strip_apk_data(data: str) -> str:
     """Strips the APK data by removing the first line if it contains "JAVA_TOOL_OPTIONS".
     Args:
         data (str): The input data to be stripped.
@@ -389,7 +405,7 @@ def strip_apk_data(data):
     return "\n".join(parts)
 
 
-def collect_version_files_metadata(app_file, app_temp_dir):
+def collect_version_files_metadata(app_file: str, app_temp_dir: str) -> list[Component]:
     """
     Collects metadata for version files in the given app temporary directory.
 
@@ -422,7 +438,9 @@ def collect_version_files_metadata(app_file, app_temp_dir):
     return file_components
 
 
-def create_version_component(app_file, group, name, rel_path, version_data):
+def create_version_component(
+    app_file: str, group: str, name: str, rel_path: str, version_data: str
+) -> Component:
     """
     Creates a Component object with the provided metadata.
 
@@ -462,7 +480,7 @@ def create_version_component(app_file, group, name, rel_path, version_data):
     return component
 
 
-def parse_file_name(file_name, group):
+def parse_file_name(file_name: str, group: str) -> tuple[str, str]:
     """
     Parses the file name and returns the group and name components.
 
@@ -488,7 +506,7 @@ def parse_file_name(file_name, group):
     return group, name
 
 
-def collect_so_files_metadata(app_file, app_temp_dir):
+def collect_so_files_metadata(app_file: str, app_temp_dir: str) -> list[Component]:
     """
     Collects metadata for shared object (`.so`) files.
 
@@ -508,7 +526,7 @@ def collect_so_files_metadata(app_file, app_temp_dir):
     return file_components
 
 
-def parse_so_file(app_file, app_temp_dir, sof):
+def parse_so_file(app_file: str, app_temp_dir: str, sof: str) -> Component:
     """Parses the given shared object (SO) file and generates metadata for it.
 
     Args:
@@ -559,7 +577,7 @@ def parse_so_file(app_file, app_temp_dir, sof):
     return component
 
 
-def get_so_version(so_metadata_notes) -> str | None:
+def get_so_version(so_metadata_notes: list[dict]) -> str | None:
     """Returns the version of the shared object (SO) file.
 
     Args:
@@ -579,7 +597,9 @@ def get_so_version(so_metadata_notes) -> str | None:
     return version
 
 
-def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
+def collect_dex_files_metadata(
+    app_file: str, parent_component: Component | None, app_temp_dir: str
+) -> list[Component]:
     """
     Collects metadata for DEX files in the given app temporary directory.
 
@@ -610,7 +630,7 @@ def collect_dex_files_metadata(app_file, parent_component, app_temp_dir):
     return file_components
 
 
-def _iter_app_dex_files(app_file):
+def _iter_app_dex_files(app_file: str) -> Iterator[tuple[str, str]]:
     """
     Yield ``(dex_path, app_temp_dir)`` for every dex inside an app or bundle.
 
@@ -641,7 +661,7 @@ def _iter_app_dex_files(app_file):
             shutil.rmtree(bundle_temp_dir, ignore_errors=True)
 
 
-def analyze_android_app(app_file, build_cg=False):
+def analyze_android_app(app_file: str, build_cg: bool = False) -> dict | None:
     """
     Build review-ready metadata for an android app in the default analysis mode.
 
@@ -668,7 +688,7 @@ def analyze_android_app(app_file, build_cg=False):
         strings.update(review_metadata.get("informative_strings", []))
     if not dex_count:
         return None
-    metadata = {
+    metadata: dict = {
         "name": os.path.basename(app_file),
         "exe_type": DEX_EXE_TYPE,
         "functions": [{"name": fn} for fn in sorted(f for f in functions if f)],
@@ -682,7 +702,7 @@ def analyze_android_app(app_file, build_cg=False):
     return metadata
 
 
-def build_app_dex_callgraph(app_file):
+def build_app_dex_callgraph(app_file: str) -> dict:
     """
     Build a merged Dalvik callgraph for every dex in an app (or bundle).
 
@@ -716,7 +736,7 @@ def build_app_dex_callgraph(app_file):
             shutil.rmtree(bundle_temp_dir, ignore_errors=True)
 
 
-def analyze_dex_behaviours(dex_metadata):
+def analyze_dex_behaviours(dex_metadata: dict) -> list[Finding]:
     """
     Run the Dalvik behavioural review over a parsed dex.
 
@@ -731,7 +751,15 @@ def analyze_dex_behaviours(dex_metadata):
         return []
 
 
-def create_dex_component(app_file, dex_metadata, group, name, rel_path, version, findings=None):
+def create_dex_component(
+    app_file: str,
+    dex_metadata: dict,
+    group: str,
+    name: str,
+    rel_path: str,
+    version: Any,
+    findings: list[Finding] | None = None,
+) -> Component:
     """
     Creates a Component object with the provided metadata for a DEX file.
 
@@ -780,7 +808,7 @@ def create_dex_component(app_file, dex_metadata, group, name, rel_path, version,
     return comp
 
 
-def build_behaviour_properties(findings):
+def build_behaviour_properties(findings: list[Finding] | None) -> list[Property]:
     """
     Render Dalvik behavioural findings as component properties.
 
@@ -804,7 +832,7 @@ def build_behaviour_properties(findings):
     return properties
 
 
-def _format_dex_method(method):
+def _format_dex_method(method) -> str:
     """
     Format a single dex method as ``name(paramTypes):returnType``.
 
@@ -821,7 +849,7 @@ def _format_dex_method(method):
         return method.name or ""
 
 
-def _clean_type(t):
+def _clean_type(t: Any) -> str:
     """
     Cleans the type string by replacing "/", removing the leading "L" and
     trailing ";".
@@ -835,7 +863,12 @@ def _clean_type(t):
     return str(t).replace("/", ".").removeprefix("L").removesuffix(";")
 
 
-def collect_files_metadata(app_file, parent_component, deep_mode, unpack_target=None):
+def collect_files_metadata(
+    app_file: str,
+    parent_component: Component | None,
+    deep_mode: bool,
+    unpack_target: str | None = None,
+) -> list[Component]:
     """
     Unzip the app (or a specific apk within a bundle) and collect metadata.
 
@@ -859,7 +892,7 @@ def collect_files_metadata(app_file, parent_component, deep_mode, unpack_target=
     return file_components
 
 
-def parse_apk_summary(data):
+def parse_apk_summary(data: str | None) -> Component | None:
     """
     Parse output from apk summary
     """

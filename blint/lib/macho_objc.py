@@ -16,6 +16,7 @@ Struct layouts (64-bit) follow Apple's objc4 runtime:
 
 import contextlib
 import struct
+from collections.abc import Iterator
 
 import lief
 
@@ -49,9 +50,9 @@ _CPU_ARCH_ABI64 = 0x01000000
 class _MachoReader:
     """Reads bytes/pointers from a Mach-O by virtual address."""
 
-    def __init__(self, parsed_obj):
+    def __init__(self, parsed_obj: lief.MachO.Binary) -> None:
         self._obj = parsed_obj
-        self.imagebase = 0
+        self.imagebase: int = 0
         with contextlib.suppress(Exception):
             self.imagebase = parsed_obj.imagebase
         # 64-bit pointer width is assumed everywhere below; 32-bit binaries use
@@ -60,48 +61,48 @@ class _MachoReader:
         with contextlib.suppress(Exception):
             self.is_64 = bool(int(parsed_obj.header.cpu_type.value) & _CPU_ARCH_ABI64)
         # address -> resolved target for internal (rebased) pointers.
-        self.ptr_map = {}
+        self.ptr_map: dict[int, int] = {}
         with contextlib.suppress(Exception):
             for reloc in parsed_obj.relocations:
                 self.ptr_map[reloc.address] = reloc.target
         # address -> external symbol name for bound pointers.
-        self.bind_map = {}
+        self.bind_map: dict[int, str] = {}
         with contextlib.suppress(Exception):
             for binding in parsed_obj.bindings:
                 if binding.symbol is not None and binding.symbol.name:
                     self.bind_map[binding.address] = binding.symbol.name
         # Virtual-address ranges of the mapped sections, used to validate
         # pointers recovered from the raw chained-fixup fallback.
-        self._va_ranges = []
+        self._va_ranges: list[tuple[int, int]] = []
         with contextlib.suppress(Exception):
             for section in parsed_obj.sections:
                 start = section.virtual_address
                 if start:
                     self._va_ranges.append((start, start + section.size))
 
-    def bytes_at(self, va, size):
+    def bytes_at(self, va: int, size: int) -> bytes | None:
         with contextlib.suppress(Exception):
             data = bytes(self._obj.get_content_from_virtual_address(va, size))
             if len(data) == size:
                 return data
         return None
 
-    def u32(self, va):
+    def u32(self, va: int) -> int | None:
         data = self.bytes_at(va, 4)
         return struct.unpack("<I", data)[0] if data else None
 
-    def i32(self, va):
+    def i32(self, va: int) -> int | None:
         data = self.bytes_at(va, 4)
         return struct.unpack("<i", data)[0] if data else None
 
-    def u64(self, va):
+    def u64(self, va: int) -> int | None:
         data = self.bytes_at(va, 8)
         return struct.unpack("<Q", data)[0] if data else None
 
-    def _in_image(self, va):
+    def _in_image(self, va: int) -> bool:
         return any(start <= va < end for start, end in self._va_ranges)
 
-    def _decode_chained_pointer(self, va):
+    def _decode_chained_pointer(self, va: int) -> int | None:
         """Recover a pointer target from a raw chained-fixup slot.
 
         Modern arm64(e) binaries store ``__objc_*`` pointers as dyld chained
@@ -125,14 +126,14 @@ class _MachoReader:
                 return candidate
         return None
 
-    def ptr(self, va):
+    def ptr(self, va: int) -> int | None:
         """Resolved pointer stored at ``va`` (rebase target), or None."""
         target = self.ptr_map.get(va)
         if target is not None:
             return target
         return self._decode_chained_pointer(va)
 
-    def cstring(self, va):
+    def cstring(self, va: int | None) -> str:
         if not va:
             return ""
         out = bytearray()
@@ -147,7 +148,7 @@ class _MachoReader:
         return out.decode("utf-8", "replace")
 
 
-def _section_map(parsed_obj):
+def _section_map(parsed_obj: lief.MachO.Binary) -> dict:
     sections = {}
     for section in parsed_obj.sections:
         # ObjC section names are unique across the binary; last one wins is fine.
@@ -155,7 +156,9 @@ def _section_map(parsed_obj):
     return sections
 
 
-def _iter_method_entries(reader, mlist_va):
+def _iter_method_entries(
+    reader: _MachoReader, mlist_va: int | None
+) -> Iterator[tuple[str, int | None]]:
     """Yield ``(name, imp)`` for each method in a method_list_t.
 
     ``name`` is the selector string and ``imp`` is the resolved virtual address
@@ -197,12 +200,12 @@ def _iter_method_entries(reader, mlist_va):
             yield name, imp
 
 
-def _parse_method_list(reader, mlist_va):
+def _parse_method_list(reader: _MachoReader, mlist_va: int | None) -> list[str]:
     """Return the list of method (selector) names for a method_list_t."""
     return [name for name, _imp in _iter_method_entries(reader, mlist_va)]
 
 
-def _parse_protocol_list(reader, plist_va):
+def _parse_protocol_list(reader: _MachoReader, plist_va: int | None) -> list[str]:
     """Return protocol names referenced by a protocol_list_t."""
     if not plist_va:
         return []
@@ -221,7 +224,7 @@ def _parse_protocol_list(reader, plist_va):
     return names
 
 
-def _superclass_name(reader, class_va):
+def _superclass_name(reader: _MachoReader, class_va: int) -> str:
     """Resolve a class's superclass: internal class name or bound symbol."""
     # External superclasses bind to _OBJC_CLASS_$_<Name>.
     bound = reader.bind_map.get(class_va + _CLASS_SUPERCLASS)
@@ -236,7 +239,9 @@ def _superclass_name(reader, class_va):
     return reader.cstring(reader.ptr((ro & ~7) + _RO_NAME))
 
 
-def _parse_class(reader, class_va, method_imps=None):
+def _parse_class(
+    reader: _MachoReader, class_va: int, method_imps: list[dict] | None = None
+) -> dict | None:
     data = reader.ptr(class_va + _CLASS_DATA)
     if data is None:
         return None
@@ -244,7 +249,7 @@ def _parse_class(reader, class_va, method_imps=None):
     name = reader.cstring(reader.ptr(ro + _RO_NAME))
     if not name:
         return None
-    methods = []
+    methods: list[str] = []
     for sel, imp in _iter_method_entries(reader, reader.ptr(ro + _RO_BASE_METHODS)):
         methods.append(sel)
         # Record recovered implementation addresses so the disassembler can seed
@@ -264,7 +269,7 @@ def _parse_class(reader, class_va, method_imps=None):
     return entry
 
 
-def _parse_pointer_array_section(sections, name, ptr_size=8):
+def _parse_pointer_array_section(sections: dict, name: str, ptr_size: int = 8) -> Iterator[int]:
     """Yield (slot_va) for each pointer slot in a pointer-array section."""
     section = sections.get(name)
     if section is None:
@@ -292,8 +297,8 @@ def parse_objc_metadata(parsed_obj) -> dict:
         LOG.debug("Skipping ObjC metadata parsing for 32-bit Mach-O binary")
         return {}
     ptr_size = 8
-    method_imps = []
-    classes = []
+    method_imps: list[dict] = []
+    classes: list[dict] = []
     for slot in _parse_pointer_array_section(sections, "__objc_classlist", ptr_size):
         if len(classes) >= _MAX_CLASSES:
             break

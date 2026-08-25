@@ -1,24 +1,27 @@
 # pylint: disable=too-many-lines
+from __future__ import annotations
+
 import sys
 from dataclasses import dataclass, field
 import os
 import platform
 import re
-from typing import List, Optional
+from typing import TextIO, cast
+
 from appdirs import user_data_dir
 
-ARCH = platform.machine()
-SYSTEM = platform.system().lower()
+ARCH: str = platform.machine()
+SYSTEM: str = platform.system().lower()
 
 # Default ignore list
-ignore_directories = [
+ignore_directories: list[str] = [
     ".git",
     ".svn",
 ]
-ignore_files = [
+ignore_files: list[str] = [
     ".ds_store",
 ]
-strings_allowlist = {
+strings_allowlist: set[str] = {
     "()",
     "[]",
     "{}",
@@ -81,7 +84,7 @@ strings_allowlist = {
 }
 
 # Method names containing common verbs that could be fuzzed
-fuzzable_names = [
+fuzzable_names: list[str] = [
     "create",
     "delete",
     "update",
@@ -1118,7 +1121,7 @@ fuzzable_names += [
     "scuttle",
     "share",
 ]
-secrets_regex = {
+secrets_regex: dict[str, list[re.Pattern[str]]] = {
     "artifactory": [
         re.compile(r'(?:\s|=|:|"|^)AKC[a-zA-Z0-9]{10,}'),
         re.compile(r'(?:\s|=|:|"|^)AP[\dABCDEF][a-zA-Z0-9]{8,}'),
@@ -1190,7 +1193,7 @@ secrets_regex = {
 SYMBOL_DELIMITER = "~~"
 
 
-def get_float_from_env(name, default):
+def get_float_from_env(name: str, default: float) -> float:
     """
     Retrieves a value from an environment variable and converts it to a
     float. If the value cannot be converted to a float, it returns the
@@ -1208,7 +1211,7 @@ def get_float_from_env(name, default):
     return value
 
 
-def get_int_from_env(name, default):
+def get_int_from_env(name: str, default: int) -> int:
     """
     Retrieves a value from an environment variable and converts it to an
     integer. If the value cannot be converted to an integer, it returns the
@@ -1244,7 +1247,7 @@ class BlintOptions:
     """
 
     deep_mode: bool = False
-    exports_prefix: List = field(default_factory=list)
+    exports_prefix: list[str] = field(default_factory=list)
     fuzzy: bool = False
     no_error: bool = False
     no_reviews: bool = False
@@ -1252,11 +1255,11 @@ class BlintOptions:
     sbom_mode: bool = False
     quiet_mode: bool = False
     db_mode: bool = False
-    image_url: str = ""
-    sbom_output: str = ""
+    image_url: str | None = ""
+    sbom_output: str | TextIO = ""
     sbom_output_dir: str = ""
-    src_dir_boms: List = field(default_factory=list)
-    src_dir_image: List = field(default_factory=list)
+    src_dir_boms: list[str] = field(default_factory=list)
+    src_dir_image: list[str] = field(default_factory=list)
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
@@ -1264,9 +1267,10 @@ class BlintOptions:
     export_callgraph_graphml: bool = False
     export_callgraph_gexf: bool = False
     callgraph_min_confidence: str = "low"
-    custom_rules_dir: Optional[str] = None
+    custom_rules_dir: str | None = None
+    sources: list[str] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):
             self.sources = [os.getcwd()]
         if not self.reports_dir:
@@ -1279,18 +1283,22 @@ class BlintOptions:
         if self.sbom_mode:
             if self.stdout_mode:
                 self.sbom_output = sys.stdout
-            elif not self.sbom_output:
-                self.sbom_output = os.path.join(self.reports_dir, "sbom-binary-postbuild.cdx.json")
-                self.sbom_output_dir = os.path.join(self.reports_dir)
-            elif os.path.isdir(self.sbom_output):
-                self.sbom_output_dir = self.sbom_output
-                self.sbom_output = os.path.join(self.sbom_output, "sbom-binary-postbuild.cdx.json")
             else:
-                self.sbom_output_dir = os.path.dirname(self.sbom_output)
+                # stdout was handled above, so the remaining branches are str.
+                sbom_output = cast(str, self.sbom_output)
+                if not sbom_output:
+                    sbom_output = os.path.join(self.reports_dir, "sbom-binary-postbuild.cdx.json")
+                    self.sbom_output_dir = os.path.join(self.reports_dir)
+                elif os.path.isdir(sbom_output):
+                    self.sbom_output_dir = sbom_output
+                    sbom_output = os.path.join(sbom_output, "sbom-binary-postbuild.cdx.json")
+                else:
+                    self.sbom_output_dir = os.path.dirname(sbom_output)
+                self.sbom_output = sbom_output
 
 
 # PII related symbols
-PII_WORDS = (
+PII_WORDS: tuple[str, ...] = (
     "FirstName",
     "LastName",
     "Phone",
@@ -1319,7 +1327,7 @@ PII_WORDS = (
 )
 
 # Some symbols to look for in a first-stage payload
-FIRST_STAGE_WORDS = (
+FIRST_STAGE_WORDS: tuple[str, ...] = (
     "System.ServiceProcess",
     "System.IO.Compression",
     "System.Reflection.Emit",
@@ -1361,7 +1369,7 @@ FIRST_STAGE_WORDS = (
 )
 
 # Setting blintdb
-BLINTDB_HOME = os.getenv("BLINTDB_HOME")
+BLINTDB_HOME: str = os.getenv("BLINTDB_HOME") or ""
 if not BLINTDB_HOME:
     if os.getenv("RUNNER_TEMP"):
         BLINTDB_HOME = os.path.join(os.environ["RUNNER_TEMP"], "blintdb")
@@ -1390,7 +1398,7 @@ MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
 BLINT_MAX_HEX_BYTES = max(0, get_int_from_env("BLINT_MAX_HEX_BYTES", 4096))
 
 
-IMPLICIT_REGS_X86 = {
+IMPLICIT_REGS_X86: dict[str, dict[str, set[str]]] = {
     "mul": {
         "read": {"ax", "eax", "rax"},
         "write": {"dx", "ax", "edx", "eax", "rdx", "rax"},
@@ -1409,7 +1417,7 @@ IMPLICIT_REGS_X86 = {
     },
     "cbw": {"read": {"al"}, "write": {"ah"}},
     "cwde": {"read": {"ax"}, "write": {"eax"}},
-    "cdqe": {"read": {"eax"}, "write": "rax"},
+    "cdqe": {"read": {"eax"}, "write": {"rax"}},
     "cwd": {"read": {"ax"}, "write": {"dx"}},
     "cdq": {"read": {"eax"}, "write": {"edx"}},
     "cqo": {"read": {"rax"}, "write": {"rdx"}},
@@ -1441,7 +1449,7 @@ IMPLICIT_REGS_X86 = {
     },
 }
 
-IMPLICIT_REGS_X64 = {
+IMPLICIT_REGS_X64: dict[str, dict[str, set[str]]] = {
     "mul": {"read": {"rax"}, "write": {"rdx", "rax"}},
     "imul": {"read": {"rax"}, "write": {"rdx", "rax"}},
     "div": {"read": {"rdx", "rax"}, "write": {"rax", "rdx"}},
@@ -1468,7 +1476,7 @@ IMPLICIT_REGS_X64 = {
     "syscall": {"read": {"rcx", "r11"}, "write": {"rcx", "r11"}},
 }
 
-IMPLICIT_REGS_ARM64 = {
+IMPLICIT_REGS_ARM64: dict[str, dict[str, set[str]]] = {
     "bl": {"write": {"x30"}},
     "blr": {"write": {"x30"}},
     "ret": {"read": {"x30"}},
@@ -1497,7 +1505,7 @@ IMPLICIT_REGS_ARM64 = {
 }
 
 # https://github.com/AsahiLinux/docs/blob/main/docs/hw/cpu/apple-instructions.md
-APPLE_PROPRIETARY_INSTRUCTION_RANGES = {
+APPLE_PROPRIETARY_INSTRUCTION_RANGES: dict[str, tuple[int, int]] = {
     "AMX": (0x00201000, 0x002012DF),
     "WKDM": (0x00200800, 0x00200CFF),
     "GuardedMode": (0x00201400, 0x00201420),
@@ -1505,7 +1513,7 @@ APPLE_PROPRIETARY_INSTRUCTION_RANGES = {
     "SyncBarrier": (0x00201460, 0x00201463),
 }
 
-APPLE_PROPRIETARY_SREGS = {
+APPLE_PROPRIETARY_SREGS: dict[str, set[str]] = {
     "GXF_CONTROL": {
         "S3_6_C15_C1_2",
         "S3_6_C15_C8_1",
@@ -1553,8 +1561,8 @@ APPLE_PROPRIETARY_SREGS = {
     },
 }
 
-MIPS_GPR = {f"${i}" for i in range(32)}
-MIPS_ABI_REGS = {
+MIPS_GPR: set[str] = {f"${i}" for i in range(32)}
+MIPS_ABI_REGS: set[str] = {
     "$zero",
     "$at",
     "$v0",
@@ -1588,11 +1596,11 @@ MIPS_ABI_REGS = {
     "$fp",
     "$ra",
 }
-MIPS_SPECIAL_REGS = {"lo", "hi", "pc"}
+MIPS_SPECIAL_REGS: set[str] = {"lo", "hi", "pc"}
 
-ALL_REGS_MIPS = MIPS_GPR | MIPS_ABI_REGS | MIPS_SPECIAL_REGS
-SORTED_ALL_REGS_MIPS = sorted(ALL_REGS_MIPS, key=len, reverse=True)
-IMPLICIT_REGS_MIPS = {
+ALL_REGS_MIPS: set[str] = MIPS_GPR | MIPS_ABI_REGS | MIPS_SPECIAL_REGS
+SORTED_ALL_REGS_MIPS: list[str] = sorted(ALL_REGS_MIPS, key=len, reverse=True)
+IMPLICIT_REGS_MIPS: dict[str, dict[str, set[str]]] = {
     "jal": {"write": {"$ra"}},
     "jalr": {"write": {"$ra"}},
     "jr": {"read": {"$ra"}},
@@ -1606,7 +1614,7 @@ IMPLICIT_REGS_MIPS = {
     "mthi": {"write": {"hi"}},
     "mtlo": {"write": {"lo"}},
 }
-MIPS_ARITH_LOGIC_3_OP = {
+MIPS_ARITH_LOGIC_3_OP: set[str] = {
     "add",
     "addu",
     "sub",
@@ -1618,10 +1626,10 @@ MIPS_ARITH_LOGIC_3_OP = {
     "slt",
     "sltu",
 }
-MIPS_ARITH_LOGIC_2_OP_IMM = {"addi", "addiu", "andi", "ori", "xori", "slti", "sltiu"}
-MIPS_SHIFT_3_OP = {"sllv", "srlv", "srav"}
-MIPS_SHIFT_2_OP_IMM = {"sll", "srl", "sra"}
-MIPS_LOAD_STORE = {
+MIPS_ARITH_LOGIC_2_OP_IMM: set[str] = {"addi", "addiu", "andi", "ori", "xori", "slti", "sltiu"}
+MIPS_SHIFT_3_OP: set[str] = {"sllv", "srlv", "srav"}
+MIPS_SHIFT_2_OP_IMM: set[str] = {"sll", "srl", "sra"}
+MIPS_LOAD_STORE: set[str] = {
     "lb",
     "lbu",
     "lh",
@@ -1635,7 +1643,7 @@ MIPS_LOAD_STORE = {
     "swl",
     "swr",
 }
-MIPS_MOVE = {"move"}
-MIPS_BRANCH_2_OP = {"beq", "bne", "bgez", "bgtz", "blez", "bltz"}
-MIPS_MULT_DIV = {"mult", "multu", "div", "divu"}
-MIPS_CALL_INST = {"jal", "bal"}
+MIPS_MOVE: set[str] = {"move"}
+MIPS_BRANCH_2_OP: set[str] = {"beq", "bne", "bgez", "bgtz", "blez", "bltz"}
+MIPS_MULT_DIV: set[str] = {"mult", "multu", "div", "divu"}
+MIPS_CALL_INST: set[str] = {"jal", "bal"}

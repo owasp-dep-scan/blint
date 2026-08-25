@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
@@ -20,21 +21,23 @@ from blint.lib.review_utils import (
 )
 from blint.logger import LOG
 
+ReviewResults = dict[str, list[dict[str, str]]]
+
 
 class ReviewRunner:
     """Class for running reviews."""
 
-    def __init__(self):
-        self.results = {}
-        self.review_methods_list = []
-        self.review_exe_list = []
-        self.review_symbols_list = []
-        self.review_imports_list = []
-        self.review_entries_list = []
-        self.review_functions_list = []
-        self.review_binary_list = []
+    def __init__(self) -> None:
+        self.results: ReviewResults = {}
+        self.review_methods_list: list[dict[str, Any]] | None = None
+        self.review_exe_list: list[dict[str, Any]] | None = None
+        self.review_symbols_list: list[dict[str, Any]] | None = None
+        self.review_imports_list: list[dict[str, Any]] | None = None
+        self.review_entries_list: list[dict[str, Any]] | None = None
+        self.review_functions_list: list[dict[str, Any]] | None = None
+        self.review_binary_list: list[dict[str, Any]] | None = None
 
-    def run_review(self, metadata):
+    def run_review(self, metadata: dict[str, Any]) -> ReviewResults:
         """
         Runs a review of the given file and metadata.
 
@@ -66,7 +69,7 @@ class ReviewRunner:
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
 
-    def _review_lists(self, metadata):
+    def _review_lists(self, metadata: dict[str, Any]) -> ReviewResults:
         """
         Reviews lists in the metadata and performs specific actions based on the
         review type.
@@ -93,13 +96,13 @@ class ReviewRunner:
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
 
-    def _review_imports(self, metadata):
+    def _review_imports(self, metadata: dict[str, Any]) -> None:
         """Reviews imports in the metadata."""
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
         LOG.debug(f"Reviewing {len(imports_list)} imports")
         self.run_review_methods_symbols(self.review_imports_list, imports_list)
 
-    def _review_entries(self, metadata):
+    def _review_entries(self, metadata: dict[str, Any]) -> None:
         """Reviews dynamic entries in the metadata."""
         entries_list = [
             f.get("name", "")
@@ -109,7 +112,7 @@ class ReviewRunner:
         LOG.debug(f"Reviewing {len(entries_list)} dynamic entries")
         self.run_review_methods_symbols(self.review_entries_list, entries_list)
 
-    def _review_symbols_exe(self, metadata):
+    def _review_symbols_exe(self, metadata: dict[str, Any]) -> None:
         """Reviews symbols in the metadata."""
         symbols_list = [f.get("name", "") for f in metadata.get("dynamic_symbols", [])]
         symbols_list += [f.get("name", "") for f in metadata.get("symtab_symbols", [])]
@@ -125,7 +128,7 @@ class ReviewRunner:
         if self.review_exe_list:
             self.run_review_methods_symbols(self.review_exe_list, symbols_list)
 
-    def _review_functions(self, metadata):
+    def _review_functions(self, metadata: dict[str, Any]) -> None:
         """Reviews disassembled functions based on their behavioural metadata."""
         disassembled_functions = metadata.get("disassembled_functions")
         if not disassembled_functions:
@@ -133,13 +136,13 @@ class ReviewRunner:
 
         LOG.debug(f"Reviewing {len(disassembled_functions)} disassembled functions")
         results = review_disassembled_functions(
-            self.review_functions_list,
+            self.review_functions_list or [],
             disassembled_functions,
             EVIDENCE_LIMIT,
         )
         self.results |= results
 
-    def _review_binary(self, metadata):
+    def _review_binary(self, metadata: dict[str, Any]) -> None:
         """Reviews whole-binary characteristics such as driver access control."""
         results = review_binary_metadata(
             self.review_binary_list,
@@ -148,7 +151,7 @@ class ReviewRunner:
         )
         self.results |= results
 
-    def _methods_or_exe(self, metadata):
+    def _methods_or_exe(self, metadata: dict[str, Any]) -> None:
         """Reviews method-like lists in the metadata."""
         functions_list = [
             re.sub(r"[*&()]", "", f.get("name", "")) for f in metadata.get("functions", [])
@@ -179,7 +182,7 @@ class ReviewRunner:
                 informative_values=informative_values,
             )
 
-    def _gen_review_lists(self, exe_type):
+    def _gen_review_lists(self, exe_type: str) -> None:
         """Generates the review lists based on the given executable type."""
         self.review_methods_list = review_methods_dict.get(exe_type)
         self.review_exe_list = review_exe_dict.get(exe_type)
@@ -189,14 +192,14 @@ class ReviewRunner:
         self.review_functions_list = review_functions_dict.get(exe_type)
         self.review_binary_list = review_binary_dict.get(exe_type)
 
-    def process_review(self, f, exe_name):
+    def process_review(self, f: str, exe_name: str) -> list[dict[str, Any]]:
         """Processes the review results for the given executable and review."""
-        reviews = []
+        reviews: list[dict[str, Any]] = []
         if not self.results:
             return []
         for cid, evidence in self.results.items():
             aresult = {
-                **review_rules_cache.get(cid),
+                **(review_rules_cache.get(cid) or {}),
                 "evidence": evidence,
                 "filename": f,
                 "exe_name": exe_name,
@@ -206,7 +209,12 @@ class ReviewRunner:
             reviews.append(aresult)
         return reviews
 
-    def run_review_methods_symbols(self, review_list, functions_list, informative_values=None):
+    def run_review_methods_symbols(
+        self,
+        review_list: list[dict[str, Any]] | None,
+        functions_list: list[str],
+        informative_values: list[str] | None = None,
+    ) -> None:
         """Runs a review of methods and symbols based on the provided lists."""
         results = run_pattern_reviews(
             review_list,

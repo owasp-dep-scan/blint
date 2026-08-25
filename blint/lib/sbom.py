@@ -6,7 +6,7 @@ import shutil
 import sys
 import uuid
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Literal, TextIO, cast
 
 import orjson
 from custom_json_diff.lib.utils import file_read, file_write
@@ -49,7 +49,7 @@ from blint.lib.utils import (
 from blint.logger import LOG
 
 
-def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Component:
+def default_parent(src_dirs: list[str], symbols_purl_map: dict | None = None) -> Component:
     """
     Creates a default parent Component object for the given source directories.
 
@@ -82,7 +82,7 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict = None) -> Compon
     return component
 
 
-def default_metadata(src_dirs):
+def default_metadata(src_dirs: list[str]) -> Metadata:
     """
     Creates default metadata for SBOM generation.
 
@@ -93,7 +93,7 @@ def default_metadata(src_dirs):
         Metadata: A Metadata object for SBOM generation.
     """
     metadata = Metadata()
-    metadata.timestamp = f"{datetime.now().isoformat(timespec='seconds')}Z"
+    metadata.timestamp = f"{datetime.now().isoformat(timespec='seconds')}Z"  # type: ignore[assignment]
     metadata.component = default_parent(src_dirs)
     metadata.tools = Tools(
         components=[
@@ -112,7 +112,12 @@ def default_metadata(src_dirs):
     return metadata
 
 
-def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=None) -> CycloneDX:
+def generate(
+    blint_options: BlintOptions,
+    exe_files: list[str],
+    android_files: list[str],
+    ios_files: list[str] | None = None,
+) -> CycloneDX | Literal[False]:
     """
     Generates an SBOM for the given source directories.
 
@@ -127,12 +132,12 @@ def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=No
     ios_files = ios_files or []
     if not android_files and not exe_files and not ios_files:
         return False
-    symbols_purl_map = {}
+    symbols_purl_map: dict = {}
     if blint_options.src_dir_boms:
         symbols_purl_map = populate_purl_lookup(blint_options.src_dir_boms)
     components = []
     dependencies = []
-    dependencies_dict = {}
+    dependencies_dict: dict[str, set] = {}
     sbom = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
         specVersion="1.6",
@@ -185,7 +190,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=No
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
             if blint_options.disassemble:
-                write_dex_callgraph(f, blint_options.sbom_output)
+                write_dex_callgraph(f, cast(str, blint_options.sbom_output))
         if ios_files:
             task = progress.add_task(
                 f"[green] Parsing {len(ios_files)} iOS apps",
@@ -196,7 +201,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=No
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
             components += process_ios_file(dependencies_dict, blint_options.deep_mode, f, sbom)
             if blint_options.disassemble:
-                write_ios_callgraphs(f, blint_options.sbom_output)
+                write_ios_callgraphs(f, cast(str, blint_options.sbom_output))
     if dependencies_dict:
         dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
@@ -213,7 +218,7 @@ def generate(blint_options: BlintOptions, exe_files, android_files, ios_files=No
 def create_sbom(
     components: list[Component],
     dependencies: list[dict],
-    output_file: str,
+    output_file: str | TextIO,
     sbom: CycloneDX,
     deep_mode: bool,
     symbols_purl_map: dict,
@@ -266,12 +271,13 @@ def create_sbom(
             )
         )
     else:
-        output_dir = os.path.dirname(output_file)
+        output_file_str = cast(str, output_file)
+        output_dir = os.path.dirname(output_file_str)
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
         file_write(
-            os.path.join(output_dir, output_file),
+            os.path.join(output_dir, output_file_str),
             sbom.model_dump_json(
                 indent=None if deep_mode else 2,
                 exclude_none=True,
@@ -284,7 +290,7 @@ def create_sbom(
     return sbom
 
 
-def purl_field(value) -> str | None:
+def purl_field(value: Any) -> str | None:
     """Coerce a purl version or qualifier value to a non-empty string.
 
     PackageURL normalizes versions and qualifier values by calling ``strip()`` on
@@ -446,9 +452,7 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
             name=name,
             version=purl_field(version),
             qualifiers=(
-                {"hash": hash_value}
-                if (hash_value := purl_field(symbol.get("hash")))
-                else {}
+                {"hash": hash_value} if (hash_value := purl_field(symbol.get("hash"))) else {}
             ),
         ).to_string()
         comp = Component(
@@ -465,7 +469,9 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
     return lib_components
 
 
-def _add_to_parent_component(metadata_components: list[Component], parent_component: Component):
+def _add_to_parent_component(
+    metadata_components: list[Component], parent_component: Component
+) -> None:
     for mc in metadata_components:
         if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
             mode="python"
@@ -479,8 +485,8 @@ def process_exe_file(
     deep_mode: bool,
     exe: str,
     sbom: CycloneDX,
-    export_prefixes: list[str] = None,
-    symbols_purl_map: dict = None,
+    export_prefixes: list[str] | None = None,
+    symbols_purl_map: dict | None = None,
     use_blintdb: bool = False,
     disassemble: bool = False,
 ) -> list[Component]:
@@ -502,7 +508,8 @@ def process_exe_file(
     """
     if is_wasm_file(exe):
         return []
-    metadata: Dict[str, Any] = parse(exe, disassemble=disassemble)
+    export_prefixes = export_prefixes or []
+    metadata: dict[str, Any] = parse(exe, disassemble=disassemble)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
     lib_components: list[Component] = []
@@ -825,7 +832,7 @@ def process_exe_file(
         lib_components += pe_components
     # Convert go dependencies
     if metadata.get("go_dependencies"):
-        go_components = process_go_dependencies(metadata.get("go_dependencies"))
+        go_components = process_go_dependencies(metadata.get("go_dependencies") or {})
         lib_components += go_components
     # Convert go formulation section
     for k, v in metadata.get("go_formulation", {}).items():
@@ -846,7 +853,7 @@ def process_exe_file(
     return lib_components
 
 
-def create_library_component(entry: Dict, exe: str) -> Component:
+def create_library_component(entry: dict, exe: str) -> Component:
     """
     Processes a library entry and creates a component object.
 
@@ -862,9 +869,7 @@ def create_library_component(entry: Dict, exe: str) -> Component:
     qualifiers = {}
     if compatibility_version := purl_field(entry.get("compatibility_version")):
         qualifiers["compatibility_version"] = compatibility_version
-    purl = PackageURL(
-        type="file", name=name, version=version, qualifiers=qualifiers
-    ).to_string()
+    purl = PackageURL(type="file", name=name, version=version, qualifiers=qualifiers).to_string()
     comp = Component(
         type=Type.library,
         name=name,
@@ -882,7 +887,9 @@ def create_library_component(entry: Dict, exe: str) -> Component:
     return comp
 
 
-def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = None) -> Component:
+def create_dynamic_component(
+    entry: dict, exe: str, evidence_metadata: dict | None = None
+) -> Component:
     """
     Creates a dynamic component object based on the entry information.
 
@@ -896,7 +903,8 @@ def create_dynamic_component(entry: Dict, exe: str, evidence_metadata: dict = No
     """
     group = None
     version = None
-    name = entry.get("name", "").removeprefix("$ORIGIN/") if entry.get("name") else None
+    raw_name = entry.get("name")
+    name = raw_name.removeprefix("$ORIGIN/") if raw_name else None
     purl = entry.get("purl")
     if not purl and name:
         purl = PackageURL(type="file", name=name).to_string()
@@ -1319,7 +1327,7 @@ def process_dotnet_dependencies(
     return components
 
 
-def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
+def process_go_dependencies(go_deps: dict[str, dict]) -> list[Component]:
     """
     Process the go dependencies metadata extracted for binary overlays
 
@@ -1347,14 +1355,14 @@ def process_go_dependencies(go_deps: dict[str, str]) -> list[Component]:
             evidence=create_component_evidence(k, 1.0),
         )
         hash_content = ""
-        if v.get("hash"):
+        if v_hash := v.get("hash"):
             try:
                 hash_content = codecs.encode(
-                    base64.b64decode(v.get("hash").removeprefix("h1:"), validate=True),
+                    base64.b64decode(v_hash.removeprefix("h1:"), validate=True),
                     encoding="hex",
                 )
             except binascii.Error:
-                hash_content = str(v.get("hash").removeprefix("h1:"))
+                hash_content = str(v_hash.removeprefix("h1:"))
         if hash_content:
             comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hash_content)]
         comp.bom_ref = RefType(f"""pkg:golang/{k}@{v.get("version")}""")
@@ -1408,7 +1416,7 @@ def process_rust_dependencies(
 
 def track_dependency(
     dependencies_dict: dict[str, set],
-    parent_component: Component,
+    parent_component: Component | None,
     app_components: list[Component],
 ) -> None:
     """
@@ -1458,7 +1466,7 @@ def trim_components(components: list[Component]) -> list[Component]:
     return [added_dict[k] for k in sorted(added_dict.keys())]
 
 
-def populate_purl_lookup(src_dir_boms: list[str]):
+def populate_purl_lookup(src_dir_boms: list[str]) -> dict[str, str]:
     """
     Create a purl lookup cache by parsing the various BOMs in the given source directory.
 
@@ -1468,7 +1476,7 @@ def populate_purl_lookup(src_dir_boms: list[str]):
     Returns:
         dict: containing symbol name as the key and purl as the value
     """
-    symbols_purl_map = {}
+    symbols_purl_map: dict[str, str] = {}
     for adir in src_dir_boms:
         if files := find_bom_files(adir):
             for f in files:
