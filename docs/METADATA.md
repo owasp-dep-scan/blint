@@ -121,6 +121,17 @@ PE (Portable Executable) files are the standard for Windows.
     - _Stack Frame Reconstruction_: By analyzing the opcodes and prologue_size, analysts can reconstruct exactly how the stack is manipulated. This is vital for understanding where local variables are stored and identifying potential buffer overflow conditions.
     - _Anti-Analysis Detection_: Malware sometimes employs custom exception handlers (handler_rva) to obscure control flow or detect debuggers. Identifying non-standard handlers is a key indicator of obfuscation.
 
+- **Embedded cryptography (`crypto_material`):** Recovered from the raw bytes of `.rdata`, `.data`, `.text` and `.rodata`, so it is available without `--disassemble`. Complements the behavioural `CRYPTO_BEHAVIOR` function review, which can say a routine looks like a cipher but not which one.
+  - `algorithms`: Sorted list of algorithm names identified from specification-fixed constants.
+  - `constants`: One entry per matched constant, with `algorithm`, `constant` (what the bytes are), `section`, `offset` and `confidence`. A 16-byte round-constant table is `high` confidence; a 4-byte polynomial that could occur as an unrelated immediate is `medium`.
+  - `permutation_tables`: 256-byte tables holding every byte value exactly once — a substitution box, including a custom or modified one that matches no published constant.
+  - `opaque_regions`: Contiguous high-entropy regions that match no known table, with `size`, `entropy`, `section_size` and `section_fraction`. The fraction is what separates an embedded encrypted payload from the certificates and compressed assets that fill a large program's `.rdata`.
+  - Note that absence of a constant is not absence of the algorithm: an AES built against AES-NI carries no tables, and mbedTLS with runtime table generation leaves only zero-filled BSS.
+
+- **Stack-built strings (`stack_strings`, requires `--disassemble`):** String literals the binary assembles on its stack from arithmetic rather than storing in a data section. These appear in no other string channel, so without this they are invisible to string scanning, to YARA rules written against literals, and to a reviewer reading the file.
+  - Each entry carries `value`, `encoding` (`utf-16le` or `ascii`), the `function` and `address` it was built in, and the `frame` slot.
+  - Recovery is a linear forward pass with no control-flow awareness, so a value assembled across a branch or loop may be partial. Treat entries as evidence to confirm against the reconstruction rather than as ground truth.
+
 In the case of ARM64X, a single PE file encapsulates ARM64 and ARM64EC architectures. For `ARM64EC` nested PE binaries, an additional attribute `nested_binary` would contain the information such as `exports`, `exceptions`, `functions`, `ctor_functions`, and `dotnet_dependencies`.
 
 ### For Mach-O Binaries

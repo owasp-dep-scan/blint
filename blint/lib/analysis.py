@@ -464,6 +464,41 @@ def run_prefuzz(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     return fuzzables
 
 
+# Evidence entries are shaped by the rule that produced them: a symbol review
+# names a function, a driver review names a control code, and a whole-binary
+# review names whatever resource it found. The first field present is used as the
+# row label, so a rule that reports none of them is skipped rather than rendering
+# a None into the table.
+_EVIDENCE_LABEL_FIELDS: tuple[str, ...] = (
+    "function",
+    "value",
+    "module",
+    "device",
+    "code",
+    "value_name",
+    "claimed_module",
+    "host_executable",
+    "primitive",
+    "section",
+)
+
+
+def _evidence_label(evidence: Any) -> str:
+    """Return the most identifying short label for one piece of evidence."""
+    if isinstance(evidence, str):
+        return evidence
+    if not isinstance(evidence, dict):
+        return str(evidence or "")
+    for field in _EVIDENCE_LABEL_FIELDS:
+        if value := evidence.get(field):
+            return str(value)
+    # A rule whose evidence is a summary rather than a named resource, such as a
+    # transport count, still deserves a row.
+    if transports := evidence.get("transports"):
+        return ", ".join(str(t) for t in transports)
+    return ""
+
+
 def print_reviews_table(reviews: list[dict[str, Any]], files: list[str]) -> None:
     """Prints the capability review table.
 
@@ -481,8 +516,8 @@ def print_reviews_table(reviews: list[dict[str, Any]], files: list[str]) -> None
     table.add_column("Capabilities")
     table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:
-        evidences = [e.get("function") for e in r.get("evidence") or []]
-        evidences = list(islice(evidences, EVIDENCE_LIMIT))
+        evidences = [_evidence_label(e) for e in r.get("evidence") or []]
+        evidences = list(islice((e for e in evidences if e), EVIDENCE_LIMIT))
         row = [r.get("id")]
         if len(files) > 1:
             row.append(os.path.basename(r.get("exe_name") or ""))

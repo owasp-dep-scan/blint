@@ -8,6 +8,7 @@ import sys
 import warnings
 import zlib
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 
 import lief
 import orjson
@@ -37,7 +38,9 @@ from blint.lib.driver_ioctl import (
     collect_driver_ioctls,
     is_kernel_driver,
 )
+from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
+from blint.lib.stack_strings import recover_stack_strings
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.utils import (
     calculate_entropy,
@@ -572,6 +575,43 @@ def binary_strings(parsed_obj) -> list[str]:
     return extract_section_strings(parsed_obj)
 
 
+# Shapes that make a string worth keeping regardless of its entropy score.
+#
+# The entropy and length gates below were written to surface secrets, and they do
+# that well. But the same list is what every string-based review reads, and for
+# that purpose the gates reject almost everything of interest: `calculate_entropy`
+# returns a coarse bucket, so `dpapisvc.dll` scores 0.2 and
+# `EveryoneIncludesAnonymous` scores 0.2 against a 0.39 threshold, while
+# `Microsoft Base Cryptographic Provider v1.0` scores 0. A PE whose indicators
+# are all short structured strings therefore yielded two strings in total, and
+# the SDDL and kernel-object-path reviews that read this list silently found
+# nothing.
+#
+# Rather than lower the threshold - which would admit tens of thousands of
+# `.rdata` fragments - a string is also kept when its *shape* says it names a
+# resource: a namespaced path, a registry key, a module or device name, a URL, or
+# an SDDL descriptor. These are the forms reviews match on, and they are bounded
+# because each requires a specific delimiter or suffix.
+REVIEW_RELEVANT_STRING_RE = re.compile(
+    r"""(
+        ^\\\\[.?]\\             # \\.\Device or \\?\Volume client paths
+      | ^\\(?:device|dosdevices|\?\?|basenamedobjects|registry|rpc\ control)\\  # object manager
+      | ^(?:hkey_|hklm\\|hkcu\\)  # registry roots
+      | (?:system|software)\\(?:currentcontrolset|microsoft|policies)\\  # registry paths
+      | ^[\w.\-]{1,60}\.(?:dll|exe|sys|cpl|ocx|drv)$  # a module name and nothing else
+      | ^(?:https?|ftps?|wss?|ldaps?|smb)://  # a URL
+      | ^[dosg]:(?:\(|p\()      # an SDDL security descriptor
+      | ^/(?:dev|proc|sys|etc|var/run)/  # unix pseudo-file paths
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_review_relevant_string(value: str) -> bool:
+    """Return True when a string names a resource a review would match on."""
+    return bool(REVIEW_RELEVANT_STRING_RE.search(value.strip()))
+
+
 def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parse strings from a parsed object.
@@ -595,7 +635,11 @@ def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
                 if s and "[]" not in s and "{}" not in s:
                     entropy = calculate_entropy(s)
                     secret_type = check_secret(s)
-                    if (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH)) or secret_type:
+                    if (
+                        (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH))
+                        or secret_type
+                        or is_review_relevant_string(s)
+                    ):
                         strings_list.append(
                             {
                                 "value": decode_base64(s) if s.endswith("==") else s,
@@ -2107,6 +2151,11 @@ def parse(exe_file: str, disassemble: bool = False) -> dict:  # pylint: disable=
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
+            # String literals a binary assembles on its stack are invisible to
+            # section scanning, so this is the only channel that sees the device
+            # paths, registry keys and module names an obfuscated image hides.
+            if stack_strings := recover_stack_strings(metadata["disassembled_functions"]):
+                metadata["stack_strings"] = stack_strings
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
                     metadata["disassembled_functions"],
@@ -2121,6 +2170,13 @@ def parse(exe_file: str, disassemble: bool = False) -> dict:  # pylint: disable=
         if isinstance(parsed_obj, lief.PE.Binary):
             if driver_interface := classify_driver_strings(metadata):
                 metadata["driver_interface"] = driver_interface
+            # Embedded cryptographic constants and opaque data regions are
+            # properties of the section bytes, so they are recovered whether or
+            # not the image was disassembled.
+            if crypto_material := analyze_crypto_material(
+                _pe_section_bytes(parsed_obj, CRYPTO_SCAN_SECTIONS)
+            ):
+                metadata["crypto_material"] = crypto_material
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
     return cleanup_dict_lief_errors(metadata)
@@ -2787,29 +2843,36 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     return lc_info
 
 
-def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
-    """Return the raw bytes of the PE data sections that can hold IOCTL tables.
+def _pe_section_bytes(parsed_obj: lief.PE.Binary, wanted: Iterable[str]) -> list:
+    """Return the raw bytes of the named PE sections.
 
-    Only the sections the table scan looks at are read, so a large image does not
-    pay to copy its code and resource sections into memory as well.
+    Only the sections a scan looks at are read, so a large image does not pay to
+    copy its resource and relocation sections into memory as well.
 
     Args:
         parsed_obj: The parsed PE binary.
+        wanted: Lowercased section names to collect.
 
     Returns:
         list: (section name, bytes) pairs, empty if the content is unreadable.
     """
     sections = []
+    wanted_names = {name.lower() for name in wanted}
     try:
         for section in parsed_obj.sections:
             name = (section.name or "").rstrip("\x00")
-            if name.lower() not in IOCTL_TABLE_SECTIONS:
+            if name.lower() not in wanted_names:
                 continue
             if content := section.content:
                 sections.append((name, bytes(content)))
     except (AttributeError, TypeError, ValueError) as e:
-        LOG.debug(f"Unable to read PE section content for IOCTL table scan: {e}")
+        LOG.debug(f"Unable to read PE section content: {e}")
     return sections
+
+
+def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
+    """Return the raw bytes of the PE data sections that can hold IOCTL tables."""
+    return _pe_section_bytes(parsed_obj, IOCTL_TABLE_SECTIONS)
 
 
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -> dict:

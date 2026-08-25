@@ -16,6 +16,11 @@ from blint.lib.driver_ioctl import (
     collect_client_ioctls,
     is_kernel_driver,
 )
+from blint.lib.implant_reviews import (
+    COVERT_CHANNEL_DEVICES,
+    IMPLANT_RULE_EVALUATORS,
+    evaluate_implant_rule,
+)
 
 # Primitives that grant a caller direct hardware or physical-memory reach.
 HARDWARE_PRIMITIVE_IMPORTS: set[str] = {
@@ -183,8 +188,32 @@ def _device_object_names(metadata: dict) -> dict:
     return names
 
 
+def _client_device_paths(metadata: dict) -> list[str]:
+    """Return the ``\\\\.\\`` device paths the image opens.
+
+    Stack-built paths are included alongside the ones recovered from the strings,
+    because an implant that assembles its device name at runtime leaves nothing
+    in ``driver_interface`` to find.
+    """
+    paths = list((metadata.get("driver_interface") or {}).get("client_device_paths") or [])
+    for entry in metadata.get("stack_strings") or []:
+        value = str(entry.get("value", "")).strip()
+        if value.startswith("\\\\.\\") and value not in paths:
+            paths.append(value)
+    return paths
+
+
+def _is_covert_channel_path(path: str) -> bool:
+    """Return True when a device path names a hypervisor or IPC channel."""
+    leaf = str(path).strip()[4:].split("\\", 1)[0].strip().lower()
+    return leaf in COVERT_CHANNEL_DEVICES
+
+
 def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     """Evaluate rule-specific whole-binary heuristics. Returns evidence list."""
+    if rule_id in IMPLANT_RULE_EVALUATORS:
+        return evaluate_implant_rule(rule_id, metadata)
+
     import_names = _collect_import_names(metadata)
 
     if rule_id == "DRIVER_INSECURE_DEVICE_OBJECT":
@@ -225,7 +254,13 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
         # The `\\.\` paths name the driver being driven, which is what decides
         # whether this is a vendor utility talking to its own driver or a client
         # reaching for someone else's.
-        target_devices = (metadata.get("driver_interface") or {}).get("client_device_paths")
+        target_devices = _client_device_paths(metadata)
+        # A hypervisor guest-communication device is reached with exactly this
+        # import pair and a vendor-range control code, but it is a covert channel
+        # rather than a vulnerable driver. Reporting it here would label the
+        # capability wrongly; COVERT_CHANNEL_DEVICE_ACCESS names it correctly.
+        if target_devices and all(_is_covert_channel_path(path) for path in target_devices):
+            return []
         client_evidence: list[dict] = []
         for entry in client_codes:
             item = {
