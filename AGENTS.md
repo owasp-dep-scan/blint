@@ -50,7 +50,8 @@ Primary workflows:
 3. `process_exe_file` parses binaries and maps dependencies/components.
 4. Optional `--use-blintdb` enriches component identification.
 5. `--use-blintdb --deep` automatically enables disassembly and uses function-hash lookup before symbol fallback.
-6. Output is written to the configured file (or stdout).
+6. Wasm inputs are skipped unless `--wasm-sbom` is set, which emits components from the Component Model binary's imported WIT interface packages (exact evidence only; exports stay a parent property).
+7. Output is written to the configured file (or stdout).
 
 ## Agent coding guidelines for this repo
 
@@ -144,6 +145,7 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`, `USE_BLINTDB`
 - `EVIDENCE_LIMIT`, `SYMBOLS_LOOKUP_BATCH_LEN`, `MIN_MATCH_SCORE`
 - `BLINT_MAX_HEX_BYTES`
+- `BLINT_MAX_WASM_INSTRUCTIONS` (total instruction-stream budget per wasm report, divided max-min fair across functions; 0 disables)
 - `SCAN_DEBUG_MODE`, `SCAN_ID`
 - `BLINT_DB_MESON_STRIP` when producing local Meson corpora in the linked `blint-db` repo
 

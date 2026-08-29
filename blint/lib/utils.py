@@ -512,6 +512,16 @@ def is_fuzzable_name(name_str: str | None) -> bool:
     return any(n.lower() in name_str for n in fuzzable_names) if name_str else False
 
 
+def severity_rank(severity: str | None) -> int:
+    """Ranks a blint severity for sorting, most severe first.
+
+    Unknown or missing severities sort last.
+    """
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+        (severity or "").lower(), 5
+    )
+
+
 def print_findings_table(findings: list[dict[str, Any]], files: list[str]) -> None:
     """
     Prints the findings in a formatted table.

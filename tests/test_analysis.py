@@ -9,7 +9,9 @@ from blint.lib.analysis import (
     _safe_mermaid_label,
     load_default_rules,
     run_checks,
+    run_wasm_findings,
 )
+from blint.lib.binary import parse
 from blint.lib.runners import ReviewRunner
 
 load_default_rules()
@@ -1098,3 +1100,54 @@ def test_network_evasion_cluster_reviews_require_multiple_patterns():
     rule_ids = {result["id"] for result in results}
 
     assert "RAW_PACKET_SOCKET_CLUSTER" not in rule_ids
+
+
+def test_run_wasm_findings_pass_through():
+    dos_file = Path(__file__).parent / "data" / "dos_growth_loop.wasm"
+    metadata = parse(str(dos_file))
+
+    results = run_wasm_findings(str(dos_file), metadata)
+
+    assert results
+    assert results[0]["id"] == "WASM-DOS-003"
+    assert results[0]["severity"] == "high"
+    assert results[0]["exe_type"] == "wasmbinary"
+    assert results[0]["filename"] == str(dos_file)
+    assert results[0]["exe_name"] == metadata["name"]
+    assert results[0]["evidence"]
+
+
+def test_run_wasm_findings_orders_by_severity_then_id():
+    metadata = {
+        "name": "synthetic.wasm",
+        "exe_type": "wasmbinary",
+        "wasm_analysis": {
+            "findings": [
+                {"id": "WASM-B-001", "title": "Medium finding", "severity": "medium"},
+                {
+                    "id": "WASM-A-002",
+                    "title": "High finding",
+                    "severity": "high",
+                    "confidence": "high",
+                    "evidence": {"ops": 3},
+                    "remediation": "Do the safe thing.",
+                },
+            ]
+        },
+    }
+
+    results = run_wasm_findings("synthetic.wasm", metadata)
+
+    assert [item["id"] for item in results] == ["WASM-A-002", "WASM-B-001"]
+    assert results[0]["description"] == "Do the safe thing."
+    assert results[0]["evidence"] == {"ops": 3}
+    assert results[0]["confidence"] == "high"
+
+
+def test_run_wasm_findings_empty_inputs():
+    clean_file = Path(__file__).parent / "data" / "complex_flow.wasm"
+    clean_metadata = parse(str(clean_file))
+
+    assert run_wasm_findings("clean.wasm", clean_metadata) == []
+    assert run_wasm_findings("clean.wasm", {}) == []
+    assert run_wasm_findings("clean.wasm", {"wasm_analysis": {}}) == []

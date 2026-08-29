@@ -9,8 +9,14 @@ from rich.progress import Progress, TaskID
 from blint.config import BlintOptions
 from blint.cyclonedx.spec import CycloneDX
 from blint.lib.android import analyze_android_app
-from blint.lib.analysis import initialize_rules, report, run_checks, run_prefuzz
-from blint.lib.binary import is_wasm_file, parse
+from blint.lib.analysis import (
+    initialize_rules,
+    report,
+    run_checks,
+    run_prefuzz,
+    run_wasm_findings,
+)
+from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.ios import collect_ios_app, enrich_with_bundle_context, is_ios_app
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
@@ -153,7 +159,12 @@ class AnalysisRunner:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
                 LOG.debug(f"Skipping disassembly for wasm file {f}")
-            metadata = parse(f, should_disassemble)
+            metadata = parse(
+                f,
+                should_disassemble,
+                wasm_strings=blint_options.wasm_strings,
+                wasm_call_graph=blint_options.wasm_call_graph,
+            )
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self.progress.advance(self.task)
 
@@ -179,7 +190,12 @@ class AnalysisRunner:
                     description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
                 )
                 should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
-                metadata = parse(bin_path, should_disassemble)
+                metadata = parse(
+                    bin_path,
+                    should_disassemble,
+                    wasm_strings=blint_options.wasm_strings,
+                    wasm_call_graph=blint_options.wasm_call_graph,
+                )
                 enrich_with_bundle_context(
                     metadata, app["bundle_info"], role, entry.get("bundle_path")
                 )
@@ -198,6 +214,18 @@ class AnalysisRunner:
         assert self.task is not None
         exe_name = metadata.get("name", f)
         wasm_report = metadata.get("wasm_report")
+        # wasm needs no disassembly of its own: the wasm_tools call graph
+        # converts directly into blint's callgraph payload. It is still gated on
+        # --disassemble so the "no artifacts without --disassemble" message
+        # stays truthful for every format.
+        if (
+            wasm_report
+            and wants_callgraph_outputs
+            and blint_options.disassemble
+            and not metadata.get("callgraph")
+            and (wasm_callgraph := build_wasm_callgraph(wasm_report))
+        ):
+            metadata["callgraph"] = wasm_callgraph
         metadata_to_export = dict(metadata)
         if wasm_report:
             metadata_to_export.pop("wasm_report", None)
@@ -226,7 +254,12 @@ class AnalysisRunner:
         # Native security-property checks (PAC, CET, etc.) are meaningless for
         # Dalvik apps and would fire spuriously; the dex review supplies the
         # relevant behavioural findings instead.
-        if metadata.get("exe_type") != "dexbinary" and (finding := run_checks(f, metadata)):
+        exe_type = metadata.get("exe_type")
+        if exe_type != "dexbinary" and (finding := run_checks(f, metadata)):
+            self.findings += finding
+        # wasm-tools findings are checks too: pass them through regardless of
+        # --no-reviews so triage output stays consistent with other formats.
+        if exe_type == "wasmbinary" and (finding := run_wasm_findings(f, metadata)):
             self.findings += finding
         if not blint_options.no_reviews:
             self.do_review(exe_name, f, metadata)

@@ -5,7 +5,7 @@ current heuristics, confidence semantics, known limitations, and practical FP/FN
 
 ## What the Callgraph Represents
 
-`blint` builds a static callgraph from the `disassembled_functions` [attribute](./DISASSEMBLE.md).
+`blint` builds a static callgraph from the `disassembled_functions` [attribute](./DISASSEMBLE.md). WebAssembly is the exception: wasm needs no disassembly of its own, and its callgraph is converted from the `wasm_tools` static call graph instead (see [WebAssembly callgraphs](#webassembly-callgraphs) below). Both sources produce the same payload shape, so the renderers and the confidence filter behave identically.
 
 - Internal edge: source and destination both map to known internal function nodes.
 - External edge: source has call evidence but destination cannot be mapped uniquely.
@@ -144,6 +144,23 @@ reason buckets such as:
 
 Kind suffixes are appended where applicable, for example
 `unresolved:indirect_hint`.
+
+## WebAssembly Callgraphs
+
+For WASM inputs the callgraph is converted from the `wasm_tools` static call graph rather than recovered from disassembly. wasm function indices are explicit in the binary, so there is no address-space or symbol recovery step and none of the heuristics above apply.
+
+- Nodes are the module's locally defined functions. Node `name` and `address` use the same demangling and formatting as `metadata["functions"]`, so a node can be cross-referenced by string match.
+- Imported functions become `external` targets rather than nodes: the import table names them exactly, but their bodies live in the host. Targets use the `module::name` form that `metadata["dynamic_symbols"]` uses, so they line up with the import table.
+- Edge kinds come from `wasm_tools`: `direct` (`call`/`return_call` with a function-index immediate), `indirect-approx` (`call_indirect`/`return_call_indirect` resolved through the element segments that populate the referenced table), and `typed-approx` (`call_ref`/`return_call_ref` resolved to every function whose signature matches the immediate type index). Both `*-approx` kinds are deliberate over-approximations — supersets of the true targets — and must not be read as ground truth.
+- Confidence uses the same mapping as the native builder: `direct` is `high`, the two approximate kinds are `low`. External import edges are the one place wasm outranks natives — an import target is named by the module rather than attributed from evidence, so a `direct` import edge stays `high`. Approximate edges to imports are recorded with reason `import:<kind>` at `low`.
+
+Exports are gated on `--disassemble` like every other format, so the "no callgraph artifacts without `--disassemble`" message stays truthful:
+
+```bash
+blint --disassemble --export-callgraph-mermaid -i component.wasm
+```
+
+`--no-wasm-call-graph` skips call-graph construction entirely, which zeroes `wasm_call_graph_summary` and suppresses wasm callgraph exports even when `--disassemble` is passed. The `wasm_tools` call graph is capped upstream at 5000 edges; when that cap is hit, `wasm_call_graph_summary.truncated` is `true`.
 
 ## Export Tuning by Confidence
 

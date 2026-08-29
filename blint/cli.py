@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         db_mode=False,
         callgraph_match_mode=False,
         quiet_mode=False,
+        wasm_sbom=False,
     )
     parser.add_argument(
         "-i",
@@ -95,6 +96,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         dest="no_reviews",
         help="Do not perform method reviews.",
+    )
+    parser.add_argument(
+        "--no-wasm-strings",
+        action="store_false",
+        default=True,
+        dest="wasm_strings",
+        help="Do not extract strings from wasm files. Shrinks the wasm report "
+        "and disables the string-based wasm findings (e.g. WASM-STR-007).",
+    )
+    parser.add_argument(
+        "--no-wasm-call-graph",
+        action="store_false",
+        default=True,
+        dest="wasm_call_graph",
+        help="Do not build the wasm_tools call graph for wasm files. Shrinks "
+        "the wasm report and disables wasm callgraph exports.",
     )
     parser.add_argument(
         "--suggest-fuzzable",
@@ -229,6 +246,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.path.exists(BLINTDB_LOC),
         dest="use_blintdb",
         help=f"Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the file exists at {BLINTDB_LOC}. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.",
+    )
+    sbom_parser.add_argument(
+        "--wasm-sbom",
+        action="store_true",
+        default=False,
+        dest="wasm_sbom",
+        help="Emit SBOM components from WebAssembly Component Model binaries "
+        "using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as "
+        "exact evidence. Core modules without component-model evidence are skipped.",
     )
     callgraph_match_parser = subparsers.add_parser(
         "callgraph-match",
@@ -476,6 +502,9 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         src_dir_image=args.src_dir_image,
         stdout_mode=args.stdout_mode,
         use_blintdb=args.use_blintdb,
+        wasm_sbom=args.wasm_sbom,
+        wasm_strings=args.wasm_strings,
+        wasm_call_graph=args.wasm_call_graph,
         disassemble=args.disassemble,
         render_mermaid_callgraph=args.render_mermaid_callgraph,
         export_callgraph_graphml=args.export_callgraph_graphml,

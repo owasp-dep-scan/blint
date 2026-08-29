@@ -28,6 +28,7 @@ def test_run_default_mode_exports_wasm_report_separately(tmp_path):
 
     assert metadata.get("binary_type") == "WASM"
     assert "wasm_report" not in metadata
+    assert "callgraph" not in metadata
     assert wasm_report.get("file") == str(wasm_file)
     assert wasm_report.get("module_version") == metadata.get("module_version")
 
@@ -63,6 +64,106 @@ def test_run_sbom_mode_skips_wasm_files(tmp_path):
     assert sbom
     assert sbom.metadata
     assert options.sbom_output
+
+
+def test_run_default_mode_surfaces_wasm_findings(tmp_path):
+    wasm_file = Path(__file__).resolve().parent / "data" / "strings_secrets.wasm"
+    options = BlintOptions(
+        src_dir_image=[str(wasm_file)],
+        reports_dir=str(tmp_path),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    findings_file = tmp_path / "findings.json"
+    assert findings_file.exists()
+    findings_report = orjson.loads(findings_file.read_bytes())
+    finding_ids = {f["id"] for f in findings_report["findings"]}
+    assert "WASM-STR-007" in finding_ids
+    wasm_finding = next(f for f in findings_report["findings"] if f["id"] == "WASM-STR-007")
+    assert wasm_finding["severity"] == "high"
+    assert wasm_finding["exe_type"] == "wasmbinary"
+    assert wasm_finding["exe_name"] == str(wasm_file)
+
+
+def test_run_default_mode_exports_wasm_callgraph_artifacts(tmp_path):
+    wasm_file = Path(__file__).resolve().parent / "data" / "component_minimal.wasm"
+    options = BlintOptions(
+        src_dir_image=[str(wasm_file)],
+        reports_dir=str(tmp_path),
+        no_reviews=True,
+        quiet_mode=True,
+        disassemble=True,
+        render_mermaid_callgraph=True,
+        export_callgraph_graphml=True,
+        export_callgraph_gexf=True,
+    )
+
+    run_default_mode(options)
+
+    mmd_file = tmp_path / f"{wasm_file.name}-callgraph.mmd"
+    graphml_file = tmp_path / f"{wasm_file.name}-callgraph.graphml"
+    gexf_file = tmp_path / f"{wasm_file.name}-callgraph.gexf"
+    assert mmd_file.exists()
+    assert graphml_file.exists()
+    assert gexf_file.exists()
+
+    mmd_text = mmd_file.read_text(encoding="utf-8")
+    assert mmd_text.startswith("graph TD")
+    assert "N0[" in mmd_text and "N1[" in mmd_text
+    assert "<graphml" in graphml_file.read_text(encoding="utf-8")
+    assert "<gexf" in gexf_file.read_text(encoding="utf-8")
+
+    metadata = orjson.loads(
+        (tmp_path / f"{wasm_file.name}-metadata.json").read_bytes()
+    )
+    callgraph = metadata["callgraph"]
+    assert callgraph["version"] == 2
+    assert callgraph["node_count"] == 2
+    assert callgraph["edge_count"] == 2
+
+
+def test_run_default_mode_wasm_opt_outs(tmp_path):
+    """--no-wasm-strings and --no-wasm-call-graph remove the derived artifacts."""
+    secrets_file = Path(__file__).resolve().parent / "data" / "strings_secrets.wasm"
+    options = BlintOptions(
+        src_dir_image=[str(secrets_file)],
+        reports_dir=str(tmp_path),
+        no_reviews=True,
+        quiet_mode=True,
+        wasm_strings=False,
+    )
+
+    run_default_mode(options)
+
+    # The string-derived finding disappears with its evidence source, so no
+    # findings report is produced at all for this input.
+    assert not (tmp_path / "findings.json").exists()
+    wasm_report = orjson.loads(
+        (tmp_path / f"{secrets_file.name}-wasm-report.json").read_bytes()
+    )
+    assert wasm_report["strings"] == []
+
+    component_file = Path(__file__).resolve().parent / "data" / "component_minimal.wasm"
+    options = BlintOptions(
+        src_dir_image=[str(component_file)],
+        reports_dir=str(tmp_path),
+        no_reviews=True,
+        quiet_mode=True,
+        disassemble=True,
+        render_mermaid_callgraph=True,
+        wasm_call_graph=False,
+    )
+
+    run_default_mode(options)
+
+    assert not (tmp_path / f"{component_file.name}-callgraph.mmd").exists()
+    metadata = orjson.loads(
+        (tmp_path / f"{component_file.name}-metadata.json").read_bytes()
+    )
+    assert "callgraph" not in metadata
 
 
 def test_run_default_mode_renders_mermaid_callgraph(tmp_path, monkeypatch):
@@ -105,7 +206,9 @@ def test_run_default_mode_renders_mermaid_callgraph(tmp_path, monkeypatch):
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
+    monkeypatch.setattr(
+        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
+    )
     monkeypatch.setattr(
         "blint.lib.runners.run_checks",
         lambda _f, _m: [
@@ -166,7 +269,9 @@ def test_run_default_mode_renders_mermaid_without_findings(tmp_path, monkeypatch
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
+    monkeypatch.setattr(
+        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
+    )
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
     run_default_mode(options)
@@ -216,7 +321,9 @@ def test_run_default_mode_exports_graphml_and_gexf_callgraphs(tmp_path, monkeypa
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d: dict(fake_metadata))
+    monkeypatch.setattr(
+        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
+    )
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
     run_default_mode(options)

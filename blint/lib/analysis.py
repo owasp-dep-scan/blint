@@ -43,6 +43,7 @@ from blint.lib.utils import (
     export_metadata,
     is_fuzzable_name,
     print_findings_table,
+    severity_rank,
 )
 from blint.logger import LOG, console
 
@@ -352,6 +353,48 @@ def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         if result := run_rule(f, metadata, rule_obj, exe_type, cid):
             results.append(result)
+    return results
+
+
+def run_wasm_findings(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Passes the wasm-tools analysis findings through as blint findings.
+
+    The ``WASM-*`` findings (WASM-CAP-001 through WASM-STR-007) are computed
+    by the wasm_tools parser from the decoded module. They are mapped, not
+    re-implemented as pattern rules, so the rule semantics stay in sync with
+    upstream. Severity tops out at ``high``, so CI builds that fail only on
+    ``critical`` findings are unaffected.
+
+    Args:
+        f: The wasm file path the metadata was parsed from.
+        metadata: The metadata dict produced by parse_wasm_metadata.
+
+    Returns:
+        A list of finding dicts in blint shape, ordered by severity then id.
+
+    """
+    results: list[dict[str, Any]] = []
+    wasm_analysis = metadata.get("wasm_analysis")
+    if not isinstance(wasm_analysis, dict):
+        return results
+    for wasm_finding in wasm_analysis.get("findings") or []:
+        if not isinstance(wasm_finding, dict) or not wasm_finding.get("id"):
+            continue
+        severity = str(wasm_finding.get("severity") or "info")
+        results.append(
+            {
+                "id": str(wasm_finding["id"]),
+                "title": str(wasm_finding.get("title") or ""),
+                "severity": severity,
+                "description": str(wasm_finding.get("remediation") or ""),
+                "confidence": str(wasm_finding.get("confidence") or "none"),
+                "evidence": wasm_finding.get("evidence") or {},
+                "filename": f,
+                "exe_name": metadata.get("name") or f,
+                "exe_type": metadata.get("exe_type"),
+            }
+        )
+    results.sort(key=lambda item: (severity_rank(item["severity"]), item["id"]))
     return results
 
 

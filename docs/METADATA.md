@@ -18,7 +18,7 @@ At the highest level, the JSON output contains attributes that identify the bina
 | `binary_type`         | The format of the binary, such as `ELF`, `PE`, `MachO`, or `WASM`. This is the primary key for interpreting format-specific sections.                                                                                                                                            | Directing further analysis; knowing which format-specific tools to use next.                                                       |
 | `hashes`              | A collection of cryptographic hashes for the file, including MD5, SHA1, SHA256, and SHA512.                                                                                                                                                                                      | File identification, malware signature matching, and searching in threat intelligence platforms like VirusTotal.                   |
 | `llvm_target_tuple`   | A string constructed to represent the binary's target environment in a format recognized by LLVM. The format is `arch-vendor-os-environment`. For example: `x86_64-pc-win32-msvc` or `mipsel-unknown-linux-muslsf`. This is crucial for accurate disassembly.                    | Configuring disassemblers and decompilers; understanding the intended operating system and ABI.                                    |
-| `callgraph`           | Optional compact function-call graph derived from `disassembled_functions` when `--disassemble` is enabled. Includes `nodes`, internal `edges` (with call counts), and unresolved/ambiguous external targets.                                                                    | Control-flow triage, function reachability analysis, and quick hotspot detection without parsing full assembly text.               |
+| `callgraph`           | Optional compact function-call graph derived from `disassembled_functions` when `--disassemble` is enabled, or converted from the `wasm_tools` call graph for WASM inputs. Includes `nodes`, internal `edges` (with call counts), and unresolved/ambiguous external targets.     | Control-flow triage, function reachability analysis, and quick hotspot detection without parsing full assembly text.               |
 | `strings`             | A list of strings extracted from the binary that exhibit high entropy or match patterns for secrets (API keys, private keys, etc.). Non-secret strings are filtered out to reduce noise. Base64-encoded strings are automatically decoded.                                       | Triage for hardcoded credentials, sensitive URLs, or cryptographic material. A primary step in vulnerability and malware analysis. |
 | `informative_strings` | Optional list of selected non-secret strings that match stable operational or exploit-triage indicators (for example network stack hooks, raw socket constants, DNS redirection hints, or Windows local-elevation technique markers). Each item includes `value` and `category`. | Capability clustering for behaviors that may be visible in constants or embedded paths rather than symbol tables alone.            |
 
@@ -199,28 +199,61 @@ WASM (WebAssembly) binaries are parsed via `wasm_tools` and then normalized into
 - **Normalization:** blint preserves common cross-format keys (`imports`, `dynamic_entries`, `functions`, `symtab_symbols`, `dynamic_symbols`) so dependency and review workflows continue to work.
 - **Raw passthrough export:** the complete parser output is written as a separate report artifact (`*-wasm-report.json`) in the reports directory.
 
-| Attribute         | Description                                                                                       | Notes                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `binary_type`     | Set to `WASM`.                                                                                    | Distinguishes the format in downstream logic.                               |
-| `exe_type`        | Set to `wasmbinary`.                                                                              | Format hint used by review logic.                                           |
-| `machine_type`    | WASM architecture class: `WASM32` or `WASM64`.                                                    | Derived from memory limits (`memories[].limits.is_64`).                     |
-| `module_version`  | WebAssembly module version from header.                                                           | Usually `1` for core wasm modules.                                          |
-| `section_count`   | Number of parsed sections.                                                                        | Mirrors parser report.                                                      |
-| `sections`        | Parsed section records (`id`, `name`, `size`, `offset`, etc.).                                    | Format-specific detail for structural analysis.                             |
-| `wasm_imports`    | Detailed WASM imports with `module`, `name`, `kind`, `type_index`.                                | Use this for function-level import analysis.                                |
-| `imports`         | Compatibility dependency list.                                                                    | For WASM this is normalized to module-level `{name, tag:"NEEDED"}` entries. |
-| `dynamic_entries` | Same dependency-style list as `imports`.                                                          | Keeps dependency processing consistent with ELF/PE/Mach-O.                  |
-| `exports`         | WASM exports with `name`, `kind`, `ref_index`.                                                    | Export-level capability and surface analysis.                               |
-| `functions`       | Parsed functions mapped to blint shape (`index`, `name`, `address`, `size`, `instruction_count`). | `address` reflects instruction/body offset in wasm bytes.                   |
-| `dynamic_symbols` | Synthetic imported symbol list used by dependency graph logic.                                    | Built from WASM imports; includes `is_imported` markers.                    |
-| `symtab_symbols`  | Synthetic exported symbol list used by review logic.                                              | Built from WASM exports; includes `is_exported` markers.                    |
-| `wasm_analysis`   | Structured analysis from `wasm_tools` (detections, capabilities, profiles, findings).             | Preserved as provided by parser API.                                        |
-| `wasm_errors`     | Parser-reported errors, if any.                                                                   | Non-fatal parse warnings/errors can appear here.                            |
-| `errors`          | blint-level error list for WASM parsing.                                                          | Set when parser reports issues or parse operation fails.                    |
+| Attribute                 | Description                                                                                       | Notes                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `binary_type`             | Set to `WASM`.                                                                                    | Distinguishes the format in downstream logic.                                                      |
+| `exe_type`                | Set to `wasmbinary`.                                                                              | Format hint used by review logic.                                                                  |
+| `machine_type`            | WASM architecture class: `WASM32` or `WASM64`.                                                    | Derived from memory limits (`memories[].limits.is_64`).                                            |
+| `module_version`          | WebAssembly module version from header.                                                           | Usually `1` for core wasm modules.                                                                 |
+| `section_count`           | Number of parsed sections.                                                                        | Mirrors parser report.                                                                             |
+| `sections`                | Parsed section records (`id`, `name`, `size`, `offset`, etc.).                                    | Format-specific detail for structural analysis.                                                    |
+| `wasm_imports`            | Detailed WASM imports with `module`, `name`, `kind`, `type_index`.                                | Use this for function-level import analysis.                                                       |
+| `imports`                 | Compatibility dependency list.                                                                    | For WASM this is normalized to module-level `{name, tag:"NEEDED"}` entries.                        |
+| `dynamic_entries`         | Same dependency-style list as `imports`.                                                          | Keeps dependency processing consistent with ELF/PE/Mach-O.                                         |
+| `exports`                 | WASM exports with `name`, `kind`, `ref_index`.                                                    | Export-level capability and surface analysis.                                                      |
+| `functions`               | Parsed functions mapped to blint shape (`index`, `name`, `address`, `size`, `instruction_count`). | `address` reflects instruction/body offset in wasm bytes.                                          |
+| `dynamic_symbols`         | Synthetic imported symbol list used by dependency graph logic.                                    | Built from WASM imports; includes `is_imported` markers.                                           |
+| `symtab_symbols`          | Synthetic exported symbol list used by review logic.                                              | Built from WASM exports; includes `is_exported` markers.                                           |
+| `wasm_analysis`           | Structured analysis from `wasm_tools` (detections, capabilities, profiles, findings).             | Preserved as provided by parser API.                                                               |
+| `wasm_errors`             | Parser-reported errors, if any.                                                                   | Non-fatal parse warnings/errors can appear here.                                                   |
+| `is_component`            | `true` when the binary is a Component Model artifact.                                             | Added by blint from the wasm-tools 2.0 report.                                                     |
+| `wasm_toolchain`          | Toolchain fingerprint (`languages`, `processed_by`, `sdks`, `target_features`).                   | Decoded from `producers` / `target_features` custom sections.                                      |
+| `wasm_strings_summary`    | Strings/IoC digest: `detected`, `string_count`, `signals`, `counts`, masked `samples`.            | Summary only; the full string list stays in `*-wasm-report.json`.                                  |
+| `wasm_call_graph_summary` | Call graph digest: `node_count`, `edge_count`, `truncated`, `edge_kinds`.                         | Edge kinds: `direct`, `indirect-approx`, `typed-approx`. Full graph stays in `*-wasm-report.json`. |
+| `wasm_unknown_opcodes`    | Distinct unknown instruction mnemonics from the analysis summary.                                 | Empty when the decoder recognizes every instruction.                                               |
+| `build_info`              | WASI runtime/variant and JS-interface hints (see below), plus toolchain and component version.    | `wasi_variants` use `preview1`/`preview2`/`preview3`/`legacy`.                                     |
+| `errors`                  | blint-level error list for WASM parsing.                                                          | Set when parser reports issues or parse operation fails.                                           |
+
+The `build_info` block for WASM binaries is assembled from the parser detections and report blocks:
+
+- `runtime: "WASI"` and `wasi_variants` when WASI imports are detected. Variant naming follows wasm-tools 2.0: `preview1`, `preview2` (renamed from `preview2-like`), `preview3` (WASI 0.3 / async components), and `legacy`.
+- `host_interface: "JavaScript"` when JS-interface modules are detected.
+- `languages` and `processed_by` when a toolchain fingerprint was decoded from `producers` custom sections.
+- `component_version` and `layer_version` for Component Model binaries.
+
+For Component Model binaries, `module_version` carries the raw 32-bit header value (for example `65549` = component version 13, layer 1) rather than the core-module version `1`, and the section lists in both the metadata and `*-wasm-report.json` are aggregations across all nested core modules, with each entry carrying a `core_module` index.
+
+The findings computed by the `wasm_tools` analysis layer (`WASM-CAP-001` through `WASM-STR-007`) are passed through into blint's findings output (`findings.json` and the console/HTML report). Each finding keeps its stable `WASM-*` id and severity (they top out at `high`, so CI builds that fail only on `critical` findings are unaffected), maps the upstream `remediation` text to `description`, and carries `confidence` plus the parser `evidence` dict. These findings are checks, not reviews: they appear even when runs are invoked with `--no-reviews`.
 
 WASM binaries also receive common derived fields like `hashes`, `import_dependencies`, `llvm_target_tuple` (for example `wasm32-unknown-unknown`), `security_properties`, and `binary_composition`.
 
-blint writes the raw parser payload to a companion file named `*-wasm-report.json` alongside `*-metadata.json`.
+blint writes the raw parser payload to a companion file named `*-wasm-report.json` alongside `*-metadata.json`. With wasm-tools 2.0 this payload additionally includes `is_component`, the extracted `strings` with linear-memory provenance (capped), the labeled `call_graph`, the `toolchain` fingerprint, and — for components — the `component` block with interfaces, interface packages, and nested core modules.
+
+#### Report-size guards
+
+Two CLI opt-outs and one default guard bound the wasm report size:
+
+- `--no-wasm-strings` skips string extraction. `strings` becomes empty in the report, `wasm_strings_summary` reports `detected: false`, and the string-derived findings (e.g. `WASM-STR-007`) disappear along with their evidence source.
+- `--no-wasm-call-graph` skips call-graph construction. `call_graph` becomes empty, `wasm_call_graph_summary` zeroes out, and wasm callgraph exports (`--export-callgraph-*`) produce no artifacts even with `--disassemble`.
+- Function instruction streams are capped at `BLINT_MAX_WASM_INSTRUCTIONS` instructions per report (default `50000`, `0` disables). This is the only unbounded part of the parser output — strings and graph edges are already capped by wasm-tools — and for large modules it dominates the report size (a 1 MB module produced a 33 MB report, 98% instructions).
+
+  The budget covers every function in the report, including those inside core modules and nested components. It is divided max-min fair rather than first-come: each function is offered an equal share, and a function needing less than its share releases the remainder to the longer ones. This keeps a trimmed report a sample of the whole module instead of the first few functions in section order — at the default budget a 3000-function module leaves every function with at least some of its body, where a greedy split would empty all but the first few dozen.
+
+  Trimmed functions keep a truthful `instruction_count` and gain an `instructions_truncated` count. When anything was dropped the report gains a top-level `blint_truncation` block (`instruction_budget`, `instructions_dropped`, `functions_truncated`), so the artifact is self-describing and a consumer can distinguish a small module from a trimmed large one without the log line. A log hint also names the environment variable.
+
+#### Callgraphs and SBOM components
+
+The wasm callgraph is converted from the `wasm_tools` static call graph rather than from disassembly; see [Callgraph Analysis](./CALLGRAPH.md#webassembly-callgraphs) for the edge kinds and confidence semantics. For SBOM generation, `blint sbom --wasm-sbom` turns a Component Model binary's imported WIT interface packages into components; see [Custom Properties](./CUSTOM_PROPERTIES.md#webassembly-component-model-properties) for the properties involved.
 
 Representative WASM fixtures used by tests are available under `tests/data/*.wasm`.
 
@@ -304,11 +337,11 @@ This object summarizes key information about the toolchain and primary language 
 
 These attributes provide detailed lists of third-party libraries and packages compiled into the binary.
 
-| Attribute             | Description                                                                                                                                                                | Use Case                                                                                                                                                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `go_dependencies`     | A list of Go packages used to build the binary, extracted from the embedded `.go.buildinfo` section. Includes package names, exact versions, and checksums (`h1:` hashes). | **Gold Standard for SCA.** Allows for precise identification of Go libraries and their versions, enabling direct mapping to known vulnerabilities (CVEs) in those packages.                                                                    |
-| `rust_dependencies`   | A list of Rust crates used to build the binary, extracted from the `.dep-v0` section created by the `cargo-auditable` feature. Includes crate name, version, and kind.     | Similar to Go, this enables precise SCA for Rust applications, mapping crates to known CVEs. **Limitation**: This section is only present if the developer explicitly enables the `cargo-auditable` feature during compilation.                |
-| `dotnet_dependencies` | A structured list of NuGet packages and their versions, extracted from the `deps.json` file embedded in the PE overlay of self-contained .NET applications.                | Provides precise SCA for .NET applications, allowing for vulnerability mapping. **Limitation**: This is only available for .NET Core/5+ applications published in "self-contained" mode and is not present in framework-dependent deployments. |
+| Attribute             | Description                                                                                                                                                                                                                                                         | Use Case                                                                                                                                                                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go_dependencies`     | A list of Go packages used to build the binary, extracted from the embedded `.go.buildinfo` section. Includes package names, exact versions, and checksums (`h1:` hashes).                                                                                          | **Gold Standard for SCA.** Allows for precise identification of Go libraries and their versions, enabling direct mapping to known vulnerabilities (CVEs) in those packages.                                                                    |
+| `rust_dependencies`   | A list of Rust crates used to build the binary, extracted from the `.dep-v0` section created by the `cargo-auditable` feature. Includes crate name, version, and kind.                                                                                              | Similar to Go, this enables precise SCA for Rust applications, mapping crates to known CVEs. **Limitation**: This section is only present if the developer explicitly enables the `cargo-auditable` feature during compilation.                |
+| `dotnet_dependencies` | A structured list of NuGet packages and their versions, extracted from the `deps.json` file embedded in the PE overlay of self-contained .NET applications.                                                                                                         | Provides precise SCA for .NET applications, allowing for vulnerability mapping. **Limitation**: This is only available for .NET Core/5+ applications published in "self-contained" mode and is not present in framework-dependent deployments. |
 | `import_dependencies` | A structured graph detailing which shared libraries (`.dll`, `.so`, `.dylib`) are imported by the main binary and which specific symbols are used from each library. See [Symbol attribution](#symbol-attribution) for what the attribution is based on per format. | Provides a clear, high-level view of runtime dependencies. Helps identify the use of sensitive APIs (e.g., crypto, networking) and from which library they originate. This is a foundational element for behavior analysis.                    |
 
 ---
@@ -336,6 +369,12 @@ Notes:
 - Address/name collisions and misses are surfaced in `external` with reason buckets such as `ambiguous_address`, `ambiguous_name`, and `address_space_miss`.
 - An external edge carries a `library` only when the resolver recovered a symbol name for the target and that name is a known import. Edges whose target is a register-indirect operand cannot be attributed, so `library` is absent on most of them. Where it is present, `confidence` is raised from `low` to `medium`: the target is still unresolved as an internal edge, but the library it reaches is evidence rather than a guess.
 - Same-address symbol aliases are collapsed into a canonical node to reduce false ambiguity while preserving alias visibility.
+
+For WASM binaries the same payload is produced by converting the `wasm_tools` static call graph instead of disassembly, so the callgraph export flags work for `.wasm` inputs under `--disassemble` too. Differences from the native graph:
+
+- Imported host functions become `external` targets with reason `import` (e.g. `wasi_snapshot_preview1.fd_write`) rather than nodes; the nodes are the locally defined functions.
+- Edge `kind` keeps the upstream semantics: `direct` edges are exact, `indirect-approx` (element-segment over-approximation for `call_indirect`) and `typed-approx` (signature-based approximation for `call_ref`) are candidates, and only `direct` edges carry `high` confidence.
+- Call sites to the same target collapse into edge `count`; node `key` uses the function body offset as its address.
 
 ### `abi_analysis`
 
@@ -422,18 +461,18 @@ The closure is capped at 256 objects so a pathological dependency graph cannot s
 
 `import_dependencies` maps each imported symbol to the library that supplies it. How much evidence exists for that depends entirely on the format:
 
-| Format | Evidence | Available |
-| :----- | :------- | :-------- |
-| PE     | The import table is organised by DLL, so every import names its library. | Always |
-| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`. | Always |
+| Format | Evidence                                                                                                                                                                            | Available                                         |
+| :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
+| PE     | The import table is organised by DLL, so every import names its library.                                                                                                            | Always                                            |
+| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`.                                                                                                                     | Always                                            |
 | ELF    | The dynamic symbol table and the `DT_NEEDED` list are unrelated flat lists. The connection only exists once the dependency closure is resolved and each library's exports are read. | Only with [`link_closure`](#link_closure) enabled |
 
 Two fields record what the result rests on:
 
-| Property                     | Description                                                                                                                              |
-| :--------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
-| `attribution_sources`        | Which evidence was used: `import_table`, `load_commands`, `link_closure`. Empty means none was available.                                |
-| `unattributed_symbol_count`  | How many imported symbols could not be tied to a library. These are collected under a synthetic `unattributed` entry in `libraries`.      |
+| Property                    | Description                                                                                                                          |
+| :-------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `attribution_sources`       | Which evidence was used: `import_table`, `load_commands`, `link_closure`. Empty means none was available.                            |
+| `unattributed_symbol_count` | How many imported symbols could not be tied to a library. These are collected under a synthetic `unattributed` entry in `libraries`. |
 
 **An ELF binary analysed without closure resolution attributes nothing.** That is deliberate. Assigning a symbol to an arbitrary declared library produces a dependency edge that is indistinguishable downstream from a correct one, and a wrong edge is worse than an honest gap.
 
@@ -445,13 +484,13 @@ Note that `::` is a library separator only in Mach-O, and only when the prefix l
 
 Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when nothing could be attributed, because with no evidence every dependency looks unused.
 
-| Property                     | Description                                                                                                                                                       |
-| :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `unused_dependencies`        | Declared libraries from which no symbol is imported, each with a `name` and a `reason`. Linking with `--as-needed` removes them.                                  |
-| `undeclared_dependencies`    | Libraries supplying symbols without being declared, with `symbol_count` and a sample of `symbols`. These work only for as long as some other dependency keeps them mapped. |
-| `attribution_sources`        | The evidence the result is based on, as above.                                                                                                                    |
-| `unattributed_symbol_count`  | Imports not tied to any library. A high count means the findings are based on partial evidence.                                                                   |
-| `declared_count`             | How many direct dependencies were declared.                                                                                                                       |
+| Property                    | Description                                                                                                                                                                |
+| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unused_dependencies`       | Declared libraries from which no symbol is imported, each with a `name` and a `reason`. Linking with `--as-needed` removes them.                                           |
+| `undeclared_dependencies`   | Libraries supplying symbols without being declared, with `symbol_count` and a sample of `symbols`. These work only for as long as some other dependency keeps them mapped. |
+| `attribution_sources`       | The evidence the result is based on, as above.                                                                                                                             |
+| `unattributed_symbol_count` | Imports not tied to any library. A high count means the findings are based on partial evidence.                                                                            |
+| `declared_count`            | How many direct dependencies were declared.                                                                                                                                |
 
 `unused_dependencies` answers a similar question to `ldd -u`, but not an identical one. `ldd -u` relocates the whole closure and counts a library as used if anything in it binds to the library, so a library this binary never calls still counts as used when some other dependency calls it. blint reports **direct** use, which is what `--as-needed` acts on. Everything `ldd -u` reports unused will also be reported here; the reverse does not hold.
 

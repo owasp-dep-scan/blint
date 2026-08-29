@@ -20,7 +20,7 @@ dependencies = [
     "apsw>=3.53.0.0",
     "packageurl-python>=0.17.6",
     "oras>=0.2.41",
-    "wasm-tools>=1.0.3",
+    "wasm-tools>=2.0.0",
 ]
 license = "MIT"
 readme = "README.md"
