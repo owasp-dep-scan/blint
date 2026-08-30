@@ -19,6 +19,7 @@ from typing import Iterable, List, Optional
 
 from blint.lib.dalvik import DexPools, disassemble_method
 from blint.lib.dalvik_dataflow import analyze
+from blint.lib.utils import severity_rank
 from blint.logger import LOG
 
 # The exe type that ties the dex review metadata to the android annotation rules.
@@ -188,11 +189,7 @@ def analyze_dex(metadata: dict, pools: Optional[DexPools] = None) -> List[Findin
                 evidence=samples,
             )
         )
-    return sorted(findings, key=lambda x: (_severity_rank(x.severity), -x.count))
-
-
-def _severity_rank(severity: str) -> int:
-    return {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(severity, 5)
+    return sorted(findings, key=lambda x: (severity_rank(x.severity), -x.count))
 
 
 def merge_findings(groups: Iterable[List[Finding]]) -> List[Finding]:
@@ -215,4 +212,4 @@ def merge_findings(groups: Iterable[List[Finding]]) -> List[Finding]:
                 if len(existing.evidence) >= 5:
                     break
                 existing.evidence.append(ev)
-    return sorted(merged.values(), key=lambda x: (_severity_rank(x.severity), -x.count))
+    return sorted(merged.values(), key=lambda x: (severity_rank(x.severity), -x.count))

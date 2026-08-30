@@ -323,7 +323,7 @@ rules:
 ### Example 5: `BINARY_REVIEWS` (Whole-Image Heuristics)
 
 Some findings cannot be expressed over a single symbol or function, because the signal is a
-*contradiction between two parts of the image*, or the *absence* of something that ought to be
+_contradiction between two parts of the image_, or the _absence_ of something that ought to be
 present. These rules use `check_type: binary_analysis`, which dispatches to a named evaluator in
 `blint/lib/binary_reviews.py` (driver access control) or `blint/lib/implant_reviews.py`
 (side-loading and passive implants) rather than matching a pattern list.
@@ -345,20 +345,20 @@ rules:
 
 The implant rule group is defined in `blint/data/annotations/review_implants_pe.yml`:
 
-| Rule | The contradiction it reports |
-| --- | --- |
-| `PE_IMPERSONATES_SYSTEM_MODULE` | Version resource claims a Microsoft module name under a different publisher, unsigned |
-| `PE_STUB_EXPORT_THUNK_TABLE` | Exports at a uniform small stride, with no real forwarders — a generated thunk array |
-| `PE_UNRESOLVED_SIBLING_MODULE_LOAD` | A `LoadLibrary` target absent from the import table whose name is a near-miss of a real module |
-| `PE_HOST_PROCESS_NAME_GATE` | A DLL comparing its host process against a runtime-assembled `.exe` name |
-| `PASSIVE_MULTI_TRANSPORT_LISTENER` | Three or more inbound transports with no outbound destination anywhere |
-| `COVERT_CHANNEL_DEVICE_ACCESS` | A hypervisor or IPC device channel that bypasses the network stack |
-| `RUNTIME_CONSTRUCTED_SECURITY_STRINGS` | Device paths or registry keys that exist only as stack arithmetic |
-| `HOST_AUTHENTICATION_DOWNGRADE` | Registry values whose only effect is to lower an authentication boundary |
-| `EMBEDDED_ENCRYPTED_PAYLOAD` | An opaque region dominating its section, beside identified crypto primitives |
-| `CUSTOM_COMMAND_DISPATCH_TABLE` | A runtime-populated table of code pointers, plus an execution primitive |
+| Rule                                   | The contradiction it reports                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `PE_IMPERSONATES_SYSTEM_MODULE`        | Version resource claims a Microsoft module name under a different publisher, unsigned          |
+| `PE_STUB_EXPORT_THUNK_TABLE`           | Exports at a uniform small stride, with no real forwarders — a generated thunk array           |
+| `PE_UNRESOLVED_SIBLING_MODULE_LOAD`    | A `LoadLibrary` target absent from the import table whose name is a near-miss of a real module |
+| `PE_HOST_PROCESS_NAME_GATE`            | A DLL comparing its host process against a runtime-assembled `.exe` name                       |
+| `PASSIVE_MULTI_TRANSPORT_LISTENER`     | Three or more inbound transports with no outbound destination anywhere                         |
+| `COVERT_CHANNEL_DEVICE_ACCESS`         | A hypervisor or IPC device channel that bypasses the network stack                             |
+| `RUNTIME_CONSTRUCTED_SECURITY_STRINGS` | Device paths or registry keys that exist only as stack arithmetic                              |
+| `HOST_AUTHENTICATION_DOWNGRADE`        | Registry values whose only effect is to lower an authentication boundary                       |
+| `EMBEDDED_ENCRYPTED_PAYLOAD`           | An opaque region dominating its section, beside identified crypto primitives                   |
+| `CUSTOM_COMMAND_DISPATCH_TABLE`        | A runtime-populated table of code pointers, plus an execution primitive                        |
 
-Each rule is deliberately narrow, and several are gated on *correlation* rather than on a single
+Each rule is deliberately narrow, and several are gated on _correlation_ rather than on a single
 observation, because a whole-binary rule that fires on ordinary software makes every report less
 useful. None is a malware verdict alone; the finding is the combination.
 

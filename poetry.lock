@@ -2196,14 +2196,14 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 
 [[package]]
 name = "wasm-tools"
-version = "1.0.3"
+version = "2.0.0"
 description = "A pure-Python WebAssembly binary parser, disassembler, and structured analysis library"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "wasm_tools-1.0.3-py3-none-any.whl", hash = "sha256:8d4cbd8c7025bedb394d33076517a5e4a5427e6cf35fecaf8b9a5793cd930378"},
-    {file = "wasm_tools-1.0.3.tar.gz", hash = "sha256:ea042f436198350068960feb5a8915e61bdaf7a36f7d9e0a80443da5c12ef7b1"},
+    {file = "wasm_tools-2.0.0-py3-none-any.whl", hash = "sha256:60276dfc3f2a7e2f3553555183ef6a076d89099e747f289897e5f81ae8724eda"},
+    {file = "wasm_tools-2.0.0.tar.gz", hash = "sha256:95eda13b65aa1801c4f47c4c47339e925cb3a70af283755345a0068edb18bff5"},
 ]
 
 [package.extras]
@@ -2215,4 +2215,4 @@ dev = ["flake8", "pyinstaller", "pylint", "pytest", "pytest-cov", "ruff"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.15"
-content-hash = "12551b6a383b166e320edbf59841a68aa0670f07c90f0ccfc25549d0ddb02c79"
+content-hash = "3c674ad30235393237227a2398eec05e13b6e58bb752d4e4fbcceaab54bc16e3"

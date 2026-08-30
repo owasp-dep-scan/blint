@@ -8,6 +8,7 @@ import blint.lib.binary as binary_module
 from blint.lib.binary import (
     _parse_address,
     build_disassembly_callgraph_metadata,
+    build_wasm_callgraph,
     construct_llvm_target_tuple,
     demangle_symbolic_name,
     is_shared_library,
@@ -117,6 +118,11 @@ def test_parse_wasm_metadata(wasm_name):
     assert metadata["llvm_target_tuple"] == "wasm32-unknown-unknown"
     assert metadata["hashes"]["sha256"]
     assert metadata["wasm_report"]["file"] == str(wasm_file)
+    assert metadata["is_component"] is False
+    assert isinstance(metadata["wasm_toolchain"], dict)
+    assert isinstance(metadata["wasm_unknown_opcodes"], list)
+    assert metadata["wasm_strings_summary"]["detected"] is False
+    assert metadata["wasm_call_graph_summary"]["truncated"] is False
 
 
 def test_parse_wasm_parser_failure(tmp_path):
@@ -127,6 +133,283 @@ def test_parse_wasm_parser_failure(tmp_path):
     assert metadata["binary_type"] == "WASM"
     assert metadata["errors"]
     assert "WebAssembly" in metadata["errors"][0]
+
+
+def test_parse_wasm_component_metadata():
+    wasm_file = TEST_DATA_DIR / "component_minimal.wasm"
+    metadata = parse(str(wasm_file))
+
+    assert metadata["binary_type"] == "WASM"
+    assert metadata["is_component"] is True
+    # Raw 32-bit header value: component version 13, layer 1.
+    assert metadata["module_version"] == 65549
+    build_info = metadata["build_info"]
+    assert build_info["runtime"] == "WASI"
+    assert build_info["wasi_variants"] == ["preview2", "preview3"]
+    assert build_info["component_version"] == 13
+    assert build_info["layer_version"] == 1
+    wasm_report = metadata["wasm_report"]
+    assert wasm_report["component"]["core_modules"]
+    assert wasm_report["functions"]
+    assert all("core_module" in fn for fn in wasm_report["functions"])
+    assert set(metadata["wasm_call_graph_summary"]["edge_kinds"]) <= {
+        "direct",
+        "indirect-approx",
+        "typed-approx",
+    }
+
+
+def test_parse_wasm_strings_summary():
+    wasm_file = TEST_DATA_DIR / "strings_secrets.wasm"
+    metadata = parse(str(wasm_file))
+
+    summary = metadata["wasm_strings_summary"]
+    assert summary["detected"] is True
+    assert summary["string_count"] >= 2
+    assert "aws_access_key" in summary["signals"]
+    assert "url" in summary["signals"]
+    # wasm-tools masks credential-like samples before reporting them.
+    assert summary["samples"]["aws_access_key"].startswith("AKIA")
+    assert summary["samples"]["aws_access_key"].endswith("...")
+    findings = {f["id"] for f in metadata["wasm_report"]["analysis"]["findings"]}
+    assert "WASM-STR-007" in findings
+
+
+def test_parse_wasm_toolchain():
+    wasm_file = TEST_DATA_DIR / "producers_toolchain.wasm"
+    metadata = parse(str(wasm_file))
+
+    toolchain = metadata["wasm_toolchain"]
+    assert toolchain["languages"] == ["Rust"]
+    assert {"name": "rustc", "version": "1.75.0"} in toolchain["processed_by"]
+    assert toolchain["target_features"] == [
+        {"enabled": True, "name": "mutable-globals"},
+        {"enabled": True, "name": "sign-ext"},
+        {"enabled": False, "name": "simd128"},
+    ]
+    assert metadata["build_info"]["languages"] == ["Rust"]
+
+
+def test_parse_wasm_flags_omit_strings_and_call_graph():
+    wasm_file = TEST_DATA_DIR / "strings_secrets.wasm"
+    metadata = parse(str(wasm_file), wasm_strings=False, wasm_call_graph=False)
+
+    report = metadata["wasm_report"]
+    assert report["strings"] == []
+    assert report["call_graph"] == {}
+    assert metadata["wasm_strings_summary"]["detected"] is False
+    assert metadata["wasm_call_graph_summary"]["node_count"] == 0
+    # The string-derived finding disappears with its evidence source.
+    findings = {f["id"] for f in report["analysis"]["findings"]}
+    assert "WASM-STR-007" not in findings
+
+
+def test_trim_wasm_instruction_streams_bounds_total_budget(monkeypatch):
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 120)
+
+    def fake_fn(name, count, fill):
+        return {
+            "name": name,
+            "instruction_count": count,
+            "instructions": [{"text": f"{fill}{i}"} for i in range(count)],
+        }
+
+    report = {
+        "functions": [fake_fn("a", 100, "a"), fake_fn("b", 100, "b")],
+        "component": {
+            "core_modules": [{"functions": [fake_fn("c", 50, "c")]}],
+            "nested_components": [],
+        },
+    }
+    dropped = binary_module.trim_wasm_instruction_streams(report)
+
+    # The 120-instruction budget is divided max-min fair across all three
+    # streams rather than spent on whichever comes first in walk order.
+    assert dropped == 130
+    for fn in (report["functions"][0], report["functions"][1]):
+        assert len(fn["instructions"]) == 40
+        assert fn["instructions_truncated"] == 60
+        assert fn["instruction_count"] == 100
+    core_fn = report["component"]["core_modules"][0]["functions"][0]
+    assert len(core_fn["instructions"]) == 40
+    assert core_fn["instructions_truncated"] == 10
+    # The artifact records its own truncation, so a reader does not depend on
+    # the log line to tell a small module from a trimmed large one.
+    assert report["blint_truncation"] == {
+        "instruction_budget": 120,
+        "instructions_dropped": 130,
+        "functions_truncated": 3,
+    }
+
+
+def test_trim_wasm_instruction_streams_redistributes_unused_share(monkeypatch):
+    """A stream under its equal share releases the remainder to longer ones."""
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 90)
+    short = {"instruction_count": 10, "instructions": [{"text": i} for i in range(10)]}
+    long_a = {"instruction_count": 80, "instructions": [{"text": i} for i in range(80)]}
+    long_b = {"instruction_count": 80, "instructions": [{"text": i} for i in range(80)]}
+    report = {"functions": [short, long_a, long_b]}
+
+    assert binary_module.trim_wasm_instruction_streams(report) == 80
+    # An equal split would be 30 each, truncating the 10-instruction stream to
+    # nothing it needed; instead it keeps all 10 and the other two get 40 each.
+    assert len(short["instructions"]) == 10
+    assert "instructions_truncated" not in short
+    assert len(long_a["instructions"]) == 40
+    assert len(long_b["instructions"]) == 40
+    assert report["blint_truncation"]["functions_truncated"] == 2
+
+
+def test_trim_wasm_instruction_streams_records_nothing_when_under_budget(monkeypatch):
+    """An untrimmed report carries no truncation block at all."""
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 100)
+    report = {"functions": [{"instruction_count": 5, "instructions": [{"text": 1}] * 5}]}
+    assert binary_module.trim_wasm_instruction_streams(report) == 0
+    assert "blint_truncation" not in report
+
+
+def test_trim_wasm_instruction_streams_walks_nested_components(monkeypatch):
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 10)
+    # Nested component entries keep their core modules at top level.
+    report = {
+        "functions": [],
+        "component": {
+            "core_modules": [],
+            "nested_components": [
+                {
+                    "core_modules": [
+                        {
+                            "functions": [
+                                {
+                                    "instruction_count": 12,
+                                    "instructions": [{"text": i} for i in range(12)],
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+        },
+    }
+    dropped = binary_module.trim_wasm_instruction_streams(report)
+
+    assert dropped == 2
+    nested_fn = report["component"]["nested_components"][0]["core_modules"][0]["functions"][0]
+    assert len(nested_fn["instructions"]) == 10
+    assert nested_fn["instructions_truncated"] == 2
+    assert nested_fn["instruction_count"] == 12
+
+
+def test_trim_wasm_instruction_streams_walks_doubly_nested_components(monkeypatch):
+    """A nested component nests further at its own top level, not under "component"."""
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
+    deep_fn = {"instruction_count": 6, "instructions": [{"text": i} for i in range(6)]}
+    report = {
+        "component": {
+            "nested_components": [
+                {"nested_components": [{"core_modules": [{"functions": [deep_fn]}]}]}
+            ]
+        }
+    }
+    assert binary_module.trim_wasm_instruction_streams(report) == 2
+    assert len(deep_fn["instructions"]) == 4
+    assert deep_fn["instructions_truncated"] == 2
+
+
+def test_trim_wasm_instruction_streams_visits_aliased_functions_once(monkeypatch):
+    """The same dict reachable twice is charged once and keeps a truthful count."""
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
+    shared_fn = {"instruction_count": 6, "instructions": [{"text": i} for i in range(6)]}
+    report = {
+        "functions": [shared_fn],
+        "component": {"core_modules": [{"functions": [shared_fn]}]},
+    }
+    assert binary_module.trim_wasm_instruction_streams(report) == 2
+    assert shared_fn["instructions_truncated"] == 2
+
+
+def test_trim_wasm_instruction_streams_zero_disables(monkeypatch):
+    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 0)
+    report = {
+        "functions": [
+            {"instruction_count": 5, "instructions": [{"text": i} for i in range(5)]}
+        ]
+    }
+    assert binary_module.trim_wasm_instruction_streams(report) == 0
+    assert len(report["functions"][0]["instructions"]) == 5
+    assert "instructions_truncated" not in report["functions"][0]
+
+
+def test_build_wasm_callgraph_converts_component_graph():
+    wasm_file = TEST_DATA_DIR / "component_minimal.wasm"
+    metadata = parse(str(wasm_file))
+
+    callgraph = build_wasm_callgraph(metadata["wasm_report"])
+
+    assert callgraph["version"] == 2
+    assert callgraph["node_count"] == len(callgraph["nodes"]) == 2
+    assert callgraph["edge_count"] == len(callgraph["edges"]) == 2
+    assert {node["name"] for node in callgraph["nodes"]} == {"func[0]", "complex_flow"}
+    exported = next(node for node in callgraph["nodes"] if node["exported"])
+    assert exported["name"] == "complex_flow"
+    assert exported["address"].startswith("0x")
+    kinds = {edge["kind"] for edge in callgraph["edges"]}
+    assert kinds == {"direct", "indirect-approx"}
+    for edge in callgraph["edges"]:
+        assert edge["confidence"] == ("high" if edge["kind"] == "direct" else "low")
+
+
+def test_build_wasm_callgraph_maps_imports_to_external():
+    wasm_report = {
+        "functions": [
+            {"index": 1, "offset": 64, "name": "main"},
+            {"index": 2, "name": "helper"},
+        ],
+        "call_graph": {
+            "nodes": [
+                {
+                    "index": 0,
+                    "name": "",
+                    "imported": True,
+                    "exported": False,
+                    "module": "env",
+                    "import_name": "log",
+                },
+                {"index": 1, "name": "main", "imported": False, "exported": True},
+                {"index": 2, "name": "helper", "imported": False, "exported": False},
+            ],
+            "edges": [
+                {"from": 1, "to": 0, "kind": "direct", "offset": 10},
+                {"from": 1, "to": 2, "kind": "direct", "offset": 14},
+                {"from": 2, "to": 1, "kind": "indirect-approx", "offset": 20},
+                {"from": 2, "to": 1, "kind": "indirect-approx", "offset": 30},
+            ],
+            "node_count": 3,
+            "edge_count": 4,
+        },
+    }
+
+    callgraph = build_wasm_callgraph(wasm_report)
+
+    assert callgraph["node_count"] == 2
+    assert [node["name"] for node in callgraph["nodes"]] == ["main", "helper"]
+    assert callgraph["nodes"][0]["key"] == "0x40::main"
+    assert callgraph["nodes"][0]["exported"] is True
+    # Both call sites from helper to main collapse into one counted edge.
+    assert callgraph["edges"] == [
+        {"src": 0, "dst": 1, "count": 1, "kind": "direct", "confidence": "high"},
+        {"src": 1, "dst": 0, "count": 2, "kind": "indirect-approx", "confidence": "low"},
+    ]
+    # The imported host function becomes an external target, not a node.
+    assert callgraph["external"] == [
+        {"src": 0, "target": "env::log", "count": 1, "reason": "import", "confidence": "high"}
+    ]
+
+
+def test_build_wasm_callgraph_empty_inputs():
+    assert build_wasm_callgraph({}) == {}
+    assert build_wasm_callgraph({"call_graph": {}}) == {}
+    assert build_wasm_callgraph({"call_graph": {"nodes": [{"index": 0, "imported": True}]}}) == {}
 
 
 def test_is_shared_library_handles_objects_without_format_attribute():

@@ -91,3 +91,4 @@ This file defines practical skills an AI agent should apply when working on `bli
 - Run tests after editing Python logic.
 - Ensure no accidental behavior change in non-targeted binary formats.
 - For WASM parsing changes, verify both normalized fields (`imports`, `dynamic_entries`, `functions`) and raw passthrough fields (`wasm_report`, `wasm_analysis`).
+- WASM has three size controls that change what downstream code sees: `--no-wasm-strings` (removes the string-derived findings with their evidence), `--no-wasm-call-graph` (zeroes `wasm_call_graph_summary` and suppresses wasm callgraph exports), and `BLINT_MAX_WASM_INSTRUCTIONS` (bounds instruction streams in the report). Exercise a component fixture as well as a core module when touching any of them, since component reports nest functions under `core_modules` and `nested_components`.

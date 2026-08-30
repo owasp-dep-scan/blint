@@ -2,6 +2,7 @@ import base64
 import binascii
 import codecs
 import os
+import re
 import shutil
 import sys
 import uuid
@@ -161,7 +162,10 @@ def generate(
         skipped_wasm = 0
         for exe in exe_files:
             if is_wasm_file(exe):
-                skipped_wasm += 1
+                if blint_options.wasm_sbom:
+                    components += process_wasm_file(dependencies_dict, exe, sbom)
+                else:
+                    skipped_wasm += 1
                 continue
             progress.update(
                 task,
@@ -179,7 +183,10 @@ def generate(
                 blint_options.disassemble,
             )
         if skipped_wasm:
-            LOG.info(f"Skipped {skipped_wasm} wasm file(s) during SBOM generation")
+            LOG.info(
+                f"Skipped {skipped_wasm} wasm file(s) during SBOM generation; "
+                "use --wasm-sbom to include Component Model interface dependencies"
+            )
         if android_files:
             task = progress.add_task(
                 f"[green] Parsing {len(android_files)} android apps",
@@ -848,6 +855,143 @@ def process_exe_file(
             metadata.get("rust_dependencies"), dependencies_dict
         )
         lib_components += rust_components
+    if lib_components:
+        track_dependency(dependencies_dict, parent_component, lib_components)
+    return lib_components
+
+
+# WIT package identifier embedded in Component Model import names, e.g.
+# "wasi:cli/run@0.2.0". Names outside this grammar carry no package identity
+# and are skipped rather than guessed.
+WASM_INTERFACE_RE = re.compile(
+    r"^(?P<namespace>[a-z0-9][a-z0-9_-]*):(?P<package>[a-z0-9][a-z0-9_-]*)"
+    r"/(?P<interface>[a-z0-9][a-z0-9_-]*)(@(?P<version>.+))?$"
+)
+
+
+def group_wasm_interface_imports(
+    imports: list[dict],
+) -> dict[tuple[str, str, str | None], set[str]]:
+    """
+    Groups Component Model import names into their WIT packages.
+
+    Args:
+        imports (list[dict]): Component import entries, each with a ``name``.
+
+    Returns:
+        dict[tuple[str, str, str | None], set[str]]: A mapping of
+        ``(namespace, package, version)`` to the full import names from that
+        package. Imports without a parsable package identifier are dropped.
+    """
+    grouped: dict[tuple[str, str, str | None], set[str]] = {}
+    for entry in imports:
+        match = WASM_INTERFACE_RE.match(str(entry.get("name", "")))
+        if not match:
+            continue
+        key = (match.group("namespace"), match.group("package"), match.group("version"))
+        grouped.setdefault(key, set()).add(match.group(0))
+    return grouped
+
+
+def process_wasm_file(
+    dependencies_dict: dict[str, set],
+    exe: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """
+    Processes a WebAssembly binary for SBOM generation.
+
+    Core modules are skipped: their imports are low-information symbols with
+    no version evidence. Component Model binaries carry exact dependency
+    evidence in their imported WIT interface packages (e.g. ``wasi:cli`` at
+    ``0.2.0``), which are emitted as required library components when the
+    ``--wasm-sbom`` opt-in is enabled. Exported interfaces are capabilities
+    the binary provides, not dependencies, so they stay a parent property.
+
+    Args:
+        dependencies_dict (dict[str, set]): A dictionary of dependencies.
+        exe: The path to the WebAssembly binary.
+        sbom: The CycloneDX SBOM object.
+
+    Returns:
+        list[Component]: The created library components.
+    """
+    # Interface extraction only needs the component block and build info;
+    # strings and the call graph would be dead weight for large components.
+    metadata: dict[str, Any] = parse(exe, wasm_strings=False, wasm_call_graph=False)
+    if not metadata.get("is_component"):
+        return []
+    component_info = (metadata.get("wasm_report") or {}).get("component") or {}
+    parent_component: Component = default_parent([exe])
+    parent_component.properties = []
+    build_info = metadata.get("build_info") or {}
+    for prop_name, prop_value in (
+        ("binary_type", metadata.get("binary_type")),
+        ("is_component", metadata.get("is_component")),
+        ("runtime", build_info.get("runtime")),
+        ("wasi_variants", build_info.get("wasi_variants")),
+        ("component_version", build_info.get("component_version")),
+        ("layer_version", build_info.get("layer_version")),
+    ):
+        if prop_value:
+            if isinstance(prop_value, (list, tuple, set)):
+                value = ", ".join(str(item) for item in prop_value)
+            elif isinstance(prop_value, bool):
+                value = str(prop_value).lower()
+            else:
+                value = str(prop_value)
+            if value:
+                parent_component.properties.append(
+                    Property(name=f"internal:{prop_name}", value=value)
+                )
+    # The same WIT grammar decides what counts as an interface on both sides;
+    # an unversioned export is as real as an unversioned import.
+    exported_interfaces = sorted(
+        name
+        for entry in component_info.get("exports") or []
+        if WASM_INTERFACE_RE.match(name := str(entry.get("name", "")))
+    )
+    if exported_interfaces:
+        parent_component.properties.append(
+            Property(
+                name="internal:exported_interfaces",
+                value=", ".join(exported_interfaces),
+            )
+        )
+    lib_components: list[Component] = []
+    grouped = group_wasm_interface_imports(component_info.get("imports") or [])
+    for (namespace, package, version), interfaces in sorted(
+        grouped.items(), key=lambda item: (item[0][:2], item[0][2] or "")
+    ):
+        purl = PackageURL(
+            type="generic",
+            namespace=namespace,
+            name=package,
+            version=purl_field(version),
+            qualifiers={"type": "wasm"},
+        ).to_string()
+        comp = Component(
+            type=Type.library,
+            group=namespace,
+            name=package,
+            version=version,
+            purl=purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(exe, 0.7),
+            properties=[
+                Property(name="internal:srcFile", value=exe),
+                # The WIT id, kept verbatim so a reader can grep the component
+                # back to the import names in the binary.
+                Property(name="internal:wit_package", value=f"{namespace}:{package}"),
+                Property(name="internal:interfaces", value=", ".join(sorted(interfaces))),
+            ],
+        )
+        comp.bom_ref = RefType(purl)
+        lib_components.append(comp)
+    if parent_component.type == Type.application and len(parent_component.properties):
+        if not sbom.metadata.component.components:
+            sbom.metadata.component.components = []
+        _add_to_parent_component(sbom.metadata.component.components, parent_component)
     if lib_components:
         track_dependency(dependencies_dict, parent_component, lib_components)
     return lib_components

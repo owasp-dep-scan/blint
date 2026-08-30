@@ -1244,6 +1244,12 @@ class BlintOptions:
         deep_mode (bool): Flag indicating whether to perform deep analysis.
         src_dir_boms (list): Directory containing pre-build and build sboms.
         use_blintdb (bool): Flag indicating whether or not to utilize blint-db
+        wasm_sbom (bool): Flag indicating whether to emit SBOM components from
+            Component Model interface packages found in wasm binaries.
+        wasm_strings (bool): Flag indicating whether to extract strings from
+            wasm files.
+        wasm_call_graph (bool): Flag indicating whether to build the
+            wasm_tools call graph for wasm files.
     """
 
     deep_mode: bool = False
@@ -1255,6 +1261,9 @@ class BlintOptions:
     sbom_mode: bool = False
     quiet_mode: bool = False
     db_mode: bool = False
+    wasm_sbom: bool = False
+    wasm_strings: bool = True
+    wasm_call_graph: bool = True
     image_url: str | None = ""
     sbom_output: str | TextIO = ""
     sbom_output_dir: str = ""
@@ -1396,6 +1405,11 @@ if BLINTDB_REFRESH in ["true", "True", "1"]:
 SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
 MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
 BLINT_MAX_HEX_BYTES = max(0, get_int_from_env("BLINT_MAX_HEX_BYTES", 4096))
+# wasm-tools caps strings and call-graph edges, but function instruction
+# streams are unbounded and dominate wasm-report size for large modules.
+BLINT_MAX_WASM_INSTRUCTIONS = max(
+    0, get_int_from_env("BLINT_MAX_WASM_INSTRUCTIONS", 50000)
+)
 
 
 IMPLICIT_REGS_X86: dict[str, dict[str, set[str]]] = {
