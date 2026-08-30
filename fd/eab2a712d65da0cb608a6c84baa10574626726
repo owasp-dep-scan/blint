@@ -1,0 +1,19 @@
+pyproject.toml
+  s_98e8483aaa52b7::t_118b28c4fc1417 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fdeab2a712d65da0cb608a6c84baa10574626726",
+  "prompts": {},
+  "sessions": {
+    "s_98e8483aaa52b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab904a8e-5585-4972-a0dc-98e30668f4a9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
