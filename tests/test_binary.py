@@ -11,6 +11,7 @@ from blint.lib.binary import (
     build_wasm_callgraph,
     construct_llvm_target_tuple,
     demangle_symbolic_name,
+    demangle_symbolic_names,
     is_shared_library,
     merge_macho_function_starts,
     merge_macho_objc_functions,
@@ -1225,6 +1226,31 @@ def test_demangle():
         )
         == "core::ptr::drop_in_place<&core::option::Option<usize>>"
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symbolic is not available on windows")
+def test_demangle_batch_matches_per_symbol():
+    # The batch path must be a pure optimisation: every distinct name resolves
+    # to exactly what demangle_symbolic_name would have produced alone. The
+    # inputs below cover each branch -- demangler hit, hygiene-only fallback,
+    # stacked COFF decoration, and a duplicate that must fan out.
+    symbols = [
+        "_ZN4core3fmt5Debug3fmt17h1234567890abcdefE",
+        "malloc",
+        ".rdata$.refptr.__mingw_initltsdrot_force",
+        ".refptr._pcre2_ucd_records_8",
+        "GCC_except_table42",
+        "@feat.00",
+        "malloc",
+    ]
+    demangled = demangle_symbolic_names(symbols)
+    assert demangled == {symbol: demangle_symbolic_name(symbol) for symbol in symbols}
+    # Duplicates collapse into a single map entry.
+    assert len(demangled) == len(set(symbols))
+
+
+def test_demangle_batch_handles_empty_input():
+    assert demangle_symbolic_names([]) == {}
 
 
 class _StubSymbol:

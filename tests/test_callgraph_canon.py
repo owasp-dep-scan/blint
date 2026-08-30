@@ -122,3 +122,14 @@ def test_canonicalize_demangles_mangled_input_automatically():
 def test_demangle_passes_through_already_demangled_names():
     name = "wasmparser::validator::operators::OperatorValidator::new_func"
     assert demangle(name) == name
+
+
+def test_demangle_strips_elf_version_suffix():
+    # dynsym entries on dynamically linked ELF carry @GLIBC_… suffixes that no
+    # demangler accepts; canonical names have to match the unversioned
+    # spelling of the same function from another binary's export table.
+    assert demangle("_Z1hic@GLIBC_2.2.5") == "h(int, char)"
+
+
+def test_demangle_strips_import_pointer_decoration():
+    assert demangle("__imp__ZN3foo3barEv") == "foo::bar()"

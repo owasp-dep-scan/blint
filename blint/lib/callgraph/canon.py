@@ -22,12 +22,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
 
-try:  # pragma: no cover - exercised indirectly; import guarded for safety
-    import multi_demangle
-except ImportError:  # pragma: no cover - multi_demangle is a hard dependency
-    multi_demangle = None
+import multi_demangle
 
 
 # Trailing Rust symbol-hash suffix, e.g. ``::h41b828a7ca01b8c4``.
@@ -104,18 +102,25 @@ class CanonicalName:
         return bool(self.value)
 
 
-def _looks_mangled(symbol: str) -> bool:
-    """Return ``True`` when ``symbol`` appears to be a raw mangled name."""
-    return symbol.startswith(("_ZN", "_RN", "_R", "__Z", "?")) or "$LT$" in symbol
+@lru_cache(maxsize=1)
+def _matching_normalizer() -> "multi_demangle.Normalizer":
+    """The matching-profile normalizer, built once for the whole process."""
+    return multi_demangle.Normalizer.matching()
 
 
 def demangle(symbol: str) -> str:
     """Best-effort demangle of a raw, mangled symbol name.
 
     Rust ``v0`` and ``legacy`` symbols as well as Itanium/MSVC C++ symbols are
-    demangled via :mod:`multi_demangle`. Inputs that are already demangled, or
-    that cannot be demangled, are returned unchanged so the function is safe to
-    apply uniformly to a symbol table of mixed provenance.
+    demangled via :mod:`multi_demangle`. Symbols taken from a binary's tables
+    may carry linker decorations no demangler accepts - ELF version suffixes
+    (``@GLIBC_2.2.5``), PLT/GOT stub names, import-pointer prefixes - so a
+    failed demangle is retried once against the matching normalizer's cleaned
+    form; canonical names have to match across binaries, where the same
+    function is referenced with and without its version. Inputs that are
+    already demangled, or that cannot be demangled, are returned unchanged so
+    the function is safe to apply uniformly to a symbol table of mixed
+    provenance.
 
     Args:
         symbol: A possibly-mangled symbol name.
@@ -123,10 +128,17 @@ def demangle(symbol: str) -> str:
     Returns:
         The demangled name, or ``symbol`` unchanged on any failure.
     """
-    if not symbol or multi_demangle is None or not _looks_mangled(symbol):
+    if not symbol or not multi_demangle.looks_mangled(symbol):
         return symbol
     try:
         demangled = multi_demangle.demangle_symbol(symbol)
+        if not demangled or demangled == symbol:
+            # Demangling failed, usually because the symbol carries linker
+            # decorations no demangler accepts (ELF version suffixes,
+            # import-pointer prefixes). Strip those and retry once; the
+            # normalizer must not run first because its legacy-Rust pass
+            # decodes `$`-escapes into a hybrid the demangler then rejects.
+            demangled = multi_demangle.demangle_symbol(_matching_normalizer().normalize(symbol))
     except Exception:  # pragma: no cover - defensive; demangler must not raise
         return symbol
     return demangled or symbol
@@ -248,7 +260,7 @@ def canonicalize(name: str, *, demangle_first: bool = False) -> CanonicalName:
     if not work:
         return CanonicalName("", NameKind.UNKNOWN, raw, False)
 
-    if demangle_first or _looks_mangled(work):
+    if demangle_first or multi_demangle.looks_mangled(work):
         work = demangle(work).strip()
 
     is_generic = "<" in work

@@ -11,6 +11,7 @@ import zipfile
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 import lief
@@ -71,51 +72,67 @@ def get_hex_truncation_count() -> int:
 
 
 def demangle_symbolic_name(symbol: str, name_only: bool = False) -> str:
-    """Demangles symbol using llvm demangle falling back to some heuristics. Covers legacy rust and Swift."""
+    """Demangle a symbol, falling back to the library's symbol-hygiene passes.
+
+    Symbols classified as mangled (C++, Rust legacy and v0, Swift, and the
+    other supported languages) are demangled. Everything else skips straight
+    to ``normalize_symbol``, which maps the pseudo-symbol shapes (anonymous
+    locals, ``GCC_except_table*``, ``@feat.00``), rewrites import pointer
+    decorations to ``__declspec(dllimport)``, and decodes legacy Rust
+    ``$``-escapes and trailing hash suffixes.
+    """
     try:
         options = demangle_options_name_only if name_only else demangle_options_complete
-        demangled_symbol = multi_demangle.demangle_symbol(symbol, options=options)
-        # demangling didn't work
-        if symbol and symbol == demangled_symbol:
-            for ign in ("__imp_anon.", "anon.", ".L__unnamed"):
-                if symbol.startswith(ign):
-                    return "anonymous"
-            if symbol.startswith("GCC_except_table"):
-                return "GCC_except_table"
-            if symbol.startswith("@feat.00"):
-                return "SAFESEH"
-            if (
-                symbol.startswith("__imp_")
-                or symbol.startswith(".rdata$")
-                or symbol.startswith(".refptr.")
-            ):
-                symbol = f"__declspec(dllimport) {symbol.removeprefix('__imp_').removeprefix('.rdata$').removeprefix('.refptr.')}"
-            demangled_symbol = (
-                symbol.replace("..", "::")
-                .replace("$SP$", "@")
-                .replace("$BP$", "*")
-                .replace("$LT$", "<")
-                .replace("$u5b$", "[")
-                .replace("$u7b$", "{")
-                .replace("$u3b$", ";")
-                .replace("$u20$", " ")
-                .replace("$u5d$", "]")
-                .replace("$u7d$", "}")
-                .replace("$GT$", ">")
-                .replace("$RF$", "&")
-                .replace("$LP$", "(")
-                .replace("$RP$", ")")
-                .replace("$C$", ",")
-                .replace("$u27$", "'")
+        if symbol and multi_demangle.classify_symbol(symbol).get("status") == "mangled":
+            demangled_symbol = multi_demangle.demangle_symbol(symbol, options=options)
+            if demangled_symbol and demangled_symbol != symbol:
+                return demangled_symbol
+        # Not mangled, or demangling didn't work
+        demangled_symbol = multi_demangle.normalize_symbol(symbol)
+        # COFF decoration prefixes can stack (".rdata$.refptr.X"); each
+        # hygiene pass peels one, so repeat until fully unwrapped.
+        while demangled_symbol.startswith(
+            (
+                "__declspec(dllimport) __imp_",
+                "__declspec(dllimport) _imp_",
+                "__declspec(dllimport) .rdata$",
+                "__declspec(dllimport) .refptr.",
             )
-        # In case of rust symbols, try and trim the hash part from the end of the symbols
-        if demangled_symbol.count("::") > 2:
-            last_part = demangled_symbol.split("::")[-1]
-            if len(last_part) == 17:
-                demangled_symbol = demangled_symbol.removesuffix(f"::{last_part}")
+        ):
+            demangled_symbol = multi_demangle.normalize_symbol(
+                demangled_symbol.removeprefix("__declspec(dllimport) ")
+            )
         return demangled_symbol
     except AttributeError:
         return symbol
+
+
+def demangle_symbolic_names(symbols: Iterable[str]) -> dict[str, str]:
+    """Batch form of :func:`demangle_symbolic_name`, returning a lookup map.
+
+    A symbol table repeats the same name across dynsym, symtab, version
+    tables, and GOT/PLT maps, so each distinct name is resolved exactly once
+    and the result is looked up per table entry. Names the demangler leaves
+    unchanged (unmangled, decorated, or failed) fall back to the per-symbol
+    hygiene path, still once per distinct name.
+
+    Args:
+        symbols: Raw symbol names; duplicates and ordering are irrelevant.
+
+    Returns:
+        A mapping of each distinct input name to its demangled form.
+    """
+    distinct = list(dict.fromkeys(symbols))
+    try:
+        demangled = multi_demangle.demangle_symbols(
+            distinct, options=demangle_options_complete, unique=False
+        )
+    except (AttributeError, TypeError):
+        demangled = distinct
+    return {
+        symbol: result if result != symbol else demangle_symbolic_name(symbol)
+        for symbol, result in zip(distinct, demangled)
+    }
 
 
 def is_base64(s: str) -> bool:
