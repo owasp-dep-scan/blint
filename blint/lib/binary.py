@@ -53,6 +53,7 @@ from blint.lib.utils import (
     coerce_to_text,
     decode_base64,
     demangle_symbolic_name,
+    demangle_symbolic_names,
     enum_to_str,
 )
 from blint.logger import DEBUG, LOG
@@ -995,6 +996,37 @@ def parse_informative_strings(parsed_obj: lief.Binary) -> list[dict]:
     return informative
 
 
+def _batch_demangle_symbol_names(symbols) -> dict[str, str]:
+    """Pre-demangle every distinct name in a symbol table in one batch.
+
+    Symbol tables repeat the same name across dynsym, symtab, version tables,
+    and GOT/PLT maps, so resolving each distinct name once and looking it up
+    per entry is markedly cheaper than demangling per entry. This pass is
+    best-effort: a name it cannot read is simply absent from the map, and the
+    parse loop falls back to demangling that symbol on its own.
+    """
+    names: list[str] = []
+    for symbol in symbols:
+        try:
+            name = symbol.demangled_name
+            if not name or isinstance(name, lief.lief_errors):
+                name = symbol.name
+        except (AttributeError, IndexError, TypeError):
+            continue
+        if isinstance(name, str) and name:
+            names.append(name)
+    return demangle_symbolic_names(names)
+
+
+def _lookup_demangled(demangled: dict[str, str], name) -> str:
+    """Resolve ``name`` from the batch map, demangling it directly on a miss."""
+    if isinstance(name, str):
+        cached = demangled.get(name)
+        if cached is not None:
+            return cached
+    return demangle_symbolic_name(name)
+
+
 def parse_symbols(symbols) -> tuple[list[dict], str]:
     """
     Parse symbols from a list of symbols.
@@ -1008,6 +1040,8 @@ def parse_symbols(symbols) -> tuple[list[dict], str]:
     symbols_list: list[dict] = []
     exe_type = ""
     skipped: defaultdict[str, int] = defaultdict(int)
+    symbols = list(symbols or [])
+    demangled = _batch_demangle_symbol_names(symbols)
     for symbol in symbols:
         try:
             symbol_version = symbol.symbol_version if symbol.has_version else ""
@@ -1025,7 +1059,7 @@ def parse_symbols(symbols) -> tuple[list[dict], str]:
             symbol_name = symbol.demangled_name
             if isinstance(symbol_name, lief.lief_errors) or not symbol_name:
                 symbol_name = symbol.name
-            symbol_name = demangle_symbolic_name(symbol_name)
+            symbol_name = _lookup_demangled(demangled, symbol_name)
             # The linkage name is what appears in another object's export table,
             # so it is the only key that matches a C++ symbol across binaries.
             # It is recorded only when demangling actually changed the name.
@@ -1549,6 +1583,8 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
     exe_type = ""
     if not symbols or isinstance(symbols, lief.lief_errors):
         return symbols_list, exe_type
+    symbols = list(symbols)
+    demangled = _batch_demangle_symbol_names(symbols)
     for symbol in symbols:
         try:
             libname = ""
@@ -1562,9 +1598,8 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
             symbol_value = ADDRESS_FMT.format(address).strip()
             symbol_name = symbol.demangled_name
             if not symbol_name or isinstance(symbol_name, lief.lief_errors):
-                symbol_name = demangle_symbolic_name(symbol.name)
-            else:
-                symbol_name = demangle_symbolic_name(symbol_name)
+                symbol_name = symbol.name
+            symbol_name = _lookup_demangled(demangled, symbol_name)
             if not exe_type:
                 exe_type = guess_exe_type(symbol_name)
             with warnings.catch_warnings():
