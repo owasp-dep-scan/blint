@@ -517,27 +517,56 @@ def parse_wasm_metadata(
             if str(imp.get("module", "")).strip()
         }
     )
+    wasm_analysis = report.get("analysis") or {}
+    # wasm-tools 2.1 detects 64-bit memories in the import section too
+    # (Emscripten-style modules), surfaced as the isa.memory64 capability.
     has_wasm64_memory = any(
         bool((mem.get("limits") or {}).get("is_64"))
         for mem in (report.get("memories") or [])
         if isinstance(mem, dict)
-    )
+    ) or "isa.memory64" in set(wasm_analysis.get("capabilities") or [])
     metadata["machine_type"] = "WASM64" if has_wasm64_memory else "WASM32"
     metadata["module_version"] = report.get("module_version")
     metadata["section_count"] = report.get("section_count", 0)
     metadata["sections"] = report.get("sections", [])
     metadata["wasm_errors"] = report.get("errors", [])
-    wasm_analysis = report.get("analysis") or {}
     metadata["wasm_analysis"] = wasm_analysis
     metadata["wasm_report"] = report
 
-    # wasm-tools 2.0 surfaces; summaries only, the full payload stays in the
+    # wasm-tools 2.x surfaces; summaries only, the full payload stays in the
     # companion *-wasm-report.json export.
     metadata["is_component"] = bool(report.get("is_component"))
     toolchain = report.get("toolchain") or {}
     metadata["wasm_toolchain"] = toolchain
     metadata["wasm_unknown_opcodes"] = list(
         (wasm_analysis.get("summary") or {}).get("unknown_opcodes") or []
+    )
+    metadata["wasm_isa_capabilities"] = sorted(
+        str(cap)
+        for cap in (wasm_analysis.get("capabilities") or [])
+        if str(cap).startswith("isa.")
+    )
+    type_kinds = Counter(
+        str(t.get("kind", "func"))
+        for t in (report.get("types") or [])
+        if isinstance(t, dict)
+    )
+    metadata["wasm_types_summary"] = {
+        "total": type_kinds.total(),
+        "func": type_kinds.get("func", 0),
+        "struct": type_kinds.get("struct", 0),
+        "array": type_kinds.get("array", 0),
+        # Any composite kind a newer wasm-tools starts decoding lands here, so
+        # the per-kind counts always add up to total.
+        **{
+            kind: count
+            for kind, count in sorted(type_kinds.items())
+            if kind not in ("func", "struct", "array")
+        },
+    }
+    format_detection = (wasm_analysis.get("detections") or {}).get("format") or {}
+    metadata["wasm_debug_info_present"] = "debug_info_present" in (
+        format_detection.get("signals") or []
     )
     call_graph = report.get("call_graph") or {}
     edge_kind_counts = Counter(
