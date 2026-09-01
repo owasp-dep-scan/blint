@@ -191,6 +191,67 @@ def test_parse_wasm_toolchain():
     assert metadata["build_info"]["languages"] == ["Rust"]
 
 
+@pytest.mark.parametrize(
+    "wasm_name",
+    [
+        "gc_rec_group.wasm",
+        "gc_ops.wasm",
+    ],
+)
+def test_parse_wasm_gc_isa_capability(wasm_name):
+    wasm_file = TEST_DATA_DIR / wasm_name
+    metadata = parse(str(wasm_file))
+
+    # wasm-tools 2.1 derives instruction-set capability tokens from decoded
+    # opcodes and type definitions; GC types or ops require isa.gc.
+    assert metadata["wasm_isa_capabilities"] == ["isa.gc"]
+    assert "isa.gc" in metadata["wasm_analysis"]["capabilities"]
+    types_summary = metadata["wasm_types_summary"]
+    assert types_summary["total"] == sum(
+        types_summary[kind] for kind in ("func", "struct", "array")
+    )
+    # Every report type entry carries the new kind attribute.
+    assert all("kind" in t for t in metadata["wasm_report"]["types"])
+
+
+def test_parse_wasm_gc_rec_group_type_kinds():
+    wasm_file = TEST_DATA_DIR / "gc_rec_group.wasm"
+    metadata = parse(str(wasm_file))
+
+    # The rec group decodes to one type-slot entry per member with its
+    # composite kind; only the func members keep a signature.
+    types_summary = metadata["wasm_types_summary"]
+    assert types_summary == {"total": 4, "func": 2, "struct": 2, "array": 0}
+    report_types = metadata["wasm_report"]["types"]
+    assert [t["kind"] for t in report_types] == ["func", "struct", "struct", "func"]
+    struct_types = [t for t in report_types if t["kind"] == "struct"]
+    assert all(t["params"] == [] and t["results"] == [] for t in struct_types)
+
+
+def test_parse_wasm_exceptions_isa_capability():
+    wasm_file = TEST_DATA_DIR / "exceptions_basic.wasm"
+    metadata = parse(str(wasm_file))
+
+    assert "isa.exceptions" in metadata["wasm_isa_capabilities"]
+    # Legacy and current EH opcodes decode instead of surfacing as unknown.
+    assert metadata["wasm_unknown_opcodes"] == []
+
+
+def test_parse_wasm_dos003_loop_grow_evidence():
+    wasm_file = TEST_DATA_DIR / "dos_growth_loop.wasm"
+    metadata = parse(str(wasm_file))
+
+    # wasm-tools 2.1 tightened WASM-DOS-003 to fire on memory.grow inside a
+    # loop body and reports the loop-context counts in the evidence.
+    finding = next(
+        f
+        for f in metadata["wasm_analysis"]["findings"]
+        if f["id"] == "WASM-DOS-003"
+    )
+    assert finding["evidence"]["memory_grow_ops"] > 0
+    assert finding["evidence"]["loop_memory_grow_ops"] > 0
+
+
 def test_parse_wasm_flags_omit_strings_and_call_graph():
     wasm_file = TEST_DATA_DIR / "strings_secrets.wasm"
     metadata = parse(str(wasm_file), wasm_strings=False, wasm_call_graph=False)
