@@ -252,6 +252,53 @@ def test_parse_wasm_dos003_loop_grow_evidence():
     assert finding["evidence"]["loop_memory_grow_ops"] > 0
 
 
+def _debug_wasm_module():
+    """A minimal core module carrying DWARF custom sections."""
+
+    def leb(value):
+        out = bytearray()
+        while True:
+            byte = value & 0x7F
+            value >>= 7
+            if value:
+                out.append(byte | 0x80)
+            else:
+                out.append(byte)
+                return bytes(out)
+
+    def name(text):
+        raw = text.encode()
+        return leb(len(raw)) + raw
+
+    def custom(payload):
+        return b"\x00" + leb(len(payload)) + payload
+
+    return (
+        b"\x00asm\x01\x00\x00\x00"
+        + custom(name(".debug_info") + b"\x00\x01\x02")
+        + custom(name(".debug_str") + b"src/main.c\x00libfoo\x00")
+    )
+
+
+def test_parse_wasm_debug_info_present(tmp_path):
+    wasm_file = tmp_path / "debug.wasm"
+    wasm_file.write_bytes(_debug_wasm_module())
+    metadata = parse(str(wasm_file))
+
+    # wasm-tools 2.1 flags unstripped DWARF builds and mines .debug_str.
+    assert metadata["wasm_debug_info_present"] is True
+    assert ".debug_str" in {s["name"] for s in metadata["sections"]}
+    assert any(
+        s.get("source") == "custom:.debug_str"
+        for s in metadata["wasm_report"]["strings"]
+    )
+
+
+def test_parse_wasm_debug_info_absent():
+    wasm_file = TEST_DATA_DIR / "gc_ops.wasm"
+    assert parse(str(wasm_file))["wasm_debug_info_present"] is False
+
+
 def test_parse_wasm_flags_omit_strings_and_call_graph():
     wasm_file = TEST_DATA_DIR / "strings_secrets.wasm"
     metadata = parse(str(wasm_file), wasm_strings=False, wasm_call_graph=False)

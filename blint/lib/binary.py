@@ -556,7 +556,18 @@ def parse_wasm_metadata(
         "func": type_kinds.get("func", 0),
         "struct": type_kinds.get("struct", 0),
         "array": type_kinds.get("array", 0),
+        # Any composite kind a newer wasm-tools starts decoding lands here, so
+        # the per-kind counts always add up to total.
+        **{
+            kind: count
+            for kind, count in sorted(type_kinds.items())
+            if kind not in ("func", "struct", "array")
+        },
     }
+    format_detection = (wasm_analysis.get("detections") or {}).get("format") or {}
+    metadata["wasm_debug_info_present"] = "debug_info_present" in (
+        format_detection.get("signals") or []
+    )
     call_graph = report.get("call_graph") or {}
     edge_kind_counts = Counter(
         str(edge.get("kind", "unknown"))
