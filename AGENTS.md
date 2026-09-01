@@ -90,6 +90,18 @@ Primary workflows:
 3. Preserve deep-mode behavior and avoid huge default output growth.
 4. If the change touches `blint/db.py`, `blint/lib/sbom.py`, or blintdb evidence fields, validate both symbol-only and deep disassembly-assisted matching.
 
+### WASM: wasm-tools upgrades
+
+`blint/lib/binary.py::parse_wasm_metadata` normalizes the `wasm_tools` library's report into blint metadata. When bumping the `wasm-tools` floor in `pyproject.toml` (and `poetry.lock`):
+
+1. Diff the library's release notes/changelog between the old and new pinned versions to find new `analysis` keys (capabilities, detections, findings) and new `types[]`/`sections[]`/`strings[]` fields.
+2. Map new attributes additively into `parse_wasm_metadata` — never rename or drop existing keys. Prefer small summary fields (e.g. `wasm_isa_capabilities`, `wasm_types_summary`, `wasm_debug_info_present`) over re-exporting the full raw structure; the full payload always stays available in the companion `*-wasm-report.json`.
+3. When summarizing counts by a category the library may extend later (e.g. type `kind`), don't hardcode the known kinds only — merge in any additional kind so per-key counts always sum to the reported `total`.
+4. Add fixtures under `tests/data/*.wasm` exercising the new decode paths (small hand-built modules are fine — see `tests/test_binary.py::_debug_wasm_module` for a minimal DWARF-bearing module built inline without a binary blob) and cover them in `tests/test_binary.py`.
+5. Update `docs/METADATA.md`'s WASM attribute table and the "wasm-tools X.Y attributes" prose section.
+6. Run the full test suite and, since `blint/lib/binary.py` changed, sanity-check against the [callgraph regression validation policy](#callgraph-regression-validation-policy) below — wasm-only field mapping changes are exempt from re-running native-architecture KPI baselines, but say so explicitly rather than skipping silently.
+7. Bump blint's own version (see below) — this is a feature addition, not a patch.
+
 ### Extend blintdb-backed matching
 
 1. Treat `blint-db/` as the reference implementation for schema and corpus generation, but keep `blint` free of a runtime dependency on that package.
@@ -139,6 +151,17 @@ For fast iterative experiments (especially callgraph tuning), prefer quiet non-r
 ```bash
 poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/reports --disassemble
 ```
+
+## Bumping blint's version
+
+The version string is duplicated across several files with no single source of truth — update all of them together, in the same commit:
+
+- `pyproject.toml` (`version = "..."`)
+- `Info.plist` (`CFBundleVersion`)
+- `file_version_info.txt` (`filevers`, `prodvers`, `FileVersion`, `ProductVersion` — note the four-part `x,y,z,0` tuple form alongside the dotted `x.y.z.0` strings)
+- `Dockerfile` (`org.opencontainers.image.version` — uses a trailing `.x` wildcard, e.g. `"3.4.x"`, not the exact patch version)
+
+Use `grep -rn "<old-version>"` across the repo (excluding `.git`, `.venv`, `node_modules`) before committing to make sure nothing was missed.
 
 ## Environment variables used often
 
