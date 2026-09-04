@@ -37,6 +37,7 @@ from blint.lib.checks import (
     check_undeclared_dependencies,
     check_unused_dependencies,
     check_virtual_size,
+    check_wx_segments,
 )
 from blint.lib.utils import (
     create_findings_table,

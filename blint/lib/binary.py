@@ -337,6 +337,118 @@ def parse_relro(parsed_obj: lief.ELF.Binary) -> str:
     return "full" if bind_now or now else "partial"
 
 
+def _rwx_permissions_str(readable: bool, writable: bool, executable: bool) -> str:
+    """Renders segment permissions in the customary ``rwx`` notation."""
+    return f"{'r' if readable else ''}{'w' if writable else ''}{'x' if executable else ''}"
+
+
+def parse_elf_wx_segments(parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Collects the loadable ELF segments mapped both writable and executable.
+
+    The GNU stack is deliberately excluded: an executable ``PT_GNU_STACK`` is
+    already reported as a missing-NX finding, so covering it here would report
+    the same defect twice.
+
+    Args:
+        parsed_obj: The parsed ELF binary.
+
+    Returns:
+        A list of segment descriptors with a name, normalized permissions and
+        the load address, usable as evidence for the W^X check.
+    """
+    wx_segments: list[dict] = []
+    segments = getattr(parsed_obj, "segments", None)
+    if not segments or isinstance(segments, lief.lief_errors):
+        return wx_segments
+    with contextlib.suppress(AttributeError, TypeError):
+        for index, segment in enumerate(segments):
+            if segment.type != lief.ELF.Segment.TYPE.LOAD:
+                continue
+            writable = segment.has(lief.ELF.Segment.FLAGS.W)
+            executable = segment.has(lief.ELF.Segment.FLAGS.X)
+            if writable and executable:
+                wx_segments.append(
+                    {
+                        "name": f"PT_LOAD[{index}]",
+                        "permissions": _rwx_permissions_str(
+                            segment.has(lief.ELF.Segment.FLAGS.R), writable, executable
+                        ),
+                        "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    }
+                )
+    return wx_segments
+
+
+def parse_pe_wx_sections(parsed_obj: lief.PE.Binary) -> list[dict]:
+    """Collects the PE sections the loader maps both writable and executable.
+
+    Args:
+        parsed_obj: The parsed PE binary.
+
+    Returns:
+        A list of section descriptors with a name, normalized permissions and
+        the relative virtual address, usable as evidence for the W^X check.
+    """
+    wx_sections: list[dict] = []
+    with contextlib.suppress(AttributeError, TypeError):
+        for section in parsed_obj.sections:
+            characteristics = section.characteristics_lists
+            writable = lief.PE.Section.CHARACTERISTICS.MEM_WRITE in characteristics
+            executable = lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE in characteristics
+            if writable and executable:
+                wx_sections.append(
+                    {
+                        "name": section.name,
+                        "permissions": _rwx_permissions_str(
+                            lief.PE.Section.CHARACTERISTICS.MEM_READ in characteristics,
+                            writable,
+                            executable,
+                        ),
+                        "virtual_address": ADDRESS_FMT.format(section.virtual_address).strip(),
+                    }
+                )
+    return wx_sections
+
+
+# Segment protections carried by mach-o load commands (mach/vm_protect.h).
+VM_PROT_READ = 0x1
+VM_PROT_WRITE = 0x2
+VM_PROT_EXECUTE = 0x4
+
+
+def parse_mach0_wx_segments(parsed_obj: lief.MachO.Binary) -> list[dict]:
+    """Collects the Mach-O segments initially mapped both writable and executable.
+
+    Only ``init_protection`` counts as evidence: ``max_protection`` describes
+    what a segment may later be remapped to, not what it is mapped with, so a
+    permissive maximum alone does not mean writable code ever existed.
+
+    Args:
+        parsed_obj: The parsed MachO binary.
+
+    Returns:
+        A list of segment descriptors with a name, normalized permissions and
+        the virtual address, usable as evidence for the W^X check.
+    """
+    wx_segments: list[dict] = []
+    with contextlib.suppress(AttributeError, TypeError):
+        for segment in parsed_obj.segments:
+            protection = int(segment.init_protection)
+            writable = bool(protection & VM_PROT_WRITE)
+            executable = bool(protection & VM_PROT_EXECUTE)
+            if writable and executable:
+                wx_segments.append(
+                    {
+                        "name": segment.name,
+                        "permissions": _rwx_permissions_str(
+                            bool(protection & VM_PROT_READ), writable, executable
+                        ),
+                        "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    }
+                )
+    return wx_segments
+
+
 def parse_functions(functions) -> list[dict]:
     """
     Parses a list of functions and returns a list of dictionaries.
@@ -1774,6 +1886,9 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
     has_symtab = metadata.get("static", False)
     properties = {
         "nx": metadata.get("has_nx", False),
+        # True when no loadable segment maps the same pages writable and
+        # executable, which trivially holds for formats without segments.
+        "w_xor_x": not metadata.get("wx_segments"),
         "pie": metadata.get("is_pie", False),
         "relro": metadata.get("relro", "no"),
         "canary": metadata.get("has_canary", False),
@@ -2561,6 +2676,7 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["is_targeting_android"] = parsed_obj.is_targeting_android
     metadata["virtual_size"] = parsed_obj.virtual_size
     metadata["has_nx"] = parsed_obj.has_nx
+    metadata["wx_segments"] = parse_elf_wx_segments(parsed_obj)
     metadata["has_interpreter"] = parsed_obj.has_interpreter
     metadata["has_notes"] = parsed_obj.has_notes
     metadata["has_overlay"] = parsed_obj.has_overlay
@@ -3250,6 +3366,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["is_reproducible_build"] = parsed_obj.is_reproducible_build
         metadata["virtual_size"] = parsed_obj.virtual_size
         metadata["has_nx"] = parsed_obj.has_nx
+        metadata["wx_segments"] = parse_pe_wx_sections(parsed_obj)
         metadata["imphash_pefile"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.PEFILE)
         metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
@@ -3576,6 +3693,7 @@ def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bin
     metadata["imagebase"] = parsed_obj.imagebase
     metadata["is_pie"] = parsed_obj.is_pie
     metadata["has_nx"] = parsed_obj.has_nx
+    metadata["wx_segments"] = parse_mach0_wx_segments(parsed_obj)
     metadata["exe_type"] = "MachO"
     metadata = add_mach0_versions(exe_file, metadata, parsed_obj)
     if parsed_obj.has_encryption_info and (encryption_info := parsed_obj.encryption_info):

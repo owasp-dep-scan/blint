@@ -9,6 +9,20 @@ def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool
     return metadata.get("has_nx") is not False
 
 
+def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+    # A mapping that is writable and executable at the same time turns any
+    # memory-write primitive into direct code execution, so the offending
+    # segments are reported by name.
+    names = [
+        entry.get("name")
+        for entry in metadata.get("wx_segments") or []
+        if isinstance(entry, dict) and entry.get("name")
+    ]
+    if not names:
+        return True
+    return ", ".join(names[:5])
+
+
 def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
     return metadata.get("is_pie") is not False
 

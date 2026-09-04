@@ -510,6 +510,18 @@ Reports declared dependencies that are never used and used libraries that are ne
 
 Over-linking is largely a property of the distribution rather than the project: builds that pass `--as-needed` are almost free of it, while those that do not accumulate it as link lines are inherited between libraries.
 
+### `wx_segments`
+
+Present for every ELF, PE and Mach-O image. Lists the loadable segments or sections the loader maps both writable and executable, each with its `name`, normalized `permissions` (for example `rwx`) and `virtual_address`. An empty list means the image maintains Write XOR Execute: no code mapping is writable and no data mapping is executable.
+
+What counts as a mapping follows what each platform loader actually enforces:
+
+- **ELF:** `PT_LOAD` program headers carrying both `PF_W` and `PF_X`, named `PT_LOAD[<index>]` by program-header position. An executable `PT_GNU_STACK` is deliberately not listed here; it is a stack-executability defect and is reported by the NX signal (`has_nx`) instead.
+- **PE:** Sections whose characteristics include both `MEM_WRITE` and `MEM_EXECUTE`.
+- **Mach-O:** Segments whose `init_protection` includes both write and execute. `max_protection` is ignored: it describes what a segment may later be remapped to, not what it is mapped with, so a permissive maximum alone does not mean writable code ever existed.
+
+The `CHECK_WX_SEGMENTS` security check turns each entry into a finding naming the segment.
+
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
@@ -517,6 +529,7 @@ This object provides a quick, at-a-glance summary of the most important security
 | Property                 | Description                                                                                                             | Security Implication                                                                                       |
 | :----------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
 | `nx`                     | **Non-eXecutable.** True if data regions (stack/heap) are not executable.                                               | Mitigates code injection attacks.                                                                          |
+| `w_xor_x`                | **Write XOR Execute.** True when no loadable segment is mapped both writable and executable.                            | Keeps code pages unmodifiable at runtime; violations are listed in [`wx_segments`](#wx_segments).          |
 | `pie` / `aslr`           | **Address Space Layout Randomization.**                                                                                 | Makes memory corruption exploits harder by randomizing locations.                                          |
 | `canary`                 | **Stack Cookie.** Confirmed via Load Config or symbols.                                                                 | Mitigates stack-based buffer overflows.                                                                    |
 | `control_flow_guard`     | **CFG (Forward-Edge).** Validates indirect call targets.                                                                | Mitigates function pointer corruption (e.g., vtable hijacking).                                            |
