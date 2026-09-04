@@ -17,7 +17,11 @@ from blint.lib.analysis import (
     run_wasm_findings,
 )
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
-from blint.lib.ios import collect_ios_app, enrich_with_bundle_context, is_ios_app
+from blint.lib.ios import (
+    collect_ios_app_detailed,
+    enrich_with_bundle_context,
+    is_ios_app,
+)
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
 from blint.lib.utils import (
@@ -75,7 +79,15 @@ def run_default_mode(blint_options: BlintOptions) -> None:
     exe_files = gen_file_list(blint_options.src_dir_image)
     analyzer = AnalysisRunner()
     findings, reviews, fuzzables, callgraphs = analyzer.start(blint_options, exe_files)
-    report(blint_options, exe_files, findings, reviews, fuzzables, callgraphs)
+    report(
+        blint_options,
+        exe_files,
+        findings,
+        reviews,
+        fuzzables,
+        callgraphs,
+        analysis_coverage=analyzer.analysis_coverage(),
+    )
     truncation_count = get_hex_truncation_count()
     if truncation_count:
         LOG.info(
@@ -105,6 +117,76 @@ class AnalysisRunner:
         )
         self.task: TaskID | None = None
         self.reviewer: ReviewRunner | None = None
+        # Per-unit isolation bookkeeping. A "unit" is one analyzable input:
+        # a top-level file, or one binary contained in an archive (.ipa).
+        # Failures and skips are recorded structurally so callers can tell a
+        # clean scan from a blind one (issues #122, #188).
+        self.units_attempted = 0
+        self.units_succeeded = 0
+        self.unit_failures: list[dict[str, Any]] = []
+        self.unit_skips: list[dict[str, Any]] = []
+
+    def _record_failure(
+        self, file_path: str, unit_role: str, stage: str, error: BaseException
+    ) -> dict[str, Any]:
+        """Record one isolated unit failure and keep the scan going.
+
+        The caller owns the ``units_attempted`` accounting; this only files
+        the structured failure record.
+        """
+        record = {
+            "file_path": file_path,
+            "unit_role": unit_role,
+            "stage": stage,
+            "exception_type": type(error).__name__,
+            "message": str(error),
+        }
+        self.unit_failures.append(record)
+        LOG.error(
+            f"Analysis of {unit_role} unit {file_path} failed at stage {stage}: "
+            f"{type(error).__name__}: {error}"
+        )
+        return record
+
+    def _record_skip(self, file_path: str, unit_role: str, reason: str) -> dict[str, Any]:
+        """Record one unit that was recognized but not analyzed, and why.
+
+        As with ``_record_failure`` the caller owns the ``units_attempted``
+        accounting; this only files the structured skip record.
+        """
+        record = {
+            "file_path": file_path,
+            "unit_role": unit_role,
+            "reason": reason,
+        }
+        self.unit_skips.append(record)
+        LOG.warning(f"Skipped {unit_role} unit {file_path}: {reason}")
+        return record
+
+    def analysis_coverage(self) -> dict[str, Any]:
+        """Run-level counterpart of the per-binary ``analysis_coverage`` block.
+
+        The per-binary block in ``blint/lib/binary.py`` counts what was
+        analyzed inside one binary; this counts the units of the run itself.
+        The two cannot live in the same place: each binary's metadata is
+        exported before the later units run, so a run-level view can only be
+        assembled by the runner once every unit has been attempted. Without
+        it, a run that failed on half its inputs is indistinguishable from a
+        run that never saw them.
+        """
+        failed = len(self.unit_failures)
+        skipped = len(self.unit_skips)
+        return {
+            "scope": "run",
+            "units": {
+                "attempted": self.units_attempted,
+                "succeeded": self.units_succeeded,
+                "failed": failed,
+                "skipped": skipped,
+            },
+            "failures": list(self.unit_failures),
+            "skipped": list(self.unit_skips),
+        }
 
     def start(
         self, blint_options: BlintOptions, exe_files: list[str]
@@ -129,7 +211,16 @@ class AnalysisRunner:
                 start=True,
             )
             for f in exe_files:
-                self._process_files(f, blint_options)
+                # One unparseable file must not abort a scan that is now much
+                # more expensive per binary (issues #122, #188): each unit is
+                # isolated and every failure is recorded in the run-level
+                # analysis coverage. Success is counted by _process_files,
+                # which knows whether the unit actually completed analysis.
+                self.units_attempted += 1
+                try:
+                    self._process_files(f, blint_options)
+                except Exception as e:  # noqa: BLE001
+                    self._record_failure(f, "top-level", "process", e)
         return self.findings, self.reviews, self.fuzzables, self.callgraphs
 
     def _process_files(self, f: str, blint_options: BlintOptions) -> None:
@@ -148,12 +239,17 @@ class AnalysisRunner:
         if is_android_app(f):
             metadata = self._process_android_file(f)
             if metadata is None:
+                self._record_skip(f, "top-level", "no_dex_bytecode")
                 LOG.warning(f"No dex bytecode could be read from android app {f}; skipping")
                 self.progress.advance(self.task)
                 return
         elif is_ios_app(f):
-            self._process_ios_file(f, blint_options, wants_callgraph_outputs)
+            archive_processed = self._process_ios_file(f, blint_options, wants_callgraph_outputs)
             self.progress.advance(self.task)
+            # The archive unit itself succeeded when collection and member
+            # iteration completed; member outcomes are accounted separately.
+            if archive_processed:
+                self.units_succeeded += 1
             return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
@@ -166,21 +262,28 @@ class AnalysisRunner:
                 wasm_call_graph=blint_options.wasm_call_graph,
             )
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+        self.units_succeeded += 1
         self.progress.advance(self.task)
 
     def _process_ios_file(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
-    ) -> None:
+    ) -> bool:
         """Unpack an iOS/macOS app (.ipa) and analyse each contained Mach-O.
 
         One archive yields several binaries (the main executable plus embedded
         frameworks, dylibs and app extensions); each is parsed through the normal
-        native path and enriched with the app-bundle context.
+        native path and enriched with the app-bundle context. Every member is
+        isolated: one bad framework records a failure and the remaining members
+        still get analysed.
+
+        Returns ``True`` when the archive was collected and all members were
+        attempted, ``False`` when the archive itself was skipped.
         """
         assert self.task is not None
-        app = collect_ios_app(f)
+        app, collect_reason = collect_ios_app_detailed(f)
         if app is None:
-            return
+            self._record_skip(f, "top-level", collect_reason or "collect_failed")
+            return False
         try:
             for entry in app["binaries"]:
                 bin_path = entry["path"]
@@ -189,17 +292,27 @@ class AnalysisRunner:
                     self.task,
                     description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
                 )
-                should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
-                metadata = parse(
-                    bin_path,
-                    should_disassemble,
-                    wasm_strings=blint_options.wasm_strings,
-                    wasm_call_graph=blint_options.wasm_call_graph,
-                )
-                enrich_with_bundle_context(
-                    metadata, app["bundle_info"], role, entry.get("bundle_path")
-                )
-                self._finalize_metadata(bin_path, metadata, blint_options, wants_callgraph_outputs)
+                # Each contained binary is its own unit: a member that fails to
+                # parse must not take the whole archive down with it.
+                self.units_attempted += 1
+                try:
+                    should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
+                    metadata = parse(
+                        bin_path,
+                        should_disassemble,
+                        wasm_strings=blint_options.wasm_strings,
+                        wasm_call_graph=blint_options.wasm_call_graph,
+                    )
+                    enrich_with_bundle_context(
+                        metadata, app["bundle_info"], role, entry.get("bundle_path")
+                    )
+                    self._finalize_metadata(
+                        bin_path, metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self.units_succeeded += 1
+                except Exception as e:  # noqa: BLE001
+                    self._record_failure(bin_path, "ipa-member", "process", e)
+            return True
         finally:
             shutil.rmtree(app["temp_dir"], ignore_errors=True)
 

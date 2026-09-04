@@ -3,7 +3,9 @@ from pathlib import Path
 import orjson
 
 from blint.config import BlintOptions
-from blint.lib.runners import run_default_mode, run_sbom_mode
+from blint.lib.runners import AnalysisRunner, run_default_mode, run_sbom_mode
+
+_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
 def test_run_default_mode_exports_wasm_report_separately(tmp_path):
@@ -335,3 +337,181 @@ def test_run_default_mode_exports_graphml_and_gexf_callgraphs(tmp_path, monkeypa
     assert gexf_file.exists()
     assert "<graphml" in graphml_file.read_text(encoding="utf-8")
     assert "<gexf" in gexf_file.read_text(encoding="utf-8")
+
+
+def test_analysis_runner_coverage_schema():
+    """The run-level coverage block has the promised shape from a fresh start."""
+    runner = AnalysisRunner()
+    coverage = runner.analysis_coverage()
+    assert coverage["scope"] == "run"
+    assert coverage["units"] == {
+        "attempted": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert coverage["failures"] == []
+    assert coverage["skipped"] == []
+
+
+def test_run_default_mode_exports_coverage_for_clean_scan(tmp_path):
+    """A scan with no findings still exports analysis-coverage.json.
+
+    The export must precede the no-findings early return in report(): a run
+    that analyzed everything successfully is exactly the one a caller needs
+    to be able to distinguish from a blind one.
+    """
+    wasm_file = _DATA_DIR / "complex_flow.wasm"
+    reports_dir = tmp_path / "reports"
+    options = BlintOptions(
+        src_dir_image=[str(wasm_file)],
+        reports_dir=str(reports_dir),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    coverage_file = reports_dir / "analysis-coverage.json"
+    assert coverage_file.exists()
+    coverage = orjson.loads(coverage_file.read_bytes())
+    assert coverage["units"] == {
+        "attempted": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert coverage["failures"] == []
+    assert coverage["skipped"] == []
+
+
+def test_run_default_mode_isolates_corrupt_binary(tmp_path):
+    """A corrupt binary must not abort a scan containing good binaries.
+
+    The corrupt fixture is a real file: an .apk (extension routes it to the
+    android analyzer) whose bytes are not a zip, so analyze_android_app
+    raises BadZipFile with no mocking involved. The good binary in the same
+    scan must still be analyzed and exported, and the failure must be
+    machine-readable in analysis-coverage.json.
+    """
+    good_wasm = _DATA_DIR / "complex_flow.wasm"
+    corrupt_apk = tmp_path / "corrupt.apk"
+    corrupt_apk.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
+    reports_dir = tmp_path / "reports"
+    options = BlintOptions(
+        src_dir_image=[str(corrupt_apk), str(good_wasm)],
+        reports_dir=str(reports_dir),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    # The scan continued past the failure: the good binary got analyzed.
+    assert (reports_dir / f"{good_wasm.name}-metadata.json").exists()
+    assert not (reports_dir / f"{corrupt_apk.name}-metadata.json").exists()
+
+    coverage = orjson.loads((reports_dir / "analysis-coverage.json").read_bytes())
+    assert coverage["units"] == {
+        "attempted": 2,
+        "succeeded": 1,
+        "failed": 1,
+        "skipped": 0,
+    }
+    assert len(coverage["failures"]) == 1
+    failure = coverage["failures"][0]
+    assert failure["file_path"] == str(corrupt_apk)
+    assert failure["unit_role"] == "top-level"
+    assert failure["stage"] == "process"
+    assert failure["exception_type"] == "BadZipFile"
+    assert failure["message"]
+
+
+def test_run_default_mode_isolates_failing_ipa_member(tmp_path, monkeypatch):
+    """One bad framework inside an .ipa must not kill the archive's members.
+
+    The archive is a real .ipa fixture; only the poisoned member's parse is
+    made to raise (LIEF tolerates arbitrary bytes, so no real Mach-O bytes
+    raise from parse). Every non-poisoned member must still be analyzed, and
+    the poisoned one recorded as an ipa-member failure.
+    """
+    import plistlib
+    import zipfile
+
+    from blint.lib.runners import parse as runners_parse
+
+    macho_bytes = b"\xcf\xfa\xed\xfe" + b"\x00" * 256
+    app_info = plistlib.dumps(
+        {
+            "CFBundleExecutable": "DemoApp",
+            "CFBundleIdentifier": "com.example.demo",
+        }
+    )
+    ipa_path = tmp_path / "demo.ipa"
+    with zipfile.ZipFile(ipa_path, "w") as zf:
+        zf.writestr("Payload/DemoApp.app/Info.plist", app_info)
+        zf.writestr("Payload/DemoApp.app/DemoApp", macho_bytes)
+        zf.writestr("Payload/DemoApp.app/Frameworks/Poison.framework/Poison", macho_bytes)
+        zf.writestr("Payload/DemoApp.app/Frameworks/Healthy.framework/Healthy", macho_bytes)
+
+    real_parse = runners_parse
+
+    def fake_parse(file_path, disassemble=False, **kwargs):
+        if file_path.endswith("Poison"):
+            raise ValueError("poisoned member")
+        return real_parse(file_path, disassemble, **kwargs)
+
+    monkeypatch.setattr("blint.lib.runners.parse", fake_parse)
+
+    reports_dir = tmp_path / "reports"
+    options = BlintOptions(
+        src_dir_image=[str(ipa_path)],
+        reports_dir=str(reports_dir),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    coverage = orjson.loads((reports_dir / "analysis-coverage.json").read_bytes())
+    # One archive unit + three member units attempted; the archive itself and
+    # two members succeeded, one member failed.
+    assert coverage["units"]["attempted"] == 4
+    assert coverage["units"]["succeeded"] == 3
+    assert coverage["units"]["failed"] == 1
+    failure = coverage["failures"][0]
+    assert failure["unit_role"] == "ipa-member"
+    assert failure["file_path"].endswith("Poison")
+    assert failure["exception_type"] == "ValueError"
+    assert failure["message"] == "poisoned member"
+    # The healthy members were still analyzed and exported.
+    exported = {p.name for p in reports_dir.glob("*-metadata.json")}
+    assert "demoapp-metadata.json" in exported
+    assert "healthy-metadata.json" in exported
+    assert "poison-metadata.json" not in exported
+
+
+def test_run_default_mode_records_unreadable_ipa_skip(tmp_path):
+    """An .ipa that cannot even be extracted is a recorded skip, not silence."""
+    bad_ipa = tmp_path / "bad.ipa"
+    # Binary-looking bytes (so is_exe accepts the file) that are not a zip.
+    bad_ipa.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
+    reports_dir = tmp_path / "reports"
+    options = BlintOptions(
+        src_dir_image=[str(bad_ipa)],
+        reports_dir=str(reports_dir),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    coverage = orjson.loads((reports_dir / "analysis-coverage.json").read_bytes())
+    assert coverage["units"]["attempted"] == 1
+    assert coverage["units"]["succeeded"] == 0
+    assert coverage["units"]["failed"] == 0
+    assert coverage["units"]["skipped"] == 1
+    skip = coverage["skipped"][0]
+    assert skip["file_path"] == str(bad_ipa)
+    assert skip["unit_role"] == "top-level"
+    assert skip["reason"] == "extract_failed"

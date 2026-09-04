@@ -260,3 +260,34 @@ def test_enrich_injects_ats_tokens_into_informative_strings():
     other = {"name": "y"}
     enrich_with_bundle_context(other, bundle_info, "framework", "DemoApp.app/Frameworks/F")
     assert "ATS_NSAllowsArbitraryLoads" not in (other.get("informative_strings") or [])
+
+
+def test_collect_ios_app_detailed_reports_reasons(tmp_path):
+    """Every collect failure mode yields its documented machine-readable token."""
+    from blint.lib.ios import collect_ios_app_detailed
+
+    bogus = tmp_path / "bogus.ipa"
+    bogus.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
+    assert collect_ios_app_detailed(str(bogus)) == (None, "extract_failed")
+
+    no_payload = tmp_path / "nopayload.ipa"
+    with zipfile.ZipFile(no_payload, "w") as zf:
+        zf.writestr("NotPayload/readme.txt", "hello")
+    assert collect_ios_app_detailed(str(no_payload)) == (None, "no_payload_dir")
+
+    no_app = tmp_path / "noapp.ipa"
+    with zipfile.ZipFile(no_app, "w") as zf:
+        zf.writestr("Payload/readme.txt", "hello")
+    assert collect_ios_app_detailed(str(no_app)) == (None, "no_app_bundle")
+
+    no_binaries = tmp_path / "nobinaries.ipa"
+    info = {"CFBundleExecutable": "DemoApp"}
+    with zipfile.ZipFile(no_binaries, "w") as zf:
+        zf.writestr("Payload/DemoApp.app/Info.plist", plistlib.dumps(info))
+    assert collect_ios_app_detailed(str(no_binaries)) == (None, "no_binaries")
+
+    # Success returns the app dict and no reason.
+    ipa = _make_ipa(tmp_path)
+    app, reason = collect_ios_app_detailed(ipa)
+    assert app is not None
+    assert reason is None

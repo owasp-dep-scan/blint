@@ -908,6 +908,7 @@ def report(
     reviews: list[dict[str, Any]],
     fuzzables: list[dict[str, Any]],
     callgraphs: list[dict[str, Any]] | None = None,
+    analysis_coverage: dict[str, Any] | None = None,
 ) -> None:
     """Generates a report based on the analysis results.
 
@@ -917,6 +918,10 @@ def report(
         findings: A list of dictionaries representing the findings.
         reviews: A list of dictionaries representing the reviews.
         fuzzables: A list of fuzzable methods.
+        callgraphs: Optional list of callgraph payloads per binary.
+        analysis_coverage: Optional run-level analysis coverage (units
+            attempted/succeeded/failed/skipped plus the failure records); exported
+            even when the scan produced no other output.
 
     """
     should_render_callgraphs = bool(blint_options.render_mermaid_callgraph and callgraphs)
@@ -927,6 +932,27 @@ def report(
         or should_export_graphml_callgraphs
         or should_export_gexf_callgraphs
     )
+    # The coverage export must happen before the no-findings early return: a
+    # scan that analyzed nothing successfully is precisely the run whose
+    # blind-spot accounting matters most.
+    if analysis_coverage is not None:
+        if not os.path.exists(blint_options.reports_dir):
+            os.makedirs(blint_options.reports_dir)
+        run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
+        export_metadata(
+            blint_options.reports_dir,
+            {
+                "scan_id": run_uuid,
+                "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
+                **analysis_coverage,
+            },
+            "Analysis-Coverage",
+        )
+        units = analysis_coverage.get("units", {})
+        LOG.info(
+            f"Analysis coverage: {units.get('succeeded', 0)}/{units.get('attempted', 0)} "
+            f"unit(s) analyzed, {units.get('failed', 0)} failed, {units.get('skipped', 0)} skipped"
+        )
     if not findings and not reviews and not should_emit_any_callgraph:
         LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
         return

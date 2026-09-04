@@ -571,6 +571,16 @@ Accounting for what was analyzed versus what was discovered, so a run that disas
 - **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`.
 - **`sections_analyzed`**: sections the entropy pass examined.
 
+#### Run-level `analysis-coverage.json`
+
+Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-coverage.json` summarizing the run's *units* (a top-level file, or one binary contained in an `.ipa`). A binary that fails to parse no longer aborts the scan (issues #122, #188); the failure lands here instead:
+
+- **`units`**: `attempted` / `succeeded` / `failed` / `skipped`.
+- **`failures`**: one record per failed unit with `file_path`, `unit_role` (`top-level` or `ipa-member`), `stage`, `exception_type` and `message`.
+- **`skipped`**: one record per recognized-but-unanalyzed unit with `file_path`, `unit_role` and a machine-readable `reason` (e.g. `extract_failed`, `no_dex_bytecode`).
+
+This file is exported even when the scan produced no findings, so a caller can always tell "clean" from "blind" without reading stderr.
+
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.

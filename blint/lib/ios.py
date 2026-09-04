@@ -10,6 +10,7 @@ minimum OS, FairPlay encryption status) so each binary's report can be enriched.
 
 import os
 import plistlib
+import shutil
 import tempfile
 import zipfile
 
@@ -285,18 +286,31 @@ def collect_ios_app(app_file: str) -> dict | None:
     ``bundle_info`` and ``binaries``; or ``None`` when no app bundle/binary is
     found.
     """
+    return collect_ios_app_detailed(app_file)[0]
+
+
+def collect_ios_app_detailed(app_file: str) -> tuple[dict | None, str | None]:
+    """Like :func:`collect_ios_app`, but also returns a skip reason.
+
+    The reason is ``None`` when collection succeeded and a short machine
+    readable token otherwise (``extract_failed``, ``no_payload_dir``,
+    ``no_app_bundle``, ``no_binaries``), so callers can record why an archive
+    went unanalyzed instead of just logging it.
+    """
     temp_dir = tempfile.mkdtemp(prefix="blint_ios_app")
     try:
         with zipfile.ZipFile(app_file) as zf:
             zf.extractall(temp_dir)
     except (zipfile.BadZipFile, OSError) as e:
+        shutil.rmtree(temp_dir, ignore_errors=True)
         LOG.warning(f"Could not extract iOS app {app_file}: {e}")
-        return None
+        return None, "extract_failed"
 
     payload_dir = os.path.join(temp_dir, "Payload")
     if not os.path.isdir(payload_dir):
         LOG.warning(f"iOS app {app_file} has no Payload/ directory; skipping")
-        return None
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None, "no_payload_dir"
     app_dirs = sorted(
         os.path.join(payload_dir, d)
         for d in os.listdir(payload_dir)
@@ -304,7 +318,8 @@ def collect_ios_app(app_file: str) -> dict | None:
     )
     if not app_dirs:
         LOG.warning(f"iOS app {app_file} has no .app bundle in Payload/; skipping")
-        return None
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None, "no_app_bundle"
 
     app_dir = app_dirs[0]
     bundle_info = _read_bundle_info(app_dir)
@@ -313,8 +328,9 @@ def collect_ios_app(app_file: str) -> dict | None:
     binaries = _collect_bundle_binaries(app_dir, bundle_info)
     if not binaries:
         LOG.warning(f"No Mach-O binaries found in iOS app {app_file}; skipping")
-        return None
-    return {"temp_dir": temp_dir, "bundle_info": bundle_info, "binaries": binaries}
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None, "no_binaries"
+    return {"temp_dir": temp_dir, "bundle_info": bundle_info, "binaries": binaries}, None
 
 
 def enrich_with_bundle_context(
