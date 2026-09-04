@@ -1151,3 +1151,85 @@ def test_run_wasm_findings_empty_inputs():
     assert run_wasm_findings("clean.wasm", clean_metadata) == []
     assert run_wasm_findings("clean.wasm", {}) == []
     assert run_wasm_findings("clean.wasm", {"wasm_analysis": {}}) == []
+
+
+def test_check_wx_segments_reports_offending_segment_names():
+    metadata = {
+        "exe_type": "genericbinary",
+        "name": "wx.elf",
+        "wx_segments": [
+            {"name": "PT_LOAD[1]", "permissions": "rwx", "virtual_address": "0x401000"},
+            {"name": "PT_LOAD[2]", "permissions": "rwx", "virtual_address": "0x402000"},
+        ],
+    }
+
+    results = [
+        result for result in run_checks("wx.elf", metadata) if result["id"] == "CHECK_WX_SEGMENTS"
+    ]
+
+    assert len(results) == 1
+    assert results[0]["severity"] == "critical"
+    assert "PT_LOAD[1]" in results[0]["title"]
+    assert "PT_LOAD[2]" in results[0]["title"]
+
+
+def test_check_wx_segments_reports_pe_sections_by_name():
+    metadata = {
+        "exe_type": "PE64",
+        "name": "wx.exe",
+        "wx_segments": [
+            {"name": ".rwx", "permissions": "rwx", "virtual_address": "0x2000"},
+        ],
+    }
+
+    results = [
+        result for result in run_checks("wx.exe", metadata) if result["id"] == "CHECK_WX_SEGMENTS"
+    ]
+
+    assert len(results) == 1
+    assert ".rwx" in results[0]["title"]
+
+
+def test_check_wx_segments_ignores_malformed_or_unnamed_entries():
+    metadata = {
+        "exe_type": "MachO",
+        "name": "wx.dylib",
+        "wx_segments": ["__DATA", {"permissions": "rwx"}, {"name": ""}],
+    }
+
+    results = [
+        result
+        for result in run_checks("wx.dylib", metadata)
+        if result["id"] == "CHECK_WX_SEGMENTS"
+    ]
+
+    assert results == []
+
+
+def test_check_wx_segments_passes_without_offending_segments():
+    clean_metadata = {
+        "exe_type": "genericbinary",
+        "name": "ok.elf",
+        "wx_segments": [],
+    }
+    missing_key_metadata = {
+        "exe_type": "PE32",
+        "name": "ok.exe",
+    }
+    other_exe_type_metadata = {
+        "exe_type": "wasmbinary",
+        "name": "module.wasm",
+        "wx_segments": [
+            {"name": "PT_LOAD[1]", "permissions": "rwx", "virtual_address": "0x401000"},
+        ],
+    }
+
+    assert not [r for r in run_checks("ok.elf", clean_metadata) if r["id"] == "CHECK_WX_SEGMENTS"]
+    assert not [
+        r for r in run_checks("ok.exe", missing_key_metadata) if r["id"] == "CHECK_WX_SEGMENTS"
+    ]
+    assert not [
+        r
+        for r in run_checks("module.wasm", other_exe_type_metadata)
+        if r["id"] == "CHECK_WX_SEGMENTS"
+    ]

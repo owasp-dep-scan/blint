@@ -20,6 +20,24 @@
     - dotnetbinary
     - MachO
     - mips-executable
+- id: CHECK_WX_SEGMENTS
+  title: Writable and Executable Memory Segment
+  description: |
+    A loadable segment or section is mapped so that the same pages can be both written and executed. This breaks the Write XOR Execute (W^X) invariant: any memory-write primitive — a buffer overflow, a use-after-free, an unsafe deserialization routine — becomes direct code execution, because the pages the processor runs are the pages an attacker can modify.
+    Such mappings usually come from the link or pack step rather than the source: a single RWX `PT_LOAD` in firmware and binaries processed by older packer releases, a linker script or `-z execstack` build marking every loadable segment read-write-execute, or PE sections carrying `MEM_WRITE` together with `MEM_EXECUTE` after processing by some packers and legacy linkers.
+    Keep code segments read-only and executable (`R+X`) and data segments writable and non-executable (`R+W`). Runtime code generation and self-modifying code should write through a private writable mapping and only flip the executable view readable-executable for the duration of the update (`mprotect`/`VirtualProtect`), or use the JIT write-protection support provided by the runtime. `readelf -l` shows the offending segment as `LOAD ... RWE`; `objdump -h` and `dumpbin /headers` show the offending PE sections.
+    Beyond exploit mitigation, keeping data non-executable matters for correctness on ARM: non-executable permission is the only mechanism that prevents speculative instruction fetches to a region, so executable data or MMIO mappings can be speculatively fetched by mispredicted indirect branches with unpredictable results on some SoCs.
+  severity: critical
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - gobinary
+    - PE32
+    - PE64
+    - dotnetbinary
+    - MachO
+    - mips-executable
 - id: CHECK_PIE
   title: Missing Position-Independent Executable (PIE) Protection
   description: |

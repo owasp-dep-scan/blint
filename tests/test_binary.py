@@ -1,4 +1,5 @@
 import os
+import struct
 import sys
 from pathlib import Path
 
@@ -297,6 +298,163 @@ def test_parse_wasm_debug_info_present(tmp_path):
 def test_parse_wasm_debug_info_absent():
     wasm_file = TEST_DATA_DIR / "gc_ops.wasm"
     assert parse(str(wasm_file))["wasm_debug_info_present"] is False
+
+
+def _wx_elf_binary(data_segment_flags: int) -> bytes:
+    """A minimal x86_64 ELF image with a parameterized second PT_LOAD."""
+    ehdrsize, phentsize = 64, 56
+
+    def phdr(p_type, flags, offset, vaddr, memsz):
+        return struct.pack("<IIQQQQQQ", p_type, flags, offset, vaddr, vaddr, memsz, memsz, 0x1000)
+
+    phdrs = [
+        phdr(1, 0x5, 0, 0x400000, 0x1000),  # PT_LOAD R+X
+        phdr(1, data_segment_flags, 0x1000, 0x401000, 0x200),
+        phdr(0x6474E551, 0x6, 0, 0, 0),  # PT_GNU_STACK R+W
+    ]
+    ehdr = struct.pack(
+        "<16sHHIQQQIHHHHHH",
+        b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8,
+        2,  # ET_EXEC
+        62,  # EM_X86_64
+        1,
+        0x400000,
+        ehdrsize,
+        0,
+        0,
+        ehdrsize,
+        phentsize,
+        len(phdrs),
+        64,
+        0,
+        0,
+    )
+    return b"".join([ehdr] + phdrs).ljust(0x1200, b"\x00")
+
+
+def _wx_macho_binary(data_protection: int, data_max_protection: int | None = None) -> bytes:
+    """A minimal x86_64 mach-o image with a parameterized __DATA segment."""
+    if data_max_protection is None:
+        data_max_protection = data_protection
+
+    def segment(name, vmaddr, maxprot, initprot):
+        body = struct.pack(
+            "<16sQQQQiiII",
+            name.encode().ljust(16, b"\x00"),
+            vmaddr,
+            0x1000,
+            vmaddr - 0x100000000,
+            0x1000,
+            maxprot,
+            initprot,
+            0,
+            0,
+        )
+        return struct.pack("<II", 0x19, len(body) + 8) + body
+
+    segments = [
+        segment("__TEXT", 0x100000000, 5, 5),
+        segment("__DATA", 0x100001000, data_max_protection, data_protection),
+    ]
+    header = struct.pack(
+        "<IiiIIIII",
+        0xFEEDFACF,
+        0x01000007,
+        3,
+        2,
+        len(segments),
+        sum(len(s) for s in segments),
+        0,
+        0,
+    )
+    return b"".join([header] + segments).ljust(0x2000, b"\x00")
+
+
+def _wx_pe_binary() -> bytes:
+    """A minimal PE32+ image whose second section is mapped W+X."""
+    dos = bytearray(0x80)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x80)
+    coff = struct.pack("<HHIIIHH", 0x8664, 2, 0, 0, 0, 0xF0, 0x0022)
+    optional = bytearray(0xF0)
+    struct.pack_into("<H", optional, 0, 0x20B)  # PE32+ magic
+    struct.pack_into("<I", optional, 32, 4)
+    struct.pack_into("<III", optional, 36, 0x200000, 0x100000, 0x200000)
+    struct.pack_into("<H", optional, 68, 3)  # subsystem: console
+    struct.pack_into("<I", optional, 92, 16)  # numberOfRvaAndSizes
+
+    def section(name, va, raw_ptr, characteristics):
+        return struct.pack(
+            "<8sIIIIIIHHI", name.encode(), 0x200, va, 0x200, raw_ptr, 0, 0, 0, 0, characteristics
+        )
+
+    sections = [
+        section(".text", 0x1000, 0x200, 0x60000020),  # R+X
+        section(".rwx", 0x2000, 0x400, 0xE0000040),  # R+W+X
+    ]
+    return b"".join([bytes(dos), b"PE\x00\x00", coff, bytes(optional)] + sections).ljust(
+        0x600, b"\x00"
+    )
+
+
+def test_parse_collects_wx_elf_load_segments(tmp_path):
+    exe_file = tmp_path / "wx.elf"
+    exe_file.write_bytes(_wx_elf_binary(0x7))  # R+W+X
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == [
+        {"name": "PT_LOAD[1]", "permissions": "rwx", "virtual_address": "0x401000"}
+    ]
+    assert metadata["security_properties"]["w_xor_x"] is False
+
+
+def test_parse_reports_no_wx_elf_load_segments_without_them(tmp_path):
+    exe_file = tmp_path / "ok.elf"
+    exe_file.write_bytes(_wx_elf_binary(0x6))  # R+W
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == []
+    assert metadata["security_properties"]["w_xor_x"] is True
+
+
+def test_parse_collects_wx_macho_segments_from_initial_protection(tmp_path):
+    exe_file = tmp_path / "wx.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x7))  # initprot R+W+X
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == [
+        {"name": "__DATA", "permissions": "rwx", "virtual_address": "0x100001000"}
+    ]
+
+
+def test_parse_ignores_permissive_macho_max_protection(tmp_path):
+    # max_protection only describes what the segment may be remapped to, so a
+    # writable-executable maximum over a read-write mapping is not a finding.
+    exe_file = tmp_path / "maxprot.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3, 0x7))  # initprot R+W, maxprot R+W+X
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == []
+
+
+def test_parse_reports_no_wx_macho_segments_for_standard_images(tmp_path):
+    exe_file = tmp_path / "ok.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3))  # initprot R+W
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == []
+    assert metadata["security_properties"]["w_xor_x"] is True
+
+
+def test_parse_collects_wx_pe_sections(tmp_path):
+    exe_file = tmp_path / "wx.exe"
+    exe_file.write_bytes(_wx_pe_binary())
+    metadata = parse(str(exe_file))
+
+    assert metadata["wx_segments"] == [
+        {"name": ".rwx", "permissions": "rwx", "virtual_address": "0x2000"}
+    ]
+    assert metadata["security_properties"]["w_xor_x"] is False
 
 
 def test_parse_wasm_flags_omit_strings_and_call_graph():
