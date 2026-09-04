@@ -1,0 +1,82 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 29-32,2594-2598,2614-2641,2655,2661-2663,2688-2692,2696-2736,3976-3991
+blint/lib/funcdisc/complete.py
+  h_6a4cc5cdf68def 1-263
+tests/corpus/sources/stackstr.c
+  h_6a4cc5cdf68def 1-17
+tests/corpus/manifest.json
+  h_6a4cc5cdf68def 1-102
+tests/scripts/validate_funcdisc.py
+  h_6a4cc5cdf68def 1-89,92,100,102,107-108,110-239
+  h_6a4cc5cdf68def 90-91,93-99,101,103-106,109
+tests/corpus/sources/godemo/main.go
+  h_6a4cc5cdf68def 1-25
+blint/lib/funcdisc/__init__.py
+  h_6a4cc5cdf68def 1-16
+tests/corpus/sources/rustdemo/.cargo/config.toml
+  h_6a4cc5cdf68def 1-3
+tests/corpus/sources/rustdemo/Cargo.toml
+  h_6a4cc5cdf68def 1-7
+blint/lib/checks.py
+  h_6a4cc5cdf68def 193-208
+blint/lib/entropy.py
+  h_6a4cc5cdf68def 1-199,201-256,260-309
+  h_6a4cc5cdf68def 200,257-259
+blint/lib/stack_strings.py
+  h_6a4cc5cdf68def 420-431,435-438,442-444,455
+blint/lib/toolchain.py
+  h_6a4cc5cdf68def 1-222
+tests/corpus/sources/.gitignore
+  h_6a4cc5cdf68def 1-4
+blint/lib/cfg.py
+  h_6a4cc5cdf68def 1-185,189-198,200-269
+  h_6a4cc5cdf68def 186-188,199
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 35
+blint/lib/disassembler.py
+  h_6a4cc5cdf68def 4-5,29-36,1909-1960,2111-2121,2145-2165,2167-2184,2187-2188,2408-2446,2455-2473
+tests/scripts/build_corpus.py
+  h_6a4cc5cdf68def 1-194
+blint/lib/absint.py
+  h_6a4cc5cdf68def 1-300
+blint/lib/funcdisc/unwind.py
+  h_6a4cc5cdf68def 1-229,233-234,237-240,246,250-349,352-490,492-496,500,503-507,509-568
+  h_6a4cc5cdf68def 230-232,235-236,241-245,247-249,350-351,491,497-499,501-502,508
+blint/data/rules.yml
+  h_6a4cc5cdf68def 358-371
+tests/corpus/sources/rustdemo/src/main.rs
+  h_6a4cc5cdf68def 1-20
+blint/lib/similarity.py
+  h_6a4cc5cdf68def 1-119
+.gitignore
+  h_6a4cc5cdf68def 145-146
+tests/corpus/sources/godemo/go.mod
+  h_6a4cc5cdf68def 1-3
+Dockerfile
+  h_6a4cc5cdf68def 8
+Info.plist
+  h_6a4cc5cdf68def 12
+docs/DISASSEMBLE.md
+  h_6a4cc5cdf68def 48-80
+docs/METADATA.md
+  h_6a4cc5cdf68def 333-344,537-573,595
+file_version_info.txt
+  h_6a4cc5cdf68def 10-11,35,40
+pyproject.toml
+  h_6a4cc5cdf68def 3
+tests/test_engine_modules.py
+  h_6a4cc5cdf68def 1-289
+tests/test_funcdisc.py
+  h_6a4cc5cdf68def 1-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "04b973e4348ac6970668331120ea631cca905b34",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
