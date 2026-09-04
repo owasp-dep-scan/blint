@@ -65,28 +65,28 @@ _SIZE_HINTS: dict[str, int] = {"byte": 1, "word": 2, "dword": 4, "qword": 8}
 _IMM = r"(?:-?(?:0x[0-9a-fA-F]+|[0-9][0-9a-fA-F]*h|[0-9]+))"
 _REG = r"[a-z][a-z0-9]*"
 
-_MOV_REG_IMM_RE = re.compile(rf"^\s*mov\s+({_REG})\s*,\s*({_IMM})\s*$", re.I)
+_MOV_REG_IMM_RE = re.compile(rf"^\s*mov\s+({_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE)
 _MOV_REG_REG_RE = re.compile(
-    rf"^\s*(?:mov|movzx|movsx|movsxd)\s+({_REG})\s*,\s*({_REG})\s*$", re.I
+    rf"^\s*(?:mov|movzx|movsx|movsxd)\s+({_REG})\s*,\s*({_REG})\s*$", re.IGNORECASE
 )
-_XOR_SELF_RE = re.compile(rf"^\s*xor\s+({_REG})\s*,\s*({_REG})\s*$", re.I)
-_ARITH_REG_IMM_RE = re.compile(rf"^\s*(add|sub|or|and|xor)\s+({_REG})\s*,\s*({_IMM})\s*$", re.I)
+_XOR_SELF_RE = re.compile(rf"^\s*xor\s+({_REG})\s*,\s*({_REG})\s*$", re.IGNORECASE)
+_ARITH_REG_IMM_RE = re.compile(rf"^\s*(add|sub|or|and|xor)\s+({_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE)
 # `lea eax, [rcx - 15]` is how a compiler folds "this character minus that one"
 # into a single instruction; it is the workhorse of arithmetic string building.
 _LEA_RE = re.compile(
-    rf"^\s*lea\s+({_REG})\s*,\s*\[\s*({_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*$", re.I
+    rf"^\s*lea\s+({_REG})\s*,\s*\[\s*({_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*$", re.IGNORECASE
 )
 # A store into a frame slot, with the value either an immediate or a register.
 _STORE_RE = re.compile(
     rf"^\s*mov\s+(?:(byte|word|dword|qword)\s+ptr\s+)?"
     rf"\[\s*({_REG})\s*([+-])\s*({_IMM})\s*\]\s*,\s*({_IMM}|{_REG})\s*$",
-    re.I,
+    re.IGNORECASE,
 )
 # Any other instruction writing a register invalidates what is known about it.
 _DEST_REG_RE = re.compile(
     rf"^\s*(?:{'|'.join(('mov', 'movzx', 'movsx', 'movsxd', 'lea', 'add', 'sub', 'or', 'and', 'xor', 'imul', 'mul', 'shl', 'shr', 'sar', 'rol', 'ror', 'not', 'neg', 'inc', 'dec', 'pop', 'cmov[a-z]+', 'set[a-z]+', 'bswap', 'div', 'idiv'))})"
     rf"\s+({_REG})\s*(?:,|$)",
-    re.I,
+    re.IGNORECASE,
 )
 
 # Registers a call clobbers under the Microsoft x64 and SysV ABIs combined. After

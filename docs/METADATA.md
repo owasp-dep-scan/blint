@@ -337,7 +337,7 @@ Recovered function starts for binaries whose symbol tables are stripped or incom
 - **`discovered_functions`**: every function start recovered from the structures the runtime itself depends on, which survive `strip`:
   - **Mach-O `__TEXT,__unwind_info`** (compact unwind): `source: "unwind"`, with exact function sizes derived from the sorted offset table and its sentinel entry.
   - **ELF `.eh_frame_hdr` / `.eh_frame`**: `source: "eh_frame"`. Starts come from the binary-search table when present; sizes come from the exact FDE `pc_range` values. A CIE/FDE walk covers binaries whose header table is missing or malformed.
-  - Each entry carries `name` (`sub_<address>` unless a real symbol name is known, in which case `symbol_name` holds it), `address`, `size` and `source`.
+  - Each entry carries `name` (the real symbol name when one exists, `sub_<address>` otherwise), `address`, `size` and `source`. Addresses already claimed by a symbol bucket enrich the existing entry with the exact unwind size when its size was unknown.
 - **`function_discovery`**: summary of the merge — `sources` (per-source counts) and `merged_count` (addresses that were genuinely new, i.e. not claimed by any symbol bucket).
 
 Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.

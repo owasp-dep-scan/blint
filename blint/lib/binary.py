@@ -22,14 +22,19 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.disassembler import disassemble_functions
+from blint.lib.driver_ioctl import (
+    IOCTL_TABLE_SECTIONS,
+    classify_driver_strings,
+    collect_driver_ioctls,
+    is_kernel_driver,
+)
 from blint.lib.elf_abi import analyze_elf_abi
 from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
 from blint.lib.elf_linkmap import resolve_link_closure
 from blint.lib.entropy import analyze_binary_entropy
 from blint.lib.funcdisc.unwind import discover_functions, merge_discovered_functions
-from blint.lib.similarity import attach_function_hashes, compute_import_hash
-from blint.lib.toolchain import infer_toolchain
 from blint.lib.import_attribution import (
     UNATTRIBUTED_LIBRARY,
     analyze_link_hygiene,
@@ -38,16 +43,11 @@ from blint.lib.import_attribution import (
     is_library_name,
     symbol_lookup_names,
 )
-from blint.lib.driver_ioctl import (
-    IOCTL_TABLE_SECTIONS,
-    classify_driver_strings,
-    collect_driver_ioctls,
-    is_kernel_driver,
-)
-from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
-from blint.lib.stack_strings import recover_stack_strings
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.similarity import attach_function_hashes, compute_import_hash
+from blint.lib.stack_strings import recover_stack_strings
+from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
     calculate_entropy,
     calculate_hashes,
@@ -315,7 +315,7 @@ def integer_to_hex_str(e: int) -> str:
     Returns:
         The hexadecimal string representation of the integer.
     """
-    return "{:02x}".format(e)
+    return f"{e:02x}"
 
 
 def parse_relro(parsed_obj: lief.ELF.Binary) -> str:
@@ -2295,8 +2295,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
 
             def _score_candidates(id_list, score):
                 for cid in id_list or []:
-                    if score > candidate_scores[cid]:
-                        candidate_scores[cid] = score
+                    candidate_scores[cid] = max(candidate_scores[cid], score)
 
             numeric_candidates = []
             if target_addr:
@@ -2626,7 +2625,9 @@ def parse(
                 )
         # Cross-version stable identifiers: import hash for every format and,
         # once disassembly ran, per-function fuzzy/CFG hashes. ELF carries its
-        # imports as imported dynamic symbols rather than an `imports` list.
+        # imports as imported dynamic symbols, Mach-O as undefined symtab
+        # entries whose names are prefixed `dylib::symbol`, and PE as the
+        # imports list.
         import_names = [
             entry.get("name")
             for entry in metadata.get("imports", [])
@@ -2638,6 +2639,15 @@ def parse(
                 for entry in metadata.get("dynamic_symbols", [])
                 if isinstance(entry, dict) and entry.get("name") and entry.get("is_imported")
             ]
+        if not import_names and metadata.get("binary_type") == "MachO":
+            import_names = []
+            for entry in metadata.get("symtab_symbols", []):
+                if not isinstance(entry, dict) or not entry.get("name"):
+                    continue
+                # Undefined symbols are the imports; blint records their
+                # LIEF category, whose string form ends in "UNDEFINED".
+                if str(entry.get("category", "")).upper().endswith("UNDEFINED"):
+                    import_names.append(entry["name"])
         metadata["import_hash"] = compute_import_hash(import_names)
         if disassemble and metadata.get("is_encrypted"):
             # FairPlay-encrypted App Store binaries have an encrypted __TEXT
@@ -3143,7 +3153,7 @@ def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list[dict]:
             "version": version,
             "purl": f"pkg:cargo/{name}@{version}" if version else f"pkg:cargo/{name}",
         }
-        for name, version in detected_deps.keys()
+        for name, version in detected_deps
     ]
 
 

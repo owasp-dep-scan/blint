@@ -1,9 +1,9 @@
+import bisect
 import contextlib
 import hashlib
 import re
-import bisect
 from collections import deque
-from functools import lru_cache
+from functools import cache, lru_cache
 from typing import NamedTuple
 
 import lief
@@ -26,6 +26,7 @@ from blint.config import (
     MIPS_SHIFT_3_OP,
     SORTED_ALL_REGS_MIPS,
 )
+from blint.lib.cfg import build_function_cfg
 from blint.lib.funcdisc.complete import (
     MAX_PROMOTED_FUNCTIONS,
     PROLOGUE_SCAN_MIN_FUNCTIONS,
@@ -33,7 +34,6 @@ from blint.lib.funcdisc.complete import (
     find_prologue_candidates,
     promotable_call_target,
 )
-from blint.lib.cfg import build_function_cfg
 from blint.lib.indicators import (
     CRYPTO_INDICATORS,
     GPU_INDICATORS,
@@ -420,12 +420,12 @@ except ImportError:
     NYXSTONE_AVAILABLE = False
 
 
-@lru_cache(maxsize=None)
+@cache
 def _normalize_arch_target(arch_target: str) -> str:
     return (arch_target or "").lower()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _has_supported_nyxstone_target(arch_target: str) -> bool:
     normalized_target = (arch_target or "").strip()
     if not normalized_target:
@@ -456,7 +456,7 @@ _NON_ELF_TRIPLE_MARKERS = (
 )
 
 
-@lru_cache(maxsize=None)
+@cache
 def _to_nyxstone_triple(arch_target: str) -> str:
     """Return an ELF-compatible target triple that Nyxstone can initialize.
 
@@ -634,7 +634,7 @@ def _append_call_target(
     )
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_arch_reg_set(arch_target: str) -> frozenset[str]:
     """Returns the appropriate set of registers based on the architecture."""
     lower_arch = _normalize_arch_target(arch_target)
@@ -645,7 +645,7 @@ def get_arch_reg_set(arch_target: str) -> frozenset[str]:
     return ARCH_REG_SET_X86
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_implicit_regs_map(arch_target: str) -> dict[str, dict[str, set[str]]]:
     """Selects the appropriate implicit registers map based on architecture."""
     lower_arch = _normalize_arch_target(arch_target)
@@ -851,16 +851,7 @@ def _extract_register_usage(
                     regs_read.update(target_regs)
         elif mnemonic in ("ret", "eret"):
             pass
-        elif mnemonic in ("and", "orr", "eor", "bic", "tst"):
-            if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
-                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
-                regs_written.update(dst_regs)
-                regs_read.update(src1_regs)
-                if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
-                    regs_read.update(src2_regs)
-        elif mnemonic in (
+        elif mnemonic in ("and", "orr", "eor", "bic", "tst") or mnemonic in (
             "lsl",
             "lsr",
             "asr",
@@ -1145,9 +1136,7 @@ def _analyze_instructions(
             if operand_text:
                 operand = parsed_instr.operand_text_lower
                 reg_token = _extract_register_token(operand, arch_reg_set)
-                if reg_token:
-                    is_indirect = True
-                elif "[" in operand and "]" in operand:
+                if reg_token or "[" in operand and "]" in operand:
                     is_indirect = True
             if is_indirect:
                 has_indirect_call = True
@@ -1931,6 +1920,7 @@ def _promote_call_targets(
     additionally be word-aligned. Bounded by the caller's promotion cap.
     """
     promoted: list[int] = []
+    promoted_set: set[int] = set()
     for target in direct_call_targets or []:
         if not isinstance(target, dict) or target.get("kind") != "direct":
             continue
@@ -1942,7 +1932,7 @@ def _promote_call_targets(
             stored_addr = absolute_addr - imagebase
             if is_aarch64 and stored_addr % 4:
                 continue
-            if stored_addr in visited_addrs or stored_addr in promoted:
+            if stored_addr in visited_addrs or stored_addr in promoted_set:
                 continue
             if (
                 promotable_call_target(
@@ -1955,6 +1945,7 @@ def _promote_call_targets(
             ):
                 continue
             promoted.append(stored_addr)
+            promoted_set.add(stored_addr)
     return promoted
 
 
@@ -1993,7 +1984,7 @@ def _mem_bytes_len(b) -> int | None:
     if isinstance(b, list):
         return len(b)
     if hasattr(b, "nbytes"):
-        return getattr(b, "nbytes")
+        return b.nbytes
     return None
 
 
@@ -2147,12 +2138,16 @@ def disassemble_functions(
     # a function set; dense binaries are left untouched.
     if len(all_func_addrs_sorted) < PROLOGUE_SCAN_MIN_FUNCTIONS:
         prologue_addrs = find_prologue_candidates(parsed_obj, arch_target, exec_ranges_stored)
-        new_addrs = [a for a in prologue_addrs if a not in set(all_func_addrs_sorted)]
+        known_addr_set = set(all_func_addrs_sorted)
+        new_addrs = [a for a in prologue_addrs if a not in known_addr_set]
         if new_addrs:
             LOG.debug(f"Prologue scan discovered {len(new_addrs)} candidate function starts.")
-            all_func_addrs_sorted = sorted(set(all_func_addrs_sorted) | set(new_addrs))
+            all_func_addrs_sorted = sorted(known_addr_set | set(new_addrs))
             addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
-            prologue_entries = [
+            # Prologue discoveries feed the worklist directly; they surface in
+            # metadata["discovered_functions"] after the loop, exactly like
+            # call-site promotions, instead of mutating the function lists.
+            all_funcs.extend(
                 {
                     "name": f"sub_{a:x}",
                     "address": f"0x{a:x}",
@@ -2160,9 +2155,7 @@ def disassemble_functions(
                     "discovered": "prologue",
                 }
                 for a in new_addrs
-            ]
-            metadata["functions"] = list(metadata.get("functions") or []) + prologue_entries
-            all_funcs.extend(prologue_entries)
+            )
     visited_addrs = set()
     # Worklist instead of a plain list so direct-call promotion can append
     # newly discovered functions; initial entries keep their existing order.
@@ -2467,8 +2460,9 @@ def disassemble_functions(
             if isinstance(func, dict) and func.get("discovered") == "callsite"
         ]
         if promoted_entries:
-            metadata["discovered_functions"] = sorted(
-                list(metadata.get("discovered_functions") or []) + promoted_entries,
-                key=lambda entry: (entry.get("address", ""), entry.get("source", "")),
-            )
+            merged_records = list(metadata.get("discovered_functions") or []) + promoted_entries
+            # Sort numerically; sorting the hex strings would interleave
+            # addresses of different lengths lexicographically.
+            merged_records.sort(key=lambda entry: int(entry.get("address", "0x0"), 16))
+            metadata["discovered_functions"] = merged_records
     return disassembly_results

@@ -6,11 +6,22 @@ native path had none. This module closes that asymmetry for the small price
 of classifying the instructions the disassembler already produces.
 
 A block ends at every branch, return or trap, and at every branch target
-inside the function; edges follow the terminators. From the block graph come
-the structural metrics rules and fingerprints consume: cyclomatic complexity,
-loop count (back edges), unreachable blocks, indirect branches, and the
-block-size spread that distinguishes compiler-generated layout from control-
-flow flattening.
+inside the function; edges follow the terminators. Calls do not end blocks
+(intra-function shape is what this graph describes), and `svc`-style
+exception entries that the CPU returns from are not traps. Branch operands
+that are registers or memory expressions are the only *indirect* branches;
+immediates whose target falls outside the disassembled window (tail calls,
+jump-table arms) are counted separately rather than as indirection, and the
+block after a truly indirect branch is kept *potentially* reachable — an
+indirect transfer can land anywhere, so treating its successor as dead
+would manufacture fake obfuscation signal.
+
+From the block graph come the structural metrics rules and fingerprints
+consume: cyclomatic complexity, loop count (back edges), unreachable
+blocks, indirect branches, and the block-size spread that distinguishes
+compiler-generated layout from control-flow flattening. The block and edge
+listings are emitted alongside the counts so the graph itself, not just its
+summary, is available to consumers.
 
 Branch targets are computed from what nyxstone renders. Both x86 and ARM64
 print branch operands as signed displacements (``jne -17``, ``b.ne #28``), so
@@ -39,7 +50,9 @@ ARM64_UNCONDITIONAL = ("b", "br", "braa", "brab", "brka", "brkb", "drps")
 ARM64_CONDITIONAL_PREFIXES = ("b.", "cbz", "cbnz", "tbz", "tbnz")
 ARM64_CALLS = {"bl", "blr", "blraa", "blrab"}
 ARM64_RET = {"ret"}
-ARM64_TRAPS = {"brk", "hlt", "udf", "svc", "hvc", "smc"}
+# brk/hlt/udf never return; svc/hvc/smc are exception *entries* the CPU
+# returns from, so they must not terminate a block.
+ARM64_TRAPS = {"brk", "hlt", "udf"}
 
 MIPS_UNCONDITIONAL = {"j", "jr", "b", "jialc"}
 MIPS_CONDITIONAL = {"beq", "bne", "blez", "bgtz", "bltz", "bgez", "beqz", "bnez"}
@@ -107,21 +120,30 @@ def classify_terminator(mnemonic: str, arch: str) -> tuple[str, bool]:
 
 def _branch_target(
     instr, parsed_instr, arch: str, index: int, addr_to_index: dict[int, int]
-) -> int | None:
-    """Resolve the jump/branch target of one instruction, if it has one."""
+) -> tuple[int | None, str]:
+    """Resolve the jump/branch target of one instruction.
+
+    Returns ``(target_index, reason)``. The reason distinguishes the cases
+    that must not be conflated: ``"direct"`` (immediate operand resolved to
+    an instruction inside the window), ``"out_of_window"`` (immediate
+    operand whose target lies outside the disassembled range — tail calls,
+    jump-table arms, cross-function jumps) and ``"indirect"`` (the operand
+    is a register or memory expression; only this case is an indirect
+    branch).
+    """
     operand_text = parsed_instr.operand_text
     if not operand_text:
-        return None
+        return None, "indirect"
     from blint.lib.disassembler import _parse_immediate_token
 
     displacement = _parse_immediate_token(operand_text.split(",")[-1].strip())
     if displacement is None:
-        return None
+        return None, "indirect"
     if any(prefix in arch for prefix in _ARCH_PC_RELATIVE_TO_END):
         target = instr.address + len(instr.bytes) + displacement
     else:
         target = instr.address + displacement
-    return addr_to_index.get(target)
+    return addr_to_index.get(target), "direct" if target in addr_to_index else "out_of_window"
 
 
 def build_function_cfg(
@@ -157,7 +179,7 @@ def build_function_cfg(
             if index + 1 < count:
                 leaders.add(index + 1)
             if kind == "jump":
-                target_index = _branch_target(instr, parsed_instr, arch, index, addr_to_index)
+                target_index, _reason = _branch_target(instr, parsed_instr, arch, index, addr_to_index)
                 if target_index is not None:
                     leaders.add(target_index)
     leader_list = sorted(leaders)
@@ -173,9 +195,10 @@ def build_function_cfg(
 
     # Edges from each block's terminator.
     successors: list[set[int]] = [set() for _ in block_bounds]
-    edge_kinds: list[tuple[int, int, str]] = []
+    edges: list[dict] = []
     conditional_count = 0
     indirect_branch_count = 0
+    out_of_window_branch_count = 0
     tail_call_count = 0
     for block_index, (start, end) in enumerate(block_bounds):
         last = end - 1
@@ -183,45 +206,56 @@ def build_function_cfg(
         instr = instr_list[last]
         parsed_instr = parsed_instrs[last]
         if kind == "jump":
+            target_index, reason = _branch_target(instr, parsed_instr, arch, last, addr_to_index)
             # Every conditional branch is a decision for the cyclomatic
             # count, whether or not its target landed inside the disassembled
             # window; resolution only decides whether an edge exists.
-            target_index = _branch_target(instr, parsed_instr, arch, last, addr_to_index)
+            if conditional:
+                conditional_count += 1
             if target_index is not None:
                 target_block = block_of_instr[target_index]
                 successors[block_index].add(target_block)
-                edge_kinds.append(
-                    (block_index, target_block, "conditional" if conditional else "jump")
+                edges.append(
+                    {
+                        "src": block_index,
+                        "dst": target_block,
+                        "kind": "conditional" if conditional else "jump",
+                        "target": hex(instr_list[target_index].address),
+                    }
                 )
-            elif not conditional:
-                indirect_branch_count += 1
-            if conditional:
-                conditional_count += 1
-                if block_index + 1 < len(block_bounds):
-                    successors[block_index].add(block_index + 1)
-                    edge_kinds.append((block_index, block_index + 1, "fallthrough"))
-            # A final unconditional branch leaving the function is a tail
-            # call: it transfers control elsewhere instead of continuing.
-            if not conditional and block_index == len(block_bounds) - 1:
-                operand_text = parsed_instr.operand_text
-                if operand_text:
-                    from blint.lib.disassembler import _parse_immediate_token
-
-                    displacement = _parse_immediate_token(operand_text.split(",")[-1].strip())
-                    if displacement is not None:
-                        if any(prefix in arch for prefix in _ARCH_PC_RELATIVE_TO_END):
-                            target = instr.address + len(instr.bytes) + displacement
-                        else:
-                            target = instr.address + displacement
-                        if target >= func_end or target < func_start:
-                            tail_call_count += 1
+            elif reason == "indirect":
+                # Only register/memory operands are indirect branches;
+                # immediates that leave the window are counted separately.
+                if not conditional:
+                    indirect_branch_count += 1
+            else:
+                out_of_window_branch_count += 1
+            if conditional and block_index + 1 < len(block_bounds):
+                successors[block_index].add(block_index + 1)
+                edges.append({"src": block_index, "dst": block_index + 1, "kind": "fallthrough"})
+            # A final direct branch leaving the function is a tail call: it
+            # transfers control elsewhere instead of continuing. A direct
+            # branch whose target lies outside the window also leaves the
+            # function as far as this graph can see.
+            if not conditional and block_index == len(block_bounds) - 1 and reason != "indirect":
+                if target_index is None:
+                    tail_call_count += 1
+                else:
+                    target_addr = instr_list[target_index].address
+                    if target_addr >= func_end or target_addr < func_start:
+                        tail_call_count += 1
+            # An indirect branch may transfer control anywhere, so the block
+            # after it is treated as potentially reachable for the
+            # reachability count — but no explicit edge is recorded.
+            if reason == "indirect" and block_index + 1 < len(block_bounds):
+                successors[block_index].add(block_index + 1)
         elif kind == "ret" or kind == "trap":
             pass
         else:
             # Non-terminating block: falls through to the next block.
             if block_index + 1 < len(block_bounds):
                 successors[block_index].add(block_index + 1)
-                edge_kinds.append((block_index, block_index + 1, "fallthrough"))
+                edges.append({"src": block_index, "dst": block_index + 1, "kind": "fallthrough"})
 
     # Loop count via back edges of a DFS from the entry block. Successor sets
     # are iterated in sorted order so the traversal, and therefore the loop
@@ -257,13 +291,28 @@ def build_function_cfg(
                     reachable.add(child)
                     queue.append(child)
 
+    # Deterministic block/edge listings. Blocks carry instruction spans and
+    # addresses; edges are (src, dst, kind) over block indices. Sorted output
+    # keeps two runs byte-identical.
+    blocks = [
+        {
+            "start": hex(instr_list[begin].address),
+            "end": hex(instr_list[end - 1].address + max(len(instr_list[end - 1].bytes), 1)),
+            "instructions": end - begin,
+        }
+        for begin, end in block_bounds
+    ]
+    edges.sort(key=lambda edge: (edge["src"], edge["dst"], edge["kind"]))
     return {
         "block_count": len(block_bounds),
-        "edge_count": len(edge_kinds),
+        "edge_count": len(edges),
         "cyclomatic_complexity": conditional_count + 1,
         "loop_count": back_edges,
         "unreachable_block_count": len(block_bounds) - len(reachable),
         "indirect_branch_count": indirect_branch_count,
+        "out_of_window_branch_count": out_of_window_branch_count,
         "max_block_instructions": max((end - start) for start, end in block_bounds),
         "tail_call_count": tail_call_count,
+        "blocks": blocks,
+        "edges": edges,
     }

@@ -22,7 +22,8 @@ rules can weigh it.
 """
 
 import contextlib
-import math
+from collections import Counter
+from math import log2
 
 import lief
 
@@ -73,22 +74,26 @@ PE_MEM_EXECUTE = 0x20000000
 PE_MEM_WRITE = 0x80000000
 ELF_SHF_WRITE = 0x1
 ELF_SHF_EXECINSTR = 0x4
+# Mach-O section attributes: only sections that genuinely contain machine
+# code count as executable (the segment's protection marks all of __TEXT X).
+MACHO_ATTR_PURE_INSTRUCTIONS = 0x80000000
+MACHO_ATTR_SOME_INSTRUCTIONS = 0x400
 
 
 def shannon_entropy(data: bytes) -> float:
-    """Shannon entropy in bits per byte over the given data."""
+    """Shannon entropy in bits per byte over the given data.
+
+    Counting goes through ``collections.Counter``, whose C-level helper keeps
+    this off the per-byte Python loop this module used before — the pass runs
+    on the default path for every binary, so it must not read like one.
+    """
     if not data:
         return 0.0
-    counts = [0] * 256
-    for byte in data:
-        counts[byte] += 1
     total = len(data)
     entropy = 0.0
-    for count in counts:
-        if not count:
-            continue
+    for count in Counter(data).values():
         probability = count / total
-        entropy -= probability * math.log2(probability)
+        entropy -= probability * log2(probability)
     return entropy
 
 
@@ -98,11 +103,34 @@ def _entropy_sample(data: bytes) -> bytes:
     return data[:ENTROPY_SAMPLE_BYTES]
 
 
+def _section_head(section, size: int) -> bytes:
+    """Read at most one entropy sample's worth of the section's bytes.
+
+    Slicing the LIEF content view before materializing bytes keeps a 100 MB
+    section from being copied just to hash its first 8 MB. The sample is
+    always the section head, so results stay deterministic.
+    """
+    try:
+        content = section.content
+        if not content:
+            return b""
+        if len(content) > ENTROPY_SAMPLE_BYTES:
+            return bytes(content[:ENTROPY_SAMPLE_BYTES])
+        return bytes(content)
+    except (AttributeError, TypeError, ValueError):
+        return b""
+
+
 def collect_sections(parsed_obj) -> list[dict]:
     """Collect format-agnostic section facts for the analyses below.
 
     Each entry carries name, virtual address/size, raw size, executable and
-    writable flags and the section's raw bytes when cheaply available.
+    writable flags and at most one entropy sample of the section's bytes.
+    Executable/writable reflect what the *section* is, not what the loader
+    maps around it: on Mach-O the segment protection marks every byte of
+    ``__TEXT`` executable, so sections are filtered on the
+    ``S_ATTR_PURE_INSTRUCTIONS``/``S_ATTR_SOME_INSTRUCTIONS`` attributes
+    instead — otherwise ``__const`` blobs would drive the packing signal.
     """
     sections: list[dict] = []
     try:
@@ -112,16 +140,21 @@ def collect_sections(parsed_obj) -> list[dict]:
                 size = int(section.size or 0)
                 if size <= 0 or size > (1 << 32):
                     continue
+                is_nobits = bool(getattr(section, "size", 0)) and bool(
+                    getattr(getattr(section, "type", None), "value", 0) == 8
+                )
                 sections.append(
                     {
-                        "name": section.name,
+                        "name": (section.name or "").strip("\x00"),
                         "virtual_address": int(section.virtual_address or 0),
                         "virtual_size": size,
-                        "raw_size": size,
-                        "file_offset": int(getattr(section, "offset", 0) or 0),
+                        # NOBITS (.bss) occupies memory, not file bytes.
+                        "raw_size": 0 if is_nobits else size,
+                        "file_offset": 0 if is_nobits else int(getattr(section, "offset", 0) or 0),
                         "executable": bool(flags & ELF_SHF_EXECINSTR),
                         "writable": bool(flags & ELF_SHF_WRITE),
-                        "bytes": bytes(section.content) if section.content else b"",
+                        "sampled": size > ENTROPY_SAMPLE_BYTES,
+                        "bytes": b"" if is_nobits else _section_head(section, size),
                     }
                 )
         elif isinstance(parsed_obj, lief.PE.Binary):
@@ -134,14 +167,15 @@ def collect_sections(parsed_obj) -> list[dict]:
                 characteristics = int(getattr(section, "characteristics", 0) or 0)
                 sections.append(
                     {
-                        "name": section.name,
+                        "name": (section.name or "").strip("\x00"),
                         "virtual_address": imagebase + int(section.virtual_address or 0),
                         "virtual_size": virtual_size or raw_size,
                         "raw_size": raw_size,
                         "file_offset": int(getattr(section, "offset", 0) or 0),
                         "executable": bool(characteristics & PE_MEM_EXECUTE),
                         "writable": bool(characteristics & PE_MEM_WRITE),
-                        "bytes": bytes(section.content) if section.content else b"",
+                        "sampled": max(virtual_size, raw_size) > ENTROPY_SAMPLE_BYTES,
+                        "bytes": _section_head(section, max(virtual_size, raw_size)),
                     }
                 )
         elif isinstance(parsed_obj, lief.MachO.Binary):
@@ -150,19 +184,25 @@ def collect_sections(parsed_obj) -> list[dict]:
                     size = int(section.size or 0)
                     if size <= 0 or size > (1 << 32):
                         continue
-                    # Mach-O has no per-section W/X flags; the segment's
-                    # protection applies to everything inside it.
+                    flag_mask = int(getattr(section, "flags", 0) or 0)
+                    executable = bool(
+                        flag_mask & MACHO_ATTR_PURE_INSTRUCTIONS
+                        or flag_mask & MACHO_ATTR_SOME_INSTRUCTIONS
+                    )
+                    # Mach-O has no per-section W flag; the segment's
+                    # protection is the honest answer for writability.
                     init_prot = int(getattr(segment, "init_protection", 0) or 0)
                     sections.append(
                         {
-                            "name": section.name,
+                            "name": (section.name or "").strip("\x00"),
                             "virtual_address": int(section.virtual_address or 0),
                             "virtual_size": size,
-                            "raw_size": int(getattr(section, "file_size", size) or size),
+                            "raw_size": int(getattr(section, "size", size) or size),
                             "file_offset": int(getattr(section, "offset", 0) or 0),
-                            "executable": bool(init_prot & 0x4),  # VM_PROT X bit
+                            "executable": executable,
                             "writable": bool(init_prot & 0x2),  # VM_PROT_WRITE bit
-                            "bytes": bytes(section.content) if section.content else b"",
+                            "sampled": size > ENTROPY_SAMPLE_BYTES,
+                            "bytes": _section_head(section, size),
                         }
                     )
     except (AttributeError, TypeError, ValueError):
@@ -170,14 +210,21 @@ def collect_sections(parsed_obj) -> list[dict]:
     return sections
 
 
-def analyze_section_entropy(sections: list[dict]) -> list[dict]:
-    """Compute per-section entropy entries for the metadata block."""
+def analyze_section_entropy(sections: list[dict]) -> tuple[list[dict], dict[str, float]]:
+    """Compute per-section entropy entries for the metadata block.
+
+    Returns the metadata entries and a name→entropy map so
+    :func:`analyze_packing` can reuse the numbers instead of recomputing
+    Shannon entropy over the same (up to 8 MB) samples.
+    """
     entries = []
+    entropies: dict[str, float] = {}
     for section in sections:
         data = section.get("bytes") or b""
         if not data:
             continue
         entropy = shannon_entropy(_entropy_sample(data))
+        entropies[section["name"]] = entropy
         entries.append(
             {
                 "name": section["name"],
@@ -185,11 +232,11 @@ def analyze_section_entropy(sections: list[dict]) -> list[dict]:
                 "entropy": round(entropy, 4),
                 "executable": section["executable"],
                 "writable": section["writable"],
-                "sampled": len(data) > ENTROPY_SAMPLE_BYTES,
+                "sampled": section.get("sampled", False),
             }
         )
     entries.sort(key=lambda item: (-item["entropy"], item["name"]))
-    return entries
+    return entries, entropies
 
 
 def analyze_packing(
@@ -198,11 +245,14 @@ def analyze_packing(
     import_count: int | None,
     file_size: int | None = None,
     is_macho: bool = False,
+    section_entropies: dict[str, float] | None = None,
 ) -> dict:
     """Derive packing likelihood and section anomalies from section facts.
 
     Every parameter is plain data so callers (and tests) can exercise the
-    heuristics without constructing a parsed binary.
+    heuristics without constructing a parsed binary. ``section_entropies``
+    accepts precomputed values (name → bits/byte) from
+    :func:`analyze_section_entropy`; when absent they are computed here.
     """
     findings: list[str] = []
     packers = set()
@@ -212,22 +262,27 @@ def analyze_packing(
     exec_entropy_by_name: dict[str, float] = {}
     for section in sections:
         data = section.get("bytes") or b""
-        name = (section["name"] or "").lower()
+        name = (section["name"] or "").strip("\x00").lower()
         if name in PACKER_SECTION_SIGNATURES:
             packers.add(PACKER_SECTION_SIGNATURES[name])
             findings.append(f"packer_section:{section['name']}")
-        if not data:
+        if section["executable"] and section["writable"]:
+            writable_executable.append(section["name"])
+        if section_entropies is None:
+            entropy = shannon_entropy(_entropy_sample(data)) if data else 0.0
+        elif name in section_entropies:
+            entropy = section_entropies[name]
+        elif not data:
             continue
-        entropy = shannon_entropy(_entropy_sample(data))
+        else:
+            entropy = shannon_entropy(_entropy_sample(data))
         if section["executable"]:
             max_exec_entropy = max(max_exec_entropy, entropy)
             exec_entropy_by_name[section["name"]] = round(entropy, 4)
-        if section["executable"] and section["writable"]:
-            writable_executable.append(section["name"])
 
     for name in writable_executable:
         findings.append(f"writable_executable_section:{name}")
-    if exec_sections and import_count is not None and exec_sections[0]:
+    if exec_sections and import_count is not None:
         if max_exec_entropy >= HIGH_ENTROPY_THRESHOLD and import_count < 20:
             findings.append("high_entropy_exec_with_few_imports")
         elif max_exec_entropy >= ELEVATED_ENTROPY_THRESHOLD and import_count < 10:
@@ -268,9 +323,7 @@ def analyze_packing(
             if overlay_size > 0x1000:
                 findings.append("file_overlay")
 
-    if packers:
-        likelihood = "high"
-    elif "high_entropy_exec_with_few_imports" in findings or (
+    if packers or "high_entropy_exec_with_few_imports" in findings or (
         writable_executable and max_exec_entropy >= HIGH_ENTROPY_THRESHOLD
     ):
         likelihood = "high"
@@ -293,7 +346,7 @@ def analyze_packing(
 def analyze_binary_entropy(parsed_obj, file_size: int | None = None) -> dict:
     """LIEF adapter: run entropy + packing analysis on a parsed binary."""
     sections = collect_sections(parsed_obj)
-    entropy_entries = analyze_section_entropy(sections)
+    entropy_entries, entropies = analyze_section_entropy(sections)
     entrypoint = None
     import_count = None
     with contextlib.suppress(AttributeError, TypeError, ValueError):
@@ -301,7 +354,12 @@ def analyze_binary_entropy(parsed_obj, file_size: int | None = None) -> dict:
     with contextlib.suppress(AttributeError, TypeError, ValueError):
         import_count = len(list(parsed_obj.imported_functions))
     packing = analyze_packing(
-        sections, entrypoint, import_count, file_size, is_macho=isinstance(parsed_obj, lief.MachO.Binary)
+        sections,
+        entrypoint,
+        import_count,
+        file_size,
+        is_macho=isinstance(parsed_obj, lief.MachO.Binary),
+        section_entropies=entropies,
     )
     return {
         "sections": entropy_entries,

@@ -286,4 +286,109 @@ class TestToolchain:
 
     def test_empty_metadata_is_honest(self):
         toolchain = infer_toolchain({})
-        assert toolchain == {"compilers": [], "runtimes": [], "libc": None}
+        assert toolchain == {"compilers": [], "linkers": [], "runtimes": [], "libc": None}
+class TestCfgSemantics:
+    def test_svc_is_not_a_trap(self):
+        # A syscall returns control, so the block after it stays reachable.
+        instrs = [
+            _Instr(0x400, "mov x0, 1", 4),
+            _Instr(0x404, "svc 128", 4),
+            _Instr(0x408, "ret", 4),
+        ]
+        parsed = [_parse("mov", "x0, 1"), _parse("svc", "128"), _parse("ret")]
+        cfg = build_function_cfg(instrs, parsed, "aarch64", 0x400)
+        assert cfg["unreachable_block_count"] == 0
+        assert cfg["block_count"] == 1
+
+    def test_indirect_branch_counted_only_for_register_operands(self):
+        # jmp rax: register operand -> genuinely indirect.
+        instrs = [
+            _Instr(0x1000, "jmp rax", 2),
+            _Instr(0x1002, "ret", 1),
+        ]
+        parsed = [_parse("jmp", "rax"), _parse("ret")]
+        cfg = build_function_cfg(instrs, parsed, "x86_64", 0x1000)
+        assert cfg["indirect_branch_count"] == 1
+        # The block after an indirect branch stays *potentially* reachable.
+        assert cfg["unreachable_block_count"] == 0
+
+    def test_out_of_window_branch_not_indirect(self):
+        # A direct jump whose target is outside the disassembled window is
+        # not an indirect branch; it is counted separately.
+        instrs = [
+            _Instr(0x1000, "jmp 99999", 5),
+            _Instr(0x1005, "ret", 1),
+        ]
+        parsed = [_parse("jmp", "99999"), _parse("ret")]
+        cfg = build_function_cfg(instrs, parsed, "x86_64", 0x1000)
+        assert cfg["indirect_branch_count"] == 0
+        assert cfg["out_of_window_branch_count"] == 1
+
+    def test_blocks_and_edges_emitted(self):
+        instrs = [
+            _Instr(0x1000, "xor eax, eax", 2),
+            _Instr(0x1002, "jne -4", 2),
+            _Instr(0x1004, "ret", 1),
+        ]
+        parsed = [_parse("xor", "eax, eax"), _parse("jne", "-4"), _parse("ret")]
+        cfg = build_function_cfg(instrs, parsed, "x86_64", 0x1000)
+        assert len(cfg["blocks"]) == cfg["block_count"]
+        assert cfg["blocks"][0]["start"] == "0x1000"
+        assert cfg["blocks"][0]["instructions"] == 2
+        kinds = {(e["src"], e["dst"], e["kind"]) for e in cfg["edges"]}
+        assert (0, 0, "conditional") in kinds  # jne targets the first block
+        assert (0, 1, "fallthrough") in kinds
+
+
+class TestCanonicalCfgHash:
+    def test_shape_identical_graphs_hash_equal(self):
+        def graph(offset):
+            return {
+                "blocks": [
+                    {"start": hex(offset), "end": hex(offset + 4), "instructions": 2},
+                    {"start": hex(offset + 4), "end": hex(offset + 8), "instructions": 1},
+                ],
+                "edges": [
+                    {"src": 0, "dst": 1, "kind": "jump"},
+                    {"src": 0, "dst": 1, "kind": "fallthrough"},
+                ],
+            }
+
+        # Same shape at different addresses hashes the same.
+        assert function_cfg_hash(graph(0x1000)) == function_cfg_hash(graph(0x9000))
+
+    def test_different_shapes_hash_differently(self):
+        one = {
+            "blocks": [
+                {"start": "0x0", "end": "0x4", "instructions": 2},
+                {"start": "0x4", "end": "0x8", "instructions": 1},
+            ],
+            "edges": [{"src": 0, "dst": 1, "kind": "jump"}],
+        }
+        two = {
+            "blocks": [
+                {"start": "0x0", "end": "0x4", "instructions": 2},
+                {"start": "0x4", "end": "0x8", "instructions": 5},
+            ],
+            "edges": [{"src": 0, "dst": 1, "kind": "jump"}],
+        }
+        assert function_cfg_hash(one) != function_cfg_hash(two)
+
+    def test_count_only_fallback_still_works(self):
+        counts_only = {"block_count": 3, "edge_count": 3, "cyclomatic_complexity": 2}
+        assert len(function_cfg_hash(counts_only)) == 16
+
+
+class TestImportHashFormats:
+    def test_pe_imports_list(self):
+        assert compute_import_hash(["Rpcrt4.dll::RpcImpersonateClient"]) != ""
+
+    def test_macho_undefined_symbol_names(self):
+        # blint prefixes Mach-O undefined symbols with `dylib::`; the same
+        # decoration must normalize away so cross-naming stays stable.
+        with_origin = compute_import_hash(["/usr/lib/libSystem.B.dylib::___assert_rtn"])
+        bare = compute_import_hash(["___assert_rtn"])
+        assert with_origin == bare
+
+    def test_elf_imported_dynamic_symbols(self):
+        assert compute_import_hash(["memcpy@GLIBC_2.2.5"]) != compute_import_hash([])

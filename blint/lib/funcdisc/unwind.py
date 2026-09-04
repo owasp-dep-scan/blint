@@ -147,8 +147,7 @@ def discover_macho_unwind_functions(parsed_obj) -> list[dict]:
             if not page_offset or page_offset > len(data):
                 # A zero page offset marks the sentinel entry: its function
                 # offset is the end boundary for sizes, not a function start.
-                if index_function_offset > end_offset:
-                    end_offset = index_function_offset
+                end_offset = max(end_offset, index_function_offset)
                 continue
             kind = _read_u32(data, page_offset)
             if kind == MACHO_UNWIND_REGULAR_PAGE:
@@ -171,17 +170,24 @@ def discover_macho_unwind_functions(parsed_obj) -> list[dict]:
 
 
 def _read_regular_page(data: bytes, page_offset: int) -> list[int]:
-    """Read a regular second-level page; entries are full absolute encodings."""
+    """Read a regular second-level page.
+
+    Apple's regular entry is
+    ``unwind_info_regular_second_level_entry { uint32_t functionOffset;
+    compact_unwind_encoding_t encoding; }`` — 8 bytes per entry with a full
+    32-bit image offset in the first word. Unlike the compressed page there
+    is no 24-bit mask: the offset uses the whole word.
+    """
     entry_page_offset = _read_u16(data, page_offset + 4)
     entry_count = _read_u16(data, page_offset + 6)
     if not entry_page_offset or not entry_count:
         return []
     entries = []
     for idx in range(min(entry_count, MAX_FUNCTION_ENTRIES)):
-        encoding = _read_u32(data, page_offset + entry_page_offset + 4 * idx)
-        if encoding is None:
+        function_offset = _read_u32(data, page_offset + entry_page_offset + 8 * idx)
+        if function_offset is None:
             break
-        entries.append(encoding & _COMPRESSED_FUNC_OFFSET_MASK)
+        entries.append(function_offset)
     return entries
 
 
@@ -348,23 +354,23 @@ def _parse_eh_frame_fdes(section_va: int, data: bytes) -> list[dict]:
                 cie_encodings[offset] = encoding
         else:
             # The CIE pointer is the byte distance from this FDE's start back
-            # to the CIE's start.
+            # to the CIE's start. A sentinel default covers CIEs whose parse
+            # failed; note the lookup must distinguish a parsed 0 (absptr)
+            # from a missing entry.
             cie_offset = offset - cie_id
-            encoding = cie_encodings.get(cie_offset) or (DW_EH_PE_PCREL | DW_EH_PE_SDATA4)
+            encoding = cie_encodings.get(cie_offset)
+            if encoding is None:
+                encoding = DW_EH_PE_PCREL | DW_EH_PE_SDATA4
             start, consumed = _decode_eh_value(data, body, encoding, section_va)
             if start is not None and start > 0:
-                range_value, range_size = _decode_eh_value(
-                    data, body + consumed, encoding & 0x0F | 0x00, section_va
+                range_value, _ = _decode_eh_value(
+                    data, body + consumed, encoding & 0x0F, section_va
                 )
                 size = range_value if range_value and range_value > 0 else 0
                 entries[start] = size
-        # Records are aligned so each entry's total size is a multiple of the
-        # address size; compilers emit 3 (32-bit) or 7 (64-bit) NUL padding
-        # bytes to restore the invariant after odd-sized augmentations.
+        # The length field already counts any trailing alignment padding the
+        # compiler emitted, so the next record starts right at record_end.
         offset = record_end
-        addr_align = 8 if is_64 else 4
-        if offset % addr_align:
-            offset += addr_align - (offset % addr_align)
     return [
         {"address": address, "size": size, "source": "eh_frame"}
         for address, size in sorted(entries.items())
@@ -429,8 +435,13 @@ def _parse_cie(data: bytes, body: int, record_end: int) -> int | None:
             cursor += size
         elif flag == 0x4C:  # 'L': LSDA encoding byte
             cursor += 1
+        elif flag == 0x53:  # 'S': signal frame — a marker byte, no payload
+            continue
         else:
-            return None
+            # Unknown single-byte augmentation markers (there is no other
+            # payload-bearing flag in the spec) do not affect the FDE
+            # encoding, so skip rather than abandon the CIE.
+            continue
         if cursor > aug_end:
             return None
     if encoding is None:
@@ -476,17 +487,17 @@ def merge_discovered_functions(metadata: dict, discovered: list[dict]) -> dict:
 
     ``metadata["discovered_functions"]`` exposes every finding — including
     addresses the symbol buckets already cover — because its exact sizes are
-    load-bearing for downstream passes (disassembly bounding decisions, call
-    targets promotion checks). Entries whose address already exists keep
-    their real symbol name there via ``symbol_name`` when one exists; the
-    rest are additionally merged into ``metadata["functions"]`` as
-    ``sub_<address>`` with ``size`` 0, matching the
-    ``merge_macho_function_starts`` contract. Function-list disassembly
-    behavior only ever gains new entries, never changes existing ones.
+    load-bearing for downstream passes (disassembly bounding, call-target
+    promotion checks). Entries whose address already exists carry the real
+    symbol name; the rest are additionally merged into
+    ``metadata["functions"]`` as ``sub_<address>`` with the exact unwind
+    size, and already-listed entries are enriched with that size when theirs
+    is unknown. Disassembly only ever gains new entries from the merge;
+    enriching a size narrows truncation to the function's real extent.
     """
     if not discovered:
         return metadata
-    existing_names = _existing_function_names(metadata)
+    existing = _existing_function_entries(metadata)
     fresh = []
     record_entries = []
     by_source: dict[str, int] = {}
@@ -494,26 +505,31 @@ def merge_discovered_functions(metadata: dict, discovered: list[dict]) -> dict:
         address = entry["address"]
         source = entry.get("source", "unknown")
         by_source[source] = by_source.get(source, 0) + 1
+        size = entry.get("size", 0)
+        claimed = existing.get(address)
+        symbol_name = claimed.get("name") if claimed else None
         record = {
-            "name": f"sub_{address:x}",
+            "name": symbol_name if symbol_name else f"sub_{address:x}",
             "address": f"0x{address:x}",
-            "size": entry.get("size", 0),
+            "size": size,
             "source": source,
         }
-        if address in existing_names:
-            if existing_names[address]:
-                record["symbol_name"] = existing_names[address]
+        if claimed is not None:
+            if not symbol_name:
+                # A nameless claim (LC_FUNCTION_STARTS entry and friends):
+                # the discovery record supplies the readable identity.
+                claimed["name"] = f"sub_{address:x}"
+                record["name"] = f"sub_{address:x}"
+            # Enrich unknown sizes with the exact unwind-table value.
+            if not isinstance(claimed.get("size"), int) or claimed.get("size", 0) <= 0:
+                claimed["size"] = size
         else:
             fresh.append(entry)
         record_entries.append(record)
     # Sort for a deterministic metadata block; addresses are unique after the
-    # dedupe pass in _existing_function_names.
+    # dedupe pass in _existing_function_entries.
     fresh.sort(key=lambda item: (item["address"], item.get("source", "")))
     metadata["discovered_functions"] = record_entries
-    if not fresh:
-        # Every discovery already had a symbol; the record above is the only
-        # observable change and the function list stays untouched.
-        return metadata
     functions = list(metadata.get("functions") or [])
     next_index = max(
         (int(fn.get("index", -1)) for fn in functions if isinstance(fn.get("index"), int)),
@@ -524,14 +540,15 @@ def merge_discovered_functions(metadata: dict, discovered: list[dict]) -> dict:
             {
                 "index": next_index,
                 "name": f"sub_{entry['address']:x}",
-                "address": f"0x{entry['address']:<10x}".strip(),
+                "address": f"0x{entry['address']:x}",
                 "size": 0,
                 "flags": None,
-                "discovered": True,
+                "discovered": entry.get("source", "unknown"),
             }
         )
         next_index += 1
-    metadata["functions"] = functions
+    if fresh:
+        metadata["functions"] = functions
     metadata["function_discovery"] = {
         "sources": dict(sorted(by_source.items())),
         "merged_count": len(fresh),
@@ -539,16 +556,17 @@ def merge_discovered_functions(metadata: dict, discovered: list[dict]) -> dict:
     return metadata
 
 
-def _existing_function_names(metadata: dict) -> dict[int, str | None]:
-    """Map every address already claimed by a function bucket to its name.
+def _existing_function_entries(metadata: dict) -> dict[int, dict]:
+    """Map every address already claimed by a function bucket to its entry.
 
     A claimed address with an empty name still blocks the merge (the address
-    exists); the value is only used to label the discovery record, so claimed
-    addresses without names map to ``None``.
+    exists); the mapped entry is enriched in place with discovery sizes and
+    names, so the value is the dict itself rather than a copy. Read each
+    entry's ``name`` to learn whether a real symbol claims the address.
     """
     from blint.lib.disassembler import FUNCTION_SYMBOLS
 
-    names: dict[int, str | None] = {}
+    existing: dict[int, dict] = {}
     for func_list_key in FUNCTION_SYMBOLS:
         for func_entry in metadata.get(func_list_key, []):
             if not isinstance(func_entry, dict):
@@ -560,9 +578,7 @@ def _existing_function_names(metadata: dict) -> dict[int, str | None]:
             elif isinstance(raw, str) and raw.strip():
                 with contextlib.suppress(ValueError):
                     address = int(raw.strip(), 16)
-            if address is None:
+            if address is None or address in existing:
                 continue
-            name = func_entry.get("name")
-            if address not in names:
-                names[address] = name if name else None
-    return names
+            existing[address] = func_entry
+    return existing

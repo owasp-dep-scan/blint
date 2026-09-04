@@ -102,11 +102,13 @@ def executable_ranges(parsed_obj) -> list[tuple[int, int]]:
                     excluded.append((start, start + size))
         elif isinstance(parsed_obj, lief.PE.Binary):
             for section in parsed_obj.sections:
-                if not section.size:
+                virtual_size = int(getattr(section, "virtual_size", 0) or 0)
+                raw_size = int(getattr(section, "size", 0) or 0)
+                if max(virtual_size, raw_size) <= 0:
                     continue
                 if section.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE):
                     start = int(section.virtual_address) + int(parsed_obj.optional_header.imagebase)
-                    ranges.append((start, start + int(section.size)))
+                    ranges.append((start, start + max(virtual_size, raw_size)))
     except (AttributeError, TypeError, ValueError):
         return ranges
     merged: list[tuple[int, int]] = []
@@ -147,11 +149,15 @@ def promotable_call_target(
     idx = bisect.bisect_right(known_starts, target_addr) - 1
     if idx >= 0 and known_starts[idx] == target_addr:
         return None
-    idx = bisect.bisect_right(disassembled_spans, (target_addr,)) - 1
-    if idx >= 0:
-        start, end = disassembled_spans[idx]
-        if target_addr < end:
-            return None
+    if disassembled_spans:
+        # bisect over the span starts alone: tuple comparison with a 1-tuple
+        # would land before a span whose start equals the target and miss it.
+        span_starts = [span[0] for span in disassembled_spans]
+        idx = bisect.bisect_right(span_starts, target_addr) - 1
+        if idx >= 0:
+            start, end = disassembled_spans[idx]
+            if start <= target_addr < end:
+                return None
     return target_addr
 
 
@@ -227,19 +233,41 @@ def _scan_x86_prologues(start: int, content: bytes) -> set[int]:
         cursor = content.find(X86_ENDBR64, cursor + 1)
     # Go stack-split prologues: guard comparison at the function start with
     # the conditional morestack branch right behind it, and the large-frame
-    # allocation that precedes the same comparison.
-    for pattern, needs_branch in ((X86_GO_STACK_CHECK, True), (X86_GO_LARGE_FRAME, False)):
+    # allocation that precedes the same comparison. The branch check accepts
+    # the long form (0f 8x, jcc rel32) and the short jbe rel8 (76); both are
+    # required so an arbitrary aligned `lea r12, [rsp-x]` elsewhere never
+    # becomes a false function start.
+    for pattern in (X86_GO_STACK_CHECK, X86_GO_LARGE_FRAME):
         cursor = content.find(pattern)
         while cursor >= 0 and len(found) < MAX_PROLOGUE_CANDIDATES:
-            if (start + cursor) % 16 == 0:
-                if not needs_branch or content[cursor + 4 : cursor + 6] in (
-                    b"\x0f\x86",
-                    b"\x0f\xbe",
-                    b"\x76",
-                ):
-                    found.add(start + cursor)
+            if (start + cursor) % 16 == 0 and _has_morestack_branch(content, cursor, len(pattern)):
+                found.add(start + cursor)
             cursor = content.find(pattern, cursor + 1)
     return found
+
+
+def _has_morestack_branch(content: bytes, cursor: int, pattern_len: int) -> bool:
+    """True when a Go morestack conditional branch follows within a few bytes.
+
+    Go emits `jbe` to the morestack path either as the 2-byte rel8 form
+    (0x76) or the 6-byte rel32 form (0f 8x). The branch sits directly behind
+    the guard comparison for the small-frame form and behind the guard that
+    follows the large-frame `lea r12`, so a short window scan covers both.
+    """
+    window = content[cursor + pattern_len : cursor + pattern_len + 12]
+    for index in range(len(window)):
+        byte = window[index]
+        if byte == 0x76:
+            return True
+        if byte == 0x0F and index + 1 < len(window) and window[index + 1] in (
+            0x82,
+            0x83,
+            0x86,
+            0x87,
+        ):
+            # jb/jae/jbe/ja rel32 — the unsigned comparisons Go uses.
+            return True
+    return False
 
 
 def _scan_arm64_prologues(start: int, content: bytes) -> set[int]:
@@ -256,8 +284,9 @@ def _scan_arm64_prologues(start: int, content: bytes) -> set[int]:
             # The frame-pointer push alone is common inside functions; paired
             # with the `mov x29, sp` that always follows it in a prologue, it
             # is a reliable start marker.
-            if offset + 8 <= usable:
-                next_word = struct.unpack_from("<I", content, offset + 4)[0]
-                if next_word == ARM64_MOV_FP_SP:
-                    found.add(start + offset)
+            if (
+                offset + 8 <= usable
+                and struct.unpack_from("<I", content, offset + 4)[0] == ARM64_MOV_FP_SP
+            ):
+                found.add(start + offset)
     return found

@@ -33,11 +33,15 @@ _IMPORT_DECORATIONS = (
 )
 
 
+_ORIGIN_PREFIX = re.compile(r"^[\w.\-/]+(?:\.dll|\.dylib|\.so|\.tbd|[A-Za-z]\w*\.[A-Za-z])::")
+
+
 def _normalize_import_name(name: str) -> str:
     """Strip decoration that varies across toolchains for one import name."""
     name = (name or "").strip()
     if not name:
         return ""
+    name = _ORIGIN_PREFIX.sub("", name)
     name = _ELF_VERSION_SUFFIX.sub("", name)
     for decoration in _IMPORT_DECORATIONS:
         if name.startswith(decoration):
@@ -85,13 +89,66 @@ def function_fuzzy_hash(assembly: str) -> str:
 def function_cfg_hash(cfg: dict | None) -> str:
     """Hash the canonical shape of one function's block graph.
 
-    Block identities are canonicalized by (size, sorted successors) so two
-    compilations of the same function produce the same numbering even when
-    blocks moved. Falls back to aggregate metrics when detailed edges are
-    unavailable — the hash then still distinguishes shapes coarsely.
+    Uses the emitted ``blocks``/``edges`` listings when present. Block
+    identities are canonicalized with a Weisfeiler-Lehman style refinement:
+    blocks start colored by instruction count, then repeatedly re-colored by
+    the multiset of their successors' colors until stable, which gives the
+    same numbering to structurally identical graphs regardless of where the
+    blocks sit in memory. The hash covers the refined colors and the sorted
+    edge set, so two functions match only when their shapes genuinely
+    coincide — a count-only summary would match any two functions with the
+    same aggregate numbers. Falls back to the aggregate metrics when the
+    detailed listings are unavailable.
     """
     if not cfg:
         return ""
+    blocks = cfg.get("blocks")
+    edges = cfg.get("edges")
+    if blocks and edges is not None:
+        block_count = len(blocks)
+        successors: list[list[int]] = [[] for _ in range(block_count)]
+        for edge in edges:
+            src, dst = edge.get("src", -1), edge.get("dst", -1)
+            if 0 <= src < block_count and 0 <= dst < block_count:
+                successors[src].append(dst)
+        # Weisfeiler-Lehman style refinement: blocks start colored by
+        # instruction count and are re-colored by their successors' colors
+        # until stable. The *signatures* (not a dense renumbering, which
+        # would erase the sizes) are what gets hashed.
+        colors = [block.get("instructions", 0) for block in blocks]
+        for _ in range(min(block_count, 8)):
+            signatures = [
+                (colors[index], tuple(sorted(colors[succ] for succ in successors[index])))
+                for index in range(block_count)
+            ]
+            if signatures == colors:
+                break
+            colors = signatures
+        # Position-independent payload: the multiset of block signatures plus
+        # edges keyed by refined color rather than block index. The
+        # signatures keep their numeric leaves (block sizes), so graphs that
+        # merely share aggregate counts do not collide, and two runs of the
+        # same shape at different addresses hash identically.
+        color_strs = [repr(color) for color in colors]
+        edge_pairs = sorted(
+            (
+                edge.get("kind", "jump"),
+                color_strs[edge["src"]],
+                color_strs[edge["dst"]],
+            )
+            for edge in edges
+            if isinstance(edge.get("src"), int)
+            and isinstance(edge.get("dst"), int)
+            and 0 <= edge["src"] < block_count
+            and 0 <= edge["dst"] < block_count
+        )
+        payload = "\n".join(
+            [
+                *(f"c={color}" for color in sorted(color_strs)),
+                *(f"e={kind}:{src}->{dst}" for kind, src, dst in edge_pairs),
+            ]
+        )
+        return _stable_digest(payload)
     parts = [
         f"blocks={cfg.get('block_count', 0)}",
         f"edges={cfg.get('edge_count', 0)}",

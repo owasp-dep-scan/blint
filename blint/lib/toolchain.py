@@ -23,10 +23,11 @@ import re
 # purpose: each prefix names a family of thousands of symbols, so one hit is
 # already strong evidence.
 GO_RUNTIME_PREFIXES = ("runtime.", "internal/cpu.", "sync/atomic.")
-RUST_MANGLING_PREFIXES = (
-    "_ZN",  # legacy itanium-style rust symbols
-    "_RN",  # v0 mangling
-)
+# `_ZN` alone is Itanium C++ mangling, not Rust: every C++ binary would
+# match. Rust's legacy mangling appends the `17h<16 hex>E` digest, and v0
+# starts with `_R` followed by a mangling letter.
+RUST_LEGACY_HASH = re.compile(r"17h[0-9a-f]{16}E")
+RUST_V0 = re.compile(r"^_R[A-Za-z]")
 SWIFT_SYMBOL_PREFIXES = ("swift_", "_swift_")
 OBJC_SYMBOL_SUBSTRINGS = ("objc_msgSend", "objc_retain", "objc_release", "_objc_")
 
@@ -35,9 +36,9 @@ MSVC_CRT_SYMBOLS = ("__scrt_common_main_seh", "__security_init_cookie", "_CRT_IN
 MINGW_SYMBOLS = ("__mingw_get_crt_info", "__mingw_raise_matherr", "pei386_runtime_relocator")
 
 _GCC_VERSION = re.compile(r"(?:gcc|GCC)[^\d]*([0-9]+\.[0-9]+\.[0-9]+)")
-_CLANG_VERSION = re.compile(r"(?:clang|Apple[ ]clang)[^\d]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.I)
-_RUSTC_VERSION = re.compile(r"rustc[ ]version[ ]([0-9a-f.]+)", re.I)
-_LLD_VERSION = re.compile(r"LLD[ ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.I)
+_CLANG_VERSION = re.compile(r"(?:clang|Apple[ ]clang)[^\d]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+_RUSTC_VERSION = re.compile(r"rustc[ ]version[ ]([0-9a-f.]+)", re.IGNORECASE)
+_LLD_VERSION = re.compile(r"LLD[ ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
 
 
 def _extract_comment_compilers(comment_content: str) -> list[dict]:
@@ -129,18 +130,29 @@ def infer_toolchain(metadata: dict) -> dict:
                     "confidence": "high",
                 }
             )
+    linkers: list[dict] = []
     for tool in metadata.get("tools") or []:
         if not isinstance(tool, dict):
             continue
         tool_name = str(tool.get("tool", "")).lower()
-        if "clang" in tool_name or "ld" in tool_name or "swift" in tool_name:
-            confidence = "medium" if "ld" in tool_name else "high"
+        if "ld" in tool_name:
+            # The linker is provenance, not a compiler; keep the distinction
+            # honest instead of filing `ld` among the compilers.
+            linkers.append(
+                {
+                    "name": tool_name,
+                    "version": tool.get("version", ""),
+                    "source": "LC_BUILD_VERSION",
+                    "confidence": "medium",
+                }
+            )
+        elif "clang" in tool_name or "swift" in tool_name:
             compilers.append(
                 {
                     "name": tool_name,
                     "version": tool.get("version", ""),
                     "source": "LC_BUILD_VERSION",
-                    "confidence": confidence,
+                    "confidence": "high",
                 }
             )
     linker_version = metadata.get("major_linker_version")
@@ -156,7 +168,9 @@ def infer_toolchain(metadata: dict) -> dict:
 
     # --- libc ------------------------------------------------------------
     for version_entry in metadata.get("symbols_version") or []:
-        name = str((version_entry or {}).get("name", ""))
+        if not isinstance(version_entry, dict):
+            continue
+        name = str(version_entry.get("name", ""))
         if name.startswith("GLIBC_"):
             libc = "glibc"
             break
@@ -179,7 +193,9 @@ def infer_toolchain(metadata: dict) -> dict:
     for name in names:
         if not found["go"] and name.startswith(GO_RUNTIME_PREFIXES):
             found["go"] = True
-        elif not found["rust"] and name.startswith(RUST_MANGLING_PREFIXES):
+        elif not found["rust"] and (
+            RUST_V0.match(name) or (name.startswith("_ZN") and RUST_LEGACY_HASH.search(name))
+        ):
             found["rust"] = True
         elif not found["swift"] and name.startswith(SWIFT_SYMBOL_PREFIXES):
             found["swift"] = True
@@ -189,6 +205,8 @@ def infer_toolchain(metadata: dict) -> dict:
             found["msvc"] = True
         elif not found["mingw"] and any(sym in name for sym in MINGW_SYMBOLS):
             found["mingw"] = True
+        if all(found.values()):
+            break
 
     if found["go"]:
         runtimes.append({"name": "go", "source": "runtime_symbols", "confidence": "high"})
@@ -217,6 +235,7 @@ def infer_toolchain(metadata: dict) -> dict:
 
     return {
         "compilers": compilers,
+        "linkers": linkers,
         "runtimes": deduped,
         "libc": libc,
     }
