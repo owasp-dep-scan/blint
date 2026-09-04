@@ -1,7 +1,9 @@
+import bisect
 import contextlib
 import hashlib
 import re
-from functools import lru_cache
+from collections import deque
+from functools import cache, lru_cache
 from typing import NamedTuple
 
 import lief
@@ -23,6 +25,14 @@ from blint.config import (
     MIPS_SHIFT_2_OP_IMM,
     MIPS_SHIFT_3_OP,
     SORTED_ALL_REGS_MIPS,
+)
+from blint.lib.cfg import build_function_cfg
+from blint.lib.funcdisc.complete import (
+    MAX_PROMOTED_FUNCTIONS,
+    PROLOGUE_SCAN_MIN_FUNCTIONS,
+    executable_ranges,
+    find_prologue_candidates,
+    promotable_call_target,
 )
 from blint.lib.indicators import (
     CRYPTO_INDICATORS,
@@ -410,12 +420,12 @@ except ImportError:
     NYXSTONE_AVAILABLE = False
 
 
-@lru_cache(maxsize=None)
+@cache
 def _normalize_arch_target(arch_target: str) -> str:
     return (arch_target or "").lower()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _has_supported_nyxstone_target(arch_target: str) -> bool:
     normalized_target = (arch_target or "").strip()
     if not normalized_target:
@@ -446,7 +456,7 @@ _NON_ELF_TRIPLE_MARKERS = (
 )
 
 
-@lru_cache(maxsize=None)
+@cache
 def _to_nyxstone_triple(arch_target: str) -> str:
     """Return an ELF-compatible target triple that Nyxstone can initialize.
 
@@ -624,7 +634,7 @@ def _append_call_target(
     )
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_arch_reg_set(arch_target: str) -> frozenset[str]:
     """Returns the appropriate set of registers based on the architecture."""
     lower_arch = _normalize_arch_target(arch_target)
@@ -635,7 +645,7 @@ def get_arch_reg_set(arch_target: str) -> frozenset[str]:
     return ARCH_REG_SET_X86
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_implicit_regs_map(arch_target: str) -> dict[str, dict[str, set[str]]]:
     """Selects the appropriate implicit registers map based on architecture."""
     lower_arch = _normalize_arch_target(arch_target)
@@ -841,16 +851,7 @@ def _extract_register_usage(
                     regs_read.update(target_regs)
         elif mnemonic in ("ret", "eret"):
             pass
-        elif mnemonic in ("and", "orr", "eor", "bic", "tst"):
-            if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
-                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
-                regs_written.update(dst_regs)
-                regs_read.update(src1_regs)
-                if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
-                    regs_read.update(src2_regs)
-        elif mnemonic in (
+        elif mnemonic in ("and", "orr", "eor", "bic", "tst") or mnemonic in (
             "lsl",
             "lsr",
             "asr",
@@ -1135,9 +1136,7 @@ def _analyze_instructions(
             if operand_text:
                 operand = parsed_instr.operand_text_lower
                 reg_token = _extract_register_token(operand, arch_reg_set)
-                if reg_token:
-                    is_indirect = True
-                elif "[" in operand and "]" in operand:
+                if reg_token or "[" in operand and "]" in operand:
                     is_indirect = True
             if is_indirect:
                 has_indirect_call = True
@@ -1896,6 +1895,60 @@ def _resolve_direct_calls(
     return potential_callees, direct_call_targets
 
 
+def _promote_call_targets(
+    direct_call_targets: list,
+    visited_addrs: set,
+    known_starts: list,
+    disassembled_spans: list[tuple[int, int]],
+    exec_ranges_stored: list[tuple[int, int]],
+    imagebase: int,
+    is_aarch64: bool = False,
+) -> list[int]:
+    """Return stored-space addresses worth promoting into new functions.
+
+    A resolved direct call whose target sits in an executable range outside
+    every known extent proves called code the discovery tables missed, so the
+    target becomes a worklist entry. Only the resolver's primary
+    ``target_address`` — the displacement-corrected absolute target — is
+    consulted. The raw operand and alternate candidates are skipped on
+    purpose: nyxstone renders branch operands as signed displacements, so
+    reinterpreting them as addresses promotes garbage, and the alternate
+    candidates encode other resolution hypotheses rather than the call's
+    destination. Everything already visited, already a known start, inside a
+    known extent (unwind tables provide exact sizes, disassembly provides the
+    rest), or not in executable memory is declined; ARM64 targets must
+    additionally be word-aligned. Bounded by the caller's promotion cap.
+    """
+    promoted: list[int] = []
+    promoted_set: set[int] = set()
+    for target in direct_call_targets or []:
+        if not isinstance(target, dict) or target.get("kind") != "direct":
+            continue
+        target_addr = target.get("target_address")
+        if not target_addr:
+            continue
+        with contextlib.suppress(ValueError):
+            absolute_addr = int(target_addr, 16)
+            stored_addr = absolute_addr - imagebase
+            if is_aarch64 and stored_addr % 4:
+                continue
+            if stored_addr in visited_addrs or stored_addr in promoted_set:
+                continue
+            if (
+                promotable_call_target(
+                    stored_addr,
+                    known_starts,
+                    disassembled_spans,
+                    exec_ranges_stored,
+                )
+                is None
+            ):
+                continue
+            promoted.append(stored_addr)
+            promoted_set.add(stored_addr)
+    return promoted
+
+
 def _classify_function(
     instruction_metrics: dict,
     instruction_count: int,
@@ -1931,7 +1984,7 @@ def _mem_bytes_len(b) -> int | None:
     if isinstance(b, list):
         return len(b)
     if hasattr(b, "nbytes"):
-        return getattr(b, "nbytes")
+        return b.nbytes
     return None
 
 
@@ -2046,6 +2099,17 @@ def disassemble_functions(
                 except ValueError:
                     pass
     all_func_addrs_sorted = sorted(list(set(all_func_addrs)))
+    # Call targets render as absolute virtual addresses, while stored function
+    # addresses are image-relative for PE and Mach-O. All discovery work below
+    # happens in stored space, so executable ranges are rebased once here.
+    imagebase = 0
+    if isinstance(parsed_obj, lief.PE.Binary):
+        imagebase = int(parsed_obj.optional_header.imagebase)
+    elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, "imagebase"):
+        imagebase = int(parsed_obj.imagebase)
+    exec_ranges_stored = [
+        (start - imagebase, end - imagebase) for start, end in executable_ranges(parsed_obj)
+    ]
     addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
     base_delta = 0
     if isinstance(parsed_obj, lief.ELF.Binary):
@@ -2069,10 +2133,52 @@ def disassemble_functions(
         if _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key):
             continue
         all_funcs.extend(metadata.get(func_list_key, []))
+    # A binary whose symbol + unwind discovery produced almost nothing gets a
+    # prologue scan so stripped Go ELF binaries and export-less PEs still gain
+    # a function set; dense binaries are left untouched.
+    if len(all_func_addrs_sorted) < PROLOGUE_SCAN_MIN_FUNCTIONS:
+        prologue_addrs = find_prologue_candidates(parsed_obj, arch_target, exec_ranges_stored)
+        known_addr_set = set(all_func_addrs_sorted)
+        new_addrs = [a for a in prologue_addrs if a not in known_addr_set]
+        if new_addrs:
+            LOG.debug(f"Prologue scan discovered {len(new_addrs)} candidate function starts.")
+            all_func_addrs_sorted = sorted(known_addr_set | set(new_addrs))
+            addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
+            # Prologue discoveries feed the worklist directly; they surface in
+            # metadata["discovered_functions"] after the loop, exactly like
+            # call-site promotions, instead of mutating the function lists.
+            all_funcs.extend(
+                {
+                    "name": f"sub_{a:x}",
+                    "address": f"0x{a:x}",
+                    "size": 0,
+                    "discovered": "prologue",
+                }
+                for a in new_addrs
+            )
     visited_addrs = set()
+    # Worklist instead of a plain list so direct-call promotion can append
+    # newly discovered functions; initial entries keep their existing order.
+    worklist: deque = deque(all_funcs)
+    promoted_count = 0
+    known_starts = list(all_func_addrs_sorted)
+    # Sorted, non-overlapping extents of known code: unwind tables contribute
+    # exact per-function sizes up front, and every completed disassembly adds
+    # its own. Promotion treats these as the ground truth for what is already
+    # a function body, so interior call targets are never promoted.
+    disassembled_spans: list[tuple[int, int]] = []
+    for discovered in metadata.get("discovered_functions") or []:
+        with contextlib.suppress(TypeError, ValueError):
+            size = int(discovered.get("size") or 0)
+            if size > 0:
+                disassembled_spans.append(
+                    (int(discovered["address"], 16), int(discovered["address"], 16) + size)
+                )
+    disassembled_spans.sort()
     # Merely invoking this method leads to more successful disassembly!
     memoryview(parsed_obj.write_to_bytes())
-    for func_entry in all_funcs:
+    while worklist:
+        func_entry = worklist.popleft()
         func_addr_str = func_entry.get("address") or func_entry.get("rva_start")
         if not func_addr_str:
             continue
@@ -2292,6 +2398,45 @@ def disassemble_functions(
                 "proprietary_instructions": proprietary_instructions,
                 "sreg_interactions": sreg_interactions,
             }
+            # Structural block graph for the truncated instruction list. This
+            # is computed after the flat metrics above and is additive: it
+            # describes the function's shape without altering any of them.
+            with contextlib.suppress(ValueError, IndexError, KeyError):
+                function_cfg = build_function_cfg(
+                    truncated_instr_list, parsed_instrs, arch_target, func_addr_va
+                )
+                if function_cfg:
+                    disassembly_results[f"{func_addr_va_hex}::{func_name}"]["cfg"] = function_cfg
+            if func_entry.get("discovered"):
+                disassembly_results[f"{func_addr_va_hex}::{func_name}"]["discovered"] = (
+                    func_entry["discovered"]
+                )
+            if promoted_count < MAX_PROMOTED_FUNCTIONS:
+                last_instr = truncated_instr_list[-1]
+                span_end = (
+                    last_instr.address + len(last_instr.bytes) - func_addr_va + func_addr
+                )
+                bisect.insort(disassembled_spans, (func_addr, span_end))
+                promoted = _promote_call_targets(
+                    direct_call_targets,
+                    visited_addrs,
+                    known_starts,
+                    disassembled_spans,
+                    exec_ranges_stored,
+                    imagebase,
+                    is_aarch64="aarch64" in arch_target.lower() or "arm64" in arch_target.lower(),
+                )
+                for promoted_addr in promoted:
+                    bisect.insort(known_starts, promoted_addr)
+                    worklist.append(
+                        {
+                            "name": f"sub_{promoted_addr:x}",
+                            "address": f"0x{promoted_addr:x}",
+                            "size": 0,
+                            "discovered": "callsite",
+                        }
+                    )
+                promoted_count += len(promoted)
             if inst_count == 0:
                 num_success += 1
             if num_failures < 10 or num_success > 10:
@@ -2300,4 +2445,24 @@ def disassemble_functions(
             LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     if not disassembly_results:
         LOG.debug("Disassembly was not successful.")
+    if promoted_count:
+        # Surface call-site discoveries in the metadata record so downstream
+        # consumers can tell symbol-derived functions from promoted ones.
+        # Stored addresses keep the same image-relative space as the unwind
+        # discovery records.
+        promoted_entries = [
+            {
+                "name": func.get("name", key.split("::", 1)[1]),
+                "address": f"0x{int(key.split('::', 1)[0], 16) - imagebase:x}",
+                "source": "callsite",
+            }
+            for key, func in disassembly_results.items()
+            if isinstance(func, dict) and func.get("discovered") == "callsite"
+        ]
+        if promoted_entries:
+            merged_records = list(metadata.get("discovered_functions") or []) + promoted_entries
+            # Sort numerically; sorting the hex strings would interleave
+            # addresses of different lengths lexicographically.
+            merged_records.sort(key=lambda entry: int(entry.get("address", "0x0"), 16))
+            metadata["discovered_functions"] = merged_records
     return disassembly_results

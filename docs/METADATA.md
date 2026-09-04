@@ -330,6 +330,18 @@ While symbol tables provide the names, these lists represent a curated set of fu
   - **Purpose**: To perform cleanup tasks like flushing files or releasing resources.
   - **Use Case for Analysts**: Malware may use destructors to cover its tracks, delete files, or send a final beacon upon exit. These are important to check for cleanup or anti-forensic activities.
 
+### `discovered_functions` and `function_discovery`
+
+Recovered function starts for binaries whose symbol tables are stripped or incomplete. Two structures are additive to the symbol-driven lists:
+
+- **`discovered_functions`**: every function start recovered from the structures the runtime itself depends on, which survive `strip`:
+  - **Mach-O `__TEXT,__unwind_info`** (compact unwind): `source: "unwind"`, with exact function sizes derived from the sorted offset table and its sentinel entry.
+  - **ELF `.eh_frame_hdr` / `.eh_frame`**: `source: "eh_frame"`. Starts come from the binary-search table when present; sizes come from the exact FDE `pc_range` values. A CIE/FDE walk covers binaries whose header table is missing or malformed.
+  - Each entry carries `name` (the real symbol name when one exists, `sub_<address>` otherwise), `address`, `size` and `source`. Addresses already claimed by a symbol bucket enrich the existing entry with the exact unwind size when its size was unknown.
+- **`function_discovery`**: summary of the merge — `sources` (per-source counts) and `merged_count` (addresses that were genuinely new, i.e. not claimed by any symbol bucket).
+
+Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.
+
 ---
 
 ## Build and Dependency Information
@@ -522,6 +534,43 @@ What counts as a mapping follows what each platform loader actually enforces:
 
 The `CHECK_WX_SEGMENTS` security check turns each entry into a finding naming the segment.
 
+### `entropy`
+
+Per-section Shannon entropy plus packing evidence, collected for every ELF, PE and Mach-O image whether or not disassembly is requested.
+
+- **`sections`**: one entry per non-empty section with `name`, `size`, `entropy` (bits per byte, 0-8), `executable`, `writable`, and `sampled` (true when entropy was computed over the first 8 MB of a larger section — the sample is always the section head, so results stay deterministic).
+- **`packing`**: the derived signals:
+  - `packed_likelihood`: `high` / `medium` / `low` summary of the evidence below.
+  - `packers`: packer section-name signatures found (UPX, Themida, VMProtect, ASPack, MPRESS and others).
+  - `writable_executable_sections`: section-level W+X evidence; the loadable-segment view lives in [`wx_segments`](#wx_segments).
+  - `executable_section_entropy` / `max_executable_section_entropy`: per-executable-section entropy values.
+  - `overlay_size`: bytes past the last section's file content (ELF/PE only; the Mach-O file tail is the code-signature SuperBlob and is excluded).
+  - `findings`: the individual evidence strings (`packer_section:`, `writable_executable_section:`, `high_entropy_exec_with_few_imports`, `entrypoint_outside_executable_sections`, `virtual_size_mismatch:`, `file_overlay`).
+
+The `CHECK_PACKED` security check turns `high`/`medium` likelihood into a finding naming the evidence.
+
+### `toolchain`
+
+Compiler and runtime attribution built from binary evidence rather than declared metadata. Every signal carries `source` and `confidence`:
+
+- **`compilers`**: from ELF `.comment` sections (gcc, clang, rustc, lld with versions), Mach-O `LC_BUILD_VERSION` tool entries, and the PE linker version fields.
+- **`runtimes`**: Go (buildinfo or `runtime.*` symbols), Rust (buildinfo or `_ZN`/`_R` mangling), Swift (`swift_` stdlib symbols), Objective-C (`objc_*` trampolines), MSVC/MinGW CRT fingerprints, .NET.
+- **`libc`**: `glibc` or `musl` from symbol-version requirements and the ELF interpreter.
+
+Empty lists mean the format carries no such evidence — attribution is never padded with guesses.
+
+### `import_hash`
+
+A stable digest over the normalized import-name set (ELF dynamic symbols marked as imports, or the `imports` list for PE/Mach-O). Normalization strips ELF `@@VERSION` suffixes, PE `__imp_`/`_imp_` thunks and common leading-underscore decoration, so the same dependency set hashes identically across formats and minor version bumps. Empty for binaries that import nothing (fully static images).
+
+### `analysis_coverage`
+
+Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
+
+- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
+- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`.
+- **`sections_analyzed`**: sections the entropy pass examined.
+
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
@@ -543,3 +592,4 @@ This object provides a quick, at-a-glance summary of the most important security
 | `safe_seh`               | **Safe SEH.** (x86) Registers exception handlers at compile time.                                                       | Prevents attackers from overwriting SEH chains on the stack to gain execution.                             |
 | `safe_delay_load`        | **Protected Delay-Load IAT.** Marks delay-load tables read-only after initialization.                                   | Prevents hooking of APIs that are loaded lazily during execution.                                          |
 | `enclave`                | **Enclave Support.** Binary contains configuration for SGX/VBS.                                                         | Indicates the application uses TEE (Trusted Execution Environment) features for high-security operations.  |
+| `packed`                 | **Packing evidence present.** Derived from the [`entropy`](#entropy) block.                                              | Strings, symbols and disassembly-derived findings may be incomplete until the binary is unpacked.           |

@@ -32,6 +32,7 @@ from blint.lib.checks import (
     check_rpath,
     check_runtime_loading,
     check_search_path,
+    check_packed,
     check_security_property,
     check_trust_info,
     check_undeclared_dependencies,
