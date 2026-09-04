@@ -1,0 +1,62 @@
+.gitignore
+  h_6a4cc5cdf68def 145-146
+blint/data/rules.yml
+  h_6a4cc5cdf68def 358-371
+blint/lib/absint.py
+  h_6a4cc5cdf68def 1-300
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 35
+blint/lib/binary.py
+  h_6a4cc5cdf68def 29-32,2594-2598,2614-2641,2655,2661-2663,2688-2692,2696-2736,3976-3991
+blint/lib/cfg.py
+  h_6a4cc5cdf68def 1-266
+blint/lib/checks.py
+  h_6a4cc5cdf68def 193-208
+blint/lib/disassembler.py
+  h_6a4cc5cdf68def 4-5,29-36,1909-1960,2111-2121,2145-2165,2167-2184,2187-2188,2408-2446,2455-2473
+blint/lib/entropy.py
+  h_6a4cc5cdf68def 1-303
+blint/lib/funcdisc/__init__.py
+  h_6a4cc5cdf68def 1-16
+blint/lib/funcdisc/complete.py
+  h_6a4cc5cdf68def 1-263
+blint/lib/funcdisc/unwind.py
+  h_6a4cc5cdf68def 1-561
+blint/lib/similarity.py
+  h_6a4cc5cdf68def 1-119
+blint/lib/stack_strings.py
+  h_6a4cc5cdf68def 420-431,435-438,442-444,455
+blint/lib/toolchain.py
+  h_6a4cc5cdf68def 1-222
+tests/corpus/manifest.json
+  h_6a4cc5cdf68def 1-102
+tests/corpus/sources/.gitignore
+  h_6a4cc5cdf68def 1-4
+tests/corpus/sources/godemo/go.mod
+  h_6a4cc5cdf68def 1-3
+tests/corpus/sources/godemo/main.go
+  h_6a4cc5cdf68def 1-25
+tests/corpus/sources/rustdemo/.cargo/config.toml
+  h_6a4cc5cdf68def 1-3
+tests/corpus/sources/rustdemo/Cargo.toml
+  h_6a4cc5cdf68def 1-7
+tests/corpus/sources/rustdemo/src/main.rs
+  h_6a4cc5cdf68def 1-20
+tests/corpus/sources/stackstr.c
+  h_6a4cc5cdf68def 1-17
+tests/scripts/build_corpus.py
+  h_6a4cc5cdf68def 1-194
+tests/scripts/validate_funcdisc.py
+  h_6a4cc5cdf68def 1-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "ad45b4d20733b357d1dfc88f1cb8f0218fcb5955",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
