@@ -142,3 +142,5 @@ requirements-dist.txt
 tests/fixtures/
 .tmp*/
 blint-db/
+
+corpus-build/

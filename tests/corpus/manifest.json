@@ -1,0 +1,102 @@
+{
+  "description": "Evaluation corpus manifest for blint v4 engine work. No binary blobs live in git: tests/scripts/build_corpus.py materializes every entry into a local directory (default corpus-build/) from local toolchains and this machine's applications. tests/scripts/validate_funcdisc.py runs the assertions below.",
+  "manifest_version": 1,
+  "build": {
+    "c_stackstr": {
+      "description": "C binary whose secret string is assembled word-by-word on the stack, built unstripped and stripped for the two local architectures plus a lipo universal pair.",
+      "kind": "clang",
+      "source": "tests/corpus/sources/stackstr.c",
+      "artifacts": [
+        {"name": "stackstr-arm64", "flags": ["-arch", "arm64", "-O2"], "strip": false},
+        {"name": "stackstr-arm64-stripped", "flags": ["-arch", "arm64", "-O2"], "strip": true},
+        {"name": "stackstr-x86_64", "flags": ["-arch", "x86_64", "-O2"], "strip": false},
+        {"name": "stackstr-x86_64-stripped", "flags": ["-arch", "x86_64", "-O2"], "strip": true}
+      ],
+      "post": [
+        {"kind": "lipo", "inputs": ["stackstr-arm64", "stackstr-x86_64"], "output": "stackstr-universal"},
+        {"kind": "codesign", "input": "stackstr-universal", "flags": ["--sign", "-", "--force"]}
+      ]
+    },
+    "rust_static": {
+      "description": "Static-pie musl Rust binary built with rust-lld; stripped with llvm-strip. Requires rustup target x86_64-unknown-linux-musl.",
+      "kind": "cargo",
+      "source": "tests/corpus/sources/rustdemo/",
+      "target": "x86_64-unknown-linux-musl",
+      "strip_with": "llvm-strip",
+      "artifacts": [
+        {"name": "rust-elf-unstripped", "strip": false},
+        {"name": "rust-elf-stripped", "strip": true}
+      ]
+    },
+    "go_static": {
+      "description": "Go binaries for linux/amd64 cross-compiled from the Mac; the stripped variant has no symbol table and no .eh_frame, which makes it the function-discovery stress case.",
+      "kind": "go",
+      "source": "tests/corpus/sources/godemo/",
+      "artifacts": [
+        {"name": "go-elf-unstripped", "env": {"GOOS": "linux", "GOARCH": "amd64"}, "strip": false},
+        {"name": "go-elf-stripped", "env": {"GOOS": "linux", "GOARCH": "amd64"}, "strip": true, "go_strip_flags": "-s -w"}
+      ]
+    }
+  },
+  "collect": {
+    "macos-system": {
+      "description": "Complete system executables on this Mac (not dyld-cache stubs): /bin/ls carries 93 symbols, LC_FUNCTION_STARTS and compact unwind; /usr/lib/dyld carries thousands of functions.",
+      "kind": "paths",
+      "entries": [
+        {"path": "/bin/ls", "name": "bin-ls"},
+        {"path": "/usr/lib/dyld", "name": "usr-lib-dyld"}
+      ]
+    },
+    "macos-apps": {
+      "description": "Real-world app binaries discovered under /Applications and ~/Applications (Contents/MacOS/*). Count varies by machine; entries are collected dynamically up to the limit.",
+      "kind": "apps",
+      "limit": 5
+    }
+  },
+  "assertions": [
+    {
+      "id": "stripped-rust-recall",
+      "kind": "pair_recall",
+      "unstripped": "rust-elf-unstripped",
+      "stripped": "rust-elf-stripped",
+      "min_recall": 0.9,
+      "gate": "Unwind (eh_frame) discovery must recover at least 90% of the functions the unstripped binary knows from the same unwind tables. Static musl-linked C functions legitimately ship without FDEs, so recall against the full unstripped set is reported as context (measured ~0.78 on this fixture; the remainder are musl C functions without unwind records)."
+    },
+    {
+      "id": "stripped-c-recall",
+      "kind": "pair_recall",
+      "unstripped": "stackstr-arm64",
+      "stripped": "stackstr-arm64-stripped",
+      "min_recall": 0.9,
+      "gate": "Mach-O compact-unwind discovery on the stripped arm64 slice."
+    },
+    {
+      "id": "stripped-go-recovery",
+      "kind": "min_functions",
+      "artifact": "go-elf-stripped",
+      "min_disassembled": 200,
+      "gate": "A stripped Go ELF has no symbols and no .eh_frame; prologue scan plus call-site promotion must still yield a working function set (was zero before v4)."
+    },
+    {
+      "id": "arm64-stack-strings",
+      "kind": "stack_strings",
+      "artifact": "stackstr-arm64-stripped",
+      "expect_value": "/usr/lib",
+      "gate": "The ARM64 abstract interpreter reconstructs the string built byte-by-byte on the stack."
+    },
+    {
+      "id": "universal-parses",
+      "kind": "parses",
+      "artifact": "stackstr-universal",
+      "expect_metadata": ["entropy", "analysis_coverage", "import_hash", "toolchain"],
+      "gate": "Universal binary parses cleanly and carries the new v4 metadata blocks."
+    },
+    {
+      "id": "real-world-no-abort",
+      "kind": "parses_all",
+      "collect": ["macos-system", "macos-apps"],
+      "expect_metadata": ["analysis_coverage"],
+      "gate": "Every collected real-world binary parses without aborting and reports analysis coverage."
+    }
+  ]
+}

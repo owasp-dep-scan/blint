@@ -26,6 +26,10 @@ from blint.lib.disassembler import disassemble_functions
 from blint.lib.elf_abi import analyze_elf_abi
 from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
 from blint.lib.elf_linkmap import resolve_link_closure
+from blint.lib.entropy import analyze_binary_entropy
+from blint.lib.funcdisc.unwind import discover_functions, merge_discovered_functions
+from blint.lib.similarity import attach_function_hashes, compute_import_hash
+from blint.lib.toolchain import infer_toolchain
 from blint.lib.import_attribution import (
     UNATTRIBUTED_LIBRARY,
     analyze_link_hygiene,
@@ -2587,6 +2591,11 @@ def parse(
             if objc_metadata := parse_objc_metadata(parsed_obj):
                 metadata["objc_metadata"] = objc_metadata
                 metadata = merge_macho_objc_functions(metadata)
+        # Stripped binaries still carry runtime-mandated function tables
+        # (compact unwind, eh_frame); recover the function starts they list so
+        # disassembly and reviews are not blind on exactly these inputs.
+        if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
+            metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
@@ -2602,6 +2611,34 @@ def parse(
             metadata["link_hygiene"] = link_hygiene
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
+        # Section entropy and packing evidence are properties of the section
+        # bytes, so they are collected for every native binary regardless of
+        # whether disassembly is requested.
+        if isinstance(parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)):
+            _file_size = None
+            with contextlib.suppress(OSError):
+                _file_size = os.path.getsize(exe_file)
+            metadata["entropy"] = analyze_binary_entropy(parsed_obj, _file_size)
+            if packing := metadata["entropy"].get("packing"):
+                metadata["security_properties"]["packed"] = packing.get("packed_likelihood") in (
+                    "high",
+                    "medium",
+                )
+        # Cross-version stable identifiers: import hash for every format and,
+        # once disassembly ran, per-function fuzzy/CFG hashes. ELF carries its
+        # imports as imported dynamic symbols rather than an `imports` list.
+        import_names = [
+            entry.get("name")
+            for entry in metadata.get("imports", [])
+            if isinstance(entry, dict) and entry.get("name")
+        ]
+        if not import_names:
+            import_names = [
+                entry.get("name")
+                for entry in metadata.get("dynamic_symbols", [])
+                if isinstance(entry, dict) and entry.get("name") and entry.get("is_imported")
+            ]
+        metadata["import_hash"] = compute_import_hash(import_names)
         if disassemble and metadata.get("is_encrypted"):
             # FairPlay-encrypted App Store binaries have an encrypted __TEXT
             # segment; disassembling it would yield meaningless instructions.
@@ -2615,12 +2652,15 @@ def parse(
             parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
+            attach_function_hashes(metadata.get("disassembled_functions"))
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             # String literals a binary assembles on its stack are invisible to
             # section scanning, so this is the only channel that sees the device
             # paths, registry keys and module names an obfuscated image hides.
-            if stack_strings := recover_stack_strings(metadata["disassembled_functions"]):
+            if stack_strings := recover_stack_strings(
+                metadata["disassembled_functions"], metadata.get("llvm_target_tuple", "")
+            ):
                 metadata["stack_strings"] = stack_strings
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
@@ -2645,7 +2685,53 @@ def parse(
                 metadata["crypto_material"] = crypto_material
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
+    # Toolchain provenance and coverage accounting run outside the guarded
+    # block: they must summarize the run even when a parse step above failed,
+    # and both are plain-metadata transforms that cannot raise.
+    metadata["toolchain"] = infer_toolchain(metadata)
+    metadata["analysis_coverage"] = _build_analysis_coverage(metadata, disassemble)
     return cleanup_dict_lief_errors(metadata)
+
+
+def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
+    """Account for what was analyzed versus what was discovered.
+
+    A run that disassembled 3 of 400 functions must never be
+    indistinguishable from a clean run of 400: automated consumers need the
+    blind spots, not just the findings.
+    """
+    functions = metadata.get("functions") or []
+    discovered = metadata.get("discovered_functions") or []
+    disassembled = metadata.get("disassembled_functions") or {}
+    symbolic_count = 0
+    discovered_merged = 0
+    for func_entry in functions:
+        if not isinstance(func_entry, dict):
+            continue
+        if func_entry.get("discovered"):
+            discovered_merged += 1
+        else:
+            symbolic_count += 1
+    degradations = []
+    if metadata.get("disassembly_skipped"):
+        degradations.append(metadata["disassembly_skipped"])
+    if disassemble and not disassembled and not metadata.get("disassembly_skipped"):
+        degradations.append("disassembly_unavailable")
+    if metadata.get("is_encrypted"):
+        degradations.append("fairplay_encrypted")
+    coverage = {
+        "functions": {
+            "symbolic": symbolic_count,
+            "discovered": len(discovered),
+            "discovered_merged_into_function_list": discovered_merged,
+            "disassembled": len(disassembled),
+        },
+        "degradations": sorted(degradations),
+    }
+    if entropy := metadata.get("entropy"):
+        sections_analyzed = len(entropy.get("sections") or [])
+        coverage["sections_analyzed"] = sections_analyzed
+    return coverage
 
 
 def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary) -> dict:
@@ -3885,6 +3971,22 @@ def _parse_address(value) -> int | None:
         with contextlib.suppress(ValueError):
             return int(value.strip(), 0)
     return None
+
+
+def discover_and_merge_functions(metadata: dict, parsed_obj) -> dict:
+    """Thin wire-up for unwind-table function discovery (funcdisc.unwind).
+
+    Recovery of stripped-binary function starts lives in a dedicated module;
+    this only applies its merge contract: ``discovered_functions`` records the
+    findings additively and ``functions`` gains ``sub_<address>`` entries only
+    for addresses no symbol bucket already claims.
+    """
+    try:
+        discovered = discover_functions(parsed_obj)
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Function discovery failed for {metadata.get('name')}: {type(e).__name__}: {e}")
+        return metadata
+    return merge_discovered_functions(metadata, discovered)
 
 
 def merge_macho_function_starts(

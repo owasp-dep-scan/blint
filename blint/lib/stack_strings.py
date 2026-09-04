@@ -417,15 +417,31 @@ def _decode_one(data: bytes, encoding: str) -> str:
     return text.split("\x00", 1)[0].strip()
 
 
-def recover_function_stack_strings(func_data: dict) -> list[dict]:
-    """Recover string literals a single disassembled function builds on its stack."""
+def _is_arm64_target(arch_target: str) -> bool:
+    """True for aarch64/arm64 LLVM triples and Mach-O cpu types."""
+    lowered = (arch_target or "").lower()
+    return "aarch64" in lowered or "arm64" in lowered
+
+
+def recover_function_stack_strings(func_data: dict, arch_target: str = "") -> list[dict]:
+    """Recover string literals a single disassembled function builds on its stack.
+
+    The x86-64 pass is the original; ARM64 is served by the shared abstract
+    interpreter in ``absint`` so iOS/macOS binaries get the same recovery.
+    """
     assembly = func_data.get("assembly") or ""
     if not assembly:
         return []
+    if _is_arm64_target(arch_target):
+        from blint.lib.absint import recover_arm64_stack_strings
+
+        return recover_arm64_stack_strings(assembly)
     return _decode_runs(_contiguous_runs(_interpret(assembly.split("\n"))))
 
 
-def recover_stack_strings(disassembled_functions: dict | None) -> list[dict]:
+def recover_stack_strings(
+    disassembled_functions: dict | None, arch_target: str = ""
+) -> list[dict]:
     """Recover stack-built string literals across every disassembled function.
 
     Returns one entry per distinct value, naming the function it was built in so
@@ -436,7 +452,7 @@ def recover_stack_strings(disassembled_functions: dict | None) -> list[dict]:
     recovered: list[dict] = []
     seen: set[str] = set()
     for func_key, func_data in disassembled_functions.items():
-        for entry in recover_function_stack_strings(func_data):
+        for entry in recover_function_stack_strings(func_data, arch_target):
             lowered = entry["value"].lower()
             if lowered in seen:
                 continue
