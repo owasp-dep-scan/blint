@@ -1,0 +1,36 @@
+Dockerfile
+  h_6a4cc5cdf68def 8
+Info.plist
+  h_6a4cc5cdf68def 12
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 911,921-924,935-955
+blint/lib/ios.py
+  h_6a4cc5cdf68def 13,289-299,305,307,312-313,321-322,331-333
+blint/lib/runners.py
+  h_6a4cc5cdf68def 20-24,82-90,120-189,214-223,242,247,249-252,265,270,275-280,283,285-286,295-315
+docs/METADATA.md
+  h_6a4cc5cdf68def 574-583
+file_version_info.txt
+  h_6a4cc5cdf68def 10-11,35,40
+pyproject.toml
+  h_6a4cc5cdf68def 3
+tests/scripts/bench.py
+  h_6a4cc5cdf68def 1-301
+tests/test_determinism.py
+  h_6a4cc5cdf68def 1-227
+tests/test_ios.py
+  h_6a4cc5cdf68def 263-293
+tests/test_runners.py
+  h_6a4cc5cdf68def 6-8,340-517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e018d1a9bb0389076a592411bd85842ec300cb1d",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
