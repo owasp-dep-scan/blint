@@ -1,0 +1,22 @@
+blint/lib/ios.py
+  h_6a4cc5cdf68def 89-94,305-309,312-320,326
+blint/lib/runners.py
+  h_6a4cc5cdf68def 128-141,190-194,196-213,219-220,222,255,278,288,301,333,348
+docs/METADATA.md
+  h_6a4cc5cdf68def 578-579
+tests/test_ios.py
+  h_6a4cc5cdf68def 1,295-373
+tests/test_runners.py
+  h_6a4cc5cdf68def 1,354,480-492,529-586
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "51b427441f6cf6b4f0c6cb36794d9fc5ea012e68",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
