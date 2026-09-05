@@ -1,0 +1,22 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 1888-1975,1978,1982-1983,1985-2009,2685-2688,2856-2875,3908-4061,4403-4406
+docs/METADATA.md
+  h_6a4cc5cdf68def 165-171,578,580-581,603-604
+tests/corpus/manifest.json
+  h_6a4cc5cdf68def 92-93
+tests/scripts/validate_funcdisc.py
+  h_6a4cc5cdf68def 162,181-212
+tests/test_binary.py
+  h_6a4cc5cdf68def 2,4,337-342,367,369-370,380-412,489-742
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "b84c26864034fb43823fd581349845001ff5edff",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
