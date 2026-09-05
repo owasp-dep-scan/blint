@@ -1,4 +1,7 @@
+import hashlib
 import os
+import platform
+import plistlib
 import shutil
 import struct
 import subprocess
@@ -22,6 +25,16 @@ from blint.lib.binary import (
     parse_informative_strings,
     parse_macho_symbols,
 )
+from tests.test_codesign_macho import (
+    _code_directory,
+    _der_cms,
+    _der_certificate,
+    _der_entitlements,
+    _entitlements_blob,
+    _superblob,
+    CSMAGIC_BLOBWRAPPER,
+)
+from blint.lib.codesign_macho import CSMAGIC_CODEDIRECTORY
 
 
 class _FakeFunctionStart:
@@ -339,8 +352,14 @@ def _wx_macho_binary(
     data_max_protection: int | None = None,
     cpu_type: int = 0x01000007,
     cpu_subtype: int = 3,
+    signature_blob: bytes | None = None,
 ) -> bytes:
-    """A minimal x86_64 mach-o image with a parameterized __DATA segment."""
+    """A minimal x86_64 mach-o image with a parameterized __DATA segment.
+
+    With ``signature_blob``, an LC_CODE_SIGNATURE load command names the
+    appended blob exactly the way codesign lays a SuperBlob out: after the
+    load commands, 16-byte aligned.
+    """
     if data_max_protection is None:
         data_max_protection = data_protection
 
@@ -363,18 +382,26 @@ def _wx_macho_binary(
         segment("__TEXT", 0x100000000, 5, 5),
         segment("__DATA", 0x100001000, data_max_protection, data_protection),
     ]
+    commands = list(segments)
+    if signature_blob is not None:
+        offset = 32 + sum(len(c) for c in commands) + 16
+        blob_offset = (offset + 15) & ~15
+        commands.append(struct.pack("<IIII", 0x1D, 16, blob_offset, len(signature_blob)))
     header = struct.pack(
         "<IIIIIIII",
         0xFEEDFACF,
         cpu_type,
         cpu_subtype,
         2,
-        len(segments),
-        sum(len(s) for s in segments),
+        len(commands),
+        sum(len(c) for c in commands),
         0,
         0,
     )
-    return b"".join([header] + segments).ljust(0x2000, b"\x00")
+    image = header + b"".join(commands)
+    if signature_blob is not None:
+        image = image.ljust(blob_offset, b"\x00") + signature_blob
+    return image.ljust(0x2000, b"\x00")
 
 
 MACHO_CPU_X86_64 = 0x01000007
@@ -660,10 +687,10 @@ def test_parse_universal_slice_failure_is_isolated(tmp_path, monkeypatch):
 
     real_summary = binary_module._macho_slice_summary
 
-    def _fail_on_arm64(parsed_slice, index, is_primary):
+    def _fail_on_arm64(exe_file, parsed_slice, index, is_primary):
         if index == 1:
             raise ValueError("boom")
-        return real_summary(parsed_slice, index, is_primary)
+        return real_summary(exe_file, parsed_slice, index, is_primary)
 
     monkeypatch.setattr(binary_module, "_macho_slice_summary", _fail_on_arm64)
     metadata = parse(str(exe_file))
@@ -772,6 +799,392 @@ def test_macho_canary_detected_from_symtab(tmp_path):
     off_metadata = parse(unprotected)
     assert on_metadata["security_properties"]["canary"] is True
     assert off_metadata["security_properties"]["canary"] is False
+
+
+# ---------------------------------------------------------------------------
+# P2.4: embedded code-signature SuperBlob parsing
+# ---------------------------------------------------------------------------
+def _synthetic_signature(
+    identifier="com.example.synth",
+    team_id="TEAM1234AB",
+    flags=0x2,  # adhoc
+    entitlements=None,
+    cms_der=None,
+) -> tuple[bytes, bytes]:
+    """A SuperBlob plus its primary CodeDirectory blob (for cdhash math)."""
+    cd = _code_directory(identifier=identifier, team_id=team_id, flags=flags)
+    entries = [(0, cd)]
+    if entitlements is not None:
+        entries.append((7, _entitlements_blob(_der_entitlements(entitlements), der=True)))
+    if cms_der is not None:
+        entries.append((0x10000, struct.pack(">II", CSMAGIC_BLOBWRAPPER, 8 + len(cms_der)) + cms_der))
+    return _superblob(entries), cd
+
+
+def test_parse_synthetic_signed_macho(tmp_path):
+    # The full wiring: an LC_CODE_SIGNATURE naming an appended SuperBlob is
+    # parsed into semantic detail, feeds security_properties, and stays
+    # cache-safe (plain JSON types).
+    entitlements = {"get-task-allow": True, "com.apple.security.cs.allow-jit": True}
+    blob, cd = _synthetic_signature(
+        flags=0x2 | 0x10000 | 0x4,  # adhoc + hardened runtime + get-task-allow
+        entitlements=entitlements,
+    )
+    exe_file = tmp_path / "signed.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3, signature_blob=blob))
+    metadata = parse(str(exe_file))
+
+    signature = metadata["code_signature"]
+    assert signature["available"] is True
+    assert signature["parse_status"] == "parsed"
+    assert signature["blob_source"] == "lief_content"
+    assert signature["data_offset"] > 0
+    # The legacy keys keep their values and types: size is the load command,
+    # data_size the blob size. "data" (which used to hold the load command
+    # bytes under a signature-data name) is gone — explicit rule-15 exception.
+    assert signature["size"] == "16"
+    assert signature["data_size"] == str(len(blob))
+    assert "data" not in signature
+    superblob = signature["superblob"]
+    assert superblob["provenance"] == "adhoc"
+    directory = superblob["code_directories"][0]
+    assert directory["identifier"] == "com.example.synth"
+    assert directory["team_id"] == "TEAM1234AB"
+    assert directory["cdhash"] == hashlib.sha256(cd).hexdigest()[:40]
+    assert superblob["entitlements_der"] == entitlements
+
+    properties = metadata["security_properties"]
+    assert properties["is_signed"] is True
+    assert properties["hardened_runtime"] is True
+    assert properties["get_task_allow"] is True
+    assert properties["library_validation"] is False
+    assert metadata["security_properties_gaps"] == ["has_nx_stack", "has_nx_heap"]
+    assert metadata["analysis_coverage"]["degradations"] == []
+
+
+def test_parse_unsigned_macho_signature_block(tmp_path):
+    # Bucket discipline: an unsigned binary is "computed: absent" — is_signed
+    # False, parse_status absent, no signature-derived security properties.
+    exe_file = tmp_path / "unsigned.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3))
+    metadata = parse(str(exe_file))
+    assert metadata["code_signature"] == {"available": False, "parse_status": "absent"}
+    assert metadata["security_properties"]["is_signed"] is False
+    assert "hardened_runtime" not in metadata["security_properties"]
+    assert metadata["security_properties_gaps"] == ["has_nx_stack", "has_nx_heap"]
+
+
+def test_parse_garbage_signature_blob_records_gap(tmp_path):
+    # Gate 5: a garbage SuperBlob must not raise and must not read as
+    # "unsigned" or "no entitlements": is_signed stays True (the blob is
+    # there), the parse failure is a declared gap and a degradation.
+    exe_file = tmp_path / "garbage-sig.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3, signature_blob=b"\xde\xad\xbe\xef" + b"\x00" * 60))
+    metadata = parse(str(exe_file))
+
+    signature = metadata["code_signature"]
+    assert signature["available"] is True
+    assert signature["parse_status"] == "parse_failed"
+    assert signature["parse_error"]
+    assert "superblob" not in signature
+    assert metadata["security_properties"]["is_signed"] is True
+    assert "hardened_runtime" not in metadata["security_properties"]
+    assert metadata["security_properties_gaps"] == [
+        "has_nx_stack",
+        "has_nx_heap",
+        "code_signature_detail",
+    ]
+    assert metadata["analysis_coverage"]["security_properties_gaps"] == [
+        "has_nx_stack",
+        "has_nx_heap",
+        "code_signature_detail",
+    ]
+    assert "code_signature_parse_failed" in metadata["analysis_coverage"]["degradations"]
+
+
+def test_parse_truncated_signature_blob_records_gap(tmp_path):
+    # Gate 5, truncated variant: the SuperBlob header declares more than the
+    # blob holds. The parse must fail loudly in band, never raise.
+    blob, _cd = _synthetic_signature()
+    exe_file = tmp_path / "truncated-sig.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3, signature_blob=blob[: len(blob) - 24]))
+    metadata = parse(str(exe_file))
+    assert metadata["code_signature"]["parse_status"] == "parse_failed"
+    assert metadata["code_signature"]["parse_error"]
+    assert metadata["security_properties"]["is_signed"] is True
+    assert "code_signature_detail" in metadata["security_properties_gaps"]
+
+
+def test_universal_slices_carry_own_signatures_and_variance(tmp_path):
+    # Rule 21 with signatures: each slice signs itself. Two slices with
+    # different entitlements and different cdhashes must surface per slice,
+    # with the variance named and the top-level block declared as the
+    # primary slice's answer.
+    entitlements_a = {"com.example.a": True}
+    entitlements_b = {"com.example.b": True, "get-task-allow": True}
+    blob_a, cd_a = _synthetic_signature(
+        identifier="com.example.a",
+        flags=0x2 | 0x10000,  # adhoc + hardened runtime, no get-task-allow
+        entitlements=entitlements_a,
+    )
+    blob_b, cd_b = _synthetic_signature(
+        identifier="com.example.b", flags=0x2 | 0x4, entitlements=entitlements_b
+    )
+    exe_file = tmp_path / "universal-signed.macho"
+    exe_file.write_bytes(
+        _macho_fat_image(
+            [
+                (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3, signature_blob=blob_a), 12),
+                (
+                    MACHO_CPU_ARM64,
+                    MACHO_CPU_ARM64E_SUBTYPE,
+                    _wx_macho_binary(
+                        0x3,
+                        cpu_type=MACHO_CPU_ARM64,
+                        cpu_subtype=MACHO_CPU_ARM64E_SUBTYPE,
+                        signature_blob=blob_b,
+                    ),
+                    14,
+                ),
+            ]
+        )
+    )
+    metadata = parse(str(exe_file))
+
+    assert metadata["code_signature_scope"] == "primary_slice"
+    variance = metadata["code_signature_slice_variance"]
+    assert "entitlements" in variance or "entitlements_der" in variance
+    assert "cdhash" in variance
+    assert "identifier" in variance
+    by_arch = {entry["arch"]: entry for entry in metadata["slices"]}
+    assert by_arch["x86_64"]["code_signature"]["cdhash"] == hashlib.sha256(cd_a).hexdigest()[:40]
+    assert by_arch["arm64e"]["code_signature"]["cdhash"] == hashlib.sha256(cd_b).hexdigest()[:40]
+    assert by_arch["x86_64"]["code_signature"]["entitlements_der"] == entitlements_a
+    assert by_arch["arm64e"]["code_signature"]["entitlements_der"] == entitlements_b
+    # Signature-derived security properties are per slice, never merged.
+    assert by_arch["x86_64"]["security_properties"]["hardened_runtime"] is True
+    assert by_arch["arm64e"]["security_properties"]["hardened_runtime"] is False
+    assert by_arch["x86_64"]["security_properties"]["get_task_allow"] is False
+    assert by_arch["arm64e"]["security_properties"]["get_task_allow"] is True
+    assert "hardened_runtime" in metadata["security_properties_slice_variance"]
+    # Top-level block: the primary (slice 0, x86_64) answer, declared as such.
+    assert metadata["code_signature"]["superblob"]["code_directories"][0][
+        "identifier"
+    ] == "com.example.a"
+    assert metadata["analysis_coverage"]["code_signature_scope"] == "primary_slice"
+    assert metadata["analysis_coverage"]["code_signature_slice_variance"] == variance
+
+
+def test_universal_signature_agreement_has_no_variance(tmp_path):
+    # The negative fixture (rule 11): slices signed identically must not
+    # report variance — the scope declaration alone remains.
+    blob, _cd = _synthetic_signature()
+    exe_file = tmp_path / "universal-same-sig.macho"
+    exe_file.write_bytes(
+        _macho_fat_image(
+            [
+                (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3, signature_blob=blob), 12),
+                (
+                    MACHO_CPU_ARM64,
+                    0,
+                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, signature_blob=blob),
+                    14,
+                ),
+            ]
+        )
+    )
+    metadata = parse(str(exe_file))
+    assert metadata["code_signature_scope"] == "primary_slice"
+    assert "code_signature_slice_variance" not in metadata
+
+
+def test_codesign_system_binary_matches_ground_truth(tmp_path):
+    # Gate 3: assert against codesign, not against blint's own parser. The
+    # Apple-signed system binary's identifier, team, flags and per-slice
+    # cdhashes must match `codesign -dvvv` output exactly.
+    if sys.platform != "darwin" or shutil.which("codesign") is None:
+        pytest.skip("codesign is macOS-only")
+    system_binary = "/usr/bin/git"
+    if not os.path.exists(system_binary):
+        pytest.skip("/usr/bin/git not present on this system")
+
+    metadata = parse(system_binary)
+    signature = metadata["code_signature"]
+    assert signature["parse_status"] == "parsed"
+
+    def codesign_details(arch=None):
+        command = ["codesign", "-dvvv"]
+        if arch:
+            command += ["--arch", arch]
+        command.append(system_binary)
+        result = subprocess.run(command, capture_output=True, text=True)
+        return result.stderr
+
+    details = codesign_details()
+    identifier = next(
+        line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Identifier=")
+    )
+    team_line = next(
+        line for line in details.splitlines() if line.startswith("TeamIdentifier=")
+    )
+    flags_line = next(line for line in details.splitlines() if "flags=0x" in line)
+    expected_flags = int(flags_line.split("flags=0x")[1].split("(")[0], 16)
+
+    primary = signature["superblob"]["code_directories"][0]
+    assert primary["identifier"] == identifier
+    assert primary["flags_raw"] == expected_flags
+    expected_team = None if team_line.endswith("not set") else team_line.split("=", 1)[1]
+    assert primary.get("team_id") == expected_team
+
+    # Per-slice cdhashes (rule 21): every slice's cdhash matches codesign's
+    # answer for that architecture, and a fat binary's slices differ.
+    for entry in metadata.get("slices", []):
+        arch_details = codesign_details(entry["arch"])
+        expected_cdhash = next(
+            line.split("=", 1)[1].split(" ")[0].lower()
+            for line in arch_details.splitlines()
+            if line.startswith("CDHash=")
+        )
+        assert entry["code_signature"]["cdhash"] == expected_cdhash
+    if metadata.get("is_universal"):
+        cdhashes = {
+            entry["code_signature"]["cdhash"] for entry in metadata.get("slices", [])
+        }
+        if len(metadata.get("slices", [])) > 1:
+            assert len(cdhashes) > 1
+
+
+def test_codesign_adhoc_binary_matches_ground_truth(tmp_path):
+    # Gate 3: an ad-hoc signed binary (`codesign -s -`) must classify as
+    # adhoc and carry the exact cdhash codesign reports.
+    if sys.platform != "darwin" or shutil.which("codesign") is None:
+        pytest.skip("codesign is macOS-only")
+    missing = [tool for tool in ("cc", "codesign") if shutil.which(tool) is None]
+    if missing:
+        pytest.skip(f"host toolchain missing: {', '.join(missing)}")
+    artifact = _compile_darwin_binary(tmp_path, "adhoc-target", ["-arch", platform.machine()])
+    result = subprocess.run(
+        ["codesign", "--sign", "-", "--force", artifact],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"codesign could not re-sign: {result.stderr.strip()}")
+
+    metadata = parse(artifact)
+    signature = metadata["code_signature"]
+    assert signature["parse_status"] == "parsed"
+    assert signature["superblob"]["provenance"] == "adhoc"
+
+    details = subprocess.run(
+        ["codesign", "-dvvv", artifact], capture_output=True, text=True
+    ).stderr
+    expected_cdhash = next(
+        line.split("=", 1)[1].strip().lower()
+        for line in details.splitlines()
+        if line.startswith("CDHash=")
+    )
+    primary = signature["superblob"]["code_directories"][0]
+    assert primary["cdhash"] == expected_cdhash
+    assert metadata["security_properties"]["is_signed"] is True
+
+
+def test_codesign_entitlements_match_ground_truth(tmp_path):
+    # Gate 3: entitlements blint reports must equal what codesign reports
+    # for the same binary, key by key.
+    if sys.platform != "darwin" or shutil.which("codesign") is None:
+        pytest.skip("codesign is macOS-only")
+    artifact = _compile_darwin_binary(tmp_path, "entitle-target", ["-arch", platform.machine()])
+    entitlements = {
+        "get-task-allow": True,
+        "com.apple.security.cs.allow-jit": True,
+        "com.example.custom": "value",
+        "com.example.groups": ["one", "two"],
+    }
+    plist_file = tmp_path / "ent.plist"
+    plist_file.write_bytes(plistlib.dumps(entitlements))
+    result = subprocess.run(
+        ["codesign", "--sign", "-", "--force", "--entitlements", str(plist_file), artifact],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"codesign could not sign with entitlements: {result.stderr.strip()}")
+
+    metadata = parse(artifact)
+    signature = metadata["code_signature"]
+    assert signature["parse_status"] == "parsed"
+    parsed = signature["superblob"]["entitlements_der"] or signature["superblob"]["entitlements"]
+    assert parsed == entitlements
+    # codesign's own view of the same blob, as ground truth.
+    reported = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", artifact],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert plistlib.loads(reported.encode()) == entitlements
+    # Security flag properties follow the CodeDirectory flags codesign
+    # actually wrote (verified empirically: codesign does not set
+    # CS_TASK_ALLOW for an ad-hoc signature just because the entitlement is
+    # present), not the entitlement dict.
+    details = subprocess.run(
+        ["codesign", "-dvvv", artifact], capture_output=True, text=True
+    ).stderr
+    flags_line = next(line for line in details.splitlines() if "flags=0x" in line)
+    expected_flags = int(flags_line.split("flags=0x")[1].split("(")[0], 16)
+    assert signature["superblob"]["code_directories"][0]["flags_raw"] == expected_flags
+    assert metadata["security_properties"]["get_task_allow"] is bool(expected_flags & 0x4)
+
+
+def test_codesign_universal_slices_with_differing_entitlements(tmp_path):
+    # Gate 4: a real fat binary whose slices carry different entitlements.
+    # The variance must say so; no slice's answer may pass for the binary's.
+    if sys.platform != "darwin" or shutil.which("codesign") is None:
+        pytest.skip("codesign is macOS-only")
+    missing = [tool for tool in ("cc", "codesign", "lipo") if shutil.which(tool) is None]
+    if missing:
+        pytest.skip(f"host toolchain missing: {', '.join(missing)}")
+
+    def compile_and_sign(name, arch, entitlements):
+        artifact = _compile_darwin_binary(tmp_path, name, ["-arch", arch])
+        plist_file = tmp_path / f"{name}.plist"
+        plist_file.write_bytes(plistlib.dumps(entitlements))
+        result = subprocess.run(
+            ["codesign", "--sign", "-", "--force", "--entitlements", str(plist_file), artifact],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"codesign failed for {name}: {result.stderr.strip()}")
+        return artifact
+
+    # A fat binary needs two distinct architectures; signing each slice
+    # separately is what gives them differing entitlements and cdhashes.
+    thin_a = compile_and_sign("slice-a", "x86_64", {"com.example.slice-a": True})
+    thin_b = compile_and_sign(
+        "slice-b", "arm64", {"com.example.slice-b": True, "get-task-allow": True}
+    )
+    universal = str(tmp_path / "universal")
+    result = subprocess.run(
+        ["lipo", "-create", "-output", universal, thin_a, thin_b],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"lipo -create failed: {result.stderr.strip()}")
+
+    metadata = parse(universal)
+    assert metadata["code_signature_scope"] == "primary_slice"
+    variance = metadata["code_signature_slice_variance"]
+    assert "entitlements" in variance or "entitlements_der" in variance
+    assert "cdhash" in variance
+    summaries = {entry["arch"]: entry["code_signature"] for entry in metadata["slices"]}
+    entitlement_views = [
+        summary.get("entitlements_der") or summary.get("entitlements") or {}
+        for summary in summaries.values()
+    ]
+    assert any("com.example.slice-a" in view for view in entitlement_views)
+    assert any("com.example.slice-b" in view for view in entitlement_views)
 
 
 def test_parse_collects_wx_pe_sections(tmp_path):

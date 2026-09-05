@@ -242,6 +242,49 @@ def test_cold_vs_warm_byte_identical_wasm(cache_options):
     _assert_replay_equals_cold(warm, cold)
 
 
+def test_cold_vs_warm_byte_identical_signed_macho(cache_options, tmp_path):
+    """A signed Mach-O caches and replays byte-identically.
+
+    The signature detail is exactly the kind of nested dict structure a
+    serializer could mangle (rule 20), so a signed binary is the fixture
+    that proves the rule holds for the new block: every value must survive
+    the store/replay round trip, not just the top-level scalars.
+    """
+    from tests.test_binary import _wx_macho_binary
+    from tests.test_codesign_macho import (
+        _code_directory,
+        _der_entitlements,
+        _entitlements_blob,
+        _superblob,
+        CSMAGIC_CODEDIRECTORY,
+    )
+
+    cd = _code_directory(
+        identifier="com.example.cached",
+        team_id="TEAM1234AB",
+        flags=0x2 | 0x10000,
+    )
+    blob = _superblob(
+        [
+            (0, cd),
+            (
+                7,
+                _entitlements_blob(
+                    _der_entitlements({"get-task-allow": True, "com.example.k": "v"}),
+                    der=True,
+                ),
+            ),
+        ]
+    )
+    signed = tmp_path / "signed.macho"
+    signed.write_bytes(_wx_macho_binary(0x3, signature_blob=blob))
+
+    cache_options.disassemble = False
+    warm, cold = _cached_parse_then_cold_parse(cache_options, str(signed))
+    assert warm["code_signature"]["parse_status"] == "parsed"
+    _assert_replay_equals_cold(warm, cold)
+
+
 def _corpus_files():
     corpus = REPO_ROOT / "corpus-build"
     if not corpus.is_dir():
