@@ -1,0 +1,42 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 1888-1975,1978,1982-1983,1985-1993,2030-2045,2722-2725,2893-2897,2903-2917,3950-4103,4445-4448
+  s_526190b23001e8::t_9f3b309e84fa61 2138
+  s_526190b23001e8::t_526dc676422e8d 2898-2902
+  s_526190b23001e8::t_47721677a5fe6d 1994-2029
+docs/METADATA.md
+  h_6a4cc5cdf68def 166,168-169,172-173,580,582-583,606
+  s_526190b23001e8::t_745c6f0667ae3e 170-171
+  s_526190b23001e8::t_8ac916ef4aa32c 165,167,587,605,624
+tests/corpus/manifest.json
+  h_6a4cc5cdf68def 92-93
+tests/scripts/validate_funcdisc.py
+  h_6a4cc5cdf68def 162,181-212
+tests/test_binary.py
+  h_6a4cc5cdf68def 2,4,337-342,367,369-370,380-412,489-596,631-776
+  s_526190b23001e8::t_22614ad5e1e8a2 597-630
+AGENTS.md
+  s_526190b23001e8::t_5d9f98dd4d162d 164
+docs/DISASSEMBLE.md
+  s_526190b23001e8::t_2e133bea8f1e39 48-51,57-66,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "5b59c8217c64b7cd82161dad1d52c4d57de9ab39",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  },
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
