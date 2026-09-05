@@ -169,6 +169,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.",
     )
     parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        dest="use_cache",
+        help="Use the content-addressed parse metadata cache: reuse the parse "
+        "result for a binary already analyzed with the same bytes, blint "
+        "version and options. Off by default; see `blint cache stats`.",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -446,6 +455,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
     )
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Manage the content-addressed parse metadata cache.",
+    )
+    cache_parser.set_defaults(cache_mode=True)
+    cache_subparsers = cache_parser.add_subparsers(
+        title="cache-actions",
+        description="Cache management actions",
+        dest="cache_action",
+    )
+    cache_clear_parser = cache_subparsers.add_parser(
+        "clear", help="Delete all cached parse metadata."
+    )
+    cache_stats_parser = cache_subparsers.add_parser(
+        "stats", help="Show cache location, entry count and actual size on disk."
+    )
+    cache_stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="cache_stats_json",
+        help="Emit the stats as JSON instead of a table.",
+    )
     return parser
 
 
@@ -511,8 +543,55 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         export_callgraph_gexf=args.export_callgraph_gexf,
         callgraph_min_confidence=args.callgraph_min_confidence,
         custom_rules_dir=args.custom_rules_dir,
+        use_cache=args.use_cache,
     )
     return blint_options
+
+
+def run_cache_command(args: argparse.Namespace) -> None:
+    """Run the `blint cache` subcommand: clear or stats."""
+    import json as _json
+
+    from blint.lib.cache import ParseCache
+
+    cache = ParseCache()
+    action = getattr(args, "cache_action", None)
+    if action == "clear":
+        freed = cache.clear()
+        if freed:
+            print(f"Deleted parse cache at {cache.db_path} ({freed / 1e6:.1f} MB freed)")
+        else:
+            print(f"No parse cache found at {cache.db_path}")
+    elif action == "stats":
+        stats = cache.stats()
+        if args.cache_stats_json:
+            print(_json.dumps(stats, indent=2))
+        else:
+            from rich.box import ROUNDED
+            from rich.table import Table
+
+            from blint.logger import console
+
+            table = Table(box=ROUNDED, title="Parse cache", show_header=False)
+            table.add_column("Property", style="cyan", no_wrap=True)
+            table.add_column("Value")
+            table.add_row("Location", str(stats["db_path"]))
+            table.add_row("Entries", str(stats["entries"]))
+            table.add_row("Original size", f"{stats['logical_bytes'] / 1e6:.1f} MB")
+            table.add_row("Compressed size", f"{stats['compressed_bytes'] / 1e6:.1f} MB")
+            table.add_row("Size on disk", f"{stats['db_file_bytes'] / 1e6:.1f} MB")
+            table.add_row("Lifetime hits", str(stats["total_hits"]))
+            table.add_row("Size bound", f"{stats['max_bytes'] / (1 << 30):.1f} GiB")
+            for version, version_stats in (stats.get("by_blint_version") or {}).items():
+                table.add_row(
+                    f"blint {version}",
+                    f"{version_stats['entries']} entries, "
+                    f"{version_stats['compressed_bytes'] / 1e6:.1f} MB",
+                )
+            console.print(table)
+    else:
+        print("Usage: blint cache [clear|stats]")
+    cache.close()
 
 
 def run_callgraph_match_command(args: argparse.Namespace) -> None:
@@ -603,6 +682,9 @@ def main() -> None:
         return
     if args.subcommand_name == "canonicalize":
         run_canonicalize_command(args)
+        return
+    if args.subcommand_name == "cache":
+        run_cache_command(args)
         return
     blint_options = handle_args(args)
     if blint_options.quiet_mode:

@@ -154,7 +154,16 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 
 ## Bumping blint's version
 
-The version string is duplicated across several files with no single source of truth — update all of them together, in the same commit:
+**Do not bump the version as part of an ordinary change.** The version is bumped
+deliberately, once, when a release is cut — not once per feature, packet or
+pull request. A branch that bumps it conflicts with every other branch in
+flight, and a version that moves on every merge stops meaning anything to the
+people reading it. If you think a change warrants a release, say so in the PR
+and leave the version alone.
+
+When a release *is* being cut, the version string is duplicated across several
+files with no single source of truth — update all of them together, in the same
+commit:
 
 - `pyproject.toml` (`version = "..."`)
 - `Info.plist` (`CFBundleVersion`)
@@ -169,6 +178,8 @@ Use `grep -rn "<old-version>"` across the repo (excluding `.git`, `.venv`, `node
 - `EVIDENCE_LIMIT`, `SYMBOLS_LOOKUP_BATCH_LEN`, `MIN_MATCH_SCORE`
 - `BLINT_MAX_HEX_BYTES`
 - `BLINT_MAX_WASM_INSTRUCTIONS` (total instruction-stream budget per wasm report, divided max-min fair across functions; 0 disables)
+- `BLINT_CACHE_DIR` (parse-cache store location; defaults to the user cache directory)
+- `BLINT_CACHE_MAX_BYTES` (parse-cache size bound; default 1 GiB, 0 disables eviction)
 - `SCAN_DEBUG_MODE`, `SCAN_ID`
 - `BLINT_DB_MESON_STRIP` when producing local Meson corpora in the linked `blint-db` repo
 

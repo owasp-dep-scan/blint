@@ -953,6 +953,12 @@ def report(
             f"Analysis coverage: {units.get('succeeded', 0)}/{units.get('attempted', 0)} "
             f"unit(s) analyzed, {units.get('failed', 0)} failed, {units.get('skipped', 0)} skipped"
         )
+        cache_stats = analysis_coverage.get("cache") or {}
+        if cache_stats.get("enabled"):
+            LOG.info(
+                f"Parse cache: {cache_stats.get('hits', 0)} hit(s), "
+                f"{cache_stats.get('misses', 0)} miss(es), {cache_stats.get('stored', 0)} stored"
+            )
     if not findings and not reviews and not should_emit_any_callgraph:
         LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
         return

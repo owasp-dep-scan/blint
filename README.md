@@ -185,7 +185,7 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 <summary><strong>Main Command Help</strong></summary>
 
 ```shell
-usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] {sbom} ...
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] [--cache] {sbom,callgraph-match,canonicalize,db,cache} ...
 
 Binary linter and SBOM generator.
 

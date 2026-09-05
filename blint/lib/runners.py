@@ -17,6 +17,7 @@ from blint.lib.analysis import (
     run_wasm_findings,
 )
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
+from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
 from blint.lib.ios import (
     collect_ios_app_detailed,
     enrich_with_bundle_context,
@@ -131,6 +132,16 @@ class AnalysisRunner:
         # rate over just the binaries.
         self.units_attempted_by_role: dict[str, int] = {}
         self.units_succeeded_by_role: dict[str, int] = {}
+        # Parse cache (P2.2). The cache instance exists for the run only; a
+        # disabled cache is None so the miss path costs nothing. Hit/miss
+        # counters are kept per role for the same reason as units_by_role
+        # (rule 19): a consumer must be able to decompose the totals.
+        self.parse_cache: ParseCache | None = None
+        self._parse_options_digest: str | None = None
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.cache_stored = 0
+        self.cache_by_role: dict[str, dict[str, int]] = {}
 
     def _mark_attempted(self, unit_role: str) -> None:
         self.units_attempted += 1
@@ -211,6 +222,18 @@ class AnalysisRunner:
                 "failed": failed_by_role.get(role, 0),
                 "skipped": skipped_by_role.get(role, 0),
             }
+        # Parse cache accounting (P2.2). ``enabled`` is what lets a consumer
+        # tell a fast run from a cached one. Failures are never cached, so
+        # every record in ``failures`` above is a fresh failure by
+        # construction; ``caches_failures`` states that invariant in the
+        # output itself. Per rule 19 the totals are broken down by role,
+        # since only some roles (native/wasm parses) can hit the cache at
+        # all — android app units never go through parse().
+        by_role = {
+            role: counts
+            for role, counts in sorted(self.cache_by_role.items())
+            if counts.get("hits") or counts.get("misses") or counts.get("stored")
+        }
         return {
             "scope": "run",
             "units": {
@@ -220,6 +243,14 @@ class AnalysisRunner:
                 "skipped": len(self.unit_skips),
             },
             "units_by_role": units_by_role,
+            "cache": {
+                "enabled": self.parse_cache is not None,
+                "hits": self.cache_hits,
+                "misses": self.cache_misses,
+                "stored": self.cache_stored,
+                "caches_failures": False,
+                "by_role": by_role,
+            },
             "failures": list(self.unit_failures),
             "skipped": list(self.unit_skips),
         }
@@ -240,24 +271,98 @@ class AnalysisRunner:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
         initialize_rules(blint_options)
-        with self.progress:
-            self.task = self.progress.add_task(
-                f"[green] BLinting {len(exe_files)} binaries",
-                total=len(exe_files),
-                start=True,
-            )
-            for f in exe_files:
-                # One unparseable file must not abort a scan that is now much
-                # more expensive per binary (issues #122, #188): each unit is
-                # isolated and every failure is recorded in the run-level
-                # analysis coverage. Success is counted by _process_files,
-                # which knows whether the unit actually completed analysis.
-                self._mark_attempted("top-level")
-                try:
-                    self._process_files(f, blint_options)
-                except Exception as e:  # noqa: BLE001
-                    self._record_failure(f, "top-level", "process", e)
+        self._setup_parse_cache(blint_options)
+        try:
+            with self.progress:
+                self.task = self.progress.add_task(
+                    f"[green] BLinting {len(exe_files)} binaries",
+                    total=len(exe_files),
+                    start=True,
+                )
+                for f in exe_files:
+                    # One unparseable file must not abort a scan that is now much
+                    # more expensive per binary (issues #122, #188): each unit is
+                    # isolated and every failure is recorded in the run-level
+                    # analysis coverage. Success is counted by _process_files,
+                    # which knows whether the unit actually completed analysis.
+                    self._mark_attempted("top-level")
+                    try:
+                        self._process_files(f, blint_options)
+                    except Exception as e:  # noqa: BLE001
+                        self._record_failure(f, "top-level", "process", e)
+        finally:
+            # Rule 18: the cache adds a SQLite connection to the run; it is
+            # released structurally, on every path, successful or not.
+            if self.parse_cache is not None:
+                self.parse_cache.close()
         return self.findings, self.reviews, self.fuzzables, self.callgraphs
+
+    def _setup_parse_cache(self, blint_options: BlintOptions) -> None:
+        """Create the run's parse cache when --cache was given.
+
+        A cache key that cannot be derived (a new parse() option with no
+        BlintOptions counterpart) disables caching for the run with a loud
+        error instead of failing the scan: wrong-or-missing caching must
+        never make blint unusable.
+        """
+        if not blint_options.use_cache:
+            return
+        try:
+            self._parse_options_digest = compute_options_digest(blint_options)
+        except CacheKeyError as exc:
+            LOG.error(f"Parse cache disabled for this run: {exc}")
+            return
+        self.parse_cache = ParseCache()
+        LOG.debug(
+            "Parse cache enabled at %s", self.parse_cache.db_path
+        )
+
+    def _mark_cache(self, outcome: str, unit_role: str) -> None:
+        """Record one cache hit/miss/stored event, total and per role."""
+        key = {"hit": "hits", "miss": "misses", "stored": "stored"}[outcome]
+        if outcome == "hit":
+            self.cache_hits += 1
+        elif outcome == "miss":
+            self.cache_misses += 1
+        elif outcome == "stored":
+            self.cache_stored += 1
+        role_counts = self.cache_by_role.setdefault(
+            unit_role, {"hits": 0, "misses": 0, "stored": 0}
+        )
+        role_counts[key] += 1
+
+    def _parse_with_cache(
+        self, file_path: str, blint_options: BlintOptions, unit_role: str
+    ) -> dict[str, Any]:
+        """Parse a binary, serving the metadata from the content-addressed
+        cache when the same bytes, blint version and options were parsed
+        before. Only the parse is cached: checks, reviews and (for .ipa
+        members) bundle enrichment always run on the returned metadata.
+        Parse failures are never cached — see blint.lib.cache."""
+        cache = self.parse_cache
+        should_disassemble = blint_options.disassemble and not is_wasm_file(file_path)
+        if cache is None:
+            return parse(
+                file_path,
+                should_disassemble,
+                wasm_strings=blint_options.wasm_strings,
+                wasm_call_graph=blint_options.wasm_call_graph,
+            )
+        file_sha = sha256_file(file_path)
+        cached = cache.get(file_sha, file_path, self._parse_options_digest) if file_sha else None
+        if cached is not None:
+            self._mark_cache("hit", unit_role)
+            return cached
+        self._mark_cache("miss", unit_role)
+        metadata = parse(
+            file_path,
+            should_disassemble,
+            wasm_strings=blint_options.wasm_strings,
+            wasm_call_graph=blint_options.wasm_call_graph,
+        )
+        if file_sha and cache.put(file_sha, self._parse_options_digest, metadata):
+            self._mark_cache("stored", unit_role)
+        return metadata
 
     def _process_files(self, f: str, blint_options: BlintOptions) -> None:
         """
@@ -291,12 +396,7 @@ class AnalysisRunner:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
                 LOG.debug(f"Skipping disassembly for wasm file {f}")
-            metadata = parse(
-                f,
-                should_disassemble,
-                wasm_strings=blint_options.wasm_strings,
-                wasm_call_graph=blint_options.wasm_call_graph,
-            )
+            metadata = self._parse_with_cache(f, blint_options, "top-level")
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
         self.progress.advance(self.task)
@@ -332,13 +432,7 @@ class AnalysisRunner:
                 # parse must not take the whole archive down with it.
                 self._mark_attempted("ipa-member")
                 try:
-                    should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
-                    metadata = parse(
-                        bin_path,
-                        should_disassemble,
-                        wasm_strings=blint_options.wasm_strings,
-                        wasm_call_graph=blint_options.wasm_call_graph,
-                    )
+                    metadata = self._parse_with_cache(bin_path, blint_options, "ipa-member")
                     enrich_with_bundle_context(
                         metadata, app["bundle_info"], role, entry.get("bundle_path")
                     )
