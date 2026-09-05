@@ -159,6 +159,7 @@ def assert_stack_strings(assertion: dict, corpus_dir: Path, report: list[dict]) 
 
 def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, report: list[dict]) -> bool:
     expected_keys = assertion.get("expect_metadata") or []
+    slice_spec = assertion.get("expect_slices")
     ok = True
     parsed = 0
     missing = []
@@ -177,6 +178,38 @@ def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, repor
                     {"id": assertion["id"], "status": "FAIL", "detail": f"{artifact} lacks {key}"}
                 )
                 break
+        if slice_spec:
+            # The old universal-parses case passed against the slice-0-only
+            # behavior because it only looked at top-level blocks; these
+            # checks fail unless every slice of a universal binary was
+            # actually summarized (P1.2).
+            slices = metadata.get("slices") or []
+            min_count = int(slice_spec.get("min_count", 1))
+            distinct_cpu = int(slice_spec.get("distinct_cpu_types", 1))
+            cpu_types = {entry.get("cpu_type") for entry in slices}
+            analyzed = all(
+                isinstance(entry.get("security_properties"), dict)
+                and (entry.get("symbols") or 0) + (entry.get("functions") or 0) > 0
+                for entry in slices
+            )
+            if (
+                not metadata.get("is_universal")
+                or len(slices) < min_count
+                or len(cpu_types) < distinct_cpu
+                or not analyzed
+            ):
+                ok = False
+                report.append(
+                    {
+                        "id": assertion["id"],
+                        "status": "FAIL",
+                        "detail": (
+                            f"{artifact}: is_universal={bool(metadata.get('is_universal'))} "
+                            f"slices={len(slices)} cpu_types={sorted(cpu_types)} "
+                            f"analyzed={analyzed}"
+                        ),
+                    }
+                )
     if missing:
         report.append(
             {"id": assertion["id"], "status": "SKIP", "detail": f"missing {len(missing)} artifacts"}

@@ -89,7 +89,8 @@
       "kind": "parses",
       "artifact": "stackstr-universal",
       "expect_metadata": ["entropy", "analysis_coverage", "import_hash", "toolchain"],
-      "gate": "Universal binary parses cleanly and carries the new v4 metadata blocks."
+      "expect_slices": {"min_count": 2, "distinct_cpu_types": 2, "each_analyzed": true},
+      "gate": "Universal binary parses cleanly, carries the new v4 metadata blocks, and every slice (not just the auto-selected first one) is summarized with per-slice security properties and analysis counters."
     },
     {
       "id": "real-world-no-abort",

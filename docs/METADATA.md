@@ -162,6 +162,13 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
 
 - **Skipped disassembly (`disassembly_skipped`):** When `--disassemble` is requested for a FairPlay-encrypted binary (`is_encrypted` is `true`), disassembly is skipped and this field is set to `fairplay_encrypted` rather than producing meaningless instructions from the encrypted `__TEXT`.
 
+- **Universal binaries (`is_universal`, `slices`):** A fat (universal) Mach-O contains one image per architecture. blint summarizes *every* slice, not just the one the generic parser auto-selects. The existing top-level keys (`cpu_type`, `functions`, `security_properties`, …) keep describing the **primary slice** (the first fat entry — the same slice that was analyzed before this field existed, so consumers of those keys see no change); `is_universal` is `true` only for fat inputs, and `slices` carries one lean entry per slice in fat order:
+  - `index`, `cpu_type`, `cpu_subtype`, `arch`, `is_primary`: slice identity. `arch` distinguishes `arm64` from `arm64e`, which matters because only arm64e slices get pointer authentication.
+  - `security_properties`: the same property set as the top-level block, computed from *this slice's* bytes. Hardening that differs between slices — a signature present on one slice but not another, PAC only on the arm64e slice — is reported per slice and is never merged into a single optimistic or pessimistic answer.
+  - `functions`, `symbols`, `imports`: counters evidencing the slice was really parsed.
+  - `is_encrypted`: per-slice FairPlay state (set when the slice's `crypt_id` is non-zero).
+  Disassembly, entropy and string-based reviews run on the primary slice only; slice summaries are metadata-level. A slice whose summary fails is isolated and recorded in [`analysis_coverage`](#analysis_coverage) under `slices` — the file is not aborted.
+
 > **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`), including the Mach-O underscore-prefixed manglings (`_$s…`/`_$S…`/`_T0…`) which the bundled demangler recognises directly. When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
 
 ### For iOS/macOS Apps (`.ipa`)
@@ -568,8 +575,10 @@ A stable digest over the normalized import-name set (ELF dynamic symbols marked 
 Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
 
 - **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
-- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`.
+- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
+- **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).
+- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet (currently Mach-O's granular `has_nx_stack` / `has_nx_heap`). Their absence from `security_properties` means "not implemented", never "checked and clean".
 
 #### Run-level `analysis-coverage.json`
 
@@ -590,6 +599,8 @@ Default-mode runs can cache parse metadata in a content-addressed SQLite store k
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
+
+Properties are format-aware: a property the format has no concept of is *omitted* rather than reported as a negative finding (`relro` never appears for Mach-O, for example), and a property blint does not compute for the format is omitted and listed in [`analysis_coverage`](#analysis_coverage) under `security_properties_gaps`.
 
 | Property                 | Description                                                                                                             | Security Implication                                                                                       |
 | :----------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
