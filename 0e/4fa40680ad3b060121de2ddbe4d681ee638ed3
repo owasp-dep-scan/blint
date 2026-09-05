@@ -1,0 +1,44 @@
+AGENTS.md
+  h_6a4cc5cdf68def 172-173
+Dockerfile
+  h_6a4cc5cdf68def 8
+Info.plist
+  h_6a4cc5cdf68def 12
+README.md
+  h_6a4cc5cdf68def 188
+blint/cli.py
+  h_6a4cc5cdf68def 171-179,458-480,546,551-596,686-688
+blint/config.py
+  h_6a4cc5cdf68def 1275-1276
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 956-961
+blint/lib/cache.py
+  h_6a4cc5cdf68def 1-456
+blint/lib/runners.py
+  h_6a4cc5cdf68def 20,135-144,225-236,246-253,274-297,300-366,399,435
+docs/METADATA.md
+  h_6a4cc5cdf68def 582,586-589
+file_version_info.txt
+  h_6a4cc5cdf68def 10-11,35,40
+pyproject.toml
+  h_6a4cc5cdf68def 3
+tests/conftest.py
+  h_6a4cc5cdf68def 1-16
+tests/scripts/bench.py
+  h_6a4cc5cdf68def 58,126-132,141-158,174-177,180-181,183-185,219-227,249-255,271,299,344-346
+tests/test_cache.py
+  h_6a4cc5cdf68def 1-554
+tests/test_runners.py
+  h_6a4cc5cdf68def 446-449,460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "0e4fa40680ad3b060121de2ddbe4d681ee638ed3",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
