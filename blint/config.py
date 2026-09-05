@@ -1272,6 +1272,8 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    # P2.2: disable the content-addressed parse cache (--no-cache).
+    no_cache: bool = False
     render_mermaid_callgraph: bool = False
     export_callgraph_graphml: bool = False
     export_callgraph_gexf: bool = False

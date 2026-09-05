@@ -579,8 +579,13 @@ Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-c
 - **`units_by_role`**: the same four counters per unit role (`top-level`, `ipa-member`), so a consumer can compute a success rate over just the member binaries or just the top-level inputs.
 - **`failures`**: one record per failed unit with `file_path`, `unit_role` (`top-level` or `ipa-member`), `stage`, `exception_type` and `message`.
 - **`skipped`**: one record per recognized-but-unanalyzed unit with `file_path`, `unit_role` and a machine-readable `reason` (e.g. `extract_failed`, `no_dex_bytecode`).
+- **`cache`**: parse-cache accounting. `enabled` tells a fast run from a cached one; `hits` / `misses` / `stored` count what was served from the content-addressed parse cache; `caches_failures` is always `false` — parse failures are never cached, so every record in `failures` is a fresh failure; `by_role` carries the same three counters per unit role, since not every role can hit the cache (android app units never go through `parse()`).
 
 This file is exported even when the scan produced no findings, so a caller can always tell "clean" from "blind" without reading stderr.
+
+### Parse cache
+
+Default-mode runs cache parse metadata in a content-addressed SQLite store keyed on `(sha256(file bytes), blint version, options digest)`, separate from blintdb (which is a shipped read-only artifact). A warm run replays byte-identical metadata — including the cross-path case, where the stored path is rewritten to the current one exactly where `parse()` embeds it. `--no-cache` disables the cache for a run; `blint cache stats` reports entry count and actual size on disk, and `blint cache clear` deletes the store. Entries are zlib-compressed and bounded by `BLINT_CACHE_MAX_BYTES` (default 1 GiB; `0` disables the bound) with least-recently-used eviction; the store lives at `BLINT_CACHE_DIR` (default: the user cache directory, e.g. `~/.cache/blint` on Linux), in `parse-cache.db`.
 
 ### `security_properties`
 

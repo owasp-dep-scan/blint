@@ -55,6 +55,7 @@ import orjson  # noqa: E402
 from blint.config import BlintOptions  # noqa: E402
 from blint.lib import binary as binary_mod  # noqa: E402
 from blint.lib.analysis import initialize_rules, run_checks  # noqa: E402
+from blint.lib.cache import ParseCache, compute_options_digest, sha256_file  # noqa: E402
 from blint.lib.review_runner import ReviewRunner  # noqa: E402
 
 # (module attribute in blint.lib.binary, phase name). All of these are
@@ -122,7 +123,13 @@ def _metadata_size_profile(metadata: dict) -> tuple[int, list[list]]:
     return total, [[key, size] for key, size in block_sizes[:_TOP_BLOCK_COUNT]]
 
 
-def bench_artifact(path: str, disassemble: bool, review_options: BlintOptions) -> dict:
+def bench_artifact(
+    path: str,
+    disassemble: bool,
+    review_options: BlintOptions,
+    parse_cache: ParseCache | None = None,
+    options_digest: str | None = None,
+) -> dict:
     """Time one artifact once, returning phases, counters and size profile."""
     clock: dict = defaultdict(float)
     originals = []
@@ -131,9 +138,24 @@ def bench_artifact(path: str, disassemble: bool, review_options: BlintOptions) -
         setattr(binary_mod, attr, _timed(original, clock, phase))
         originals.append((attr, original))
     try:
-        start = time.perf_counter()
-        metadata = binary_mod.parse(path, disassemble=disassemble)
-        clock["parse"] += time.perf_counter() - start
+        metadata = None
+        if parse_cache is not None:
+            # The cached path replaces the parse with a lookup (hash + select
+            # + deserialize) on hits and adds a store on misses. Both are
+            # timed as their own phases so the miss-path overhead cannot hide
+            # inside `parse`.
+            start = time.perf_counter()
+            file_sha = sha256_file(path)
+            metadata = parse_cache.get(file_sha, path, options_digest)
+            clock["cache_lookup"] += time.perf_counter() - start
+        if metadata is None:
+            start = time.perf_counter()
+            metadata = binary_mod.parse(path, disassemble=disassemble)
+            clock["parse"] += time.perf_counter() - start
+            if parse_cache is not None:
+                start = time.perf_counter()
+                parse_cache.put(file_sha, options_digest, metadata)
+                clock["cache_store"] += time.perf_counter() - start
 
         reviews_error = None
         review_start = time.perf_counter()
@@ -149,10 +171,18 @@ def bench_artifact(path: str, disassemble: bool, review_options: BlintOptions) -
             setattr(binary_mod, attr, original)
 
     phases = dict(clock)
+    # On a cache hit no parse ran at all; record it as zero so the
+    # parse_other remainder stays well-defined and the A/B table shows the
+    # full drop instead of a missing phase.
+    phases.setdefault("parse", 0.0)
     # Phases nest inside parse; surface the unattributed remainder so no
     # regression can hide inside "parse" without showing up somewhere.
+    # cache_* phases replace parse rather than nesting inside it, so they
+    # are excluded from the remainder math.
     phases["parse_other"] = phases["parse"] - sum(
-        seconds for name, seconds in phases.items() if name not in ("parse", "reviews")
+        seconds
+        for name, seconds in phases.items()
+        if name not in ("parse", "reviews") and not name.startswith("cache_")
     )
     metadata_bytes, top_blocks = _metadata_size_profile(metadata)
     entry = {
@@ -186,6 +216,15 @@ def main() -> int:
     parser.add_argument("--repeat", type=int, default=1, help="runs per artifact; minimum is kept")
     parser.add_argument("--only", default="", help="substring filter on artifact names")
     parser.add_argument("--no-disassemble", action="store_true", help="skip disassembly")
+    parser.add_argument(
+        "--cache",
+        choices=["off", "on"],
+        default="off",
+        help="use the content-addressed parse cache. 'on' replaces repeat "
+        "parses with cache lookups (timed as cache_lookup/cache_store), so "
+        "a cold cache-on run measures the miss-path overhead and a warm "
+        "cache-on run measures the speedup.",
+    )
     parser.add_argument("--compare", type=Path, help="baseline JSON to diff phases against")
     parser.add_argument(
         "--threshold", type=float, default=10.0, help="percent delta flagged as a regression"
@@ -207,6 +246,13 @@ def main() -> int:
     initialize_rules(review_options)
     disassemble = not args.no_disassemble
 
+    parse_cache = None
+    options_digest = None
+    if args.cache == "on":
+        parse_cache = ParseCache()
+        options_digest = compute_options_digest(review_options)
+        print(f"Parse cache: {parse_cache.db_path}")
+
     try:
         from importlib.metadata import version as _pkg_version
 
@@ -222,7 +268,7 @@ def main() -> int:
         # records an error and the bench continues with the rest.
         try:
             runs = [
-                bench_artifact(str(path), disassemble, review_options)
+                bench_artifact(str(path), disassemble, review_options, parse_cache, options_digest)
                 for _ in range(args.repeat)
             ]
         except Exception as e:  # noqa: BLE001
@@ -250,6 +296,7 @@ def main() -> int:
             "blint_version": blint_version,
             "python": sys.version.split()[0],
             "disassemble": disassemble,
+            "cache": args.cache,
             "repeat": args.repeat,
             "corpus_dir": str(args.dir),
         },
@@ -293,6 +340,9 @@ def main() -> int:
             print(f"\n{regressions} phase regression(s) above threshold")
         else:
             print("\nNo phase regressions above threshold")
+
+    if parse_cache is not None:
+        parse_cache.close()
 
     return 0
 

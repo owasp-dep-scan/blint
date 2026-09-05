@@ -443,6 +443,10 @@ def test_run_default_mode_isolates_failing_ipa_member(tmp_path, monkeypatch):
     from blint.lib.runners import parse as runners_parse
 
     macho_bytes = b"\xcf\xfa\xed\xfe" + b"\x00" * 256
+    # The poisoned member must have its own bytes: the parse cache is
+    # content-addressed, so a member whose bytes match a healthy member is
+    # legitimately served from cache and never reaches parse at all.
+    poison_bytes = macho_bytes[:-1] + bytes([macho_bytes[-1] ^ 0xFF])
     app_info = plistlib.dumps(
         {
             "CFBundleExecutable": "DemoApp",
@@ -453,7 +457,7 @@ def test_run_default_mode_isolates_failing_ipa_member(tmp_path, monkeypatch):
     with zipfile.ZipFile(ipa_path, "w") as zf:
         zf.writestr("Payload/DemoApp.app/Info.plist", app_info)
         zf.writestr("Payload/DemoApp.app/DemoApp", macho_bytes)
-        zf.writestr("Payload/DemoApp.app/Frameworks/Poison.framework/Poison", macho_bytes)
+        zf.writestr("Payload/DemoApp.app/Frameworks/Poison.framework/Poison", poison_bytes)
         zf.writestr("Payload/DemoApp.app/Frameworks/Healthy.framework/Healthy", macho_bytes)
 
     real_parse = runners_parse

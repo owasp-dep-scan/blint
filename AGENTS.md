@@ -169,6 +169,8 @@ Use `grep -rn "<old-version>"` across the repo (excluding `.git`, `.venv`, `node
 - `EVIDENCE_LIMIT`, `SYMBOLS_LOOKUP_BATCH_LEN`, `MIN_MATCH_SCORE`
 - `BLINT_MAX_HEX_BYTES`
 - `BLINT_MAX_WASM_INSTRUCTIONS` (total instruction-stream budget per wasm report, divided max-min fair across functions; 0 disables)
+- `BLINT_CACHE_DIR` (parse-cache store location; defaults to the user cache directory)
+- `BLINT_CACHE_MAX_BYTES` (parse-cache size bound; default 1 GiB, 0 disables eviction)
 - `SCAN_DEBUG_MODE`, `SCAN_ID`
 - `BLINT_DB_MESON_STRIP` when producing local Meson corpora in the linked `blint-db` repo
 
