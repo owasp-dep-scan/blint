@@ -125,6 +125,20 @@ class AnalysisRunner:
         self.units_succeeded = 0
         self.unit_failures: list[dict[str, Any]] = []
         self.unit_skips: list[dict[str, Any]] = []
+        # Attempted/succeeded are also kept per unit_role: the totals mix
+        # granularities (an .ipa archive counts beside the members it
+        # contains), and the breakdown is what lets a consumer compute a
+        # rate over just the binaries.
+        self.units_attempted_by_role: dict[str, int] = {}
+        self.units_succeeded_by_role: dict[str, int] = {}
+
+    def _mark_attempted(self, unit_role: str) -> None:
+        self.units_attempted += 1
+        self.units_attempted_by_role[unit_role] = self.units_attempted_by_role.get(unit_role, 0) + 1
+
+    def _mark_success(self, unit_role: str) -> None:
+        self.units_succeeded += 1
+        self.units_succeeded_by_role[unit_role] = self.units_succeeded_by_role.get(unit_role, 0) + 1
 
     def _record_failure(
         self, file_path: str, unit_role: str, stage: str, error: BaseException
@@ -173,17 +187,39 @@ class AnalysisRunner:
         assembled by the runner once every unit has been attempted. Without
         it, a run that failed on half its inputs is indistinguishable from a
         run that never saw them.
+
+        ``units`` totals mix granularities (an .ipa archive counts as a unit
+        beside the member units it contains); ``units_by_role`` carries the
+        same four counters per role so a consumer can compute a success rate
+        over just the member binaries, or just the top-level inputs.
         """
-        failed = len(self.unit_failures)
-        skipped = len(self.unit_skips)
+        failed_by_role: dict[str, int] = {}
+        for record in self.unit_failures:
+            role = record["unit_role"]
+            failed_by_role[role] = failed_by_role.get(role, 0) + 1
+        skipped_by_role: dict[str, int] = {}
+        for record in self.unit_skips:
+            role = record["unit_role"]
+            skipped_by_role[role] = skipped_by_role.get(role, 0) + 1
+        units_by_role: dict[str, dict[str, int]] = {}
+        for role in sorted(
+            set(self.units_attempted_by_role) | set(failed_by_role) | set(skipped_by_role)
+        ):
+            units_by_role[role] = {
+                "attempted": self.units_attempted_by_role.get(role, 0),
+                "succeeded": self.units_succeeded_by_role.get(role, 0),
+                "failed": failed_by_role.get(role, 0),
+                "skipped": skipped_by_role.get(role, 0),
+            }
         return {
             "scope": "run",
             "units": {
                 "attempted": self.units_attempted,
                 "succeeded": self.units_succeeded,
-                "failed": failed,
-                "skipped": skipped,
+                "failed": len(self.unit_failures),
+                "skipped": len(self.unit_skips),
             },
+            "units_by_role": units_by_role,
             "failures": list(self.unit_failures),
             "skipped": list(self.unit_skips),
         }
@@ -216,7 +252,7 @@ class AnalysisRunner:
                 # isolated and every failure is recorded in the run-level
                 # analysis coverage. Success is counted by _process_files,
                 # which knows whether the unit actually completed analysis.
-                self.units_attempted += 1
+                self._mark_attempted("top-level")
                 try:
                     self._process_files(f, blint_options)
                 except Exception as e:  # noqa: BLE001
@@ -239,8 +275,8 @@ class AnalysisRunner:
         if is_android_app(f):
             metadata = self._process_android_file(f)
             if metadata is None:
+                # _record_skip already logs the skip with its reason.
                 self._record_skip(f, "top-level", "no_dex_bytecode")
-                LOG.warning(f"No dex bytecode could be read from android app {f}; skipping")
                 self.progress.advance(self.task)
                 return
         elif is_ios_app(f):
@@ -249,7 +285,7 @@ class AnalysisRunner:
             # The archive unit itself succeeded when collection and member
             # iteration completed; member outcomes are accounted separately.
             if archive_processed:
-                self.units_succeeded += 1
+                self._mark_success("top-level")
             return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
@@ -262,7 +298,7 @@ class AnalysisRunner:
                 wasm_call_graph=blint_options.wasm_call_graph,
             )
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
-        self.units_succeeded += 1
+        self._mark_success("top-level")
         self.progress.advance(self.task)
 
     def _process_ios_file(
@@ -294,7 +330,7 @@ class AnalysisRunner:
                 )
                 # Each contained binary is its own unit: a member that fails to
                 # parse must not take the whole archive down with it.
-                self.units_attempted += 1
+                self._mark_attempted("ipa-member")
                 try:
                     should_disassemble = blint_options.disassemble and not is_wasm_file(bin_path)
                     metadata = parse(
@@ -309,7 +345,7 @@ class AnalysisRunner:
                     self._finalize_metadata(
                         bin_path, metadata, blint_options, wants_callgraph_outputs
                     )
-                    self.units_succeeded += 1
+                    self._mark_success("ipa-member")
                 except Exception as e:  # noqa: BLE001
                     self._record_failure(bin_path, "ipa-member", "process", e)
             return True

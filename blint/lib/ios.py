@@ -86,6 +86,12 @@ def _read_bundle_info(app_dir: str) -> dict:
     except (OSError, ValueError, plistlib.InvalidFileException) as e:
         LOG.debug(f"Could not read Info.plist at {plist_path}: {e}")
         return info
+    # A plist whose root element is not a dict (an array, a string, or no
+    # element at all) is legal XML that plistlib returns as-is; treat it like
+    # an unreadable plist instead of crashing on the key lookups below.
+    if not isinstance(plist, dict):
+        LOG.debug(f"Info.plist at {plist_path} has a non-dict root element; ignoring it")
+        return info
     for plist_key, meta_key in _INFO_PLIST_KEYS.items():
         if plist_key in plist:
             info[meta_key] = plist[plist_key]
@@ -296,14 +302,28 @@ def collect_ios_app_detailed(app_file: str) -> tuple[dict | None, str | None]:
     readable token otherwise (``extract_failed``, ``no_payload_dir``,
     ``no_app_bundle``, ``no_binaries``), so callers can record why an archive
     went unanalyzed instead of just logging it.
+
+    The extraction directory is removed on every exit path: the four skip
+    returns each clean up, and any exception is re-raised after cleanup so a
+    scan that survives a bad archive (which error isolation now makes the
+    normal outcome) does not leak one extracted bundle per failure.
     """
     temp_dir = tempfile.mkdtemp(prefix="blint_ios_app")
+    try:
+        return _collect_ios_app_in(temp_dir, app_file)
+    except BaseException:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+
+
+def _collect_ios_app_in(temp_dir: str, app_file: str) -> tuple[dict | None, str | None]:
+    """Collect an .ipa extracted into ``temp_dir``; caller owns cleanup."""
     try:
         with zipfile.ZipFile(app_file) as zf:
             zf.extractall(temp_dir)
     except (zipfile.BadZipFile, OSError) as e:
-        shutil.rmtree(temp_dir, ignore_errors=True)
         LOG.warning(f"Could not extract iOS app {app_file}: {e}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
         return None, "extract_failed"
 
     payload_dir = os.path.join(temp_dir, "Payload")

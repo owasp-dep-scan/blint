@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import orjson
@@ -350,6 +351,7 @@ def test_analysis_runner_coverage_schema():
         "failed": 0,
         "skipped": 0,
     }
+    assert coverage["units_by_role"] == {}
     assert coverage["failures"] == []
     assert coverage["skipped"] == []
 
@@ -475,10 +477,19 @@ def test_run_default_mode_isolates_failing_ipa_member(tmp_path, monkeypatch):
 
     coverage = orjson.loads((reports_dir / "analysis-coverage.json").read_bytes())
     # One archive unit + three member units attempted; the archive itself and
-    # two members succeeded, one member failed.
-    assert coverage["units"]["attempted"] == 4
-    assert coverage["units"]["succeeded"] == 3
-    assert coverage["units"]["failed"] == 1
+    # two members succeeded, one member failed. The per-role breakdown makes
+    # the mixed-granularity totals recoverable: a consumer can compute the
+    # member-binary rate from units_by_role alone.
+    assert coverage["units"] == {
+        "attempted": 4,
+        "succeeded": 3,
+        "failed": 1,
+        "skipped": 0,
+    }
+    assert coverage["units_by_role"] == {
+        "ipa-member": {"attempted": 3, "succeeded": 2, "failed": 1, "skipped": 0},
+        "top-level": {"attempted": 1, "succeeded": 1, "failed": 0, "skipped": 0},
+    }
     failure = coverage["failures"][0]
     assert failure["unit_role"] == "ipa-member"
     assert failure["file_path"].endswith("Poison")
@@ -515,3 +526,61 @@ def test_run_default_mode_records_unreadable_ipa_skip(tmp_path):
     assert skip["file_path"] == str(bad_ipa)
     assert skip["unit_role"] == "top-level"
     assert skip["reason"] == "extract_failed"
+
+
+def test_run_default_mode_non_dict_plist_ipas_no_crash_no_leak(tmp_path):
+    """The reviewer's must-fix repro, end-to-end and now succeeding.
+
+    Three .ipa archives whose Info.plist roots are not dicts used to raise
+    TypeError out of _read_bundle_info (caught per-unit by isolation, but
+    leaking one fully-extracted bundle per archive). With the guard the
+    archives analyze normally, and no extraction directories leak even on
+    the failure paths isolation makes survivable.
+    """
+    import glob
+    import plistlib
+    import tempfile
+    import zipfile
+
+    macho_bytes = b"\xcf\xfa\xed\xfe" + b"\x00" * 256
+    sources = []
+    for index in (1, 2, 3):
+        ipa_path = tmp_path / f"app{index}.ipa"
+        with zipfile.ZipFile(ipa_path, "w") as zf:
+            zf.writestr(f"Payload/App{index}.app/Info.plist", b'<plist version="1.0"/>')
+            zf.writestr(f"Payload/App{index}.app/App{index}", macho_bytes)
+        sources.append(str(ipa_path))
+
+    def leaked_dirs() -> set[str]:
+        return set(glob.glob(os.path.join(tempfile.gettempdir(), "blint_ios_app*")))
+
+    before = leaked_dirs()
+    reports_dir = tmp_path / "reports"
+    options = BlintOptions(
+        src_dir_image=sources,
+        reports_dir=str(reports_dir),
+        no_reviews=True,
+        quiet_mode=True,
+    )
+
+    run_default_mode(options)
+
+    coverage = orjson.loads((reports_dir / "analysis-coverage.json").read_bytes())
+    # Totals mix granularities by design: 3 archive units + 3 member units.
+    # The per-role breakdown is the disaggregated view (3 inputs processed,
+    # 3 member binaries analyzed).
+    assert coverage["units"] == {
+        "attempted": 6,
+        "succeeded": 6,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert coverage["units_by_role"] == {
+        "ipa-member": {"attempted": 3, "succeeded": 3, "failed": 0, "skipped": 0},
+        "top-level": {"attempted": 3, "succeeded": 3, "failed": 0, "skipped": 0},
+    }
+    # Member binaries were still analyzed and exported.
+    exported = {p.name for p in reports_dir.glob("*-metadata.json")}
+    assert exported == {"app1-metadata.json", "app2-metadata.json", "app3-metadata.json"}
+    # And nothing leaked, despite three archives being fully extracted.
+    assert leaked_dirs() == before
