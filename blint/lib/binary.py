@@ -4,6 +4,7 @@ import codecs
 import contextlib
 import os
 import re
+import struct
 import sys
 import warnings
 import zlib
@@ -22,6 +23,7 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.codesign_macho import SUPERBLOB_MAGIC, parse_superblob, signature_summary
 from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.disassembler import disassemble_functions
 from blint.lib.driver_ioctl import (
@@ -1949,6 +1951,33 @@ def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
     return False
 
 
+def _primary_code_directory(code_signature: dict | None) -> dict | None:
+    """The primary (slot-0) CodeDirectory of a parsed code_signature block."""
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return None
+    directories = (code_signature.get("superblob") or {}).get("code_directories") or []
+    for directory in directories:
+        if directory.get("slot_type") == "code_directory":
+            return directory
+    return directories[0] if directories else None
+
+
+def _codesign_security_flags(flags: dict | None) -> dict:
+    """The hardening-relevant CodeDirectory flags as security_properties keys.
+
+    Computed only from a parsed CodeDirectory; an absent or unparseable
+    signature yields {} so the keys stay out of security_properties instead
+    of reporting confident negatives for an unknown (rule 14).
+    """
+    if not isinstance(flags, dict):
+        return {}
+    return {
+        "hardened_runtime": bool(flags.get("runtime")),
+        "library_validation": bool(flags.get("library_validation")),
+        "get_task_allow": bool(flags.get("get_task_allow")),
+    }
+
+
 def _macho_has_pac(parsed_obj: lief.MachO.Binary) -> bool:
     """True when the slice is built for arm64e-style pointer authentication."""
     try:
@@ -1969,7 +1998,13 @@ def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) ->
     - computed: ``nx``, ``w_xor_x``, ``pie``, ``canary`` (stack-protector
       symbols in the symtab), ``stripped`` (defined, named symbols in the
       symtab — see :func:`_macho_symtab_has_names`), ``is_signed`` (embedded
-      signature blob), and ``pac`` when the slice is arm64e.
+      signature blob, presence-only), ``pac`` when the slice is arm64e, and —
+      when the SuperBlob parsed — ``hardened_runtime``,
+      ``library_validation`` and ``get_task_allow`` from the primary
+      CodeDirectory flags. These three are reported as explicit booleans
+      whenever the signature parsed, because for hardening properties the
+      ``False`` is the finding; when the signature did not parse they are
+      omitted rather than guessed.
     - not applicable: ``relro``.
     - not implemented: granular ``has_nx_stack``/``has_nx_heap``.
     """
@@ -1984,10 +2019,22 @@ def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) ->
     }
     if _macho_has_pac(parsed_obj):
         properties["pac"] = True
+    if code_directory := _primary_code_directory(metadata.get("code_signature")):
+        properties.update(_codesign_security_flags(code_directory.get("flags")))
     # Bucket (c) bookkeeping: properties a Mach-O could carry but blint does
     # not compute yet. Stating them keeps "absent from security_properties"
     # from being read as "checked and clean", and analysis_coverage echoes it.
-    metadata["security_properties_gaps"] = ["has_nx_stack", "has_nx_heap"]
+    gaps = ["has_nx_stack", "has_nx_heap"]
+    code_signature = metadata.get("code_signature")
+    if (
+        isinstance(code_signature, dict)
+        and code_signature.get("available")
+        and code_signature.get("parse_status") == "parse_failed"
+    ):
+        # The blob is there and blint could not read it: the signature detail
+        # is a declared blind spot, never a thin "no entitlements" answer.
+        gaps.append("code_signature_detail")
+    metadata["security_properties_gaps"] = gaps
     return properties
 
 
@@ -2024,6 +2071,51 @@ def _record_slice_variance(metadata: dict, properties: dict) -> None:
         LOG.debug(
             f"Universal binary slices disagree on {', '.join(variance)}; "
             f"security_properties describes the primary slice only"
+        )
+
+
+CODE_SIGNATURE_VARIANCE_ASPECTS = (
+    "parse_status",
+    "provenance",
+    "identifier",
+    "team_id",
+    "cdhash",
+    "hash_type",
+    "flags",
+    "entitlements",
+    "entitlements_der",
+)
+
+
+def _record_code_signature_variance(metadata: dict) -> None:
+    """Declare the scope of the top-level ``code_signature`` block.
+
+    Signatures are per slice: every slice of a universal binary carries its
+    own CodeDirectory, its own cdhash (they differ by construction — the
+    directory hashes slice-specific code), and can carry different
+    entitlements. The top-level block describes the primary slice, so for a
+    fat binary it must say so (``code_signature_scope``) and name what the
+    slices disagree about (``code_signature_slice_variance``) rather than
+    presenting one slice's cdhash and entitlements as the binary's. Nothing
+    is merged; per-slice truth stays in ``slices[][code_signature]``.
+    """
+    slices = metadata.get("slices") or []
+    if not metadata.get("is_universal") or len(slices) < 2:
+        return
+    metadata["code_signature_scope"] = "primary_slice"
+    variance = []
+    for aspect in CODE_SIGNATURE_VARIANCE_ASPECTS:
+        values = [
+            (entry.get("code_signature") or {}).get(aspect) for entry in slices
+        ]
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            variance.append(aspect)
+    if variance:
+        metadata["code_signature_slice_variance"] = variance
+        LOG.debug(
+            f"Universal binary slices disagree on code signature "
+            f"{', '.join(variance)}; code_signature describes the primary slice only"
         )
 
 
@@ -2136,6 +2228,7 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
     metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
     _record_slice_variance(metadata, metadata["security_properties"])
+    _record_code_signature_variance(metadata)
     metadata["binary_composition"] = construct_binary_composition(metadata, parsed_obj)
     build_info = {}
     if go_formulation := metadata.get("go_formulation"):
@@ -2900,6 +2993,19 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     # properties the other slices disagree about.
     if variance := metadata.get("security_properties_slice_variance"):
         coverage["security_properties_slice_variance"] = list(variance)
+    # Same rule-21 reason for code_signature: the top-level block speaks for
+    # the primary slice, and a consumer must be able to see that plus which
+    # signature aspects the other slices disagree about.
+    if scope := metadata.get("code_signature_scope"):
+        coverage["code_signature_scope"] = scope
+    if variance := metadata.get("code_signature_slice_variance"):
+        coverage["code_signature_slice_variance"] = list(variance)
+    # A signature blob blint could not parse is a blind spot like any other:
+    # declared in the gaps (stamped by _macho_security_properties), and here
+    # as a degradation so a thin result can never read as "no entitlements".
+    if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
+        degradations.append("code_signature_parse_failed")
+        coverage["degradations"] = sorted(degradations)
     # Per-slice accounting for universal binaries (P1.2). A slice whose
     # summary failed is a unit like any other: isolated, counted, and named —
     # never silently dropped and never fatal for the file.
@@ -4006,16 +4112,18 @@ def _macho_count(entries) -> int:
 
 
 def _macho_slice_summary(
-    parsed_slice: lief.MachO.Binary, index: int, is_primary: bool
+    exe_file: str, parsed_slice: lief.MachO.Binary, index: int, is_primary: bool
 ) -> dict:
     """Lean identity and hardening summary for one slice of a universal binary.
 
     The full metadata (functions, libraries, versions, strings) stays on the
     primary slice's top-level keys; each slice entry carries only what can
     genuinely differ between slices and therefore must never be merged across
-    them: identity, the security properties, per-slice encryption state and
-    counters that evidence the slice was really parsed. Keeping the entries
-    lean also keeps cache entries (which inherit metadata size) small.
+    them: identity, the security properties, per-slice encryption state,
+    counters that evidence the slice was really parsed, and the slice's own
+    parsed code signature (``code_signature`` — every slice has its own
+    CodeDirectory, cdhash and entitlements). Keeping the entries lean also
+    keeps cache entries (which inherit metadata size) small.
     """
     header = parsed_slice.header
     cpu_type = enum_to_str(header.cpu_type)
@@ -4040,11 +4148,38 @@ def _macho_slice_summary(
     }
     if _macho_has_pac(parsed_slice):
         summary["security_properties"]["pac"] = True
+    slice_signature = _macho_slice_signature(exe_file, parsed_slice)
+    summary["code_signature"] = slice_signature
+    if slice_signature.get("parse_status") == "parsed":
+        summary["security_properties"].update(
+            _codesign_security_flags(slice_signature.get("flags"))
+        )
     with contextlib.suppress(AttributeError, TypeError):
         encryption = parsed_slice.encryption_info
         if encryption is not None and not isinstance(encryption, lief.lief_errors):
             summary["is_encrypted"] = bool(getattr(encryption, "crypt_id", 0))
     return summary
+
+
+def _macho_slice_signature(exe_file: str, parsed_slice: lief.MachO.Binary) -> dict:
+    """Per-slice code-signature summary; never a merged cross-slice answer."""
+    try:
+        if not _macho_is_signed(parsed_slice):
+            return {"available": False, "parse_status": "absent"}
+        code_signature = None
+        if parsed_slice.has_code_signature:
+            code_signature = parsed_slice.code_signature
+        elif parsed_slice.has_code_signature_dir:
+            code_signature = parsed_slice.code_signature_dir
+        if code_signature is None:
+            return {"available": False, "parse_status": "absent"}
+        blob, _blob_source = _macho_signature_blob(exe_file, parsed_slice, code_signature)
+        if not blob:
+            return {"available": True, "parse_status": "parse_failed", "parse_error": "blob_unreadable"}
+        return signature_summary(parse_superblob(blob))
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Slice signature parse failed for {exe_file}: {type(e).__name__}: {e}")
+        return {"available": True, "parse_status": "parse_failed", "parse_error": type(e).__name__}
 
 
 def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
@@ -4083,7 +4218,9 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
             )
             continue
         try:
-            slice_summaries.append(_macho_slice_summary(slice_obj, index, slice_obj is primary))
+            slice_summaries.append(
+                _macho_slice_summary(exe_file, slice_obj, index, slice_obj is primary)
+            )
         except Exception as e:  # noqa: BLE001 - one slice must not abort the file
             LOG.error(
                 f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}"
@@ -4474,8 +4611,136 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     return metadata
 
 
+LC_CODE_SIGNATURE_CMD = 0x1D
+
+
+def _macho_signature_data_offset(code_signature) -> int | None:
+    """The ``dataoff`` of ``LC_CODE_SIGNATURE`` — an offset *within the slice*.
+
+    LIEF exposes it as ``data_offset``. When that is unavailable the value is
+    recovered from the 16 bytes the ``data`` property returns, which are the
+    load command itself ``(cmd, cmdsize, dataoff, datasize)``, trying both
+    byte orders.
+
+    For a slice of a universal binary this is not a file offset: the fat
+    header places the slice at ``fat_offset``, so the blob lives at
+    ``fat_offset + dataoff``. Use :func:`_macho_signature_file_offset` for
+    anything that seeks.
+    """
+    offset = getattr(code_signature, "data_offset", None)
+    if isinstance(offset, int) and offset > 0:
+        return offset
+    data = getattr(code_signature, "data", None)
+    if not data or len(data) < 16:
+        return None
+    raw = bytes(data)
+    for fmt in ("<IIII", ">IIII"):
+        cmd, _cmdsize, dataoff, _datasize = struct.unpack(fmt, raw[:16])
+        if cmd == LC_CODE_SIGNATURE_CMD and 0 < dataoff < 1 << 32:
+            return dataoff
+    return None
+
+
+def _macho_signature_file_offset(parsed_obj, code_signature) -> int | None:
+    """Absolute file offset of the SuperBlob, fat header accounted for.
+
+    ``dataoff`` is slice-relative, so for a universal binary every slice but
+    a hypothetical one at offset zero would seek into the wrong bytes without
+    adding ``fat_offset``. A thin binary reports ``fat_offset`` 0 and the two
+    agree.
+    """
+    offset = _macho_signature_data_offset(code_signature)
+    if offset is None:
+        return None
+    fat_offset = getattr(parsed_obj, "fat_offset", 0)
+    return offset + (fat_offset if isinstance(fat_offset, int) and fat_offset > 0 else 0)
+
+
+def _macho_signature_blob(exe_file: str, parsed_obj, code_signature) -> tuple[bytes | None, str]:
+    """The raw SuperBlob bytes, and where they came from.
+
+    Primary source is LIEF's ``content`` (it reads the range the load command
+    names, relative to the right slice). When that is empty, the file range is
+    read directly at :func:`_macho_signature_file_offset`, and the read is
+    only accepted if the bytes actually start with the SuperBlob magic — a
+    wrong offset must fail loudly rather than hand the parser garbage.
+    """
+    content = getattr(code_signature, "content", None)
+    if content:
+        blob = bytes(content)
+        if blob:
+            return blob, "lief_content"
+    data_size = getattr(code_signature, "data_size", 0) or 0
+    offset = _macho_signature_file_offset(parsed_obj, code_signature)
+    if not data_size or offset is None:
+        return None, "unavailable"
+    try:
+        with open(exe_file, "rb") as handle:
+            handle.seek(offset)
+            blob = handle.read(data_size)
+    except OSError:
+        return None, "unreadable"
+    if len(blob) != data_size:
+        return None, "short_read"
+    if struct.unpack_from(">I", blob, 0)[0] != SUPERBLOB_MAGIC:
+        return None, "wrong_offset"
+    return blob, "file_range"
+
+
+def _macho_code_signature_block(exe_file: str, parsed_obj, code_signature) -> dict:
+    """The metadata ``code_signature`` block for one slice.
+
+    ``parse_status`` is the honest tristate: ``"absent"``, ``"parsed"``, or
+    ``"parse_failed"`` — a present-but-unreadable blob is never folded into a
+    confident "unsigned" or an empty entitlements answer. ``data_offset`` is
+    the load command's slice-relative ``dataoff``, ``file_offset`` the
+    absolute position of the blob (they differ for a slice of a universal
+    binary), and ``blob_source`` says which read path produced the bytes. The legacy ``size``/``data_size`` keys keep their
+    original string values (load-command size and blob size respectively).
+
+    Removed key, an explicit rule-15 exception: ``data`` used to hold the
+    hex of those same 16 load-command bytes under a name claiming signature
+    content — it has never held signature data. Its entire information
+    content (cmd, cmdsize, dataoff, datasize) is preserved by ``size``,
+    ``data_offset`` and ``data_size``, and the only consumer
+    (``checks.check_codesign``) reads ``available``, which is unchanged.
+    """
+    block: dict = {
+        "available": getattr(code_signature, "size", 0) > 0,
+        "data_size": str(getattr(code_signature, "data_size", 0)),
+        "size": str(getattr(code_signature, "size", 0)),
+        "parse_status": "absent",
+        "parse_error": None,
+    }
+    if not block["available"]:
+        return block
+    blob, blob_source = _macho_signature_blob(exe_file, parsed_obj, code_signature)
+    block["blob_source"] = blob_source
+    if not blob:
+        block["parse_status"] = "parse_failed"
+        block["parse_error"] = f"blob_source_{blob_source}"
+        return block
+    block["data_offset"] = _macho_signature_data_offset(code_signature)
+    block["file_offset"] = _macho_signature_file_offset(parsed_obj, code_signature)
+    detail = parse_superblob(blob)
+    block["parse_status"] = detail.pop("parse_status")
+    block["parse_error"] = detail.pop("parse_error")
+    # The superblob detail is present exactly when the blob parsed: a failed
+    # parse must leave nothing that reads as a thin partial answer.
+    if block["parse_status"] == "parsed":
+        block["superblob"] = detail
+    return block
+
+
 def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO code signature metadata from the parsed object and adds it to the metadata.
+
+    The embedded SuperBlob (``LC_CODE_SIGNATURE`` → ``data_offset``/``data_size``)
+    is parsed into semantic detail — blob index, CodeDirectory flags and
+    cdhash, entitlements (XML and DER), requirements and the CMS signer
+    chain — by :mod:`blint.lib.codesign_macho`. See
+    :func:`_macho_code_signature_block` for the exact shape and the
+    parse-status tristate.
 
     Args:
         exe_file: The path of the executable file.
@@ -4486,24 +4751,17 @@ def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bi
         The updated metadata dictionary.
     """
     try:
+        code_signature = None
         if parsed_obj.has_code_signature:
             code_signature = parsed_obj.code_signature
-            metadata["code_signature"] = {
-                "available": code_signature.size > 0,
-                "data": str(code_signature.data.hex()),
-                "data_size": str(code_signature.data_size),
-                "size": str(code_signature.size),
-            }
-        if not parsed_obj.has_code_signature and parsed_obj.has_code_signature_dir:
+        elif parsed_obj.has_code_signature_dir:
             code_signature = parsed_obj.code_signature_dir
-            metadata["code_signature"] = {
-                "available": code_signature.size > 0,
-                "data": str(code_signature.data.hex()),
-                "data_size": str(code_signature.data_size),
-                "size": str(code_signature.size),
-            }
-        if not parsed_obj.has_code_signature and not parsed_obj.has_code_signature_dir:
-            metadata["code_signature"] = {"available": False}
+        if code_signature is None:
+            metadata["code_signature"] = {"available": False, "parse_status": "absent"}
+        else:
+            metadata["code_signature"] = _macho_code_signature_block(
+                exe_file, parsed_obj, code_signature
+            )
         if parsed_obj.has_data_in_code:
             data_in_code = parsed_obj.data_in_code
             metadata["data_in_code"] = {
@@ -4511,7 +4769,7 @@ def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bi
                 "data_size": str(data_in_code.data_size),
                 "size": str(data_in_code.size),
             }
-    except (AttributeError, TypeError) as e:
+    except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)} while parsing {exe_file} Mach0 code signature.")
     return metadata
 
