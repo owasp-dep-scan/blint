@@ -1885,20 +1885,164 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     return "-".join(components)
 
 
-def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> dict:
-    """Constructs a summary of security mitigations."""
-    has_symtab = metadata.get("static", False)
+# C symbols whose import (or, for statically linked images, definition) proves
+# the stack-protector was in play. Both the ELF (two leading underscores) and
+# Mach-O (three) spellings are covered so one set serves both formats.
+STACK_CHK_SYMBOLS = {
+    "__stack_chk_fail",
+    "__stack_chk_guard",
+    "___stack_chk_fail",
+    "___stack_chk_guard",
+}
+
+
+def _macho_symtab_has_names(symtab_symbols: list[dict] | None) -> bool:
+    """True when a Mach-O symtab carries defined, named symbols worth reading.
+
+    ``strip`` on a Mach-O executable keeps the symbol table itself — undefined
+    imports stay because dyld needs them — but removes every defined local or
+    external name. Runtime markers that survive a strip (``__mh_execute_header``,
+    the ``radr://`` linker notes) are not name evidence. So "has names" is the
+    honest signal for whether symbol-based analysis can see anything, and the
+    inverse is what ``security_properties.stripped`` reports.
+    """
+    for symbol in symtab_symbols or []:
+        if not isinstance(symbol, dict):
+            continue
+        if str(symbol.get("category", "")).upper().endswith("UNDEFINED"):
+            continue
+        name = symbol.get("short_name") or symbol.get("name") or ""
+        if not isinstance(name, str):
+            continue
+        name = name.strip()
+        if not name or name == "__mh_execute_header" or name.startswith("radr://"):
+            continue
+        return True
+    return False
+
+
+def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
+    """True when the Mach-O symtab references the stack-protector runtime."""
+    for symbol in symtab_symbols or []:
+        if not isinstance(symbol, dict):
+            continue
+        name = symbol.get("short_name") or symbol.get("name") or ""
+        if isinstance(name, str) and name.strip() in STACK_CHK_SYMBOLS:
+            return True
+    return False
+
+
+def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
+    """True when the slice carries an embedded code-signature blob.
+
+    Presence of the blob is the file-level fact; who signed it and with what
+    entitlements is the SuperBlob parser's job and is deliberately not
+    attempted here.
+    """
+    try:
+        if parsed_obj.has_code_signature and parsed_obj.code_signature.size > 0:
+            return True
+        if parsed_obj.has_code_signature_dir and parsed_obj.code_signature_dir.size > 0:
+            return True
+    except (AttributeError, TypeError):
+        return False
+    return False
+
+
+def _macho_has_pac(parsed_obj: lief.MachO.Binary) -> bool:
+    """True when the slice is built for arm64e-style pointer authentication."""
+    try:
+        return bool(parsed_obj.support_arm64_ptr_auth)
+    except (AttributeError, TypeError):
+        return False
+
+
+def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
+    """Security properties for Mach-O, computed rather than defaulted.
+
+    Every property lands in one of three buckets: computed from the file
+    (reported whatever the value), not applicable to the format (omitted —
+    reporting ``relro: "no"`` for a format without RELRO reads as a finding
+    when it is only a vocabulary mismatch), or not implemented yet (omitted,
+    with the gap recorded in ``analysis_coverage``).
+
+    - computed: ``nx``, ``w_xor_x``, ``pie``, ``canary`` (stack-protector
+      symbols in the symtab), ``stripped`` (defined, named symbols in the
+      symtab — see :func:`_macho_symtab_has_names`), ``is_signed`` (embedded
+      signature blob), and ``pac`` when the slice is arm64e.
+    - not applicable: ``relro``.
+    - not implemented: granular ``has_nx_stack``/``has_nx_heap``.
+    """
     properties = {
         "nx": metadata.get("has_nx", False),
-        # True when no loadable segment maps the same pages writable and
-        # executable, which trivially holds for formats without segments.
+        # True when no segment maps the same pages writable and executable.
         "w_xor_x": not metadata.get("wx_segments"),
         "pie": metadata.get("is_pie", False),
-        "relro": metadata.get("relro", "no"),
         "canary": metadata.get("has_canary", False),
-        "stripped": not has_symtab,
-        "is_signed": bool(metadata.get("signatures")),
+        "stripped": not _macho_symtab_has_names(metadata.get("symtab_symbols")),
+        "is_signed": _macho_is_signed(parsed_obj),
     }
+    if _macho_has_pac(parsed_obj):
+        properties["pac"] = True
+    # Bucket (c) bookkeeping: properties a Mach-O could carry but blint does
+    # not compute yet. Stating them keeps "absent from security_properties"
+    # from being read as "checked and clean", and analysis_coverage echoes it.
+    metadata["security_properties_gaps"] = ["has_nx_stack", "has_nx_heap"]
+    return properties
+
+
+def _record_slice_variance(metadata: dict, properties: dict) -> None:
+    """Name the properties whose value is not the same in every slice.
+
+    The top-level ``security_properties`` block describes the primary slice —
+    which keeps existing consumers correct, but leaves a fat binary's
+    at-a-glance summary silently speaking for one architecture. /usr/bin/git
+    is the case in point: PAC lives on its arm64e slice, so the top level
+    carries no ``pac`` key and reads exactly like a binary that was checked
+    and found to lack it. That was the original P1.2 harm, and analyzing the
+    other slices does not fix it for anyone reading the summary.
+
+    So the summary says so in band: ``security_properties_scope`` marks the
+    answer as the primary slice's, and ``security_properties_slice_variance``
+    names every property the slices disagree about. Nothing is merged — a
+    merge would have to choose between an optimistic and a pessimistic lie —
+    and the per-slice truth stays in ``slices``.
+    """
+    slices = metadata.get("slices") or []
+    if not metadata.get("is_universal") or len(slices) < 2:
+        return
+    metadata["security_properties_scope"] = "primary_slice"
+    # A property missing from one slice's set (pac, which is only reported
+    # when true) is itself a disagreement, so compare over the union of keys.
+    per_slice = [entry.get("security_properties") or {} for entry in slices]
+    names = {name for entry in per_slice for name in entry}
+    variance = sorted(
+        name for name in names if len({entry.get(name) for entry in per_slice}) > 1
+    )
+    if variance:
+        metadata["security_properties_slice_variance"] = variance
+        LOG.debug(
+            f"Universal binary slices disagree on {', '.join(variance)}; "
+            f"security_properties describes the primary slice only"
+        )
+
+
+def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> dict:
+    """Constructs a summary of security mitigations."""
+    if isinstance(parsed_obj, lief.MachO.Binary):
+        properties = _macho_security_properties(metadata, parsed_obj)
+    else:
+        properties = {
+            "nx": metadata.get("has_nx", False),
+            # True when no loadable segment maps the same pages writable and
+            # executable, which trivially holds for formats without segments.
+            "w_xor_x": not metadata.get("wx_segments"),
+            "pie": metadata.get("is_pie", False),
+            "relro": metadata.get("relro", "no"),
+            "canary": metadata.get("has_canary", False),
+            "stripped": not metadata.get("static", False),
+            "is_signed": bool(metadata.get("signatures")),
+        }
     if isinstance(parsed_obj, lief.PE.Binary):
         if dll_chars := metadata.get("dll_characteristics", ""):
             properties["aslr"] = "DYNAMIC_BASE" in dll_chars
@@ -1991,6 +2135,7 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     """
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
     metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
+    _record_slice_variance(metadata, metadata["security_properties"])
     metadata["binary_composition"] = construct_binary_composition(metadata, parsed_obj)
     build_info = {}
     if go_formulation := metadata.get("go_formulation"):
@@ -2574,6 +2719,10 @@ def parse(
         elif lief.is_pe(exe_file):
             parser_config = lief.PE.ParserConfig.all
             parsed_obj = lief.PE.parse(exe_file, parser_config)
+        elif lief.is_macho(exe_file):
+            # lief.parse auto-selects one slice of a universal binary; go
+            # through the FatBinary so every slice is seen (P1.2).
+            parsed_obj = _parse_macho(exe_file, metadata)
         else:
             parsed_obj = lief.parse(exe_file)
         if not parsed_obj:
@@ -2741,6 +2890,31 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     if entropy := metadata.get("entropy"):
         sections_analyzed = len(entropy.get("sections") or [])
         coverage["sections_analyzed"] = sections_analyzed
+    # Mach-O properties blint does not compute yet (stamped by
+    # _macho_security_properties); mirrored here so a consumer of the coverage
+    # block alone still sees the blind spots.
+    if gaps := metadata.get("security_properties_gaps"):
+        coverage["security_properties_gaps"] = list(gaps)
+    # Same reason: a consumer reading only the coverage block must be able to
+    # tell that the top-level security summary speaks for one slice and which
+    # properties the other slices disagree about.
+    if variance := metadata.get("security_properties_slice_variance"):
+        coverage["security_properties_slice_variance"] = list(variance)
+    # Per-slice accounting for universal binaries (P1.2). A slice whose
+    # summary failed is a unit like any other: isolated, counted, and named —
+    # never silently dropped and never fatal for the file.
+    slice_summaries = metadata.get("slices") or []
+    slice_errors = metadata.pop("slice_errors", [])
+    if metadata.get("is_universal"):
+        coverage["slices"] = {
+            "total": len(slice_summaries) + len(slice_errors),
+            "summarized": len(slice_summaries),
+            "failed": len(slice_errors),
+        }
+        if slice_errors:
+            coverage["slices"]["errors"] = slice_errors
+            degradations.append("slice_summary_failed")
+            coverage["degradations"] = sorted(degradations)
     return coverage
 
 
@@ -3773,6 +3947,160 @@ def add_rdata_symbols(metadata: dict, rdata_section, text_section, sections) -> 
     return metadata
 
 
+# Mach-O CPU subtype of arm64e (the low 24 bits; the high bits carry the
+# ABI64 flag). The distinction matters because only arm64e slices get
+# pointer authentication, so an aggregate "PAC: no" over a fat binary that
+# contains an arm64e slice would be a confident wrong answer.
+CPU_SUBTYPE_ARM64E = 0x2
+CPU_SUBTYPE_FLAG_MASK = 0x00FFFFFF
+
+
+def _macho_arch_name(cpu_type: str, cpu_subtype: int) -> str:
+    """Human-readable slice architecture; arm64 vs arm64e must stay distinct."""
+    base = (cpu_type or "unknown").lower()
+    if base == "arm64":
+        subtype = int(cpu_subtype or 0) & CPU_SUBTYPE_FLAG_MASK
+        return "arm64e" if subtype == CPU_SUBTYPE_ARM64E else "arm64"
+    return base
+
+
+def _macho_symbol_signals(parsed_slice: lief.MachO.Binary) -> dict:
+    """Single pass over a slice's symtab for the symbol-derived signals.
+
+    Mirrors the metadata-dict helpers used for the primary slice
+    (:func:`_macho_symtab_has_names`, :func:`_macho_symtab_has_canary`) but
+    reads LIEF objects directly so non-primary slices need no metadata dict.
+    The primary-slice cross-check test pins the two against each other.
+    """
+    total = 0
+    imports = 0
+    canary = False
+    has_defined_names = False
+    with contextlib.suppress(AttributeError, TypeError):
+        for symbol in parsed_slice.symbols:
+            total += 1
+            name = symbol.name
+            if not isinstance(name, str):
+                name = ""
+            if name.strip() in STACK_CHK_SYMBOLS:
+                canary = True
+            if str(symbol.category).upper().endswith("UNDEFINED"):
+                imports += 1
+            elif name and name != "__mh_execute_header" and not name.startswith("radr://"):
+                has_defined_names = True
+    return {
+        "total": total,
+        "imports": imports,
+        "canary": canary,
+        "has_defined_names": has_defined_names,
+    }
+
+
+def _macho_count(entries) -> int:
+    """Length of a LIEF object list that may be a lief_errors sentinel."""
+    if not entries or isinstance(entries, lief.lief_errors):
+        return 0
+    with contextlib.suppress(TypeError):
+        return len(list(entries))
+    return 0
+
+
+def _macho_slice_summary(
+    parsed_slice: lief.MachO.Binary, index: int, is_primary: bool
+) -> dict:
+    """Lean identity and hardening summary for one slice of a universal binary.
+
+    The full metadata (functions, libraries, versions, strings) stays on the
+    primary slice's top-level keys; each slice entry carries only what can
+    genuinely differ between slices and therefore must never be merged across
+    them: identity, the security properties, per-slice encryption state and
+    counters that evidence the slice was really parsed. Keeping the entries
+    lean also keeps cache entries (which inherit metadata size) small.
+    """
+    header = parsed_slice.header
+    cpu_type = enum_to_str(header.cpu_type)
+    signals = _macho_symbol_signals(parsed_slice)
+    summary = {
+        "index": index,
+        "cpu_type": cpu_type,
+        "cpu_subtype": header.cpu_subtype,
+        "arch": _macho_arch_name(cpu_type, header.cpu_subtype),
+        "is_primary": is_primary,
+        "security_properties": {
+            "nx": bool(parsed_slice.has_nx),
+            "w_xor_x": not parse_mach0_wx_segments(parsed_slice),
+            "pie": bool(parsed_slice.is_pie),
+            "canary": signals["canary"],
+            "stripped": not signals["has_defined_names"],
+            "is_signed": _macho_is_signed(parsed_slice),
+        },
+        "functions": _macho_count(parsed_slice.functions),
+        "symbols": signals["total"],
+        "imports": signals["imports"],
+    }
+    if _macho_has_pac(parsed_slice):
+        summary["security_properties"]["pac"] = True
+    with contextlib.suppress(AttributeError, TypeError):
+        encryption = parsed_slice.encryption_info
+        if encryption is not None and not isinstance(encryption, lief.lief_errors):
+            summary["is_encrypted"] = bool(getattr(encryption, "crypt_id", 0))
+    return summary
+
+
+def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
+    """Parse a Mach-O file, summarizing every slice of a universal binary.
+
+    ``lief.parse`` auto-selects a single slice of a fat binary, so a universal
+    input was analyzed as whichever slice came first — on an arm64e system
+    binary that meant PAC was reported absent because the slice carrying it
+    was never looked at. This uses ``lief.MachO.parse`` and returns the
+    FatBinary's first slice as the primary: the existing top-level keys keep
+    describing that slice exactly as before (additive rule — consumers read
+    them today), while every slice gets a per-slice summary under ``slices``.
+    Slice selection is by fat index, which is deterministic.
+
+    A slice whose summary fails is recorded for ``analysis_coverage`` and the
+    remaining slices are still summarized; the file is not aborted.
+    """
+    fat = lief.MachO.parse(exe_file)
+    if not fat or isinstance(fat, lief.lief_errors):
+        # Same failure behavior as before: parse() returns early with just
+        # the file path and the run-level coverage records the unit.
+        return lief.parse(exe_file)
+    primary = fat.at(0)
+    if not primary or isinstance(primary, lief.lief_errors):
+        return None
+    if len(fat) <= 1:
+        return primary
+    metadata["is_universal"] = True
+    slice_summaries: list[dict] = []
+    slice_errors: list[dict] = []
+    for index in range(len(fat)):
+        slice_obj = fat.at(index)
+        if not slice_obj or isinstance(slice_obj, lief.lief_errors):
+            slice_errors.append(
+                {"index": index, "exception_type": "LiefParseError", "message": "slice not parseable"}
+            )
+            continue
+        try:
+            slice_summaries.append(_macho_slice_summary(slice_obj, index, slice_obj is primary))
+        except Exception as e:  # noqa: BLE001 - one slice must not abort the file
+            LOG.error(
+                f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}"
+            )
+            slice_errors.append(
+                {
+                    "index": index,
+                    "exception_type": type(e).__name__,
+                    "message": str(e),
+                }
+            )
+    metadata["slices"] = slice_summaries
+    if slice_errors:
+        metadata["slice_errors"] = slice_errors
+    return primary
+
+
 def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Adds MachO metadata to the given metadata dictionary.
 
@@ -4114,6 +4442,10 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["unwind_functions"] = parse_functions(parsed_obj.unwind_functions)
     metadata["symtab_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
+    # Stack-protector evidence lives in the symtab, same as ELF's has_canary;
+    # construct_security_properties reads it instead of defaulting Mach-O to
+    # "no canary" (which is what the missing key used to collapse into).
+    metadata["has_canary"] = _macho_symtab_has_canary(metadata["symtab_symbols"])
 
     # Populate function info based on local symbols for .o files or others where parsed_obj.functions is empty.
     if not metadata["functions"]:

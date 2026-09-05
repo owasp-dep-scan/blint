@@ -161,7 +161,7 @@ flight, and a version that moves on every merge stops meaning anything to the
 people reading it. If you think a change warrants a release, say so in the PR
 and leave the version alone.
 
-When a release *is* being cut, the version string is duplicated across several
+When a release _is_ being cut, the version string is duplicated across several
 files with no single source of truth — update all of them together, in the same
 commit:
 

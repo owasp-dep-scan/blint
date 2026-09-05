@@ -45,25 +45,25 @@ The `disassembled_functions` attribute is a dictionary where each key is a uniqu
 | `function_type`               | String             | A classification of the function based on heuristics. Possible values include: "PLT_Thunk", "Simple_Return", "Has_Syscalls", "Has_Indirect_Calls", or "Has_Conditional_Jumps". If a function doesn't fit these specific categories but is not a simple return, this field will be an empty string. |
 | `proprietary_instructions`    | List of Strings    | (Apple Silicon Only) A list of categories for proprietary instructions found (e.g., "GuardedMode", "AMX"). This indicates the use of non-standard hardware features.                                                                                                                               |
 | `sreg_interactions`           | List of Strings    | (Apple Silicon Only) A list of categories for interactions with proprietary System Registers (e.g., "SPRR_CONTROL", "PAC_KEYS"). This signals manipulation of low-level security and hardware configuration.                                                                                       |
-| `cfg`                          | Dictionary         | The function's control-flow graph metrics (see below). Present for every successfully disassembled function.                                                                                                                                                                                       |
-| `fuzzy_hash`                   | String             | A stable hash of the function's normalized mnemonic sequence (operands dropped). Survives register-allocation and immediate drift across compiler versions; intended for cross-version similarity matching.                                                                                       |
-| `cfg_hash`                     | String             | A hash of the function's block-graph shape (block/edge counts, complexity, loops, unreachable and indirect branches). More robust to recompilation than byte-level hashes.                                                                                                                        |
-| `discovered`                   | String             | Present only for functions recovered by discovery rather than symbols: `"prologue"` (frame-setup pattern scan) or `"callsite"` (a direct-call target promoted into a function).                                                                                                                   |
+| `cfg`                         | Dictionary         | The function's control-flow graph metrics (see below). Present for every successfully disassembled function.                                                                                                                                                                                       |
+| `fuzzy_hash`                  | String             | A stable hash of the function's normalized mnemonic sequence (operands dropped). Survives register-allocation and immediate drift across compiler versions; intended for cross-version similarity matching.                                                                                        |
+| `cfg_hash`                    | String             | A hash of the function's block-graph shape (block/edge counts, complexity, loops, unreachable and indirect branches). More robust to recompilation than byte-level hashes.                                                                                                                         |
+| `discovered`                  | String             | Present only for functions recovered by discovery rather than symbols: `"prologue"` (frame-setup pattern scan) or `"callsite"` (a direct-call target promoted into a function).                                                                                                                    |
 
 ### `cfg` Sub-structure
 
 Block-graph metrics computed from the truncated instruction list after the flat instruction metrics. The graph splits at every branch, return and trap, and at every intra-function branch target; calls do not split blocks (call evidence lives on the callgraph).
 
-| Field                     | Type    | Description                                                                                                                        |
-| :------------------------ | :------ | :--------------------------------------------------------------------------------------------------------------------------------- |
-| `block_count`             | Integer | Number of basic blocks.                                                                                                            |
-| `edge_count`              | Integer | Number of intra-function edges (branch, fallthrough).                                                                              |
-| `cyclomatic_complexity`   | Integer | Conditional branches + 1 (McCabe's metric).                                                                                        |
-| `loop_count`              | Integer | Back edges found by a depth-first traversal (natural loops).                                                                       |
-| `unreachable_block_count` | Integer | Blocks with no path from the entry block; elevated counts can indicate opaque predicates or control-flow flattening.               |
-| `indirect_branch_count`   | Integer | Branches whose target is a register or memory operand (`jmp rax`, `blr x8`); high fan-out suggests obfuscated dispatch.            |
-| `max_block_instructions`  | Integer | Size of the largest block, in instructions.                                                                                        |
-| `tail_call_count`         | Integer | Unconditional branches leaving the function from its final block (tail calls).                                                     |
+| Field                     | Type    | Description                                                                                                             |
+| :------------------------ | :------ | :---------------------------------------------------------------------------------------------------------------------- |
+| `block_count`             | Integer | Number of basic blocks.                                                                                                 |
+| `edge_count`              | Integer | Number of intra-function edges (branch, fallthrough).                                                                   |
+| `cyclomatic_complexity`   | Integer | Conditional branches + 1 (McCabe's metric).                                                                             |
+| `loop_count`              | Integer | Back edges found by a depth-first traversal (natural loops).                                                            |
+| `unreachable_block_count` | Integer | Blocks with no path from the entry block; elevated counts can indicate opaque predicates or control-flow flattening.    |
+| `indirect_branch_count`   | Integer | Branches whose target is a register or memory operand (`jmp rax`, `blr x8`); high fan-out suggests obfuscated dispatch. |
+| `max_block_instructions`  | Integer | Size of the largest block, in instructions.                                                                             |
+| `tail_call_count`         | Integer | Unconditional branches leaving the function from its final block (tail calls).                                          |
 
 `function_metric` review rules can reference these via dotted `check_field` paths such as `cfg.cyclomatic_complexity`.
 
@@ -75,7 +75,7 @@ Function addresses come from three cooperating sources, tried in order of confid
 2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values.
 3. **Completion passes**:
    - **Prologue scan** (only when symbols + unwind produced fewer than 32 functions): scans executable bytes for compiler frame setups — `push rbp; mov rbp, rsp`, `endbr64` + frame setup and Go's stack-guard prologues on x86-64; `paciasp`, the `stp x29, x30, [sp, #-N]!` frame-push and Go's `ldr x16, [x28+16]` guard on ARM64. Candidates are tagged `source: "prologue"` (lowest confidence).
-   - **Call-site promotion** (bounded to a fixpoint): a resolved *direct*-call target that sits in executable memory outside every known function extent (unwind sizes and completed disassemblies) is promoted into a new function and disassembled in turn. Tagged `source: "callsite"`.
+   - **Call-site promotion** (bounded to a fixpoint): a resolved _direct_-call target that sits in executable memory outside every known function extent (unwind sizes and completed disassemblies) is promoted into a new function and disassembled in turn. Tagged `source: "callsite"`.
 
 On a stripped Go ELF binary — no symbols, no `.eh_frame` — the completion passes recover a working function set (prologue precision measured at 1.00 against the unstripped symbol table on the evaluation corpus).
 

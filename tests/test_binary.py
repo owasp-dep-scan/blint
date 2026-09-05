@@ -1,5 +1,7 @@
 import os
+import shutil
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -332,7 +334,12 @@ def _wx_elf_binary(data_segment_flags: int) -> bytes:
     return b"".join([ehdr] + phdrs).ljust(0x1200, b"\x00")
 
 
-def _wx_macho_binary(data_protection: int, data_max_protection: int | None = None) -> bytes:
+def _wx_macho_binary(
+    data_protection: int,
+    data_max_protection: int | None = None,
+    cpu_type: int = 0x01000007,
+    cpu_subtype: int = 3,
+) -> bytes:
     """A minimal x86_64 mach-o image with a parameterized __DATA segment."""
     if data_max_protection is None:
         data_max_protection = data_protection
@@ -357,10 +364,10 @@ def _wx_macho_binary(data_protection: int, data_max_protection: int | None = Non
         segment("__DATA", 0x100001000, data_max_protection, data_protection),
     ]
     header = struct.pack(
-        "<IiiIIIII",
+        "<IIIIIIII",
         0xFEEDFACF,
-        0x01000007,
-        3,
+        cpu_type,
+        cpu_subtype,
         2,
         len(segments),
         sum(len(s) for s in segments),
@@ -368,6 +375,39 @@ def _wx_macho_binary(data_protection: int, data_max_protection: int | None = Non
         0,
     )
     return b"".join([header] + segments).ljust(0x2000, b"\x00")
+
+
+MACHO_CPU_X86_64 = 0x01000007
+MACHO_CPU_ARM64 = 0x0100000C
+MACHO_CPU_ARM64E_SUBTYPE = 0x80000002  # ARM64E | ABI64 flag
+
+
+def _macho_fat_image(slices: list[tuple[int, int, bytes, int]]) -> bytes:
+    """Wrap thin Mach-O images into a fat (universal) binary.
+
+    Each slice is a ``(cpu_type, cpu_subtype, image, align)`` tuple; slice
+    offsets are aligned to the slice's own ``2**align`` requirement, which
+    LIEF's fat reader enforces. No binary blobs are committed — the thin
+    images come from the same inline builder the W^X tests use.
+    """
+    placements = []
+    offset = 8 + 20 * len(slices)
+    for cpu_type, cpu_subtype, image, align in slices:
+        step = 1 << align
+        offset = (offset + step - 1) & ~(step - 1)
+        placements.append((cpu_type, cpu_subtype, offset, len(image), align, image))
+        offset += len(image)
+    out = bytearray(offset)
+    struct.pack_into(">II", out, 0, 0xCAFEBABE, len(slices))
+    for index, (cpu_type, cpu_subtype, slice_offset, size, align, _) in enumerate(placements):
+        struct.pack_into(">IIIII", out, 8 + 20 * index, cpu_type, cpu_subtype, slice_offset, size, align)
+    for _, _, slice_offset, _, _, image in placements:
+        out[slice_offset : slice_offset + len(image)] = image
+    return bytes(out)
+
+
+def _slice_security_properties(metadata: dict) -> list[dict]:
+    return [entry["security_properties"] for entry in metadata.get("slices") or []]
 
 
 def _wx_pe_binary() -> bytes:
@@ -444,6 +484,294 @@ def test_parse_reports_no_wx_macho_segments_for_standard_images(tmp_path):
 
     assert metadata["wx_segments"] == []
     assert metadata["security_properties"]["w_xor_x"] is True
+
+
+def test_macho_security_properties_are_computed_not_defaulted(tmp_path):
+    # P1.1: Mach-O security_properties used to read ELF-only metadata keys and
+    # default every miss into a confident-sounding negative answer. The format
+    # branch must compute what Mach-O can carry and omit what it cannot.
+    exe_file = tmp_path / "thin.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3))  # no symtab, no signature
+    metadata = parse(str(exe_file))
+
+    properties = metadata["security_properties"]
+    # relro is an ELF concept; reporting it as "no" for Mach-O read as a
+    # finding when it was only a vocabulary mismatch.
+    assert "relro" not in properties
+    # An image with no defined, named symtab symbols is stripped; the old
+    # answer derived the same value from an ELF-only "static" key.
+    assert properties["stripped"] is True
+    assert properties["canary"] is False
+    assert properties["is_signed"] is False
+    assert properties["nx"] is True
+    assert properties["pie"] is metadata["is_pie"]
+    # Properties that are computable but not implemented yet are declared,
+    # both beside the properties and in the coverage block, so their absence
+    # cannot be read as "checked and clean".
+    assert metadata["security_properties_gaps"] == ["has_nx_stack", "has_nx_heap"]
+    assert metadata["analysis_coverage"]["security_properties_gaps"] == [
+        "has_nx_stack",
+        "has_nx_heap",
+    ]
+
+
+def test_macho_symtab_name_helpers():
+    # The strip discriminator: undefined imports and strip survivors
+    # (__mh_execute_header, radr:// linker notes) are not name evidence.
+    assert binary_module._macho_symtab_has_names(
+        [{"category": "CATEGORY.UNDEFINED", "short_name": "_printf"}]
+    ) is False
+    assert binary_module._macho_symtab_has_names(
+        [{"category": "CATEGORY.EXTERNAL", "short_name": "__mh_execute_header"}]
+    ) is False
+    assert binary_module._macho_symtab_has_names(
+        [{"category": "CATEGORY.LOCAL", "short_name": "radr://5614542"}]
+    ) is False
+    assert binary_module._macho_symtab_has_names(
+        [{"category": "CATEGORY.LOCAL", "short_name": "_main"}]
+    ) is True
+    # Canary evidence: the stack-protector runtime symbols, in either the
+    # ELF or the Mach-O spelling.
+    assert binary_module._macho_symtab_has_canary(
+        [{"short_name": "___stack_chk_fail"}]
+    ) is True
+    assert binary_module._macho_symtab_has_canary(
+        [{"short_name": "___stack_chk_guard"}]
+    ) is True
+    # Negative fixture (rule 11): ordinary imports prove nothing.
+    assert binary_module._macho_symtab_has_canary(
+        [{"short_name": "_printf"}, {"short_name": "__stack_chk_smash"}]
+    ) is False
+
+
+def test_parse_universal_macho_summarizes_every_slice(tmp_path):
+    # P1.2: lief.parse auto-selects one slice of a fat binary; every slice
+    # must be summarized, and hardening present in only one slice (PAC on the
+    # arm64e slice here) must stay attributable to that slice.
+    exe_file = tmp_path / "universal.macho"
+    exe_file.write_bytes(
+        _macho_fat_image(
+            [
+                (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3), 12),
+                (
+                    MACHO_CPU_ARM64,
+                    MACHO_CPU_ARM64E_SUBTYPE,
+                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=MACHO_CPU_ARM64E_SUBTYPE),
+                    14,
+                ),
+            ]
+        )
+    )
+    metadata = parse(str(exe_file))
+
+    assert metadata["is_universal"] is True
+    slices = metadata["slices"]
+    assert [entry["index"] for entry in slices] == [0, 1]
+    assert [entry["cpu_type"] for entry in slices] == ["X86_64", "ARM64"]
+    assert [entry["arch"] for entry in slices] == ["x86_64", "arm64e"]
+    # The first slice stays the primary: existing consumers read the
+    # top-level keys, so they must keep describing that slice.
+    assert [entry["is_primary"] for entry in slices] == [True, False]
+    assert metadata["cpu_type"] == "X86_64"
+    # PAC comes from the arm64e slice and only from it.
+    assert "pac" not in slices[0]["security_properties"]
+    assert slices[1]["security_properties"]["pac"] is True
+    # Every slice was really parsed: the counters are present and the
+    # per-slice properties are complete. The arm64e slice additionally
+    # carries pac.
+    for entry, expected in (
+        (slices[0], {"nx", "w_xor_x", "pie", "canary", "stripped", "is_signed"}),
+        (slices[1], {"nx", "w_xor_x", "pie", "canary", "stripped", "is_signed", "pac"}),
+    ):
+        assert set(entry["security_properties"]) == expected
+        assert entry["symbols"] == 0  # minimal fixture carries no symtab
+        assert entry["functions"] >= 0
+    # Top-level properties describe the primary slice; only "packed" is
+    # added afterwards from the (primary) entropy pass.
+    top_level = dict(metadata["security_properties"])
+    top_level_packed = top_level.pop("packed", None)
+    assert top_level == slices[0]["security_properties"]
+    assert top_level_packed is not None
+    coverage_slices = metadata["analysis_coverage"]["slices"]
+    assert coverage_slices == {"total": 2, "summarized": 2, "failed": 0}
+    # The top-level summary speaks for one slice, so it must say so: without
+    # this, a fat binary whose PAC lives on its arm64e slice reads at a
+    # glance exactly like one that was checked and found to lack PAC — the
+    # original P1.2 harm, surviving in the block consumers actually read.
+    assert metadata["security_properties_scope"] == "primary_slice"
+    assert metadata["security_properties_slice_variance"] == ["pac"]
+    assert metadata["analysis_coverage"]["security_properties_slice_variance"] == ["pac"]
+
+
+def test_universal_slice_variance_omitted_when_slices_agree(tmp_path):
+    """No disagreement, no variance key — the signal must mean something."""
+    exe_file = tmp_path / "agreeing.macho"
+    exe_file.write_bytes(
+        _macho_fat_image(
+            [
+                (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3), 12),
+                (
+                    MACHO_CPU_ARM64,
+                    3,
+                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=3),
+                    14,
+                ),
+            ]
+        )
+    )
+    metadata = parse(str(exe_file))
+
+    assert metadata["is_universal"] is True
+    assert [entry["arch"] for entry in metadata["slices"]] == ["x86_64", "arm64"]
+    # Scope is still stated — the answer is still one slice's — but there is
+    # nothing to disagree about.
+    assert metadata["security_properties_scope"] == "primary_slice"
+    assert "security_properties_slice_variance" not in metadata
+    assert "security_properties_slice_variance" not in metadata["analysis_coverage"]
+
+
+def test_parse_thin_macho_has_no_slice_block(tmp_path):
+    exe_file = tmp_path / "thin.macho"
+    exe_file.write_bytes(_wx_macho_binary(0x3))
+    metadata = parse(str(exe_file))
+
+    assert "is_universal" not in metadata
+    assert "slices" not in metadata
+    assert "slices" not in metadata["analysis_coverage"]
+
+
+def test_parse_universal_slice_failure_is_isolated(tmp_path, monkeypatch):
+    # One slice failing its summary must not abort the file: the remaining
+    # slice is still summarized and the failure lands in analysis_coverage.
+    exe_file = tmp_path / "universal.macho"
+    exe_file.write_bytes(
+        _macho_fat_image(
+            [
+                (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3), 12),
+                (
+                    MACHO_CPU_ARM64,
+                    0,
+                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64),
+                    14,
+                ),
+            ]
+        )
+    )
+
+    real_summary = binary_module._macho_slice_summary
+
+    def _fail_on_arm64(parsed_slice, index, is_primary):
+        if index == 1:
+            raise ValueError("boom")
+        return real_summary(parsed_slice, index, is_primary)
+
+    monkeypatch.setattr(binary_module, "_macho_slice_summary", _fail_on_arm64)
+    metadata = parse(str(exe_file))
+
+    assert metadata["is_universal"] is True
+    assert [entry["index"] for entry in metadata["slices"]] == [0]
+    coverage_slices = metadata["analysis_coverage"]["slices"]
+    assert coverage_slices["total"] == 2
+    assert coverage_slices["summarized"] == 1
+    assert coverage_slices["failed"] == 1
+    assert coverage_slices["errors"][0]["index"] == 1
+    assert coverage_slices["errors"][0]["exception_type"] == "ValueError"
+    assert "slice_summary_failed" in metadata["analysis_coverage"]["degradations"]
+
+
+_DARWIN_SLICE_SRC = """
+#include <string.h>
+#include <stdio.h>
+int main(int argc, char **argv) {
+    char buf[64];
+    if (argc > 1) {
+        strncpy(buf, argv[1], sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = 0;
+        puts(buf);
+    }
+    return 0;
+}
+"""
+
+
+def _compile_darwin_binary(tmp_path: Path, name: str, flags: list[str]) -> str:
+    """Compile a Mach-O with the host Apple toolchain, or skip the test.
+
+    Returns the artifact path. Skipping (not failing) when the host cannot
+    build Mach-O slices keeps the suite runnable on Linux CI, where the
+    synthetic fat fixtures above carry the same assertions.
+    """
+    if sys.platform != "darwin":
+        pytest.skip("host is not macOS")
+    missing = [tool for tool in ("cc", "strip", "lipo") if shutil.which(tool) is None]
+    if missing:
+        pytest.skip(f"host toolchain missing: {', '.join(missing)}")
+    source = tmp_path / f"{name}.c"
+    artifact = str(tmp_path / name)
+    source.write_text(_DARWIN_SLICE_SRC)
+    result = subprocess.run(
+        ["cc", *flags, "-O2", "-o", artifact, str(source)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"host cc cannot build {flags}: {result.stderr.strip()}")
+    return artifact
+
+
+def test_universal_binary_attributes_properties_per_slice(tmp_path):
+    # Gate: a real two-arch universal binary built by the host compiler, with
+    # a property (stripped) planted in exactly one slice via strip(1). The
+    # property must be attributable to that slice and never merge into the
+    # other slice's answer.
+    thin_arm64 = _compile_darwin_binary(tmp_path, "thin-arm64", ["-arch", "arm64"])
+    thin_x86 = _compile_darwin_binary(tmp_path, "thin-x86_64", ["-arch", "x86_64"])
+    subprocess.run(["strip", thin_arm64], check=True, capture_output=True)
+    universal = str(tmp_path / "universal")
+    result = subprocess.run(
+        ["lipo", "-create", "-output", universal, thin_x86, thin_arm64],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"lipo -create failed: {result.stderr.strip()}")
+
+    metadata = parse(universal)
+    assert metadata["is_universal"] is True
+    by_arch = {entry["arch"]: entry for entry in metadata["slices"]}
+    assert set(by_arch) == {"x86_64", "arm64"}
+    # The planted property: stripped arm64 slice, unstripped x86_64 slice.
+    assert by_arch["arm64"]["security_properties"]["stripped"] is True
+    assert by_arch["x86_64"]["security_properties"]["stripped"] is False
+    # strip keeps the undefined imports, so canary evidence survives on both.
+    assert by_arch["arm64"]["security_properties"]["canary"] is True
+    assert by_arch["x86_64"]["security_properties"]["canary"] is True
+    # Both slices were really analyzed.
+    for entry in metadata["slices"]:
+        assert entry["symbols"] > 0
+        assert entry["imports"] > 0
+    # Top-level describes the primary slice and agrees with its summary.
+    primary = next(entry for entry in metadata["slices"] if entry["is_primary"])
+    top_level = dict(metadata["security_properties"])
+    top_level.pop("packed", None)
+    assert top_level == primary["security_properties"]
+    assert metadata["cpu_type"] == primary["cpu_type"]
+
+
+def test_macho_canary_detected_from_symtab(tmp_path):
+    # The canary property needs both directions: a build with the stack
+    # protector reports it, and a -fno-stack-protector build of the same
+    # source must not (rule 11's negative fixture).
+    hardened = _compile_darwin_binary(
+        tmp_path, "canary-on", ["-arch", "arm64", "-fstack-protector-all"]
+    )
+    unprotected = _compile_darwin_binary(
+        tmp_path, "canary-off", ["-arch", "arm64", "-fno-stack-protector"]
+    )
+    on_metadata = parse(hardened)
+    off_metadata = parse(unprotected)
+    assert on_metadata["security_properties"]["canary"] is True
+    assert off_metadata["security_properties"]["canary"] is False
 
 
 def test_parse_collects_wx_pe_sections(tmp_path):

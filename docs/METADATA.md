@@ -162,6 +162,15 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
 
 - **Skipped disassembly (`disassembly_skipped`):** When `--disassemble` is requested for a FairPlay-encrypted binary (`is_encrypted` is `true`), disassembly is skipped and this field is set to `fairplay_encrypted` rather than producing meaningless instructions from the encrypted `__TEXT`.
 
+- **Universal binaries (`is_universal`, `slices`):** A fat (universal) Mach-O contains one image per architecture. blint summarizes _every_ slice, not just the one the generic parser auto-selects. The existing top-level keys (`cpu_type`, `functions`, `security_properties`, …) keep describing the **primary slice** (the first fat entry — the same slice that was analyzed before this field existed, so consumers of those keys see no change); `is_universal` is `true` only for fat inputs, and `slices` carries one lean entry per slice in fat order:
+  - `index`, `cpu_type`, `cpu_subtype`, `arch`, `is_primary`: slice identity. `arch` distinguishes `arm64` from `arm64e`, which matters because only arm64e slices get pointer authentication.
+  - `security_properties`: the same property set as the top-level block, computed from _this slice's_ bytes. Hardening that differs between slices — a signature present on one slice but not another, PAC only on the arm64e slice — is reported per slice and is never merged into a single optimistic or pessimistic answer.
+  - `functions`, `symbols`, `imports`: counters evidencing the slice was really parsed.
+  - `is_encrypted`: per-slice FairPlay state (set when the slice's `crypt_id` is non-zero).
+    Because the top-level block speaks for the primary slice, a fat input also carries `security_properties_scope: "primary_slice"` and, when the slices do not agree, `security_properties_slice_variance` naming every property they differ on (both mirrored into `analysis_coverage`). `/usr/bin/git` is the case in point: PAC is on its arm64e slice, so the top level has no `pac` key and would otherwise read exactly like a binary checked and found to lack it. Nothing is merged across slices — a merge would have to pick between an optimistic and a pessimistic lie — so the per-slice truth stays in `slices` and the summary states its own scope.
+
+  Disassembly, entropy and string-based reviews run on the primary slice only; slice summaries are metadata-level. A slice whose summary fails is isolated and recorded in [`analysis_coverage`](#analysis_coverage) under `slices` — the file is not aborted.
+
 > **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`), including the Mach-O underscore-prefixed manglings (`_$s…`/`_$S…`/`_T0…`) which the bundled demangler recognises directly. When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
 
 ### For iOS/macOS Apps (`.ipa`)
@@ -568,12 +577,14 @@ A stable digest over the normalized import-name set (ELF dynamic symbols marked 
 Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
 
 - **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
-- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`.
+- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
+- **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).
+- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet (currently Mach-O's granular `has_nx_stack` / `has_nx_heap`). Their absence from `security_properties` means "not implemented", never "checked and clean".
 
 #### Run-level `analysis-coverage.json`
 
-Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-coverage.json` summarizing the run's *units* (a top-level file, or one binary contained in an `.ipa`). A binary that fails to parse no longer aborts the scan (issues #122, #188); the failure lands here instead:
+Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-coverage.json` summarizing the run's _units_ (a top-level file, or one binary contained in an `.ipa`). A binary that fails to parse no longer aborts the scan (issues #122, #188); the failure lands here instead:
 
 - **`units`**: `attempted` / `succeeded` / `failed` / `skipped`. Totals mix granularities: an `.ipa` archive counts as a unit beside the member units it contains.
 - **`units_by_role`**: the same four counters per unit role (`top-level`, `ipa-member`), so a consumer can compute a success rate over just the member binaries or just the top-level inputs.
@@ -590,6 +601,8 @@ Default-mode runs can cache parse metadata in a content-addressed SQLite store k
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
+
+Properties are format-aware: a property the format has no concept of is _omitted_ rather than reported as a negative finding (`relro` never appears for Mach-O, for example), and a property blint does not compute for the format is omitted and listed in [`analysis_coverage`](#analysis_coverage) under `security_properties_gaps`.
 
 | Property                 | Description                                                                                                             | Security Implication                                                                                       |
 | :----------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
@@ -608,4 +621,4 @@ This object provides a quick, at-a-glance summary of the most important security
 | `safe_seh`               | **Safe SEH.** (x86) Registers exception handlers at compile time.                                                       | Prevents attackers from overwriting SEH chains on the stack to gain execution.                             |
 | `safe_delay_load`        | **Protected Delay-Load IAT.** Marks delay-load tables read-only after initialization.                                   | Prevents hooking of APIs that are loaded lazily during execution.                                          |
 | `enclave`                | **Enclave Support.** Binary contains configuration for SGX/VBS.                                                         | Indicates the application uses TEE (Trusted Execution Environment) features for high-security operations.  |
-| `packed`                 | **Packing evidence present.** Derived from the [`entropy`](#entropy) block.                                              | Strings, symbols and disassembly-derived findings may be incomplete until the binary is unpacked.           |
+| `packed`                 | **Packing evidence present.** Derived from the [`entropy`](#entropy) block.                                             | Strings, symbols and disassembly-derived findings may be incomplete until the binary is unpacked.          |
