@@ -55,7 +55,7 @@ class ReviewRunner:
             return {}
         if not metadata or not (exe_type := metadata.get("exe_type")):
             return {}
-        self._gen_review_lists(exe_type)
+        self._gen_review_lists(exe_type, metadata.get("binary_type") or "")
         if (
             self.review_methods_list
             or self.review_exe_list
@@ -182,15 +182,27 @@ class ReviewRunner:
                 informative_values=informative_values,
             )
 
-    def _gen_review_lists(self, exe_type: str) -> None:
-        """Generates the review lists based on the given executable type."""
+    def _gen_review_lists(self, exe_type: str, binary_type: str = "") -> None:
+        """Generates the review lists based on the given executable type.
+
+        Whole-binary reviews additionally accept rules registered under the
+        *format* (``ELF``, ``PE``, ``MachO``). ``exe_type`` is a toolchain
+        label — ``gobinary``, ``genericbinary``, or a ``machine-filetype``
+        fallback such as ``x86_64-dyn`` — so a rule about a format's on-disk
+        structure cannot enumerate the labels it must cover without guessing
+        at machine names. Only BINARY_REVIEWS gets this: every other group
+        keys off toolchain-specific evidence where the exact label matters.
+        """
         self.review_methods_list = review_methods_dict.get(exe_type)
         self.review_exe_list = review_exe_dict.get(exe_type)
         self.review_symbols_list = review_symbols_dict.get(exe_type)
         self.review_imports_list = review_imports_dict.get(exe_type)
         self.review_entries_list = review_entries_dict.get(exe_type)
         self.review_functions_list = review_functions_dict.get(exe_type)
-        self.review_binary_list = review_binary_dict.get(exe_type)
+        binary_rules = list(review_binary_dict.get(exe_type) or [])
+        if binary_type and binary_type != exe_type:
+            binary_rules += review_binary_dict.get(binary_type) or []
+        self.review_binary_list = binary_rules or None
 
     def process_review(self, f: str, exe_name: str) -> list[dict[str, Any]]:
         """Processes the review results for the given executable and review."""

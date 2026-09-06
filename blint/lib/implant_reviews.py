@@ -26,6 +26,11 @@ Each rule here is built on one such contradiction:
   (``EMBEDDED_ENCRYPTED_PAYLOAD``).
 * A table of code pointers indexed at runtime, with no dynamic-dispatch reason
   (``CUSTOM_COMMAND_DISPATCH_TABLE``).
+* An ELF whose entry point, note sections or executable mapping contradict the
+  layout a linker produces (``ELF_ENTRY_POINT_OUTSIDE_CODE``,
+  ``ELF_NOTE_SECTION_WITHOUT_SEGMENT``, ``ELF_APPENDED_EXECUTABLE_MAPPING``) -
+  the residue of adding code to a finished binary without touching one
+  original byte.
 
 Every rule states the contradiction it found in its evidence, so a reviewer can
 check the claim rather than trust the label. None of them is a malware verdict on
@@ -35,6 +40,8 @@ its own; several together are.
 import re
 from collections.abc import Iterable
 from typing import Any
+
+from blint.lib.indicators import BUILD_SANDBOX_ENV_INDICATORS
 
 # --------------------------------------------------------------------------
 # Vendor identity
@@ -874,6 +881,86 @@ def _count_pointer_table_stores(assembly: str) -> tuple[int, int]:
     return len(offsets), (max(offsets) - min(offsets) + 8) if offsets else 0
 
 
+# --------------------------------------------------------------------------
+# ELF layout coherence
+# --------------------------------------------------------------------------
+# blint/lib/binary.py computes these observations while parsing; the rules
+# here only decide which of them are worth a reviewer's attention and say why.
+# The evidence is the parser's, unmodified, so a reviewer can check the claim
+# against readelf directly.
+
+_ENTRY_POINT_ANOMALIES: frozenset[str] = frozenset(
+    {
+        "entry_point_outside_any_section",
+        "entry_point_in_non_executable_section",
+        "entry_point_in_unexpected_section",
+    }
+)
+
+
+def _layout_anomalies(metadata: dict, kinds: frozenset[str] | set[str]) -> list[dict]:
+    """Return the parser's layout anomalies whose ``kind`` is in ``kinds``."""
+    return [
+        anomaly
+        for anomaly in metadata.get("layout_anomalies") or []
+        if anomaly.get("kind") in kinds
+    ]
+
+
+def _evaluate_elf_entry_point_outside_code(metadata: dict) -> list[dict]:
+    """Execution starts somewhere the toolchain would not have put it."""
+    return _layout_anomalies(metadata, _ENTRY_POINT_ANOMALIES)
+
+
+def _evaluate_elf_note_section_without_segment(metadata: dict) -> list[dict]:
+    """Mapped note sections in an image that has no PT_NOTE to reach them."""
+    return _layout_anomalies(metadata, {"note_section_without_note_segment"})
+
+
+def _evaluate_elf_appended_executable_mapping(metadata: dict) -> list[dict]:
+    """An executable mapping that runs to the last byte of the file."""
+    return _layout_anomalies(metadata, {"executable_mapping_at_eof"})
+
+
+def _evaluate_elf_build_sandbox_gate(metadata: dict) -> list[dict]:
+    """A build-sandbox environment probe in an image whose layout is incoherent.
+
+    Reading ``NIX_BUILD_TOP`` is entirely ordinary on its own - every build
+    tool on the system does it, and it is the single most common false
+    positive this file could produce. It becomes evidence only in an image
+    that has already contradicted itself structurally, because the pair is
+    the shape of an implant that suppresses itself while a rebuild is being
+    verified. Reported only alongside a layout anomaly for that reason, in
+    the same spirit as CUSTOM_COMMAND_DISPATCH_TABLE.
+    """
+    anomalies = metadata.get("layout_anomalies") or []
+    if not anomalies:
+        return []
+    corroborating = sorted({str(anomaly.get("kind")) for anomaly in anomalies})
+    found = {
+        indicator
+        for value in _iter_strings(metadata)
+        for indicator in BUILD_SANDBOX_ENV_INDICATORS
+        if indicator in value
+    }
+    return [
+        {
+            "variable": indicator,
+            "corroborated_by": corroborating,
+            "detail": (
+                f"The image reads {indicator}, which exists only inside a package build "
+                "sandbox, and its own layout is already incoherent "
+                f"({', '.join(corroborating)}). Deciding whether to act based on whether a "
+                "build is watching is how an implant survives reproducible-build "
+                "verification: it stays inert for the rebuild that would expose it. The "
+                "environment probe alone is ordinary - every build tool makes it - so this "
+                "is reported only because the structural finding came first."
+            ),
+        }
+        for indicator in sorted(found)
+    ]
+
+
 # Rule id to evaluator. Kept as a table so the dispatcher in binary_reviews stays
 # a lookup rather than a chain of comparisons.
 IMPLANT_RULE_EVALUATORS: dict[str, Any] = {
@@ -887,6 +974,10 @@ IMPLANT_RULE_EVALUATORS: dict[str, Any] = {
     "HOST_AUTHENTICATION_DOWNGRADE": _evaluate_host_authentication_downgrade,
     "EMBEDDED_ENCRYPTED_PAYLOAD": _evaluate_embedded_encrypted_payload,
     "CUSTOM_COMMAND_DISPATCH_TABLE": _evaluate_custom_command_dispatch_table,
+    "ELF_ENTRY_POINT_OUTSIDE_CODE": _evaluate_elf_entry_point_outside_code,
+    "ELF_NOTE_SECTION_WITHOUT_SEGMENT": _evaluate_elf_note_section_without_segment,
+    "ELF_APPENDED_EXECUTABLE_MAPPING": _evaluate_elf_appended_executable_mapping,
+    "ELF_BUILD_SANDBOX_EVASION_GATE": _evaluate_elf_build_sandbox_gate,
 }
 
 

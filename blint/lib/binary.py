@@ -385,6 +385,281 @@ def parse_elf_wx_segments(parsed_obj: lief.ELF.Binary) -> list[dict]:
     return wx_segments
 
 
+# --------------------------------------------------------------------------
+# ELF layout coherence
+# --------------------------------------------------------------------------
+# An implant can be added to an ELF without changing a single original byte:
+# append the payload plus a fresh section header table at EOF, retype a spare
+# PT_NOTE program header into an executable PT_LOAD covering those bytes, and
+# point e_entry and e_shoff at them. Nothing is packed, nothing becomes
+# writable-and-executable, and readelf reports a self-consistent file, so
+# neither CHECK_WX_SEGMENTS nor the entropy work sees it. What the result
+# cannot hide is incoherence between the parts: the entry point lands in a
+# section the toolchain would never start execution in, the note section the
+# repurposed header used to cover is orphaned, and an executable mapping ends
+# exactly at end-of-file. The helpers below compute those three observations
+# as evidence; blint/lib/implant_reviews.py turns them into reviews.
+#
+# Reference: "Trusting-Trust Attack against an Entire Linux Distribution
+# through Binary Manipulation" (arXiv 2607.24888), which carries the implant
+# through GNU strip across the NixOS bootstrap.
+
+# SHF_EXECINSTR: the section holds machine instructions.
+SHF_EXECINSTR = 0x4
+
+# Sections a toolchain legitimately places an entry point in. Entry stubs live
+# in .text on every mainstream target; .init and the small startup-specific
+# text sections cover linker scripts, -ffunction-sections builds and the
+# hand-written entry stubs in libc and in freestanding images.
+ENTRY_POINT_SECTIONS: frozenset[str] = frozenset(
+    {
+        ".text",
+        ".text.startup",
+        ".text.unlikely",
+        ".text._start",
+        ".init",
+        ".init.text",
+        ".start",
+        ".startup",
+        ".head.text",
+        ".text.boot",
+        ".plt",
+        ".iplt",
+    }
+)
+
+
+def _elf_section_flags(section) -> int:
+    """Return a section's raw ``sh_flags``, or 0 when lief cannot supply it."""
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        return int(section.flags)
+    return 0
+
+
+def parse_elf_entry_point_section(parsed_obj: lief.ELF.Binary) -> str:
+    """Return the name of the section containing ``e_entry``.
+
+    PE metadata has carried ``entry_point_section`` for some time; this is the
+    ELF counterpart, and the raw material for the entry-point coherence
+    review. An empty string means the entry address falls in no section at
+    all — which is itself the strongest form of the anomaly, so callers must
+    distinguish "no section" from "not computed".
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        entrypoint = int(parsed_obj.header.entrypoint)
+        if not entrypoint:
+            return ""
+        for section in parsed_obj.sections:
+            start = int(section.virtual_address)
+            size = int(section.size)
+            if start and size and start <= entrypoint < start + size:
+                return section.name
+    return ""
+
+
+def parse_elf_segments_summary(parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Summarize every ELF program header, in program-header-table order.
+
+    ELF metadata previously recorded only ``numberof_segments``, which is
+    exactly the field an implant leaves untouched when it retypes a spare
+    header in place. Exporting the table itself makes the change visible to a
+    consumer diffing two builds of the same binary, and gives the layout
+    reviews their evidence.
+    """
+    summary: list[dict] = []
+    segments = getattr(parsed_obj, "segments", None)
+    if not segments or isinstance(segments, lief.lief_errors):
+        return summary
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for index, segment in enumerate(segments):
+            summary.append(
+                {
+                    "index": index,
+                    "type": enum_to_str(segment.type),
+                    "permissions": _rwx_permissions_str(
+                        segment.has(lief.ELF.Segment.FLAGS.R),
+                        segment.has(lief.ELF.Segment.FLAGS.W),
+                        segment.has(lief.ELF.Segment.FLAGS.X),
+                    ),
+                    "file_offset": int(segment.file_offset),
+                    "file_size": int(segment.physical_size),
+                    "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    "virtual_size": int(segment.virtual_size),
+                }
+            )
+    return summary
+
+
+def _elf_notes_without_note_segment(parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Allocated ``.note.*`` sections in a file that has no ``PT_NOTE`` at all.
+
+    The loader reaches notes through ``PT_NOTE``; the section headers are for
+    tools. Retyping the file's only ``PT_NOTE`` header into a ``PT_LOAD``
+    therefore costs the attacker nothing at run time while leaving the note
+    sections themselves in place, mapped, and unreachable as notes. A
+    toolchain does not produce that state: it emits the segment and the
+    sections together.
+
+    The condition is deliberately "no ``PT_NOTE`` whatsoever", not "this
+    section is uncovered". The Go linker legitimately emits a ``PT_NOTE``
+    spanning only ``.note.go.buildid`` and leaves the adjacent
+    ``.note.gnu.build-id`` outside it, so per-section coverage fires on every
+    Go binary. The cost of the narrower rule is that a file with two
+    ``PT_NOTE`` headers, one of them repurposed, is missed — worth paying,
+    since the alternative is a rule nobody can leave enabled.
+
+    Only ``SHF_ALLOC`` note sections count. Non-allocated notes are
+    legitimately outside the load image and were never covered by a segment.
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        if any(
+            segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments
+        ):
+            return []
+        return [
+            {
+                "section": section.name,
+                "file_offset": int(section.offset),
+                "size": int(section.size),
+            }
+            for section in parsed_obj.sections
+            if section.name.startswith(".note") and int(section.virtual_address)
+        ]
+    return []
+
+
+def parse_elf_layout_anomalies(exe_file: str, parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Collect structural contradictions in an ELF's layout.
+
+    Each entry names the contradiction in ``kind`` and carries the addresses
+    and names a reviewer needs to check it by hand. Emptiness is the normal
+    result; nothing here is a verdict on its own.
+    """
+    anomalies: list[dict] = []
+    header = getattr(parsed_obj, "header", None)
+    if header is None:
+        return anomalies
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        entrypoint = int(header.entrypoint)
+        # Relocatable objects and shared libraries without a start symbol
+        # carry no meaningful entry point; there is nothing to be incoherent.
+        if entrypoint and parsed_obj.header.file_type != lief.ELF.Header.FILE_TYPE.REL:
+            anomalies += _elf_entry_point_anomalies(parsed_obj, entrypoint)
+    for orphan in _elf_notes_without_note_segment(parsed_obj):
+        anomalies.append(
+            {
+                "kind": "note_section_without_note_segment",
+                **orphan,
+                "detail": (
+                    f"{orphan['section']} is part of the load image, but the file has no "
+                    "PT_NOTE segment at all. A toolchain emits note sections and the PT_NOTE "
+                    "that covers them together; sections outliving the segment is what "
+                    "retyping that program header into something else leaves behind."
+                ),
+            }
+        )
+    anomalies += _elf_eof_executable_mapping(exe_file, parsed_obj)
+    return anomalies
+
+
+def _elf_entry_point_anomalies(parsed_obj: lief.ELF.Binary, entrypoint: int) -> list[dict]:
+    """Entry-point coherence: where execution starts vs. where code lives."""
+    containing = None
+    for section in parsed_obj.sections:
+        start = int(section.virtual_address)
+        size = int(section.size)
+        if start and size and start <= entrypoint < start + size:
+            containing = section
+            break
+    address = ADDRESS_FMT.format(entrypoint).strip()
+    if containing is None:
+        return [
+            {
+                "kind": "entry_point_outside_any_section",
+                "entrypoint": address,
+                "detail": (
+                    f"Execution starts at {address}, which no section header covers. Every "
+                    "toolchain-produced entry point lies inside a section; an address outside "
+                    "the section table is reachable through the program headers alone, which "
+                    "is how code appended after the fact is mapped."
+                ),
+            }
+        ]
+    name = containing.name
+    if not _elf_section_flags(containing) & SHF_EXECINSTR:
+        return [
+            {
+                "kind": "entry_point_in_non_executable_section",
+                "entrypoint": address,
+                "section": name,
+                "detail": (
+                    f"Execution starts at {address}, inside section {name or '(unnamed)'}, "
+                    "which is not marked SHF_EXECINSTR. The section table says this is not "
+                    "code, and the entry point says it is; one of the two was edited."
+                ),
+            }
+        ]
+    if name not in ENTRY_POINT_SECTIONS:
+        return [
+            {
+                "kind": "entry_point_in_unexpected_section",
+                "entrypoint": address,
+                "section": name,
+                "detail": (
+                    f"Execution starts at {address}, inside executable section {name}, which "
+                    "is not one of the sections a toolchain starts a program in "
+                    f"({', '.join(sorted(ENTRY_POINT_SECTIONS))}). Custom linker scripts do "
+                    "reach this state legitimately, so read the section before concluding — "
+                    "but relocating the entry point into a section of its own is also exactly "
+                    "what an appended implant does."
+                ),
+            }
+        ]
+    return []
+
+
+def _elf_eof_executable_mapping(exe_file: str, parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Executable ``PT_LOAD`` segments whose file range ends at end-of-file.
+
+    A linker lays the executable segment out before the read-only data,
+    symbol table and section-header string table, so an executable mapping is
+    followed by *something*. One that runs to the last byte of the file is the
+    shape of code appended to a finished binary.
+
+    The section header table sitting last is normal and deliberately not
+    considered: the check is about the mapped, executable bytes.
+    """
+    findings: list[dict] = []
+    with contextlib.suppress(AttributeError, TypeError, ValueError, OSError):
+        file_size = os.path.getsize(exe_file)
+        if not file_size:
+            return findings
+        for index, segment in enumerate(parsed_obj.segments):
+            if segment.type != lief.ELF.Segment.TYPE.LOAD:
+                continue
+            if not segment.has(lief.ELF.Segment.FLAGS.X):
+                continue
+            end = int(segment.file_offset) + int(segment.physical_size)
+            if end != file_size:
+                continue
+            findings.append(
+                {
+                    "kind": "executable_mapping_at_eof",
+                    "segment": f"PT_LOAD[{index}]",
+                    "file_offset": int(segment.file_offset),
+                    "file_size": int(segment.physical_size),
+                    "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    "detail": (
+                        f"PT_LOAD[{index}] is executable and its file range ends at byte "
+                        f"{end}, the last byte of the file. A linker places read-only data "
+                        "and the symbol tables after the code, so an executable mapping that "
+                        "reaches end-of-file is code that arrived after the link."
+                    ),
+                }
+            )
+    return findings
+
+
 def parse_pe_wx_sections(parsed_obj: lief.PE.Binary) -> list[dict]:
     """Collects the PE sections the loader maps both writable and executable.
 
@@ -1264,10 +1539,18 @@ def detect_exe_type(parsed_obj: lief.Binary, metadata: dict) -> str:
     with contextlib.suppress(AttributeError, TypeError):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
+        # A statically linked ELF has no interpreter, and `"musl" in None`
+        # raises TypeError — which the suppress() above swallowed, abandoning
+        # the whole function and returning "" before the machine-type fallback
+        # below could run. Every static ELF therefore had no exe_type at all,
+        # and since review rules are selected by exact exe_type match, no
+        # review rule of any group could ever fire on one. Coercing to "" here
+        # is the whole fix.
+        interpreter = metadata.get("interpreter") or ""
         if (
             parsed_obj.has_section(".note.gnu.build-id")
-            or "musl" in metadata.get("interpreter")  # type: ignore[operator]
-            or "ld-linux" in metadata.get("interpreter")  # type: ignore[operator]
+            or "musl" in interpreter
+            or "ld-linux" in interpreter
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -3053,6 +3336,12 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["virtual_size"] = parsed_obj.virtual_size
     metadata["has_nx"] = parsed_obj.has_nx
     metadata["wx_segments"] = parse_elf_wx_segments(parsed_obj)
+    # Layout coherence: the raw program-header table, where execution starts,
+    # and the contradictions between them. Additive, and computed for every
+    # ELF because they cost one pass over headers that are already parsed.
+    metadata["entry_point_section"] = parse_elf_entry_point_section(parsed_obj)
+    metadata["segments_summary"] = parse_elf_segments_summary(parsed_obj)
+    metadata["layout_anomalies"] = parse_elf_layout_anomalies(exe_file, parsed_obj)
     metadata["has_interpreter"] = parsed_obj.has_interpreter
     metadata["has_notes"] = parsed_obj.has_notes
     metadata["has_overlay"] = parsed_obj.has_overlay

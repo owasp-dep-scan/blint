@@ -65,6 +65,8 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
 
 - **Link Closure (`link_closure`, optional):** The result of resolving the dependency graph the way the dynamic loader would. See [`link_closure`](#link_closure) below.
 
+- **Layout Coherence (`entry_point_section`, `segments_summary`, `layout_anomalies`):** Where execution starts, the full program-header table, and the contradictions between them. See [`layout_anomalies`](#layout_anomalies) below.
+
 ### For PE Binaries
 
 PE (Portable Executable) files are the standard for Windows.
@@ -557,6 +559,28 @@ What counts as a mapping follows what each platform loader actually enforces:
 - **Mach-O:** Segments whose `init_protection` includes both write and execute. `max_protection` is ignored: it describes what a segment may later be remapped to, not what it is mapped with, so a permissive maximum alone does not mean writable code ever existed.
 
 The `CHECK_WX_SEGMENTS` security check turns each entry into a finding naming the segment.
+
+### `layout_anomalies`
+
+ELF only. Three related additions record how an ELF is laid out and where that layout contradicts itself:
+
+- `entry_point_section`: the name of the section containing `e_entry`, the ELF counterpart of the field PE metadata has always carried. An empty string means the entry address falls in no section at all — which is the strongest form of the anomaly below, not a missing computation.
+- `segments_summary`: every program header in table order, each with `index`, `type`, normalized `permissions`, `file_offset`, `file_size`, `virtual_address` and `virtual_size`. ELF metadata previously recorded only `numberof_segments`, which is exactly the field that stays constant when a spare program header is retyped in place; exporting the table makes that change visible to anything diffing two builds of the same binary.
+- `layout_anomalies`: a list of structural contradictions, each with a `kind`, the addresses and names needed to check it by hand, and a `detail` sentence. An empty list is the normal result.
+
+The anomaly kinds:
+
+| `kind`                                  | What it means                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `entry_point_outside_any_section`       | `e_entry` is covered by no section header. Toolchain-produced entry points always lie inside a section.                    |
+| `entry_point_in_non_executable_section` | `e_entry` is inside a section not marked `SHF_EXECINSTR`. The section table says this is not code; the header says it is.  |
+| `entry_point_in_unexpected_section`     | `e_entry` is inside an executable section whose name is outside the small set toolchains emit entry stubs into.            |
+| `note_section_without_note_segment`     | The image maps `.note.*` sections but carries no `PT_NOTE` at all, so nothing at run time can reach them.                  |
+| `executable_mapping_at_eof`             | An executable `PT_LOAD`'s file range ends on the last byte of the file, where a linker would have placed data and symbols. |
+
+These exist because an implant can be added to a finished ELF without changing one original byte: append the payload at EOF, retype a spare `PT_NOTE` program header into an executable `PT_LOAD` covering it, and redirect `e_entry` and `e_shoff` (arXiv 2607.24888, which carries exactly this through GNU `strip` across the NixOS bootstrap). Nothing is packed, nothing becomes writable-and-executable, and the result is internally consistent enough that `readelf` reports no problem — so neither `wx_segments` nor `entropy` sees it. What the result cannot hide is the disagreement between its parts.
+
+The `ELF_ENTRY_POINT_OUTSIDE_CODE`, `ELF_NOTE_SECTION_WITHOUT_SEGMENT`, `ELF_APPENDED_EXECUTABLE_MAPPING` and `ELF_BUILD_SANDBOX_EVASION_GATE` reviews turn these into findings. Note that `note_section_without_note_segment` requires the _absence_ of any `PT_NOTE` rather than per-section coverage: the Go linker legitimately emits a `PT_NOTE` spanning only `.note.go.buildid` and leaves the adjacent `.note.gnu.build-id` outside it, so per-section coverage fires on every Go binary.
 
 ### `entropy`
 

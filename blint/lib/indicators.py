@@ -445,3 +445,22 @@ GPU_INDICATORS: list[str] = [
     "warpsync",
     "vote",
 ]
+
+
+# Environment variables that exist only inside a package build sandbox. An
+# implant that must not perturb reproducible-build verification reads one of
+# these to decide whether it is being observed, and stays inert when it is -
+# the gate in the trusting-trust attack of arXiv 2607.24888, whose payload
+# checks NIX_BUILD_TOP before acting.
+#
+# The names are deliberately the sandbox markers only. Build-root *paths* such
+# as /nix/store are omitted: on the systems where this matters they appear in
+# essentially every binary, so they carry no signal and a great deal of noise.
+BUILD_SANDBOX_ENV_INDICATORS: tuple[str, ...] = (
+    "NIX_BUILD_TOP",
+    "NIX_BUILD_CORES",
+    "GUIX_BUILD_OPTIONS",
+    "SOURCE_DATE_EPOCH",
+    "DEB_BUILD_OPTIONS",
+    "RPM_BUILD_ROOT",
+)
