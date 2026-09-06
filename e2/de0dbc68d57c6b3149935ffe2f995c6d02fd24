@@ -1,0 +1,36 @@
+README.md
+  h_6a4cc5cdf68def 188,216,235,252
+blint/cli.py
+  h_6a4cc5cdf68def 8,181-188,277-284,538-542,569
+blint/config.py
+  h_6a4cc5cdf68def 1275-1277
+blint/lib/cache.py
+  h_6a4cc5cdf68def 243-250,496-502
+blint/lib/parallel.py
+  h_6a4cc5cdf68def 1-467
+blint/lib/runners.py
+  h_6a4cc5cdf68def 18,26-31,145-148,150,156-162,167,172,190,209,269,292-296,301-309,336-337,343-347,349,351,356-359,364-483,498,707-763
+blint/lib/sbom.py
+  h_6a4cc5cdf68def 43-49,156,164-186,192-213,519-752
+blint/lib/utils.py
+  h_6a4cc5cdf68def 783-786
+docs/METADATA.md
+  h_6a4cc5cdf68def 590-593
+tests/scripts/determinism_jobs.py
+  h_6a4cc5cdf68def 1-255
+tests/scripts/jobs_bench.py
+  h_6a4cc5cdf68def 1-118
+tests/test_parallel.py
+  h_6a4cc5cdf68def 1-566
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "e2de0dbc68d57c6b3149935ffe2f995c6d02fd24",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
