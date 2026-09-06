@@ -185,7 +185,7 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 <summary><strong>Main Command Help</strong></summary>
 
 ```shell
-usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] [--cache] {sbom,callgraph-match,canonicalize,db,cache} ...
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] [--cache] [--jobs JOBS] {sbom,callgraph-match,canonicalize,db,cache} ...
 
 Binary linter and SBOM generator.
 
@@ -213,6 +213,7 @@ options:
                         Filter exported callgraph edges/external links by confidence. Defaults to low (no filtering).
   --custom-rules-dir CUSTOM_RULES_DIR
                         Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.
+  --jobs JOBS           Analyze up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
   -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
@@ -231,7 +232,7 @@ sub-commands:
 ```shell
 usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
                   [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]] [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
-                  [--wasm-sbom]
+                  [--wasm-sbom] [--jobs JOBS]
 
 options:
   -h, --help            show this help message and exit
@@ -248,6 +249,7 @@ options:
                         Directories containing pre-build and build BOMs. Use to improve the precision.
   --use-blintdb         Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the local database file exists.
   --wasm-sbom           Emit SBOM components from WebAssembly Component Model binaries using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as exact evidence. Core modules without component-model evidence are skipped.
+  --jobs JOBS           Parse up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
 ```
 
 </details>

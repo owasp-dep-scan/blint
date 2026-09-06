@@ -1272,6 +1272,9 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    # P3.2: number of parallel worker processes (--jobs N). 1 (the default)
+    # keeps the sequential loop; the CLI resolves 0/auto to the CPU count.
+    jobs: int = 1
     # P2.2: opt into the content-addressed parse cache (--cache). Off by
     # default: caching writes to the user's disk and trades correctness-on-
     # change for speed, so it is the caller's choice to make, not blint's.

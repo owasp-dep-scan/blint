@@ -240,6 +240,14 @@ class ParseCache:
                 flags |= apsw.SQLITE_OPEN_CREATE
             self._conn = apsw.Connection(os.path.abspath(self.db_path), flags=flags)
             _apply_runtime_pragmas(self._conn, read_only=False)
+            # Several blint processes can hold connections to the same store
+            # at once (--jobs N gives every worker its own connection).
+            # Write-ahead logging keeps a worker's reads from blocking on
+            # another worker's writes; combined with the busy_timeout pragma
+            # above it is what makes concurrent stores safe. The mode is a
+            # persistent property of the database file and content-neutral.
+            with contextlib.suppress(apsw.Error):
+                self._conn.execute("PRAGMA journal_mode = WAL")
             if create:
                 self._create_schema(self._conn)
         except (apsw.Error, OSError) as exc:
@@ -485,6 +493,13 @@ class ParseCache:
             return 0
         freed = os.path.getsize(self.db_path)
         os.remove(self.db_path)
+        # WAL mode keeps -wal/-shm sidecars next to the database; leftover
+        # sidecars without their database would confuse a later open.
+        for suffix in ("-wal", "-shm"):
+            sidecar = self.db_path + suffix
+            if os.path.exists(sidecar):
+                with contextlib.suppress(OSError):
+                    os.remove(sidecar)
         return freed
 
 

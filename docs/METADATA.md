@@ -587,6 +587,10 @@ This file is exported even when the scan produced no findings, so a caller can a
 
 Default-mode runs can cache parse metadata in a content-addressed SQLite store keyed on `(sha256(file bytes), blint version, options digest)`, separate from blintdb (which is a shipped read-only artifact). A warm run replays byte-identical metadata — including the cross-path case, where the stored path is rewritten to the current one exactly where `parse()` embeds it. The cache is **off by default** — `--cache` opts a run into it, since caching writes to the user's disk and is a caller's choice; `blint cache stats` reports entry count and actual size on disk, and `blint cache clear` deletes the store. Entries are zlib-compressed and bounded by `BLINT_CACHE_MAX_BYTES` (default 1 GiB; `0` disables the bound) with least-recently-used eviction; the store lives at `BLINT_CACHE_DIR` (default: the user cache directory, e.g. `~/.cache/blint` on Linux), in `parse-cache.db`.
 
+### Parallel analysis
+
+`--jobs N` analyzes up to N binaries in parallel worker processes (default `1`, which is the unchanged sequential loop; `0` or `auto` means one worker per CPU). Both the default mode and `blint sbom` accept the flag; the unit of work is one binary, and there is no parallelism within a binary. Output is byte-identical to the sequential run for any N: every worker result carries its input position and the parent merges strictly in that order, which also holds for `analysis-coverage.json` and the cache counters. A worker that dies hard (e.g. a segfault inside LIEF) is recorded in `analysis-coverage.json` as a failure with `stage: "worker"` and `exception_type: "WorkerDied"` naming the file it was analyzing; the remaining files are still analyzed. If the pool cannot start at all, the run falls back to the sequential path with an error logged. With `--cache --jobs N`, every worker opens its own SQLite connection to the same store (WAL mode); hit/miss/stored totals match the equivalent sequential run.
+
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
