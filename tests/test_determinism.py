@@ -225,3 +225,60 @@ def test_determinism_corpus_fixture_if_present(tmp_path):
     second = _parsed_metadata(go_stripped)
     _assert_identical_metadata(first, second)
     assert _disassembly_really_ran(first)
+
+
+def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
+    native_binary, tmp_path
+):
+    """SBOM bytes must not depend on ``PYTHONHASHSEED``.
+
+    ``dependsOn`` is accumulated in a ``set`` and was serialized with
+    ``list()``, so its order came straight from set iteration: two runs of
+    the same blint over the same binary on two machines produced different
+    SBOM bytes, and ``--jobs N`` had to reproduce that arbitrary order
+    exactly to look deterministic. Sorting on the way out removes the whole
+    class. The test asserts on a real generated SBOM and refuses to pass
+    vacuously: at least one ``dependsOn`` list must have enough entries for
+    an ordering to exist at all.
+    """
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    shutil.copy(native_binary, scan_dir / "demo-bin")
+    # The compiled demo links almost nothing, so on its own it yields no
+    # dependsOn list long enough for an order to exist. A real system binary
+    # links several libraries and gives the assertion something to bite on.
+    system_binary = shutil.which("ls")
+    if system_binary and not os.path.islink(system_binary):
+        shutil.copy(system_binary, scan_dir / "system-bin")
+    outputs = {}
+    for seed in ("0", "4242"):
+        env = dict(os.environ)
+        env["PYTHONHASHSEED"] = seed
+        env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        out_file = tmp_path / f"sbom-{seed}.cdx.json"
+        subprocess.run(
+            [
+                sys.executable, "-m", "blint.cli", "sbom",
+                "-i", str(scan_dir), "-o", str(out_file), "-q",
+            ],
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        bom = json.loads(out_file.read_text())
+        # serialNumber is a fresh uuid4 and the timestamp is wall clock;
+        # neither is derived from the input.
+        bom.pop("serialNumber", None)
+        bom.get("metadata", {}).pop("timestamp", None)
+        outputs[seed] = bom
+    depends = [
+        d.get("dependsOn") or [] for d in outputs["0"].get("dependencies") or []
+    ]
+    if not any(len(d) > 1 for d in depends):
+        pytest.skip("this binary produced no multi-entry dependsOn list to order")
+    assert outputs["0"] == outputs["4242"], (
+        "SBOM differs across PYTHONHASHSEED values: "
+        f"{_first_diff_path(outputs['0'], outputs['4242'])}"
+    )
+    for entry in depends:
+        assert entry == sorted(entry), "dependsOn must be serialized in sorted order"

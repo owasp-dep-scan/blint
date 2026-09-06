@@ -8,7 +8,6 @@ from rich.progress import Progress, TaskID
 
 from blint.config import BlintOptions
 from blint.cyclonedx.spec import CycloneDX
-from blint.lib.android import analyze_android_app
 from blint.lib.analysis import (
     initialize_rules,
     report,
@@ -16,12 +15,19 @@ from blint.lib.analysis import (
     run_prefuzz,
     run_wasm_findings,
 )
+from blint.lib.android import analyze_android_app
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
 from blint.lib.ios import (
     collect_ios_app_detailed,
     enrich_with_bundle_context,
     is_ios_app,
+)
+from blint.lib.parallel import (
+    PoolStartupError,
+    WorkerSpec,
+    run_pool,
+    take_worker_logs,
 )
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
@@ -136,20 +142,34 @@ class AnalysisRunner:
         # disabled cache is None so the miss path costs nothing. Hit/miss
         # counters are kept per role for the same reason as units_by_role
         # (rule 19): a consumer must be able to decompose the totals.
+        # In parallel mode (--jobs N) the parent owns no connection at all:
+        # every worker opens its own (SQLite connections cannot be shared
+        # across processes), and cache_enabled below is what the coverage
+        # block reports.
         self.parse_cache: ParseCache | None = None
+        self.cache_enabled = False
         self._parse_options_digest: str | None = None
         self.cache_hits = 0
         self.cache_misses = 0
         self.cache_stored = 0
         self.cache_by_role: dict[str, dict[str, int]] = {}
+        # Ordered unit events, one tuple per attempted/succeeded/failed/
+        # skipped/cache outcome in the order it happened. Sequential
+        # processing accumulates state directly; parallel processing ships
+        # this list back from each worker and replays it here in submission
+        # order, which is what makes the merged run byte-identical to the
+        # sequential one.
+        self.events: list[tuple[str, ...]] = []
 
     def _mark_attempted(self, unit_role: str) -> None:
         self.units_attempted += 1
         self.units_attempted_by_role[unit_role] = self.units_attempted_by_role.get(unit_role, 0) + 1
+        self.events.append(("attempted", unit_role))
 
     def _mark_success(self, unit_role: str) -> None:
         self.units_succeeded += 1
         self.units_succeeded_by_role[unit_role] = self.units_succeeded_by_role.get(unit_role, 0) + 1
+        self.events.append(("succeeded", unit_role))
 
     def _record_failure(
         self, file_path: str, unit_role: str, stage: str, error: BaseException
@@ -167,6 +187,7 @@ class AnalysisRunner:
             "message": str(error),
         }
         self.unit_failures.append(record)
+        self.events.append(("failure", record))
         LOG.error(
             f"Analysis of {unit_role} unit {file_path} failed at stage {stage}: "
             f"{type(error).__name__}: {error}"
@@ -185,6 +206,7 @@ class AnalysisRunner:
             "reason": reason,
         }
         self.unit_skips.append(record)
+        self.events.append(("skip", record))
         LOG.warning(f"Skipped {unit_role} unit {file_path}: {reason}")
         return record
 
@@ -244,7 +266,7 @@ class AnalysisRunner:
             },
             "units_by_role": units_by_role,
             "cache": {
-                "enabled": self.parse_cache is not None,
+                "enabled": self.cache_enabled,
                 "hits": self.cache_hits,
                 "misses": self.cache_misses,
                 "stored": self.cache_stored,
@@ -267,10 +289,24 @@ class AnalysisRunner:
         the source files, parses the metadata, checks the security properties,
         performs symbol reviews, and suggests fuzzable targets if specified.
 
+        With ``--jobs N`` (N > 1 and more than one file) the same per-file
+        work runs in a process pool and results are merged strictly in
+        submission order, so the exported output is byte-identical to this
+        sequential loop. ``--jobs 1`` is this loop, unchanged.
+
         Returns:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
         initialize_rules(blint_options)
+        jobs = max(1, int(getattr(blint_options, "jobs", 1) or 1))
+        if jobs > 1 and len(exe_files) > 1:
+            try:
+                return self._start_parallel(blint_options, exe_files, jobs)
+            except PoolStartupError as exc:
+                # Parallelism is a performance feature and must never be the
+                # reason a scan fails; the sequential path below records real
+                # per-file failures through the normal isolation machinery.
+                LOG.error(f"Parallel analysis unavailable ({exc}); falling back to sequential")
         self._setup_parse_cache(blint_options)
         try:
             with self.progress:
@@ -297,25 +333,156 @@ class AnalysisRunner:
                 self.parse_cache.close()
         return self.findings, self.reviews, self.fuzzables, self.callgraphs
 
-    def _setup_parse_cache(self, blint_options: BlintOptions) -> None:
-        """Create the run's parse cache when --cache was given.
+    def _setup_parse_cache(self, blint_options: BlintOptions, for_workers: bool = False) -> bool:
+        """Prepare the run's parse cache when --cache was given.
 
         A cache key that cannot be derived (a new parse() option with no
         BlintOptions counterpart) disables caching for the run with a loud
         error instead of failing the scan: wrong-or-missing caching must
         never make blint unusable.
+
+        With ``for_workers`` the parent only validates the key: SQLite
+        connections cannot be shared across processes, so every pool worker
+        opens its own connection in its setup hook and the parent never
+        touches the cache. Returns whether caching is enabled for the run.
         """
+        self.cache_enabled = False
         if not blint_options.use_cache:
-            return
+            return False
         try:
             self._parse_options_digest = compute_options_digest(blint_options)
         except CacheKeyError as exc:
             LOG.error(f"Parse cache disabled for this run: {exc}")
-            return
+            return False
+        self.cache_enabled = True
+        if for_workers:
+            return True
         self.parse_cache = ParseCache()
         LOG.debug(
             "Parse cache enabled at %s", self.parse_cache.db_path
         )
+        return True
+
+    def _worker_spec(self, blint_options: BlintOptions, cache_enabled: bool) -> WorkerSpec:
+        """The per-worker configuration for default-mode pool workers.
+
+        The payload is ``BlintOptions`` plus the cache settings; it holds
+        only primitives and lists, which is what makes it picklable to
+        spawn-started workers.
+        """
+        return WorkerSpec(
+            analyze=analyze_unit_default,
+            setup=_worker_setup_default,
+            teardown=_worker_teardown_default,
+            payload={
+                "blint_options": blint_options,
+                "cache_enabled": cache_enabled,
+                "options_digest": self._parse_options_digest,
+            },
+            unit_role="top-level",
+            record_errors=True,
+        )
+
+    def _start_parallel(
+        self, blint_options: BlintOptions, exe_files: list[str], jobs: int
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+    ]:
+        """Run one pool task per binary; merge results by submission index.
+
+        The unit of work is the binary (no parallelism within a binary).
+        Workers complete out of order; every envelope carries its submission
+        index and the merge below iterates ``range(len(exe_files))``, which
+        is what keeps findings/reviews/fuzzables/callgraphs and the
+        run-level coverage block byte-identical to the sequential run for
+        any N. A worker that dies hard (SIGKILL, segfault in LIEF, OOM) has
+        its in-flight unit recorded here as a ``WorkerDied`` failure and
+        every other file still gets analyzed.
+        """
+        cache_enabled = self._setup_parse_cache(blint_options, for_workers=True)
+        spec = self._worker_spec(blint_options, cache_enabled)
+        units = [(idx, f) for idx, f in enumerate(exe_files)]
+        envelopes: dict[int, dict[str, Any]] = {}
+        hard_failures: dict[int, str] = {}
+        try:
+            with self.progress:
+                self.task = self.progress.add_task(
+                    f"[green] BLinting {len(exe_files)} binaries ({jobs} workers)",
+                    total=len(exe_files),
+                    start=True,
+                )
+                envelopes, hard_failures = run_pool(
+                    units,
+                    min(jobs, len(units)),
+                    spec,
+                    on_done=self._advance_progress,
+                )
+                # Merge in submission order, never completion order.
+                for idx in range(len(exe_files)):
+                    if idx in envelopes:
+                        self._merge_unit_envelope(envelopes[idx])
+                    else:
+                        self._merge_hard_failure(exe_files[idx], hard_failures[idx])
+        finally:
+            self.task = None
+        return self.findings, self.reviews, self.fuzzables, self.callgraphs
+
+    def _advance_progress(self, _idx: int) -> None:
+        """Advance the run progress bar as worker results arrive."""
+        if self.task is not None:
+            self.progress.advance(self.task)
+
+    def _merge_unit_envelope(self, envelope: dict[str, Any]) -> None:
+        """Apply one worker's result to the run accumulators.
+
+        Buffered worker log records are replayed first, then the envelope's
+        ordered events, so the merged run's logs and coverage records appear
+        in the same order the sequential run produced them.
+        """
+        for level, message in envelope.get("logs") or []:
+            LOG.log(level, message)
+        self.findings += envelope.get("findings") or []
+        self.reviews += envelope.get("reviews") or []
+        self.fuzzables += envelope.get("fuzzables") or []
+        self.callgraphs += envelope.get("callgraphs") or []
+        for event in envelope.get("events") or []:
+            kind = event[0]
+            if kind == "attempted":
+                self._mark_attempted(event[1])
+            elif kind == "succeeded":
+                self._mark_success(event[1])
+            elif kind == "failure":
+                self.unit_failures.append(event[1])
+                self.events.append(event)
+            elif kind == "skip":
+                self.unit_skips.append(event[1])
+                self.events.append(event)
+            elif kind == "cache":
+                self._mark_cache(event[1], event[2])
+            else:
+                raise ValueError(f"unknown unit event kind {kind!r}")
+
+    def _merge_hard_failure(self, file_path: str, reason: str) -> None:
+        """Record a unit whose worker died hard (SIGKILL, segfault, OOM).
+
+        Mirrors ``_record_failure`` but with a stage that names what actually
+        happened: there is no exception to wrap, only an exit code.
+        """
+        record = {
+            "file_path": file_path,
+            "unit_role": "top-level",
+            "stage": "worker",
+            "exception_type": "WorkerDied",
+            "message": reason,
+        }
+        self._mark_attempted("top-level")
+        self.unit_failures.append(record)
+        self.events.append(("failure", record))
+        LOG.error(
+            f"Analysis of top-level unit {file_path} failed at stage worker: "
+            f"WorkerDied: {reason}"
+        )
+        self._advance_progress(0)
 
     def _mark_cache(self, outcome: str, unit_role: str) -> None:
         """Record one cache hit/miss/stored event, total and per role."""
@@ -330,6 +497,7 @@ class AnalysisRunner:
             unit_role, {"hits": 0, "misses": 0, "stored": 0}
         )
         role_counts[key] += 1
+        self.events.append(("cache", outcome, unit_role))
 
     def _parse_with_cache(
         self, file_path: str, blint_options: BlintOptions, unit_role: str
@@ -538,3 +706,60 @@ class AnalysisRunner:
         if self.reviewer.results:
             review = self.reviewer.process_review(f, exe_name)
             self.reviews += review
+
+
+def _worker_setup_default(payload: dict[str, Any]) -> dict[str, Any]:
+    """Initialize one default-mode pool worker.
+
+    Runs once per worker, before any unit. Under the spawn start method
+    (macOS, Windows) the worker re-imported every module, so the module-
+    global rule state is empty here and must be built; ``initialize_rules``
+    clears and refills it, and is idempotent, so under fork (Linux), where
+    the initialized globals were simply inherited, re-running it is a no-op
+    in effect. The worker also opens its own parse-cache connection: SQLite
+    connections cannot be shared across processes.
+    """
+    blint_options: BlintOptions = payload["blint_options"]
+    initialize_rules(blint_options)
+    cache = ParseCache() if payload["cache_enabled"] else None
+    return {
+        "blint_options": blint_options,
+        "cache": cache,
+        "options_digest": payload["options_digest"],
+    }
+
+
+def _worker_teardown_default(state: dict[str, Any]) -> None:
+    """Close the worker's parse-cache connection on every exit path."""
+    cache: ParseCache | None = state.get("cache")
+    if cache is not None:
+        cache.close()
+
+
+def analyze_unit_default(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Analyze one top-level file inside a pool worker.
+
+    This is the parallel twin of the sequential ``start()`` loop body: mark
+    the unit attempted, run ``_process_files``, and turn any exception into
+    a recorded failure exactly as the sequential path does. Everything the
+    unit produces — findings, reviews, fuzzables, callgraphs, coverage
+    events, buffered log records — travels back in one picklable envelope
+    that the parent merges at the unit's submission index.
+    """
+    runner = AnalysisRunner()
+    runner.task = runner.progress.add_task("unit", total=1, start=False)
+    runner.parse_cache = state.get("cache")
+    runner._parse_options_digest = state.get("options_digest")
+    runner._mark_attempted("top-level")
+    try:
+        runner._process_files(file_path, state["blint_options"])
+    except Exception as e:  # noqa: BLE001
+        runner._record_failure(file_path, "top-level", "process", e)
+    return {
+        "findings": runner.findings,
+        "reviews": runner.reviews,
+        "fuzzables": runner.fuzzables,
+        "callgraphs": runner.callgraphs,
+        "events": runner.events,
+        "logs": take_worker_logs(),
+    }

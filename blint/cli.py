@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
+from blint.lib.parallel import resolve_jobs
 from blint.lib.runners import run_default_mode, run_sbom_mode
 from blint.config import BlintOptions, BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC
 from blint.lib.utils import blintdb_setup
@@ -178,6 +179,14 @@ def build_parser() -> argparse.ArgumentParser:
         "version and options. Off by default; see `blint cache stats`.",
     )
     parser.add_argument(
+        "--jobs",
+        dest="jobs",
+        default="1",
+        help="Analyze up to N binaries in parallel worker processes. Accepts "
+        "a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
+        "(sequential, unchanged behavior).",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -264,6 +273,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit SBOM components from WebAssembly Component Model binaries "
         "using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as "
         "exact evidence. Core modules without component-model evidence are skipped.",
+    )
+    sbom_parser.add_argument(
+        "--jobs",
+        dest="jobs",
+        default="1",
+        help="Parse up to N binaries in parallel worker processes. Accepts a "
+        "positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
+        "(sequential, unchanged behavior).",
     )
     callgraph_match_parser = subparsers.add_parser(
         "callgraph-match",
@@ -518,6 +535,11 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         print(BLINT_LOGO)
     if not args.src_dir_image:
         args.src_dir_image = [os.getcwd()]
+    try:
+        jobs = resolve_jobs(getattr(args, "jobs", 1))
+    except ValueError as exc:
+        LOG.error(str(exc))
+        raise SystemExit(2) from exc
     blint_options = BlintOptions(
         deep_mode=args.deep_mode,
         exports_prefix=args.exports_prefix,
@@ -544,6 +566,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         callgraph_min_confidence=args.callgraph_min_confidence,
         custom_rules_dir=args.custom_rules_dir,
         use_cache=args.use_cache,
+        jobs=jobs,
     )
     return blint_options
 
