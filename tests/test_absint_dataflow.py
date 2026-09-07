@@ -427,3 +427,18 @@ class TestDecodeGroundTruth:
             assert blocks, "expected a CFG for the disassembled function"
             total = sum(block["instructions"] for block in blocks)
             assert total == len(lines), "CFG blocks must tile the assembly text"
+
+
+def test_loop_only_function_is_not_reported_as_a_cap_hit():
+    """A function with no successor-free block converged; it did not hit the cap.
+
+    Every reachable block here has a successor (the loop closes back on the
+    entry) and the trailing block is unreachable, so there is no exit block
+    to read the result from. That is a function nothing was learned about,
+    which the caller must not confuse with a non-converged one.
+    """
+    lines = ["mov eax, 1", "jmp 4096", "nop", "jmp 4096", "ret"]
+    cfg = _cfg([2, 2, 1], [(0, 1, "fallthrough"), (1, 0, "jump")])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert entries == []

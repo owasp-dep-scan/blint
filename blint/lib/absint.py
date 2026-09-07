@@ -870,14 +870,18 @@ def interpret(lines: list[str], model: ArchModel) -> FrameState:
     return state
 
 
-def _block_line_spans(blocks: list[dict]) -> list[tuple[int, int]] | None:
+def _block_line_spans(blocks: list[dict], lines: list[str]) -> list[tuple[int, int]] | None:
     """Map each CFG block to its [start, end) slice of the assembly lines.
 
-    Returns None unless the blocks tile the text exactly: cumulative
-    instruction counts must add up to the line count with no holes or
-    overlaps. A mismatch means the CFG and the listing describe different
-    functions, and falling back silently would hide exactly that bug.
+    Returns None unless the blocks tile the text exactly: every block must
+    carry a positive instruction count, the counts must add up to the line
+    count, and no line may be blank (a blank line shifts every following
+    block's correspondence). A mismatch means the CFG and the listing
+    describe different functions, and analyzing one against the other would
+    attribute instructions to blocks they do not belong to.
     """
+    if not blocks:
+        return None
     spans: list[tuple[int, int]] = []
     cursor = 0
     for block in blocks:
@@ -886,6 +890,8 @@ def _block_line_spans(blocks: list[dict]) -> list[tuple[int, int]] | None:
             return None
         spans.append((cursor, cursor + count))
         cursor += count
+    if cursor != len(lines) or any(not line.strip() for line in lines):
+        return None
     return spans
 
 
@@ -911,16 +917,20 @@ def interpret_over_cfg(
     The state returned is the join over the reachable exit blocks'
     out-states: the frame picture every path out of the function agrees on.
     """
-    spans = _block_line_spans(blocks)
+    spans = _block_line_spans(blocks, lines)
     if spans is None:
         raise ValueError("CFG blocks do not tile the assembly text")
     block_count = len(blocks)
     successors: list[list[int]] = [[] for _ in range(block_count)]
     for edge in edges:
         src, dst = edge.get("src"), edge.get("dst")
+        # Both endpoints are range-checked: an out-of-range src would index
+        # another block's successor list (or raise), silently rewiring the
+        # graph this pass reasons over.
         if (
             isinstance(src, int)
             and isinstance(dst, int)
+            and 0 <= src < block_count
             and 0 <= dst < block_count
             and dst not in successors[src]
         ):
@@ -974,17 +984,16 @@ def interpret_over_cfg(
                 if successor not in worklist:
                     worklist.append(successor)
 
-    # Exits: blocks with no successors (ret/trap/unresolved jumps), plus the
-    # final block in address order when every block has a successor (a loop
-    # back to the top leaves the function only through calls or traps).
+    # Exits: blocks with no successors (ret/trap/unresolved jumps). When
+    # every block has one - a loop back to the top that leaves the function
+    # only through a call or a trap - the join runs over every visited
+    # block instead, which keeps only what holds everywhere in the function.
     exits = [i for i in range(block_count) if out_states[i] is not None and not successors[i]]
     if not exits:
-        exits = [block_count - 1]
+        exits = [i for i in range(block_count) if out_states[i] is not None]
     result: FrameState | None = None
     for index in exits:
         exit_state = out_states[index]
-        if exit_state is None:
-            continue
         if result is None:
             result = FrameState(model)
             result.registers = dict(exit_state.registers)
@@ -992,7 +1001,10 @@ def interpret_over_cfg(
             result.sp_adjustment = exit_state.sp_adjustment
         else:
             result.joined_with(exit_state)
-    return result
+    # Reaching here means the pass converged, so an absent result is a
+    # function nothing was learned about, not a cap hit. Those are two
+    # different outcomes to the caller, so this returns an empty state.
+    return result if result is not None else FrameState(model)
 
 
 def model_for_target(arch_target: str) -> ArchModel:
@@ -1032,7 +1044,7 @@ def recover_function_stack_strings_with_method(
 
     Returns ``(entries, method)`` where method names how the function was
     analyzed: ``"dataflow"`` (CFG fixed point), ``"fallback"`` (no usable
-    CFG — straight-line pass), ``"cap_hit"`` (iteration cap reached; no
+    CFG, or one past the instruction budget — straight-line pass), ``"cap_hit"`` (iteration cap reached; no
     entries, because a half-converged state is exactly the residue this
     pass exists to remove) or ``"skipped"`` (nothing to analyze).
     """
@@ -1044,27 +1056,17 @@ def recover_function_stack_strings_with_method(
     cfg = func_data.get("cfg") or {}
     blocks = cfg.get("blocks") or []
     edges = cfg.get("edges") or []
-    spans = _block_line_spans(blocks) if blocks else None
-    blank_lines = any(not line.strip() for line in lines)
     # The dataflow maps block instruction counts onto line positions, so it
-    # needs the CFG to tile the text exactly and no blank lines shifting the
-    # correspondence. A mismatch means the CFG and the listing describe
-    # different functions; falling back silently would hide exactly that bug.
-    tiles = spans is not None and spans[-1][1] == len(lines) and not blank_lines
+    # needs the CFG to tile the text exactly. A mismatch means the CFG and
+    # the listing describe different functions; falling back silently would
+    # hide exactly that bug, so it warns.
+    tiles = _block_line_spans(blocks, lines) is not None
     if tiles and len(lines) <= MAX_INSTRUCTIONS:
-        try:
-            state = interpret_over_cfg(lines, model, blocks, edges)
-        except ValueError:
-            LOG.warning(
-                "stack strings: CFG blocks do not tile the assembly text for %s;"
-                " falling back to the straight-line pass",
-                func_data.get("name") or func_data.get("address") or "<unnamed>",
-            )
-            return _recover_straight_line(lines, model), "fallback"
+        state = interpret_over_cfg(lines, model, blocks, edges)
         if state is None:
             return [], "cap_hit"
         return _decode_runs(iter_frame_runs(state)), "dataflow"
-    if blocks and spans is not None and (spans[-1][1] != len(lines) or blank_lines):
+    if blocks and not tiles:
         LOG.warning(
             "stack strings: CFG blocks do not tile the %d-line assembly text for %s;"
             " falling back to the straight-line pass",
