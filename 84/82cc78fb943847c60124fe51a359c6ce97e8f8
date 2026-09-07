@@ -1,0 +1,21 @@
+blint/lib/absint.py
+  s_526190b23001e8::t_5b2f388b4f9523 873,876-881,883-884,893-894,920,927-929,933,987-990,993,1004-1007,1047,1060-1063,1065,1069
+tests/test_absint_dataflow.py
+  s_526190b23001e8::t_5b2f388b4f9523 430-444
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8482cc78fb943847c60124fe51a359c6ce97e8f8",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
