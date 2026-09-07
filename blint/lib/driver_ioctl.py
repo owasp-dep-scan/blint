@@ -8,13 +8,20 @@ functions 0x851/0x852 were reachable but absent from the advisory).
 
 This module is deliberately heuristic. It reads the disassembly metadata blint
 already produces, so it cannot prove reachability the way runtime probing can.
-Control codes are recovered from compare immediates, so a driver that computes
-its codes at runtime will be missed.
+Dispatch-side control codes are recovered from compare immediates and
+jump-table lowerings, so a driver that computes its codes at runtime will be
+missed. Client-side codes are recovered from the abstract interpreter's
+call-site argument dataflow (see extract_client_ioctl_codes): a code is
+reported only where the dataflow holds it in the ABI's control-code argument
+register at a call site the disassembler resolved to DeviceIoControl or
+NtDeviceIoControlFile/ZwDeviceIoControlFile.
 """
 
 import re
 import struct
 from collections.abc import Iterable, Iterator
+
+from blint.lib.absint import recover_call_site_arguments_with_method
 
 # DRIVER_OBJECT.MajorFunction lives at offset 0x70 on x64 and each slot is a
 # pointer, so the device-control dispatch slots are at fixed offsets. The
@@ -77,10 +84,23 @@ VENDOR_FUNCTION_CODE_FLOOR = 0x800
 
 # A driver's dispatch routine compares the control code, so `switch
 # (IoControlCode)` lowers to cmp/sub/add chains. A user-mode client instead
-# passes the code as the second argument to DeviceIoControl, which materialises
-# as `mov edx, <code>`.
+# passes the code as an argument at a DeviceIoControl call site; that recovery
+# lives in extract_client_ioctl_codes and runs on the abstract interpreter's
+# call-site argument dataflow, not on a mnemonic regex.
 DISPATCH_MNEMONIC_RE = re.compile(r"^\s*(?:cmp|sub|add|xor)\b")
-CLIENT_MNEMONIC_RE = re.compile(r"^\s*mov\b")
+
+# The control code travels in a fixed ABI position at these call sites: the
+# second integer argument of DeviceIoControl(hDevice, dwIoControlCode, ...)
+# and the sixth of NtDeviceIoControlFile/ZwDeviceIoControlFile(FileHandle,
+# Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, ...). Under the
+# Microsoft x64 ABI only the first four integer arguments live in registers,
+# so an Nt/Zw code is stack-passed there and the position lookup finds no
+# register to read — nothing is reported for such sites rather than a guess.
+DEVICE_IOCTL_CALLEE_CODE_POSITIONS: dict[str, int] = {
+    "deviceiocontrol": 1,
+    "ntdeviceiocontrolfile": 5,
+    "zwdeviceiocontrolfile": 5,
+}
 
 # What the branch after a compare says about the immediate. `cmp code, X` /
 # `je handler` tests for one control code. `cmp code, X` / `ja higher_half` is a
@@ -566,22 +586,72 @@ def extract_ioctl_codes_detailed(func_data: dict) -> list[tuple[int, bool]]:
     return _extract_codes_detailed(func_data, DISPATCH_MNEMONIC_RE)
 
 
-def extract_client_ioctl_codes(func_data: dict) -> list[int]:
-    """Recover control codes a user-mode client passes to DeviceIoControl."""
-    return _extract_codes(func_data, CLIENT_MNEMONIC_RE)
+def _normalized_callee(name: str) -> str:
+    """Normalize a resolved callee name for the control-code position lookup.
+
+    PE import names are qualified (`KERNEL32.dll::DeviceIoControl`) and C
+    exports may carry a leading underscore.
+    """
+    return str(name or "").strip().lower().rsplit("::", 1)[-1].lstrip("_")
 
 
-def collect_client_ioctls(disassembled_functions: dict) -> list[dict]:
+def extract_client_ioctl_codes(
+    func_data: dict, arch_target: str = "", binary_format: str = "PE"
+) -> list[int]:
+    """Recover the control codes a function passes at DeviceIoControl call sites.
+
+    The codes come from the abstract interpreter's call-site argument
+    recovery (``blint.lib.absint``): a code is reported only when the CFG
+    dataflow holds it in the ABI's control-code argument register at an
+    instruction the disassembler resolved to DeviceIoControl or
+    NtDeviceIoControlFile/ZwDeviceIoControlFile. An unresolved call site
+    contributes nothing, and so does a code the model cannot confirm — a
+    value loaded on only some paths to the call is dropped by the join
+    rather than reported.
+
+    ``arch_target`` is the LLVM triple the function was disassembled for and
+    ``binary_format`` selects the calling convention (PE means Microsoft x64
+    on x86-64); every combination the argument registers cannot be
+    determined for yields no codes. Functions without a usable CFG, past the
+    instruction budget, or whose dataflow hit the iteration cap yield no
+    codes either: there is deliberately no straight-line fallback, which
+    would resurface exactly the scraped-not-passed values this recovery
+    replaced.
+
+    Returns one entry per distinct plausible control code, in call-site
+    order.
+    """
+    records, _ = recover_call_site_arguments_with_method(func_data, arch_target, binary_format)
+    codes: list[int] = []
+    seen: set[int] = set()
+    for record in records:
+        position = DEVICE_IOCTL_CALLEE_CODE_POSITIONS.get(_normalized_callee(record["callee"]))
+        if position is None or position >= len(record["arguments"]):
+            continue
+        code = record["arguments"][position]
+        if code is None or code in seen or not is_plausible_ioctl(code):
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
+
+
+def collect_client_ioctls(
+    disassembled_functions: dict, arch_target: str = "", binary_format: str = "PE"
+) -> list[dict]:
     """Collect vendor-range control codes issued by a user-mode client.
 
-    Returns one entry per distinct code, with the function that references it.
+    Returns one entry per distinct code, with the function that issues it at
+    a resolved DeviceIoControl call site. ``arch_target`` and
+    ``binary_format`` select the architecture model and calling convention;
+    see extract_client_ioctl_codes.
     """
     if not disassembled_functions:
         return []
     results: list[dict] = []
     seen: set[int] = set()
     for func_key, func_data in disassembled_functions.items():
-        for code in extract_client_ioctl_codes(func_data):
+        for code in extract_client_ioctl_codes(func_data, arch_target, binary_format):
             if code in seen:
                 continue
             seen.add(code)

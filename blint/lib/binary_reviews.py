@@ -248,7 +248,11 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
             return []
         if not (import_names & DEVICE_OPEN_IMPORTS and import_names & DEVICE_IOCTL_IMPORTS):
             return []
-        client_codes = collect_client_ioctls(metadata.get("disassembled_functions") or {})
+        client_codes = collect_client_ioctls(
+            metadata.get("disassembled_functions") or {},
+            arch_target=str(metadata.get("llvm_target_tuple") or ""),
+            binary_format=str(metadata.get("binary_type") or "PE"),
+        )
         if not client_codes:
             return []
         # The `\\.\` paths name the driver being driven, which is what decides

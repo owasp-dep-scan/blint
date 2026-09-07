@@ -47,6 +47,16 @@ caller-saved registers exactly as the ABI demands; callee-saved registers
 and the frame registers survive. Any instruction writing a register the
 model does not understand invalidates it, and stores through unknown
 registers are ignored.
+
+The same converged dataflow also powers call-site constant-argument
+recovery (``recover_call_site_arguments``): a second, replay pass over the
+fixed point snapshots the integer argument registers just before every
+call instruction, so an argument assembled on one arm of a conditional —
+or after the call, or in a register no argument position reads — is never
+reported as reaching the call. Which registers hold arguments is a
+property of the binary's ABI (format plus architecture), resolved by
+``argument_registers``; there is no straight-line fallback for this
+recovery, because a fallback would resurface exactly those leaked values.
 """
 
 from __future__ import annotations
@@ -326,6 +336,18 @@ class ArchModel:
     def step(self, state: FrameState, text: str) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def call_kind(self, mnemonic: str) -> str | None:  # pragma: no cover - interface
+        """Classify a mnemonic as a call ('call'), a tail transfer ('tail') or None.
+
+        'call' means the mnemonic always transfers control to a callee (x86
+        ``call``, ARM64 ``bl``/``blr``); 'tail' means the mnemonic is an
+        ordinary branch that only becomes a call when its resolved target
+        leaves the function, which the disassembler annotates only for the
+        function's final instruction. Callers must not treat a 'tail' line
+        as a call site without that annotation.
+        """
+        raise NotImplementedError
+
     def clobber_call_registers(self, state: FrameState) -> None:
         for name in self.call_clobbered:
             state.invalidate(name)
@@ -402,6 +424,14 @@ class X86_64Model(ArchModel):
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _X86_REGISTER_INFO.get(name.strip().lower())
+
+    def call_kind(self, mnemonic: str) -> str | None:
+        lowered = mnemonic.strip().lower()
+        if lowered.startswith("call"):
+            return "call"
+        if lowered in ("jmp", "jmpq"):
+            return "tail"
+        return None
 
     def write_operand(self, state: FrameState, name: str, value) -> None:
         info = self.register(name)
@@ -633,6 +663,14 @@ class Arm64Model(ArchModel):
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _arm64_register_family(name)
+
+    def call_kind(self, mnemonic: str) -> str | None:
+        lowered = mnemonic.strip().lower()
+        if lowered in ("bl", "blr", "blraa", "blrab"):
+            return "call"
+        if lowered in ("b", "br"):
+            return "tail"
+        return None
 
     def is_zero_register(self, family: str) -> bool:
         return family == "xzr"
@@ -895,27 +933,17 @@ def _block_line_spans(blocks: list[dict], lines: list[str]) -> list[tuple[int, i
     return spans
 
 
-def interpret_over_cfg(
-    lines: list[str],
-    model: ArchModel,
-    blocks: list[dict],
-    edges: list[dict],
-) -> FrameState | None:
-    """Iterate the function's blocks to a fixed point; None when the cap is hit.
+def _cfg_spans_and_graph(
+    lines: list[str], blocks: list[dict], edges: list[dict]
+) -> tuple[list[tuple[int, int]], list[list[int]], list[list[int]]]:
+    """Return (block→line spans, successors, predecessors) for one function.
 
-    The worklist starts at block 0 and follows the CFG's edges, so
-    unreachable blocks never contribute values. A block's in-state is the
-    join of its visited predecessors' out-states (a copy of the first, then
-    narrowed by the rest — the join's identity is the unconstrained state,
-    not the empty one); when out-states stop changing the pass has reached
-    its fixed point. Blocks are limited to ``MAX_BLOCK_VISITS`` visits —
-    loop-carried values meet at conflicts and go unknown long before that,
-    so the cap only fires on pathological inputs, and returning None
-    (rather than a half-converged state) keeps such a function's residue
-    out of the output.
-
-    The state returned is the join over the reachable exit blocks'
-    out-states: the frame picture every path out of the function agrees on.
+    Raises ValueError unless the blocks tile the text exactly: a mismatch
+    means the CFG and the listing describe different functions, and analyzing
+    one against the other would attribute instructions to blocks they do not
+    belong to. Every edge endpoint is range-checked: an out-of-range ``src``
+    would index another block's successor list (or raise), silently rewiring
+    the graph the pass reasons over.
     """
     spans = _block_line_spans(blocks, lines)
     if spans is None:
@@ -924,9 +952,6 @@ def interpret_over_cfg(
     successors: list[list[int]] = [[] for _ in range(block_count)]
     for edge in edges:
         src, dst = edge.get("src"), edge.get("dst")
-        # Both endpoints are range-checked: an out-of-range src would index
-        # another block's successor list (or raise), silently rewiring the
-        # graph this pass reasons over.
         if (
             isinstance(src, int)
             and isinstance(dst, int)
@@ -941,7 +966,66 @@ def interpret_over_cfg(
     for src, dsts in enumerate(successors):
         for dst in dsts:
             predecessors[dst].append(src)
+    return spans, successors, predecessors
 
+
+def _block_in_state(
+    model: ArchModel,
+    block_index: int,
+    predecessors: list[list[int]],
+    out_states: list[FrameState | None],
+) -> FrameState | None:
+    """Join the visited predecessors' out-states into one block's in-state.
+
+    Returns the function entry state (a fresh, unconstrained state) only for
+    block 0 with no visited predecessor; any other block whose predecessors
+    have not produced an out-state yet returns None and is retried later by
+    the worklist.
+    """
+    state: FrameState | None = None
+    for pred in predecessors[block_index]:
+        pred_out = out_states[pred]
+        if pred_out is None:
+            continue
+        if state is None:
+            state = FrameState(model)
+            state.registers = dict(pred_out.registers)
+            state.slots = dict(pred_out.slots)
+            state.sp_adjustment = pred_out.sp_adjustment
+        else:
+            state.joined_with(pred_out)
+    if state is None and block_index == 0:
+        state = FrameState(model)
+    return state
+
+
+def _converge_over_cfg(
+    lines: list[str],
+    model: ArchModel,
+    blocks: list[dict],
+    edges: list[dict],
+) -> tuple[
+    list[tuple[int, int]], list[list[int]], list[list[int]], list[FrameState | None]
+] | None:
+    """Iterate the function's blocks to a fixed point over the CFG.
+
+    The worklist starts at block 0 and follows the CFG's edges, so
+    unreachable blocks never contribute values. A block's in-state is the
+    join of its visited predecessors' out-states (the join's identity is the
+    unconstrained state, not the empty one); when out-states stop changing
+    the pass has reached its fixed point. Blocks are limited to
+    ``MAX_BLOCK_VISITS`` visits — loop-carried values meet at conflicts and
+    go unknown long before that, so the cap only fires on pathological
+    inputs, and returning None (rather than a half-converged state) keeps
+    such a function's residue out of every result built on this pass.
+
+    Returns the block→line spans, the successor and predecessor lists and
+    the final out-state per block (None for blocks never reached), or None
+    when the iteration cap was hit. Raises ValueError when the blocks do not
+    tile the assembly text.
+    """
+    spans, successors, predecessors = _cfg_spans_and_graph(lines, blocks, edges)
+    block_count = len(blocks)
     out_states: list[FrameState | None] = [None] * block_count
     visits = [0] * block_count
     worklist = [0]
@@ -950,25 +1034,12 @@ def interpret_over_cfg(
         visits[index] += 1
         if visits[index] > MAX_BLOCK_VISITS:
             return None
-        state = None
-        for pred in predecessors[index]:
-            pred_out = out_states[pred]
-            if pred_out is None:
-                continue
-            if state is None:
-                state = FrameState(model)
-                state.registers = dict(pred_out.registers)
-                state.slots = dict(pred_out.slots)
-                state.sp_adjustment = pred_out.sp_adjustment
-            else:
-                state.joined_with(pred_out)
+        state = _block_in_state(model, index, predecessors, out_states)
         if state is None:
-            # Block 0 with no visited predecessor: the function entry state.
-            # Any other block queued here is retried when a predecessor lands.
-            if index != 0:
-                visits[index] -= 1
-                continue
-            state = FrameState(model)
+            # A non-entry block queued before any predecessor ran: retried
+            # when one lands.
+            visits[index] -= 1
+            continue
         start, end = spans[index]
         for line in lines[start:end]:
             model.step(state, line.strip())
@@ -983,14 +1054,31 @@ def interpret_over_cfg(
             for successor in successors[index]:
                 if successor not in worklist:
                     worklist.append(successor)
+    return spans, successors, predecessors, out_states
 
-    # Exits: blocks with no successors (ret/trap/unresolved jumps). When
-    # every block has one - a loop back to the top that leaves the function
-    # only through a call or a trap - the join runs over every visited
-    # block instead, which keeps only what holds everywhere in the function.
-    exits = [i for i in range(block_count) if out_states[i] is not None and not successors[i]]
+
+def interpret_over_cfg(
+    lines: list[str],
+    model: ArchModel,
+    blocks: list[dict],
+    edges: list[dict],
+) -> FrameState | None:
+    """Iterate the function's blocks to a fixed point; None when the cap is hit.
+
+    The state returned is the join over the reachable exit blocks'
+    out-states: the frame picture every path out of the function agrees on.
+    Blocks with no successor (ret/trap/unresolved jumps) are the exits; when
+    every block has one - a loop back to the top that leaves the function
+    only through a call or a trap - the join runs over every visited block
+    instead, which keeps only what holds everywhere in the function.
+    """
+    converged = _converge_over_cfg(lines, model, blocks, edges)
+    if converged is None:
+        return None
+    _, successors, _, out_states = converged
+    exits = [i for i in range(len(blocks)) if out_states[i] is not None and not successors[i]]
     if not exits:
-        exits = [i for i in range(block_count) if out_states[i] is not None]
+        exits = [i for i in range(len(blocks)) if out_states[i] is not None]
     result: FrameState | None = None
     for index in exits:
         exit_state = out_states[index]
@@ -1005,6 +1093,223 @@ def interpret_over_cfg(
     # function nothing was learned about, not a cap hit. Those are two
     # different outcomes to the caller, so this returns an empty state.
     return result if result is not None else FrameState(model)
+
+
+# ---------------------------------------------------------------------------
+# Call-site constant-argument recovery.
+# ---------------------------------------------------------------------------
+
+# Integer argument registers per calling convention, named by the register
+# *family* the FrameState keys them under. The convention is a property of
+# the binary format plus the architecture, not of the architecture alone:
+# see argument_registers.
+X86_WIN64_ARGUMENT_REGISTERS = ("rcx", "rdx", "r8", "r9")
+X86_SYSV_ARGUMENT_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
+ARM64_ARGUMENT_REGISTERS = tuple(f"x{i}" for i in range(8))
+
+
+def argument_registers(binary_format: str, arch_target: str) -> tuple[str, ...] | None:
+    """Integer argument register families for the ABI a binary was built for.
+
+    x86-64 Windows images pass integer arguments in rcx/rdx/r8/r9 (Microsoft
+    x64) while ELF and Mach-O images for the same processor use
+    rdi/rsi/rdx/rcx/r8/r9 (SysV, whose integer argument registers Apple's
+    ABI also shares). AArch64 uses x0-x7 under every mainstream OS ABI. The
+    architecture resolution mirrors model_for_target, so the argument
+    families always match the model that would decode the function: an
+    empty triple means x86-64 there, and it means x86-64 here. Any other
+    combination whose convention cannot be determined returns None rather
+    than silently assuming one; callers must treat None as "call-site
+    arguments are not recoverable", never fall back to a default.
+    """
+    lowered = (arch_target or "").lower()
+    if "aarch64" in lowered or "arm64" in lowered:
+        return ARM64_ARGUMENT_REGISTERS
+    if not lowered or any(
+        marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")
+    ):
+        fmt = (binary_format or "").lower()
+        if "pe" in fmt:
+            return X86_WIN64_ARGUMENT_REGISTERS
+        if "elf" in fmt or "macho" in fmt:
+            return X86_SYSV_ARGUMENT_REGISTERS
+    return None
+
+
+def _callee_resolvers(
+    direct_call_targets: list[dict] | None,
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Index the disassembler's resolved call targets by their operand text.
+
+    Returns two maps, (call-site operands, tail-transfer operands), keyed by
+    the normalized operand text of the call instruction (the assembly line
+    minus its mnemonic) and holding the set of callee names that operand
+    resolved to. A key resolving to more than one name (the same register or
+    slot text reaching different callees at different program points) keeps
+    both names, and resolution refuses it: an unresolved callee is a
+    legitimate result, a wrong one is not.
+    """
+    call_operands: dict[str, set[str]] = {}
+    tail_operands: dict[str, set[str]] = {}
+    for entry in direct_call_targets or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("target_name") or "").strip()
+        operand = " ".join(str(entry.get("raw_operand") or "").split()).lower()
+        if not name or not operand:
+            continue
+        # A name that is just the operand echoed back (the disassembler's
+        # stand-in for an unresolved numeric target) carries no resolution.
+        if " ".join(name.split()).lower() == operand:
+            continue
+        table = tail_operands if entry.get("kind") == "tailcall" else call_operands
+        table.setdefault(operand, set()).add(name)
+    return call_operands, tail_operands
+
+
+def _call_site_callee(
+    model: ArchModel,
+    text: str,
+    call_operands: dict[str, set[str]],
+    tail_operands: dict[str, set[str]],
+    is_last_line: bool,
+) -> str | None:
+    """Resolve one instruction's callee name from the disassembler's targets.
+
+    Only instruction text the disassembler itself annotated is trusted: an
+    operand that no target entry resolves to yields None (the callee is
+    genuinely unknown), and the tail-branch forms (``jmp``/``b``/``br``)
+    resolve only on the function's last line, which is the only place the
+    disassembler annotates them — elsewhere they are ordinary branches and
+    must not inherit a callee by operand coincidence.
+    """
+    parts = text.split(None, 1)
+    if len(parts) < 2:
+        return None
+    kind = model.call_kind(parts[0])
+    if kind is None:
+        return None
+    if kind == "tail" and not is_last_line:
+        return None
+    key = " ".join(parts[1].split()).lower()
+    names = (tail_operands if kind == "tail" else call_operands).get(key)
+    if names and len(names) == 1:
+        return next(iter(names))
+    return None
+
+
+def _call_site_records(
+    lines: list[str],
+    model: ArchModel,
+    spans: list[tuple[int, int]],
+    predecessors: list[list[int]],
+    out_states: list[FrameState | None],
+    arg_families: tuple[str, ...],
+    direct_call_targets: list[dict] | None,
+) -> list[dict]:
+    """Snapshot the argument registers at every call instruction.
+
+    One replay pass over the converged out-states: each block is re-walked
+    once from its final in-state (the same join the worklist computed), and
+    a record is taken just before a call instruction is stepped — the model
+    clobbers the argument registers at the call itself, so this is the only
+    point the incoming arguments are observable. Only integer constants are
+    reported; a symbolic pointer or an unknown value yields None for that
+    position, never a stale value from before the call sequence.
+
+    The replay is O(lines) time and holds one FrameState at a time; the
+    records are O(call sites) small dicts, which is the only extra memory
+    retained.
+    """
+    call_operands, tail_operands = _callee_resolvers(direct_call_targets)
+    last_line = len(lines) - 1
+    records: list[dict] = []
+    for block_index, (start, end) in enumerate(spans):
+        if out_states[block_index] is None:
+            continue  # unreachable to the dataflow: contributes nothing
+        state = _block_in_state(model, block_index, predecessors, out_states)
+        if state is None:
+            continue
+        for offset, line in enumerate(lines[start:end]):
+            text = line.strip()
+            if not text:
+                continue
+            kind = model.call_kind(text.split(None, 1)[0])
+            # A tail branch is a call site only on the function's last line,
+            # the only place the disassembler annotates it; elsewhere it is
+            # an ordinary branch and must not be recorded at all.
+            if kind is not None and (kind == "call" or start + offset == last_line):
+                callee = _call_site_callee(
+                    model, text, call_operands, tail_operands, start + offset == last_line
+                )
+                arguments = []
+                for family in arg_families:
+                    value = state.registers.get(family)
+                    arguments.append(value if isinstance(value, int) else None)
+                records.append(
+                    {
+                        "line": start + offset,
+                        "instruction": text,
+                        "callee": callee,
+                        "registers": tuple(arg_families),
+                        "arguments": arguments,
+                    }
+                )
+            model.step(state, text)
+    return records
+
+
+def recover_call_site_arguments_with_method(
+    func_data: dict, arch_target: str = "", binary_format: str = ""
+) -> tuple[list[dict], str]:
+    """Recover one function's call-site constant arguments via the CFG dataflow.
+
+    Returns ``(records, method)``. Each record names one call instruction
+    (``line`` index into the assembly text, ``instruction`` text), the
+    ``callee`` the disassembler resolved it to (None when unresolved), the
+    ABI's ``registers`` tuple and the integer constants in ``arguments`` at
+    that point (None where the model does not know one). ``method`` names
+    how the function was analyzed: ``"dataflow"`` (CFG fixed point),
+    ``"no_cfg"`` / ``"cfg_mismatch"`` (no CFG, or one that does not tile the
+    text — there is deliberately no straight-line fallback, which would
+    report values that leak from not-taken paths), ``"cap_hit"`` (iteration
+    cap; no records), ``"no_abi"`` (argument registers undeterminable for
+    this format/architecture) or ``"skipped"`` (nothing to analyze, or past
+    the instruction budget).
+    """
+    assembly = func_data.get("assembly") or ""
+    if not assembly:
+        return [], "skipped"
+    arg_families = argument_registers(binary_format, arch_target)
+    if not arg_families:
+        return [], "no_abi"
+    lines = assembly.split("\n")
+    if len(lines) > MAX_INSTRUCTIONS:
+        return [], "skipped"
+    model = model_for_target(arch_target)
+    cfg = func_data.get("cfg") or {}
+    blocks = cfg.get("blocks") or []
+    edges = cfg.get("edges") or []
+    if not blocks:
+        return [], "no_cfg"
+    if _block_line_spans(blocks, lines) is None:
+        return [], "cfg_mismatch"
+    converged = _converge_over_cfg(lines, model, blocks, edges)
+    if converged is None:
+        return [], "cap_hit"
+    spans, _, predecessors, out_states = converged
+    records = _call_site_records(
+        lines, model, spans, predecessors, out_states, arg_families,
+        func_data.get("direct_call_targets"),
+    )
+    return records, "dataflow"
+
+
+def recover_call_site_arguments(
+    func_data: dict, arch_target: str = "", binary_format: str = ""
+) -> list[dict]:
+    """Recover one function's call-site constant arguments (see _with_method)."""
+    return recover_call_site_arguments_with_method(func_data, arch_target, binary_format)[0]
 
 
 def model_for_target(arch_target: str) -> ArchModel:
