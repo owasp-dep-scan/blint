@@ -2307,7 +2307,6 @@ def disassemble_functions(
                     f"Could not find valid instructions for function '{func_name}' {func_addr_va} {inst_count}."
                 )
                 continue
-            plain_assembly_text = "\n".join(i.assembly for i in instr_list)
             end_index = _find_function_end_index(instr_list, has_exact_size)
             truncated_instr_list = instr_list[: end_index + 1] if end_index != -1 else instr_list
             if not truncated_instr_list:
@@ -2315,6 +2314,13 @@ def disassemble_functions(
                     f"Instruction list for '{func_name}' became empty after truncation. Skipping."
                 )
                 continue
+            # This function's instructions only. The disassembler reads a
+            # fixed-size window that can run well past the function end, and
+            # every consumer of this text (fuzzy hashing, stack-string
+            # recovery, dispatch-table detection) would otherwise read
+            # instructions belonging to later functions. instruction_count
+            # and the CFG are already truncated the same way.
+            plain_assembly_text = "\n".join(i.assembly for i in truncated_instr_list)
             lower_assembly = plain_assembly_text.lower()
             assembly_hash = hashlib.sha256(plain_assembly_text.encode("utf-8")).hexdigest()
             instruction_count = len(truncated_instr_list)
