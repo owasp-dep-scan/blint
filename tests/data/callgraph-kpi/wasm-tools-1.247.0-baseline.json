@@ -75,21 +75,20 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 70,
+        "external_edges": 229,
         "external_reason_buckets": {
-          "address_space_miss": 24,
-          "address_space_miss:indirect_hint": 31,
-          "address_space_miss:tailcall": 5,
-          "unresolved:tailcall": 10
+          "address_space_miss:indirect_hint": 22,
+          "address_space_miss:tailcall": 1,
+          "unresolved:tailcall": 206
         },
-        "functions_total": 22222,
-        "functions_with_direct_targets": 15973,
+        "functions_total": 22219,
+        "functions_with_direct_targets": 19214,
         "internal_edge_kinds": {
-          "direct": 55570,
-          "indirect_hint": 81,
-          "tailcall": 1553
+          "direct": 67644,
+          "indirect_hint": 127,
+          "tailcall": 7109
         },
-        "internal_edges": 57204
+        "internal_edges": 74880
       }
     },
     "x86_64-apple-macosx": {

@@ -658,6 +658,11 @@ def _get_implicit_regs_map(arch_target: str) -> dict[str, dict[str, set[str]]]:
     return IMPLICIT_REGS_X86
 
 
+def _addr_in_exec_ranges(addr: int, exec_ranges: list) -> bool:
+    """Return True when addr falls inside one of the executable ranges."""
+    return any(start <= addr < end for start, end in exec_ranges)
+
+
 def _find_function_end_index(instr_list: list, has_exact_size: bool = False) -> int:
     """
     Scans a list of instructions to find the true end of a function.
@@ -2107,8 +2112,9 @@ def disassemble_functions(
         imagebase = int(parsed_obj.optional_header.imagebase)
     elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, "imagebase"):
         imagebase = int(parsed_obj.imagebase)
+    exec_ranges_true = executable_ranges(parsed_obj)
     exec_ranges_stored = [
-        (start - imagebase, end - imagebase) for start, end in executable_ranges(parsed_obj)
+        (start - imagebase, end - imagebase) for start, end in exec_ranges_true
     ]
     addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
     base_delta = 0
@@ -2120,7 +2126,18 @@ def disassemble_functions(
                 break
         if code_segment and all_func_addrs_sorted:
             min_func_addr = all_func_addrs_sorted[0]
-            if code_segment.virtual_address != min_func_addr:
+            # The delta is a hypothesis that symbol addresses live in a foreign
+            # space offset from LIEF's virtual addresses. It is only supported
+            # when the lowest function address is not executable memory in its
+            # own right: "lowest function above the X segment start" is the
+            # normal layout of any binary whose first symbol is not exactly at
+            # the segment start, and shifting those reads decodes a *different
+            # function's* bytes (x86 decodes almost anything, so the wrong read
+            # succeeds and the correct one is never tried).
+            if (
+                code_segment.virtual_address != min_func_addr
+                and not _addr_in_exec_ranges(min_func_addr, exec_ranges_true)
+            ):
                 base_delta = code_segment.virtual_address - min_func_addr
                 LOG.debug(
                     f"Detected address delta. LIEF VA: {hex(code_segment.virtual_address)}, Symbol VA: {hex(min_func_addr)}. Applying delta: {hex(base_delta)}"
@@ -2267,6 +2284,21 @@ def disassemble_functions(
                 disassemblers_to_try.append((mips16_nyxstone_instance, "MIPS16"))
             if micromips_nyxstone_instance:
                 disassemblers_to_try.append((micromips_nyxstone_instance, "MicroMIPS"))
+            # The byte source whose address is executable memory is tried
+            # first. The rebased read only wins when the symbol address
+            # itself is not executable (a genuinely foreign symbol address
+            # space); when both or neither qualify, the symbol's own address
+            # is the honest choice. With a spurious base_delta both can be
+            # readable, and x86 decodes almost anything, so rebased-first
+            # would silently win with another function's bytes.
+            prefer_rebased = not _addr_in_exec_ranges(
+                func_addr_va, exec_ranges_true
+            ) and _addr_in_exec_ranges(lief_lookup_va, exec_ranges_true)
+            bytes_sets = (
+                [(rebased_bytes_list, "rebased"), (original_bytes_list, "original")]
+                if prefer_rebased
+                else [(original_bytes_list, "original"), (rebased_bytes_list, "rebased")]
+            )
             for offset in range(4):
                 original_len = _mem_bytes_len(original_bytes_list)
                 rebased_len = _mem_bytes_len(rebased_bytes_list)
@@ -2279,10 +2311,6 @@ def disassemble_functions(
                     break
                 addr_to_try = func_addr_va + offset
                 for instance, mode_name in disassemblers_to_try:
-                    bytes_sets = [
-                        (rebased_bytes_list, "rebased"),
-                        (original_bytes_list, "original"),
-                    ]
                     for byte_source, source_name in bytes_sets:
                         source_len = _mem_bytes_len(byte_source)
                         if source_len is not None and offset >= source_len:
