@@ -614,3 +614,26 @@ def test_recover_call_site_arguments_public_wrapper():
         "mov edx, 2201297921\ncall qword ptr [rip + 4096]"   # 0x83352401
     )
     assert recover_call_site_arguments(func, "", "PE")[0]["arguments"][1] == 0x83352401
+
+
+def test_entry_block_call_does_not_see_a_value_the_loop_body_writes():
+    """The entry block joins the entry path, which knows nothing.
+
+    Control reaches block 0 both from function entry and from the back
+    edge, so a code the loop body loads is not established on the first
+    iteration. Reporting it here would be exactly the not-taken-path leak
+    this recovery exists to avoid.
+    """
+    func = _resolved_func(
+        "call qword ptr [rip + 4096]\ntest eax, eax\nmov edx, 2201297921\njne 4096\nret",
+        blocks=[{"instructions": 2}, {"instructions": 2}, {"instructions": 1}],
+        edges=[
+            {"src": 0, "dst": 1, "kind": "fallthrough"},
+            {"src": 1, "dst": 0, "kind": "jump"},
+            {"src": 1, "dst": 2, "kind": "fallthrough"},
+        ],
+    )
+    records, method = recover_call_site_arguments_with_method(func, "", "PE")
+    assert method == "dataflow"
+    assert [r["arguments"][1] for r in records] == [None]
+    assert extract_client_ioctl_codes(func, "", "PE") == []

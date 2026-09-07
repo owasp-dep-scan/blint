@@ -977,12 +977,14 @@ def _block_in_state(
 ) -> FrameState | None:
     """Join the visited predecessors' out-states into one block's in-state.
 
-    Returns the function entry state (a fresh, unconstrained state) only for
-    block 0 with no visited predecessor; any other block whose predecessors
-    have not produced an out-state yet returns None and is retried later by
-    the worklist.
+    Block 0 always joins the function entry state, which knows nothing, in
+    with its predecessors: control reaches the entry block along the entry
+    path as well as along any back edge, so a value the loop body writes is
+    not established on the first iteration and must not survive the join. A
+    non-entry block whose predecessors have not produced an out-state yet
+    returns None and is retried later by the worklist.
     """
-    state: FrameState | None = None
+    state: FrameState | None = FrameState(model) if block_index == 0 else None
     for pred in predecessors[block_index]:
         pred_out = out_states[pred]
         if pred_out is None:
@@ -994,8 +996,6 @@ def _block_in_state(
             state.sp_adjustment = pred_out.sp_adjustment
         else:
             state.joined_with(pred_out)
-    if state is None and block_index == 0:
-        state = FrameState(model)
     return state
 
 
@@ -1071,6 +1071,9 @@ def interpret_over_cfg(
     every block has one - a loop back to the top that leaves the function
     only through a call or a trap - the join runs over every visited block
     instead, which keeps only what holds everywhere in the function.
+
+    Raises ValueError when the blocks do not tile the assembly text; callers
+    are expected to check that first and pick their own fallback.
     """
     converged = _converge_over_cfg(lines, model, blocks, edges)
     if converged is None:
