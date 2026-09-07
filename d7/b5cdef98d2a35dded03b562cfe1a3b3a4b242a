@@ -1,0 +1,24 @@
+blint/lib/absint.py
+  h_6a4cc5cdf68def 3-8,17-49,52-53,55-128,130-557,567-568,571,573-575,577-578,581-585,588-589,592-593,600-602,604,612-613,628-629,631-632,634-638,640-645,647,651,653,661,666,669,674,677-681,683,686-687,695,697-699,704,707,711,713,716,723,725-726,733,735-736,739-740,749-751,757-762,764-784,786-846,849-1013,1025,1028-1088
+blint/lib/binary.py
+  h_6a4cc5cdf68def 51,3224,3226-3228
+blint/lib/stack_strings.py
+  h_6a4cc5cdf68def 16-28,31-35,38-44,47,49-57,59-64,66-67,70-81,94-101
+docs/METADATA.md
+  h_6a4cc5cdf68def 135-136
+tests/scripts/bench.py
+  h_6a4cc5cdf68def 69
+tests/test_absint_dataflow.py
+  h_6a4cc5cdf68def 1-429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "d7b5cdef98d2a35dded03b562cfe1a3b3a4b242a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
