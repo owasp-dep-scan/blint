@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import orjson
@@ -130,6 +131,7 @@ def _cached_parse_then_cold_parse(options: BlintOptions, file_path: str):
         options.disassemble,
         wasm_strings=options.wasm_strings,
         wasm_call_graph=options.wasm_call_graph,
+        sdk_path=options.sdk_path,
     )
     return warm, cold
 
@@ -395,6 +397,114 @@ def test_invalidation_changed_option(native_binary, cache_options):
 
 
 # ---------------------------------------------------------------------------
+# The sdk_path option (P2.6)
+# ---------------------------------------------------------------------------
+
+
+def _second_sdk_tree(base: Path) -> Path:
+    """A second, content-different fixture SDK for invalidation tests."""
+    from tests.test_tbd_index import _write_sdk
+
+    root = base / "sdk-two"
+    root.mkdir()
+    _write_sdk(root)
+    (root / "usr" / "lib" / "libextra.tbd").write_text(
+        "--- !tapi-tbd\n"
+        "tbd-version:     4\n"
+        "targets:         [ x86_64-macos ]\n"
+        "install-name:    '/usr/lib/libextra.dylib'\n"
+        "exports:\n"
+        "  - targets:         [ x86_64-macos ]\n"
+        "    symbols:         [ _extra_export ]\n"
+    )
+    return root
+
+
+def test_digest_covers_sdk_path_and_its_contents(tmp_path, cache_options):
+    """The sdk_path option enters the key with the option itself; the .tbd
+    tree's fingerprint enters with it, so a different SDK at the *same path*
+    is still a different key."""
+    from tests.test_tbd_index import _write_sdk
+
+    sdk_one = tmp_path / "sdk-one"
+    sdk_one.mkdir()
+    _write_sdk(sdk_one)
+    cache_options.sdk_path = str(sdk_one)
+    digest_one = compute_options_digest(cache_options)
+
+    # Same tree copied elsewhere: same fingerprint, but the path value itself
+    # differs, so the digest differs too.
+    sdk_copy = tmp_path / "sdk-copy"
+    shutil.copytree(sdk_one, sdk_copy)
+    cache_options.sdk_path = str(sdk_copy)
+    assert compute_options_digest(cache_options) != digest_one
+
+    # A changed tree at the original path (extra library) must invalidate.
+    cache_options.sdk_path = str(sdk_one)
+    digest_same_path = compute_options_digest(cache_options)
+    (sdk_one / "usr" / "lib" / "libextra.tbd").write_text(
+        "--- !tapi-tbd\n"
+        "tbd-version:     4\n"
+        "targets:         [ x86_64-macos ]\n"
+        "install-name:    '/usr/lib/libextra.dylib'\n"
+        "exports:\n"
+        "  - targets:         [ x86_64-macos ]\n"
+        "    symbols:         [ _extra_export ]\n"
+    )
+    assert compute_options_digest(cache_options) != digest_same_path
+
+    # And turning the option off is, of course, another key.
+    cache_options.sdk_path = None
+    assert compute_options_digest(cache_options) != digest_one
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/git")),
+    reason="needs a macOS host with /usr/bin/git for a real import table",
+)
+def test_cold_vs_warm_byte_identical_with_sdk_path(cache_options, tmp_path):
+    """Cold and warm runs with --sdk-path agree byte for byte.
+
+    The sdk_tbd block is the new serialization surface: counts, sorted
+    samples, and library names must survive the store/replay round trip
+    exactly as serialized, including when nothing was attributed (git's
+    imports all carry binds, so the block is pure confirmation counts).
+    """
+    from tests.test_tbd_index import _write_sdk
+
+    sdk_root = tmp_path / "sdk"
+    sdk_root.mkdir()
+    _write_sdk(sdk_root)
+    cache_options.sdk_path = str(sdk_root)
+    warm, cold = _cached_parse_then_cold_parse(cache_options, "/usr/bin/git")
+    assert cold.get("binary_type") == "MachO"
+    assert cold.get("sdk_tbd"), "expected the fixture parse to record sdk_tbd"
+    _assert_replay_equals_cold(warm, cold)
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/git")),
+    reason="needs a macOS host with /usr/bin/git for a real import table",
+)
+def test_invalidation_changed_sdk_option(cache_options, tmp_path):
+    """Pointing --sdk-path at a different tree is a different cache key."""
+    from tests.test_tbd_index import _write_sdk
+
+    sdk_one = tmp_path / "sdk-one"
+    sdk_one.mkdir()
+    _write_sdk(sdk_one)
+    cache_options.sdk_path = str(sdk_one)
+    first = _runner_run(cache_options, "/usr/bin/git")
+    assert first.cache_stored == 1
+
+    sdk_two = _second_sdk_tree(tmp_path)
+    cache_options.sdk_path = str(sdk_two)
+    second = _runner_run(cache_options, "/usr/bin/git")
+    assert second.cache_hits == 0, "a changed SDK tree must invalidate cached metadata"
+    assert second.cache_stored == 1
+
+
+# ---------------------------------------------------------------------------
 # Failure policy
 # ---------------------------------------------------------------------------
 
@@ -644,3 +754,27 @@ def test_findings_and_reviews_match_cold_run(native_binary, tmp_path):
     assert cold_hits == 0 and warm_hits == 1, "second run did not come from the cache"
     assert warm_findings == cold_findings
     assert warm_reviews == cold_reviews
+
+
+def test_digest_covers_link_closure_env_toggle(cache_options, monkeypatch):
+    """The env-var toggle that decides ELF closure resolution is keyed too.
+
+    ``BLINT_RESOLVE_LINK_CLOSURE`` is not a parse() parameter, so the
+    signature-derived digest cannot see it; two runs differing only in that
+    environment would otherwise share a cache entry while carrying different
+    metadata. The digest reads the toggle out of binary.py's module globals
+    (where the env var is resolved at import), so patching that global is
+    exactly what a fresh process with the env set would produce.
+    """
+    import blint.lib.binary as binary_mod
+
+    digest_off = compute_options_digest(cache_options)
+    monkeypatch.setattr(binary_mod, "RESOLVE_LINK_CLOSURE", True)
+    try:
+        digest_on = compute_options_digest(cache_options)
+        assert digest_on != digest_off, (
+            "a changed link-closure environment must change the cache key"
+        )
+    finally:
+        monkeypatch.undo()
+    assert compute_options_digest(cache_options) == digest_off

@@ -1697,6 +1697,58 @@ def test_parse_macho_symbols_export_info_symbol_is_json_safe():
     assert export_info["symbol"] == "macho_symbol"
 
 
+def test_parse_macho_symbols_records_import_and_export_flags():
+    """Undefined symbols are imports, export-trie symbols are exports.
+
+    Regression for the false CHECK_UNUSED_DEPENDENCIES finding on every
+    Mach-O in /usr/bin: the parser recorded neither flag, so the dependency
+    graph's ``is_imported`` gate silently dropped every Mach-O import and
+    link hygiene reported each declared dylib unused. The flags are the
+    LIEF category / export-info signals the import-hash path already read.
+    """
+
+    def fake_symbol(symbol_category, has_export):
+        class _FakeExportInfo:
+            symbol = "sym"
+            kind = "regular"
+            flags = "FLAG_A"
+            node_offset = 0x10
+            address = 0x20
+
+        class _FakeSymbol:
+            has_binding_info = False
+            value = 0x1000
+            demangled_name = "sym"
+            name = "sym"
+            has_export_info = has_export
+            export_info = _FakeExportInfo() if has_export else None
+            category = symbol_category
+            type = "TYPE"
+            numberof_sections = 1
+            description = "desc"
+            origin = "ORIGIN"
+
+        return _FakeSymbol()
+
+    symbols, _ = parse_macho_symbols(
+        [
+            fake_symbol("CATEGORY.UNDEFINED", False),
+            fake_symbol("CATEGORY.LOCAL", False),
+            fake_symbol("CATEGORY.EXTERNAL", True),
+        ]
+    )
+
+    assert symbols[0]["is_imported"] is True
+    assert symbols[0]["is_exported"] is False
+    # Locals are neither.
+    assert symbols[1]["is_imported"] is False
+    assert symbols[1]["is_exported"] is False
+    # EXTERNAL with export info is an export, not an import
+    # (__mh_execute_header's shape).
+    assert symbols[2]["is_imported"] is False
+    assert symbols[2]["is_exported"] is True
+
+
 def test_build_disassembly_callgraph_metadata_counts_and_external():
     metadata = {
         "disassembled_functions": {

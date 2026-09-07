@@ -211,6 +211,71 @@ def test_determinism_wasm_fixture_across_hash_seeds():
     assert outputs["0"] == outputs["4242"]
 
 
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/git")),
+    reason="needs a macOS host with /usr/bin/git",
+)
+def test_determinism_sdk_path_on_and_off_across_hash_seeds(tmp_path):
+    """``--sdk-path`` must be deterministic on and off, and must never leak
+    the SDK's absolute path into metadata (P2.6).
+
+    The SDK is a deterministic function of the analyst's environment, but
+    the *path naming it* is not part of the binary: it appears in no field,
+    only in the indexed facts derived from it. The probe parses with the
+    option on under two hash seeds, then compares those bytes against an
+    option-off parse to prove the option actually reached the output.
+    """
+    from tests.test_tbd_index import _write_sdk
+
+    sdk_root = tmp_path / "sdk"
+    sdk_root.mkdir()
+    _write_sdk(sdk_root)
+    probe = (
+        "import sys, logging;"
+        "logging.disable(logging.CRITICAL);"
+        "import orjson;"
+        "sys.path.insert(0, sys.argv[1]);"
+        "from blint.lib.binary import parse;"
+        "md = parse(sys.argv[2], disassemble=False, sdk_path=sys.argv[3]);"
+        "print(orjson.dumps(md, default=str).decode('utf-8', 'ignore'))"
+    )
+    outputs = {}
+    for seed in ("0", "4242"):
+        env = dict(os.environ)
+        env["PYTHONHASHSEED"] = seed
+        env["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(REPO_ROOT), "/usr/bin/git", str(sdk_root)],
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        outputs[seed] = result.stdout
+    assert outputs["0"] == outputs["4242"], (
+        "sdk_tbd bytes differ across PYTHONHASHSEED values"
+    )
+    # The environment must not surface in the output: no absolute SDK path,
+    # and no tmp-path fragments, in the metadata bytes.
+    assert str(sdk_root).encode() not in outputs["0"]
+    # And the option demonstrably changed the output vs the option-off run.
+    off_probe = (
+        "import sys;"
+        "import orjson;"
+        "sys.path.insert(0, sys.argv[1]);"
+        "from blint.lib.binary import parse;"
+        "md = parse(sys.argv[2], disassemble=False);"
+        "print(orjson.dumps(md, default=str).decode('utf-8', 'ignore'))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", off_probe, str(REPO_ROOT), "/usr/bin/git"],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
+    )
+    assert b"sdk_tbd" in outputs["0"]
+    assert b"sdk_tbd" not in result.stdout
+
+
 def test_determinism_corpus_fixture_if_present(tmp_path):
     """If the local corpus is built, the harshest fixture is pinned too.
 

@@ -210,6 +210,7 @@ def generate(
                     symbols_purl_map,
                     blint_options.use_blintdb,
                     blint_options.disassemble,
+                    blint_options.sdk_path,
                 )
         if skipped_wasm:
             LOG.info(
@@ -596,6 +597,7 @@ def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
         state["symbols_purl_map"],
         state["use_blintdb"],
         state["disassemble"],
+        state.get("sdk_path"),
     )
     return {
         "wasm": False,
@@ -648,6 +650,7 @@ def _generate_exes_parallel(
             "use_blintdb": blint_options.use_blintdb,
             "disassemble": blint_options.disassemble,
             "wasm_sbom": blint_options.wasm_sbom,
+            "sdk_path": blint_options.sdk_path,
         },
         unit_role="sbom",
         record_errors=False,
@@ -714,6 +717,7 @@ def process_exe_file(
     symbols_purl_map: dict | None = None,
     use_blintdb: bool = False,
     disassemble: bool = False,
+    sdk_path: str | None = None,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill-of-Materials.
@@ -726,6 +730,9 @@ def process_exe_file(
         export_prefixes (list): Prefixes to determine exported symbols.
         symbols_purl_map (dict): containing symbol name as the key and purl as the value
         use_blintdb (bool): should blintdb be used to improve component identification
+        disassemble (bool): whether to disassemble native binaries.
+        sdk_path (str): optional Apple SDK root whose .tbd stubs attribute and
+            confirm Mach-O imports (the --sdk-path option).
 
     Returns:
         list[Component]: The updated list of components.
@@ -734,7 +741,7 @@ def process_exe_file(
     if is_wasm_file(exe):
         return []
     export_prefixes = export_prefixes or []
-    metadata: dict[str, Any] = parse(exe, disassemble=disassemble)
+    metadata: dict[str, Any] = parse(exe, disassemble=disassemble, sdk_path=sdk_path)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
     lib_components: list[Component] = []

@@ -161,7 +161,7 @@ def test_write_ios_callgraphs_emits_sidecars(tmp_path, monkeypatch):
         str(app_dir / "Lib"): {"callgraph": callgraph},
         str(app_dir / "Encrypted"): {"disassembly_skipped": "fairplay_encrypted"},
     }
-    monkeypatch.setattr("blint.lib.sbom.parse", lambda path, disassemble=False: parsed[path])
+    monkeypatch.setattr("blint.lib.sbom.parse", lambda path, disassemble=False, sdk_path=None: parsed[path])
 
     write_ios_callgraphs(str(tmp_path / "demo.ipa"), str(tmp_path / "bom.json"))
 

@@ -173,7 +173,7 @@ def test_process_exe_file_uses_blintdb_hash_matches(tmp_path, monkeypatch):
     monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
     monkeypatch.setattr(
         "blint.lib.sbom.parse",
-        lambda _exe, disassemble=False: metadata,
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
     )
 
     components = process_exe_file(
