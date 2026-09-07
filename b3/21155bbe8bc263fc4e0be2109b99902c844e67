@@ -1,0 +1,44 @@
+blint/cli.py
+  h_6a4cc5cdf68def 172-180,294-301,587
+blint/config.py
+  h_6a4cc5cdf68def 1288-1294
+blint/lib/binary.py
+  h_6a4cc5cdf68def 52,2021-2033,2060-2061,3085,3094-3097,3145-3148,3161-3163,3285-3288
+blint/lib/cache.py
+  h_6a4cc5cdf68def 19-23,160-164,175-182,201-214
+blint/lib/import_attribution.py
+  h_6a4cc5cdf68def 107-121,239-262,284-290,308-322
+blint/lib/runners.py
+  h_6a4cc5cdf68def 34,47-70,81,326,545,558
+blint/lib/sbom.py
+  h_6a4cc5cdf68def 213,600,653,720,733-735,744
+blint/lib/tbd_index.py
+  h_6a4cc5cdf68def 1-667
+docs/METADATA.md
+  h_6a4cc5cdf68def 519,526,535-555,558-562,570
+tests/test_binary.py
+  h_6a4cc5cdf68def 1700-1751
+tests/test_cache.py
+  h_6a4cc5cdf68def 31,134,399-506,757-780
+tests/test_determinism.py
+  h_6a4cc5cdf68def 214-278
+tests/test_import_attribution.py
+  h_6a4cc5cdf68def 149-236
+tests/test_sbom_blintdb.py
+  h_6a4cc5cdf68def 176
+tests/test_sbom_ios.py
+  h_6a4cc5cdf68def 164
+tests/test_tbd_index.py
+  h_6a4cc5cdf68def 1-666
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "b321155bbe8bc263fc4e0be2109b99902c844e67",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
