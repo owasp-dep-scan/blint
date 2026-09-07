@@ -11,6 +11,7 @@ from pathlib import Path
 import lief
 import pytest
 import blint.lib.binary as binary_module
+from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 
 from blint.lib.binary import (
     _macho_signature_blob,
@@ -1695,6 +1696,104 @@ def test_parse_macho_symbols_export_info_symbol_is_json_safe():
     export_info = symbols[0]["export_info"]
     assert export_info
     assert export_info["symbol"] == "macho_symbol"
+
+
+def test_parse_macho_symbols_records_import_and_export_flags():
+    """Undefined symbols are imports, export-trie symbols are exports.
+
+    Regression for the false CHECK_UNUSED_DEPENDENCIES finding on every
+    Mach-O in /usr/bin: the parser recorded neither flag, so the dependency
+    graph's ``is_imported`` gate silently dropped every Mach-O import and
+    link hygiene reported each declared dylib unused. The flags are the
+    LIEF category / export-info signals the import-hash path already read.
+    """
+
+    def fake_symbol(symbol_category, has_export):
+        class _FakeExportInfo:
+            symbol = "sym"
+            kind = "regular"
+            flags = "FLAG_A"
+            node_offset = 0x10
+            address = 0x20
+
+        class _FakeSymbol:
+            has_binding_info = False
+            value = 0x1000
+            demangled_name = "sym"
+            name = "sym"
+            has_export_info = has_export
+            export_info = _FakeExportInfo() if has_export else None
+            category = symbol_category
+            type = "TYPE"
+            numberof_sections = 1
+            description = "desc"
+            origin = "ORIGIN"
+
+        return _FakeSymbol()
+
+    symbols, _ = parse_macho_symbols(
+        [
+            fake_symbol("CATEGORY.UNDEFINED", False),
+            fake_symbol("CATEGORY.LOCAL", False),
+            fake_symbol("CATEGORY.EXTERNAL", True),
+        ]
+    )
+
+    assert symbols[0]["is_imported"] is True
+    assert symbols[0]["is_exported"] is False
+    # Locals are neither.
+    assert symbols[1]["is_imported"] is False
+    assert symbols[1]["is_exported"] is False
+    # EXTERNAL with export info is an export, not an import
+    # (__mh_execute_header's shape).
+    assert symbols[2]["is_imported"] is False
+    assert symbols[2]["is_exported"] is True
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/git")),
+    reason="needs a real Mach-O binary so parse() takes the Mach-O branch",
+)
+def test_parse_drops_the_private_sdk_map_even_when_a_later_step_raises(
+    monkeypatch, tmp_path
+):
+    """The full SDK attribution map must never reach exported metadata.
+
+    It rides a private key so the dependency graph sees every symbol while
+    the exported ``sdk_tbd`` block keeps a capped sample. The in-flow pop was
+    on the success path only, but everything from the dependency graph
+    onward runs inside ``parse()``'s ``(AttributeError, TypeError,
+    ValueError)`` guard -- so a failure there returned metadata still
+    carrying the private map, which then gets exported and cached.
+    """
+    fake_sdk = tmp_path / "SDK"
+    (fake_sdk / "usr" / "lib").mkdir(parents=True)
+    (fake_sdk / "usr" / "lib" / "libstub.tbd").write_text(
+        "--- !tapi-tbd\n"
+        "tbd-version:     4\n"
+        "targets:         [ arm64-macos ]\n"
+        "install-name:    '/usr/lib/libstub.dylib'\n"
+        "exports:\n"
+        "  - targets:         [ arm64-macos ]\n"
+        "    symbols:         [ _stub_export ]\n"
+    )
+
+    def _enrich(metadata, _sdk_path):
+        metadata["sdk_tbd"] = {"attributed_symbol_count": 1}
+        metadata[SDK_ATTRIBUTIONS_KEY] = {"_stub_export": "/usr/lib/libstub.dylib"}
+        return metadata["sdk_tbd"]
+
+    def _raise(_metadata):
+        raise ValueError("simulated dependency-graph failure")
+
+    monkeypatch.setattr(binary_module, "enrich_macho_sdk_attribution", _enrich)
+    monkeypatch.setattr(binary_module, "analyze_import_deps", _raise)
+
+    metadata = binary_module.parse("/usr/bin/git", sdk_path=str(fake_sdk))
+
+    assert SDK_ATTRIBUTIONS_KEY not in metadata
+    # The capped public block still survives the failure.
+    assert metadata["sdk_tbd"]["attributed_symbol_count"] == 1
 
 
 def test_build_disassembly_callgraph_metadata_counts_and_external():

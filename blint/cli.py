@@ -170,6 +170,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.",
     )
     parser.add_argument(
+        "--sdk-path",
+        dest="sdk_path",
+        default=None,
+        help="Path to an Apple SDK root whose .tbd stubs are used to attribute "
+        "and confirm Mach-O imports (for example the path printed by "
+        "`xcrun --show-sdk-path`). Off by default; the path must contain "
+        ".tbd files or the run aborts.",
+    )
+    parser.add_argument(
         "--cache",
         action="store_true",
         default=False,
@@ -281,6 +290,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Parse up to N binaries in parallel worker processes. Accepts a "
         "positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
         "(sequential, unchanged behavior).",
+    )
+    sbom_parser.add_argument(
+        "--sdk-path",
+        dest="sdk_path",
+        default=None,
+        help="Path to an Apple SDK root whose .tbd stubs are used to attribute "
+        "and confirm Mach-O dependency edges. Off by default; the path must "
+        "contain .tbd files or the run aborts.",
     )
     callgraph_match_parser = subparsers.add_parser(
         "callgraph-match",
@@ -567,6 +584,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         custom_rules_dir=args.custom_rules_dir,
         use_cache=args.use_cache,
         jobs=jobs,
+        sdk_path=getattr(args, "sdk_path", None),
     )
     return blint_options
 

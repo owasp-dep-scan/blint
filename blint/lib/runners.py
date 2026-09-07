@@ -31,6 +31,7 @@ from blint.lib.parallel import (
 )
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
+from blint.lib.tbd_index import TbdSdkError, load_or_build_index
 from blint.lib.utils import (
     export_metadata,
     find_android_files,
@@ -43,6 +44,30 @@ from blint.lib.utils import (
 from blint.logger import LOG
 
 
+def _validate_sdk_path(blint_options: BlintOptions) -> None:
+    """Load the .tbd index once per run when --sdk-path was given.
+
+    The failure is deliberately loud and run-level: a path with no .tbd
+    files is a configuration error the analyst must see exactly once,
+    before any analysis, not a per-binary degradation repeated for every
+    Mach-O input. It also warms the on-disk index artifact so parallel
+    workers each pay one load instead of one build.
+    """
+    sdk_path = getattr(blint_options, "sdk_path", None)
+    if not sdk_path:
+        return
+    try:
+        index = load_or_build_index(sdk_path)
+    except TbdSdkError as exc:
+        LOG.error(str(exc))
+        raise SystemExit(2) from exc
+    LOG.info(
+        "SDK .tbd index ready: %d libraries from %d files",
+        len(index.libraries),
+        index.file_count,
+    )
+
+
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -53,6 +78,7 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     Returns:
         CycloneDX: Generated CycloneDX SBOM
     """
+    _validate_sdk_path(blint_options)
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
@@ -297,6 +323,7 @@ class AnalysisRunner:
         Returns:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
+        _validate_sdk_path(blint_options)
         initialize_rules(blint_options)
         jobs = max(1, int(getattr(blint_options, "jobs", 1) or 1))
         if jobs > 1 and len(exe_files) > 1:
@@ -515,6 +542,7 @@ class AnalysisRunner:
                 should_disassemble,
                 wasm_strings=blint_options.wasm_strings,
                 wasm_call_graph=blint_options.wasm_call_graph,
+                sdk_path=blint_options.sdk_path,
             )
         file_sha = sha256_file(file_path)
         cached = cache.get(file_sha, file_path, self._parse_options_digest) if file_sha else None
@@ -527,6 +555,7 @@ class AnalysisRunner:
             should_disassemble,
             wasm_strings=blint_options.wasm_strings,
             wasm_call_graph=blint_options.wasm_call_graph,
+            sdk_path=blint_options.sdk_path,
         )
         if file_sha and cache.put(file_sha, self._parse_options_digest, metadata):
             self._mark_cache("stored", unit_role)

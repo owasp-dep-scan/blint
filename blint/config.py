@@ -1285,6 +1285,13 @@ class BlintOptions:
     callgraph_min_confidence: str = "low"
     custom_rules_dir: str | None = None
     sources: list[str] = field(default_factory=list)
+    # P2.6: opt into Apple SDK .tbd attribution (--sdk-path). Off by default:
+    # the path names an environment on the analyst's machine, and the SDK
+    # describes what the SDK ships, not what the binary's runtime ships, so
+    # using it is the caller's call. When set, Mach-O imports are attributed
+    # and confirmed against the SDK's .tbd stubs under the `sdk_tbd`
+    # attribution source; a path with no .tbd files is a hard error.
+    sdk_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):

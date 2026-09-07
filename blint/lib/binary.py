@@ -49,6 +49,7 @@ from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import recover_stack_strings
+from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
 from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
     calculate_entropy,
@@ -2017,6 +2018,19 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
     demangled = _batch_demangle_symbol_names(symbols)
     for symbol in symbols:
         try:
+            # A symbol the binary does not define is an import; this is the
+            # n_type-based category LIEF computes, the same signal the
+            # import-hash path reads. The field has to be recorded explicitly:
+            # analyze_import_deps gates on it, and a missing key read as False
+            # silently dropped every Mach-O import from the dependency graph
+            # while link hygiene went on to report every declared dylib as
+            # unused (the false CHECK_UNUSED_DEPENDENCIES on /usr/bin/git).
+            category = str(symbol.category or "")
+            is_imported = category.upper().endswith("UNDEFINED")
+            # Exports are what the export trie actually offers; EXTERNAL
+            # symbols without export info (e.g. __mh_execute_header in some
+            # link modes) stay non-exported here.
+            is_exported = bool(symbol.has_export_info)
             libname = ""
             if symbol.has_binding_info and symbol.binding_info.has_library:
                 libname = symbol.binding_info.library.name
@@ -2043,6 +2057,8 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
                         "num_sections": symbol.numberof_sections,
                         "description": symbol.description,
                         "address": symbol_value,
+                        "is_imported": is_imported,
+                        "is_exported": is_exported,
                         "export_info": {
                             "symbol": symbol_name,
                             "kind": symbol.export_info.kind,
@@ -3066,6 +3082,7 @@ def parse(
     disassemble: bool = False,
     wasm_strings: bool = True,
     wasm_call_graph: bool = True,
+    sdk_path: str | None = None,
 ) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
@@ -3074,6 +3091,10 @@ def parse(
     :param: disassemble Whether to disassemble functions (native formats only)
     :param: wasm_strings Whether to extract strings from wasm files
     :param: wasm_call_graph Whether to build the wasm_tools call graph for wasm files
+    :param: sdk_path Optional Apple SDK root whose .tbd stubs are used to
+        attribute and confirm Mach-O imports. Opt-in: reads an environment
+        the user names, so it defaults to off and is recorded in metadata
+        under the distinct `sdk_tbd` attribution source when given.
     :return Metadata dict
     """
     metadata: dict = {"file_path": exe_file}
@@ -3121,6 +3142,10 @@ def parse(
         if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
             metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
+        # SDK-assisted attribution has to precede the dependency graph: it
+        # fills the provider evidence the graph and link hygiene read.
+        if sdk_path and isinstance(parsed_obj, lief.MachO.Binary):
+            enrich_macho_sdk_attribution(metadata, sdk_path)
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
         # for those formats.
@@ -3133,6 +3158,9 @@ def parse(
         # came from, so this has to follow the attribution pass.
         if link_hygiene := analyze_link_hygiene(metadata, metadata["import_dependencies"]):
             metadata["link_hygiene"] = link_hygiene
+        # The full SDK attribution map was for the passes above only; exported
+        # and cached metadata carry the capped sample under `sdk_tbd`.
+        metadata.pop(SDK_ATTRIBUTIONS_KEY, None)
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
         # Section entropy and packing evidence are properties of the section
@@ -3220,6 +3248,12 @@ def parse(
                 metadata["crypto_material"] = crypto_material
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
+    # The in-parse pop above is on the success path only, and everything from
+    # the dependency graph onward runs under the guard: a ValueError there
+    # left the private full-attribution map in the metadata that gets exported
+    # and cached, which is exactly what that key must never reach. Popping
+    # again here covers the exception path.
+    metadata.pop(SDK_ATTRIBUTIONS_KEY, None)
     # Toolchain provenance and coverage accounting run outside the guarded
     # block: they must summarize the run even when a parse step above failed,
     # and both are plain-metadata transforms that cannot raise.
@@ -3254,6 +3288,10 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         degradations.append("disassembly_unavailable")
     if metadata.get("is_encrypted"):
         degradations.append("fairplay_encrypted")
+    if (metadata.get("link_hygiene") or {}).get("attribution_status") == "unresolved":
+        # Imports exist but none could be pinned to a library, so the
+        # unused/undeclared dependency checks were skipped rather than clean.
+        degradations.append("dependency_attribution_unresolved")
     coverage = {
         "functions": {
             "symbolic": symbolic_count,

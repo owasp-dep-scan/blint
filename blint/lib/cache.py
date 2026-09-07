@@ -16,9 +16,11 @@ input path against the ``BlintOptions`` attribute of the same name. A new
 ``parse()`` parameter therefore enters the key automatically; one without a
 ``BlintOptions`` counterpart raises ``CacheKeyError`` at startup rather than
 silently serving stale results, because a missed option serving wrong results
-is worse than any slowdown. ``BLINT_MAX_WASM_INSTRUCTIONS`` (the one
-environment constant that reaches ``parse()``) is folded into the digest;
-``BLINT_MAX_HEX_BYTES`` is export-time only and deliberately excluded.
+is worse than any slowdown. Two environment constants that reach ``parse()``
+differently — ``BLINT_MAX_WASM_INSTRUCTIONS`` (read at import time) and
+``BLINT_RESOLVE_LINK_CLOSURE`` (an environment toggle, not a parse parameter)
+— are folded into the digest explicitly; ``BLINT_MAX_HEX_BYTES`` is
+export-time only and deliberately excluded.
 
 Replay path rewriting: ``parse()`` embeds the input path in its output in a
 handful of places — the top-level ``file_path`` and ``name`` fields, and
@@ -155,6 +157,11 @@ def compute_options_digest(
     attribute of the same name; anything else raises ``CacheKeyError`` so the
     gap is loud instead of a silently wrong cache. The wasm instruction
     budget constant that ``binary.py`` consumes is folded in explicitly.
+
+    The ``sdk_path`` option names an environment directory whose *contents*
+    (not its path string) decide part of the output, so when it is set the
+    .tbd tree's fingerprint is folded in as well: two different SDKs at the
+    same path must not share cache entries.
     """
     parse_fn = parse_fn or binary_parse
     if wasm_instruction_budget is None:
@@ -165,6 +172,14 @@ def compute_options_digest(
         "cache_schema": CACHE_SCHEMA_VERSION,
         "BLINT_MAX_WASM_INSTRUCTIONS": wasm_instruction_budget,
     }
+    # The link-closure toggle is an environment variable, not a parse()
+    # parameter, yet it decides whether ELF metadata carries a resolved
+    # closure. Folding it in keeps two runs that differ only in that
+    # environment from sharing a cache entry (the parse cache is content-
+    # addressed in output, not in inputs).
+    payload["BLINT_RESOLVE_LINK_CLOSURE"] = bool(
+        binary_parse.__globals__.get("RESOLVE_LINK_CLOSURE")
+    )
     for name, param in inspect.signature(parse_fn).parameters.items():
         if name == "exe_file":
             continue
@@ -183,6 +198,20 @@ def compute_options_digest(
                 "parse output); serving cached results for an unkeyed option "
                 "would silently be wrong."
             )
+    if payload.get("sdk_path"):
+        # Imported lazily: tbd_index pulls in yaml, which the digest must not
+        # require for runs that never touch an SDK.
+        from blint.lib.tbd_index import TbdSdkError, index_fingerprint
+
+        try:
+            payload["sdk_index_fingerprint"] = index_fingerprint(
+                str(payload["sdk_path"])
+            )
+        except (OSError, TbdSdkError) as exc:
+            raise CacheKeyError(
+                f"sdk_path {payload['sdk_path']!r} cannot be fingerprinted for "
+                f"the cache key: {exc}"
+            ) from exc
     canonical = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
     return hashlib.sha256(canonical).hexdigest()
 

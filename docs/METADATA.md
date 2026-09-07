@@ -516,14 +516,14 @@ The closure is capped at 256 objects so a pathological dependency graph cannot s
 | Format | Evidence                                                                                                                                                                            | Available                                         |
 | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
 | PE     | The import table is organised by DLL, so every import names its library.                                                                                                            | Always                                            |
-| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`.                                                                                                                     | Always                                            |
+| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`. The `is_imported` flag on each symtab entry marks the undefined symbols that are the imports.                        | Always                                            |
 | ELF    | The dynamic symbol table and the `DT_NEEDED` list are unrelated flat lists. The connection only exists once the dependency closure is resolved and each library's exports are read. | Only with [`link_closure`](#link_closure) enabled |
 
 Two fields record what the result rests on:
 
 | Property                    | Description                                                                                                                          |
 | :-------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| `attribution_sources`       | Which evidence was used: `import_table`, `load_commands`, `link_closure`. Empty means none was available.                            |
+| `attribution_sources`       | Which evidence was used: `import_table`, `load_commands`, `sdk_tbd`, `link_closure`. Empty means none was available.                  |
 | `unattributed_symbol_count` | How many imported symbols could not be tied to a library. These are collected under a synthetic `unattributed` entry in `libraries`. |
 
 **An ELF binary analysed without closure resolution attributes nothing.** That is deliberate. Assigning a symbol to an arbitrary declared library produces a dependency edge that is indistinguishable downstream from a correct one, and a wrong edge is worse than an honest gap.
@@ -532,9 +532,36 @@ C++ and Rust symbols are matched on their linkage name, which blint records as `
 
 Note that `::` is a library separator only in Mach-O, and only when the prefix looks like a library. Everywhere else it separates namespace components, and `APT::PackageContainer::begin` is one symbol rather than a dependency on `APT`.
 
+#### The `.tbd` SDK index (`--sdk-path`)
+
+On a running macOS install the system libraries a binary links against are absent from disk — they live only in the dyld shared cache. `--sdk-path <dir>` (off by default) points blint at an Apple SDK whose `.tbd` text stubs describe what every system library exports, and is the only static oracle for confirming Mach-O dependency questions. The path must contain `.tbd` files; a run given a path with none aborts with an error rather than serving an empty index.
+
+When the option is on, Mach-O imports the binary's own evidence could not pin to a library (flat binds, missing binding info) are attributed to the first declared library — in load-command order, matching dyld's search order — whose export surface provides the symbol. A symbol's surface is the library's own `exports`/`reexports` sections plus, transitively, the exports of everything it names under `reexported-libraries` (v4) or `re-exports` (v2/v3).
+
+A re-exported symbol is attributed to the **declaring** library, never the implementing one. A Mach-O two-level bind records the ordinal of the library in the binary's own load-command list; dyld resolves through that library's re-export edges at runtime, but the bind still names the declared library — `dyld_info -imports /usr/bin/git` reports `_dispatch_once (from libSystem)` although the implementation lives in libdispatch.dylib. Substituting the implementing library would contradict the binary's own bind and re-flag declared umbrellas as unused.
+
+The evidence is marked `sdk_tbd` in `attribution_sources`, always distinct from `load_commands`: **a `.tbd` describes what the SDK ships, not what the machine under the binary ships.** The block records no SDK identity — no paths, versions, or totals of the analyst's environment — only these binary-relative facts:
+
+| Property                           | Description                                                                                                                        |
+| :--------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
+| `attributed_symbol_count`          | Imports without a `dylib::symbol` prefix that the index pinned to a declared library.                                               |
+| `attributed_symbols`               | Capped, sorted sample of the same, as `symbol: install-name`.                                                                       |
+| `confirmed_symbol_count`           | Load-command binds the SDK surface confirms.                                                                                        |
+| `reexport_confirmed_symbol_count`  | How many of those confirmations needed the re-export closure.                                                                       |
+| `unconfirmed_symbol_count`         | Load-command binds the SDK surface cannot back — private or otherwise noteworthy.                                                   |
+| `unconfirmed_symbols`              | Capped, sorted sample of the same.                                                                                                  |
+
+Every `_count` above is exact; only the `_symbols` samples are capped, so a large binary's metadata does not grow with its import table. A count that saturated at the sample cap would understate exactly the binaries whose gaps matter most.
+
+The index is built once per run and cached on disk (under the parse-cache directory, keyed by a fingerprint of the SDK's `.tbd` tree), so `--jobs N` workers each pay one load rather than one build.
+
 ### `link_hygiene`
 
-Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when nothing could be attributed, because with no evidence every dependency looks unused.
+Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when no attribution evidence was collected at all, because with no evidence every dependency looks unused. A separate shape covers the case where the binary imports symbols but none of them could be pinned to any library:
+
+| Property                    | Description                                                                                                       |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| `attribution_status`        | `"unresolved"` — the binary imports symbols, but none were attributed, so unused/undeclared answers would be manufactured rather than observed. No `unused_dependencies` or `undeclared_dependencies` keys are present in this state, and `analysis_coverage.degradations` carries `dependency_attribution_unresolved`. |
 
 | Property                    | Description                                                                                                                                                                |
 | :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -542,6 +569,7 @@ Reports declared dependencies that are never used and used libraries that are ne
 | `undeclared_dependencies`   | Libraries supplying symbols without being declared, with `symbol_count` and a sample of `symbols`. These work only for as long as some other dependency keeps them mapped. |
 | `attribution_sources`       | The evidence the result is based on, as above.                                                                                                                             |
 | `unattributed_symbol_count` | Imports not tied to any library. A high count means the findings are based on partial evidence.                                                                            |
+| `imported_symbol_count`     | Present only in the `unresolved` state: how many imports existed for the (failed) attribution to consider.                                                                  |
 | `declared_count`            | How many direct dependencies were declared.                                                                                                                                |
 
 `unused_dependencies` answers a similar question to `ldd -u`, but not an identical one. `ldd -u` relocates the whole closure and counts a library as used if anything in it binds to the library, so a library this binary never calls still counts as used when some other dependency calls it. blint reports **direct** use, which is what `--as-needed` acts on. Everything `ldd -u` reports unused will also be reported here; the reverse does not hold.
