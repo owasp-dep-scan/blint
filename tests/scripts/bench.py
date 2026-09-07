@@ -66,7 +66,7 @@ _TIMED_PHASES = [
     ("disassemble_functions", "disassembly"),
     ("attach_function_hashes", "similarity"),
     ("build_disassembly_callgraph_metadata", "cfg"),
-    ("recover_stack_strings", "stack_strings"),
+    ("analyze_stack_strings", "stack_strings"),
     ("analyze_binary_entropy", "entropy"),
     ("parse_strings", "strings"),
 ]

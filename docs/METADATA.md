@@ -132,7 +132,8 @@ PE (Portable Executable) files are the standard for Windows.
 
 - **Stack-built strings (`stack_strings`, requires `--disassemble`):** String literals the binary assembles on its stack from arithmetic rather than storing in a data section. These appear in no other string channel, so without this they are invisible to string scanning, to YARA rules written against literals, and to a reviewer reading the file.
   - Each entry carries `value`, `encoding` (`utf-16le` or `ascii`), the `function` and `address` it was built in, and the `frame` slot.
-  - Recovery is a linear forward pass with no control-flow awareness, so a value assembled across a branch or loop may be partial. Treat entries as evidence to confirm against the reconstruction rather than as ground truth.
+  - Recovery is a fixed-point dataflow over the function's CFG: a register or frame byte survives a control-flow merge only when every incoming path agrees on its value, and blocks unreachable from the entry contribute nothing. A value assembled on one branch of a conditional is therefore not reported — treat entries as paths that certainly execute, and confirm the reconstruction before acting on it.
+  - `stack_strings_coverage` records how the pass covered the binary: `functions_total`, `functions_dataflow` (CFG fixed point), `functions_fallback` (no usable CFG — straight-line pass), and `functions_iteration_cap_hit` (the loop iteration cap was reached; those functions contribute no entries, because a half-converged state is residue rather than evidence).
 
 In the case of ARM64X, a single PE file encapsulates ARM64 and ARM64EC architectures. For `ARM64EC` nested PE binaries, an additional attribute `nested_binary` would contain the information such as `exports`, `exceptions`, `functions`, `ctor_functions`, and `dotnet_dependencies`.
 

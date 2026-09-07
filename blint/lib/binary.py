@@ -48,7 +48,7 @@ from blint.lib.import_attribution import (
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
-from blint.lib.stack_strings import recover_stack_strings
+from blint.lib.stack_strings import analyze_stack_strings
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
 from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
@@ -3221,9 +3221,11 @@ def parse(
             # String literals a binary assembles on its stack are invisible to
             # section scanning, so this is the only channel that sees the device
             # paths, registry keys and module names an obfuscated image hides.
-            if stack_strings := recover_stack_strings(
+            stack_strings, stack_strings_coverage = analyze_stack_strings(
                 metadata["disassembled_functions"], metadata.get("llvm_target_tuple", "")
-            ):
+            )
+            metadata["stack_strings_coverage"] = stack_strings_coverage
+            if stack_strings:
                 metadata["stack_strings"] = stack_strings
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
