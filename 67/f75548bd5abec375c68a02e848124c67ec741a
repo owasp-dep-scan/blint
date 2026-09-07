@@ -1,0 +1,24 @@
+blint/lib/absint.py
+  h_6a4cc5cdf68def 50-59,339-350,428-435,667-674,936-939,941-946,969,971-1028,1037,1039-1042,1057-1058,1060-1079,1081,1098-1314
+blint/lib/binary_reviews.py
+  h_6a4cc5cdf68def 251-255
+blint/lib/driver_ioctl.py
+  h_6a4cc5cdf68def 11-17,24-25,87-89,91-103,589-636,639-641,644-647,654
+tests/test_absint_call_args.py
+  h_6a4cc5cdf68def 1-616
+tests/test_driver_ioctl.py
+  h_6a4cc5cdf68def 459-460,462-463,465-476,480-500,506-507,520-523,526-531,571-589,599-608,635,639-646,1017-1029
+tests/test_implant_reviews.py
+  h_6a4cc5cdf68def 437,444-453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "67f75548bd5abec375c68a02e848124c67ec741a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
