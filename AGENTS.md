@@ -146,6 +146,24 @@ Use `tests/scripts/callgraph_kpi_baseline.py` for each architecture fixture, pas
 both `--baseline` and `--labels`. Do not update one architecture baseline in isolation
 without checking the others for silent drift.
 
+**Every KPI counter coming back `0` means the run never disassembled, not that the
+callgraph collapsed.** Two causes, both silent — the script reports the zeros as a
+full-scale regression against the baseline rather than as an error:
+
+- nyxstone imports successfully but disassembles nothing unless LLVM 18 is on `PATH`
+  with `NYXSTONE_LLVM_PREFIX` set (see the environment section below). A plain
+  `bash`/`sh` wrapper that does not inherit the interactive shell's environment hits
+  this.
+- `parse()` on a path that does not exist returns near-empty metadata instead of
+  raising. The fixture directories are named `wasm-tools-1.247.0-<arch>-<os>`
+  (for example `wasm-tools-1.247.0-aarch64-macos`), and the Windows binaries are
+  `wasm-tools.exe`; a wrong path reads exactly like a total regression.
+
+Check `functions_total` is non-zero before believing any comparison. `compare_kpi`
+only flags counters that *drop*, so a baseline recorded from a weaker run keeps
+passing while silently losing its ability to catch a regression — which is why
+baselines need refreshing when output legitimately grows, not only when they fail.
+
 For fast iterative experiments (especially callgraph tuning), prefer quiet non-review runs:
 
 ```bash
