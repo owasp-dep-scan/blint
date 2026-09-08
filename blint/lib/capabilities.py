@@ -19,9 +19,9 @@ from typing import Any
 
 from blint.config import BlintOptions
 from blint.lib.analysis import (
-    _REVIEW_RULE_SOURCES,
-    _review_group_targets,
+    REVIEW_GROUP_TARGETS,
     initialize_rules,
+    review_rule_sources,
     review_rules_cache,
     rules_dict,
 )
@@ -104,7 +104,7 @@ def build_capability_index() -> dict[str, Any]:
     # come from review_rules_cache, the last-registered variant, which is
     # exactly what the engine's process_review emits for the id.
     aggregated: dict[str, dict[str, Any]] = {}
-    for group, target_dict in sorted(_review_group_targets().items()):
+    for group, target_dict in sorted(REVIEW_GROUP_TARGETS.items()):
         for exe_type, rule_maps in sorted(target_dict.items()):
             for rule_map in rule_maps:
                 for rule_id in rule_map:
@@ -122,7 +122,7 @@ def build_capability_index() -> dict[str, Any]:
         entry["requires_disassemble"] = "FUNCTION_REVIEWS" in record["groups"] or (
             rule_id in DISASSEMBLY_EVIDENCE_RULE_IDS
         )
-        entry["source_files"] = sorted(_REVIEW_RULE_SOURCES.get(rule_id) or [])
+        entry["source_files"] = sorted(review_rule_sources.get(rule_id) or [])
         capabilities.append(entry)
 
     # Reviews seeded in code rather than YAML: ids present in the cache but

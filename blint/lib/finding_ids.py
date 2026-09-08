@@ -37,6 +37,8 @@ import hashlib
 import json
 from typing import Any
 
+from blint.logger import LOG
+
 # Bumped only when the ID scheme itself must change semantics; part of the
 # hash input so two schemes can never collide.
 _ID_SCHEME = "blint-finding-id-v1"
@@ -82,14 +84,32 @@ def attach_finding_ids(
 ) -> int:
     """Attach a ``finding_id`` field to each finding, in place.
 
+    IDs are unique within one binary: consumers key suppressions and diffs
+    on them, so two findings sharing an ID would silently collapse into
+    one. Rule and evidence separate them today, but nothing in the engine
+    guarantees no rule will ever emit two findings with the same evidence,
+    so a collision is broken here rather than trusted away — the later
+    finding's ID takes an occurrence counter, and the collision is logged
+    because it usually means the rule should be carrying a locator.
+
     Returns the number of findings that received an ID. The identity digest
     is computed once per binary, not once per finding.
     """
     if not findings:
         return 0
     identity = binary_identity_digest(metadata, file_path)
+    occurrences: dict[str, int] = {}
     for finding in findings:
-        finding["finding_id"] = compute_finding_id(
-            finding.get("id"), identity, _evidence_locator(finding)
-        )
+        rule_id = finding.get("id")
+        locator = _evidence_locator(finding)
+        finding_id = compute_finding_id(rule_id, identity, locator)
+        seen_before = occurrences.get(finding_id, 0)
+        occurrences[finding_id] = seen_before + 1
+        if seen_before:
+            LOG.warning(
+                f"Finding {rule_id} in {file_path} repeats with identical evidence; "
+                "disambiguating its stable id by occurrence."
+            )
+            finding_id = compute_finding_id(rule_id, identity, f"{locator}\x00#{seen_before}")
+        finding["finding_id"] = finding_id
     return len(findings)

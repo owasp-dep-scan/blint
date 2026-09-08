@@ -109,38 +109,27 @@ review_rules_cache: dict[str, Any] = {
 # ReviewRunner). This table is the one place a group name becomes a target
 # dict: the engine loaders and the capability catalog both go through it, so
 # the catalog cannot disagree with the engine about where a rule is applied.
-_REVIEW_GROUP_TARGETS: dict[str, defaultdict[str, list[dict[str, Any]]]] = {}
-
-
-def _review_group_targets() -> dict[str, defaultdict[str, list[dict[str, Any]]]]:
-    """Return the group-constant -> rule-dict mapping, binding the module
-    globals lazily so the dicts are always the live objects
-    ``initialize_rules`` clears and refills in place."""
-    if not _REVIEW_GROUP_TARGETS:
-        _REVIEW_GROUP_TARGETS.update(
-            {
-                "METHOD_REVIEWS": review_methods_dict,
-                "EXE_REVIEWS": review_exe_dict,
-                "SYMBOL_REVIEWS": review_symbols_dict,
-                "IMPORT_REVIEWS": review_imports_dict,
-                "ENTRIES_REVIEWS": review_entries_dict,
-                "FUNCTION_REVIEWS": review_functions_dict,
-                "BINARY_REVIEWS": review_binary_dict,
-            }
-        )
-    return _REVIEW_GROUP_TARGETS
-
+# The dicts are the live objects initialize_rules clears and refills in
+# place, so binding them once here is safe.
+REVIEW_GROUP_TARGETS: dict[str, defaultdict[str, list[dict[str, Any]]]] = {
+    "METHOD_REVIEWS": review_methods_dict,
+    "EXE_REVIEWS": review_exe_dict,
+    "SYMBOL_REVIEWS": review_symbols_dict,
+    "IMPORT_REVIEWS": review_imports_dict,
+    "ENTRIES_REVIEWS": review_entries_dict,
+    "FUNCTION_REVIEWS": review_functions_dict,
+    "BINARY_REVIEWS": review_binary_dict,
+}
 
 # Populated by register_review_rules as annotation blocks load. The engine
-# never reads it; blint.lib.capabilities does, so the catalog's file
+# never reads it; the capability catalog does, so the catalog's file
 # provenance comes from the engine's own load pass instead of a second
 # directory walk. Cleared by initialize_rules like the rule dicts.
-_REVIEW_RULE_SOURCES: dict[str, list[str]] = {}
+review_rule_sources: dict[str, list[str]] = {}
 
 
 def register_review_rules(
     methods_reviews_groups: dict[str, Any],
-    review_rules_cache: dict[str, Any],
     source: str = "",
     warn_unknown_group: bool = False,
 ) -> None:
@@ -175,13 +164,13 @@ def register_review_rules(
             # exactly what the engine's process_review emits.
             review_rules_cache[rule_id] = rule
             if source:
-                known = _REVIEW_RULE_SOURCES.setdefault(rule_id, [])
+                known = review_rule_sources.setdefault(rule_id, [])
                 if source not in known:
                     known.append(source)
         else:
             warn("Default rule has no 'id'. Skipping.")
     group = methods_reviews_groups.get("group")
-    target = _review_group_targets().get(group)
+    target = REVIEW_GROUP_TARGETS.get(group)
     if target is None:
         if warn_unknown_group:
             warn(f"Unknown group '{group}'. Skipping block.")
@@ -265,9 +254,7 @@ def load_default_rules() -> None:
                 methods_reviews_groups = yaml.safe_load(tmp_data)
                 if not methods_reviews_groups:
                     continue
-                register_review_rules(
-                    methods_reviews_groups, review_rules_cache, source=review_methods_file
-                )
+                register_review_rules(methods_reviews_groups, source=review_methods_file)
 
 
 def load_custom_rules(
@@ -312,7 +299,6 @@ def load_custom_rules(
                         continue
                     register_review_rules(
                         methods_reviews_groups,
-                        review_rules_cache,
                         source=str(rule_file_path),
                         warn_unknown_group=True,
                     )
@@ -333,7 +319,7 @@ def initialize_rules(blint_options: BlintOptions) -> None:
     review_functions_dict.clear()
     review_binary_dict.clear()
     review_rules_cache.clear()
-    _REVIEW_RULE_SOURCES.clear()
+    review_rule_sources.clear()
     review_rules_cache.update(
         {
             "PII_READ": {

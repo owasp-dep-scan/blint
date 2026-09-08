@@ -10,6 +10,7 @@ import pytest
 
 from blint import analyze
 from blint.lib.finding_ids import (
+    attach_finding_ids,
     binary_identity_digest,
     compute_finding_id,
 )
@@ -42,6 +43,27 @@ def test_same_rule_different_evidence_gets_distinct_ids():
     id_a = compute_finding_id("WASM-STR-007", "a" * 64, '{"function":1}')
     id_b = compute_finding_id("WASM-STR-007", "a" * 64, '{"function":2}')
     assert id_a != id_b
+
+
+def test_ids_stay_unique_when_a_rule_repeats_identical_evidence():
+    """IDs must be unique within one binary, whatever the engine emits.
+
+    No rule emits two findings with the same evidence today, but consumers
+    key suppressions and diffs on these ids, so a collision must break the
+    tie rather than collapse the two findings into one.
+    """
+    metadata = {"hashes": {"sha256": "c" * 64}}
+    findings = [
+        {"id": "WASM-STR-007", "evidence": {"function": 3}},
+        {"id": "WASM-STR-007", "evidence": {"function": 3}},
+        {"id": "WASM-STR-007", "evidence": {"function": 4}},
+    ]
+    attach_finding_ids(str(SECRETS_WASM), metadata, findings)
+    ids = [f["finding_id"] for f in findings]
+    assert len(set(ids)) == 3
+    # The first occurrence keeps the plain id, so adding a duplicate later
+    # does not re-track the finding that was already there.
+    assert ids[0] == compute_finding_id("WASM-STR-007", "c" * 64, '{"function":3}')
 
 
 def test_binary_identity_digest_prefers_metadata_hash():

@@ -93,7 +93,7 @@ def test_every_engine_review_id_is_catalogued(index):
     """No review the engine can emit is missing from the catalog."""
     catalogued = {e["id"] for e in _by_kind(index, "review")}
     engine_ids = set(analysis_mod.review_rules_cache)
-    for target in analysis_mod._review_group_targets().values():
+    for target in analysis_mod.REVIEW_GROUP_TARGETS.values():
         for rule_maps in target.values():
             for rule_map in rule_maps:
                 engine_ids |= set(rule_map)
