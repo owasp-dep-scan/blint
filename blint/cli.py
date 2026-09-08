@@ -464,6 +464,18 @@ def build_parser() -> argparse.ArgumentParser:
         dest="canonicalize_json",
         help="Emit the result as JSON instead of a table.",
     )
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help="Emit the catalog of checks and reviews blint analyzes with.",
+    )
+    capabilities_parser.set_defaults(capabilities_mode=True)
+    capabilities_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="capabilities_json",
+        help="Emit the catalog as JSON (machine readable; for agents and tooling).",
+    )
     db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
     db_parser.add_argument(
@@ -715,6 +727,19 @@ def run_canonicalize_command(args: argparse.Namespace) -> None:
     console.print(table)
 
 
+def run_capabilities_command(args: argparse.Namespace) -> None:
+    """Run the `blint capabilities` subcommand: print the rule catalog."""
+    import json as _json
+
+    from blint.lib.capabilities import build_capability_index, render_capabilities_table
+
+    index = build_capability_index()
+    if args.capabilities_json:
+        print(_json.dumps(index, indent=2))
+    else:
+        render_capabilities_table(index)
+
+
 def main() -> None:
     """Main function of the blint tool"""
     args = build_args()
@@ -723,6 +748,9 @@ def main() -> None:
         return
     if args.subcommand_name == "canonicalize":
         run_canonicalize_command(args)
+        return
+    if args.subcommand_name == "capabilities":
+        run_capabilities_command(args)
         return
     if args.subcommand_name == "cache":
         run_cache_command(args)

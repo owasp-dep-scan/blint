@@ -18,6 +18,7 @@ from blint.lib.analysis import (
 from blint.lib.android import analyze_android_app
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
+from blint.lib.finding_ids import attach_finding_ids
 from blint.lib.ios import (
     collect_ios_app_detailed,
     enrich_with_bundle_context,
@@ -137,16 +138,38 @@ def run_default_mode(blint_options: BlintOptions) -> None:
 class AnalysisRunner:
     """Class to analyze binaries."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        export_artifacts: bool = True,
+        progress_disabled: bool = False,
+        retain_metadata: bool = False,
+    ) -> None:
+        """Configure the runner for its caller.
+
+        ``export_artifacts`` (CLI default) writes the per-binary
+        ``*-metadata.json`` / wasm report files to ``reports_dir``; the
+        Python API turns it off so ``blint.analyze()`` returns results
+        without writing files. ``retain_metadata`` keeps each unit's
+        exported metadata shape in ``metadata_records`` — used by the API
+        for a single input; never enabled for multi-binary CLI runs, where
+        retaining every parse would be an unbounded memory cost.
+        ``progress_disabled`` mutes the transient progress bar for callers
+        that must not touch the terminal.
+        """
         self.findings: list[dict[str, Any]] = []
         self.reviews: list[dict[str, Any]] = []
         self.fuzzables: list[dict[str, Any]] = []
         self.callgraphs: list[dict[str, Any]] = []
+        self.export_artifacts = export_artifacts
+        self.retain_metadata = retain_metadata
+        self.metadata_records: list[dict[str, Any]] = []
         self.progress: Progress = Progress(
             transient=True,
             redirect_stderr=True,
             redirect_stdout=True,
             refresh_per_second=1,
+            disable=progress_disabled,
         )
         self.task: TaskID | None = None
         self.reviewer: ReviewRunner | None = None
@@ -669,17 +692,22 @@ class AnalysisRunner:
         metadata_to_export = dict(metadata)
         if wasm_report:
             metadata_to_export.pop("wasm_report", None)
-        export_metadata(
-            blint_options.reports_dir,
-            metadata_to_export,
-            f"{os.path.basename(exe_name)}-metadata",
-        )
-        if wasm_report:
+        if self.retain_metadata:
+            # The exported shape (wasm report split off), not the live parse
+            # dict, so an API consumer sees exactly what the CLI exports.
+            self.metadata_records.append({"file_path": f, "metadata": metadata_to_export})
+        if self.export_artifacts:
             export_metadata(
                 blint_options.reports_dir,
-                wasm_report,
-                f"{os.path.basename(exe_name)}-wasm-report",
+                metadata_to_export,
+                f"{os.path.basename(exe_name)}-metadata",
             )
+            if wasm_report:
+                export_metadata(
+                    blint_options.reports_dir,
+                    wasm_report,
+                    f"{os.path.basename(exe_name)}-wasm-report",
+                )
         if wants_callgraph_outputs and metadata.get("callgraph"):
             self.callgraphs.append(
                 {
@@ -691,16 +719,21 @@ class AnalysisRunner:
             self.task,
             description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules",
         )
+        unit_findings: list[dict[str, Any]] = []
         # Native security-property checks (PAC, CET, etc.) are meaningless for
         # Dalvik apps and would fire spuriously; the dex review supplies the
         # relevant behavioural findings instead.
         exe_type = metadata.get("exe_type")
         if exe_type != "dexbinary" and (finding := run_checks(f, metadata)):
-            self.findings += finding
+            unit_findings += finding
         # wasm-tools findings are checks too: pass them through regardless of
         # --no-reviews so triage output stays consistent with other formats.
         if exe_type == "wasmbinary" and (finding := run_wasm_findings(f, metadata)):
-            self.findings += finding
+            unit_findings += finding
+        # Stable finding IDs (D4) are attached per binary, after the binary's
+        # findings exist but before they join the run-wide list.
+        attach_finding_ids(f, metadata, unit_findings)
+        self.findings += unit_findings
         if not blint_options.no_reviews:
             self.do_review(exe_name, f, metadata)
         if blint_options.fuzzy and (fuzzdata := run_prefuzz(metadata)):

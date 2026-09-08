@@ -2,6 +2,8 @@
 
 `blint` allows users to define custom rules to extend its analysis capabilities, particularly for identifying specific behaviors or characteristics within binaries. These rules are defined using YAML files.
 
+To see every built-in check and review — ids, severities, exe types, evidence source, and whether a rule needs `--disassemble` to fire — run `blint capabilities --json`. Rule ids should not collide with existing ones; the catalog's `source_files` field shows where each id is defined today (some ids are deliberately reused across files for the same capability under different exe types).
+
 ## Rule File Structure
 
 A custom rules file is a YAML document with the following top-level keys:
