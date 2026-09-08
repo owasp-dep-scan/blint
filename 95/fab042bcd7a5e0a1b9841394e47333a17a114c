@@ -1,0 +1,36 @@
+README.md
+  h_6a4cc5cdf68def 272-303
+blint/__init__.py
+  h_6a4cc5cdf68def 1-22
+blint/api.py
+  h_6a4cc5cdf68def 1-255
+blint/cli.py
+  h_6a4cc5cdf68def 467-478,730-742,752-754
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 108-194,266-270,310,313-318,336
+blint/lib/capabilities.py
+  h_6a4cc5cdf68def 1-200
+blint/lib/finding_ids.py
+  h_6a4cc5cdf68def 1-95
+blint/lib/runners.py
+  h_6a4cc5cdf68def 21,141-159,164-166,172,695-699,702-703,705-710,722,728,732-736
+docs/RULES.md
+  h_6a4cc5cdf68def 5-6
+tests/test_api.py
+  h_6a4cc5cdf68def 1-267
+tests/test_capabilities.py
+  h_6a4cc5cdf68def 1-176
+tests/test_finding_ids.py
+  h_6a4cc5cdf68def 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "95fab042bcd7a5e0a1b9841394e47333a17a114c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
