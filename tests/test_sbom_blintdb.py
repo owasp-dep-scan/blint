@@ -883,3 +883,64 @@ def test_process_exe_file_surfaces_fuzzy_evidence_and_layer_state(tmp_path, monk
     assert prop_map["internal:blintdb_matched_instruction_hash_count"] == "0"
     assert prop_map["internal:blintdb_matched_assembly_hash_count"] == "0"
     assert prop_map["internal:blintdb_matched_import_hash_count"] == "1"
+
+
+def test_fuzzy_hit_does_not_waive_the_symbol_only_filter(tmp_path):
+    """One project's fuzzy match must not admit another project's weak symbols.
+
+    Symbol-only candidates are held to SYMBOL_ONLY_MATCH_THRESHOLD distinct
+    symbols unless some hash or callgraph evidence exists. That gate is global,
+    so a fuzzy hit anywhere in the lookup would waive it for every candidate —
+    attributing a component on evidence the fuzzy gates themselves reject.
+    """
+    db_file = tmp_path / "blint.db"
+    _create_v3_blintdb(db_file)
+    connection = sqlite3.connect(db_file)
+    # Give the unrelated project enough symbols to clear the score gate in
+    # _finalize_project_matches while staying under the symbol-count gate.
+    connection.executemany(
+        "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, ?)",
+        [(2, "memcpy", "imports"), (2, "malloc", "imports"), (2, "free", "imports")],
+    )
+    connection.commit()
+    connection.close()
+
+    metadata = _fuzzy_metadata(import_hash=None, name="/tmp/unknown/mystery-binary")
+    matches = lookup_project_matches(
+        {"imports": ["puts", "memcpy", "malloc", "free"]},
+        function_hash_index=build_function_hash_index(metadata),
+        binary_metadata=metadata,
+        db_file=str(db_file),
+    )
+
+    purls = {match["project_purl"] for match in matches}
+    # demo earns its place through the fuzzy gates; other has four generic
+    # libc imports and a single colliding fuzzy shape.
+    assert "pkg:generic/demo@1.0.0" in purls
+    assert "pkg:generic/other@2.0.0" not in purls
+
+
+def test_supported_version_stamp_with_a_foreign_layout_is_refused_not_raised(tmp_path):
+    """Accepting more than one schema version means meeting unknown layouts.
+
+    The lookup queries do not swallow SQLite errors, so a database that stamps
+    a supported version without carrying the expected tables must be skipped
+    the way an unsupported one is — never raised out of an SBOM run.
+    """
+    db_file = tmp_path / "blint.db"
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        """
+        CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE Components (component_id INTEGER PRIMARY KEY, purl TEXT);
+        """
+    )
+    connection.executemany(
+        "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
+        (("schema_family", "blint-db"), ("schema_version", "3")),
+    )
+    connection.commit()
+    connection.close()
+
+    assert is_supported_blintdb(str(db_file)) is True
+    assert lookup_project_matches({"imports": ["puts"]}, db_file=str(db_file)) == []

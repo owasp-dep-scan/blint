@@ -322,6 +322,26 @@ def _blintdb_has_callgraph_tables(connection: apsw.Connection) -> bool:
     return len({row[0] for row in rows}) == 2
 
 
+# The tables every lookup query joins. Accepting more than one schema version
+# means blint can meet a database whose layout it has never seen, and the
+# queries below do not swallow SQLite errors — so an unknown layout must be
+# refused here rather than raised out of an SBOM run.
+_REQUIRED_TABLES = ("Projects", "Builds", "Binaries", "Symbols", "FunctionFingerprints")
+
+
+def _blintdb_has_required_tables(connection: apsw.Connection) -> bool:
+    """Whether the database carries every table the lookup queries join."""
+    placeholders = ",".join("?" for _ in _REQUIRED_TABLES)
+    try:
+        rows = connection.execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})",
+            _REQUIRED_TABLES,
+        ).fetchall()
+    except apsw.Error:
+        return False
+    return len({row[0] for row in rows}) == len(_REQUIRED_TABLES)
+
+
 # The similarity hash columns live on two tables: the per-function fuzzy and
 # CFG hashes on FunctionFingerprints, the per-binary import hash on Binaries.
 _HASH_COLUMN_TABLES = {
@@ -809,14 +829,15 @@ def _finalize_project_matches(
             + matched_import_hash_count * IMPORT_HASH_MATCH_WEIGHT
             + matched_cfg_hash_count * CFG_HASH_MATCH_WEIGHT
         )
+        fuzzy_only_qualified = (
+            matched_fuzzy_hash_count >= FUZZY_ONLY_MATCH_THRESHOLD
+            and fuzzy_coverage >= FUZZY_ONLY_MIN_QUERY_COVERAGE
+        )
         if not (
             matched_instruction_hash_count
             or matched_assembly_hash_count
             or matched_callgraph_count >= CALLGRAPH_ONLY_MATCH_THRESHOLD
-            or (
-                matched_fuzzy_hash_count >= FUZZY_ONLY_MATCH_THRESHOLD
-                and fuzzy_coverage >= FUZZY_ONLY_MIN_QUERY_COVERAGE
-            )
+            or fuzzy_only_qualified
             or base_score >= SYMBOL_ONLY_MATCH_THRESHOLD
         ):
             continue
@@ -840,6 +861,7 @@ def _finalize_project_matches(
                 "matched_assembly_hashes": sorted(match["matched_assembly_hashes"])[
                     :DB_EVIDENCE_LIMIT
                 ],
+                "fuzzy_only_qualified": fuzzy_only_qualified,
                 "matched_fuzzy_hash_count": matched_fuzzy_hash_count,
                 "matched_fuzzy_hashes": sorted(match["matched_fuzzy_hashes"])[:DB_EVIDENCE_LIMIT],
                 "matched_cfg_hash_count": matched_cfg_hash_count,
@@ -911,6 +933,12 @@ def lookup_project_matches(
     if not connection:
         return []
     try:
+        if not _blintdb_has_required_tables(connection):
+            LOG.debug(
+                "Skipping blintdb lookup: the database stamps a supported schema version but "
+                "does not carry every table the lookup needs"
+            )
+            return []
         project_matches: dict = {}
         target_binary_name = _normalize_binary_name(
             (binary_metadata or {}).get("name") or (binary_metadata or {}).get("file_path")
@@ -918,7 +946,6 @@ def lookup_project_matches(
         target_binary_names = {target_binary_name} if target_binary_name else set()
         capabilities = blintdb_hash_capabilities(database_file)
         hash_found = False
-        fuzzy_found = False
         if instruction_hashes := normalized_hash_index.get("instruction_hashes"):
             hash_found = _query_hash_batches(
                 connection,
@@ -969,13 +996,17 @@ def lookup_project_matches(
                     binary_filter_params=binary_filter_params,
                 )
                 if not fuzzy_found and binary_filters:
-                    fuzzy_found = _query_hash_batches(
+                    _query_hash_batches(
                         connection,
                         project_matches,
                         fuzzy_hashes,
                         hash_column="fuzzy_hash",
                     )
-                hash_found = hash_found or fuzzy_found
+        # fuzzy_found deliberately does not feed hash_found: that flag waives
+        # the symbol-only filter for every candidate in the lookup, so one
+        # project's fuzzy hit would admit another project's weak symbols on
+        # evidence the fuzzy gates themselves reject. Fuzzy earns a candidate
+        # its place through fuzzy_only_qualified instead, per candidate.
         # cfg_hash is corroboration only (CFG_HASH_MATCH_WEIGHT is 0), so it is
         # merged as evidence and never opens the hash-evidence return gate.
         if (cfg_hashes := normalized_hash_index.get("cfg_hashes")) and capabilities.get(
@@ -1076,6 +1107,7 @@ def lookup_project_matches(
             match
             for match in matches
             if match["matched_symbol_count"] >= SYMBOL_ONLY_MATCH_THRESHOLD
+            or match["fuzzy_only_qualified"]
         ][:limit]
     finally:
         connection.close()
