@@ -1,0 +1,28 @@
+tests/test_diff.py
+  s_526190b23001e8::t_21a4abea554056 637-673
+blint/lib/diff.py
+  s_526190b23001e8::t_1dcfc4caee3de7 989-1002
+  s_526190b23001e8::t_1cc96105cd4a89 1105-1108
+  s_526190b23001e8::t_1e946750fd6c8f 207-212
+  s_526190b23001e8::t_2b8ef294457347 941
+  s_526190b23001e8::t_7535a6549780f8 805-808
+blint/cli.py
+  s_526190b23001e8::t_565ea470875899 7
+  s_526190b23001e8::t_8aa95be41c7707 804-806
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f2b1cca7dd564ec3234125a8dd4d4832ad6ca956",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
