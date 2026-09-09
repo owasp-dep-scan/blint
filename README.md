@@ -282,6 +282,34 @@ options:
 
 </details>
 
+<details>
+<summary><strong>Diff Sub-command Help</strong></summary>
+
+Compare two versions of one binary — inputs may be binaries or exported
+<code>*-metadata.json</code> files. The report covers metadata deltas
+(imports, exports, dependencies, entitlements, sections, identity),
+hardening regressions with an explicit per-property polarity, finding and
+capability-review deltas paired across rebuilds, and — with
+<code>--disassemble</code> — a function-level delta keyed on content hashes,
+so a recompile is not reported as rewritten code.
+
+```shell
+usage: blint diff [-h] [--json] [--disassemble] [--no-reviews] [-q] old_input new_input
+
+positional arguments:
+  old_input      Old version: a binary or a blint *-metadata.json export.
+  new_input      New version: a binary or a blint *-metadata.json export.
+
+options:
+  -h, --help     show this help message and exit
+  --json         Emit the diff report as JSON (machine readable; for agents and tooling).
+  --disassemble  Disassemble binary inputs so the function-level delta (added/removed/changed by content hash) can be computed. Metadata-JSON inputs carry disassembly only if they were generated with --disassemble.
+  --no-reviews   Skip the capability-review delta.
+  -q, --quiet    Disable logging and progress bars.
+```
+
+</details>
+
 ## Python API
 
 Analyze a single binary in process, with the same engine the CLI uses:

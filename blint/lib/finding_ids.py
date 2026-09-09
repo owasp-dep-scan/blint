@@ -65,12 +65,63 @@ def binary_identity_digest(metadata: dict[str, Any], file_path: str) -> str:
     return digest.hexdigest()
 
 
-def _evidence_locator(finding: dict[str, Any]) -> str:
+def evidence_locator(finding: dict[str, Any]) -> str:
     """Canonical string for the finding's evidence, empty when it has none."""
     evidence = finding.get("evidence")
     if not evidence:
         return ""
     return json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
+
+
+# Bumped only when the pairing scheme itself must change semantics; part of
+# the hash input so a pairing key can never be mistaken for a finding_id even
+# by accident.
+_PAIRING_SCHEME = "blint-finding-pair-v1"
+
+
+def compute_finding_pairing_key(rule_id: Any, locator: str) -> str:
+    """Compute the key that pairs one finding across two *versions* of a binary.
+
+    This is deliberately NOT ``compute_finding_id``: the stable ID folds in the
+    whole-file sha256, so every rebuild mints new IDs by design (see the module
+    docstring), while pairing across versions must survive rebuilds. The
+    pairing key hashes only ``(rule_id, evidence locator)`` — the same inputs
+    the ID uses minus the binary identity — i.e. "the same rule firing on the
+    same evidence". Consumers diffing two versions of a binary pair on this
+    and must never pair on ``finding_id``.
+    """
+    payload = "\x00".join((_PAIRING_SCHEME, str(rule_id or ""), locator))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_ID_LENGTH]
+
+
+def attach_pairing_keys(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Attach a ``pairing_key`` field to each item, in place, and index it.
+
+    Works for findings and for reviews (both carry ``id`` and optional
+    ``evidence``). Repeats of one rule with identical evidence get the same
+    occurrence-counter disambiguation ``attach_finding_ids`` uses, so the keys
+    within one side stay unique and the Nth repeat pairs with the Nth repeat
+    on the other side. Reviews are one entry per rule id, so for them the
+    locator is empty and the key reduces to the rule id.
+
+    Returns ``{pairing_key: item}`` for the side — the index a diff pairs
+    against.
+    """
+    index: dict[str, dict[str, Any]] = {}
+    occurrences: dict[str, int] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = compute_finding_pairing_key(item.get("id"), evidence_locator(item))
+        seen_before = occurrences.get(key, 0)
+        occurrences[key] = seen_before + 1
+        if seen_before:
+            key = compute_finding_pairing_key(
+                item.get("id"), f"{evidence_locator(item)}\x00#{seen_before}"
+            )
+        item["pairing_key"] = key
+        index[key] = item
+    return index
 
 
 def compute_finding_id(rule_id: Any, identity: str, locator: str) -> str:
@@ -101,7 +152,7 @@ def attach_finding_ids(
     occurrences: dict[str, int] = {}
     for finding in findings:
         rule_id = finding.get("id")
-        locator = _evidence_locator(finding)
+        locator = evidence_locator(finding)
         finding_id = compute_finding_id(rule_id, identity, locator)
         seen_before = occurrences.get(finding_id, 0)
         occurrences[finding_id] = seen_before + 1

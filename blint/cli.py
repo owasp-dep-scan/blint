@@ -476,6 +476,50 @@ def build_parser() -> argparse.ArgumentParser:
         dest="capabilities_json",
         help="Emit the catalog as JSON (machine readable; for agents and tooling).",
     )
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two versions of a binary (binaries or *-metadata.json files).",
+    )
+    diff_parser.set_defaults(diff_mode=True)
+    diff_parser.add_argument(
+        "old_input",
+        help="Old version: a binary or a blint *-metadata.json export.",
+    )
+    diff_parser.add_argument(
+        "new_input",
+        help="New version: a binary or a blint *-metadata.json export.",
+    )
+    diff_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="diff_json",
+        help="Emit the diff report as JSON (machine readable; for agents and tooling).",
+    )
+    diff_parser.add_argument(
+        "--disassemble",
+        action="store_true",
+        default=False,
+        dest="diff_disassemble",
+        help="Disassemble binary inputs so the function-level delta (added/"
+        "removed/changed by content hash) can be computed. Metadata-JSON "
+        "inputs carry disassembly only if they were generated with --disassemble.",
+    )
+    diff_parser.add_argument(
+        "--no-reviews",
+        action="store_true",
+        default=False,
+        dest="diff_no_reviews",
+        help="Skip the capability-review delta.",
+    )
+    diff_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        dest="quiet_mode",
+        help="Disable logging and progress bars.",
+    )
     db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
     db_parser.add_argument(
@@ -740,6 +784,30 @@ def run_capabilities_command(args: argparse.Namespace) -> None:
         render_capabilities_table(index)
 
 
+def run_diff_command(args: argparse.Namespace) -> None:
+    """Run the `blint diff` subcommand: compare two versions of one binary."""
+    import json as _json
+
+    from blint.lib.diff import DiffError, diff_binary_metadata, render_diff_table
+
+    if args.quiet_mode:
+        LOG.disabled = True
+    try:
+        report = diff_binary_metadata(
+            args.old_input,
+            args.new_input,
+            disassemble=args.diff_disassemble,
+            no_reviews=args.diff_no_reviews,
+        )
+    except DiffError as exc:
+        LOG.error("blint diff failed: %s", exc)
+        raise SystemExit(2) from exc
+    if args.diff_json:
+        print(_json.dumps(report, indent=2, sort_keys=True))
+    else:
+        render_diff_table(report)
+
+
 def main() -> None:
     """Main function of the blint tool"""
     args = build_args()
@@ -751,6 +819,9 @@ def main() -> None:
         return
     if args.subcommand_name == "capabilities":
         run_capabilities_command(args)
+        return
+    if args.subcommand_name == "diff":
+        run_diff_command(args)
         return
     if args.subcommand_name == "cache":
         run_cache_command(args)

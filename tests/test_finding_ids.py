@@ -149,3 +149,39 @@ def test_different_binaries_same_rule_get_different_ids():
         id_a = next(f["finding_id"] for f in a if f["id"] == rule_id)
         id_b = next(f["finding_id"] for f in b if f["id"] == rule_id)
         assert id_a != id_b
+
+
+def test_pairing_key_is_the_cross_version_counterpart_of_the_id():
+    """P4.4's pairing key omits exactly the axis the stable ID adds: the
+    whole-file identity. Same rule + evidence pairs across rebuilds; the
+    finding_id of the same finding does not. The two schemes must also
+    never collide."""
+    from blint.lib.finding_ids import compute_finding_pairing_key
+
+    key_v1 = compute_finding_pairing_key("CHECK_PIE", "")
+    key_v2 = compute_finding_pairing_key("CHECK_PIE", "")
+    assert key_v1 == key_v2, "pairing must survive a rebuild"
+    id_v1 = compute_finding_id("CHECK_PIE", "a" * 64, "")
+    id_v2 = compute_finding_id("CHECK_PIE", "b" * 64, "")
+    assert id_v1 != id_v2, "IDs must NOT pair across rebuilds (whole-file identity)"
+    assert key_v1 != compute_finding_pairing_key("CHECK_NX", "")
+    assert key_v1 != compute_finding_pairing_key("CHECK_PIE", '{"f":1}')
+    assert {key_v1, id_v1}.__len__() == 2, "scheme tags keep the two namespaces apart"
+
+
+def test_attach_pairing_keys_index_is_unique_and_disambiguates_repeats():
+    from blint.lib.finding_ids import attach_pairing_keys
+
+    findings = [
+        {"id": "W", "evidence": {"f": 1}},
+        {"id": "W", "evidence": {"f": 1}},
+        {"id": "W", "evidence": {"f": 2}},
+        {"id": "R", "evidence": None},
+    ]
+    index = attach_pairing_keys(findings)
+    assert len(index) == len(findings), "keys are unique within one side"
+    assert all(f["pairing_key"] for f in findings)
+    # Repeats get distinct keys in list order, like attach_finding_ids.
+    assert findings[0]["pairing_key"] != findings[1]["pairing_key"]
+    # Reviews (evidence-less) reduce to the rule id's key.
+    assert findings[3]["pairing_key"] == index[findings[3]["pairing_key"]]["pairing_key"]

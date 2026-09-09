@@ -67,6 +67,21 @@ def compute_import_hash(import_names: list[str] | None) -> str:
     return _stable_digest("\n".join(normalized))
 
 
+def function_mnemonics(assembly: str) -> list[str]:
+    """The normalized mnemonic sequence of one function's assembly text.
+
+    The same sequence ``function_fuzzy_hash`` hashes, exposed so consumers
+    (the diff's boundary-change test) compare exactly what the hash covers
+    instead of re-parsing the assembly text a second way.
+    """
+    mnemonics = []
+    for line in assembly.split("\n"):
+        token = line.strip().split(None, 1)
+        if token and token[0]:
+            mnemonics.append(token[0].lower())
+    return mnemonics
+
+
 def function_fuzzy_hash(assembly: str) -> str:
     """Hash the mnemonic sequence of one disassembled function.
 
@@ -76,11 +91,7 @@ def function_fuzzy_hash(assembly: str) -> str:
     """
     if not assembly:
         return ""
-    mnemonics = []
-    for line in assembly.split("\n"):
-        token = line.strip().split(None, 1)
-        if token and token[0]:
-            mnemonics.append(token[0].lower())
+    mnemonics = function_mnemonics(assembly)
     if not mnemonics:
         return ""
     return _stable_digest("\n".join(mnemonics))
