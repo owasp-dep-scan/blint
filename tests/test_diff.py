@@ -634,6 +634,43 @@ def test_self_diff_is_empty_on_every_layer(tmp_path):
     assert report["imports"].get("added_count", 0) == 0
 
 
+def test_differing_bytes_are_never_reported_unchanged(tmp_path):
+    """Two files that provably differ must not be reported as unchanged.
+
+    The analysis layers can all come back equal — a patched instruction is
+    invisible without ``--disassemble``, and a static binary offers no
+    import evidence — but the sha256 is proof the inputs differ. "No
+    differences found" for a modified build is the one answer a change
+    detector must never give.
+    """
+    old_p = _write_meta(_mkdir(tmp_path, "old"), _meta(hashes={"sha256": "a" * 64}))
+    new_p = _write_meta(_mkdir(tmp_path, "new"), _meta(hashes={"sha256": "b" * 64}))
+    report = diff_binary_metadata(old_p, new_p)
+    assert report["unchanged"] is False
+    assert report["identity"]["file_sha256"] == {"old": "a" * 64, "new": "b" * 64}
+
+
+@needs_corpus
+def test_a_patched_instruction_is_not_reported_unchanged(tmp_path):
+    """The same contract against real bytes: one flipped byte inside the
+    text of a stripped static binary changes no metadata blint reports
+    without disassembly, and must still not read as an all-clear."""
+    original = tmp_path / "original.bin"
+    patched = tmp_path / "patched.bin"
+    payload = bytearray(GO_ELF_STRIPPED.read_bytes())
+    original.write_bytes(bytes(payload))
+    payload[len(payload) // 2] ^= 0xFF
+    patched.write_bytes(bytes(payload))
+
+    report = diff_binary_metadata(str(original), str(patched))
+
+    assert report["unchanged"] is False
+    assert report["identity"]["file_sha256"]["old"] != report["identity"]["file_sha256"]["new"]
+    # The layers that could not see the change say so rather than voting
+    # "equal": the function layer never ran here.
+    assert report["functions"]["status"] == "unavailable"
+
+
 def test_report_is_deterministic_across_processes(tmp_path):
     old = _meta(security_properties={**_meta()["security_properties"], "canary": False})
     old_p = _write_meta(_mkdir(tmp_path, "old"), old)

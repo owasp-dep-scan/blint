@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
 from blint.lib.parallel import resolve_jobs
 from blint.lib.runners import run_default_mode, run_sbom_mode
@@ -800,7 +801,9 @@ def run_diff_command(args: argparse.Namespace) -> None:
             no_reviews=args.diff_no_reviews,
         )
     except DiffError as exc:
-        LOG.error("blint diff failed: %s", exc)
+        # Straight to stderr, not through LOG: -q silences the logger, and a
+        # non-zero exit with no reason is the least useful thing CI can get.
+        print(f"blint diff failed: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
     if args.diff_json:
         print(_json.dumps(report, indent=2, sort_keys=True))

@@ -204,7 +204,12 @@ def _recompute_findings_reviews(side: DiffSide) -> None:
         side.findings = run_checks(side.path, metadata)
         if exe_type == "wasmbinary":
             side.findings += run_wasm_findings(side.path, metadata)
-    attach_finding_ids(side.path, metadata, side.findings)
+    # A stable ID identifies the analyzed binary's bytes. For a
+    # metadata-JSON side those bytes are not here: hashing the export in
+    # their place would mint IDs that look like a binary's and match no
+    # binary. Such a side's findings pair and report without one.
+    if side.kind == "binary" or (metadata.get("hashes") or {}).get("sha256"):
+        attach_finding_ids(side.path, metadata, side.findings)
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
     if reviewer.results:
@@ -797,7 +802,10 @@ def _function_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[
         "added_count": len(added),
         "removed_names": sorted({str(e.get("name")) for e in removed})[:LIST_LIMIT],
         "removed_count": len(removed),
-        "truncated": len(changed) > LIST_LIMIT,
+        "truncated": max(
+            len(changed), len(scope_changed), len(added), len(removed), len(set(unverifiable))
+        )
+        > LIST_LIMIT,
     }
 
 
@@ -930,9 +938,7 @@ def diff_binary_metadata(
         "unchanged": not any(
             delta
             for delta in (
-                _has_delta(
-                    identity, bool(identity.get("changed_fields") or identity.get("toolchain"))
-                ),
+                _has_delta(identity, _identity_changed(identity)),
                 _count_delta(dependencies),
                 _count_delta(imports),
                 _count_delta(exports),
@@ -978,6 +984,20 @@ def _count_delta(layer: dict[str, Any]) -> bool:
     if layer.get("status") in _ABSENCE_STATUSES:
         return False
     return bool(layer.get("added_count") or layer.get("removed_count"))
+
+
+def _identity_changed(identity: dict[str, Any]) -> bool:
+    """Whether the identity layer observed a difference.
+
+    Differing file bytes count. A diff whose analysis layers all came back
+    equal, or could not run, must not claim two different files are
+    unchanged: the sha256 is proof they differ, and reporting "no
+    differences" for a binary that was rebuilt with a modified instruction
+    is the one answer a change detector must never give.
+    """
+    return bool(
+        identity.get("changed_fields") or identity.get("toolchain") or identity.get("file_sha256")
+    )
 
 
 def _entitlements_changed(entitlements: dict[str, Any]) -> bool:
@@ -1082,6 +1102,10 @@ def render_diff_table(report: dict[str, Any]) -> None:
     )
     if report.get("unchanged"):
         console.print(f"{title}: no differences found")
+        # The layers that could not observe anything are part of the answer:
+        # "nothing changed" and "nothing was looked at" must not read alike.
+        for note in report.get("notes") or []:
+            console.print(f"  note: {note}")
         return
     table = Table(box=ROUNDED, title=title, show_lines=False)
     table.add_column("Layer", style="cyan", no_wrap=True)
