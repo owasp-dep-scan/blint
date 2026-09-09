@@ -1,0 +1,36 @@
+blint/db.py
+  h_6a4cc5cdf68def 18-25,71-75,83-137,148-159,423-424,429,524-692,1364-1511,1570-1625
+blint/lib/banners.py
+  h_6a4cc5cdf68def 1-166
+blint/lib/binary.py
+  h_6a4cc5cdf68def 26,1341-1345
+blint/lib/cache.py
+  h_6a4cc5cdf68def 74-77
+blint/lib/sbom.py
+  h_6a4cc5cdf68def 42,1046-1070,1083-1116
+docs/CUSTOM_PROPERTIES.md
+  h_6a4cc5cdf68def 130-154
+tests/scripts/ab_blintdb_v2_identity.py
+  h_6a4cc5cdf68def 4,6-8,54-65,74-80
+tests/scripts/build_static_linkage_corpus.py
+  h_6a4cc5cdf68def 1-305
+tests/scripts/measure_banner_precision.py
+  h_6a4cc5cdf68def 1-113
+tests/scripts/measure_static_linkage.py
+  h_6a4cc5cdf68def 1-190
+tests/test_sbom_blintdb.py
+  h_6a4cc5cdf68def 805-807
+tests/test_static_linkage.py
+  h_6a4cc5cdf68def 1-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "da1958f1e2479698e8045a3bb358e720dbd1c00c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
