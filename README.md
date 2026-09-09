@@ -120,11 +120,14 @@ blint produces several JSON artifacts in the specified reports directory.
 
 ## Advanced Usage: SBOM Generation with blintdb
 
-For C and C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb v2**, a pre-compiled database built from real project outputs, to improve component identification with:
+For C and C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb**, a pre-compiled database built from real project outputs, to improve component identification with:
 
 - project-level symbol matching
 - binary-name hints
 - optional disassembly hash matching when deep mode is enabled
+- similarity-hash matching (function fuzzy hashes, and the binary import-set digest) when the database carries those columns, so a compiler-drifted recompile degrades to fuzzy matching instead of missing
+
+Databases with schema version 2 and version 3 are both supported; the similarity-hash columns are detected per database, so a v2 database (or one whose hash columns are unpopulated) keeps working with exact matching only. Matched components record this as an `internal:blintdb_fuzzy_layer` property (`active`, or a named `unavailable_*`/`inactive_*` state such as `unavailable_hash_columns_absent` or `inactive_no_disassembly`) so "the fuzzy layer found nothing" is never confused with "the fuzzy layer could not run".
 
 The workflow is a two-step process:
 

@@ -31,6 +31,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.db import (
+    blintdb_fuzzy_layer_state,
     build_callgraph_canon_names,
     build_function_hash_index,
     build_symbol_source_map,
@@ -1024,6 +1025,19 @@ def process_exe_file(
                 ),
                 "blintdb_matched_assembly_hash_count": evidence.get("matched_assembly_hash_count"),
                 "blintdb_matched_assembly_hashes": evidence.get("matched_assembly_hashes", []),
+                # The similarity-hash evidence keys follow the same contract as
+                # the exact-hash keys above: always present on a matched
+                # component, zero when the layer did not contribute.
+                # blintdb_fuzzy_layer names why — a v2 database, unpopulated
+                # columns, or a run without disassembly must read as its own
+                # state instead of a bare zero.
+                "blintdb_matched_fuzzy_hash_count": evidence.get("matched_fuzzy_hash_count"),
+                "blintdb_matched_fuzzy_hashes": evidence.get("matched_fuzzy_hashes", []),
+                "blintdb_matched_cfg_hash_count": evidence.get("matched_cfg_hash_count"),
+                "blintdb_matched_cfg_hashes": evidence.get("matched_cfg_hashes", []),
+                "blintdb_matched_import_hash_count": evidence.get("matched_import_hash_count"),
+                "blintdb_matched_import_hashes": evidence.get("matched_import_hashes", []),
+                "blintdb_fuzzy_layer": blintdb_fuzzy_layer_state(metadata=metadata),
                 "blintdb_matched_callgraph_count": evidence.get("matched_callgraph_count"),
                 "blintdb_matched_callgraph_functions": evidence.get(
                     "matched_callgraph_functions", []
