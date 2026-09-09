@@ -1,0 +1,28 @@
+README.md
+  h_6a4cc5cdf68def 285-312
+blint/cli.py
+  h_6a4cc5cdf68def 479-522,787-810,823-825
+blint/lib/diff.py
+  h_6a4cc5cdf68def 1-1227
+blint/lib/finding_ids.py
+  h_6a4cc5cdf68def 68,76-126,155
+blint/lib/similarity.py
+  h_6a4cc5cdf68def 70-84,94
+tests/test_cli.py
+  h_6a4cc5cdf68def 21-42
+tests/test_diff.py
+  h_6a4cc5cdf68def 1-821
+tests/test_finding_ids.py
+  h_6a4cc5cdf68def 152-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "982b81b826b248c5ce2bf913f3c4409c83262dc8",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
