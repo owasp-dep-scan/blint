@@ -71,7 +71,10 @@ from blint.db import _apply_runtime_pragmas, _execute
 from blint.lib.binary import parse as binary_parse
 from blint.logger import LOG
 
-CACHE_SCHEMA_VERSION = 1
+# 2: parse output changed in P4.3 — vendored-banner strings matching
+# blint.lib.banners signatures are now kept in `strings` — so entries written
+# by an earlier cache schema must not be served to a banner-expecting reader.
+CACHE_SCHEMA_VERSION = 2
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

@@ -127,6 +127,31 @@ When blint parses a native binary it records the symbol tables and import and ex
 | `internal:hash_path`                | single value   | The path used for the binary hash lookup.                                                   |
 | `internal:serviceable`              | boolean        | Whether the binary is considered serviceable.                                               |
 
+## blintdb component attribution properties
+
+These properties appear on library components produced from the local blintdb database (`blint sbom --use-blintdb`). `internal:blintdb_attribution` names the evidence layer that earned the component its place, so a reader can tell the granularities apart without consulting anything else: `whole_binary` (symbols or hashes matched at binary granularity), `member` (static-archive member evidence), or `whole_binary+member` (both layers independently agree).
+
+| Property                                | Value type      | When emitted                                              | What it captures                                                                                                                                                                                                      |
+| --------------------------------------- | --------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal:blintdb_attribution`          | single value    | On every blintdb-matched component                        | The evidence layer that surfaced the component: `whole_binary`, `member`, or `whole_binary+member`.                                                                                                                   |
+| `internal:blintdb_fuzzy_layer`          | single value    | On every blintdb-matched component                        | Named state of the similarity-hash layer: `active`, or one of the `unavailable_*` / `inactive_*` reasons it could not run (a v2 database, unpopulated columns, a run without disassembly).                            |
+| `internal:blintdb_member_layer`         | single value    | When archive-member evidence contributed to the component | Named state of the member-level layer: `active`, or the `unavailable_*` / `inactive_*` reason it could not run (no member rows in the database, no disassembly, no function hashes).                                  |
+| `internal:blintdb_matched_member_count` | number like     | When member evidence contributed                          | How many archive members qualified.                                                                                                                                                                                   |
+| `internal:blintdb_member_names`         | comma list      | When member evidence contributed                          | The qualified member object names (`deflate.o`, `inflate.o`, ...).                                                                                                                                                    |
+| `internal:blintdb_member_details`       | comma list      | When member evidence contributed                          | Per-member evidence: coverage measured against the member's own function population, distinct fuzzy and exact hash matches, the address-adjacency (contiguity) ratio, and which qualification path the member passed.  |
+
+Member-level matching is what attributes statically linked binaries: a stripped static binary has no imports and no symbol names, but its archive members are present whole, so function hashes matched against the database's per-member fingerprints recover the embedded library. Component candidates qualified only by member evidence carry the `member` attribution value and the per-member evidence above; they never relax any whole-binary gate.
+
+## Vendored banner properties
+
+These properties come from vendored-source banner detection: version strings a vendored library copy leaves in the binary (for example `deflate 1.3.1 Copyright ...`). Every signature requires the version to appear inside a string that also names the library, so a bare version-like string is never a banner. Banner evidence is independent of blintdb; a banner for a library blintdb already attributed is recorded on that component as corroboration instead of a duplicate.
+
+| Property                         | Value type   | When emitted                                  | What it captures                                                                                   |
+| -------------------------------- | ------------ | --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `internal:vendored_banner_layer` | single value | On banner components (and corroborated ones)  | Named state of the banner scan: `active`, or `inactive_no_strings` when the binary had no strings. |
+| `internal:vendored_attribution`  | single value | On banner components                          | Always `vendored_banner`, distinguishing banner-attributed components from hash-attributed ones.    |
+| `internal:vendored_banner`       | single value | On banner components                          | The matched banner string, truncated, as the evidence for the version claim.                        |
+
 ## ELF ABI and runtime dependency properties
 
 These properties come from the ELF ABI analysis. The first three sit on the parent component and describe the binary as a whole; the rest sit on the library components the analysis produces. See [`abi_analysis`](METADATA.md#abi_analysis) for how the values are derived.

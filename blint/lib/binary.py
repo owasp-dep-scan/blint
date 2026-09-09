@@ -23,6 +23,7 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.banners import is_probable_banner_string
 from blint.lib.codesign_macho import SUPERBLOB_MAGIC, parse_superblob, signature_summary
 from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.disassembler import disassemble_functions
@@ -1337,6 +1338,11 @@ def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
                         (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH))
                         or secret_type
                         or is_review_relevant_string(s)
+                        # Vendored-source version banners are short plain text
+                        # that both entropy and length gates reject; the
+                        # banner layer (P4.3) reads this list, so strings
+                        # matching its library-anchored signatures are kept.
+                        or is_probable_banner_string(s)
                     ):
                         strings_list.append(
                             {

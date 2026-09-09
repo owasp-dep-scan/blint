@@ -39,6 +39,7 @@ from blint.db import (
 )
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_services import detect_services
+from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.ios import collect_ios_app
 from blint.lib.parallel import (
@@ -1042,6 +1043,31 @@ def process_exe_file(
                 "blintdb_matched_callgraph_functions": evidence.get(
                     "matched_callgraph_functions", []
                 ),
+                # blintdb_attribution names the evidence layer that earned this
+                # component its place: whole_binary (symbols/hashes matched at
+                # binary granularity), member (static-archive member evidence
+                # from the P4.3 layer), or whole_binary+member (both layers
+                # independently agree). A reader can therefore tell a member-
+                # level attribution from a whole-binary one without consulting
+                # the per-layer states.
+                "blintdb_attribution": evidence.get("blintdb_attribution", "whole_binary"),
+                # Member-layer keys exist only when the archive-member layer
+                # fired for this component; a component attributed purely from
+                # whole-binary evidence carries none of them.
+                "blintdb_member_layer": evidence.get("blintdb_member_layer"),
+                "blintdb_matched_member_count": evidence.get("blintdb_matched_member_count"),
+                "blintdb_member_names": [
+                    member["member_name"]
+                    for member in evidence.get("blintdb_members", [])
+                ],
+                "blintdb_member_details": [
+                    f"{member['member_name']} coverage={member['member_coverage']}"
+                    f" fuzzy={member['matched_fuzzy_hash_count']}"
+                    f" exact={member['matched_exact_hash_count']}"
+                    f" contiguity={member['contiguity_ratio']}"
+                    f" qualification={member['qualification']}"
+                    for member in evidence.get("blintdb_members", [])
+                ],
             }
             comp = create_dynamic_component(
                 {"purl": binary_purl, "tag": "NEEDED"},
@@ -1053,6 +1079,40 @@ def process_exe_file(
                 },
             )
             lib_components.append(comp)
+
+    # Vendored-source banners (P4.3): version strings a vendored copy leaves in
+    # the binary. An evidence layer independent of blintdb — a banner claims
+    # library and version directly — so it runs regardless of --use-blintdb.
+    # A banner hit on a library blintdb already attributed corroborates that
+    # component instead of emitting a duplicate.
+    banner_result = detect_vendored_banners(metadata)
+    for banner in banner_result["banners"]:
+        banner_evidence = {
+            "vendored_banner_layer": banner_result["state"],
+            "vendored_attribution": "vendored_banner",
+            "vendored_banner": banner["banner"],
+        }
+        existing = next(
+            (
+                comp
+                for comp in lib_components
+                if getattr(comp, "purl", None) == banner["purl"]
+            ),
+            None,
+        )
+        if existing is not None:
+            for key, value in banner_evidence.items():
+                existing.properties.append(Property(name=f"internal:{key}", value=value))
+        else:
+            # Name and version come from the purl, the same way every other
+            # dynamic component derives them.
+            lib_components.append(
+                create_dynamic_component(
+                    {"purl": banner["purl"], "tag": "NEEDED"},
+                    exe,
+                    banner_evidence,
+                )
+            )
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
