@@ -1,0 +1,24 @@
+README.md
+  h_6a4cc5cdf68def 123,128-130
+blint/db.py
+  h_6a4cc5cdf68def 13-16,18,23-67,73-83,204-211,236-247,255-256,270-278,284-287,325-424,455-457,476-483,485,494-501,618-663,763-766,778-780,788-800,802-811,816-820,843-850,865-866,885,891-893,919,921,955-998,1014-1040,1049-1051,1130-1135
+blint/lib/sbom.py
+  h_6a4cc5cdf68def 34,1028-1040
+tests/scripts/ab_blintdb_v2_identity.py
+  h_6a4cc5cdf68def 1-387
+tests/scripts/measure_fuzzy_collisions.py
+  h_6a4cc5cdf68def 1-472
+tests/test_sbom_blintdb.py
+  h_6a4cc5cdf68def 6-21,135-293,480-885
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "1e528cc17ba5d6f071909cb0a195e3ea8d3c3556",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
