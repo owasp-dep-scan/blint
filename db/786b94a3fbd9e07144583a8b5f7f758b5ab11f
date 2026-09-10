@@ -1,0 +1,16 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 53
+blint/lib/ios.py
+  h_6a4cc5cdf68def 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "db786b94a3fbd9e07144583a8b5f7f758b5ab11f",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
