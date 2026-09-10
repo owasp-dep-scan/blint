@@ -1,0 +1,14 @@
+blint/lib/macos_bundle.py
+  h_6a4cc5cdf68def 98-117,303-330,383-386,396-408
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "966c14faabac395922df2a50132c8a6be455e54d",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
