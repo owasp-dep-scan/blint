@@ -1,0 +1,24 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 51,3191-3197
+blint/lib/ios.py
+  h_6a4cc5cdf68def 17,493,500-503
+blint/lib/swift_metadata.py
+  h_6a4cc5cdf68def 1-296
+docs/METADATA.md
+  h_6a4cc5cdf68def 176-179,225-248,671-683
+hash_ab.py
+  h_6a4cc5cdf68def 1-16
+tests/test_swift_metadata.py
+  h_6a4cc5cdf68def 1-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "42b15b04447308d9e379737c294f1a2b7d3f139c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
