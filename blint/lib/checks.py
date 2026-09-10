@@ -24,6 +24,25 @@ def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
     return ", ".join(names[:5])
 
 
+def check_objc_load_methods(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports classes whose ``+load`` runs before ``main``.
+
+    Non-lazy classes are listed in ``__objc_nlclslist`` precisely because the
+    runtime must execute their ``+load`` during image setup — code with no
+    caller, which is an execution-order and persistence review surface rather
+    than a defect.
+    """
+    objc = metadata.get("objc_metadata") or {}
+    names = [
+        entry.get("name") for entry in objc.get("nonlazy_classes") or [] if entry.get("name")
+    ]
+    if not names:
+        return True
+    return ", ".join(sorted(names)[:10])
+
+
 def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
     return metadata.get("is_pie") is not False
 

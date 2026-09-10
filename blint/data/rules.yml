@@ -20,6 +20,20 @@
     - dotnetbinary
     - MachO
     - mips-executable
+- id: CHECK_OBJC_LOAD_METHODS
+  title: Objective-C +load Methods Run Before Main
+  description: |
+    The binary registers non-lazy Objective-C classes (`__objc_nlclslist`),
+    which means the Objective-C runtime executes their `+load` methods during
+    image setup — before the application's `main` and with no caller in the
+    code. That is a legitimate hook most apps use (analytics, crash
+    reporters), but it is also the earliest code that runs in the process,
+    invisible to entry-point-based review, and a classic persistence or
+    environment-tamper point. Review what these classes initialize.
+  severity: info
+  exe_types:
+    - MachO
+    - genericbinary
 - id: CHECK_WX_SEGMENTS
   title: Writable and Executable Memory Segment
   description: |

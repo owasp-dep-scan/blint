@@ -27,6 +27,7 @@ from blint.lib.checks import (
     check_libc_portability,
     check_link_closure,
     check_nx,
+    check_objc_load_methods,
     check_pie,
     check_relro,
     check_rpath,
