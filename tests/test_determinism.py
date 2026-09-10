@@ -347,3 +347,36 @@ def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
     )
     for entry in depends:
         assert entry == sorted(entry), "dependsOn must be serialized in sorted order"
+
+
+def test_root_depends_on_is_sorted_regardless_of_component_order(tmp_path):
+    """The promoted-root ``dependsOn`` list must be sorted on the way out.
+
+    ``create_sbom`` builds the root component's ``dependsOn`` from the
+    component list, which arrives in directory-scan order. POSIX scandir
+    happens to be sorted for most directories, which is why the end-to-end
+    seed test above passed for years — on Windows the order differs and the
+    unsorted list shipped. Feed deliberately unsorted refs and assert the
+    emitted list is sorted (regression for the Windows CI failure).
+    """
+    from blint.cyclonedx.spec import BomFormat, Component, CycloneDX, Metadata, RefType, Type
+    from blint.lib.sbom import create_sbom
+
+    sbom = CycloneDX(bomFormat=BomFormat.CycloneDX, specVersion="1.6", version=1)
+    sbom.metadata = Metadata()
+    parent = Component(type=Type.application, name="scan-root")
+    parent.bom_ref = RefType("pkg:generic/scan-root")
+    sbom.metadata.component = parent
+    for ref in ("pkg:generic/zeta", "pkg:generic/alpha", "pkg:generic/mid"):
+        child = Component(type=Type.library, name=ref.rsplit("/", 1)[-1])
+        child.bom_ref = RefType(ref)
+        parent.components = [*(parent.components or []), child]
+
+    out_file = tmp_path / "sbom.json"
+    create_sbom(parent.components, [], str(out_file), sbom, False, {})
+    bom = json.loads(out_file.read_text())
+    root = next(
+        d for d in bom["dependencies"] if d["ref"] == "pkg:generic/scan-root"
+    )
+    assert root["dependsOn"] == sorted(root["dependsOn"])
+    assert root["dependsOn"] == ["pkg:generic/alpha", "pkg:generic/mid", "pkg:generic/zeta"]

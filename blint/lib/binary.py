@@ -50,6 +50,7 @@ from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
+from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
 from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
@@ -2239,6 +2240,47 @@ def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
     return False
 
 
+# PE spellings of the stack-protector runtime, matched as lowercase substrings
+# so x86 decoration (`@__security_check_cookie@8`) still matches.
+PE_STACK_CHK_MARKERS = (
+    "security_check_cookie",
+    "stack_chk_fail",
+    "stack_chk_guard",
+    "rtc_checkstackvars",
+)
+
+
+def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
+    """Explicit canary verdict for a PE, or None when there is no evidence.
+
+    Drives ``has_canary`` (and through it CHECK_CANARY) the same way the ELF
+    and Mach-O paths do — the rule only fires on an explicit ``False``, so a
+    PE that never set the key silently read as protected. Evidence order:
+    the stack-protector runtime symbols the binary itself references win over
+    the load-config guard flag, which is the same source
+    ``construct_security_properties`` uses for ``security_properties.canary``.
+    A PE with no load configuration and no marker symbol gets no verdict:
+    unknown is reported as absent, not as clean (rule 14).
+    """
+    for source in ("symtab_symbols", "imports"):
+        for symbol in metadata.get(source) or []:
+            if not isinstance(symbol, dict):
+                continue
+            name = symbol.get("short_name") or symbol.get("name") or ""
+            if isinstance(name, str) and any(
+                marker in name.lower() for marker in PE_STACK_CHK_MARKERS
+            ):
+                return True
+    try:
+        if not parsed_obj.has_configuration:
+            return None
+        load_config = parsed_obj.load_configuration
+        guard_flags = lief.PE.LoadConfiguration.IMAGE_GUARD
+        return not load_config.has(guard_flags.SECURITY_COOKIE_UNUSED)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
     """True when the slice carries an embedded code-signature blob.
 
@@ -3146,6 +3188,13 @@ def parse(
         # (compact unwind, eh_frame); recover the function starts they list so
         # disassembly and reviews are not blind on exactly these inputs.
         if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
+            # Swift reflection metadata (__swift5_* on Mach-O, .swift5_* on
+            # ELF) names every Swift type, its fields and its metadata access
+            # functions — evidence in its own right and a function oracle for
+            # stripped Swift binaries (issue #109 for the ELF spelling).
+            if swift_metadata := parse_swift_metadata(parsed_obj):
+                metadata["swift_metadata"] = swift_metadata
+                metadata = merge_swift_functions(metadata)
             metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
         # SDK-assisted attribution has to precede the dependency graph: it
@@ -4118,6 +4167,11 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["imports"],
             metadata["dynamic_entries"],
         ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
+        # Stack-protector evidence, same as the ELF and Mach-O paths: an
+        # explicit verdict (or none) rather than a silently absent key that
+        # CHECK_CANARY collapses into "protected".
+        if (pe_canary := _pe_has_canary(parsed_obj, metadata)) is not None:
+            metadata["has_canary"] = pe_canary
         # Attempt to detect if this PE is a driver
         if metadata["dynamic_entries"]:
             for e in metadata["dynamic_entries"]:

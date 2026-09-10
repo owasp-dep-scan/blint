@@ -24,6 +24,12 @@ from blint.lib.ios import (
     enrich_with_bundle_context,
     is_ios_app,
 )
+from blint.lib.macos_bundle import (
+    collect_macos_bundle_detailed,
+    find_macos_bundles,
+    is_macos_bundle,
+    path_inside_any_bundle,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -91,12 +97,19 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
         LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
     android_files = []
     ios_files = []
+    macos_bundles = []
     for src in blint_options.src_dir_image:
         if files := find_android_files(src):
             android_files += files
         if files := find_ios_files(src):
             ios_files += files
-    return generate(blint_options, exe_files, android_files, ios_files)
+        if files := find_macos_bundles(src):
+            macos_bundles += files
+    # A bundle directory covers everything inside it (the walker descends
+    # into embedded bundles itself), so loose executables discovered within
+    # one must not also be analysed as top-level units.
+    exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
+    return generate(blint_options, exe_files, android_files, ios_files, macos_bundles)
 
 
 def run_default_mode(blint_options: BlintOptions) -> None:
@@ -111,6 +124,15 @@ def run_default_mode(blint_options: BlintOptions) -> None:
             "Callgraph export was requested without --disassemble; no callgraph artifacts will be generated."
         )
     exe_files = gen_file_list(blint_options.src_dir_image)
+    macos_bundles = []
+    for src in blint_options.src_dir_image:
+        if files := find_macos_bundles(src):
+            macos_bundles += files
+    # A bundle directory covers everything inside it (the walker descends
+    # into embedded bundles itself), so loose executables discovered within
+    # one must not also be analysed as top-level units.
+    exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
+    exe_files += macos_bundles
     analyzer = AnalysisRunner()
     findings, reviews, fuzzables, callgraphs = analyzer.start(blint_options, exe_files)
     report(
@@ -612,6 +634,12 @@ class AnalysisRunner:
             if archive_processed:
                 self._mark_success("top-level")
             return
+        elif is_macos_bundle(f):
+            bundle_processed = self._process_macos_bundle(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            if bundle_processed:
+                self._mark_success("top-level")
+            return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
@@ -665,6 +693,51 @@ class AnalysisRunner:
             return True
         finally:
             shutil.rmtree(app["temp_dir"], ignore_errors=True)
+
+    def _process_macos_bundle(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Walk a macOS bundle (.app/.framework/.dSYM/.appex/.xpc) and analyse
+        each contained Mach-O.
+
+        The shape mirrors ``_process_ios_file`` minus the extraction: a bundle
+        is a directory, so there is nothing to unpack and nothing to clean up.
+        Every member is isolated — one bad framework records a failure and the
+        remaining members still get analysed.
+
+        Returns ``True`` when the bundle was collected and all members were
+        attempted, ``False`` when the bundle itself was skipped.
+        """
+        assert self.task is not None
+        bundle, collect_reason = collect_macos_bundle_detailed(f)
+        if bundle is None:
+            self._record_skip(f, "top-level", collect_reason or "collect_failed")
+            return False
+        bundle_info = bundle["bundle_info"]
+        for entry in bundle["binaries"]:
+            bin_path = entry["path"]
+            role = entry["role"]
+            self.progress.update(
+                self.task,
+                description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
+            )
+            # Each member is its own unit: a member that fails to parse must
+            # not take the whole bundle down with it.
+            self._mark_attempted("bundle-member")
+            try:
+                metadata = self._parse_with_cache(bin_path, blint_options, "bundle-member")
+                enrich_with_bundle_context(
+                    metadata,
+                    bundle_info,
+                    role,
+                    entry.get("bundle_path"),
+                    context_key="macos_bundle",
+                )
+                self._finalize_metadata(bin_path, metadata, blint_options, wants_callgraph_outputs)
+                self._mark_success("bundle-member")
+            except Exception as e:  # noqa: BLE001
+                self._record_failure(bin_path, "bundle-member", "process", e)
+        return True
 
     def _finalize_metadata(
         self,

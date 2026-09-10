@@ -23,12 +23,22 @@ import lief
 from blint.logger import LOG
 
 # class_t offsets
+_CLASS_ISA = 0
 _CLASS_SUPERCLASS = 8
 _CLASS_DATA = 32
 # class_ro_t offsets
 _RO_NAME = 0x18
 _RO_BASE_METHODS = 0x20
 _RO_BASE_PROTOCOLS = 0x28
+_RO_IVARS = 0x30
+_RO_BASE_PROPERTIES = 0x40
+# category_t offsets (verified against otool -o on real arm64e binaries)
+_CAT_CLS_NAME = 0x00
+_CAT_CLS = 0x08
+_CAT_INSTANCE_METHODS = 0x10
+_CAT_CLASS_METHODS = 0x18
+_CAT_PROTOCOLS = 0x20
+_CAT_INSTANCE_PROPERTIES = 0x28
 # protocol_t offsets
 _PROTO_NAME = 8
 _PROTO_INSTANCE_METHODS = 0x18
@@ -40,6 +50,11 @@ _ENTSIZE_MASK = 0xFFFF
 _MAX_CLASSES = 20000
 _MAX_METHODS_PER_LIST = 4000
 _MAX_PROTOCOLS = 10000
+_MAX_CATEGORIES = 5000
+_MAX_NONLAZY_CLASSES = 5000
+_MAX_IVARS_PER_LIST = 500
+_MAX_PROPERTIES_PER_LIST = 200
+_MAX_DEGRADATIONS = 32
 _MAX_STRING = 512
 
 
@@ -205,6 +220,82 @@ def _parse_method_list(reader: _MachoReader, mlist_va: int | None) -> list[str]:
     return [name for name, _imp in _iter_method_entries(reader, mlist_va)]
 
 
+def _parse_ivar_list(reader: _MachoReader, ilist_va: int | None) -> list[dict]:
+    """Parse an ``ivar_list_t`` into ``[{"name", "type"}]``.
+
+    Two entry encodings exist (objc4): the legacy 32-byte ``ivar_t`` —
+    pointer to the offset slot, name pointer, type pointer, then alignment
+    and size — and the relative (small) 20-byte form used by chained-fixup
+    binaries, whose ``name``/``type`` members are int32 offsets from the
+    field's own address. The encoding is selected by the list's entsize;
+    anything else is reported as a degradation rather than misread.
+    """
+    if not ilist_va:
+        return []
+    entsize_and_flags = reader.u32(ilist_va)
+    count = reader.u32(ilist_va + 4)
+    if entsize_and_flags is None or not count:
+        return []
+    count = min(count, _MAX_IVARS_PER_LIST)
+    entsize = entsize_and_flags & _ENTSIZE_MASK
+    ivars = []
+    for i in range(count):
+        entry = ilist_va + 8 + i * entsize
+        if entsize == 32:  # legacy: offset ptr, name ptr, type ptr, align, size
+            name = reader.cstring(reader.ptr(entry + 8))
+            ivar_type = reader.cstring(reader.ptr(entry + 16))
+        elif entsize == 20:  # relative: offset, name, type (int32), align, size
+            name_off = reader.i32(entry + 4)
+            type_off = reader.i32(entry + 8)
+            name = reader.cstring(
+                reader.ptr(entry + 4 + name_off) if name_off is not None else None
+            )
+            ivar_type = reader.cstring(
+                reader.ptr(entry + 8 + type_off) if type_off is not None else None
+            )
+        else:
+            return ivars
+        if name:
+            ivars.append({"name": name, "type": ivar_type})
+    return ivars
+
+
+def _parse_property_list(reader: _MachoReader, plist_va: int | None) -> list[dict]:
+    """Parse a ``property_list_t`` into ``[{"name", "attributes"}]``.
+
+    ``attributes`` is the type-encoding string the runtime keeps (e.g.
+    ``T@"NSString",C,N``), which carries mutability and memory semantics.
+    Legacy entries are two pointers (entsize 16); relative entries are two
+    int32 offsets from each field's own address (entsize 8).
+    """
+    if not plist_va:
+        return []
+    entsize_and_flags = reader.u32(plist_va)
+    count = reader.u32(plist_va + 4)
+    if entsize_and_flags is None or not count:
+        return []
+    count = min(count, _MAX_PROPERTIES_PER_LIST)
+    entsize = entsize_and_flags & _ENTSIZE_MASK
+    props = []
+    for i in range(count):
+        entry = plist_va + 8 + i * entsize
+        if entsize == 16:  # legacy: name ptr, attributes ptr
+            name = reader.cstring(reader.ptr(entry))
+            attributes = reader.cstring(reader.ptr(entry + 8))
+        elif entsize == 8:  # relative
+            name_off = reader.i32(entry)
+            attr_off = reader.i32(entry + 4)
+            name = reader.cstring(reader.ptr(entry + name_off) if name_off is not None else None)
+            attributes = reader.cstring(
+                reader.ptr(entry + 4 + attr_off) if attr_off is not None else None
+            )
+        else:
+            return props
+        if name:
+            props.append({"name": name, "attributes": attributes})
+    return props
+
+
 def _parse_protocol_list(reader: _MachoReader, plist_va: int | None) -> list[str]:
     """Return protocol names referenced by a protocol_list_t."""
     if not plist_va:
@@ -266,6 +357,12 @@ def _parse_class(
     }
     if protocols:
         entry["protocols"] = protocols
+    if ivars := _parse_ivar_list(reader, reader.ptr(ro + _RO_IVARS)):
+        entry["ivars"] = ivars
+        entry["ivar_count"] = len(ivars)
+    if properties := _parse_property_list(reader, reader.ptr(ro + _RO_BASE_PROPERTIES)):
+        entry["properties"] = properties
+        entry["property_count"] = len(properties)
     return entry
 
 
@@ -278,8 +375,97 @@ def _parse_pointer_array_section(sections: dict, name: str, ptr_size: int = 8) -
         yield section.virtual_address + i * ptr_size
 
 
+def _category_class_name(reader: _MachoReader, cat_va: int) -> str:
+    """Name of the class a category extends.
+
+    The ``cls`` slot binds to the external class for the common shape — a
+    category patching a framework class such as NSObject — so the binding
+    table is authoritative; an internal class is resolved through its own
+    ``class_ro_t`` name.
+    """
+    bound = reader.bind_map.get(cat_va + _CAT_CLS)
+    if bound:
+        return bound.replace("_OBJC_CLASS_$_", "").lstrip("_")
+    cls_va = reader.ptr(cat_va + _CAT_CLS)
+    if not cls_va:
+        return ""
+    ro = reader.ptr(cls_va + _CLASS_DATA)
+    if ro is None:
+        return ""
+    return reader.cstring(reader.ptr((ro & ~7) + _RO_NAME))
+
+
+def _parse_category(
+    reader: _MachoReader, cat_va: int, method_imps: list[dict] | None = None
+) -> dict | None:
+    """Parse one ``category_t``: a named extension patching an existing class.
+
+    Categories are how third-party code adds methods to framework classes
+    (NSURL, NSProcessInfo, ...), so the extended class is capability evidence
+    in its own right. Instance methods get the ``-[Class(Category) selector]``
+    spelling the ObjC runtime itself uses; class methods the ``+[...]`` form.
+    """
+    name_va = reader.ptr(cat_va + _CAT_CLS_NAME)
+    name = reader.cstring(name_va)
+    if not name:
+        return None
+    class_name = _category_class_name(reader, cat_va)
+    label = f"{class_name}({name})" if class_name else name
+    entry: dict = {"name": name, "class_name": class_name}
+    methods: list[str] = []
+    for sel, imp in _iter_method_entries(reader, reader.ptr(cat_va + _CAT_INSTANCE_METHODS)):
+        methods.append(sel)
+        if imp is not None and method_imps is not None:
+            method_imps.append({"name": f"-[{label} {sel}]", "address": imp})
+    class_methods: list[str] = []
+    for sel, imp in _iter_method_entries(reader, reader.ptr(cat_va + _CAT_CLASS_METHODS)):
+        class_methods.append(sel)
+        if imp is not None and method_imps is not None:
+            method_imps.append({"name": f"+[{label} {sel}]", "address": imp})
+    if methods:
+        entry["method_count"] = len(methods)
+        entry["methods"] = methods
+    if class_methods:
+        entry["class_method_count"] = len(class_methods)
+        entry["class_methods"] = class_methods
+    if protocols := _parse_protocol_list(reader, reader.ptr(cat_va + _CAT_PROTOCOLS)):
+        entry["protocols"] = protocols
+    if properties := _parse_property_list(reader, reader.ptr(cat_va + _CAT_INSTANCE_PROPERTIES)):
+        entry["properties"] = properties
+        entry["property_count"] = len(properties)
+    return entry
+
+
+def _find_load_imp(reader: _MachoReader, class_va: int) -> int | None:
+    """The ``+load`` implementation of a non-lazy class, if it has one.
+
+    ``+load`` is a class method, so its method list hangs off the metaclass
+    reached through the class's ``isa``. It runs before ``main`` during
+    runtime image setup — code with no caller, which is why the class was
+    listed in ``__objc_nlclslist`` in the first place.
+    """
+    meta_va = reader.ptr(class_va + _CLASS_ISA)
+    if not meta_va:
+        return None
+    ro = reader.ptr(meta_va + _CLASS_DATA)
+    if ro is None:
+        return None
+    for sel, imp in _iter_method_entries(reader, reader.ptr((ro & ~7) + _RO_BASE_METHODS)):
+        if sel == "load" and imp is not None:
+            return imp
+    return None
+
+
 def parse_objc_metadata(parsed_obj) -> dict:
     """Parse Objective-C classes, protocols, categories and selector refs.
+
+    Also parses the depth metadata the class list alone misses: categories
+    (``__objc_catlist`` — named extensions patching framework classes), the
+    non-lazy ``+load`` classes and categories (``__objc_nlclslist`` /
+    ``__objc_nlcatlist`` — code the runtime runs before ``main``), and class
+    ivars and properties. Every place where a pointer or list cannot be
+    resolved adds a token to ``parse_degradations`` rather than disappearing
+    silently.
 
     Returns an empty dict for binaries without Objective-C metadata.
     """
@@ -297,23 +483,34 @@ def parse_objc_metadata(parsed_obj) -> dict:
         LOG.debug("Skipping ObjC metadata parsing for 32-bit Mach-O binary")
         return {}
     ptr_size = 8
+    degradations: dict[str, int] = {}
+
+    def _degrade(token: str) -> None:
+        """Count one unresolvable structure so silence is never mistaken for clean."""
+        degradations[token] = degradations.get(token, 0) + 1
+
     method_imps: list[dict] = []
     classes: list[dict] = []
     for slot in _parse_pointer_array_section(sections, "__objc_classlist", ptr_size):
         if len(classes) >= _MAX_CLASSES:
+            degradations["class_cap_hit"] = _MAX_CLASSES
             break
         class_va = reader.ptr(slot)
         if not class_va:
+            _degrade("unresolved_class_pointer")
             continue
         with contextlib.suppress(Exception):
             parsed = _parse_class(reader, class_va, method_imps)
             if parsed:
                 classes.append(parsed)
+            else:
+                _degrade("unparsed_class")
 
     protocols = []
     for slot in _parse_pointer_array_section(sections, "__objc_protolist", ptr_size):
         proto_va = reader.ptr(slot)
         if not proto_va:
+            _degrade("unresolved_protocol_pointer")
             continue
         with contextlib.suppress(Exception):
             name = reader.cstring(reader.ptr(proto_va + _PROTO_NAME))
@@ -321,6 +518,65 @@ def parse_objc_metadata(parsed_obj) -> dict:
                 continue
             methods = _parse_method_list(reader, reader.ptr(proto_va + _PROTO_INSTANCE_METHODS))
             protocols.append({"name": name, "methods": methods})
+
+    # Categories: named extensions that patch existing (usually framework)
+    # classes. Their methods run exactly like the class's own.
+    categories: list[dict] = []
+    for slot in _parse_pointer_array_section(sections, "__objc_catlist", ptr_size):
+        if len(categories) >= _MAX_CATEGORIES:
+            degradations["category_cap_hit"] = _MAX_CATEGORIES
+            break
+        cat_va = reader.ptr(slot)
+        if not cat_va:
+            _degrade("unresolved_category_pointer")
+            continue
+        with contextlib.suppress(Exception):
+            parsed = _parse_category(reader, cat_va, method_imps)
+            if parsed:
+                categories.append(parsed)
+            else:
+                _degrade("unparsed_category")
+
+    # Non-lazy classes/categories: listed explicitly because the runtime must
+    # run their ``+load`` before main — code with no caller.
+    nonlazy_classes: list[dict] = []
+    for slot in _parse_pointer_array_section(sections, "__objc_nlclslist", ptr_size):
+        if len(nonlazy_classes) >= _MAX_NONLAZY_CLASSES:
+            degradations["nonlazy_cap_hit"] = _MAX_NONLAZY_CLASSES
+            break
+        class_va = reader.ptr(slot)
+        if not class_va:
+            _degrade("unresolved_nonlazy_class_pointer")
+            continue
+        with contextlib.suppress(Exception):
+            ro = reader.ptr(class_va + _CLASS_DATA)
+            name = reader.cstring(reader.ptr((ro & ~7) + _RO_NAME)) if ro else ""
+            if not name:
+                _degrade("unparsed_nonlazy_class")
+                continue
+            entry: dict = {"name": name, "runs_before_main": True}
+            if load_imp := _find_load_imp(reader, class_va):
+                entry["load_imp"] = f"0x{load_imp:x}"
+                if method_imps is not None:
+                    method_imps.append({"name": f"+[{name} load]", "address": load_imp})
+            nonlazy_classes.append(entry)
+
+    nonlazy_categories: list[dict] = []
+    for slot in _parse_pointer_array_section(sections, "__objc_nlcatlist", ptr_size):
+        if len(nonlazy_categories) >= _MAX_CATEGORIES:
+            break
+        cat_va = reader.ptr(slot)
+        if not cat_va:
+            _degrade("unresolved_nonlazy_category_pointer")
+            continue
+        with contextlib.suppress(Exception):
+            name_va = reader.ptr(cat_va + _CAT_CLS_NAME)
+            name = reader.cstring(name_va)
+            if not name:
+                _degrade("unparsed_nonlazy_category")
+                continue
+            entry = {"name": name, "class_name": _category_class_name(reader, cat_va)}
+            nonlazy_categories.append(entry)
 
     # Referenced selectors (__objc_selrefs) and external classes (bindings to
     # _OBJC_CLASS_$_*) are strong capability signals at message-send sites.
@@ -344,10 +600,13 @@ def parse_objc_metadata(parsed_obj) -> dict:
         return {}
 
     LOG.debug(
-        "Parsed ObjC metadata: %d classes, %d protocols, %d selectors",
+        "Parsed ObjC metadata: %d classes, %d protocols, %d selectors, %d categories, "
+        "%d non-lazy classes",
         len(classes),
         len(protocols),
         len(selectors),
+        len(categories),
+        len(nonlazy_classes),
     )
     # Deduplicate recovered implementations by address (the same imp can appear
     # in both a class and its metaclass method list).
@@ -359,7 +618,7 @@ def parse_objc_metadata(parsed_obj) -> dict:
             seen_imp.add(addr)
             unique_imps.append(entry)
 
-    return {
+    out = {
         "class_count": len(classes),
         "protocol_count": len(protocols),
         "selector_count": len(selectors),
@@ -369,3 +628,18 @@ def parse_objc_metadata(parsed_obj) -> dict:
         "external_classes": external_classes,
         "method_imps": unique_imps,
     }
+    if categories:
+        out["category_count"] = len(categories)
+        out["categories"] = categories
+    if nonlazy_classes:
+        out["nonlazy_class_count"] = len(nonlazy_classes)
+        out["nonlazy_classes"] = nonlazy_classes
+    if nonlazy_categories:
+        out["nonlazy_category_count"] = len(nonlazy_categories)
+        out["nonlazy_categories"] = nonlazy_categories
+    if degradations:
+        out["parse_degradations"] = [
+            f"{token}:{count}" for token, count in sorted(degradations.items())
+        ][:_MAX_DEGRADATIONS]
+        out["parse_degradation_count"] = sum(degradations.values())
+    return out
