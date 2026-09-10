@@ -1,0 +1,24 @@
+blint/lib/ios.py
+  h_6a4cc5cdf68def 77-87,109-124,151-154,161-164,170,177-183,370,381-385,387-392,399
+blint/lib/macos_bundle.py
+  h_6a4cc5cdf68def 1-401
+blint/lib/runners.py
+  h_6a4cc5cdf68def 27-32,100,106-112,127-135,637-642,697-741
+blint/lib/sbom.py
+  h_6a4cc5cdf68def 45,131,141,146-147,248-258,1448-1451,1453,1460-1462,1474,1507,1528,1648-1697
+tests/test_ios.py
+  h_6a4cc5cdf68def 11,151,174,187,190,369
+tests/test_macos_bundle.py
+  h_6a4cc5cdf68def 1-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1f34ff6c88e9d98d6da2eb693248cfdd859dc41",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
