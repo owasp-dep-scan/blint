@@ -163,38 +163,41 @@ def _decode_one(data: bytes, encoding: str) -> str:
     return text.split("\x00", 1)[0].strip()
 
 
-def _decode_runs(runs: Iterator[tuple[str, int, bytes]]) -> list[dict]:
-    """Decode each byte run, keeping the single best reading of each.
+def _decode_run(run: tuple[str, int, bytes]) -> dict | None:
+    """Decode one byte run, keeping its single best reading, or None.
 
     A run is tried as both UTF-16LE and ASCII because a function may build
     either, but only the longer valid reading is kept. Emitting both would report
     the same literal twice, once truncated at the first zero byte of its own wide
     encoding.
     """
+    base, offset, data = run
+    best: tuple[str, str] | None = None
+    for encoding, label in (("utf-16-le", "utf-16le"), ("ascii", "ascii")):
+        if encoding == "utf-16-le" and len(data) < MIN_RECOVERED_LEN * 2:
+            continue
+        candidate = _decode_one(data, encoding)
+        if not candidate or not _looks_like_text(candidate):
+            continue
+        if best is None or len(candidate) > len(best[0]):
+            best = (candidate, label)
+    if best is None:
+        return None
+    return {"value": best[0], "encoding": best[1], "frame": f"{base}{offset:+d}"}
+
+
+def _decode_runs(runs: Iterator[tuple[str, int, bytes]]) -> list[dict]:
+    """Decode the byte runs, dropping repeats of a value already reported."""
     recovered: list[dict] = []
     seen: set[str] = set()
-    for base, offset, data in runs:
+    for run in runs:
         if len(recovered) >= MAX_RUNS_PER_FUNCTION:
             break
-        best: tuple[str, str] | None = None
-        for encoding, label in (("utf-16-le", "utf-16le"), ("ascii", "ascii")):
-            if encoding == "utf-16-le" and len(data) < MIN_RECOVERED_LEN * 2:
-                continue
-            candidate = _decode_one(data, encoding)
-            if not candidate or not _looks_like_text(candidate):
-                continue
-            if best is None or len(candidate) > len(best[0]):
-                best = (candidate, label)
-        if best is None or best[0].lower() in seen:
+        entry = _decode_run(run)
+        if entry is None or entry["value"].lower() in seen:
             continue
-        seen.add(best[0].lower())
-        recovered.append(
-            {
-                "value": best[0],
-                "encoding": best[1],
-                "frame": f"{base}{offset:+d}",
-            }
-        )
+        seen.add(entry["value"].lower())
+        recovered.append(entry)
     return recovered
 
 
@@ -215,6 +218,44 @@ def iter_frame_runs(state: FrameState) -> Iterator[tuple[str, int, bytes]]:
             run_start = offset
             current = [state.slots[(base, offset)]]
         yield base, run_start, bytes(current)
+
+
+def _drop_partial_runs(
+    runs: list[tuple[str, int, bytes]],
+) -> list[tuple[str, int, bytes]]:
+    """Drop each run that is a shorter reading of a longer run in the same slot.
+
+    Reading a frame at several program points catches a string mid-assembly:
+    ``'fts'``, ``'ftsv'``, ``'ftsvS'`` and six more readings of the one
+    ``'ftsvSOiIpom'`` an OrbStack function builds at ``sp+21``. A run is a
+    partial reading when a longer run covers its bytes at the same address and
+    those bytes agree, which makes it the same construction seen earlier rather
+    than a second string; anything else is kept, including a shorter string
+    that merely reads like a prefix of one built elsewhere in the function.
+
+    Only runs that decode are allowed to displace a shorter one. A longer run
+    the decoder rejects reports nothing itself, so letting it absorb the
+    readings inside it would lose them outright — which cost OrbStack four
+    values ('--since', 'Challenge', '[ipv', 'ipv') when this filtered raw
+    runs.
+    """
+    runs = [run for run in runs if _decode_run(run) is not None]
+    by_base: dict[str, list[tuple[str, int, bytes]]] = {}
+    for run in runs:
+        by_base.setdefault(run[0], []).append(run)
+    kept = []
+    for run in runs:
+        base, start, data = run
+        if any(
+            len(other) > len(data)
+            and other_start <= start
+            and start + len(data) <= other_start + len(other)
+            and other[start - other_start : start - other_start + len(data)] == data
+            for _, other_start, other in by_base[base]
+        ):
+            continue
+        kept.append(run)
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -1129,8 +1170,13 @@ def harvest_strings_over_cfg(
     construction, while the block whose state completed it still holds it.
     Unreachable blocks have no out-state and contribute nothing, and values
     conflicting at a merge go unknown exactly as before, so nothing downstream
-    of a conflict can complete a run. The same run reported from several
-    blocks' states is kept once.
+    of a conflict can complete a run.
+
+    Reading every block's state sees one string several times over, because a
+    string assembled across block boundaries is complete to a different length
+    in each of them. Those partial readings are dropped
+    (:func:`_drop_partial_runs`) so a function reports the string it built, not
+    the block layout it built it in.
 
     Returns None when the iteration cap was hit. Raises ValueError when the
     blocks do not tile the assembly text.
@@ -1139,20 +1185,17 @@ def harvest_strings_over_cfg(
     if converged is None:
         return None
     _, _, _, out_states = converged
-    recovered: list[dict] = []
-    seen: set[str] = set()
+    runs: list[tuple[str, int, bytes]] = []
+    seen_runs: set[tuple[str, int, bytes]] = set()
     for state in out_states:
         if state is None:
             continue
-        for run in _decode_runs(iter_frame_runs(state)):
-            key = run["value"].lower()
-            if key in seen:
+        for run in iter_frame_runs(state):
+            if run in seen_runs:
                 continue
-            seen.add(key)
-            recovered.append(run)
-            if len(recovered) >= MAX_RUNS_PER_FUNCTION:
-                return recovered
-    return recovered
+            seen_runs.add(run)
+            runs.append(run)
+    return _decode_runs(iter(_drop_partial_runs(runs)))
 
 
 # ---------------------------------------------------------------------------

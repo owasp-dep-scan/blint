@@ -168,7 +168,12 @@ def main() -> None:
         member_functions = {}
         for member in truth:
             row = connection.execute(
-                "SELECT function_count FROM Binaries WHERE name=? AND archive_name IS NOT NULL",
+                # The empty string means absent here exactly as it does in the
+                # lookup's own member filter; counting such a row as judgeable
+                # would put a member in the denominator that can never be
+                # claimed.
+                "SELECT function_count FROM Binaries"
+                " WHERE name=? AND archive_name IS NOT NULL AND archive_name != ''",
                 (member,),
             ).fetchone()
             member_functions[member] = row[0] if row else None

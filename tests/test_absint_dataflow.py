@@ -178,6 +178,69 @@ def test_later_slot_reuse_does_not_un_construct_an_earlier_string():
     assert "ABCD" in [entry["value"] for entry in entries]
 
 
+def test_a_string_assembled_across_blocks_is_reported_once_at_full_length():
+    """Harvesting every block's state must not report a string per block.
+
+    The three stores build one 12-byte run, but each block's out-state holds
+    it complete to a different length, so reading them all sees 'ABCD',
+    'ABCDEFGH' and the whole string. Only the last is the string the function
+    built. On OrbStack this shape reported nine readings of one 'ftsvSOiIpom'
+    built at sp+21, 12 of 104 reported values there being partial readings of
+    another.
+    """
+    lines = [
+        "mov dword ptr [rbp - 32], 1145258561",  # 'ABCD'
+        "nop",
+        "mov dword ptr [rbp - 28], 1212630597",  # 'EFGH'
+        "nop",
+        "mov dword ptr [rbp - 24], 1280002633",  # 'IJKL'
+        "ret",
+    ]
+    cfg = _cfg([2, 2, 2], [(0, 1, "fallthrough"), (1, 2, "fallthrough")])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert [entry["value"] for entry in entries] == ["ABCDEFGHIJKL"]
+
+
+def test_a_shorter_string_elsewhere_in_the_frame_is_not_a_partial_reading():
+    """Only a longer run covering the same bytes at the same address wins.
+
+    'ABCD' built at its own slot is a string in its own right even though the
+    other slot's 'ABCDEFGH' begins with the same letters — collapsing on the
+    decoded text alone would drop it.
+    """
+    lines = [
+        "mov dword ptr [rbp - 64], 1145258561",  # 'ABCD' at its own slot
+        "mov dword ptr [rbp - 32], 1145258561",  # 'ABCD...
+        "mov dword ptr [rbp - 28], 1212630597",  # ...EFGH' at another
+        "ret",
+    ]
+    cfg = _cfg([4], [])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert sorted(entry["value"] for entry in entries) == ["ABCD", "ABCDEFGH"]
+
+
+def test_an_undecodable_longer_run_does_not_absorb_the_string_inside_it():
+    """A run the decoder rejects must not take a real reading down with it.
+
+    The later store extends 'ABCD' with control bytes, so the 8-byte run is
+    not text and reports nothing. Suppressing 'ABCD' as a partial reading of
+    it would lose the string entirely — the shape that cost OrbStack
+    '--since', 'Challenge', '[ipv' and 'ipv'.
+    """
+    lines = [
+        "mov dword ptr [rbp - 32], 1145258561",  # 'ABCD'
+        "nop",
+        "mov dword ptr [rbp - 28], 67305985",  # control bytes, not text
+        "ret",
+    ]
+    cfg = _cfg([2, 2], [(0, 1, "fallthrough")])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert [entry["value"] for entry in entries] == ["ABCD"]
+
+
 def test_join_keeps_slot_bytes_written_identically_on_both_arms():
     same_store = "mov dword ptr [rbp - 16], 1145258561"  # 'ABCD'
     lines = [
