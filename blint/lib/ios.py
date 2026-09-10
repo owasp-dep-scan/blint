@@ -74,23 +74,18 @@ def is_ios_app(path) -> bool:
     return isinstance(path, str) and path.lower().endswith(IOS_APP_EXTNS)
 
 
-def _read_bundle_info(app_dir: str) -> dict:
-    """Read the relevant keys from a ``.app`` bundle's Info.plist."""
-    info = {"bundle_dir": os.path.basename(app_dir)}
-    plist_path = os.path.join(app_dir, "Info.plist")
-    if not os.path.isfile(plist_path):
-        return info
-    try:
-        with open(plist_path, "rb") as fp:
-            plist = plistlib.load(fp)
-    except (OSError, ValueError, plistlib.InvalidFileException) as e:
-        LOG.debug(f"Could not read Info.plist at {plist_path}: {e}")
-        return info
-    # A plist whose root element is not a dict (an array, a string, or no
-    # element at all) is legal XML that plistlib returns as-is; treat it like
-    # an unreadable plist instead of crashing on the key lookups below.
+def bundle_info_from_plist(plist: object) -> dict:
+    """Map one bundle ``Info.plist`` dict onto blint's bundle-info keys.
+
+    Shared by the ``.ipa`` reader and the macOS bundle walker (``.app`` /
+    ``.framework`` / ``.dSYM``): both bundle shapes carry the same plist
+    vocabulary, and two readers would drift. A plist whose root element is
+    not a dict (an array, a string, or no element at all) is legal XML that
+    plistlib returns as-is; it is treated like an unreadable plist instead
+    of crashing on the key lookups.
+    """
+    info: dict = {}
     if not isinstance(plist, dict):
-        LOG.debug(f"Info.plist at {plist_path} has a non-dict root element; ignoring it")
         return info
     for plist_key, meta_key in _INFO_PLIST_KEYS.items():
         if plist_key in plist:
@@ -108,6 +103,22 @@ def _read_bundle_info(app_dir: str) -> dict:
     if schemes:
         info["url_schemes"] = sorted(set(schemes))
     info.update(_collect_privacy_signals(plist))
+    return info
+
+
+def _read_bundle_info(app_dir: str) -> dict:
+    """Read the relevant keys from a ``.app`` bundle's Info.plist."""
+    info = {"bundle_dir": os.path.basename(app_dir)}
+    plist_path = os.path.join(app_dir, "Info.plist")
+    if not os.path.isfile(plist_path):
+        return info
+    try:
+        with open(plist_path, "rb") as fp:
+            plist = plistlib.load(fp)
+    except (OSError, ValueError, plistlib.InvalidFileException) as e:
+        LOG.debug(f"Could not read Info.plist at {plist_path}: {e}")
+        return info
+    info.update(bundle_info_from_plist(plist))
     return info
 
 
@@ -137,26 +148,39 @@ def _collect_privacy_signals(plist: dict) -> dict:
     return signals
 
 
-def _read_privacy_manifest(app_dir: str) -> dict | None:
-    """Read and aggregate the app privacy manifest(s) for a ``.app`` bundle.
+def read_privacy_manifest(
+    app_dir: str, sub_dirs: tuple[str, ...] = ("Frameworks", "PlugIns")
+) -> dict | None:
+    """Read and aggregate the app privacy manifest(s) for a bundle.
 
     The main bundle, each embedded framework and each app extension may ship its
     own ``PrivacyInfo.xcprivacy``. We union their declarations so the reported
     posture reflects the whole app (third-party SDKs included): whether any
     component declares tracking, the set of tracking domains, the collected data
     types and the required-reason API categories declared in use.
+
+    ``sub_dirs`` names where embedded components live, relative to ``app_dir``;
+    iOS bundles keep them at the root while macOS bundles nest them under
+    ``Contents/``, so the macOS walker passes its own layout.
     """
     paths: list[str] = []
     root_manifest = os.path.join(app_dir, _PRIVACY_MANIFEST_NAME)
     if os.path.isfile(root_manifest):
         paths.append(root_manifest)
-    for sub in ("Frameworks", "PlugIns"):
+    for sub in sub_dirs:
         sub_dir = os.path.join(app_dir, sub)
         if not os.path.isdir(sub_dir):
             continue
         for root, _dirs, files in os.walk(sub_dir):
             if _PRIVACY_MANIFEST_NAME in files:
                 paths.append(os.path.join(root, _PRIVACY_MANIFEST_NAME))
+    # The macOS walker searches aliased layouts (``Versions/Current`` is a
+    # symlink into ``Versions/A``), so the same manifest can be reached twice;
+    # deduplicate by real path or ``manifest_count`` overcounts.
+    unique: dict[str, str] = {}
+    for path in paths:
+        unique[os.path.realpath(path)] = path
+    paths = list(unique.values())
     if not paths:
         return None
 
@@ -343,7 +367,7 @@ def _collect_ios_app_in(temp_dir: str, app_file: str) -> tuple[dict | None, str 
 
     app_dir = app_dirs[0]
     bundle_info = _read_bundle_info(app_dir)
-    if manifest := _read_privacy_manifest(app_dir):
+    if manifest := read_privacy_manifest(app_dir):
         bundle_info["privacy_manifest"] = manifest
     binaries = _collect_bundle_binaries(app_dir, bundle_info)
     if not binaries:
@@ -354,16 +378,25 @@ def _collect_ios_app_in(temp_dir: str, app_file: str) -> tuple[dict | None, str 
 
 
 def enrich_with_bundle_context(
-    metadata: dict, bundle_info: dict, role: str, bundle_path: str | None = None
+    metadata: dict,
+    bundle_info: dict,
+    role: str,
+    bundle_path: str | None = None,
+    context_key: str = "ios_bundle",
 ) -> dict:
-    """Attach app-bundle context to a binary's parsed metadata."""
+    """Attach app-bundle context to a binary's parsed metadata.
+
+    Shared by the ``.ipa`` path (context under ``ios_bundle``) and the macOS
+    bundle walker (``macos_bundle``): the plist-derived posture and the
+    rule-engine token injection are the same for both bundle shapes.
+    """
     if not isinstance(metadata, dict):
         return metadata
     context = {k: v for k, v in bundle_info.items() if k != "executable"}
     context["role"] = role
     if bundle_path:
         context["bundle_path"] = bundle_path
-    metadata["ios_bundle"] = context
+    metadata[context_key] = context
     # Replace the extraction temp path with a stable bundle-relative path so
     # reports identify the binary by its location inside the app.
     if bundle_path:

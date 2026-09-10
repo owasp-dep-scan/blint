@@ -42,6 +42,7 @@ from blint.lib.android_services import detect_services
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.ios import collect_ios_app
+from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -127,6 +128,7 @@ def generate(
     exe_files: list[str],
     android_files: list[str],
     ios_files: list[str] | None = None,
+    macos_bundles: list[str] | None = None,
 ) -> CycloneDX | Literal[False]:
     """
     Generates an SBOM for the given source directories.
@@ -136,11 +138,13 @@ def generate(
         exe_files (list): Native binaries to analyse.
         android_files (list): Android app archives to analyse.
         ios_files (list): iOS/macOS app archives (``.ipa``) to analyse.
+        macos_bundles (list): macOS bundle directories (``.app``/``.framework``/``.dSYM``).
     Returns:
         CycloneDX: Generated CycloneDX SBOM
     """
     ios_files = ios_files or []
-    if not android_files and not exe_files and not ios_files:
+    macos_bundles = macos_bundles or []
+    if not android_files and not exe_files and not ios_files and not macos_bundles:
         return False
     symbols_purl_map: dict = {}
     if blint_options.src_dir_boms:
@@ -241,6 +245,17 @@ def generate(
             components += process_ios_file(dependencies_dict, blint_options.deep_mode, f, sbom)
             if blint_options.disassemble:
                 write_ios_callgraphs(f, cast(str, blint_options.sbom_output))
+        if macos_bundles:
+            task = progress.add_task(
+                f"[green] Parsing {len(macos_bundles)} macOS bundles",
+                total=len(macos_bundles),
+                start=True,
+            )
+        for f in macos_bundles:
+            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
+            components += process_macos_bundle_file(
+                dependencies_dict, blint_options.deep_mode, f, sbom
+            )
     if dependencies_dict:
         # sorted(), not list(): set iteration order depends on PYTHONHASHSEED,
         # so list(v) made the SBOM unreproducible across runs and machines —
@@ -1430,17 +1445,21 @@ def process_android_file(
     return app_components
 
 
-def _ios_purl(bundle_identifier: str, version: str, qualifiers: dict | None = None) -> str:
-    """Build a ``pkg:ios`` PackageURL string for an app bundle component."""
+def _ios_purl(
+    bundle_identifier: str, version: str, qualifiers: dict | None = None, purl_type: str = "ios"
+) -> str:
+    """Build a ``pkg:ios``/``pkg:macos`` PackageURL string for an app bundle component."""
     return PackageURL(
-        type="ios",
+        type=purl_type,
         name=bundle_identifier,
         version=version or None,
         qualifiers=qualifiers or {},
     ).to_string()
 
 
-def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
+def ios_parent_component(
+    bundle_info: dict, app_file: str, purl_type: str = "ios"
+) -> Component | None:
     """Build the parent application component for an iOS/macOS app bundle.
 
     The component is identified by the bundle's ``CFBundleIdentifier`` and
@@ -1452,7 +1471,7 @@ def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
     version = str(bundle_info.get("bundle_version") or "")
     if not name:
         return None
-    purl = _ios_purl(name, version)
+    purl = _ios_purl(name, version, None, purl_type)
     component = Component(type=Type.application, name=name, version=version, purl=purl)
     component.bom_ref = RefType(purl)
     manifest = bundle_info.get("privacy_manifest") or {}
@@ -1485,7 +1504,7 @@ def ios_parent_component(bundle_info: dict, app_file: str) -> Component | None:
     return component
 
 
-def ios_binary_component(entry: dict, bundle_info: dict) -> Component:
+def ios_binary_component(entry: dict, bundle_info: dict, purl_type: str = "ios") -> Component:
     """Build a component for a single Mach-O binary inside an app bundle.
 
     The main executable is reported as an application sub-component while
@@ -1506,7 +1525,7 @@ def ios_binary_component(entry: dict, bundle_info: dict) -> Component:
     identifier = entry.get("bundle_identifier") or bundle_info.get("bundle_identifier") or name
     version = str(entry.get("bundle_version") or bundle_info.get("bundle_version") or "")
     comp_type = Type.application if role == "main" else Type.library
-    purl = _ios_purl(identifier, version, {"path": purl_path})
+    purl = _ios_purl(identifier, version, {"path": purl_path}, purl_type)
     properties = [
         Property(name="internal:srcFile", value=bundle_path),
         Property(name="internal:role", value=role),
@@ -1623,6 +1642,56 @@ def process_ios_file(
             track_dependency(dependencies_dict, parent_component, binary_components)
     finally:
         shutil.rmtree(app["temp_dir"], ignore_errors=True)
+    return components
+
+
+def process_macos_bundle_file(
+    dependencies_dict: dict[str, set],
+    deep_mode: bool,
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process a macOS bundle directory (``.app``/``.framework``/``.dSYM``) and
+    update the SBOM.
+
+    Mirrors :func:`process_ios_file` with two differences: the bundle is a
+    directory (nothing to unpack, nothing to clean up) and components are
+    identified with ``pkg:macos`` purls. The bundle becomes the parent
+    application component and each contained Mach-O a sub-component keyed by
+    its bundle-relative path.
+
+    Args:
+        dependencies_dict (dict[str, set]): Existing dependencies dictionary.
+        deep_mode (bool): Flag indicating whether to include per-binary library
+            components extracted from the Mach-O load commands.
+        f (str): The bundle directory to process.
+        sbom (CycloneDX): Software Bill-of-Materials object to be updated.
+
+    Returns:
+        list: The components discovered in the bundle.
+    """
+    bundle = collect_macos_bundle(f)
+    if bundle is None:
+        return []
+    components: list[Component] = []
+    bundle_info = dict(bundle["bundle_info"])
+    parent_component = ios_parent_component(bundle_info, f, purl_type="macos")
+    if parent_component:
+        if not sbom.metadata.component.components:
+            sbom.metadata.component.components = []
+        _add_to_parent_component(sbom.metadata.component.components, parent_component)
+    binary_components: list[Component] = []
+    for entry in bundle["binaries"]:
+        comp = ios_binary_component(entry, bundle_info, purl_type="macos")
+        binary_components.append(comp)
+        components.append(comp)
+        if deep_mode:
+            lib_components = ios_binary_libraries(entry["path"])
+            components += lib_components
+            if lib_components:
+                track_dependency(dependencies_dict, comp, lib_components)
+    if parent_component and binary_components:
+        track_dependency(dependencies_dict, parent_component, binary_components)
     return components
 
 
