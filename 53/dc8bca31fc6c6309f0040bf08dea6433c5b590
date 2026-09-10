@@ -1,0 +1,16 @@
+tests/test_capabilities.py
+  h_6a4cc5cdf68def 77
+blint/lib/macos_bundle.py
+  h_6a4cc5cdf68def 98-120,306-333,386-389,399-411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "53dc8bca31fc6c6309f0040bf08dea6433c5b590",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
