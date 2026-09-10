@@ -179,9 +179,9 @@
           "type": "external",
           "src": "wasm_tools::dump::Dump::print_module@0x361da0",
           "target": "qword ptr [rax + 72]",
-          "reason": "unresolved:indirect_hint",
+          "reason": "symbol_only_miss:indirect_hint",
           "expect_present": true,
-          "note": "Current unresolved indirect memory call"
+          "note": "Indirect memory call whose target symbol name is recovered but matches no unique internal node. Was unresolved:indirect_hint when this label was written: the edge is still found at the same source and target, and `unresolved` is the bucket for a call site where no name, address or immediate could be recovered at all (binary.py resolver ladder), so reaching symbol_only_miss means a target name is now recovered here. Strictly more information than before, not a lost edge."
         },
         {
           "type": "external",

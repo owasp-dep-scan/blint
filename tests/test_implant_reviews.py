@@ -434,13 +434,23 @@ def test_byovd_rule_defers_to_the_covert_channel_rule():
 
 
 def test_byovd_rule_still_fires_for_a_real_third_party_driver():
+    assembly = "mov edx, 2147509400\ncall qword ptr [rip + 100]\nret"
     metadata = sleepwalker_metadata(
         subsystem="Windows GUI",
         disassembled_functions={
             "0x1000::sub_1000": {
                 "name": "sub_1000",
                 "address": "0x1000",
-                "assembly": "mov edx, 2147509400\ncall qword ptr [rip + 100]\nret",
+                "assembly": assembly,
+                "instruction_count": 3,
+                "cfg": {"blocks": [{"instructions": 3}], "edges": []},
+                "direct_call_targets": [
+                    {
+                        "target_name": "KERNEL32.dll::DeviceIoControl",
+                        "raw_operand": "qword ptr [rip + 100]",
+                        "kind": "indirect_hint",
+                    }
+                ],
             }
         },
         driver_interface={"client_device_paths": ["\\\\.\\ThrottleStop"]},

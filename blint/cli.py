@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 
+from blint.lib.parallel import resolve_jobs
 from blint.lib.runners import run_default_mode, run_sbom_mode
 from blint.config import BlintOptions, BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC
 from blint.lib.utils import blintdb_setup
@@ -169,6 +171,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.",
     )
     parser.add_argument(
+        "--sdk-path",
+        dest="sdk_path",
+        default=None,
+        help="Path to an Apple SDK root whose .tbd stubs are used to attribute "
+        "and confirm Mach-O imports (for example the path printed by "
+        "`xcrun --show-sdk-path`). Off by default; the path must contain "
+        ".tbd files or the run aborts.",
+    )
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        default=False,
+        dest="use_cache",
+        help="Use the content-addressed parse metadata cache: reuse the parse "
+        "result for a binary already analyzed with the same bytes, blint "
+        "version and options. Off by default; see `blint cache stats`.",
+    )
+    parser.add_argument(
+        "--jobs",
+        dest="jobs",
+        default="1",
+        help="Analyze up to N binaries in parallel worker processes. Accepts "
+        "a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
+        "(sequential, unchanged behavior).",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -255,6 +283,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit SBOM components from WebAssembly Component Model binaries "
         "using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as "
         "exact evidence. Core modules without component-model evidence are skipped.",
+    )
+    sbom_parser.add_argument(
+        "--jobs",
+        dest="jobs",
+        default="1",
+        help="Parse up to N binaries in parallel worker processes. Accepts a "
+        "positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
+        "(sequential, unchanged behavior).",
+    )
+    sbom_parser.add_argument(
+        "--sdk-path",
+        dest="sdk_path",
+        default=None,
+        help="Path to an Apple SDK root whose .tbd stubs are used to attribute "
+        "and confirm Mach-O dependency edges. Off by default; the path must "
+        "contain .tbd files or the run aborts.",
     )
     callgraph_match_parser = subparsers.add_parser(
         "callgraph-match",
@@ -421,6 +465,62 @@ def build_parser() -> argparse.ArgumentParser:
         dest="canonicalize_json",
         help="Emit the result as JSON instead of a table.",
     )
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help="Emit the catalog of checks and reviews blint analyzes with.",
+    )
+    capabilities_parser.set_defaults(capabilities_mode=True)
+    capabilities_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="capabilities_json",
+        help="Emit the catalog as JSON (machine readable; for agents and tooling).",
+    )
+    diff_parser = subparsers.add_parser(
+        "diff",
+        help="Compare two versions of a binary (binaries or *-metadata.json files).",
+    )
+    diff_parser.set_defaults(diff_mode=True)
+    diff_parser.add_argument(
+        "old_input",
+        help="Old version: a binary or a blint *-metadata.json export.",
+    )
+    diff_parser.add_argument(
+        "new_input",
+        help="New version: a binary or a blint *-metadata.json export.",
+    )
+    diff_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="diff_json",
+        help="Emit the diff report as JSON (machine readable; for agents and tooling).",
+    )
+    diff_parser.add_argument(
+        "--disassemble",
+        action="store_true",
+        default=False,
+        dest="diff_disassemble",
+        help="Disassemble binary inputs so the function-level delta (added/"
+        "removed/changed by content hash) can be computed. Metadata-JSON "
+        "inputs carry disassembly only if they were generated with --disassemble.",
+    )
+    diff_parser.add_argument(
+        "--no-reviews",
+        action="store_true",
+        default=False,
+        dest="diff_no_reviews",
+        help="Skip the capability-review delta.",
+    )
+    diff_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=False,
+        dest="quiet_mode",
+        help="Disable logging and progress bars.",
+    )
     db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
     db_parser.add_argument(
@@ -445,6 +545,29 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
+    )
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Manage the content-addressed parse metadata cache.",
+    )
+    cache_parser.set_defaults(cache_mode=True)
+    cache_subparsers = cache_parser.add_subparsers(
+        title="cache-actions",
+        description="Cache management actions",
+        dest="cache_action",
+    )
+    cache_clear_parser = cache_subparsers.add_parser(
+        "clear", help="Delete all cached parse metadata."
+    )
+    cache_stats_parser = cache_subparsers.add_parser(
+        "stats", help="Show cache location, entry count and actual size on disk."
+    )
+    cache_stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="cache_stats_json",
+        help="Emit the stats as JSON instead of a table.",
     )
     return parser
 
@@ -486,6 +609,11 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         print(BLINT_LOGO)
     if not args.src_dir_image:
         args.src_dir_image = [os.getcwd()]
+    try:
+        jobs = resolve_jobs(getattr(args, "jobs", 1))
+    except ValueError as exc:
+        LOG.error(str(exc))
+        raise SystemExit(2) from exc
     blint_options = BlintOptions(
         deep_mode=args.deep_mode,
         exports_prefix=args.exports_prefix,
@@ -511,8 +639,57 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         export_callgraph_gexf=args.export_callgraph_gexf,
         callgraph_min_confidence=args.callgraph_min_confidence,
         custom_rules_dir=args.custom_rules_dir,
+        use_cache=args.use_cache,
+        jobs=jobs,
+        sdk_path=getattr(args, "sdk_path", None),
     )
     return blint_options
+
+
+def run_cache_command(args: argparse.Namespace) -> None:
+    """Run the `blint cache` subcommand: clear or stats."""
+    import json as _json
+
+    from blint.lib.cache import ParseCache
+
+    cache = ParseCache()
+    action = getattr(args, "cache_action", None)
+    if action == "clear":
+        freed = cache.clear()
+        if freed:
+            print(f"Deleted parse cache at {cache.db_path} ({freed / 1e6:.1f} MB freed)")
+        else:
+            print(f"No parse cache found at {cache.db_path}")
+    elif action == "stats":
+        stats = cache.stats()
+        if args.cache_stats_json:
+            print(_json.dumps(stats, indent=2))
+        else:
+            from rich.box import ROUNDED
+            from rich.table import Table
+
+            from blint.logger import console
+
+            table = Table(box=ROUNDED, title="Parse cache", show_header=False)
+            table.add_column("Property", style="cyan", no_wrap=True)
+            table.add_column("Value")
+            table.add_row("Location", str(stats["db_path"]))
+            table.add_row("Entries", str(stats["entries"]))
+            table.add_row("Original size", f"{stats['logical_bytes'] / 1e6:.1f} MB")
+            table.add_row("Compressed size", f"{stats['compressed_bytes'] / 1e6:.1f} MB")
+            table.add_row("Size on disk", f"{stats['db_file_bytes'] / 1e6:.1f} MB")
+            table.add_row("Lifetime hits", str(stats["total_hits"]))
+            table.add_row("Size bound", f"{stats['max_bytes'] / (1 << 30):.1f} GiB")
+            for version, version_stats in (stats.get("by_blint_version") or {}).items():
+                table.add_row(
+                    f"blint {version}",
+                    f"{version_stats['entries']} entries, "
+                    f"{version_stats['compressed_bytes'] / 1e6:.1f} MB",
+                )
+            console.print(table)
+    else:
+        print("Usage: blint cache [clear|stats]")
+    cache.close()
 
 
 def run_callgraph_match_command(args: argparse.Namespace) -> None:
@@ -595,6 +772,45 @@ def run_canonicalize_command(args: argparse.Namespace) -> None:
     console.print(table)
 
 
+def run_capabilities_command(args: argparse.Namespace) -> None:
+    """Run the `blint capabilities` subcommand: print the rule catalog."""
+    import json as _json
+
+    from blint.lib.capabilities import build_capability_index, render_capabilities_table
+
+    index = build_capability_index()
+    if args.capabilities_json:
+        print(_json.dumps(index, indent=2))
+    else:
+        render_capabilities_table(index)
+
+
+def run_diff_command(args: argparse.Namespace) -> None:
+    """Run the `blint diff` subcommand: compare two versions of one binary."""
+    import json as _json
+
+    from blint.lib.diff import DiffError, diff_binary_metadata, render_diff_table
+
+    if args.quiet_mode:
+        LOG.disabled = True
+    try:
+        report = diff_binary_metadata(
+            args.old_input,
+            args.new_input,
+            disassemble=args.diff_disassemble,
+            no_reviews=args.diff_no_reviews,
+        )
+    except DiffError as exc:
+        # Straight to stderr, not through LOG: -q silences the logger, and a
+        # non-zero exit with no reason is the least useful thing CI can get.
+        print(f"blint diff failed: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    if args.diff_json:
+        print(_json.dumps(report, indent=2, sort_keys=True))
+    else:
+        render_diff_table(report)
+
+
 def main() -> None:
     """Main function of the blint tool"""
     args = build_args()
@@ -603,6 +819,15 @@ def main() -> None:
         return
     if args.subcommand_name == "canonicalize":
         run_canonicalize_command(args)
+        return
+    if args.subcommand_name == "capabilities":
+        run_capabilities_command(args)
+        return
+    if args.subcommand_name == "diff":
+        run_diff_command(args)
+        return
+    if args.subcommand_name == "cache":
+        run_cache_command(args)
         return
     blint_options = handle_args(args)
     if blint_options.quiet_mode:

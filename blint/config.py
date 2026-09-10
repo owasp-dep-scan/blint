@@ -1272,12 +1272,26 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    # P3.2: number of parallel worker processes (--jobs N). 1 (the default)
+    # keeps the sequential loop; the CLI resolves 0/auto to the CPU count.
+    jobs: int = 1
+    # P2.2: opt into the content-addressed parse cache (--cache). Off by
+    # default: caching writes to the user's disk and trades correctness-on-
+    # change for speed, so it is the caller's choice to make, not blint's.
+    use_cache: bool = False
     render_mermaid_callgraph: bool = False
     export_callgraph_graphml: bool = False
     export_callgraph_gexf: bool = False
     callgraph_min_confidence: str = "low"
     custom_rules_dir: str | None = None
     sources: list[str] = field(default_factory=list)
+    # P2.6: opt into Apple SDK .tbd attribution (--sdk-path). Off by default:
+    # the path names an environment on the analyst's machine, and the SDK
+    # describes what the SDK ships, not what the binary's runtime ships, so
+    # using it is the caller's call. When set, Mach-O imports are attributed
+    # and confirmed against the SDK's .tbd stubs under the `sdk_tbd`
+    # attribution source; a path with no .tbd files is a hard error.
+    sdk_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):

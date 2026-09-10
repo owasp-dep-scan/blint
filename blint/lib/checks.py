@@ -190,3 +190,19 @@ def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str
     if not key:
         return True
     return properties.get(key) is True
+
+
+def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+    """Flag binaries whose entropy analysis found packing evidence.
+
+    Follows the checks convention: True means clean, a string carries the
+    finding detail, and False would mean the rule fired without evidence.
+    """
+    packing = (metadata.get("entropy") or {}).get("packing") or {}
+    likelihood = packing.get("packed_likelihood")
+    if likelihood not in ("high", "medium"):
+        return True
+    packers = packing.get("packers") or []
+    findings = packing.get("findings") or []
+    detail = ", ".join(packers) if packers else ", ".join(findings[:5])
+    return f"packing evidence ({likelihood}): {detail}" if detail else True

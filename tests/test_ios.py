@@ -1,3 +1,4 @@
+import pytest
 import plistlib
 import zipfile
 
@@ -260,3 +261,113 @@ def test_enrich_injects_ats_tokens_into_informative_strings():
     other = {"name": "y"}
     enrich_with_bundle_context(other, bundle_info, "framework", "DemoApp.app/Frameworks/F")
     assert "ATS_NSAllowsArbitraryLoads" not in (other.get("informative_strings") or [])
+
+
+def test_collect_ios_app_detailed_reports_reasons(tmp_path):
+    """Every collect failure mode yields its documented machine-readable token."""
+    from blint.lib.ios import collect_ios_app_detailed
+
+    bogus = tmp_path / "bogus.ipa"
+    bogus.write_bytes(b"PK\x03\x04" + b"\x00" * 64)
+    assert collect_ios_app_detailed(str(bogus)) == (None, "extract_failed")
+
+    no_payload = tmp_path / "nopayload.ipa"
+    with zipfile.ZipFile(no_payload, "w") as zf:
+        zf.writestr("NotPayload/readme.txt", "hello")
+    assert collect_ios_app_detailed(str(no_payload)) == (None, "no_payload_dir")
+
+    no_app = tmp_path / "noapp.ipa"
+    with zipfile.ZipFile(no_app, "w") as zf:
+        zf.writestr("Payload/readme.txt", "hello")
+    assert collect_ios_app_detailed(str(no_app)) == (None, "no_app_bundle")
+
+    no_binaries = tmp_path / "nobinaries.ipa"
+    info = {"CFBundleExecutable": "DemoApp"}
+    with zipfile.ZipFile(no_binaries, "w") as zf:
+        zf.writestr("Payload/DemoApp.app/Info.plist", plistlib.dumps(info))
+    assert collect_ios_app_detailed(str(no_binaries)) == (None, "no_binaries")
+
+    # Success returns the app dict and no reason.
+    ipa = _make_ipa(tmp_path)
+    app, reason = collect_ios_app_detailed(ipa)
+    assert app is not None
+    assert reason is None
+
+
+def _blint_ios_app_dir_count() -> int:
+    import glob
+    import tempfile
+
+    return len(glob.glob(os.path.join(tempfile.gettempdir(), "blint_ios_app*")))
+
+
+def test_read_bundle_info_rejects_non_dict_plist_roots(tmp_path):
+    """A legal plist with a non-dict root must not crash the bundle reader.
+
+    plistlib returns None for an empty <plist/> and lists/strings for other
+    root element types; all are treated like an unreadable plist (rule 10:
+    one fixture per variant).
+    """
+    from blint.lib.ios import _read_bundle_info
+
+    for plist_bytes in (
+        b'<plist version="1.0"/>',
+        b'<plist version="1.0"><array><string>x</string></array></plist>',
+        b"<plist version=\"1.0\"><string>just a string</string></plist>",
+    ):
+        app_dir = tmp_path / "App.app"
+        app_dir.mkdir(exist_ok=True)
+        (app_dir / "Info.plist").write_bytes(plist_bytes)
+        info = _read_bundle_info(str(app_dir))
+        assert info == {"bundle_dir": "App.app"}
+
+
+def test_collect_ios_app_non_dict_plist_root_no_crash_no_leak(tmp_path):
+    """The reviewer's repro: <plist version="1.0"/> must collect, not crash.
+
+    The binaries inside are still analyzable (bundle info is simply empty),
+    and the extraction directory must be gone when collection fails or
+    returns.
+    """
+    from blint.lib.ios import collect_ios_app_detailed
+    import shutil
+
+    ipa_path = tmp_path / "app1.ipa"
+    with zipfile.ZipFile(ipa_path, "w") as zf:
+        zf.writestr("Payload/App1.app/Info.plist", b'<plist version="1.0"/>')
+        zf.writestr("Payload/App1.app/App1", _MACHO_BYTES)
+
+    before = _blint_ios_app_dir_count()
+    app, reason = collect_ios_app_detailed(str(ipa_path))
+    assert app is not None
+    assert reason is None
+    assert len(app["binaries"]) == 1
+    shutil.rmtree(app["temp_dir"], ignore_errors=True)
+    assert _blint_ios_app_dir_count() == before
+
+
+def test_collect_ios_app_detailed_cleans_up_on_unexpected_error(tmp_path, monkeypatch):
+    """Any exception mid-collection removes the extraction dir before raising.
+
+    Error isolation makes surviving a bad archive the normal outcome, so the
+    cleanup cannot live only on the skip-return paths (review round 1,
+    must-fix).
+    """
+    import blint.lib.ios as ios_mod
+
+    ipa_path = tmp_path / "app2.ipa"
+    with zipfile.ZipFile(ipa_path, "w") as zf:
+        zf.writestr(
+            "Payload/App2.app/Info.plist",
+            plistlib.dumps({"CFBundleExecutable": "App2"}),
+        )
+        zf.writestr("Payload/App2.app/App2", _MACHO_BYTES)
+
+    def boom(*_args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ios_mod, "_read_privacy_manifest", boom)
+    before = _blint_ios_app_dir_count()
+    with pytest.raises(RuntimeError, match="boom"):
+        ios_mod.collect_ios_app_detailed(str(ipa_path))
+    assert _blint_ios_app_dir_count() == before

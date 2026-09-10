@@ -10,18 +10,166 @@ from blint.config import BLINTDB_LOC, MIN_MATCH_SCORE, SYMBOLS_LOOKUP_BATCH_LEN
 from blint.logger import LOG
 
 DB_SCHEMA_FAMILY = "blint-db"
+# Oldest schema version this consumer reads; current blint-db producers stamp
+# newer versions, so support is a set rather than an equality check. Column
+# presence, not the version alone, decides whether the similarity hash columns
+# are queried (see blintdb_hash_capabilities).
 DB_SCHEMA_VERSION = 2
+# 2: pre-similarity baseline. 3: additive ABI tables. 4: similarity hash
+# columns plus Binaries.archive_name. All are additive layouts the column
+# detection below can tell apart, so support is a set rather than an equality
+# check; which columns exist (blintdb_hash_capabilities), not the version
+# alone, decides whether each layer is queried. A database stamping a
+# supported version without the layout it promises is refused via
+# _blintdb_has_required_tables.
+SUPPORTED_DB_SCHEMA_VERSIONS = (2, 3, 4)
 DB_QUERY_LIMIT = 50
 DB_EVIDENCE_LIMIT = 25
 SYMBOL_ONLY_MATCH_THRESHOLD = max(3, MIN_MATCH_SCORE // 2)
 MIN_FUNCTION_INSTRUCTION_COUNT_FOR_HASH_LOOKUP = 4
-# Minimum distinct canonical functions a source graph must share with the binary
-# before a callgraph-only match (no symbol or hash corroboration) is surfaced.
+# Minimum instruction count for a function's fuzzy hash to take part in a
+# blintdb lookup. Exact-hash lookups use
+# MIN_FUNCTION_INSTRUCTION_COUNT_FOR_HASH_LOOKUP; the fuzzy hash digests the
+# mnemonic sequence with operands dropped, so short functions collide across
+# unrelated projects (a push/mov/ret thunk is the same sequence everywhere).
+# Value from the cross-project collision measurement in
+# tests/scripts/measure_fuzzy_collisions.py over 16 corpus binaries
+# (204,626 hashed functions): the cross-project collision rate is 12.05% of
+# functions at floor 4, 9.06% at floor 8, 6.82% at floor 12 — floor 8 is the
+# knee of that curve and still keeps 78% of hashed functions eligible.
+MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP = 8
+# Score contribution of one distinct matched fuzzy hash. Deliberately a sixth
+# of an exact instruction-hash match (12 points): a fuzzy match asserts that
+# the same mnemonic sequence occurred, not the same instructions.
+FUZZY_HASH_MATCH_WEIGHT = 2.0
+# Distinct matched fuzzy hashes required before fuzzy evidence alone can
+# surface a project match. One or two colliding generic functions must never
+# attribute a component; same scale as CALLGRAPH_ONLY_MATCH_THRESHOLD.
+FUZZY_ONLY_MATCH_THRESHOLD = 8
+# Fuzzy-only attribution additionally requires the matched functions to cover
+# this fraction of the queried binary's own floor-passing fuzzy functions.
+# The absolute count alone cannot separate a small binary that genuinely
+# matches its project from a large binary that merely bundles the same runtime
+# as another project. Measured gap (tests/scripts/measure_fuzzy_collisions.py,
+# name-neutralized probe, real lookup path): the worst foreign-project overlap
+# covers 12.5%/12.1%/8.9% of the query at floors 8/16 (1,055 shared hashes for
+# the app pair that bundles the same runtime) while every own-project match
+# covers 100%. This gate sits four times above the observed false maximum; it
+# is deliberately strict because the intended fuzzy-only consumer (P4.3,
+# stripped-binary linkage recovery) matches a binary against the project most
+# of its functions came from. Rows that fail the gate keep their fuzzy score
+# contribution — they are corroboration, never sole attribution.
+FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
+# Score contribution of a matching binary-level import-set digest. One lookup
+# carries a single import hash, so this contributes at most one weight and is
+# kept below SYMBOL_ONLY_MATCH_THRESHOLD: import evidence corroborates but can
+# never surface a match on its own. An empty import hash (statically linked or
+# import-less binaries) is never queried, so empty never matches empty.
+IMPORT_HASH_MATCH_WEIGHT = 4.0
+# cfg_hash is recorded as match evidence but carries no score weight: the
+# block-graph shape is invariant under mnemonic substitution, so it identifies
+# shape classes rather than functions. Weighed against real archive-member
+# data in P4.3 (tests/scripts/measure_static_linkage.py) and kept at zero:
+# foreign members collect 1-5 cfg matches per member even when no fuzzy or
+# exact hash matches at all, so cfg evidence cannot distinguish presence from
+# a shared shape class.
+CFG_HASH_MATCH_WEIGHT = 0.0
 CALLGRAPH_ONLY_MATCH_THRESHOLD = 8
 # Score contribution per shared canonical function, capped so a very large
 # overlap corroborates strongly without completely overwhelming other evidence.
 CALLGRAPH_MATCH_WEIGHT = 0.5
 CALLGRAPH_MATCH_SCORE_CAP = 60.0
+
+# --- Member-level (static archive) matching, P4.3 ---------------------------
+#
+# A statically linked binary contains whole .a members at once, so a genuine
+# member match covers a small fraction of the query by construction — the
+# whole-binary fuzzy-only coverage gate (FUZZY_ONLY_MIN_QUERY_COVERAGE, measured
+# against the query's own functions) rejects exactly the evidence this layer is
+# for. Member matching therefore measures coverage against the *member* instead.
+#
+# Values from tests/scripts/measure_static_linkage.py over real archives
+# (zlib 1.3.1, lua 5.4.6, sqlite 3.46.0, cjson 1.7.18, all disassembled per
+# member) linked into stripped binaries, plus one query linked only against an
+# archive absent from the database (miniz 2.1.0, a zlib-shaped library) as the
+# false-positive probe. Measured separation on candidates that share >= 1
+# distinct fuzzy or exact hash with the query:
+#
+# - genuine members: distinct fuzzy matches 3..1350, member coverage
+#   0.33..0.87 (dead-stripping removes unreachable member functions, so
+#   coverage is never 1.0 by construction);
+# - noise members (present in the database, not in the binary): <= 1 distinct
+#   fuzzy match, member coverage <= 0.08, exact coverage <= 0.08 — with one
+#   instructive exception: a 1808-function member collected 3 distinct exact
+#   matches (generic libc prologues) at 0.003 coverage, so the exact path
+#   needs the coverage gate, not just a match count.
+#
+# The contiguity ratio (address-adjacency of the matched query functions) is
+# a corroborating gate on both paths — genuine member matches all measured
+# >= 0.62 — but it does not separate by itself: the same 1808-function noise
+# member's three scattered matches landed adjacent by coincidence. Member
+# coverage cannot carry the exact path alone, because a member small enough
+# is covered by any three generic hashes it happens to share.
+
+# Distinct fuzzy-hash matches required before fuzzy evidence alone can qualify
+# a member. Measured: every fuzzy-path genuine member matched >= 6; noise
+# members matched at most 1.
+MEMBER_MIN_FUZZY_MATCH_HASHES = 6
+# Distinct exact (instruction) hash matches that can qualify a member via the
+# exact path (with the coverage and contiguity gates below). Measured: genuine
+# exact-path members matched 3; the count alone is not a gate — the
+# 1808-function noise member also collected 3.
+MEMBER_MIN_EXACT_MATCH_HASHES = 3
+# Fraction of the member's own fingerprint population that must be matched.
+# One gate for both paths because the measured distributions agree:
+# genuine members cover 0.33..0.87 of themselves, noise members <= 0.08. The
+# gate sits just above four times the observed noise maximum.
+MEMBER_MIN_MEMBER_COVERAGE = 0.35
+# Smallest member population the coverage gate can actually judge. Coverage is
+# a ratio, so a member with few enough functions is covered by whatever handful
+# of generic hashes it happens to share: at or below
+# MEMBER_MIN_EXACT_MATCH_HASHES / MEMBER_MIN_MEMBER_COVERAGE functions the
+# exact path's coverage gate cannot fail, and archives are full of members that
+# small. Such a member carries no evidence to judge, so it is out of scope
+# rather than admitted — the same boundary the measurement reported for small
+# dead-stripped members on the recall side.
+MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS = (
+    int(MEMBER_MIN_EXACT_MATCH_HASHES / MEMBER_MIN_MEMBER_COVERAGE) + 1
+)
+# Fraction of the member's matched query functions that must sit address-
+# adjacent to the next matched function (gap <= MEMBER_CONTIGUITY_GAP_BYTES
+# past the function's end). Applied to both paths, and only when the member
+# matched at two or more distinct query addresses; single-address matches pass
+# by definition (an adjacency ratio needs two points).
+MEMBER_MIN_CONTIGUITY_RATIO = 0.5
+MEMBER_CONTIGUITY_GAP_BYTES = 64
+# Cap on how many distinct member candidates one hash batch may return. The
+# query-side instruction-count floors are the ones build_function_hash_index
+# applies; member-side quantities are covered by the gates above.
+MEMBER_QUERY_BATCH_LIMIT = 200
+
+# Named states for the similarity-hash layer, reported by
+# blintdb_fuzzy_layer_state() and logged during lookups so that "the layer ran
+# and found nothing" is never indistinguishable from "the layer could not run".
+HASH_LAYER_ACTIVE = "active"
+HASH_LAYER_UNAVAILABLE_DATABASE_MISSING = "unavailable_database_missing"
+HASH_LAYER_UNAVAILABLE_SCHEMA_UNSUPPORTED = "unavailable_schema_unsupported"
+HASH_LAYER_UNAVAILABLE_COLUMNS_ABSENT = "unavailable_hash_columns_absent"
+HASH_LAYER_UNAVAILABLE_COLUMNS_UNPOPULATED = "unavailable_hash_columns_unpopulated"
+HASH_LAYER_INACTIVE_NO_DISASSEMBLY = "inactive_no_disassembly"
+HASH_LAYER_INACTIVE_NO_FUZZY_HASHES = "inactive_no_fuzzy_hashes"
+
+# Named states for the member-level layer, reported by
+# blintdb_member_layer_state() so that member-level attribution, its absence,
+# and its impossibility are never conflated — a component attributed at
+# member granularity carries different evidence than one attributed from
+# whole-binary symbols.
+MEMBER_LAYER_ACTIVE = "active"
+MEMBER_LAYER_UNAVAILABLE_DATABASE_MISSING = "unavailable_database_missing"
+MEMBER_LAYER_UNAVAILABLE_SCHEMA_UNSUPPORTED = "unavailable_schema_unsupported"
+MEMBER_LAYER_UNAVAILABLE_NO_MEMBER_ROWS = "unavailable_no_member_rows"
+MEMBER_LAYER_INACTIVE_NO_DISASSEMBLY = "inactive_no_disassembly"
+MEMBER_LAYER_INACTIVE_NO_HASHES = "inactive_no_function_hashes"
 SYMBOL_SOURCES = (
     "functions",
     "ctor_functions",
@@ -142,10 +290,14 @@ def is_supported_blintdb(db_file: str | None = None) -> bool:
     meta = get_schema_meta(db_file)
     if not meta:
         return False
-    return (
-        meta.get("schema_family") == DB_SCHEMA_FAMILY
-        and int(meta.get("schema_version", "0")) == DB_SCHEMA_VERSION
-    )
+    return meta.get("schema_family") == DB_SCHEMA_FAMILY and _supported_schema_version(meta)
+
+
+def _supported_schema_version(meta: dict[str, str]) -> bool:
+    try:
+        return int(meta.get("schema_version", "0")) in SUPPORTED_DB_SCHEMA_VERSIONS
+    except (TypeError, ValueError):
+        return False
 
 
 def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
@@ -170,7 +322,18 @@ def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
 
 
 def build_function_hash_index(metadata: dict | None) -> dict[str, list[str]]:
-    """Extract disassembly hashes from parsed binary metadata."""
+    """Extract disassembly hashes from parsed binary metadata.
+
+    Exact ``instruction_hash``/``assembly_hash`` values are collected as before.
+    The fuzzy and CFG hashes exist only on ``disassembled_functions``, so both
+    keys are absent from the result when disassembly did not run — callers must
+    treat that as "layer unavailable" (see blintdb_fuzzy_layer_state) and never
+    as "queried and found nothing". Fuzzy and CFG hashes additionally require a
+    known instruction count at or above
+    MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP: unlike the exact
+    hashes there is no producer-side guarantee the function was big enough to
+    be worth matching.
+    """
     if not metadata:
         return {}
     disassembled_functions = metadata.get("disassembled_functions") or {}
@@ -178,6 +341,8 @@ def build_function_hash_index(metadata: dict | None) -> dict[str, list[str]]:
         return {}
     instruction_hashes = []
     assembly_hashes = []
+    fuzzy_hashes = []
+    cfg_hashes = []
     for function_data in disassembled_functions.values():
         if not isinstance(function_data, dict):
             continue
@@ -191,11 +356,24 @@ def build_function_hash_index(metadata: dict | None) -> dict[str, list[str]]:
             instruction_hashes.append(function_data["instruction_hash"])
         if function_data.get("assembly_hash"):
             assembly_hashes.append(function_data["assembly_hash"])
+        if (
+            instruction_count is None
+            or int(instruction_count) < MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP
+        ):
+            continue
+        if function_data.get("fuzzy_hash"):
+            fuzzy_hashes.append(function_data["fuzzy_hash"])
+        if function_data.get("cfg_hash"):
+            cfg_hashes.append(function_data["cfg_hash"])
     hash_index = {}
     if instruction_hashes:
         hash_index["instruction_hashes"] = _clean_nonempty_values(instruction_hashes)
     if assembly_hashes:
         hash_index["assembly_hashes"] = _clean_nonempty_values(assembly_hashes)
+    if fuzzy_hashes:
+        hash_index["fuzzy_hashes"] = _clean_nonempty_values(fuzzy_hashes)
+    if cfg_hashes:
+        hash_index["cfg_hashes"] = _clean_nonempty_values(cfg_hashes)
     return hash_index
 
 
@@ -233,6 +411,323 @@ def _blintdb_has_callgraph_tables(connection: apsw.Connection) -> bool:
     return len({row[0] for row in rows}) == 2
 
 
+# The tables every lookup query joins. Accepting more than one schema version
+# means blint can meet a database whose layout it has never seen, and the
+# queries below do not swallow SQLite errors — so an unknown layout must be
+# refused here rather than raised out of an SBOM run.
+_REQUIRED_TABLES = ("Projects", "Builds", "Binaries", "Symbols", "FunctionFingerprints")
+
+
+def _blintdb_has_required_tables(connection: apsw.Connection) -> bool:
+    """Whether the database carries every table the lookup queries join."""
+    placeholders = ",".join("?" for _ in _REQUIRED_TABLES)
+    try:
+        rows = connection.execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})",
+            _REQUIRED_TABLES,
+        ).fetchall()
+    except apsw.Error:
+        return False
+    return len({row[0] for row in rows}) == len(_REQUIRED_TABLES)
+
+
+# The similarity hash columns live on two tables: the per-function fuzzy and
+# CFG hashes on FunctionFingerprints, the per-binary import hash on Binaries.
+# archive_name marks Binaries rows that are static-archive members; it is the
+# member-level layer's capability column in the same sense.
+_HASH_COLUMN_TABLES = {
+    "fuzzy_hash": "FunctionFingerprints",
+    "cfg_hash": "FunctionFingerprints",
+    "import_hash": "Binaries",
+    "archive_name": "Binaries",
+}
+
+# blint reads producer-built databases; it never creates one. Which columns a
+# database actually carries (and whether they hold any values) is therefore a
+# property to detect, not assume — schema version 2 and version 3 databases may
+# or may not carry them. Results are memoized per database file because
+# databases are read-only during a run and the populated-ness probe is an
+# index scan when a column exists but is entirely NULL.
+_blintdb_capability_cache: dict[str, dict[str, bool]] = {}
+
+
+def _table_columns(connection: apsw.Connection, table: str) -> set[str]:
+    try:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    except apsw.Error:
+        return set()
+    return {str(row[1]) for row in rows}
+
+
+def _column_populated(connection: apsw.Connection, table: str, column: str) -> bool:
+    try:
+        row = connection.execute(
+            f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {column} IS NOT NULL "
+            f"AND {column} != '' LIMIT 1)"
+        ).fetchone()
+    except apsw.Error:
+        return False
+    return bool(row and row[0])
+
+
+def blintdb_hash_capabilities(db_file: str | None = None) -> dict[str, bool]:
+    """Detect which similarity hash columns a blintdb carries and populates.
+
+    Returns a dict with a boolean per known column (``fuzzy_hash``,
+    ``cfg_hash``, ``import_hash``) plus a ``<column>_populated`` boolean that
+    is True only when the column exists and at least one non-empty value is
+    stored. Empty when the database is missing or unreadable; callers must
+    treat a missing key as "column absent", never as False-by-lookup.
+    """
+    database_file = _resolve_db_file(db_file)
+    if not database_file or not os.path.exists(database_file):
+        return {}
+    cache_key = os.path.abspath(database_file)
+    cached = _blintdb_capability_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    capabilities: dict[str, bool] = {}
+    connection = get(database_file)
+    if connection is not None:
+        try:
+            table_columns = {
+                table: _table_columns(connection, table)
+                for table in set(_HASH_COLUMN_TABLES.values())
+            }
+            for column, table in _HASH_COLUMN_TABLES.items():
+                present = column in table_columns[table]
+                capabilities[column] = present
+                capabilities[f"{column}_populated"] = (
+                    present and _column_populated(connection, table, column)
+                )
+        finally:
+            connection.close()
+    _blintdb_capability_cache[cache_key] = capabilities
+    return capabilities
+
+
+def blintdb_fuzzy_layer_state(
+    db_file: str | None = None, metadata: dict | None = None
+) -> str:
+    """Name why the fuzzy-hash layer did or did not take part in a lookup.
+
+    Returns one of the HASH_LAYER_* states. Every non-active state is a reason
+    the layer could not run — never a report of zero matches — so callers can
+    distinguish "queried and found nothing" (``active``) from the five ways the
+    layer is unavailable or inactive.
+    """
+    database_file = _resolve_db_file(db_file)
+    if not database_file or not os.path.exists(database_file):
+        return HASH_LAYER_UNAVAILABLE_DATABASE_MISSING
+    if not is_supported_blintdb(database_file):
+        return HASH_LAYER_UNAVAILABLE_SCHEMA_UNSUPPORTED
+    capabilities = blintdb_hash_capabilities(database_file)
+    if not capabilities.get("fuzzy_hash"):
+        return HASH_LAYER_UNAVAILABLE_COLUMNS_ABSENT
+    if not capabilities.get("fuzzy_hash_populated"):
+        return HASH_LAYER_UNAVAILABLE_COLUMNS_UNPOPULATED
+    disassembled_functions = (metadata or {}).get("disassembled_functions")
+    if not isinstance(disassembled_functions, dict) or not disassembled_functions:
+        return HASH_LAYER_INACTIVE_NO_DISASSEMBLY
+    if not build_function_hash_index(metadata).get("fuzzy_hashes"):
+        return HASH_LAYER_INACTIVE_NO_FUZZY_HASHES
+    return HASH_LAYER_ACTIVE
+
+
+def blintdb_member_layer_state(db_file: str | None = None, metadata: dict | None = None) -> str:
+    """Name why the member-level (static archive) layer did or did not run.
+
+    Returns one of the MEMBER_LAYER_* states. Every non-active state is a
+    reason the layer could not run — never a report of zero matches — so
+    callers can distinguish "queried and found nothing" (``active``) from the
+    ways the layer is unavailable or inactive. A database without member rows
+    (``unavailable_no_member_rows``) is the normal state for databases built
+    before member ingestion existed.
+    """
+    database_file = _resolve_db_file(db_file)
+    if not database_file or not os.path.exists(database_file):
+        return MEMBER_LAYER_UNAVAILABLE_DATABASE_MISSING
+    if not is_supported_blintdb(database_file):
+        return MEMBER_LAYER_UNAVAILABLE_SCHEMA_UNSUPPORTED
+    capabilities = blintdb_hash_capabilities(database_file)
+    if not capabilities.get("archive_name"):
+        return MEMBER_LAYER_UNAVAILABLE_NO_MEMBER_ROWS
+    if not capabilities.get("archive_name_populated"):
+        return MEMBER_LAYER_UNAVAILABLE_NO_MEMBER_ROWS
+    disassembled_functions = (metadata or {}).get("disassembled_functions")
+    if not isinstance(disassembled_functions, dict) or not disassembled_functions:
+        return MEMBER_LAYER_INACTIVE_NO_DISASSEMBLY
+    hash_index = build_function_hash_index(metadata)
+    if not hash_index.get("fuzzy_hashes") and not hash_index.get("instruction_hashes"):
+        return MEMBER_LAYER_INACTIVE_NO_HASHES
+    return MEMBER_LAYER_ACTIVE
+
+
+def build_query_function_positions(metadata: dict | None) -> dict[str, list[dict]]:
+    """Map each exact/fuzzy hash to the query functions that carry it.
+
+    The positions (address, size) of the query binary's own functions are what
+    member-level contiguity is measured on. Sizes come from ``functions``
+    metadata joined on address; functions without a size entry fall back to
+    ``instruction_count * 4`` (exact for fixed-length ISAs, an upper bound
+    elsewhere). Applies the same instruction-count floors as
+    ``build_function_hash_index``.
+    """
+    if not metadata:
+        return {}
+    disassembled_functions = metadata.get("disassembled_functions")
+    if not isinstance(disassembled_functions, dict):
+        return {}
+    function_sizes = {}
+    for entry in metadata.get("functions") or []:
+        if isinstance(entry, dict) and entry.get("address"):
+            try:
+                function_sizes[int(str(entry["address"]), 16)] = int(entry.get("size") or 0)
+            except (TypeError, ValueError):
+                continue
+    positions: dict[str, list[dict]] = {}
+    for function_data in disassembled_functions.values():
+        if not isinstance(function_data, dict):
+            continue
+        instruction_count = function_data.get("instruction_count")
+        if (
+            instruction_count is None
+            or int(instruction_count) < MIN_FUNCTION_INSTRUCTION_COUNT_FOR_HASH_LOOKUP
+        ):
+            continue
+        try:
+            address = int(str(function_data.get("address")), 16)
+        except (TypeError, ValueError):
+            continue
+        size = function_sizes.get(address) or int(instruction_count) * 4
+        position = {"address": address, "size": size}
+        if function_data.get("instruction_hash"):
+            positions.setdefault(str(function_data["instruction_hash"]), []).append(position)
+        if (
+            int(instruction_count) >= MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP
+            and function_data.get("fuzzy_hash")
+        ):
+            positions.setdefault(str(function_data["fuzzy_hash"]), []).append(position)
+    return positions
+
+
+def _member_contiguity(positions: list[dict]) -> float:
+    """Fraction of address-ordered matched functions adjacent to the next.
+
+    A real archive member is emitted as one address run, so a genuine match
+    scores near 1.0 while scattered collisions score near 0.0. Positions with
+    the same address (one function matching several hashes) count once.
+    """
+    addresses = sorted({p["address"] for p in positions})
+    if not addresses:
+        return 0.0
+    if len(addresses) == 1:
+        return 1.0
+    size_by_address = {}
+    for p in positions:
+        size_by_address.setdefault(p["address"], p["size"])
+    adjacent = 0
+    for current, following in zip(addresses, addresses[1:]):
+        gap = following - (current + size_by_address.get(current, 0))
+        if 0 <= gap <= MEMBER_CONTIGUITY_GAP_BYTES:
+            adjacent += 1
+    return adjacent / (len(addresses) - 1)
+
+
+def _query_member_hash_matches(
+    connection: apsw.Connection,
+    hash_values: list[str],
+    *,
+    hash_column: str,
+    limit: int = MEMBER_QUERY_BATCH_LIMIT,
+) -> list[dict]:
+    """Find static-archive members holding any of the given function hashes.
+
+    Groups by member (Binaries row with archive_name set), not by project:
+    the member is the unit a statically linked binary actually contains.
+    """
+    if not hash_values:
+        return []
+    placeholders = ",".join("?" for _ in hash_values)
+    params = [*hash_values, limit]
+    query = f"""
+        SELECT
+            Projects.project_id,
+            Projects.name AS project_name,
+            Projects.purl AS project_purl,
+            Binaries.binary_id,
+            Binaries.name AS member_name,
+            Binaries.archive_name AS archive_name,
+            COUNT(DISTINCT FunctionFingerprints.function_key) AS matched_function_count,
+            group_concat(DISTINCT FunctionFingerprints.{hash_column}) AS matched_hashes
+        FROM FunctionFingerprints
+        JOIN Binaries ON FunctionFingerprints.binary_id = Binaries.binary_id
+        JOIN Builds ON Binaries.build_id = Builds.build_id
+        JOIN Projects ON Builds.project_id = Projects.project_id
+        WHERE Projects.purl IS NOT NULL
+            AND Projects.purl != ''
+            AND Binaries.archive_name IS NOT NULL
+            AND Binaries.archive_name != ''
+            AND FunctionFingerprints.{hash_column} IN ({placeholders})
+        GROUP BY Binaries.binary_id
+        ORDER BY matched_function_count DESC, Binaries.binary_id ASC
+        LIMIT ?
+    """
+    return _execute(connection, query, params)
+
+
+def _collect_member_candidates(
+    connection: apsw.Connection,
+    hash_values: list[str],
+    *,
+    hash_column: str,
+) -> dict[int, dict]:
+    """Collect per-member matched hashes across every query batch.
+
+    A member matched by hashes in two different batches must union them, the
+    way the whole-binary path unions through _merge_hash_rows: keeping only the
+    first batch's row would undercount the matches the coverage gate divides.
+    """
+    candidates: dict[int, dict] = {}
+    for batch in _batched(_clean_nonempty_values(hash_values)):
+        for row in _query_member_hash_matches(
+            connection, batch, hash_column=hash_column
+        ):
+            candidate = candidates.setdefault(
+                int(row["binary_id"]), {"row": row, "hashes": set()}
+            )
+            candidate["hashes"].update(_decode_csv_set(row["matched_hashes"]))
+    return candidates
+
+
+def _query_member_totals(
+    connection: apsw.Connection, binary_ids: list[int]
+) -> dict[int, dict]:
+    """Return per-member fingerprint totals needed for member-side coverage.
+
+    The denominator is the member's whole fingerprint population, not the
+    hash-populating subset: coverage means "how much of this member is in the
+    query", and rows whose hashes are NULL (functions the producer could not
+    hash) are still part of the member.
+    """
+    totals = {}
+    ids = [int(binary_id) for binary_id in binary_ids if binary_id is not None]
+    for batch in _batched([str(binary_id) for binary_id in ids], 100):
+        placeholders = ",".join("?" for _ in batch)
+        rows = connection.execute(
+            f"""
+            SELECT binary_id, COUNT(*) AS total_functions
+            FROM FunctionFingerprints
+            WHERE binary_id IN ({placeholders})
+            GROUP BY binary_id
+            """,
+            batch,
+        ).fetchall()
+        for row in rows:
+            totals[int(row[0])] = {"total_functions": int(row[1] or 0)}
+    return totals
+
+
 def _build_binary_filters(binary_metadata: dict | None) -> tuple[str, list[str]]:
     if not binary_metadata:
         return "", []
@@ -263,6 +758,9 @@ def _ensure_project_match(project_matches: dict, row) -> dict:
             "matched_symbol_sources": set(),
             "matched_instruction_hashes": set(),
             "matched_assembly_hashes": set(),
+            "matched_fuzzy_hashes": set(),
+            "matched_cfg_hashes": set(),
+            "matched_import_hashes": set(),
             "matched_callgraph_functions": set(),
             "matched_symbol_rows": 0,
             "matched_function_rows": 0,
@@ -281,18 +779,30 @@ def _merge_symbol_rows(project_matches: dict, rows, source: str) -> None:
         match["matched_symbol_rows"] += int(row["matched_row_count"] or 0)
 
 
+_HASH_MATCH_KEYS = {
+    "instruction_hash": "matched_instruction_hashes",
+    "assembly_hash": "matched_assembly_hashes",
+    "fuzzy_hash": "matched_fuzzy_hashes",
+    "cfg_hash": "matched_cfg_hashes",
+}
+
+
 def _merge_hash_rows(project_matches: dict, rows, hash_kind: str) -> None:
-    target_key = (
-        "matched_instruction_hashes"
-        if hash_kind == "instruction_hash"
-        else "matched_assembly_hashes"
-    )
+    target_key = _HASH_MATCH_KEYS[hash_kind]
     for row in rows:
         match = _ensure_project_match(project_matches, row)
         match["matched_binary_ids"].update(_decode_csv_set(row["matched_binary_ids"]))
         match["matched_binary_names"].update(_decode_hex_csv(row.get("matched_binary_names_hex")))
         match[target_key].update(_decode_csv_set(row["matched_hashes"]))
         match["matched_function_rows"] += int(row["matched_row_count"] or 0)
+
+
+def _merge_import_hash_rows(project_matches: dict, rows) -> None:
+    for row in rows:
+        match = _ensure_project_match(project_matches, row)
+        match["matched_binary_ids"].update(_decode_csv_set(row["matched_binary_ids"]))
+        match["matched_binary_names"].update(_decode_hex_csv(row.get("matched_binary_names_hex")))
+        match["matched_import_hashes"].update(_decode_csv_set(row["matched_hashes"]))
 
 
 def _merge_callgraph_rows(project_matches: dict, rows) -> None:
@@ -411,6 +921,52 @@ def _query_project_hash_matches(
     return _execute(connection, query, params)
 
 
+def _query_project_import_hash_matches(
+    connection: apsw.Connection,
+    import_hashes: list[str],
+    *,
+    binary_filters: str = "",
+    binary_filter_params: list[str] | None = None,
+    limit: int = DB_QUERY_LIMIT,
+) -> list[dict]:
+    """Match a binary-level import-set digest against blintdb Binaries.
+
+    An import hash summarizes the whole normalized import set of a binary, so
+    a hit means another stored binary declares exactly the same dependency
+    surface. Empty values are never queried (a statically linked binary shares
+    its empty import set with every other one); call sites drop them before
+    this query runs.
+    """
+    if not import_hashes:
+        return []
+    placeholders = ",".join("?" for _ in import_hashes)
+    params = list(import_hashes)
+    if binary_filter_params:
+        params.extend(binary_filter_params)
+    params.append(limit)
+    query = f"""
+        SELECT
+            Projects.project_id,
+            Projects.name AS project_name,
+            Projects.purl AS project_purl,
+            COUNT(*) AS matched_row_count,
+            group_concat(DISTINCT Binaries.binary_id) AS matched_binary_ids,
+            group_concat(DISTINCT hex(Binaries.name)) AS matched_binary_names_hex,
+            group_concat(DISTINCT Binaries.import_hash) AS matched_hashes
+        FROM Binaries
+        JOIN Builds ON Binaries.build_id = Builds.build_id
+        JOIN Projects ON Builds.project_id = Projects.project_id
+        WHERE Projects.purl IS NOT NULL
+            AND Projects.purl != ''
+            AND Binaries.import_hash IN ({placeholders})
+            {binary_filters}
+        GROUP BY Projects.project_id
+        ORDER BY matched_row_count DESC, Projects.project_id ASC
+        LIMIT ?
+    """
+    return _execute(connection, query, params)
+
+
 def _query_symbol_batches(
     connection: apsw.Connection,
     project_matches: dict,
@@ -510,7 +1066,10 @@ def _query_callgraph_batches(
 
 
 def _finalize_project_matches(
-    project_matches: dict, *, target_binary_names: set[str] | None = None
+    project_matches: dict,
+    *,
+    target_binary_names: set[str] | None = None,
+    fuzzy_query_count: int = 0,
 ) -> list[dict]:
     target_binary_names = target_binary_names or set()
     finalized_matches = []
@@ -522,6 +1081,9 @@ def _finalize_project_matches(
         matched_binary_name_count = len(match["matched_binary_names"])
         matched_instruction_hash_count = len(match["matched_instruction_hashes"])
         matched_assembly_hash_count = len(match["matched_assembly_hashes"])
+        matched_fuzzy_hash_count = len(match["matched_fuzzy_hashes"])
+        matched_cfg_hash_count = len(match["matched_cfg_hashes"])
+        matched_import_hash_count = len(match["matched_import_hashes"])
         matched_callgraph_count = len(match["matched_callgraph_functions"])
         binary_name_match = bool(
             target_binary_names
@@ -529,18 +1091,40 @@ def _finalize_project_matches(
                 {_normalize_binary_name(name) for name in match["matched_binary_names"]}
             )
         )
-        score = float(matched_symbol_count)
-        score += matched_instruction_hash_count * float(max(MIN_MATCH_SCORE, 12))
-        score += matched_assembly_hash_count * float(max(MIN_MATCH_SCORE // 2, 6))
-        score += float(min(len(match["matched_symbol_sources"]), 4))
-        score += min(matched_callgraph_count * CALLGRAPH_MATCH_WEIGHT, CALLGRAPH_MATCH_SCORE_CAP)
+        # Fuzzy, CFG and import evidence never takes part in the surfacing
+        # decision through the score: a match qualifies on exact hashes, on
+        # callgraph overlap, on non-fuzzy score, or on fuzzy evidence that
+        # passes both gates below. This keeps a v2 database (whose
+        # fuzzy/cfg/import counts are always zero) byte-identical to the
+        # pre-fuzzy gate.
+        base_score = float(matched_symbol_count)
+        base_score += matched_instruction_hash_count * float(max(MIN_MATCH_SCORE, 12))
+        base_score += matched_assembly_hash_count * float(max(MIN_MATCH_SCORE // 2, 6))
+        base_score += float(min(len(match["matched_symbol_sources"]), 4))
+        base_score += min(
+            matched_callgraph_count * CALLGRAPH_MATCH_WEIGHT, CALLGRAPH_MATCH_SCORE_CAP
+        )
         if binary_name_match:
-            score += float(max(MIN_MATCH_SCORE * 3, 18))
+            base_score += float(max(MIN_MATCH_SCORE * 3, 18))
+        fuzzy_coverage = (
+            matched_fuzzy_hash_count / fuzzy_query_count if fuzzy_query_count else 0.0
+        )
+        score = (
+            base_score
+            + matched_fuzzy_hash_count * FUZZY_HASH_MATCH_WEIGHT
+            + matched_import_hash_count * IMPORT_HASH_MATCH_WEIGHT
+            + matched_cfg_hash_count * CFG_HASH_MATCH_WEIGHT
+        )
+        fuzzy_only_qualified = (
+            matched_fuzzy_hash_count >= FUZZY_ONLY_MATCH_THRESHOLD
+            and fuzzy_coverage >= FUZZY_ONLY_MIN_QUERY_COVERAGE
+        )
         if not (
             matched_instruction_hash_count
             or matched_assembly_hash_count
             or matched_callgraph_count >= CALLGRAPH_ONLY_MATCH_THRESHOLD
-            or score >= SYMBOL_ONLY_MATCH_THRESHOLD
+            or fuzzy_only_qualified
+            or base_score >= SYMBOL_ONLY_MATCH_THRESHOLD
         ):
             continue
         finalized_matches.append(
@@ -563,6 +1147,15 @@ def _finalize_project_matches(
                 "matched_assembly_hashes": sorted(match["matched_assembly_hashes"])[
                     :DB_EVIDENCE_LIMIT
                 ],
+                "fuzzy_only_qualified": fuzzy_only_qualified,
+                "matched_fuzzy_hash_count": matched_fuzzy_hash_count,
+                "matched_fuzzy_hashes": sorted(match["matched_fuzzy_hashes"])[:DB_EVIDENCE_LIMIT],
+                "matched_cfg_hash_count": matched_cfg_hash_count,
+                "matched_cfg_hashes": sorted(match["matched_cfg_hashes"])[:DB_EVIDENCE_LIMIT],
+                "matched_import_hash_count": matched_import_hash_count,
+                "matched_import_hashes": sorted(match["matched_import_hashes"])[
+                    :DB_EVIDENCE_LIMIT
+                ],
                 "matched_callgraph_count": matched_callgraph_count,
                 "matched_callgraph_functions": sorted(match["matched_callgraph_functions"])[
                     :DB_EVIDENCE_LIMIT
@@ -577,6 +1170,8 @@ def _finalize_project_matches(
             row["binary_name_match"],
             row["matched_instruction_hash_count"],
             row["matched_assembly_hash_count"],
+            row["matched_fuzzy_hash_count"],
+            row["matched_import_hash_count"],
             row["matched_callgraph_count"],
             row["matched_symbol_count"],
             row["matched_binary_count"],
@@ -595,13 +1190,15 @@ def lookup_project_matches(
     db_file: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
-    """Lookup candidate project purls in blintdb v2 using symbols, function hashes, and callgraph."""
+    """Lookup candidate project purls in blintdb using symbols, function hashes, and callgraph."""
     database_file = _resolve_db_file(db_file)
     if not database_file or not os.path.exists(database_file):
         return []
     if not is_supported_blintdb(database_file):
         LOG.debug(
-            "Skipping blintdb lookup because the local database is not a supported v2 schema"
+            "Skipping blintdb lookup because the local database is not a supported schema "
+            "(supported versions: %s)",
+            ", ".join(str(version) for version in SUPPORTED_DB_SCHEMA_VERSIONS),
         )
         return []
     normalized_source_map = {
@@ -622,11 +1219,18 @@ def lookup_project_matches(
     if not connection:
         return []
     try:
+        if not _blintdb_has_required_tables(connection):
+            LOG.debug(
+                "Skipping blintdb lookup: the database stamps a supported schema version but "
+                "does not carry every table the lookup needs"
+            )
+            return []
         project_matches: dict = {}
         target_binary_name = _normalize_binary_name(
             (binary_metadata or {}).get("name") or (binary_metadata or {}).get("file_path")
         )
         target_binary_names = {target_binary_name} if target_binary_name else set()
+        capabilities = blintdb_hash_capabilities(database_file)
         hash_found = False
         if instruction_hashes := normalized_hash_index.get("instruction_hashes"):
             hash_found = _query_hash_batches(
@@ -661,6 +1265,54 @@ def lookup_project_matches(
                     hash_column="assembly_hash",
                 )
             hash_found = hash_found or assembly_found
+        if fuzzy_hashes := normalized_hash_index.get("fuzzy_hashes"):
+            if not capabilities.get("fuzzy_hash_populated"):
+                LOG.debug(
+                    "blintdb fuzzy-hash layer unavailable (%s); %d fuzzy hashes not queried",
+                    blintdb_fuzzy_layer_state(database_file),
+                    len(fuzzy_hashes),
+                )
+            else:
+                fuzzy_found = _query_hash_batches(
+                    connection,
+                    project_matches,
+                    fuzzy_hashes,
+                    hash_column="fuzzy_hash",
+                    binary_filters=binary_filters,
+                    binary_filter_params=binary_filter_params,
+                )
+                if not fuzzy_found and binary_filters:
+                    _query_hash_batches(
+                        connection,
+                        project_matches,
+                        fuzzy_hashes,
+                        hash_column="fuzzy_hash",
+                    )
+        # fuzzy_found deliberately does not feed hash_found: that flag waives
+        # the symbol-only filter for every candidate in the lookup, so one
+        # project's fuzzy hit would admit another project's weak symbols on
+        # evidence the fuzzy gates themselves reject. Fuzzy earns a candidate
+        # its place through fuzzy_only_qualified instead, per candidate.
+        # cfg_hash is corroboration only (CFG_HASH_MATCH_WEIGHT is 0), so it is
+        # merged as evidence and never opens the hash-evidence return gate.
+        if (cfg_hashes := normalized_hash_index.get("cfg_hashes")) and capabilities.get(
+            "cfg_hash_populated"
+        ):
+            cfg_found = _query_hash_batches(
+                connection,
+                project_matches,
+                cfg_hashes,
+                hash_column="cfg_hash",
+                binary_filters=binary_filters,
+                binary_filter_params=binary_filter_params,
+            )
+            if not cfg_found and binary_filters:
+                _query_hash_batches(
+                    connection,
+                    project_matches,
+                    cfg_hashes,
+                    hash_column="cfg_hash",
+                )
         symbol_found = False
         if normalized_source_map:
             symbol_found = _query_symbol_batches(
@@ -676,6 +1328,33 @@ def lookup_project_matches(
                     project_matches,
                     normalized_source_map,
                 )
+        # An empty import hash is never queried: statically linked binaries
+        # would otherwise all match each other.
+        query_import_hashes = []
+        if capabilities.get("import_hash_populated"):
+            query_import_hashes = _clean_nonempty_values(
+                [(binary_metadata or {}).get("import_hash")]
+            )
+        elif (binary_metadata or {}).get("import_hash"):
+            LOG.debug(
+                "blintdb import-hash column unavailable for this database; import evidence "
+                "not queried"
+            )
+        import_found = False
+        if query_import_hashes:
+            import_found = _query_project_import_hash_matches(
+                connection,
+                query_import_hashes,
+                binary_filters=binary_filters,
+                binary_filter_params=binary_filter_params,
+            )
+            if not import_found and binary_filters:
+                import_found = _query_project_import_hash_matches(
+                    connection,
+                    query_import_hashes,
+                )
+            if import_found:
+                _merge_import_hash_rows(project_matches, import_found)
         callgraph_found = False
         if normalized_canon_names and _blintdb_has_callgraph_tables(connection):
             callgraph_found = _query_callgraph_batches(
@@ -684,7 +1363,9 @@ def lookup_project_matches(
                 normalized_canon_names,
             )
         matches = _finalize_project_matches(
-            project_matches, target_binary_names=target_binary_names
+            project_matches,
+            target_binary_names=target_binary_names,
+            fuzzy_query_count=len(normalized_hash_index.get("fuzzy_hashes") or []),
         )
         name_matched_rows = [match for match in matches if match["binary_name_match"]]
         name_matched_purls = {match["project_purl"] for match in name_matched_rows}
@@ -712,9 +1393,155 @@ def lookup_project_matches(
             match
             for match in matches
             if match["matched_symbol_count"] >= SYMBOL_ONLY_MATCH_THRESHOLD
+            or match["fuzzy_only_qualified"]
         ][:limit]
     finally:
         connection.close()
+
+
+def lookup_member_matches(
+    metadata: dict | None = None,
+    *,
+    db_file: str | None = None,
+) -> tuple[list[dict], str]:
+    """Match a binary's function hashes against blintdb static-archive members.
+
+    This is the member-level counterpart of ``lookup_project_matches``: the
+    unit of evidence is one ``.a`` member (a Binaries row with archive_name
+    set), not the whole project. Coverage is measured against the member's own
+    fingerprint population, not against the query — the property that
+    separates a genuinely linked member from cross-project hash collisions.
+    Two qualification paths per member, both requiring the same coverage gate
+    and the same address-adjacency of the matched query functions: a fuzzy
+    path (distinct fuzzy matches) and an exact path (distinct instruction-hash
+    matches).
+
+    The layer is deliberately independent of the whole-binary gates: qualifying
+    here never waives the symbol-only filter or any other gate in
+    ``lookup_project_matches`` — attribution earned by member evidence is
+    recorded as member evidence, per candidate.
+
+    Returns ``(matches, state)`` where ``state`` is a MEMBER_LAYER_* name and
+    each match carries the qualifying members with per-member evidence.
+    """
+    state = blintdb_member_layer_state(db_file, metadata)
+    if state != MEMBER_LAYER_ACTIVE:
+        return [], state
+    database_file = _resolve_db_file(db_file)
+    positions = build_query_function_positions(metadata)
+    hash_index = build_function_hash_index(metadata)
+    query_fuzzy = hash_index.get("fuzzy_hashes") or []
+    query_exact = hash_index.get("instruction_hashes") or []
+    connection = get(database_file)
+    if connection is None:
+        return [], state
+    try:
+        if not _blintdb_has_required_tables(connection):
+            return [], state
+        fuzzy_candidates = _collect_member_candidates(
+            connection, query_fuzzy, hash_column="fuzzy_hash"
+        )
+        exact_candidates = _collect_member_candidates(
+            connection, query_exact, hash_column="instruction_hash"
+        )
+        if not fuzzy_candidates and not exact_candidates:
+            return [], state
+        totals = _query_member_totals(
+            connection,
+            set(fuzzy_candidates) | set(exact_candidates),
+        )
+    finally:
+        connection.close()
+
+    matches_by_purl: dict[str, dict] = {}
+
+    member_rows = {}
+    for hash_kind, candidates in (
+        ("fuzzy", fuzzy_candidates),
+        ("exact", exact_candidates),
+    ):
+        for binary_id, candidate in candidates.items():
+            member_rows.setdefault(
+                binary_id, {"row": candidate["row"], "matched": {}}
+            )["matched"][hash_kind] = candidate["hashes"]
+    for binary_id, entry in sorted(member_rows.items()):
+        row = entry["row"]
+        matched_fuzzy = entry["matched"].get("fuzzy") or set()
+        matched_exact = entry["matched"].get("exact") or set()
+        total_functions = totals.get(binary_id, {}).get("total_functions", 0)
+        # Contiguity reads both hash kinds: a linked member is one address run
+        # whichever hash matched it, and the exact path needs the corroboration
+        # more than the fuzzy path does — three generic hashes is the whole of
+        # its evidence.
+        matched_positions = [
+            p
+            for h in matched_fuzzy | matched_exact
+            for p in positions.get(h, [])
+        ]
+        contiguity_ratio = _member_contiguity(matched_positions) if matched_positions else 0.0
+        member_coverage = (
+            len(matched_fuzzy) / total_functions if total_functions else 0.0
+        )
+        exact_coverage = (
+            len(matched_exact) / total_functions if total_functions else 0.0
+        )
+        fuzzy_qualified = (
+            len(matched_fuzzy) >= MEMBER_MIN_FUZZY_MATCH_HASHES
+            and member_coverage >= MEMBER_MIN_MEMBER_COVERAGE
+            and contiguity_ratio >= MEMBER_MIN_CONTIGUITY_RATIO
+        )
+        exact_qualified = (
+            len(matched_exact) >= MEMBER_MIN_EXACT_MATCH_HASHES
+            and total_functions >= MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS
+            and exact_coverage >= MEMBER_MIN_MEMBER_COVERAGE
+            and contiguity_ratio >= MEMBER_MIN_CONTIGUITY_RATIO
+        )
+        if not (fuzzy_qualified or exact_qualified):
+            continue
+        qualification = (
+            "fuzzy+exact" if fuzzy_qualified and exact_qualified
+            else "exact" if exact_qualified
+            else "fuzzy"
+        )
+        purl = row["project_purl"]
+        match = matches_by_purl.setdefault(
+            purl,
+            {
+                "project_id": row["project_id"],
+                "project_name": row["project_name"],
+                "project_purl": purl,
+                "attribution": "member",
+                "members": [],
+                "score": 0.0,
+            },
+        )
+        match["members"].append(
+            {
+                "member_name": row["member_name"],
+                "archive_name": row["archive_name"],
+                "member_functions": total_functions,
+                "matched_fuzzy_hash_count": len(matched_fuzzy),
+                "member_coverage": round(member_coverage, 4),
+                "matched_exact_hash_count": len(matched_exact),
+                "member_exact_coverage": round(exact_coverage, 4),
+                "contiguity_ratio": round(contiguity_ratio, 4),
+                "qualification": qualification,
+                "matched_addresses": sorted(
+                    {hex(p["address"]) for p in matched_positions}
+                )[:DB_EVIDENCE_LIMIT],
+            }
+        )
+        match["score"] += len(matched_exact) * float(max(MIN_MATCH_SCORE, 12)) + len(
+            matched_fuzzy
+        ) * FUZZY_HASH_MATCH_WEIGHT
+    matches = sorted(
+        matches_by_purl.values(),
+        key=lambda m: (m["score"], len(m["members"]), m["project_purl"]),
+        reverse=True,
+    )
+    for match in matches:
+        match["members"].sort(key=lambda m: (-m["member_coverage"], m["member_name"]))
+    return matches, state
 
 
 def detect_binaries_utilized(
@@ -763,10 +1590,72 @@ def detect_binaries_utilized(
             "matched_instruction_hashes": match["matched_instruction_hashes"],
             "matched_assembly_hash_count": match["matched_assembly_hash_count"],
             "matched_assembly_hashes": match["matched_assembly_hashes"],
+            "matched_fuzzy_hash_count": match["matched_fuzzy_hash_count"],
+            "matched_fuzzy_hashes": match["matched_fuzzy_hashes"],
+            "matched_cfg_hash_count": match["matched_cfg_hash_count"],
+            "matched_cfg_hashes": match["matched_cfg_hashes"],
+            "matched_import_hash_count": match["matched_import_hash_count"],
+            "matched_import_hashes": match["matched_import_hashes"],
             "matched_callgraph_count": match.get("matched_callgraph_count", 0),
             "matched_callgraph_functions": match.get("matched_callgraph_functions", []),
         }
         for match in matches
         if match["project_purl"]
     }
+    # Member-level layer. Runs only when the database carries archive-member
+    # rows; a whole-binary match never inherits member evidence and a
+    # member-qualified project never relaxes the whole-binary gates — the two
+    # layers fail independently and record their evidence separately.
+    member_matches, member_state = lookup_member_matches(
+        binary_metadata, db_file=db_file
+    )
+    for member_match in member_matches:
+        purl = member_match["project_purl"]
+        member_evidence = {
+            "blintdb_member_layer": member_state,
+            "blintdb_attribution": "member",
+            "blintdb_matched_member_count": len(member_match["members"]),
+            "blintdb_member_score": member_match["score"],
+            "blintdb_members": [
+                {
+                    "member_name": member["member_name"],
+                    "archive_name": member["archive_name"],
+                    "member_coverage": member["member_coverage"],
+                    "matched_fuzzy_hash_count": member["matched_fuzzy_hash_count"],
+                    "matched_exact_hash_count": member["matched_exact_hash_count"],
+                    "contiguity_ratio": member["contiguity_ratio"],
+                    "qualification": member["qualification"],
+                }
+                for member in member_match["members"]
+            ],
+        }
+        if purl in binary_evidence:
+            binary_evidence[purl].update(member_evidence)
+            binary_evidence[purl]["blintdb_attribution"] = "whole_binary+member"
+        else:
+            binary_detected.add(purl)
+            binary_evidence[purl] = {
+                "project_name": member_match["project_name"],
+                "score": member_match["score"],
+                "matched_binary_count": 0,
+                "matched_binary_name_count": 0,
+                "matched_binary_names": [],
+                "binary_name_match": False,
+                "matched_symbol_count": 0,
+                "matched_symbol_sources": [],
+                "matched_symbols": [],
+                "matched_instruction_hash_count": 0,
+                "matched_instruction_hashes": [],
+                "matched_assembly_hash_count": 0,
+                "matched_assembly_hashes": [],
+                "matched_fuzzy_hash_count": 0,
+                "matched_fuzzy_hashes": [],
+                "matched_cfg_hash_count": 0,
+                "matched_cfg_hashes": [],
+                "matched_import_hash_count": 0,
+                "matched_import_hashes": [],
+                "matched_callgraph_count": 0,
+                "matched_callgraph_functions": [],
+                **member_evidence,
+            }
     return binary_detected, binary_evidence

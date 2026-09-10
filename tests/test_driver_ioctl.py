@@ -456,15 +456,46 @@ def test_is_kernel_driver_gates_user_mode_binaries():
     assert is_kernel_driver({"subsystem": "WINDOWS_GUI", "imports": [{"name": "IoCreateDevice"}]})
 
 
-# Real nyxstone output for the same two instructions under each IntegerBase
-# style, captured from `Nyxstone("x86_64", immediate_style=...)`. blint defaults
+# Real nyxstone output for the same call site under each IntegerBase style,
+# captured from `Nyxstone("x86_64", immediate_style=...)`. blint defaults
 # to Dec, but immediate_style is a caller-settable parameter of
-# disassemble_functions, so every style has to be understood.
+# disassemble_functions, so every style has to be understood. The trailing
+# dispatch-slot store is the shape find_dispatch_handlers matches.
 NYXSTONE_RENDERINGS = {
-    "Dec": "mov edx, 2147509400\nmov qword ptr [rcx + 224], rax",
-    "HexPrefix": "mov edx, 0x80006498\nmov qword ptr [rcx + 0xe0], rax",
-    "HexSuffix": "mov edx, 80006498h\nmov qword ptr [rcx + 0e0h], rax",
+    "Dec": (
+        "mov edx, 2147509400\nxor r8d, r8d\nxor r9d, r9d\n"
+        "call qword ptr [rip + 4092]\nmov qword ptr [rcx + 224], rax"
+    ),
+    "HexPrefix": (
+        "mov edx, 0x80006498\nxor r8d, r8d\nxor r9d, r9d\n"
+        "call qword ptr [rip + 4092]\nmov qword ptr [rcx + 0xe0], rax"
+    ),
+    "HexSuffix": (
+        "mov edx, 80006498h\nxor r8d, r8d\nxor r9d, r9d\n"
+        "call qword ptr [rip + 4092]\nmov qword ptr [rcx + 0e0h], rax"
+    ),
 }
+
+
+def _client_function(
+    assembly: str,
+    operand: str = "qword ptr [rip + 4092]",
+    callee: str = "KERNEL32.dll::DeviceIoControl",
+) -> dict:
+    """A disassembled function shape with a single call site the disassembler
+    resolved to ``callee``: the CFG tiles the text and the call target carries
+    the operand text the assembly line shows."""
+    lines = assembly.split("\n")
+    return {
+        "name": "sub_1400",
+        "address": "0x1400",
+        "assembly": assembly,
+        "instruction_count": len(lines),
+        "cfg": {"blocks": [{"instructions": len(lines)}], "edges": []},
+        "direct_call_targets": [
+            {"target_name": callee, "raw_operand": operand, "kind": "indirect_hint"}
+        ],
+    }
 
 
 def test_immediate_recovery_handles_every_disassembler_integer_base():
@@ -472,6 +503,8 @@ def test_immediate_recovery_handles_every_disassembler_integer_base():
 
     for style, assembly in NYXSTONE_RENDERINGS.items():
         codes = extract_client_ioctl_codes({"assembly": assembly})
+        assert codes == [], f"no call site, so no codes may be scraped in {style}"
+        codes = extract_client_ioctl_codes(_client_function(assembly))
         assert THROTTLESTOP_PHYS_READ in codes, f"missed control code in {style} rendering"
 
 
@@ -484,11 +517,18 @@ def test_dispatch_slot_detection_handles_every_disassembler_integer_base():
         )
 
 
-def test_aarch64_hash_prefixed_immediates_are_recovered():
+def test_aarch64_movz_movk_lane_code_is_recovered_at_a_call_site():
+    """AArch64 materializes a 32-bit code as a movz/movk lane pair, and blint
+    renders the immediates in decimal — the old per-line scrape could never
+    see this code, let alone tie it to the argument register."""
     from blint.lib.driver_ioctl import extract_client_ioctl_codes
 
-    # AArch64 renders immediates with a '#' prefix.
-    codes = extract_client_ioctl_codes({"assembly": "mov w1, #0x80006498"})
+    # 0x80006498 == (0x8000 << 16) | 0x6498; 0x6498 == 25752.
+    assembly = "movz w1, #25752\nmov x0, xzr\nmovk w1, #32768, lsl #16\nbl #-48"
+    func = _client_function(
+        assembly, operand="#-48", callee="DeviceIoControl"
+    )
+    codes = extract_client_ioctl_codes(func, arch_target="aarch64-pc-windows-msvc")
     assert THROTTLESTOP_PHYS_READ in codes
 
 
@@ -528,6 +568,25 @@ def test_vendor_function_code_floor_rejects_reserved_and_sign_bit_constants():
 
 def _exploit_client_metadata():
     """Metadata shaped like the CVE-2025-7771 proof-of-concept client."""
+    def client_func(address: str, name: str, assembly: str) -> dict:
+        lines = assembly.split("\n")
+        return {
+            "name": name,
+            "address": address,
+            "assembly": assembly,
+            "direct_calls": [],
+            "instruction_metrics": {},
+            "instruction_count": len(lines),
+            "cfg": {"blocks": [{"instructions": len(lines)}], "edges": []},
+            "direct_call_targets": [
+                {
+                    "target_name": "KERNEL32.dll::DeviceIoControl",
+                    "raw_operand": "qword ptr [rip + 4096]",
+                    "kind": "indirect_hint",
+                }
+            ],
+        }
+
     return {
         "exe_type": "PE64",
         "magic": "PE32+",
@@ -537,22 +596,16 @@ def _exploit_client_metadata():
             {"name": "KERNEL32.dll::DeviceIoControl"},
         ],
         "disassembled_functions": {
-            "0x1400019f0::sub_19f0": {
-                "name": "sub_19f0",
-                "address": "0x1400019f0",
-                "assembly": "mov edx, 2147509400\nmov rcx, rax\ncall qword ptr [rip + 0x1000]",
-                "direct_calls": [],
-                "instruction_metrics": {},
-                "instruction_count": 3,
-            },
-            "0x140002030::sub_2030": {
-                "name": "sub_2030",
-                "address": "0x140002030",
-                "assembly": "mov edx, 2147509404\nmov rcx, rax\ncall qword ptr [rip + 0x1000]",
-                "direct_calls": [],
-                "instruction_metrics": {},
-                "instruction_count": 3,
-            },
+            "0x1400019f0::sub_19f0": client_func(
+                "0x1400019f0",
+                "sub_19f0",
+                "mov edx, 2147509400\nmov rcx, rax\ncall qword ptr [rip + 4096]",
+            ),
+            "0x140002030::sub_2030": client_func(
+                "0x140002030",
+                "sub_2030",
+                "mov edx, 2147509404\nmov rcx, rax\ncall qword ptr [rip + 4096]",
+            ),
         },
     }
 
@@ -579,10 +632,18 @@ def test_exploit_client_rule_ignores_ordinary_file_io_binary():
         "0x401000::main": {
             "name": "main",
             "address": "0x401000",
-            "assembly": "mov edx, 1024\nmov ecx, 66\ncall qword ptr [rip + 0x10]",
+            "assembly": "mov edx, 1024\nmov ecx, 66\ncall qword ptr [rip + 4096]",
             "direct_calls": [],
             "instruction_metrics": {},
             "instruction_count": 3,
+            "cfg": {"blocks": [{"instructions": 3}], "edges": []},
+            "direct_call_targets": [
+                {
+                    "target_name": "KERNEL32.dll::DeviceIoControl",
+                    "raw_operand": "qword ptr [rip + 4096]",
+                    "kind": "indirect_hint",
+                }
+            ],
         }
     }
     assert "BYOVD_EXPLOIT_CLIENT_DEVICE_ACCESS" not in review_binary_metadata(
@@ -953,7 +1014,19 @@ def test_exploit_client_evidence_names_the_target_device():
             "0x401000::exploit": {
                 "name": "exploit",
                 "address": "0x401000",
-                "assembly": f"mov edx, {THROTTLESTOP_PHYS_WRITE:#x}\ncall DeviceIoControl\n",
+                "assembly": (
+                    f"mov edx, {THROTTLESTOP_PHYS_WRITE:#x}\n"
+                    "call qword ptr [rip + 4096]"
+                ),
+                "instruction_count": 2,
+                "cfg": {"blocks": [{"instructions": 2}], "edges": []},
+                "direct_call_targets": [
+                    {
+                        "target_name": "KERNEL32.dll::DeviceIoControl",
+                        "raw_operand": "qword ptr [rip + 4096]",
+                        "kind": "indirect_hint",
+                    }
+                ],
             }
         },
     }

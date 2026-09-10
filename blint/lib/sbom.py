@@ -31,6 +31,7 @@ from blint.cyclonedx.spec import (
     Type,
 )
 from blint.db import (
+    blintdb_fuzzy_layer_state,
     build_callgraph_canon_names,
     build_function_hash_index,
     build_symbol_source_map,
@@ -38,8 +39,16 @@ from blint.db import (
 )
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_services import detect_services
+from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.ios import collect_ios_app
+from blint.lib.parallel import (
+    PoolStartupError,
+    WorkerSpec,
+    payload_as_state,
+    run_pool,
+    take_worker_logs,
+)
 from blint.lib.utils import (
     calculate_hashes,
     camel_to_snake,
@@ -146,6 +155,7 @@ def generate(
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )
     sbom.metadata = default_metadata(blint_options.src_dir_image)
+    jobs = max(1, int(getattr(blint_options, "jobs", 1) or 1))
     with Progress(
         transient=True,
         redirect_stderr=True,
@@ -153,35 +163,57 @@ def generate(
         refresh_per_second=1,
         disable=blint_options.quiet_mode,
     ) as progress:
-        if exe_files:
+        skipped_wasm = 0
+        ran_parallel = False
+        if exe_files and jobs > 1 and len(exe_files) > 1:
+            try:
+                skipped_wasm = _generate_exes_parallel(
+                    blint_options,
+                    exe_files,
+                    sbom,
+                    components,
+                    dependencies_dict,
+                    symbols_purl_map,
+                    progress,
+                )
+                ran_parallel = True
+            except PoolStartupError as exc:
+                # Parallelism must never be the reason an SBOM fails; the
+                # merge happens only after the pool succeeds, so nothing has
+                # been accumulated and the sequential loop below processes
+                # every file.
+                LOG.error(
+                    f"Parallel SBOM generation unavailable ({exc}); falling back to sequential"
+                )
+        if not ran_parallel:
             task = progress.add_task(
                 f"[green] Parsing {len(exe_files)} binaries",
                 total=len(exe_files),
                 start=True,
             )
-        skipped_wasm = 0
-        for exe in exe_files:
-            if is_wasm_file(exe):
-                if blint_options.wasm_sbom:
-                    components += process_wasm_file(dependencies_dict, exe, sbom)
-                else:
-                    skipped_wasm += 1
-                continue
-            progress.update(
-                task,
-                description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
-                advance=1,
-            )
-            components += process_exe_file(
-                dependencies_dict,
-                blint_options.deep_mode,
-                exe,
-                sbom,
-                blint_options.exports_prefix,
-                symbols_purl_map,
-                blint_options.use_blintdb,
-                blint_options.disassemble,
-            )
+            for exe in exe_files:
+                if is_wasm_file(exe):
+                    if blint_options.wasm_sbom:
+                        components += process_wasm_file(dependencies_dict, exe, sbom)
+                    else:
+                        skipped_wasm += 1
+                    continue
+                progress.update(
+                    task,
+                    description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                    advance=1,
+                )
+                components += process_exe_file(
+                    dependencies_dict,
+                    blint_options.deep_mode,
+                    exe,
+                    sbom,
+                    blint_options.exports_prefix,
+                    symbols_purl_map,
+                    blint_options.use_blintdb,
+                    blint_options.disassemble,
+                    blint_options.sdk_path,
+                )
         if skipped_wasm:
             LOG.info(
                 f"Skipped {skipped_wasm} wasm file(s) during SBOM generation; "
@@ -210,7 +242,12 @@ def generate(
             if blint_options.disassemble:
                 write_ios_callgraphs(f, cast(str, blint_options.sbom_output))
     if dependencies_dict:
-        dependencies += [{"ref": k, "dependsOn": list(v)} for k, v in dependencies_dict.items()]
+        # sorted(), not list(): set iteration order depends on PYTHONHASHSEED,
+        # so list(v) made the SBOM unreproducible across runs and machines —
+        # and it was the one thing --jobs N had to reproduce bit-for-bit. A
+        # dependency list has no meaningful order of its own, so sorting both
+        # fixes that and makes the parallel merge order-independent.
+        dependencies += [{"ref": k, "dependsOn": sorted(v)} for k, v in dependencies_dict.items()]
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
     return create_sbom(
         components,
@@ -487,6 +524,192 @@ def _add_to_parent_component(
     metadata_components.append(parent_component)
 
 
+def _scratch_sbom() -> CycloneDX:
+    """A throwaway CycloneDX scaffold for one unit of SBOM work.
+
+    ``process_exe_file`` and ``process_wasm_file`` record the binary's parent
+    component by appending to ``sbom.metadata.component.components``; pool
+    workers hand each unit a private scaffold so the parent-side append (and
+    its dedupe against the accumulated list) happens exactly once, at the
+    unit's merge position, in submission order.
+    """
+    scratch = CycloneDX(
+        bomFormat=BomFormat.CycloneDX,
+        specVersion="1.6",
+        version=1,
+        serialNumber=f"urn:uuid:{uuid.uuid4()}",
+    )
+    scratch.metadata = Metadata()
+    scratch.metadata.component = Component(type=Type.application, name="blint-scratch")
+    return scratch
+
+
+def _drain_parent_components(scratch: CycloneDX) -> list[Component]:
+    """Return (and clear) the parent components a unit appended to its scratch."""
+    components_list = scratch.metadata.component.components if scratch.metadata else None
+    if not components_list:
+        return []
+    scratch.metadata.component.components = []
+    return list(components_list)
+
+
+def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Process one file for the SBOM inside a pool worker.
+
+    Parallel twin of the sequential ``generate()`` loop body: wasm inputs
+    keep their skip/``--wasm-sbom`` handling, native inputs run the full
+    ``process_exe_file``. The unit's components, its parent components and
+    its dependency-graph updates travel back as one envelope; the parent
+    merges them at the unit's submission index, which keeps the component
+    list, the metadata parent dedupe and the dependency dict insertion
+    order identical to the sequential run. Exceptions are deliberately not
+    caught here (``record_errors=False``): the sequential SBOM loop aborts
+    the run on a bad binary, and so does the parent when it replays the
+    exception at this unit's merge position.
+    """
+    if is_wasm_file(file_path):
+        if not state["wasm_sbom"]:
+            return {
+                "wasm": True,
+                "skipped": True,
+                "components": [],
+                "parent_components": [],
+                "deps_updates": {},
+                "logs": take_worker_logs(),
+            }
+        scratch = _scratch_sbom()
+        deps_updates: dict[str, set] = {}
+        components = process_wasm_file(deps_updates, file_path, scratch)
+        return {
+            "wasm": True,
+            "skipped": False,
+            "components": components,
+            "parent_components": _drain_parent_components(scratch),
+            "deps_updates": {ref: sorted(refs) for ref, refs in deps_updates.items()},
+            "logs": take_worker_logs(),
+        }
+    scratch = _scratch_sbom()
+    deps_updates: dict[str, set] = {}
+    components = process_exe_file(
+        deps_updates,
+        state["deep_mode"],
+        file_path,
+        scratch,
+        state["exports_prefix"],
+        state["symbols_purl_map"],
+        state["use_blintdb"],
+        state["disassemble"],
+        state.get("sdk_path"),
+    )
+    return {
+        "wasm": False,
+        "skipped": False,
+        "components": components,
+        "parent_components": _drain_parent_components(scratch),
+        "deps_updates": {ref: sorted(refs) for ref, refs in deps_updates.items()},
+        "logs": take_worker_logs(),
+    }
+
+
+def _merge_dependency_updates(
+    dependencies_dict: dict[str, set], updates: dict[str, list]
+) -> None:
+    """Fold one unit's dependency-graph updates into the run's dict.
+
+    Order is irrelevant here: ``generate()`` sorts every ``dependsOn`` list
+    on the way out, so the merged sets need only hold the same members the
+    sequential run would have accumulated.
+    """
+    for ref, deps in updates.items():
+        dependencies_dict.setdefault(ref, set()).update(deps)
+
+
+def _generate_exes_parallel(
+    blint_options: BlintOptions,
+    exe_files: list[str],
+    sbom: CycloneDX,
+    components: list[Component],
+    dependencies_dict: dict[str, set],
+    symbols_purl_map: dict,
+    progress: Progress,
+) -> int:
+    """Run the per-binary SBOM work in a process pool; returns the count of
+    wasm files skipped for lack of ``--wasm-sbom``.
+
+    Results merge in submission order. A worker that dies hard while a
+    binary was assigned to it raises here rather than dropping the binary
+    silently: an SBOM missing a component is a wrong answer, and the
+    sequential path would have died on the same binary too.
+    """
+    jobs = max(1, int(getattr(blint_options, "jobs", 1) or 1))
+    spec = WorkerSpec(
+        analyze=analyze_unit_sbom,
+        setup=payload_as_state,
+        payload={
+            "deep_mode": blint_options.deep_mode,
+            "exports_prefix": blint_options.exports_prefix,
+            "symbols_purl_map": symbols_purl_map,
+            "use_blintdb": blint_options.use_blintdb,
+            "disassemble": blint_options.disassemble,
+            "wasm_sbom": blint_options.wasm_sbom,
+            "sdk_path": blint_options.sdk_path,
+        },
+        unit_role="sbom",
+        record_errors=False,
+    )
+    units = [(idx, f) for idx, f in enumerate(exe_files)]
+    task = progress.add_task(
+        f"[green] Parsing {len(exe_files)} binaries ({jobs} workers)",
+        total=len(exe_files),
+        start=True,
+    )
+    envelopes, hard_failures = run_pool(
+        units,
+        min(jobs, len(units)),
+        spec,
+        on_done=lambda _idx: progress.advance(task),
+    )
+    # process_exe_file initializes this list lazily on first append; the
+    # merge does the same so parent components land identically.
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    skipped_wasm = 0
+    for idx in range(len(exe_files)):
+        if idx in hard_failures:
+            raise RuntimeError(
+                f"worker died while processing {exe_files[idx]}: {hard_failures[idx]}"
+            )
+        envelope = envelopes[idx]
+        for level, message in envelope.get("logs") or []:
+            LOG.log(level, message)
+        if "exception" in envelope:
+            # analyze_unit_sbom runs without its own per-unit isolation on
+            # purpose: the sequential loop aborts the run on a bad binary,
+            # and replaying the exception at this unit's merge position
+            # reproduces exactly that.
+            raise envelope["exception"]
+        if envelope["wasm"]:
+            if envelope["skipped"]:
+                skipped_wasm += 1
+            else:
+                components += envelope["components"]
+                for parent_component in envelope["parent_components"]:
+                    _add_to_parent_component(sbom.metadata.component.components, parent_component)
+                _merge_dependency_updates(dependencies_dict, envelope["deps_updates"])
+        else:
+            components += envelope["components"]
+            for parent_component in envelope["parent_components"]:
+                _add_to_parent_component(sbom.metadata.component.components, parent_component)
+            _merge_dependency_updates(dependencies_dict, envelope["deps_updates"])
+            # No advance here: on_done already advanced the bar once per unit
+            # as its result arrived. Advancing again would double-count.
+            progress.update(
+                task,
+                description=f"Processed [bold]{os.path.basename(exe_files[idx])}[/bold]",
+            )
+    return skipped_wasm
+
+
 def process_exe_file(
     dependencies_dict: dict[str, set],
     deep_mode: bool,
@@ -496,6 +719,7 @@ def process_exe_file(
     symbols_purl_map: dict | None = None,
     use_blintdb: bool = False,
     disassemble: bool = False,
+    sdk_path: str | None = None,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill-of-Materials.
@@ -508,6 +732,9 @@ def process_exe_file(
         export_prefixes (list): Prefixes to determine exported symbols.
         symbols_purl_map (dict): containing symbol name as the key and purl as the value
         use_blintdb (bool): should blintdb be used to improve component identification
+        disassemble (bool): whether to disassemble native binaries.
+        sdk_path (str): optional Apple SDK root whose .tbd stubs attribute and
+            confirm Mach-O imports (the --sdk-path option).
 
     Returns:
         list[Component]: The updated list of components.
@@ -516,7 +743,7 @@ def process_exe_file(
     if is_wasm_file(exe):
         return []
     export_prefixes = export_prefixes or []
-    metadata: dict[str, Any] = parse(exe, disassemble=disassemble)
+    metadata: dict[str, Any] = parse(exe, disassemble=disassemble, sdk_path=sdk_path)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
     lib_components: list[Component] = []
@@ -799,10 +1026,48 @@ def process_exe_file(
                 ),
                 "blintdb_matched_assembly_hash_count": evidence.get("matched_assembly_hash_count"),
                 "blintdb_matched_assembly_hashes": evidence.get("matched_assembly_hashes", []),
+                # The similarity-hash evidence keys follow the same contract as
+                # the exact-hash keys above: always present on a matched
+                # component, zero when the layer did not contribute.
+                # blintdb_fuzzy_layer names why — a v2 database, unpopulated
+                # columns, or a run without disassembly must read as its own
+                # state instead of a bare zero.
+                "blintdb_matched_fuzzy_hash_count": evidence.get("matched_fuzzy_hash_count"),
+                "blintdb_matched_fuzzy_hashes": evidence.get("matched_fuzzy_hashes", []),
+                "blintdb_matched_cfg_hash_count": evidence.get("matched_cfg_hash_count"),
+                "blintdb_matched_cfg_hashes": evidence.get("matched_cfg_hashes", []),
+                "blintdb_matched_import_hash_count": evidence.get("matched_import_hash_count"),
+                "blintdb_matched_import_hashes": evidence.get("matched_import_hashes", []),
+                "blintdb_fuzzy_layer": blintdb_fuzzy_layer_state(metadata=metadata),
                 "blintdb_matched_callgraph_count": evidence.get("matched_callgraph_count"),
                 "blintdb_matched_callgraph_functions": evidence.get(
                     "matched_callgraph_functions", []
                 ),
+                # blintdb_attribution names the evidence layer that earned this
+                # component its place: whole_binary (symbols/hashes matched at
+                # binary granularity), member (static-archive member evidence
+                # from the P4.3 layer), or whole_binary+member (both layers
+                # independently agree). A reader can therefore tell a member-
+                # level attribution from a whole-binary one without consulting
+                # the per-layer states.
+                "blintdb_attribution": evidence.get("blintdb_attribution", "whole_binary"),
+                # Member-layer keys exist only when the archive-member layer
+                # fired for this component; a component attributed purely from
+                # whole-binary evidence carries none of them.
+                "blintdb_member_layer": evidence.get("blintdb_member_layer"),
+                "blintdb_matched_member_count": evidence.get("blintdb_matched_member_count"),
+                "blintdb_member_names": [
+                    member["member_name"]
+                    for member in evidence.get("blintdb_members", [])
+                ],
+                "blintdb_member_details": [
+                    f"{member['member_name']} coverage={member['member_coverage']}"
+                    f" fuzzy={member['matched_fuzzy_hash_count']}"
+                    f" exact={member['matched_exact_hash_count']}"
+                    f" contiguity={member['contiguity_ratio']}"
+                    f" qualification={member['qualification']}"
+                    for member in evidence.get("blintdb_members", [])
+                ],
             }
             comp = create_dynamic_component(
                 {"purl": binary_purl, "tag": "NEEDED"},
@@ -814,6 +1079,40 @@ def process_exe_file(
                 },
             )
             lib_components.append(comp)
+
+    # Vendored-source banners (P4.3): version strings a vendored copy leaves in
+    # the binary. An evidence layer independent of blintdb — a banner claims
+    # library and version directly — so it runs regardless of --use-blintdb.
+    # A banner hit on a library blintdb already attributed corroborates that
+    # component instead of emitting a duplicate.
+    banner_result = detect_vendored_banners(metadata)
+    for banner in banner_result["banners"]:
+        banner_evidence = {
+            "vendored_banner_layer": banner_result["state"],
+            "vendored_attribution": "vendored_banner",
+            "vendored_banner": banner["banner"],
+        }
+        existing = next(
+            (
+                comp
+                for comp in lib_components
+                if getattr(comp, "purl", None) == banner["purl"]
+            ),
+            None,
+        )
+        if existing is not None:
+            for key, value in banner_evidence.items():
+                existing.properties.append(Property(name=f"internal:{key}", value=value))
+        else:
+            # Name and version come from the purl, the same way every other
+            # dynamic component derives them.
+            lib_components.append(
+                create_dynamic_component(
+                    {"purl": banner["purl"], "tag": "NEEDED"},
+                    exe,
+                    banner_evidence,
+                )
+            )
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []

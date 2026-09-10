@@ -104,6 +104,26 @@ def build_symbol_provider_map(metadata: dict) -> tuple[dict[str, str], list[str]
     if macho_pairs and "import_table" not in sources:
         sources.append("load_commands")
 
+    # The .tbd SDK index attributes imports the binary's own evidence could
+    # not pin to a library (flat binds, missing binding info). It is recorded
+    # by parse() under `sdk_tbd` so the result survives caching, and it is
+    # kept distinct from `load_commands`: a bind the binary made and an
+    # export the SDK implies are different strengths of evidence. During the
+    # parse that produced it, the full map is available under a private key;
+    # exported metadata carries a capped sample the module falls back to.
+    # Spelled via the module that owns the key so the private-metadata
+    # contract lives in one place. Imported here, not at module scope:
+    # tbd_index imports this module.
+    from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
+
+    sdk_providers = metadata.get(SDK_ATTRIBUTIONS_KEY)
+    if not sdk_providers:
+        sdk_providers = (metadata.get("sdk_tbd") or {}).get("attributed_symbols")
+    if sdk_providers:
+        for symbol, library in sdk_providers.items():
+            providers.setdefault(symbol, library.rsplit("/", 1)[-1])
+        sources.append("sdk_tbd")
+
     # ELF only knows which library supplies a symbol once the closure has been
     # resolved against a filesystem and each library's exports read.
     closure_providers = (metadata.get("link_closure") or {}).get("symbol_providers") or {}
@@ -221,6 +241,30 @@ def _meaningful_symbols(symbols: list) -> list[str]:
     return [name for name in symbols or [] if name not in UNPROVIDED_SYMBOLS]
 
 
+def _attribution_extent(metadata: dict, dep_graph: dict) -> tuple[int, int]:
+    """Count the binary's imports and how many of them were attributed.
+
+    Returns ``(imported_count, attributed_count)``. The first is a fact from
+    the symbol tables; the second is what the dependency graph managed to pin
+    to a named library. Together they separate the three cases that decide
+    whether an empty used-library set means anything: no imports at all
+    (unused is a real finding), imports that all went unattributed (a
+    resolution failure of ours, reported as ``unknown``), and a healthy mix.
+    """
+    imported_count = 0
+    for bucket in ("symtab_symbols", "dynamic_symbols"):
+        for entry in metadata.get(bucket) or []:
+            if isinstance(entry, dict) and entry.get("is_imported"):
+                imported_count += 1
+    attributed_count = 0
+    for library, entry in (dep_graph.get("libraries") or {}).items():
+        if library == UNATTRIBUTED_LIBRARY or not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "imported":
+            attributed_count += len(entry.get("imported_symbols") or [])
+    return imported_count, attributed_count
+
+
 def analyze_link_hygiene(metadata: dict, dep_graph: dict) -> dict:
     """Report declared dependencies that are unused and used ones that are not declared.
 
@@ -242,8 +286,13 @@ def analyze_link_hygiene(metadata: dict, dep_graph: dict) -> dict:
 
     Returns:
         dict: The findings, plus ``attribution_sources`` recording what the
-        result is based on. Returns an empty dict when nothing can be attributed,
-        because with no evidence every dependency looks unused.
+        result is based on. Two cases return no findings: when nothing can be
+        attributed at all (no evidence was collected, every dependency would
+        look unused), and — reported as ``attribution_status: "unresolved"``
+        rather than as an empty result — when the binary imports symbols but
+        none of them could be pinned to any library. With zero attributed
+        symbols every dependency reads as unused, which is a property of the
+        resolution, not of the binary, so the honest answer is unknown.
     """
     _, sources = build_symbol_provider_map(metadata)
     if not sources:
@@ -260,6 +309,21 @@ def analyze_link_hygiene(metadata: dict, dep_graph: dict) -> dict:
         if library == UNATTRIBUTED_LIBRARY:
             continue
         used[library.rsplit("/", 1)[-1]] = _meaningful_symbols(entry.get("imported_symbols") or [])
+
+    if not used:
+        imported_count, attributed_count = _attribution_extent(metadata, dep_graph)
+        if imported_count and not attributed_count:
+            # Symbols were imported, yet none landed on any library: the
+            # every-dependency-unused conclusion below would be manufactured.
+            # Say so instead of reporting it.
+            unattributed = (dep_graph.get("libraries") or {}).get(UNATTRIBUTED_LIBRARY) or {}
+            return {
+                "attribution_sources": sources,
+                "attribution_status": "unresolved",
+                "unattributed_symbol_count": len(unattributed.get("imported_symbols") or []),
+                "imported_symbol_count": imported_count,
+                "declared_count": len(declared),
+            }
 
     unused = []
     for library in declared:

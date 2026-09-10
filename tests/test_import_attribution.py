@@ -146,6 +146,94 @@ def test_macho_library_prefix_is_used_when_it_names_a_library():
     assert "wasm_tools" not in graph["libraries"]
 
 
+def test_git_shape_imports_reach_the_dependency_graph():
+    # Regression for the false CHECK_UNUSED_DEPENDENCIES on /usr/bin/git:
+    # every symtab entry was dropped because the Mach-O parser did not record
+    # `is_imported`, so the graph held no imported library and link hygiene
+    # reported both declared dylibs unused. A falsy-but-present gate is what
+    # dropped them, which is why the entries here carry is_imported=False
+    # explicitly rather than omitting the key.
+    metadata = {
+        "name": "/usr/bin/git",
+        "binary_type": "MachO",
+        "libraries": [
+            {"name": "/usr/lib/libxcselect.dylib"},
+            {"name": "/usr/lib/libSystem.B.dylib"},
+        ],
+        "symtab_symbols": [
+            {
+                "name": "/usr/lib/libSystem.B.dylib::_dispatch_once",
+                "is_imported": True,
+                "is_exported": False,
+            },
+            {
+                "name": "/usr/lib/libxcselect.dylib::_xcselect_invoke_xcrun",
+                "is_imported": True,
+                "is_exported": False,
+            },
+            {
+                "name": "_main",
+                "is_imported": False,
+                "is_exported": False,
+            },
+        ],
+    }
+    graph = analyze_import_deps(metadata)
+    assert graph["attribution_sources"] == ["load_commands"]
+    assert graph["unattributed_symbol_count"] == 0
+    imported = {
+        lib for lib, entry in graph["libraries"].items() if entry.get("type") == "imported"
+    }
+    assert imported == {"libSystem.B.dylib", "libxcselect.dylib"}
+
+    hygiene = analyze_link_hygiene(metadata, graph)
+    assert hygiene["unused_dependencies"] == []
+    assert hygiene["undeclared_dependencies"] == []
+
+
+def test_hygiene_reports_unresolved_when_imports_exist_but_none_attributed():
+    # The vacuous case behind the same false finding: attribution evidence
+    # exists (the load-command map could be built) but the dependency graph
+    # attributed nothing, so every declared dependency would read as unused.
+    # That is a resolution failure, reported as unknown -- never as findings.
+    # The graph here is what the old is_imported gate produced for exactly
+    # this metadata; the guard keeps any future gate regression honest.
+    metadata = {
+        "name": "/usr/bin/git",
+        "binary_type": "MachO",
+        "libraries": [{"name": "/usr/lib/libSystem.B.dylib"}],
+        "symtab_symbols": [
+            {"name": "/usr/lib/libSystem.B.dylib::_strcmp", "is_imported": True},
+        ],
+    }
+    graph = {"libraries": {"/usr/bin/git": {"type": "main_binary"}}}
+    hygiene = analyze_link_hygiene(metadata, graph)
+    assert hygiene["attribution_status"] == "unresolved"
+    assert "unused_dependencies" not in hygiene
+    assert "undeclared_dependencies" not in hygiene
+    assert hygiene["imported_symbol_count"] == 1
+    assert hygiene["declared_count"] == 1
+
+
+def test_hygiene_unresolved_counts_sdk_attributed_imports():
+    # When the SDK map attributed symbols, the same guard must see them as
+    # resolved: the graph carries the sdk_tbd source and a non-empty
+    # attribution extent.
+    metadata = {
+        "name": "/usr/bin/mailq",
+        "binary_type": "MachO",
+        "libraries": [{"name": "/usr/lib/libSystem.B.dylib"}],
+        "symtab_symbols": [{"name": "_getenv", "is_imported": True}],
+        "sdk_tbd_attributions": {"_getenv": "/usr/lib/libSystem.B.dylib"},
+    }
+    graph = analyze_import_deps(metadata)
+    assert graph["attribution_sources"] == ["sdk_tbd"]
+    hygiene = analyze_link_hygiene(metadata, graph)
+    assert "attribution_status" not in hygiene
+    assert hygiene["unused_dependencies"] == []
+    assert hygiene["undeclared_dependencies"] == []
+
+
 def test_pe_imports_attribute_without_a_closure():
     # PE names every import as `library::function`, so attribution is free.
     metadata = {

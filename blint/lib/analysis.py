@@ -32,6 +32,7 @@ from blint.lib.checks import (
     check_rpath,
     check_runtime_loading,
     check_search_path,
+    check_packed,
     check_security_property,
     check_trust_info,
     check_undeclared_dependencies,
@@ -104,6 +105,82 @@ review_rules_cache: dict[str, Any] = {
     },
 }
 
+# The review group constants name the metadata list each group reviews (see
+# ReviewRunner). This table is the one place a group name becomes a target
+# dict: the engine loaders and the capability catalog both go through it, so
+# the catalog cannot disagree with the engine about where a rule is applied.
+# The dicts are the live objects initialize_rules clears and refills in
+# place, so binding them once here is safe.
+REVIEW_GROUP_TARGETS: dict[str, defaultdict[str, list[dict[str, Any]]]] = {
+    "METHOD_REVIEWS": review_methods_dict,
+    "EXE_REVIEWS": review_exe_dict,
+    "SYMBOL_REVIEWS": review_symbols_dict,
+    "IMPORT_REVIEWS": review_imports_dict,
+    "ENTRIES_REVIEWS": review_entries_dict,
+    "FUNCTION_REVIEWS": review_functions_dict,
+    "BINARY_REVIEWS": review_binary_dict,
+}
+
+# Populated by register_review_rules as annotation blocks load. The engine
+# never reads it; the capability catalog does, so the catalog's file
+# provenance comes from the engine's own load pass instead of a second
+# directory walk. Cleared by initialize_rules like the rule dicts.
+review_rule_sources: dict[str, list[str]] = {}
+
+
+def register_review_rules(
+    methods_reviews_groups: dict[str, Any],
+    source: str = "",
+    warn_unknown_group: bool = False,
+) -> None:
+    """Register one parsed annotation block into the review rule dicts.
+
+    This is the single load path every YAML annotation block goes through,
+    built-in or custom: rules without an ``id`` are skipped with a warning,
+    the block's rule map is appended under each of its ``exe_type`` keys in
+    the dict its ``group`` names, the canonical rule record is cached by id
+    for ``process_review``, and the source file that registered each id is
+    recorded for the capability catalog. Unknown groups are skipped
+    silently unless ``warn_unknown_group`` is set (the custom-rules loader
+    wants the noise; the built-in files are curated and historically
+    silent).
+    """
+
+    def warn(message: str) -> None:
+        prefix = f"{source}: " if source else ""
+        LOG.warning(f"{prefix}{message}")
+
+    exe_type_list = methods_reviews_groups.get("exe_type")
+    if isinstance(exe_type_list, str):
+        exe_type_list = [exe_type_list]
+    all_rules = methods_reviews_groups.get("rules") or []
+    method_rules_dict = {}
+    for rule in all_rules:
+        rule_id = rule.get("id")
+        if rule_id:
+            method_rules_dict[rule_id] = rule
+            # Last registration wins for the display record; ids reused
+            # across files therefore show the last-loaded variant, which is
+            # exactly what the engine's process_review emits.
+            review_rules_cache[rule_id] = rule
+            if source:
+                known = review_rule_sources.setdefault(rule_id, [])
+                if source not in known:
+                    known.append(source)
+        else:
+            warn("Default rule has no 'id'. Skipping.")
+    group = methods_reviews_groups.get("group")
+    target = REVIEW_GROUP_TARGETS.get(group)
+    if target is None:
+        if warn_unknown_group:
+            warn(f"Unknown group '{group}'. Skipping block.")
+        return
+    if not exe_type_list and method_rules_dict:
+        warn("Annotation block has no 'exe_type'; its rules can never match.")
+    for etype in exe_type_list or []:
+        target[etype].append(method_rules_dict)
+
+
 # Debug mode
 DEBUG_MODE = os.getenv("SCAN_DEBUG_MODE") == "debug"
 
@@ -175,35 +252,9 @@ def load_default_rules() -> None:
                 if not tmp_data:
                     continue
                 methods_reviews_groups = yaml.safe_load(tmp_data)
-                exe_type_list = methods_reviews_groups.get("exe_type")
-                if isinstance(exe_type_list, str):
-                    exe_type_list = [exe_type_list]
-                all_rules = methods_reviews_groups.get("rules")
-                method_rules_dict = {}
-                for rule in all_rules:
-                    rule_id = rule.get("id")
-                    if rule_id:
-                        method_rules_dict[rule_id] = rule
-                        review_rules_cache[rule_id] = rule
-                    else:
-                        LOG.warning("Default rule has no 'id'. Skipping.")
-                        continue
-                for etype in exe_type_list:
-                    group = methods_reviews_groups.get("group")
-                    if group == "METHOD_REVIEWS":
-                        review_methods_dict[etype].append(method_rules_dict)
-                    elif group == "EXE_REVIEWS":
-                        review_exe_dict[etype].append(method_rules_dict)
-                    elif group == "SYMBOL_REVIEWS":
-                        review_symbols_dict[etype].append(method_rules_dict)
-                    elif group == "IMPORT_REVIEWS":
-                        review_imports_dict[etype].append(method_rules_dict)
-                    elif group == "ENTRIES_REVIEWS":
-                        review_entries_dict[etype].append(method_rules_dict)
-                    elif group == "FUNCTION_REVIEWS":
-                        review_functions_dict[etype].append(method_rules_dict)
-                    elif group == "BINARY_REVIEWS":
-                        review_binary_dict[etype].append(method_rules_dict)
+                if not methods_reviews_groups:
+                    continue
+                register_review_rules(methods_reviews_groups, source=review_methods_file)
 
 
 def load_custom_rules(
@@ -243,43 +294,14 @@ def load_custom_rules(
                     methods_reviews_groups = yaml.safe_load(tmp_data)
                     if not methods_reviews_groups:
                         continue
-                    exe_type_list = methods_reviews_groups.get("exe_type")
-                    if isinstance(exe_type_list, str):
-                        exe_type_list = [exe_type_list]
-                    all_rules = methods_reviews_groups.get("rules")
-                    if not all_rules:
+                    if not methods_reviews_groups.get("rules"):
                         LOG.info(f"No 'rules' found in block of {rule_file_path}")
                         continue
-                    method_rules_dict = {}
-                    for rule in all_rules:
-                        rule_id = rule.get("id")
-                        if rule_id:
-                            method_rules_dict[rule_id] = rule
-                            review_rules_cache[rule_id] = rule
-                        else:
-                            LOG.warning(f"Rule in {rule_file_path} has no 'id'. Skipping.")
-                            continue
-
-                    for etype in exe_type_list:
-                        group = methods_reviews_groups.get("group")
-                        if group == "METHOD_REVIEWS":
-                            review_methods_dict[etype].append(method_rules_dict)
-                        elif group == "EXE_REVIEWS":
-                            review_exe_dict[etype].append(method_rules_dict)
-                        elif group == "SYMBOL_REVIEWS":
-                            review_symbols_dict[etype].append(method_rules_dict)
-                        elif group == "IMPORT_REVIEWS":
-                            review_imports_dict[etype].append(method_rules_dict)
-                        elif group == "ENTRIES_REVIEWS":
-                            review_entries_dict[etype].append(method_rules_dict)
-                        elif group == "FUNCTION_REVIEWS":
-                            review_functions_dict[etype].append(method_rules_dict)
-                        elif group == "BINARY_REVIEWS":
-                            review_binary_dict[etype].append(method_rules_dict)
-                        else:
-                            LOG.warning(
-                                f"Unknown group '{methods_reviews_groups.get('group')}' in {rule_file_path}. Skipping block."
-                            )
+                    register_review_rules(
+                        methods_reviews_groups,
+                        source=str(rule_file_path),
+                        warn_unknown_group=True,
+                    )
         except Exception as e:
             LOG.error(f"Error loading custom rules from {rule_file_path}: {e}")
 
@@ -297,6 +319,7 @@ def initialize_rules(blint_options: BlintOptions) -> None:
     review_functions_dict.clear()
     review_binary_dict.clear()
     review_rules_cache.clear()
+    review_rule_sources.clear()
     review_rules_cache.update(
         {
             "PII_READ": {
@@ -907,6 +930,7 @@ def report(
     reviews: list[dict[str, Any]],
     fuzzables: list[dict[str, Any]],
     callgraphs: list[dict[str, Any]] | None = None,
+    analysis_coverage: dict[str, Any] | None = None,
 ) -> None:
     """Generates a report based on the analysis results.
 
@@ -916,6 +940,10 @@ def report(
         findings: A list of dictionaries representing the findings.
         reviews: A list of dictionaries representing the reviews.
         fuzzables: A list of fuzzable methods.
+        callgraphs: Optional list of callgraph payloads per binary.
+        analysis_coverage: Optional run-level analysis coverage (units
+            attempted/succeeded/failed/skipped plus the failure records); exported
+            even when the scan produced no other output.
 
     """
     should_render_callgraphs = bool(blint_options.render_mermaid_callgraph and callgraphs)
@@ -926,6 +954,33 @@ def report(
         or should_export_graphml_callgraphs
         or should_export_gexf_callgraphs
     )
+    # The coverage export must happen before the no-findings early return: a
+    # scan that analyzed nothing successfully is precisely the run whose
+    # blind-spot accounting matters most.
+    if analysis_coverage is not None:
+        if not os.path.exists(blint_options.reports_dir):
+            os.makedirs(blint_options.reports_dir)
+        run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
+        export_metadata(
+            blint_options.reports_dir,
+            {
+                "scan_id": run_uuid,
+                "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
+                **analysis_coverage,
+            },
+            "Analysis-Coverage",
+        )
+        units = analysis_coverage.get("units", {})
+        LOG.info(
+            f"Analysis coverage: {units.get('succeeded', 0)}/{units.get('attempted', 0)} "
+            f"unit(s) analyzed, {units.get('failed', 0)} failed, {units.get('skipped', 0)} skipped"
+        )
+        cache_stats = analysis_coverage.get("cache") or {}
+        if cache_stats.get("enabled"):
+            LOG.info(
+                f"Parse cache: {cache_stats.get('hits', 0)} hit(s), "
+                f"{cache_stats.get('misses', 0)} miss(es), {cache_stats.get('stored', 0)} stored"
+            )
     if not findings and not reviews and not should_emit_any_callgraph:
         LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
         return

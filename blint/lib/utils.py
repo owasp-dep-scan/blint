@@ -780,8 +780,10 @@ def export_metadata(directory: str, metadata: dict[str, Any], mtype: str) -> Non
     """
     Exports metadata to file.
     """
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    # exist_ok matters under --jobs N: several workers export into the same
+    # reports directory concurrently and the exists-check alone races the
+    # create between the two.
+    os.makedirs(directory, exist_ok=True)
     outfile = str(Path(directory) / f"{mtype.lower()}.json")
     count_before = get_hex_truncation_count()
     output = orjson.dumps(metadata, default=json_serializer).decode("utf-8", "ignore")

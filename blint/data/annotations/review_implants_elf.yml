@@ -1,0 +1,96 @@
+---
+text: Review for ELF layout incoherence left by post-link code insertion
+group: BINARY_REVIEWS
+exe_type:
+  - genericbinary
+  - gobinary
+  - ELF
+rules:
+  - id: ELF_ENTRY_POINT_OUTSIDE_CODE
+    title: Execution starts outside the sections a linker starts programs in
+    summary: The address in e_entry falls in no section, in a section not marked executable, or in an executable section outside the small set a toolchain uses for entry stubs.
+    description: |
+      A linker emits the entry stub into .text, or into one of a handful of startup-specific text
+      sections, and records that address in e_entry. This image starts somewhere else: in no section
+      at all, in a section the section table says is not code, or in an executable section with a
+      name no toolchain generates entry code into. The two halves of the file disagree - the section
+      table describes one layout and the ELF header points outside it - and producing that
+      disagreement requires editing the header after the link.
+
+      This is the redirect step of adding an implant to a finished binary. The published attack
+      against the NixOS bootstrap (arXiv 2607.24888) appends payload code, maps it through a
+      repurposed program header, and points e_entry at it; the payload saves the registers, decides
+      whether to act based on argv[0] and the build-sandbox environment, and jumps to the original
+      _start, so the program behaves normally and no original byte has changed. Nothing is packed
+      and nothing becomes writable-and-executable, so neither the entropy work nor CHECK_WX_SEGMENTS
+      sees it - the relocated entry point is the visible part.
+
+      Read the section before concluding. Custom linker scripts, freestanding images, bootloaders
+      and unikernels legitimately start execution in sections of their own naming, and that case is
+      reported at the same strength as the malicious one because a single binary carries nothing
+      that separates them. The evidence names the section and the address so the entry code can be
+      checked directly; the strong form of this finding is an entry point that no section covers.
+    check_type: binary_analysis
+  - id: ELF_NOTE_SECTION_WITHOUT_SEGMENT
+    title: Mapped note sections in an image with no PT_NOTE segment
+    summary: The image carries allocated .note sections but no program header of type PT_NOTE, so nothing at run time can reach them.
+    description: |
+      Note sections are reached at run time through a PT_NOTE program header; the section headers
+      exist for tools. A toolchain emits the two together, so an image that maps .note sections
+      while carrying no PT_NOTE at all is in a state the linker does not produce. The build-id a
+      distribution uses to match a binary to its debug symbols is present in the file and
+      unreachable as a note.
+
+      The way an image reaches that state is by having its PT_NOTE header retyped into something
+      else. A program header table has a fixed size decided at link time, so an attacker who wants
+      to map appended code without relocating the whole file needs a spare entry, and PT_NOTE is the
+      one entry whose loss changes no run-time behaviour: the loader ignores notes, and the sections
+      stay in place for anyone who reads section headers. That is the repurpose step in arXiv
+      2607.24888, and the orphaned note sections are what it leaves behind.
+
+      The rule requires that no PT_NOTE exist anywhere in the image rather than checking each note
+      section for coverage, because the Go linker legitimately emits a PT_NOTE spanning only
+      .note.go.buildid and leaves the adjacent .note.gnu.build-id outside it. The cost is that an
+      image with two PT_NOTE headers, one of them repurposed, is not reported.
+    check_type: binary_analysis
+  - id: ELF_APPENDED_EXECUTABLE_MAPPING
+    title: Executable mapping runs to the last byte of the file
+    summary: An executable PT_LOAD segment's file range ends exactly at end-of-file, where a linker would have placed read-only data and the symbol tables.
+    description: |
+      A linker lays out an executable segment with the read-only data, the symbol table and the
+      section header string table after it, so the executable mapping is followed by something. A
+      segment marked executable whose file range ends on the last byte of the file is therefore code
+      that arrived after the link - appended to a finished binary and mapped by adjusting a program
+      header, which is the append step of the attack this group of rules describes.
+
+      The check is on the mapped executable bytes only. A section header table sitting at the end of
+      a file is entirely normal and is not evidence of anything; so is a non-executable segment
+      reaching end-of-file. Note also that an attacker who appends a new section header table after
+      the payload pushes the executable mapping back off the end of the file and is not reported
+      here - that layout is covered by ELF_ENTRY_POINT_OUTSIDE_CODE and
+      ELF_NOTE_SECTION_WITHOUT_SEGMENT instead. Tiny hand-linked and freestanding images that map
+      the whole file in one executable segment reach this state legitimately.
+    check_type: binary_analysis
+  - id: ELF_BUILD_SANDBOX_EVASION_GATE
+    title: Image probes a package-build sandbox variable and its layout is incoherent
+    summary: A string naming a build-sandbox-only environment variable, in an image that already carries an ELF layout anomaly.
+    description: |
+      This image contains the name of an environment variable that exists only inside a package
+      build sandbox - NIX_BUILD_TOP, GUIX_BUILD_OPTIONS, SOURCE_DATE_EPOCH, RPM_BUILD_ROOT or a
+      sibling - and its own structure already contradicts itself in one of the ways the other rules
+      in this group describe. Reading such a variable is completely ordinary on its own: every build
+      tool on the system does it, which is why this rule requires the structural finding first and
+      names it in the evidence.
+
+      The pair matters because it is how an implant defeats the defence that would otherwise catch
+      it. Reproducible builds detect binary tampering by rebuilding and diffing, so an implant whose
+      carrier is a build tool must not fire while a build is being verified. Checking whether it is
+      running inside the build sandbox and staying inert if so buys exactly that: the rebuild
+      matches, the verification passes, and the payload runs only on end-user machines. The payload
+      in arXiv 2607.24888 gates on NIX_BUILD_TOP for this reason, alongside a check that argv[0]
+      names the tool it expects to be.
+
+      A build tool that has a legitimate reason for an unusual layout - a bootloader, a unikernel,
+      an image with a custom linker script - can match both halves innocently. Read the entry code
+      and the variable's use before concluding.
+    check_type: binary_analysis

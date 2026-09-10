@@ -65,6 +65,8 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
 
 - **Link Closure (`link_closure`, optional):** The result of resolving the dependency graph the way the dynamic loader would. See [`link_closure`](#link_closure) below.
 
+- **Layout Coherence (`entry_point_section`, `segments_summary`, `layout_anomalies`):** Where execution starts, the full program-header table, and the contradictions between them. See [`layout_anomalies`](#layout_anomalies) below.
+
 ### For PE Binaries
 
 PE (Portable Executable) files are the standard for Windows.
@@ -130,7 +132,8 @@ PE (Portable Executable) files are the standard for Windows.
 
 - **Stack-built strings (`stack_strings`, requires `--disassemble`):** String literals the binary assembles on its stack from arithmetic rather than storing in a data section. These appear in no other string channel, so without this they are invisible to string scanning, to YARA rules written against literals, and to a reviewer reading the file.
   - Each entry carries `value`, `encoding` (`utf-16le` or `ascii`), the `function` and `address` it was built in, and the `frame` slot.
-  - Recovery is a linear forward pass with no control-flow awareness, so a value assembled across a branch or loop may be partial. Treat entries as evidence to confirm against the reconstruction rather than as ground truth.
+  - Recovery is a fixed-point dataflow over the function's CFG: a register or frame byte survives a control-flow merge only when every incoming path agrees on its value, and blocks unreachable from the entry contribute nothing. A value assembled on one branch of a conditional is therefore not reported — treat entries as paths that certainly execute, and confirm the reconstruction before acting on it.
+  - `stack_strings_coverage` records how the pass covered the binary: `functions_total`, `functions_dataflow` (CFG fixed point), `functions_fallback` (no usable CFG — straight-line pass), and `functions_iteration_cap_hit` (the loop iteration cap was reached; those functions contribute no entries, because a half-converged state is residue rather than evidence).
 
 In the case of ARM64X, a single PE file encapsulates ARM64 and ARM64EC architectures. For `ARM64EC` nested PE binaries, an additional attribute `nested_binary` would contain the information such as `exports`, `exceptions`, `functions`, `ctor_functions`, and `dotnet_dependencies`.
 
@@ -146,7 +149,20 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF.
   - `uuid`: A unique identifier for the binary, used by debuggers and crash report symbolication tools.
   - `rpath`: A runtime search path for libraries.
-  - `code_signature`: Information about the binary's digital signature, crucial for Apple's security model.
+  - `code_signature`: The embedded code-signature SuperBlob, parsed into semantic detail (see below).
+
+- **Code signature (`code_signature`):** The SuperBlob that `LC_CODE_SIGNATURE` points at, parsed by `blint/lib/codesign_macho.py` — what the binary _claims_ about itself, never a trust judgment. `trust_validation` fields say `not_performed` in band, so "signed" is never read as "trusted"; blint does not validate certificate chains, revocation, or notarization.
+  - `available`: `true` when the slice carries an embedded signature blob.
+  - `parse_status`: `parsed`, `parse_failed`, or `absent`. A present-but-corrupt blob is `parse_failed` — never folded into a confident "unsigned" or an empty entitlements answer; it lands in `analysis_coverage` (`security_properties_gaps` gains `code_signature_detail`, and `degradations` gains `code_signature_parse_failed`).
+  - `size`, `data_size`: legacy keys (strings) — the load-command size and the blob size in the file. `data_offset`: the load command's `dataoff`, which is **slice-relative**; `file_offset`: the absolute position of the SuperBlob in the file (`fat_offset + dataoff` — the two differ for every slice of a universal binary). `blob_source`: `lief_content` or `file_range`, i.e. which read path produced the bytes.
+    The former `data` key (removed, an explicit additive-only exception) held the hex of the 16-byte load command itself under a name claiming signature content — it had never held signature data. Its entire information content (cmd, cmdsize, dataoff, datasize) is preserved by `size`, `data_offset`/`file_offset` and `data_size`.
+  - `superblob.blobs`: the blob index — `slot_type`, `offset`, `size`, `magic` per member.
+  - `superblob.code_directories[]`: every CodeDirectory (primary and alternates) with `version`, `identifier`, `team_id`, `flags` (named booleans: `adhoc`, `hard`, `kill`, `restrict`, `runtime` (hardened runtime), `library_validation`, `get_task_allow`, `linker_signed`, …), `flags_raw`, `hash_type`/`hash_size`, `page_size`, `code_slots`/`special_slots`, `code_limit`, `platform_id`, `runtime_version` (v0x20500+), `exec_seg_flags` (v0x20400+), and the **cdhash** — `cdhash` (20-byte truncated, the form `codesign -dvvv` displays and the identity the system keys on) plus `cdhash_full` and `cdhash_algorithm`.
+  - `superblob.entitlements`: parsed key/value pairs from the XML-plist slot; `superblob.entitlements_der`: the same from the DER slot (modern Apple binaries). A payload that fails to decode yields `{"decode_error": ...}` rather than an empty dict, so "no entitlements" and "undecodable entitlements" stay distinct.
+  - `superblob.requirements`: internal-requirements inventory (`count`, `types`).
+  - `superblob.cms`: the CMS (PKCS#7) signature — `content_type`, `signer_cn` (the signing certificate, identified by SignerInfo issuerAndSerialNumber, not blob position), `certificates[]` with `subject_cn`/`subject_organization`/`issuer_cn`/`serial`, and `trust_validation: "not_performed"`.
+  - `superblob.provenance`: `adhoc`, `linker_signed`, `cms_signed`, or `unknown` — a claim read off the blob's flags and CMS presence.
+- **Signature-derived security properties:** when the SuperBlob parsed, `security_properties` gains explicit `hardened_runtime`, `library_validation` and `get_task_allow` booleans from the primary CodeDirectory flags (`False` is reported too — for hardening properties the negative is the finding). `is_signed` remains presence-only (the blob exists), so a corrupt blob still reads `is_signed: true` with the failure recorded as a gap.
 
 - **Encryption (`is_encrypted`, `encryption_info`):** Derived from `LC_ENCRYPTION_INFO(_64)`. `is_encrypted` is `true` when `crypt_id` is non-zero (FairPlay-protected App Store binaries); developer, ad-hoc, and enterprise builds report `false`. `encryption_info` carries `crypt_id`, `crypt_offset`, and `crypt_size`. An encrypted `__TEXT` segment cannot be meaningfully disassembled without on-device decryption.
 
@@ -161,6 +177,17 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
 - **Function recovery (`functions`):** For stripped release builds (the common case for shipped iOS/macOS apps) the symbol table exposes little beyond `__mh_execute_header`. blint augments the function list from the `LC_FUNCTION_STARTS` table — every entry point is recovered, reusing a surviving symbol name when one exists and synthesising a `sub_<address>` name otherwise. Recovered Objective-C implementations then upgrade matching `sub_<address>` entries to their `-[Class selector]` names. This is what allows disassembly and callgraph construction to work on stripped apps.
 
 - **Skipped disassembly (`disassembly_skipped`):** When `--disassemble` is requested for a FairPlay-encrypted binary (`is_encrypted` is `true`), disassembly is skipped and this field is set to `fairplay_encrypted` rather than producing meaningless instructions from the encrypted `__TEXT`.
+
+- **Universal binaries (`is_universal`, `slices`):** A fat (universal) Mach-O contains one image per architecture. blint summarizes _every_ slice, not just the one the generic parser auto-selects. The existing top-level keys (`cpu_type`, `functions`, `security_properties`, …) keep describing the **primary slice** (the first fat entry — the same slice that was analyzed before this field existed, so consumers of those keys see no change); `is_universal` is `true` only for fat inputs, and `slices` carries one lean entry per slice in fat order:
+  - `index`, `cpu_type`, `cpu_subtype`, `arch`, `is_primary`: slice identity. `arch` distinguishes `arm64` from `arm64e`, which matters because only arm64e slices get pointer authentication.
+  - `security_properties`: the same property set as the top-level block, computed from _this slice's_ bytes. Hardening that differs between slices — a signature present on one slice but not another, PAC only on the arm64e slice — is reported per slice and is never merged into a single optimistic or pessimistic answer.
+  - `code_signature`: the slice's own parsed signature summary (`parse_status`, `provenance`, `identifier`, `team_id`, `cdhash`, `hash_type`, `flags`, `entitlements`, `entitlements_der`). Signatures are per slice — every slice has its own CodeDirectory and its own cdhash, and entitlements can differ between slices — so a single top-level cdhash for a fat binary would be a wrong answer.
+  - `functions`, `symbols`, `imports`: counters evidencing the slice was really parsed.
+  - `is_encrypted`: per-slice FairPlay state (set when the slice's `crypt_id` is non-zero).
+    Because the top-level block speaks for the primary slice, a fat input also carries `security_properties_scope: "primary_slice"` and, when the slices do not agree, `security_properties_slice_variance` naming every property they differ on (both mirrored into `analysis_coverage`). `/usr/bin/git` is the case in point: PAC is on its arm64e slice, so the top level has no `pac` key and would otherwise read exactly like a binary checked and found to lack it. Nothing is merged across slices — a merge would have to pick between an optimistic and a pessimistic lie — so the per-slice truth stays in `slices` and the summary states its own scope.
+    The same rule applies to signatures: the top-level `code_signature` block declares `code_signature_scope: "primary_slice"` and, when slices disagree, `code_signature_slice_variance` names the aspects (`cdhash`, `entitlements`, `flags`, …) — also mirrored into `analysis_coverage`. cdhash differs by construction across slices; differing entitlements are the signal to look for.
+
+  Disassembly, entropy and string-based reviews run on the primary slice only; slice summaries are metadata-level. A slice whose summary fails is isolated and recorded in [`analysis_coverage`](#analysis_coverage) under `slices` — the file is not aborted.
 
 > **Swift symbols** are demangled automatically (e.g. `Foundation.URL.appendingPathComponent(...)`), including the Mach-O underscore-prefixed manglings (`_$s…`/`_$S…`/`_T0…`) which the bundled demangler recognises directly. When `--disassemble` is enabled, Mach-O imported calls made through `__stubs` and the GOT are resolved to their demangled symbol names, so call sites reference real Foundation/libswiftCore/libc APIs rather than anonymous stubs.
 
@@ -330,6 +357,18 @@ While symbol tables provide the names, these lists represent a curated set of fu
   - **Purpose**: To perform cleanup tasks like flushing files or releasing resources.
   - **Use Case for Analysts**: Malware may use destructors to cover its tracks, delete files, or send a final beacon upon exit. These are important to check for cleanup or anti-forensic activities.
 
+### `discovered_functions` and `function_discovery`
+
+Recovered function starts for binaries whose symbol tables are stripped or incomplete. Two structures are additive to the symbol-driven lists:
+
+- **`discovered_functions`**: every function start recovered from the structures the runtime itself depends on, which survive `strip`:
+  - **Mach-O `__TEXT,__unwind_info`** (compact unwind): `source: "unwind"`, with exact function sizes derived from the sorted offset table and its sentinel entry.
+  - **ELF `.eh_frame_hdr` / `.eh_frame`**: `source: "eh_frame"`. Starts come from the binary-search table when present; sizes come from the exact FDE `pc_range` values. A CIE/FDE walk covers binaries whose header table is missing or malformed.
+  - Each entry carries `name` (the real symbol name when one exists, `sub_<address>` otherwise), `address`, `size` and `source`. Addresses already claimed by a symbol bucket enrich the existing entry with the exact unwind size when its size was unknown.
+- **`function_discovery`**: summary of the merge — `sources` (per-source counts) and `merged_count` (addresses that were genuinely new, i.e. not claimed by any symbol bucket).
+
+Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.
+
 ---
 
 ## Build and Dependency Information
@@ -478,14 +517,14 @@ The closure is capped at 256 objects so a pathological dependency graph cannot s
 | Format | Evidence                                                                                                                                                                            | Available                                         |
 | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
 | PE     | The import table is organised by DLL, so every import names its library.                                                                                                            | Always                                            |
-| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`.                                                                                                                     | Always                                            |
+| Mach-O | Each symbol is bound to a dylib, recorded as `library::symbol`. The `is_imported` flag on each symtab entry marks the undefined symbols that are the imports.                        | Always                                            |
 | ELF    | The dynamic symbol table and the `DT_NEEDED` list are unrelated flat lists. The connection only exists once the dependency closure is resolved and each library's exports are read. | Only with [`link_closure`](#link_closure) enabled |
 
 Two fields record what the result rests on:
 
 | Property                    | Description                                                                                                                          |
 | :-------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| `attribution_sources`       | Which evidence was used: `import_table`, `load_commands`, `link_closure`. Empty means none was available.                            |
+| `attribution_sources`       | Which evidence was used: `import_table`, `load_commands`, `sdk_tbd`, `link_closure`. Empty means none was available.                  |
 | `unattributed_symbol_count` | How many imported symbols could not be tied to a library. These are collected under a synthetic `unattributed` entry in `libraries`. |
 
 **An ELF binary analysed without closure resolution attributes nothing.** That is deliberate. Assigning a symbol to an arbitrary declared library produces a dependency edge that is indistinguishable downstream from a correct one, and a wrong edge is worse than an honest gap.
@@ -494,9 +533,36 @@ C++ and Rust symbols are matched on their linkage name, which blint records as `
 
 Note that `::` is a library separator only in Mach-O, and only when the prefix looks like a library. Everywhere else it separates namespace components, and `APT::PackageContainer::begin` is one symbol rather than a dependency on `APT`.
 
+#### The `.tbd` SDK index (`--sdk-path`)
+
+On a running macOS install the system libraries a binary links against are absent from disk — they live only in the dyld shared cache. `--sdk-path <dir>` (off by default) points blint at an Apple SDK whose `.tbd` text stubs describe what every system library exports, and is the only static oracle for confirming Mach-O dependency questions. The path must contain `.tbd` files; a run given a path with none aborts with an error rather than serving an empty index.
+
+When the option is on, Mach-O imports the binary's own evidence could not pin to a library (flat binds, missing binding info) are attributed to the first declared library — in load-command order, matching dyld's search order — whose export surface provides the symbol. A symbol's surface is the library's own `exports`/`reexports` sections plus, transitively, the exports of everything it names under `reexported-libraries` (v4) or `re-exports` (v2/v3).
+
+A re-exported symbol is attributed to the **declaring** library, never the implementing one. A Mach-O two-level bind records the ordinal of the library in the binary's own load-command list; dyld resolves through that library's re-export edges at runtime, but the bind still names the declared library — `dyld_info -imports /usr/bin/git` reports `_dispatch_once (from libSystem)` although the implementation lives in libdispatch.dylib. Substituting the implementing library would contradict the binary's own bind and re-flag declared umbrellas as unused.
+
+The evidence is marked `sdk_tbd` in `attribution_sources`, always distinct from `load_commands`: **a `.tbd` describes what the SDK ships, not what the machine under the binary ships.** The block records no SDK identity — no paths, versions, or totals of the analyst's environment — only these binary-relative facts:
+
+| Property                           | Description                                                                                                                        |
+| :--------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
+| `attributed_symbol_count`          | Imports without a `dylib::symbol` prefix that the index pinned to a declared library.                                               |
+| `attributed_symbols`               | Capped, sorted sample of the same, as `symbol: install-name`.                                                                       |
+| `confirmed_symbol_count`           | Load-command binds the SDK surface confirms.                                                                                        |
+| `reexport_confirmed_symbol_count`  | How many of those confirmations needed the re-export closure.                                                                       |
+| `unconfirmed_symbol_count`         | Load-command binds the SDK surface cannot back — private or otherwise noteworthy.                                                   |
+| `unconfirmed_symbols`              | Capped, sorted sample of the same.                                                                                                  |
+
+Every `_count` above is exact; only the `_symbols` samples are capped, so a large binary's metadata does not grow with its import table. A count that saturated at the sample cap would understate exactly the binaries whose gaps matter most.
+
+The index is built once per run and cached on disk (under the parse-cache directory, keyed by a fingerprint of the SDK's `.tbd` tree), so `--jobs N` workers each pay one load rather than one build.
+
 ### `link_hygiene`
 
-Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when nothing could be attributed, because with no evidence every dependency looks unused.
+Reports declared dependencies that are never used and used libraries that are never declared. Requires symbol attribution, so for ELF it needs closure resolution; the whole block is absent when no attribution evidence was collected at all, because with no evidence every dependency looks unused. A separate shape covers the case where the binary imports symbols but none of them could be pinned to any library:
+
+| Property                    | Description                                                                                                       |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| `attribution_status`        | `"unresolved"` — the binary imports symbols, but none were attributed, so unused/undeclared answers would be manufactured rather than observed. No `unused_dependencies` or `undeclared_dependencies` keys are present in this state, and `analysis_coverage.degradations` carries `dependency_attribution_unresolved`. |
 
 | Property                    | Description                                                                                                                                                                |
 | :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -504,6 +570,7 @@ Reports declared dependencies that are never used and used libraries that are ne
 | `undeclared_dependencies`   | Libraries supplying symbols without being declared, with `symbol_count` and a sample of `symbols`. These work only for as long as some other dependency keeps them mapped. |
 | `attribution_sources`       | The evidence the result is based on, as above.                                                                                                                             |
 | `unattributed_symbol_count` | Imports not tied to any library. A high count means the findings are based on partial evidence.                                                                            |
+| `imported_symbol_count`     | Present only in the `unresolved` state: how many imports existed for the (failed) attribution to consider.                                                                  |
 | `declared_count`            | How many direct dependencies were declared.                                                                                                                                |
 
 `unused_dependencies` answers a similar question to `ldd -u`, but not an identical one. `ldd -u` relocates the whole closure and counts a library as used if anything in it binds to the library, so a library this binary never calls still counts as used when some other dependency calls it. blint reports **direct** use, which is what `--as-needed` acts on. Everything `ldd -u` reports unused will also be reported here; the reverse does not hold.
@@ -522,9 +589,92 @@ What counts as a mapping follows what each platform loader actually enforces:
 
 The `CHECK_WX_SEGMENTS` security check turns each entry into a finding naming the segment.
 
+### `layout_anomalies`
+
+ELF only. Three related additions record how an ELF is laid out and where that layout contradicts itself:
+
+- `entry_point_section`: the name of the section containing `e_entry`, the ELF counterpart of the field PE metadata has always carried. An empty string means the entry address falls in no section at all — which is the strongest form of the anomaly below, not a missing computation.
+- `segments_summary`: every program header in table order, each with `index`, `type`, normalized `permissions`, `file_offset`, `file_size`, `virtual_address` and `virtual_size`. ELF metadata previously recorded only `numberof_segments`, which is exactly the field that stays constant when a spare program header is retyped in place; exporting the table makes that change visible to anything diffing two builds of the same binary.
+- `layout_anomalies`: a list of structural contradictions, each with a `kind`, the addresses and names needed to check it by hand, and a `detail` sentence. An empty list is the normal result.
+
+The anomaly kinds:
+
+| `kind`                                  | What it means                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `entry_point_outside_any_section`       | `e_entry` is covered by no section header. Toolchain-produced entry points always lie inside a section.                    |
+| `entry_point_in_non_executable_section` | `e_entry` is inside a section not marked `SHF_EXECINSTR`. The section table says this is not code; the header says it is.  |
+| `entry_point_in_unexpected_section`     | `e_entry` is inside an executable section whose name is outside the small set toolchains emit entry stubs into.            |
+| `note_section_without_note_segment`     | The image maps `.note.*` sections but carries no `PT_NOTE` at all, so nothing at run time can reach them.                  |
+| `executable_mapping_at_eof`             | An executable `PT_LOAD`'s file range ends on the last byte of the file, where a linker would have placed data and symbols. |
+
+These exist because an implant can be added to a finished ELF without changing one original byte: append the payload at EOF, retype a spare `PT_NOTE` program header into an executable `PT_LOAD` covering it, and redirect `e_entry` and `e_shoff` (arXiv 2607.24888, which carries exactly this through GNU `strip` across the NixOS bootstrap). Nothing is packed, nothing becomes writable-and-executable, and the result is internally consistent enough that `readelf` reports no problem — so neither `wx_segments` nor `entropy` sees it. What the result cannot hide is the disagreement between its parts.
+
+The `ELF_ENTRY_POINT_OUTSIDE_CODE`, `ELF_NOTE_SECTION_WITHOUT_SEGMENT`, `ELF_APPENDED_EXECUTABLE_MAPPING` and `ELF_BUILD_SANDBOX_EVASION_GATE` reviews turn these into findings. Note that `note_section_without_note_segment` requires the _absence_ of any `PT_NOTE` rather than per-section coverage: the Go linker legitimately emits a `PT_NOTE` spanning only `.note.go.buildid` and leaves the adjacent `.note.gnu.build-id` outside it, so per-section coverage fires on every Go binary.
+
+### `entropy`
+
+Per-section Shannon entropy plus packing evidence, collected for every ELF, PE and Mach-O image whether or not disassembly is requested.
+
+- **`sections`**: one entry per non-empty section with `name`, `size`, `entropy` (bits per byte, 0-8), `executable`, `writable`, and `sampled` (true when entropy was computed over the first 8 MB of a larger section — the sample is always the section head, so results stay deterministic).
+- **`packing`**: the derived signals:
+  - `packed_likelihood`: `high` / `medium` / `low` summary of the evidence below.
+  - `packers`: packer section-name signatures found (UPX, Themida, VMProtect, ASPack, MPRESS and others).
+  - `writable_executable_sections`: section-level W+X evidence; the loadable-segment view lives in [`wx_segments`](#wx_segments).
+  - `executable_section_entropy` / `max_executable_section_entropy`: per-executable-section entropy values.
+  - `overlay_size`: bytes past the last section's file content (ELF/PE only; the Mach-O file tail is the code-signature SuperBlob and is excluded).
+  - `findings`: the individual evidence strings (`packer_section:`, `writable_executable_section:`, `high_entropy_exec_with_few_imports`, `entrypoint_outside_executable_sections`, `virtual_size_mismatch:`, `file_overlay`).
+
+The `CHECK_PACKED` security check turns `high`/`medium` likelihood into a finding naming the evidence.
+
+### `toolchain`
+
+Compiler and runtime attribution built from binary evidence rather than declared metadata. Every signal carries `source` and `confidence`:
+
+- **`compilers`**: from ELF `.comment` sections (gcc, clang, rustc, lld with versions), Mach-O `LC_BUILD_VERSION` tool entries, and the PE linker version fields.
+- **`runtimes`**: Go (buildinfo or `runtime.*` symbols), Rust (buildinfo or `_ZN`/`_R` mangling), Swift (`swift_` stdlib symbols), Objective-C (`objc_*` trampolines), MSVC/MinGW CRT fingerprints, .NET.
+- **`libc`**: `glibc` or `musl` from symbol-version requirements and the ELF interpreter.
+
+Empty lists mean the format carries no such evidence — attribution is never padded with guesses.
+
+### `import_hash`
+
+A stable digest over the normalized import-name set (ELF dynamic symbols marked as imports, or the `imports` list for PE/Mach-O). Normalization strips ELF `@@VERSION` suffixes, PE `__imp_`/`_imp_` thunks and common leading-underscore decoration, so the same dependency set hashes identically across formats and minor version bumps. Empty for binaries that import nothing (fully static images).
+
+### `analysis_coverage`
+
+Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
+
+- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
+- **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
+- **`sections_analyzed`**: sections the entropy pass examined.
+- **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).
+- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet (currently Mach-O's granular `has_nx_stack` / `has_nx_heap`). Their absence from `security_properties` means "not implemented", never "checked and clean".
+
+#### Run-level `analysis-coverage.json`
+
+Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-coverage.json` summarizing the run's _units_ (a top-level file, or one binary contained in an `.ipa`). A binary that fails to parse no longer aborts the scan (issues #122, #188); the failure lands here instead:
+
+- **`units`**: `attempted` / `succeeded` / `failed` / `skipped`. Totals mix granularities: an `.ipa` archive counts as a unit beside the member units it contains.
+- **`units_by_role`**: the same four counters per unit role (`top-level`, `ipa-member`), so a consumer can compute a success rate over just the member binaries or just the top-level inputs.
+- **`failures`**: one record per failed unit with `file_path`, `unit_role` (`top-level` or `ipa-member`), `stage`, `exception_type` and `message`.
+- **`skipped`**: one record per recognized-but-unanalyzed unit with `file_path`, `unit_role` and a machine-readable `reason` (e.g. `extract_failed`, `no_dex_bytecode`).
+- **`cache`**: parse-cache accounting. `enabled` tells a fast run from a cached one; `hits` / `misses` / `stored` count what was served from the content-addressed parse cache; `caches_failures` is always `false` — parse failures are never cached, so every record in `failures` is a fresh failure; `by_role` carries the same three counters per unit role, since not every role can hit the cache (android app units never go through `parse()`).
+
+This file is exported even when the scan produced no findings, so a caller can always tell "clean" from "blind" without reading stderr.
+
+### Parse cache
+
+Default-mode runs can cache parse metadata in a content-addressed SQLite store keyed on `(sha256(file bytes), blint version, options digest)`, separate from blintdb (which is a shipped read-only artifact). A warm run replays byte-identical metadata — including the cross-path case, where the stored path is rewritten to the current one exactly where `parse()` embeds it. The cache is **off by default** — `--cache` opts a run into it, since caching writes to the user's disk and is a caller's choice; `blint cache stats` reports entry count and actual size on disk, and `blint cache clear` deletes the store. Entries are zlib-compressed and bounded by `BLINT_CACHE_MAX_BYTES` (default 1 GiB; `0` disables the bound) with least-recently-used eviction; the store lives at `BLINT_CACHE_DIR` (default: the user cache directory, e.g. `~/.cache/blint` on Linux), in `parse-cache.db`.
+
+### Parallel analysis
+
+`--jobs N` analyzes up to N binaries in parallel worker processes (default `1`, which is the unchanged sequential loop; `0` or `auto` means one worker per CPU). Both the default mode and `blint sbom` accept the flag; the unit of work is one binary, and there is no parallelism within a binary. Output is byte-identical to the sequential run for any N: every worker result carries its input position and the parent merges strictly in that order, which also holds for `analysis-coverage.json` and the cache counters. A worker that dies hard (e.g. a segfault inside LIEF) is recorded in `analysis-coverage.json` as a failure with `stage: "worker"` and `exception_type: "WorkerDied"` naming the file it was analyzing; the remaining files are still analyzed. If the pool cannot start at all, the run falls back to the sequential path with an error logged. With `--cache --jobs N`, every worker opens its own SQLite connection to the same store (WAL mode); hit/miss/stored totals match the equivalent sequential run.
+
 ### `security_properties`
 
 This object provides a quick, at-a-glance summary of the most important security mitigations compiled into the binary.
+
+Properties are format-aware: a property the format has no concept of is _omitted_ rather than reported as a negative finding (`relro` never appears for Mach-O, for example), and a property blint does not compute for the format is omitted and listed in [`analysis_coverage`](#analysis_coverage) under `security_properties_gaps`.
 
 | Property                 | Description                                                                                                             | Security Implication                                                                                       |
 | :----------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------- |
@@ -543,3 +693,4 @@ This object provides a quick, at-a-glance summary of the most important security
 | `safe_seh`               | **Safe SEH.** (x86) Registers exception handlers at compile time.                                                       | Prevents attackers from overwriting SEH chains on the stack to gain execution.                             |
 | `safe_delay_load`        | **Protected Delay-Load IAT.** Marks delay-load tables read-only after initialization.                                   | Prevents hooking of APIs that are loaded lazily during execution.                                          |
 | `enclave`                | **Enclave Support.** Binary contains configuration for SGX/VBS.                                                         | Indicates the application uses TEE (Trusted Execution Environment) features for high-security operations.  |
+| `packed`                 | **Packing evidence present.** Derived from the [`entropy`](#entropy) block.                                             | Strings, symbols and disassembly-derived findings may be incomplete until the binary is unpacked.          |

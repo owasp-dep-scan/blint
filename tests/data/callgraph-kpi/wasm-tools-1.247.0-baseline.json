@@ -14,22 +14,22 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 1737,
+        "external_edges": 3420,
         "external_reason_buckets": {
           "address_space_miss:indirect_hint": 2,
-          "import": 1681,
-          "import:indirect_hint": 2,
-          "import:tailcall": 10,
-          "unresolved:tailcall": 42
+          "import": 3162,
+          "import:indirect_hint": 3,
+          "import:tailcall": 22,
+          "unresolved:tailcall": 231
         },
-        "functions_total": 11807,
-        "functions_with_direct_targets": 10814,
+        "functions_total": 26971,
+        "functions_with_direct_targets": 23239,
         "internal_edge_kinds": {
-          "direct": 46778,
-          "indirect_hint": 311,
-          "tailcall": 4016
+          "direct": 80806,
+          "indirect_hint": 433,
+          "tailcall": 9181
         },
-        "internal_edges": 51105
+        "internal_edges": 90420
       }
     },
     "aarch64-pc-windows-msvc": {
@@ -46,18 +46,19 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 90,
+        "external_edges": 93,
         "external_reason_buckets": {
-          "unresolved:tailcall": 90
+          "address_space_miss:indirect_hint": 2,
+          "unresolved:tailcall": 91
         },
-        "functions_total": 15923,
-        "functions_with_direct_targets": 15760,
+        "functions_total": 16193,
+        "functions_with_direct_targets": 16001,
         "internal_edge_kinds": {
-          "direct": 61864,
-          "indirect_hint": 357,
-          "tailcall": 5035
+          "direct": 66963,
+          "indirect_hint": 405,
+          "tailcall": 5078
         },
-        "internal_edges": 67256
+        "internal_edges": 72446
       }
     },
     "aarch64-unknown-linux-gnu": {
@@ -74,21 +75,20 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 68,
+        "external_edges": 229,
         "external_reason_buckets": {
-          "address_space_miss": 24,
-          "address_space_miss:indirect_hint": 29,
-          "address_space_miss:tailcall": 5,
-          "unresolved:tailcall": 10
+          "address_space_miss:indirect_hint": 22,
+          "address_space_miss:tailcall": 1,
+          "unresolved:tailcall": 206
         },
-        "functions_total": 22181,
-        "functions_with_direct_targets": 15931,
+        "functions_total": 22219,
+        "functions_with_direct_targets": 19214,
         "internal_edge_kinds": {
-          "direct": 55061,
-          "indirect_hint": 81,
-          "tailcall": 1548
+          "direct": 67644,
+          "indirect_hint": 127,
+          "tailcall": 7109
         },
-        "internal_edges": 56690
+        "internal_edges": 74880
       }
     },
     "x86_64-apple-macosx": {
@@ -105,24 +105,24 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 5030,
+        "external_edges": 10418,
         "external_reason_buckets": {
-          "address_space_miss:indirect_hint": 126,
-          "address_space_miss:tailcall": 60,
-          "import": 1613,
-          "symbol_only_miss:indirect_hint": 15,
-          "symbol_only_miss:tailcall": 2543,
-          "unresolved:indirect_hint": 642,
-          "unresolved:tailcall": 31
+          "address_space_miss:indirect_hint": 202,
+          "address_space_miss:tailcall": 189,
+          "import": 3407,
+          "symbol_only_miss:indirect_hint": 18,
+          "symbol_only_miss:tailcall": 5418,
+          "unresolved:indirect_hint": 990,
+          "unresolved:tailcall": 194
         },
-        "functions_total": 11202,
-        "functions_with_direct_targets": 8944,
+        "functions_total": 27083,
+        "functions_with_direct_targets": 20862,
         "internal_edge_kinds": {
-          "direct": 32158,
-          "indirect_hint": 149,
-          "tailcall": 592
+          "direct": 65625,
+          "indirect_hint": 269,
+          "tailcall": 2004
         },
-        "internal_edges": 32899
+        "internal_edges": 67898
       }
     },
     "x86_64-pc-windows-msvc": {
@@ -139,22 +139,22 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 3926,
+        "external_edges": 3939,
         "external_reason_buckets": {
-          "address_space_miss:indirect_hint": 57,
-          "address_space_miss:tailcall": 1,
-          "symbol_only_miss:indirect_hint": 500,
+          "address_space_miss:indirect_hint": 60,
+          "address_space_miss:tailcall": 3,
+          "symbol_only_miss:indirect_hint": 501,
           "unresolved:indirect_hint": 3358,
-          "unresolved:tailcall": 10
+          "unresolved:tailcall": 17
         },
-        "functions_total": 16145,
-        "functions_with_direct_targets": 15977,
+        "functions_total": 16556,
+        "functions_with_direct_targets": 16118,
         "internal_edge_kinds": {
-          "direct": 62644,
+          "direct": 64254,
           "indirect_hint": 21,
-          "tailcall": 4887
+          "tailcall": 5003
         },
-        "internal_edges": 67552
+        "internal_edges": 69278
       }
     },
     "x86_64-unknown-linux-gnu": {
@@ -171,18 +171,18 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 92527,
+        "external_edges": 92706,
         "external_reason_buckets": {
           "address_space_miss": 216,
-          "address_space_miss:indirect_hint": 5678,
-          "address_space_miss:tailcall": 926,
-          "symbol_only_miss:indirect_hint": 5593,
+          "address_space_miss:indirect_hint": 5853,
+          "address_space_miss:tailcall": 1038,
+          "symbol_only_miss:indirect_hint": 6960,
           "symbol_only_miss:tailcall": 4115,
-          "unresolved:indirect_hint": 75861,
-          "unresolved:tailcall": 138
+          "unresolved:indirect_hint": 74498,
+          "unresolved:tailcall": 26
         },
         "functions_total": 22173,
-        "functions_with_direct_targets": 17881,
+        "functions_with_direct_targets": 17882,
         "internal_edge_kinds": {
           "direct": 22257,
           "indirect_hint": 22,

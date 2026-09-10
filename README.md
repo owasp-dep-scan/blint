@@ -120,11 +120,14 @@ blint produces several JSON artifacts in the specified reports directory.
 
 ## Advanced Usage: SBOM Generation with blintdb
 
-For C and C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb v2**, a pre-compiled database built from real project outputs, to improve component identification with:
+For C and C++ binaries, identifying components from symbols alone can be imprecise. `blint` can use **blintdb**, a pre-compiled database built from real project outputs, to improve component identification with:
 
 - project-level symbol matching
 - binary-name hints
 - optional disassembly hash matching when deep mode is enabled
+- similarity-hash matching (function fuzzy hashes, and the binary import-set digest) when the database carries those columns, so a compiler-drifted recompile degrades to fuzzy matching instead of missing
+
+Databases with schema version 2 and version 3 are both supported; the similarity-hash columns are detected per database, so a v2 database (or one whose hash columns are unpopulated) keeps working with exact matching only. Matched components record this as an `internal:blintdb_fuzzy_layer` property (`active`, or a named `unavailable_*`/`inactive_*` state such as `unavailable_hash_columns_absent` or `inactive_no_disassembly`) so "the fuzzy layer found nothing" is never confused with "the fuzzy layer could not run".
 
 The workflow is a two-step process:
 
@@ -185,7 +188,7 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 <summary><strong>Main Command Help</strong></summary>
 
 ```shell
-usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] {sbom} ...
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] [--cache] [--jobs JOBS] {sbom,callgraph-match,canonicalize,db,cache} ...
 
 Binary linter and SBOM generator.
 
@@ -213,6 +216,7 @@ options:
                         Filter exported callgraph edges/external links by confidence. Defaults to low (no filtering).
   --custom-rules-dir CUSTOM_RULES_DIR
                         Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.
+  --jobs JOBS           Analyze up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
   -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
@@ -231,7 +235,7 @@ sub-commands:
 ```shell
 usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
                   [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]] [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
-                  [--wasm-sbom]
+                  [--wasm-sbom] [--jobs JOBS]
 
 options:
   -h, --help            show this help message and exit
@@ -248,6 +252,7 @@ options:
                         Directories containing pre-build and build BOMs. Use to improve the precision.
   --use-blintdb         Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the local database file exists.
   --wasm-sbom           Emit SBOM components from WebAssembly Component Model binaries using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as exact evidence. Core modules without component-model evidence are skipped.
+  --jobs JOBS           Parse up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
 ```
 
 </details>
@@ -266,6 +271,66 @@ options:
 ```
 
 </details>
+
+<details>
+<summary><strong>Capabilities Sub-command Help</strong></summary>
+
+```shell
+usage: blint capabilities [-h] [--json]
+
+options:
+  -h, --help  show this help message and exit
+  --json      Emit the catalog as JSON (machine readable; for agents and tooling).
+```
+
+</details>
+
+<details>
+<summary><strong>Diff Sub-command Help</strong></summary>
+
+Compare two versions of one binary — inputs may be binaries or exported
+<code>*-metadata.json</code> files. The report covers metadata deltas
+(imports, exports, dependencies, entitlements, sections, identity),
+hardening regressions with an explicit per-property polarity, finding and
+capability-review deltas paired across rebuilds, and — with
+<code>--disassemble</code> — a function-level delta keyed on content hashes,
+so a recompile is not reported as rewritten code.
+
+```shell
+usage: blint diff [-h] [--json] [--disassemble] [--no-reviews] [-q] old_input new_input
+
+positional arguments:
+  old_input      Old version: a binary or a blint *-metadata.json export.
+  new_input      New version: a binary or a blint *-metadata.json export.
+
+options:
+  -h, --help     show this help message and exit
+  --json         Emit the diff report as JSON (machine readable; for agents and tooling).
+  --disassemble  Disassemble binary inputs so the function-level delta (added/removed/changed by content hash) can be computed. Metadata-JSON inputs carry disassembly only if they were generated with --disassemble.
+  --no-reviews   Skip the capability-review delta.
+  -q, --quiet    Disable logging and progress bars.
+```
+
+</details>
+
+## Python API
+
+Analyze a single binary in process, with the same engine the CLI uses:
+
+```python
+from blint import analyze, NotABinaryError
+
+result = analyze("/path/to/binary", disassemble=True)
+result.metadata    # parsed metadata (same content as *-metadata.json)
+result.findings    # security-check findings, each with a stable finding_id
+result.reviews     # capability reviews
+result.fuzzables   # fuzzable targets (suggest_fuzzable=True)
+result.coverage    # run-level analysis_coverage block (units, failures, skips)
+```
+
+`analyze()` writes no report files. A missing path raises `FileNotFoundError`, a file blint cannot parse raises `NotABinaryError`, and a failed analysis raises `AnalysisFailedError` with the structured failure record attached — so a clean result can never be mistaken for a blind one. Calls are serialized by an internal lock (the engine's rule state is module-global); sequential calls with different options each see their own rules.
+
+Every finding carries a `finding_id`: a content hash over `(rule id, binary sha256, evidence locator)` — deliberately not over titles, descriptions, paths or the blint version — so findings can be tracked, suppressed and diffed across runs on the same bytes.
 
 ## References
 

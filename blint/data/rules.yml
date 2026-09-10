@@ -355,3 +355,17 @@
     - x86_64-exec
     - MachO
     - mips-executable
+- id: CHECK_PACKED
+  title: Binary Shows Packing Evidence
+  description: |
+    The binary carries evidence consistent with packing or self-encryption: a packer-specific section signature (UPX, Themida, VMProtect and friends), high-entropy executable sections combined with a minimal import table, or a file overlay past the last section.
+    Packers exist for legitimate reasons - software protection, game anti-cheat - but they are also the single most common way malware hides its real code from static analysis. A packed binary defeats string-based reviews, symbol matching and most of the disassembly pipeline, so every finding in this report should be read as incomplete until the binary is unpacked.
+    Review the packing evidence in the `entropy` block of the metadata, confirm the binary's provenance, and unpack it (for example with `upx -d` when UPX is identified) before drawing security conclusions from the analysis.
+  severity: warning
+  exe_types:
+    - genericbinary
+    - x86_64-executable
+    - x86_64-exec
+    - MachO
+    - PE32
+    - PE64

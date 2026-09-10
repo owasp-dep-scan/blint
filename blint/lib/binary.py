@@ -4,6 +4,7 @@ import codecs
 import contextlib
 import os
 import re
+import struct
 import sys
 import warnings
 import zlib
@@ -22,10 +23,21 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.banners import is_probable_banner_string
+from blint.lib.codesign_macho import SUPERBLOB_MAGIC, parse_superblob, signature_summary
+from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.disassembler import disassemble_functions
+from blint.lib.driver_ioctl import (
+    IOCTL_TABLE_SECTIONS,
+    classify_driver_strings,
+    collect_driver_ioctls,
+    is_kernel_driver,
+)
 from blint.lib.elf_abi import analyze_elf_abi
 from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
 from blint.lib.elf_linkmap import resolve_link_closure
+from blint.lib.entropy import analyze_binary_entropy
+from blint.lib.funcdisc.unwind import discover_functions, merge_discovered_functions
 from blint.lib.import_attribution import (
     UNATTRIBUTED_LIBRARY,
     analyze_link_hygiene,
@@ -34,16 +46,12 @@ from blint.lib.import_attribution import (
     is_library_name,
     symbol_lookup_names,
 )
-from blint.lib.driver_ioctl import (
-    IOCTL_TABLE_SECTIONS,
-    classify_driver_strings,
-    collect_driver_ioctls,
-    is_kernel_driver,
-)
-from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
-from blint.lib.stack_strings import recover_stack_strings
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.similarity import attach_function_hashes, compute_import_hash
+from blint.lib.stack_strings import analyze_stack_strings
+from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
+from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
     calculate_entropy,
     calculate_hashes,
@@ -311,7 +319,7 @@ def integer_to_hex_str(e: int) -> str:
     Returns:
         The hexadecimal string representation of the integer.
     """
-    return "{:02x}".format(e)
+    return f"{e:02x}"
 
 
 def parse_relro(parsed_obj: lief.ELF.Binary) -> str:
@@ -377,6 +385,281 @@ def parse_elf_wx_segments(parsed_obj: lief.ELF.Binary) -> list[dict]:
                     }
                 )
     return wx_segments
+
+
+# --------------------------------------------------------------------------
+# ELF layout coherence
+# --------------------------------------------------------------------------
+# An implant can be added to an ELF without changing a single original byte:
+# append the payload plus a fresh section header table at EOF, retype a spare
+# PT_NOTE program header into an executable PT_LOAD covering those bytes, and
+# point e_entry and e_shoff at them. Nothing is packed, nothing becomes
+# writable-and-executable, and readelf reports a self-consistent file, so
+# neither CHECK_WX_SEGMENTS nor the entropy work sees it. What the result
+# cannot hide is incoherence between the parts: the entry point lands in a
+# section the toolchain would never start execution in, the note section the
+# repurposed header used to cover is orphaned, and an executable mapping ends
+# exactly at end-of-file. The helpers below compute those three observations
+# as evidence; blint/lib/implant_reviews.py turns them into reviews.
+#
+# Reference: "Trusting-Trust Attack against an Entire Linux Distribution
+# through Binary Manipulation" (arXiv 2607.24888), which carries the implant
+# through GNU strip across the NixOS bootstrap.
+
+# SHF_EXECINSTR: the section holds machine instructions.
+SHF_EXECINSTR = 0x4
+
+# Sections a toolchain legitimately places an entry point in. Entry stubs live
+# in .text on every mainstream target; .init and the small startup-specific
+# text sections cover linker scripts, -ffunction-sections builds and the
+# hand-written entry stubs in libc and in freestanding images.
+ENTRY_POINT_SECTIONS: frozenset[str] = frozenset(
+    {
+        ".text",
+        ".text.startup",
+        ".text.unlikely",
+        ".text._start",
+        ".init",
+        ".init.text",
+        ".start",
+        ".startup",
+        ".head.text",
+        ".text.boot",
+        ".plt",
+        ".iplt",
+    }
+)
+
+
+def _elf_section_flags(section) -> int:
+    """Return a section's raw ``sh_flags``, or 0 when lief cannot supply it."""
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        return int(section.flags)
+    return 0
+
+
+def parse_elf_entry_point_section(parsed_obj: lief.ELF.Binary) -> str:
+    """Return the name of the section containing ``e_entry``.
+
+    PE metadata has carried ``entry_point_section`` for some time; this is the
+    ELF counterpart, and the raw material for the entry-point coherence
+    review. An empty string means the entry address falls in no section at
+    all — which is itself the strongest form of the anomaly, so callers must
+    distinguish "no section" from "not computed".
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        entrypoint = int(parsed_obj.header.entrypoint)
+        if not entrypoint:
+            return ""
+        for section in parsed_obj.sections:
+            start = int(section.virtual_address)
+            size = int(section.size)
+            if start and size and start <= entrypoint < start + size:
+                return section.name
+    return ""
+
+
+def parse_elf_segments_summary(parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Summarize every ELF program header, in program-header-table order.
+
+    ELF metadata previously recorded only ``numberof_segments``, which is
+    exactly the field an implant leaves untouched when it retypes a spare
+    header in place. Exporting the table itself makes the change visible to a
+    consumer diffing two builds of the same binary, and gives the layout
+    reviews their evidence.
+    """
+    summary: list[dict] = []
+    segments = getattr(parsed_obj, "segments", None)
+    if not segments or isinstance(segments, lief.lief_errors):
+        return summary
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for index, segment in enumerate(segments):
+            summary.append(
+                {
+                    "index": index,
+                    "type": enum_to_str(segment.type),
+                    "permissions": _rwx_permissions_str(
+                        segment.has(lief.ELF.Segment.FLAGS.R),
+                        segment.has(lief.ELF.Segment.FLAGS.W),
+                        segment.has(lief.ELF.Segment.FLAGS.X),
+                    ),
+                    "file_offset": int(segment.file_offset),
+                    "file_size": int(segment.physical_size),
+                    "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    "virtual_size": int(segment.virtual_size),
+                }
+            )
+    return summary
+
+
+def _elf_notes_without_note_segment(parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Allocated ``.note.*`` sections in a file that has no ``PT_NOTE`` at all.
+
+    The loader reaches notes through ``PT_NOTE``; the section headers are for
+    tools. Retyping the file's only ``PT_NOTE`` header into a ``PT_LOAD``
+    therefore costs the attacker nothing at run time while leaving the note
+    sections themselves in place, mapped, and unreachable as notes. A
+    toolchain does not produce that state: it emits the segment and the
+    sections together.
+
+    The condition is deliberately "no ``PT_NOTE`` whatsoever", not "this
+    section is uncovered". The Go linker legitimately emits a ``PT_NOTE``
+    spanning only ``.note.go.buildid`` and leaves the adjacent
+    ``.note.gnu.build-id`` outside it, so per-section coverage fires on every
+    Go binary. The cost of the narrower rule is that a file with two
+    ``PT_NOTE`` headers, one of them repurposed, is missed — worth paying,
+    since the alternative is a rule nobody can leave enabled.
+
+    Only ``SHF_ALLOC`` note sections count. Non-allocated notes are
+    legitimately outside the load image and were never covered by a segment.
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        if any(
+            segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments
+        ):
+            return []
+        return [
+            {
+                "section": section.name,
+                "file_offset": int(section.offset),
+                "size": int(section.size),
+            }
+            for section in parsed_obj.sections
+            if section.name.startswith(".note") and int(section.virtual_address)
+        ]
+    return []
+
+
+def parse_elf_layout_anomalies(exe_file: str, parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Collect structural contradictions in an ELF's layout.
+
+    Each entry names the contradiction in ``kind`` and carries the addresses
+    and names a reviewer needs to check it by hand. Emptiness is the normal
+    result; nothing here is a verdict on its own.
+    """
+    anomalies: list[dict] = []
+    header = getattr(parsed_obj, "header", None)
+    if header is None:
+        return anomalies
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        entrypoint = int(header.entrypoint)
+        # Relocatable objects and shared libraries without a start symbol
+        # carry no meaningful entry point; there is nothing to be incoherent.
+        if entrypoint and parsed_obj.header.file_type != lief.ELF.Header.FILE_TYPE.REL:
+            anomalies += _elf_entry_point_anomalies(parsed_obj, entrypoint)
+    for orphan in _elf_notes_without_note_segment(parsed_obj):
+        anomalies.append(
+            {
+                "kind": "note_section_without_note_segment",
+                **orphan,
+                "detail": (
+                    f"{orphan['section']} is part of the load image, but the file has no "
+                    "PT_NOTE segment at all. A toolchain emits note sections and the PT_NOTE "
+                    "that covers them together; sections outliving the segment is what "
+                    "retyping that program header into something else leaves behind."
+                ),
+            }
+        )
+    anomalies += _elf_eof_executable_mapping(exe_file, parsed_obj)
+    return anomalies
+
+
+def _elf_entry_point_anomalies(parsed_obj: lief.ELF.Binary, entrypoint: int) -> list[dict]:
+    """Entry-point coherence: where execution starts vs. where code lives."""
+    containing = None
+    for section in parsed_obj.sections:
+        start = int(section.virtual_address)
+        size = int(section.size)
+        if start and size and start <= entrypoint < start + size:
+            containing = section
+            break
+    address = ADDRESS_FMT.format(entrypoint).strip()
+    if containing is None:
+        return [
+            {
+                "kind": "entry_point_outside_any_section",
+                "entrypoint": address,
+                "detail": (
+                    f"Execution starts at {address}, which no section header covers. Every "
+                    "toolchain-produced entry point lies inside a section; an address outside "
+                    "the section table is reachable through the program headers alone, which "
+                    "is how code appended after the fact is mapped."
+                ),
+            }
+        ]
+    name = containing.name
+    if not _elf_section_flags(containing) & SHF_EXECINSTR:
+        return [
+            {
+                "kind": "entry_point_in_non_executable_section",
+                "entrypoint": address,
+                "section": name,
+                "detail": (
+                    f"Execution starts at {address}, inside section {name or '(unnamed)'}, "
+                    "which is not marked SHF_EXECINSTR. The section table says this is not "
+                    "code, and the entry point says it is; one of the two was edited."
+                ),
+            }
+        ]
+    if name not in ENTRY_POINT_SECTIONS:
+        return [
+            {
+                "kind": "entry_point_in_unexpected_section",
+                "entrypoint": address,
+                "section": name,
+                "detail": (
+                    f"Execution starts at {address}, inside executable section {name}, which "
+                    "is not one of the sections a toolchain starts a program in "
+                    f"({', '.join(sorted(ENTRY_POINT_SECTIONS))}). Custom linker scripts do "
+                    "reach this state legitimately, so read the section before concluding — "
+                    "but relocating the entry point into a section of its own is also exactly "
+                    "what an appended implant does."
+                ),
+            }
+        ]
+    return []
+
+
+def _elf_eof_executable_mapping(exe_file: str, parsed_obj: lief.ELF.Binary) -> list[dict]:
+    """Executable ``PT_LOAD`` segments whose file range ends at end-of-file.
+
+    A linker lays the executable segment out before the read-only data,
+    symbol table and section-header string table, so an executable mapping is
+    followed by *something*. One that runs to the last byte of the file is the
+    shape of code appended to a finished binary.
+
+    The section header table sitting last is normal and deliberately not
+    considered: the check is about the mapped, executable bytes.
+    """
+    findings: list[dict] = []
+    with contextlib.suppress(AttributeError, TypeError, ValueError, OSError):
+        file_size = os.path.getsize(exe_file)
+        if not file_size:
+            return findings
+        for index, segment in enumerate(parsed_obj.segments):
+            if segment.type != lief.ELF.Segment.TYPE.LOAD:
+                continue
+            if not segment.has(lief.ELF.Segment.FLAGS.X):
+                continue
+            end = int(segment.file_offset) + int(segment.physical_size)
+            if end != file_size:
+                continue
+            findings.append(
+                {
+                    "kind": "executable_mapping_at_eof",
+                    "segment": f"PT_LOAD[{index}]",
+                    "file_offset": int(segment.file_offset),
+                    "file_size": int(segment.physical_size),
+                    "virtual_address": ADDRESS_FMT.format(segment.virtual_address).strip(),
+                    "detail": (
+                        f"PT_LOAD[{index}] is executable and its file range ends at byte "
+                        f"{end}, the last byte of the file. A linker places read-only data "
+                        "and the symbol tables after the code, so an executable mapping that "
+                        "reaches end-of-file is code that arrived after the link."
+                    ),
+                }
+            )
+    return findings
 
 
 def parse_pe_wx_sections(parsed_obj: lief.PE.Binary) -> list[dict]:
@@ -1055,6 +1338,11 @@ def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
                         (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH))
                         or secret_type
                         or is_review_relevant_string(s)
+                        # Vendored-source version banners are short plain text
+                        # that both entropy and length gates reject; the
+                        # banner layer (P4.3) reads this list, so strings
+                        # matching its library-anchored signatures are kept.
+                        or is_probable_banner_string(s)
                     ):
                         strings_list.append(
                             {
@@ -1258,10 +1546,18 @@ def detect_exe_type(parsed_obj: lief.Binary, metadata: dict) -> str:
     with contextlib.suppress(AttributeError, TypeError):
         if parsed_obj.has_section(".note.go.buildid"):
             return "gobinary"
+        # A statically linked ELF has no interpreter, and `"musl" in None`
+        # raises TypeError — which the suppress() above swallowed, abandoning
+        # the whole function and returning "" before the machine-type fallback
+        # below could run. Every static ELF therefore had no exe_type at all,
+        # and since review rules are selected by exact exe_type match, no
+        # review rule of any group could ever fire on one. Coercing to "" here
+        # is the whole fix.
+        interpreter = metadata.get("interpreter") or ""
         if (
             parsed_obj.has_section(".note.gnu.build-id")
-            or "musl" in metadata.get("interpreter")  # type: ignore[operator]
-            or "ld-linux" in metadata.get("interpreter")  # type: ignore[operator]
+            or "musl" in interpreter
+            or "ld-linux" in interpreter
         ):
             return "genericbinary"
         if metadata.get("machine_type") and metadata.get("file_type"):
@@ -1728,6 +2024,19 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
     demangled = _batch_demangle_symbol_names(symbols)
     for symbol in symbols:
         try:
+            # A symbol the binary does not define is an import; this is the
+            # n_type-based category LIEF computes, the same signal the
+            # import-hash path reads. The field has to be recorded explicitly:
+            # analyze_import_deps gates on it, and a missing key read as False
+            # silently dropped every Mach-O import from the dependency graph
+            # while link hygiene went on to report every declared dylib as
+            # unused (the false CHECK_UNUSED_DEPENDENCIES on /usr/bin/git).
+            category = str(symbol.category or "")
+            is_imported = category.upper().endswith("UNDEFINED")
+            # Exports are what the export trie actually offers; EXTERNAL
+            # symbols without export info (e.g. __mh_execute_header in some
+            # link modes) stay non-exported here.
+            is_exported = bool(symbol.has_export_info)
             libname = ""
             if symbol.has_binding_info and symbol.binding_info.has_library:
                 libname = symbol.binding_info.library.name
@@ -1754,6 +2063,8 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
                         "num_sections": symbol.numberof_sections,
                         "description": symbol.description,
                         "address": symbol_value,
+                        "is_imported": is_imported,
+                        "is_exported": is_exported,
                         "export_info": {
                             "symbol": symbol_name,
                             "kind": symbol.export_info.kind,
@@ -1881,20 +2192,254 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     return "-".join(components)
 
 
-def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> dict:
-    """Constructs a summary of security mitigations."""
-    has_symtab = metadata.get("static", False)
+# C symbols whose import (or, for statically linked images, definition) proves
+# the stack-protector was in play. Both the ELF (two leading underscores) and
+# Mach-O (three) spellings are covered so one set serves both formats.
+STACK_CHK_SYMBOLS = {
+    "__stack_chk_fail",
+    "__stack_chk_guard",
+    "___stack_chk_fail",
+    "___stack_chk_guard",
+}
+
+
+def _macho_symtab_has_names(symtab_symbols: list[dict] | None) -> bool:
+    """True when a Mach-O symtab carries defined, named symbols worth reading.
+
+    ``strip`` on a Mach-O executable keeps the symbol table itself — undefined
+    imports stay because dyld needs them — but removes every defined local or
+    external name. Runtime markers that survive a strip (``__mh_execute_header``,
+    the ``radr://`` linker notes) are not name evidence. So "has names" is the
+    honest signal for whether symbol-based analysis can see anything, and the
+    inverse is what ``security_properties.stripped`` reports.
+    """
+    for symbol in symtab_symbols or []:
+        if not isinstance(symbol, dict):
+            continue
+        if str(symbol.get("category", "")).upper().endswith("UNDEFINED"):
+            continue
+        name = symbol.get("short_name") or symbol.get("name") or ""
+        if not isinstance(name, str):
+            continue
+        name = name.strip()
+        if not name or name == "__mh_execute_header" or name.startswith("radr://"):
+            continue
+        return True
+    return False
+
+
+def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
+    """True when the Mach-O symtab references the stack-protector runtime."""
+    for symbol in symtab_symbols or []:
+        if not isinstance(symbol, dict):
+            continue
+        name = symbol.get("short_name") or symbol.get("name") or ""
+        if isinstance(name, str) and name.strip() in STACK_CHK_SYMBOLS:
+            return True
+    return False
+
+
+def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
+    """True when the slice carries an embedded code-signature blob.
+
+    Presence of the blob is the file-level fact; who signed it and with what
+    entitlements is the SuperBlob parser's job and is deliberately not
+    attempted here.
+    """
+    try:
+        if parsed_obj.has_code_signature and parsed_obj.code_signature.size > 0:
+            return True
+        if parsed_obj.has_code_signature_dir and parsed_obj.code_signature_dir.size > 0:
+            return True
+    except (AttributeError, TypeError):
+        return False
+    return False
+
+
+def _primary_code_directory(code_signature: dict | None) -> dict | None:
+    """The primary (slot-0) CodeDirectory of a parsed code_signature block."""
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return None
+    directories = (code_signature.get("superblob") or {}).get("code_directories") or []
+    for directory in directories:
+        if directory.get("slot_type") == "code_directory":
+            return directory
+    return directories[0] if directories else None
+
+
+def _codesign_security_flags(flags: dict | None) -> dict:
+    """The hardening-relevant CodeDirectory flags as security_properties keys.
+
+    Computed only from a parsed CodeDirectory; an absent or unparseable
+    signature yields {} so the keys stay out of security_properties instead
+    of reporting confident negatives for an unknown (rule 14).
+    """
+    if not isinstance(flags, dict):
+        return {}
+    return {
+        "hardened_runtime": bool(flags.get("runtime")),
+        "library_validation": bool(flags.get("library_validation")),
+        "get_task_allow": bool(flags.get("get_task_allow")),
+    }
+
+
+def _macho_has_pac(parsed_obj: lief.MachO.Binary) -> bool:
+    """True when the slice is built for arm64e-style pointer authentication."""
+    try:
+        return bool(parsed_obj.support_arm64_ptr_auth)
+    except (AttributeError, TypeError):
+        return False
+
+
+def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
+    """Security properties for Mach-O, computed rather than defaulted.
+
+    Every property lands in one of three buckets: computed from the file
+    (reported whatever the value), not applicable to the format (omitted —
+    reporting ``relro: "no"`` for a format without RELRO reads as a finding
+    when it is only a vocabulary mismatch), or not implemented yet (omitted,
+    with the gap recorded in ``analysis_coverage``).
+
+    - computed: ``nx``, ``w_xor_x``, ``pie``, ``canary`` (stack-protector
+      symbols in the symtab), ``stripped`` (defined, named symbols in the
+      symtab — see :func:`_macho_symtab_has_names`), ``is_signed`` (embedded
+      signature blob, presence-only), ``pac`` when the slice is arm64e, and —
+      when the SuperBlob parsed — ``hardened_runtime``,
+      ``library_validation`` and ``get_task_allow`` from the primary
+      CodeDirectory flags. These three are reported as explicit booleans
+      whenever the signature parsed, because for hardening properties the
+      ``False`` is the finding; when the signature did not parse they are
+      omitted rather than guessed.
+    - not applicable: ``relro``.
+    - not implemented: granular ``has_nx_stack``/``has_nx_heap``.
+    """
     properties = {
         "nx": metadata.get("has_nx", False),
-        # True when no loadable segment maps the same pages writable and
-        # executable, which trivially holds for formats without segments.
+        # True when no segment maps the same pages writable and executable.
         "w_xor_x": not metadata.get("wx_segments"),
         "pie": metadata.get("is_pie", False),
-        "relro": metadata.get("relro", "no"),
         "canary": metadata.get("has_canary", False),
-        "stripped": not has_symtab,
-        "is_signed": bool(metadata.get("signatures")),
+        "stripped": not _macho_symtab_has_names(metadata.get("symtab_symbols")),
+        "is_signed": _macho_is_signed(parsed_obj),
     }
+    if _macho_has_pac(parsed_obj):
+        properties["pac"] = True
+    if code_directory := _primary_code_directory(metadata.get("code_signature")):
+        properties.update(_codesign_security_flags(code_directory.get("flags")))
+    # Bucket (c) bookkeeping: properties a Mach-O could carry but blint does
+    # not compute yet. Stating them keeps "absent from security_properties"
+    # from being read as "checked and clean", and analysis_coverage echoes it.
+    gaps = ["has_nx_stack", "has_nx_heap"]
+    code_signature = metadata.get("code_signature")
+    if (
+        isinstance(code_signature, dict)
+        and code_signature.get("available")
+        and code_signature.get("parse_status") == "parse_failed"
+    ):
+        # The blob is there and blint could not read it: the signature detail
+        # is a declared blind spot, never a thin "no entitlements" answer.
+        gaps.append("code_signature_detail")
+    metadata["security_properties_gaps"] = gaps
+    return properties
+
+
+def _record_slice_variance(metadata: dict, properties: dict) -> None:
+    """Name the properties whose value is not the same in every slice.
+
+    The top-level ``security_properties`` block describes the primary slice —
+    which keeps existing consumers correct, but leaves a fat binary's
+    at-a-glance summary silently speaking for one architecture. /usr/bin/git
+    is the case in point: PAC lives on its arm64e slice, so the top level
+    carries no ``pac`` key and reads exactly like a binary that was checked
+    and found to lack it. That was the original P1.2 harm, and analyzing the
+    other slices does not fix it for anyone reading the summary.
+
+    So the summary says so in band: ``security_properties_scope`` marks the
+    answer as the primary slice's, and ``security_properties_slice_variance``
+    names every property the slices disagree about. Nothing is merged — a
+    merge would have to choose between an optimistic and a pessimistic lie —
+    and the per-slice truth stays in ``slices``.
+    """
+    slices = metadata.get("slices") or []
+    if not metadata.get("is_universal") or len(slices) < 2:
+        return
+    metadata["security_properties_scope"] = "primary_slice"
+    # A property missing from one slice's set (pac, which is only reported
+    # when true) is itself a disagreement, so compare over the union of keys.
+    per_slice = [entry.get("security_properties") or {} for entry in slices]
+    names = {name for entry in per_slice for name in entry}
+    variance = sorted(
+        name for name in names if len({entry.get(name) for entry in per_slice}) > 1
+    )
+    if variance:
+        metadata["security_properties_slice_variance"] = variance
+        LOG.debug(
+            f"Universal binary slices disagree on {', '.join(variance)}; "
+            f"security_properties describes the primary slice only"
+        )
+
+
+CODE_SIGNATURE_VARIANCE_ASPECTS = (
+    "parse_status",
+    "provenance",
+    "identifier",
+    "team_id",
+    "cdhash",
+    "hash_type",
+    "flags",
+    "entitlements",
+    "entitlements_der",
+)
+
+
+def _record_code_signature_variance(metadata: dict) -> None:
+    """Declare the scope of the top-level ``code_signature`` block.
+
+    Signatures are per slice: every slice of a universal binary carries its
+    own CodeDirectory, its own cdhash (they differ by construction — the
+    directory hashes slice-specific code), and can carry different
+    entitlements. The top-level block describes the primary slice, so for a
+    fat binary it must say so (``code_signature_scope``) and name what the
+    slices disagree about (``code_signature_slice_variance``) rather than
+    presenting one slice's cdhash and entitlements as the binary's. Nothing
+    is merged; per-slice truth stays in ``slices[][code_signature]``.
+    """
+    slices = metadata.get("slices") or []
+    if not metadata.get("is_universal") or len(slices) < 2:
+        return
+    metadata["code_signature_scope"] = "primary_slice"
+    variance = []
+    for aspect in CODE_SIGNATURE_VARIANCE_ASPECTS:
+        values = [
+            (entry.get("code_signature") or {}).get(aspect) for entry in slices
+        ]
+        first = values[0]
+        if any(value != first for value in values[1:]):
+            variance.append(aspect)
+    if variance:
+        metadata["code_signature_slice_variance"] = variance
+        LOG.debug(
+            f"Universal binary slices disagree on code signature "
+            f"{', '.join(variance)}; code_signature describes the primary slice only"
+        )
+
+
+def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> dict:
+    """Constructs a summary of security mitigations."""
+    if isinstance(parsed_obj, lief.MachO.Binary):
+        properties = _macho_security_properties(metadata, parsed_obj)
+    else:
+        properties = {
+            "nx": metadata.get("has_nx", False),
+            # True when no loadable segment maps the same pages writable and
+            # executable, which trivially holds for formats without segments.
+            "w_xor_x": not metadata.get("wx_segments"),
+            "pie": metadata.get("is_pie", False),
+            "relro": metadata.get("relro", "no"),
+            "canary": metadata.get("has_canary", False),
+            "stripped": not metadata.get("static", False),
+            "is_signed": bool(metadata.get("signatures")),
+        }
     if isinstance(parsed_obj, lief.PE.Binary):
         if dll_chars := metadata.get("dll_characteristics", ""):
             properties["aslr"] = "DYNAMIC_BASE" in dll_chars
@@ -1987,6 +2532,8 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     """
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
     metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
+    _record_slice_variance(metadata, metadata["security_properties"])
+    _record_code_signature_variance(metadata)
     metadata["binary_composition"] = construct_binary_composition(metadata, parsed_obj)
     build_info = {}
     if go_formulation := metadata.get("go_formulation"):
@@ -2291,8 +2838,7 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
 
             def _score_candidates(id_list, score):
                 for cid in id_list or []:
-                    if score > candidate_scores[cid]:
-                        candidate_scores[cid] = score
+                    candidate_scores[cid] = max(candidate_scores[cid], score)
 
             numeric_candidates = []
             if target_addr:
@@ -2542,6 +3088,7 @@ def parse(
     disassemble: bool = False,
     wasm_strings: bool = True,
     wasm_call_graph: bool = True,
+    sdk_path: str | None = None,
 ) -> dict:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """
     Parse the executable using lief and capture the metadata
@@ -2550,6 +3097,10 @@ def parse(
     :param: disassemble Whether to disassemble functions (native formats only)
     :param: wasm_strings Whether to extract strings from wasm files
     :param: wasm_call_graph Whether to build the wasm_tools call graph for wasm files
+    :param: sdk_path Optional Apple SDK root whose .tbd stubs are used to
+        attribute and confirm Mach-O imports. Opt-in: reads an environment
+        the user names, so it defaults to off and is recorded in metadata
+        under the distinct `sdk_tbd` attribution source when given.
     :return Metadata dict
     """
     metadata: dict = {"file_path": exe_file}
@@ -2571,6 +3122,10 @@ def parse(
         elif lief.is_pe(exe_file):
             parser_config = lief.PE.ParserConfig.all
             parsed_obj = lief.PE.parse(exe_file, parser_config)
+        elif lief.is_macho(exe_file):
+            # lief.parse auto-selects one slice of a universal binary; go
+            # through the FatBinary so every slice is seen (P1.2).
+            parsed_obj = _parse_macho(exe_file, metadata)
         else:
             parsed_obj = lief.parse(exe_file)
         if not parsed_obj:
@@ -2587,7 +3142,16 @@ def parse(
             if objc_metadata := parse_objc_metadata(parsed_obj):
                 metadata["objc_metadata"] = objc_metadata
                 metadata = merge_macho_objc_functions(metadata)
+        # Stripped binaries still carry runtime-mandated function tables
+        # (compact unwind, eh_frame); recover the function starts they list so
+        # disassembly and reviews are not blind on exactly these inputs.
+        if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
+            metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
+        # SDK-assisted attribution has to precede the dependency graph: it
+        # fills the provider evidence the graph and link hygiene read.
+        if sdk_path and isinstance(parsed_obj, lief.MachO.Binary):
+            enrich_macho_sdk_attribution(metadata, sdk_path)
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
         # for those formats.
@@ -2600,8 +3164,50 @@ def parse(
         # came from, so this has to follow the attribution pass.
         if link_hygiene := analyze_link_hygiene(metadata, metadata["import_dependencies"]):
             metadata["link_hygiene"] = link_hygiene
+        # The full SDK attribution map was for the passes above only; exported
+        # and cached metadata carry the capped sample under `sdk_tbd`.
+        metadata.pop(SDK_ATTRIBUTIONS_KEY, None)
         metadata["llvm_target_tuple"] = construct_llvm_target_tuple(metadata)
         metadata = add_derived_attributes(metadata, parsed_obj)
+        # Section entropy and packing evidence are properties of the section
+        # bytes, so they are collected for every native binary regardless of
+        # whether disassembly is requested.
+        if isinstance(parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)):
+            _file_size = None
+            with contextlib.suppress(OSError):
+                _file_size = os.path.getsize(exe_file)
+            metadata["entropy"] = analyze_binary_entropy(parsed_obj, _file_size)
+            if packing := metadata["entropy"].get("packing"):
+                metadata["security_properties"]["packed"] = packing.get("packed_likelihood") in (
+                    "high",
+                    "medium",
+                )
+        # Cross-version stable identifiers: import hash for every format and,
+        # once disassembly ran, per-function fuzzy/CFG hashes. ELF carries its
+        # imports as imported dynamic symbols, Mach-O as undefined symtab
+        # entries whose names are prefixed `dylib::symbol`, and PE as the
+        # imports list.
+        import_names = [
+            entry.get("name")
+            for entry in metadata.get("imports", [])
+            if isinstance(entry, dict) and entry.get("name")
+        ]
+        if not import_names:
+            import_names = [
+                entry.get("name")
+                for entry in metadata.get("dynamic_symbols", [])
+                if isinstance(entry, dict) and entry.get("name") and entry.get("is_imported")
+            ]
+        if not import_names and metadata.get("binary_type") == "MachO":
+            import_names = []
+            for entry in metadata.get("symtab_symbols", []):
+                if not isinstance(entry, dict) or not entry.get("name"):
+                    continue
+                # Undefined symbols are the imports; blint records their
+                # LIEF category, whose string form ends in "UNDEFINED".
+                if str(entry.get("category", "")).upper().endswith("UNDEFINED"):
+                    import_names.append(entry["name"])
+        metadata["import_hash"] = compute_import_hash(import_names)
         if disassemble and metadata.get("is_encrypted"):
             # FairPlay-encrypted App Store binaries have an encrypted __TEXT
             # segment; disassembling it would yield meaningless instructions.
@@ -2615,12 +3221,17 @@ def parse(
             parsed_obj, (lief.ELF.Binary, lief.PE.Binary, lief.MachO.Binary)
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
+            attach_function_hashes(metadata.get("disassembled_functions"))
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             # String literals a binary assembles on its stack are invisible to
             # section scanning, so this is the only channel that sees the device
             # paths, registry keys and module names an obfuscated image hides.
-            if stack_strings := recover_stack_strings(metadata["disassembled_functions"]):
+            stack_strings, stack_strings_coverage = analyze_stack_strings(
+                metadata["disassembled_functions"], metadata.get("llvm_target_tuple", "")
+            )
+            metadata["stack_strings_coverage"] = stack_strings_coverage
+            if stack_strings:
                 metadata["stack_strings"] = stack_strings
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
@@ -2645,7 +3256,101 @@ def parse(
                 metadata["crypto_material"] = crypto_material
     except (AttributeError, TypeError, ValueError) as e:
         LOG.exception(f"Caught {type(e)}: {e} while parsing {exe_file}.")
+    # The in-parse pop above is on the success path only, and everything from
+    # the dependency graph onward runs under the guard: a ValueError there
+    # left the private full-attribution map in the metadata that gets exported
+    # and cached, which is exactly what that key must never reach. Popping
+    # again here covers the exception path.
+    metadata.pop(SDK_ATTRIBUTIONS_KEY, None)
+    # Toolchain provenance and coverage accounting run outside the guarded
+    # block: they must summarize the run even when a parse step above failed,
+    # and both are plain-metadata transforms that cannot raise.
+    metadata["toolchain"] = infer_toolchain(metadata)
+    metadata["analysis_coverage"] = _build_analysis_coverage(metadata, disassemble)
     return cleanup_dict_lief_errors(metadata)
+
+
+def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
+    """Account for what was analyzed versus what was discovered.
+
+    A run that disassembled 3 of 400 functions must never be
+    indistinguishable from a clean run of 400: automated consumers need the
+    blind spots, not just the findings.
+    """
+    functions = metadata.get("functions") or []
+    discovered = metadata.get("discovered_functions") or []
+    disassembled = metadata.get("disassembled_functions") or {}
+    symbolic_count = 0
+    discovered_merged = 0
+    for func_entry in functions:
+        if not isinstance(func_entry, dict):
+            continue
+        if func_entry.get("discovered"):
+            discovered_merged += 1
+        else:
+            symbolic_count += 1
+    degradations = []
+    if metadata.get("disassembly_skipped"):
+        degradations.append(metadata["disassembly_skipped"])
+    if disassemble and not disassembled and not metadata.get("disassembly_skipped"):
+        degradations.append("disassembly_unavailable")
+    if metadata.get("is_encrypted"):
+        degradations.append("fairplay_encrypted")
+    if (metadata.get("link_hygiene") or {}).get("attribution_status") == "unresolved":
+        # Imports exist but none could be pinned to a library, so the
+        # unused/undeclared dependency checks were skipped rather than clean.
+        degradations.append("dependency_attribution_unresolved")
+    coverage = {
+        "functions": {
+            "symbolic": symbolic_count,
+            "discovered": len(discovered),
+            "discovered_merged_into_function_list": discovered_merged,
+            "disassembled": len(disassembled),
+        },
+        "degradations": sorted(degradations),
+    }
+    if entropy := metadata.get("entropy"):
+        sections_analyzed = len(entropy.get("sections") or [])
+        coverage["sections_analyzed"] = sections_analyzed
+    # Mach-O properties blint does not compute yet (stamped by
+    # _macho_security_properties); mirrored here so a consumer of the coverage
+    # block alone still sees the blind spots.
+    if gaps := metadata.get("security_properties_gaps"):
+        coverage["security_properties_gaps"] = list(gaps)
+    # Same reason: a consumer reading only the coverage block must be able to
+    # tell that the top-level security summary speaks for one slice and which
+    # properties the other slices disagree about.
+    if variance := metadata.get("security_properties_slice_variance"):
+        coverage["security_properties_slice_variance"] = list(variance)
+    # Same rule-21 reason for code_signature: the top-level block speaks for
+    # the primary slice, and a consumer must be able to see that plus which
+    # signature aspects the other slices disagree about.
+    if scope := metadata.get("code_signature_scope"):
+        coverage["code_signature_scope"] = scope
+    if variance := metadata.get("code_signature_slice_variance"):
+        coverage["code_signature_slice_variance"] = list(variance)
+    # A signature blob blint could not parse is a blind spot like any other:
+    # declared in the gaps (stamped by _macho_security_properties), and here
+    # as a degradation so a thin result can never read as "no entitlements".
+    if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
+        degradations.append("code_signature_parse_failed")
+        coverage["degradations"] = sorted(degradations)
+    # Per-slice accounting for universal binaries (P1.2). A slice whose
+    # summary failed is a unit like any other: isolated, counted, and named —
+    # never silently dropped and never fatal for the file.
+    slice_summaries = metadata.get("slices") or []
+    slice_errors = metadata.pop("slice_errors", [])
+    if metadata.get("is_universal"):
+        coverage["slices"] = {
+            "total": len(slice_summaries) + len(slice_errors),
+            "summarized": len(slice_summaries),
+            "failed": len(slice_errors),
+        }
+        if slice_errors:
+            coverage["slices"]["errors"] = slice_errors
+            degradations.append("slice_summary_failed")
+            coverage["degradations"] = sorted(degradations)
+    return coverage
 
 
 def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary) -> dict:
@@ -2677,6 +3382,12 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["virtual_size"] = parsed_obj.virtual_size
     metadata["has_nx"] = parsed_obj.has_nx
     metadata["wx_segments"] = parse_elf_wx_segments(parsed_obj)
+    # Layout coherence: the raw program-header table, where execution starts,
+    # and the contradictions between them. Additive, and computed for every
+    # ELF because they cost one pass over headers that are already parsed.
+    metadata["entry_point_section"] = parse_elf_entry_point_section(parsed_obj)
+    metadata["segments_summary"] = parse_elf_segments_summary(parsed_obj)
+    metadata["layout_anomalies"] = parse_elf_layout_anomalies(exe_file, parsed_obj)
     metadata["has_interpreter"] = parsed_obj.has_interpreter
     metadata["has_notes"] = parsed_obj.has_notes
     metadata["has_overlay"] = parsed_obj.has_overlay
@@ -3057,7 +3768,7 @@ def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list[dict]:
             "version": version,
             "purl": f"pkg:cargo/{name}@{version}" if version else f"pkg:cargo/{name}",
         }
-        for name, version in detected_deps.keys()
+        for name, version in detected_deps
     ]
 
 
@@ -3677,6 +4388,191 @@ def add_rdata_symbols(metadata: dict, rdata_section, text_section, sections) -> 
     return metadata
 
 
+# Mach-O CPU subtype of arm64e (the low 24 bits; the high bits carry the
+# ABI64 flag). The distinction matters because only arm64e slices get
+# pointer authentication, so an aggregate "PAC: no" over a fat binary that
+# contains an arm64e slice would be a confident wrong answer.
+CPU_SUBTYPE_ARM64E = 0x2
+CPU_SUBTYPE_FLAG_MASK = 0x00FFFFFF
+
+
+def _macho_arch_name(cpu_type: str, cpu_subtype: int) -> str:
+    """Human-readable slice architecture; arm64 vs arm64e must stay distinct."""
+    base = (cpu_type or "unknown").lower()
+    if base == "arm64":
+        subtype = int(cpu_subtype or 0) & CPU_SUBTYPE_FLAG_MASK
+        return "arm64e" if subtype == CPU_SUBTYPE_ARM64E else "arm64"
+    return base
+
+
+def _macho_symbol_signals(parsed_slice: lief.MachO.Binary) -> dict:
+    """Single pass over a slice's symtab for the symbol-derived signals.
+
+    Mirrors the metadata-dict helpers used for the primary slice
+    (:func:`_macho_symtab_has_names`, :func:`_macho_symtab_has_canary`) but
+    reads LIEF objects directly so non-primary slices need no metadata dict.
+    The primary-slice cross-check test pins the two against each other.
+    """
+    total = 0
+    imports = 0
+    canary = False
+    has_defined_names = False
+    with contextlib.suppress(AttributeError, TypeError):
+        for symbol in parsed_slice.symbols:
+            total += 1
+            name = symbol.name
+            if not isinstance(name, str):
+                name = ""
+            if name.strip() in STACK_CHK_SYMBOLS:
+                canary = True
+            if str(symbol.category).upper().endswith("UNDEFINED"):
+                imports += 1
+            elif name and name != "__mh_execute_header" and not name.startswith("radr://"):
+                has_defined_names = True
+    return {
+        "total": total,
+        "imports": imports,
+        "canary": canary,
+        "has_defined_names": has_defined_names,
+    }
+
+
+def _macho_count(entries) -> int:
+    """Length of a LIEF object list that may be a lief_errors sentinel."""
+    if not entries or isinstance(entries, lief.lief_errors):
+        return 0
+    with contextlib.suppress(TypeError):
+        return len(list(entries))
+    return 0
+
+
+def _macho_slice_summary(
+    exe_file: str, parsed_slice: lief.MachO.Binary, index: int, is_primary: bool
+) -> dict:
+    """Lean identity and hardening summary for one slice of a universal binary.
+
+    The full metadata (functions, libraries, versions, strings) stays on the
+    primary slice's top-level keys; each slice entry carries only what can
+    genuinely differ between slices and therefore must never be merged across
+    them: identity, the security properties, per-slice encryption state,
+    counters that evidence the slice was really parsed, and the slice's own
+    parsed code signature (``code_signature`` — every slice has its own
+    CodeDirectory, cdhash and entitlements). Keeping the entries lean also
+    keeps cache entries (which inherit metadata size) small.
+    """
+    header = parsed_slice.header
+    cpu_type = enum_to_str(header.cpu_type)
+    signals = _macho_symbol_signals(parsed_slice)
+    summary = {
+        "index": index,
+        "cpu_type": cpu_type,
+        "cpu_subtype": header.cpu_subtype,
+        "arch": _macho_arch_name(cpu_type, header.cpu_subtype),
+        "is_primary": is_primary,
+        "security_properties": {
+            "nx": bool(parsed_slice.has_nx),
+            "w_xor_x": not parse_mach0_wx_segments(parsed_slice),
+            "pie": bool(parsed_slice.is_pie),
+            "canary": signals["canary"],
+            "stripped": not signals["has_defined_names"],
+            "is_signed": _macho_is_signed(parsed_slice),
+        },
+        "functions": _macho_count(parsed_slice.functions),
+        "symbols": signals["total"],
+        "imports": signals["imports"],
+    }
+    if _macho_has_pac(parsed_slice):
+        summary["security_properties"]["pac"] = True
+    slice_signature = _macho_slice_signature(exe_file, parsed_slice)
+    summary["code_signature"] = slice_signature
+    if slice_signature.get("parse_status") == "parsed":
+        summary["security_properties"].update(
+            _codesign_security_flags(slice_signature.get("flags"))
+        )
+    with contextlib.suppress(AttributeError, TypeError):
+        encryption = parsed_slice.encryption_info
+        if encryption is not None and not isinstance(encryption, lief.lief_errors):
+            summary["is_encrypted"] = bool(getattr(encryption, "crypt_id", 0))
+    return summary
+
+
+def _macho_slice_signature(exe_file: str, parsed_slice: lief.MachO.Binary) -> dict:
+    """Per-slice code-signature summary; never a merged cross-slice answer."""
+    try:
+        if not _macho_is_signed(parsed_slice):
+            return {"available": False, "parse_status": "absent"}
+        code_signature = None
+        if parsed_slice.has_code_signature:
+            code_signature = parsed_slice.code_signature
+        elif parsed_slice.has_code_signature_dir:
+            code_signature = parsed_slice.code_signature_dir
+        if code_signature is None:
+            return {"available": False, "parse_status": "absent"}
+        blob, _blob_source = _macho_signature_blob(exe_file, parsed_slice, code_signature)
+        if not blob:
+            return {"available": True, "parse_status": "parse_failed", "parse_error": "blob_unreadable"}
+        return signature_summary(parse_superblob(blob))
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Slice signature parse failed for {exe_file}: {type(e).__name__}: {e}")
+        return {"available": True, "parse_status": "parse_failed", "parse_error": type(e).__name__}
+
+
+def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
+    """Parse a Mach-O file, summarizing every slice of a universal binary.
+
+    ``lief.parse`` auto-selects a single slice of a fat binary, so a universal
+    input was analyzed as whichever slice came first — on an arm64e system
+    binary that meant PAC was reported absent because the slice carrying it
+    was never looked at. This uses ``lief.MachO.parse`` and returns the
+    FatBinary's first slice as the primary: the existing top-level keys keep
+    describing that slice exactly as before (additive rule — consumers read
+    them today), while every slice gets a per-slice summary under ``slices``.
+    Slice selection is by fat index, which is deterministic.
+
+    A slice whose summary fails is recorded for ``analysis_coverage`` and the
+    remaining slices are still summarized; the file is not aborted.
+    """
+    fat = lief.MachO.parse(exe_file)
+    if not fat or isinstance(fat, lief.lief_errors):
+        # Same failure behavior as before: parse() returns early with just
+        # the file path and the run-level coverage records the unit.
+        return lief.parse(exe_file)
+    primary = fat.at(0)
+    if not primary or isinstance(primary, lief.lief_errors):
+        return None
+    if len(fat) <= 1:
+        return primary
+    metadata["is_universal"] = True
+    slice_summaries: list[dict] = []
+    slice_errors: list[dict] = []
+    for index in range(len(fat)):
+        slice_obj = fat.at(index)
+        if not slice_obj or isinstance(slice_obj, lief.lief_errors):
+            slice_errors.append(
+                {"index": index, "exception_type": "LiefParseError", "message": "slice not parseable"}
+            )
+            continue
+        try:
+            slice_summaries.append(
+                _macho_slice_summary(exe_file, slice_obj, index, slice_obj is primary)
+            )
+        except Exception as e:  # noqa: BLE001 - one slice must not abort the file
+            LOG.error(
+                f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}"
+            )
+            slice_errors.append(
+                {
+                    "index": index,
+                    "exception_type": type(e).__name__,
+                    "message": str(e),
+                }
+            )
+    metadata["slices"] = slice_summaries
+    if slice_errors:
+        metadata["slice_errors"] = slice_errors
+    return primary
+
+
 def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Adds MachO metadata to the given metadata dictionary.
 
@@ -3887,6 +4783,22 @@ def _parse_address(value) -> int | None:
     return None
 
 
+def discover_and_merge_functions(metadata: dict, parsed_obj) -> dict:
+    """Thin wire-up for unwind-table function discovery (funcdisc.unwind).
+
+    Recovery of stripped-binary function starts lives in a dedicated module;
+    this only applies its merge contract: ``discovered_functions`` records the
+    findings additively and ``functions`` gains ``sub_<address>`` entries only
+    for addresses no symbol bucket already claims.
+    """
+    try:
+        discovered = discover_functions(parsed_obj)
+    except (AttributeError, TypeError, ValueError) as e:
+        LOG.debug(f"Function discovery failed for {metadata.get('name')}: {type(e).__name__}: {e}")
+        return metadata
+    return merge_discovered_functions(metadata, discovered)
+
+
 def merge_macho_function_starts(
     functions: list[dict], symtab_symbols: list[dict], parsed_obj: lief.MachO.Binary
 ) -> list[dict]:
@@ -4002,6 +4914,10 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["unwind_functions"] = parse_functions(parsed_obj.unwind_functions)
     metadata["symtab_symbols"], exe_type = parse_macho_symbols(parsed_obj.symbols)
+    # Stack-protector evidence lives in the symtab, same as ELF's has_canary;
+    # construct_security_properties reads it instead of defaulting Mach-O to
+    # "no canary" (which is what the missing key used to collapse into).
+    metadata["has_canary"] = _macho_symtab_has_canary(metadata["symtab_symbols"])
 
     # Populate function info based on local symbols for .o files or others where parsed_obj.functions is empty.
     if not metadata["functions"]:
@@ -4030,8 +4946,136 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     return metadata
 
 
+LC_CODE_SIGNATURE_CMD = 0x1D
+
+
+def _macho_signature_data_offset(code_signature) -> int | None:
+    """The ``dataoff`` of ``LC_CODE_SIGNATURE`` — an offset *within the slice*.
+
+    LIEF exposes it as ``data_offset``. When that is unavailable the value is
+    recovered from the 16 bytes the ``data`` property returns, which are the
+    load command itself ``(cmd, cmdsize, dataoff, datasize)``, trying both
+    byte orders.
+
+    For a slice of a universal binary this is not a file offset: the fat
+    header places the slice at ``fat_offset``, so the blob lives at
+    ``fat_offset + dataoff``. Use :func:`_macho_signature_file_offset` for
+    anything that seeks.
+    """
+    offset = getattr(code_signature, "data_offset", None)
+    if isinstance(offset, int) and offset > 0:
+        return offset
+    data = getattr(code_signature, "data", None)
+    if not data or len(data) < 16:
+        return None
+    raw = bytes(data)
+    for fmt in ("<IIII", ">IIII"):
+        cmd, _cmdsize, dataoff, _datasize = struct.unpack(fmt, raw[:16])
+        if cmd == LC_CODE_SIGNATURE_CMD and 0 < dataoff < 1 << 32:
+            return dataoff
+    return None
+
+
+def _macho_signature_file_offset(parsed_obj, code_signature) -> int | None:
+    """Absolute file offset of the SuperBlob, fat header accounted for.
+
+    ``dataoff`` is slice-relative, so for a universal binary every slice but
+    a hypothetical one at offset zero would seek into the wrong bytes without
+    adding ``fat_offset``. A thin binary reports ``fat_offset`` 0 and the two
+    agree.
+    """
+    offset = _macho_signature_data_offset(code_signature)
+    if offset is None:
+        return None
+    fat_offset = getattr(parsed_obj, "fat_offset", 0)
+    return offset + (fat_offset if isinstance(fat_offset, int) and fat_offset > 0 else 0)
+
+
+def _macho_signature_blob(exe_file: str, parsed_obj, code_signature) -> tuple[bytes | None, str]:
+    """The raw SuperBlob bytes, and where they came from.
+
+    Primary source is LIEF's ``content`` (it reads the range the load command
+    names, relative to the right slice). When that is empty, the file range is
+    read directly at :func:`_macho_signature_file_offset`, and the read is
+    only accepted if the bytes actually start with the SuperBlob magic — a
+    wrong offset must fail loudly rather than hand the parser garbage.
+    """
+    content = getattr(code_signature, "content", None)
+    if content:
+        blob = bytes(content)
+        if blob:
+            return blob, "lief_content"
+    data_size = getattr(code_signature, "data_size", 0) or 0
+    offset = _macho_signature_file_offset(parsed_obj, code_signature)
+    if not data_size or offset is None:
+        return None, "unavailable"
+    try:
+        with open(exe_file, "rb") as handle:
+            handle.seek(offset)
+            blob = handle.read(data_size)
+    except OSError:
+        return None, "unreadable"
+    if len(blob) != data_size:
+        return None, "short_read"
+    if struct.unpack_from(">I", blob, 0)[0] != SUPERBLOB_MAGIC:
+        return None, "wrong_offset"
+    return blob, "file_range"
+
+
+def _macho_code_signature_block(exe_file: str, parsed_obj, code_signature) -> dict:
+    """The metadata ``code_signature`` block for one slice.
+
+    ``parse_status`` is the honest tristate: ``"absent"``, ``"parsed"``, or
+    ``"parse_failed"`` — a present-but-unreadable blob is never folded into a
+    confident "unsigned" or an empty entitlements answer. ``data_offset`` is
+    the load command's slice-relative ``dataoff``, ``file_offset`` the
+    absolute position of the blob (they differ for a slice of a universal
+    binary), and ``blob_source`` says which read path produced the bytes. The legacy ``size``/``data_size`` keys keep their
+    original string values (load-command size and blob size respectively).
+
+    Removed key, an explicit rule-15 exception: ``data`` used to hold the
+    hex of those same 16 load-command bytes under a name claiming signature
+    content — it has never held signature data. Its entire information
+    content (cmd, cmdsize, dataoff, datasize) is preserved by ``size``,
+    ``data_offset`` and ``data_size``, and the only consumer
+    (``checks.check_codesign``) reads ``available``, which is unchanged.
+    """
+    block: dict = {
+        "available": getattr(code_signature, "size", 0) > 0,
+        "data_size": str(getattr(code_signature, "data_size", 0)),
+        "size": str(getattr(code_signature, "size", 0)),
+        "parse_status": "absent",
+        "parse_error": None,
+    }
+    if not block["available"]:
+        return block
+    blob, blob_source = _macho_signature_blob(exe_file, parsed_obj, code_signature)
+    block["blob_source"] = blob_source
+    if not blob:
+        block["parse_status"] = "parse_failed"
+        block["parse_error"] = f"blob_source_{blob_source}"
+        return block
+    block["data_offset"] = _macho_signature_data_offset(code_signature)
+    block["file_offset"] = _macho_signature_file_offset(parsed_obj, code_signature)
+    detail = parse_superblob(blob)
+    block["parse_status"] = detail.pop("parse_status")
+    block["parse_error"] = detail.pop("parse_error")
+    # The superblob detail is present exactly when the blob parsed: a failed
+    # parse must leave nothing that reads as a thin partial answer.
+    if block["parse_status"] == "parsed":
+        block["superblob"] = detail
+    return block
+
+
 def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     """Extracts MachO code signature metadata from the parsed object and adds it to the metadata.
+
+    The embedded SuperBlob (``LC_CODE_SIGNATURE`` → ``data_offset``/``data_size``)
+    is parsed into semantic detail — blob index, CodeDirectory flags and
+    cdhash, entitlements (XML and DER), requirements and the CMS signer
+    chain — by :mod:`blint.lib.codesign_macho`. See
+    :func:`_macho_code_signature_block` for the exact shape and the
+    parse-status tristate.
 
     Args:
         exe_file: The path of the executable file.
@@ -4042,24 +5086,17 @@ def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bi
         The updated metadata dictionary.
     """
     try:
+        code_signature = None
         if parsed_obj.has_code_signature:
             code_signature = parsed_obj.code_signature
-            metadata["code_signature"] = {
-                "available": code_signature.size > 0,
-                "data": str(code_signature.data.hex()),
-                "data_size": str(code_signature.data_size),
-                "size": str(code_signature.size),
-            }
-        if not parsed_obj.has_code_signature and parsed_obj.has_code_signature_dir:
+        elif parsed_obj.has_code_signature_dir:
             code_signature = parsed_obj.code_signature_dir
-            metadata["code_signature"] = {
-                "available": code_signature.size > 0,
-                "data": str(code_signature.data.hex()),
-                "data_size": str(code_signature.data_size),
-                "size": str(code_signature.size),
-            }
-        if not parsed_obj.has_code_signature and not parsed_obj.has_code_signature_dir:
-            metadata["code_signature"] = {"available": False}
+        if code_signature is None:
+            metadata["code_signature"] = {"available": False, "parse_status": "absent"}
+        else:
+            metadata["code_signature"] = _macho_code_signature_block(
+                exe_file, parsed_obj, code_signature
+            )
         if parsed_obj.has_data_in_code:
             data_in_code = parsed_obj.data_in_code
             metadata["data_in_code"] = {
@@ -4067,7 +5104,7 @@ def add_mach0_signature(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bi
                 "data_size": str(data_in_code.data_size),
                 "size": str(data_in_code.size),
             }
-    except (AttributeError, TypeError) as e:
+    except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Caught {type(e)} while parsing {exe_file} Mach0 code signature.")
     return metadata
 

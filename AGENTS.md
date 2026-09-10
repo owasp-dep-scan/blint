@@ -146,6 +146,24 @@ Use `tests/scripts/callgraph_kpi_baseline.py` for each architecture fixture, pas
 both `--baseline` and `--labels`. Do not update one architecture baseline in isolation
 without checking the others for silent drift.
 
+**Every KPI counter coming back `0` means the run never disassembled, not that the
+callgraph collapsed.** Two causes, both silent — the script reports the zeros as a
+full-scale regression against the baseline rather than as an error:
+
+- nyxstone imports successfully but disassembles nothing unless LLVM 18 is on `PATH`
+  with `NYXSTONE_LLVM_PREFIX` set (see the environment section below). A plain
+  `bash`/`sh` wrapper that does not inherit the interactive shell's environment hits
+  this.
+- `parse()` on a path that does not exist returns near-empty metadata instead of
+  raising. The fixture directories are named `wasm-tools-1.247.0-<arch>-<os>`
+  (for example `wasm-tools-1.247.0-aarch64-macos`), and the Windows binaries are
+  `wasm-tools.exe`; a wrong path reads exactly like a total regression.
+
+Check `functions_total` is non-zero before believing any comparison. `compare_kpi`
+only flags counters that *drop*, so a baseline recorded from a weaker run keeps
+passing while silently losing its ability to catch a regression — which is why
+baselines need refreshing when output legitimately grows, not only when they fail.
+
 For fast iterative experiments (especially callgraph tuning), prefer quiet non-review runs:
 
 ```bash
@@ -154,7 +172,16 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 
 ## Bumping blint's version
 
-The version string is duplicated across several files with no single source of truth — update all of them together, in the same commit:
+**Do not bump the version as part of an ordinary change.** The version is bumped
+deliberately, once, when a release is cut — not once per feature, packet or
+pull request. A branch that bumps it conflicts with every other branch in
+flight, and a version that moves on every merge stops meaning anything to the
+people reading it. If you think a change warrants a release, say so in the PR
+and leave the version alone.
+
+When a release _is_ being cut, the version string is duplicated across several
+files with no single source of truth — update all of them together, in the same
+commit:
 
 - `pyproject.toml` (`version = "..."`)
 - `Info.plist` (`CFBundleVersion`)
@@ -169,6 +196,8 @@ Use `grep -rn "<old-version>"` across the repo (excluding `.git`, `.venv`, `node
 - `EVIDENCE_LIMIT`, `SYMBOLS_LOOKUP_BATCH_LEN`, `MIN_MATCH_SCORE`
 - `BLINT_MAX_HEX_BYTES`
 - `BLINT_MAX_WASM_INSTRUCTIONS` (total instruction-stream budget per wasm report, divided max-min fair across functions; 0 disables)
+- `BLINT_CACHE_DIR` (parse-cache store location; defaults to the user cache directory)
+- `BLINT_CACHE_MAX_BYTES` (parse-cache size bound; default 1 GiB, 0 disables eviction)
 - `SCAN_DEBUG_MODE`, `SCAN_ID`
 - `BLINT_DB_MESON_STRIP` when producing local Meson corpora in the linked `blint-db` repo
 
