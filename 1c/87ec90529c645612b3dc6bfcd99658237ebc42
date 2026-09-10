@@ -1,0 +1,26 @@
+blint/data/rules.yml
+  h_6a4cc5cdf68def 202-237
+blint/lib/analysis.py
+  h_6a4cc5cdf68def 36-38
+blint/lib/checks.py
+  h_6a4cc5cdf68def 5,82-145
+blint/lib/ios.py
+  h_6a4cc5cdf68def 17-21,377-384,413-417
+blint/lib/macos_bundle.py
+  h_6a4cc5cdf68def 21-25,192-199
+blint/lib/provisioning.py
+  h_6a4cc5cdf68def 1-308
+tests/test_provisioning.py
+  h_6a4cc5cdf68def 1-381
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1c87ec90529c645612b3dc6bfcd99658237ebc42",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
