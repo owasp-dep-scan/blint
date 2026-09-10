@@ -79,6 +79,15 @@ def test_resolve_jobs_rejects_garbage_loudly(bad):
 # --------------------------------------------------------------------------
 
 
+# The signal that kills a worker outright, with no chance to clean up or
+# raise. Windows has no SIGKILL; there os.kill routes SIGTERM through
+# TerminateProcess, which is the same abrupt death. Without this the kill
+# raised AttributeError inside the worker and was recorded as an ordinary
+# analysis failure — the tests then asserted against a soft failure while
+# claiming to cover a hard one.
+_HARD_KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
 def _double_unit(payload, state):
     # Variable sleep so completions interleave and finish out of order.
     import time
@@ -97,7 +106,7 @@ def test_run_pool_returns_all_results_with_out_of_order_completion():
 
 def _suicide_unit(payload, state):
     if payload[0] in state["victims"]:
-        os.kill(os.getpid(), signal.SIGKILL)
+        os.kill(os.getpid(), _HARD_KILL)
     return {"value": payload[0]}
 
 
@@ -172,7 +181,7 @@ def test_run_pool_replaces_a_dead_worker_task_queue():
 
 
 def _setup_suicide(payload):
-    os.kill(os.getpid(), signal.SIGKILL)
+    os.kill(os.getpid(), _HARD_KILL)
 
 
 def test_run_pool_sterile_startup_raises():
@@ -256,7 +265,7 @@ def _poison_setup_default(payload):
 
 def _poison_analyze_default(file_path, state):
     if file_path == state["poison_path"]:
-        os.kill(os.getpid(), signal.SIGKILL)
+        os.kill(os.getpid(), _HARD_KILL)
     return runners_mod.analyze_unit_default(file_path, state)
 
 
@@ -461,7 +470,7 @@ def test_parallel_pool_startup_failure_falls_back_to_sequential(
 
 def _poison_analyze_sbom(file_path, state):
     if file_path == state["poison_path"]:
-        os.kill(os.getpid(), signal.SIGKILL)
+        os.kill(os.getpid(), _HARD_KILL)
     return sbom_mod.analyze_unit_sbom(file_path, state)
 
 
