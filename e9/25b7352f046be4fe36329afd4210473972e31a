@@ -1,0 +1,28 @@
+tests/test_absint_dataflow.py
+  s_526190b23001e8::t_2e8ebbeba0ea4a 181-195,197-223
+  s_526190b23001e8::t_04fd2a4f363359 196
+  s_526190b23001e8::t_6b4f367abbc352 224-243
+tests/scripts/measure_static_linkage.py
+  s_526190b23001e8::t_db3dbe131259db 171-176
+blint/lib/absint.py
+  s_526190b23001e8::t_602cd760cebbf8 235-240,242
+  s_526190b23001e8::t_40a8322069e1e1 166-167,174-190,193,196-197,199-200
+  s_526190b23001e8::t_e68815429df082 1173-1179,1188-1189,1193-1194,1196-1198
+  s_526190b23001e8::t_23f6cde0eb93de 223-234,241,243-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e925b7352f046be4fe36329afd4210473972e31a",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
