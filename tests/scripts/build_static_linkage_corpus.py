@@ -73,8 +73,10 @@ def download(url: str, dest: Path) -> None:
 def build_project(kind: str, src_dir: Path, out: Path) -> None:
     env = dict(os.environ, CC=CLANG)
     if kind == "zlib":
+        # zlib's configure rejects compiler-style -arch flags ("unknown
+        # option"), and the native build already targets this machine's arm64.
         run(
-            ["./configure", "--static", *(["-archs", "arm64"] if ARCH else [])],
+            ["./configure", "--static"],
             cwd=src_dir,
             env=env,
             stdout=subprocess.DEVNULL,
@@ -160,8 +162,10 @@ def main() -> None:
         lib_paths = [archives[name] for name in libs.split()]
         include_args = [f"-I{archives[name].parent}" for name in libs.split()]
         include_args += [
-            f"-I{src_dir / 'zlib' / next(d.name for d in src_dir.glob('zlib-*') if d.is_dir())}",
-            f"-I{src_dir / 'lua' / next(d.name for d in src_dir.glob('lua-*') if d.is_dir()) / 'src'}",
+            # The archives build in-place, so each project's sources sit one
+            # level below its project directory (src/zlib/zlib-1.3.1).
+            f"-I{next(d for d in (src_dir / 'zlib').glob('zlib-*') if d.is_dir())}",
+            f"-I{next(d for d in (src_dir / 'lua').glob('lua-*') if d.is_dir()) / 'src'}",
             f"-I{src_dir / 'miniz' / 'miniz-2.1.0'}",
         ]
         binary = apps_dir / app

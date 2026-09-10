@@ -118,7 +118,19 @@ def main() -> None:
     reports_dir = corpus / "reports"
 
     apps = sorted(p.name[len("gt-") : -len(".txt")] for p in apps_dir.glob("gt-*.txt"))
-    totals = {"claimed": 0, "claimed_true": 0, "loaded": 0, "projects": 0, "projects_true": 0, "false_projects": 0}
+    totals = {
+        "claimed": 0,
+        "claimed_true": 0,
+        "loaded": 0,
+        "loaded_judgeable": 0,
+        "loaded_out_of_scope": 0,
+        "loaded_absent": 0,
+        "claimed_true_judgeable": 0,
+        "projects": 0,
+        "projects_true": 0,
+        "false_projects": 0,
+    }
+    connection = db_module.get(db_file)
     for app in apps:
         metadata = json.loads((reports_dir / f"{app}-metadata.json").read_text())
         truth = load_ground_truth(apps_dir, app)
@@ -147,9 +159,33 @@ def main() -> None:
         project_truth = {row["purl"] for row in candidate_rows(metadata, db_file) if row["member"] in truth}
         false_purls = claimed_purls - project_truth
 
+        # Recall over the judgeable subset: the raw denominator counts every
+        # loaded member, but members below the coverage-judgeability floor are
+        # out of scope by design (a member too small for coverage to judge is
+        # not evidence), and the corpus deliberately keeps one archive absent
+        # from the database as the false-attribution probe. Neither can ever be
+        # claimed, so recall is also reported over what is in scope.
+        member_functions = {}
+        for member in truth:
+            row = connection.execute(
+                "SELECT function_count FROM Binaries WHERE name=? AND archive_name IS NOT NULL",
+                (member,),
+            ).fetchone()
+            member_functions[member] = row[0] if row else None
+        judgeable = {
+            member
+            for member, count in member_functions.items()
+            if count is not None and count >= db_module.MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS
+        }
+        absent = {member for member, count in member_functions.items() if count is None}
+
         totals["loaded"] += len(truth)
         totals["claimed"] += len(claimed_names)
         totals["claimed_true"] += len(claimed_true)
+        totals["loaded_judgeable"] += len(judgeable)
+        totals["loaded_out_of_scope"] += len(truth) - len(judgeable) - len(absent)
+        totals["loaded_absent"] += len(absent)
+        totals["claimed_true_judgeable"] += len(claimed_true & judgeable)
         totals["projects"] += len(claimed_purls)
         totals["projects_true"] += len(claimed_purls & project_truth)
         totals["false_projects"] += len(false_purls)
@@ -180,6 +216,12 @@ def main() -> None:
     print(
         f"   member claims: {totals['claimed_true']}/{totals['loaded']} loaded members recovered"
         f" ({totals['claimed']} claimed, {totals['claimed'] - totals['claimed_true']} false)"
+    )
+    print(
+        f"   recall over judgeable members: {totals['claimed_true_judgeable']}/{totals['loaded_judgeable']}"
+        f" (out of scope: {totals['loaded_out_of_scope']} below the"
+        f" {db_module.MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS}-function judgeability floor,"
+        f" {totals['loaded_absent']} absent from the database by design)"
     )
     print(
         f"   project attributions: {totals['projects_true']} true, {totals['false_projects']} false"
