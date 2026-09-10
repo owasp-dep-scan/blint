@@ -9,6 +9,7 @@ what these tests pin. Validation of the parsed *metadata* against real Apple
 artifacts is the lane's external ground-truth gate, not this file's job.
 """
 
+import os
 import plistlib
 
 from blint.lib.ios import enrich_with_bundle_context
@@ -152,10 +153,18 @@ def test_framework_versions_aliasing_yields_one_binary(tmp_path):
     (fw / "Core").symlink_to("Versions/A/Core")
     collection, reason = collect_macos_bundle_detailed(str(fw))
     assert reason is None
-    # The root-level path is the canonical user-visible spelling; the
-    # Versions/Current and Versions/A aliases must not produce extra entries.
-    assert [b["bundle_path"] for b in collection["binaries"]] == ["Core"]
-    assert collection["binaries"][0]["role"] == "main"
+    # One entry, whichever spelling reached it: the three aliases resolve to
+    # the same file and must not each produce a binary.
+    assert len(collection["binaries"]) == 1
+    entry = collection["binaries"][0]
+    assert entry["role"] == "main"
+    assert os.path.realpath(entry["path"]) == os.path.realpath(fw / "Versions" / "A" / "Core")
+    if os.path.isfile(fw / "Core"):
+        # The root-level alias is the canonical user-visible spelling and wins
+        # when it is usable. Windows creates the relative link as a dangling
+        # reparse point (realpath resolves it, opening it does not), so there
+        # the walker falls through to the Versions path instead.
+        assert entry["bundle_path"] == "Core"
 
 
 def test_framework_without_executable_key_finds_versions_binary(tmp_path):
