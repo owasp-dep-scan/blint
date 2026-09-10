@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""A/B byte-identity gate for the blintdb v2 path (P4.2a).
+"""A/B byte-identity gate for the blintdb v2 path (P4.2a, extended by P4.3).
 
-Proves the similarity-hash columns are additive: with a v2 database, matches,
-scores and SBOM component attribution are byte-identical to the base commit.
+Proves the similarity-hash columns (P4.2a) and the member-level + banner
+layers (P4.3) are additive: with a v2 database, matches, scores and SBOM
+component attribution are byte-identical to the base commit.
 
 The script builds one v2 blintdb from a fixture binary's own metadata (exact
 instruction/assembly hashes, symbols, binary name), then runs the SAME lookup
@@ -50,6 +51,18 @@ ADDITIVE_PROPERTY_NAMES = {
     "internal:blintdb_matched_import_hash_count",
     "internal:blintdb_matched_import_hashes",
     "internal:blintdb_fuzzy_layer",
+    # P4.3: the attribution label every blintdb component now carries, the
+    # member-layer evidence keys, and the vendored-banner properties. On a
+    # member-less database the member keys are absent; the attribution label
+    # and banner properties are the only ones a v2 run can still emit.
+    "internal:blintdb_attribution",
+    "internal:blintdb_member_layer",
+    "internal:blintdb_matched_member_count",
+    "internal:blintdb_member_names",
+    "internal:blintdb_member_details",
+    "internal:vendored_banner_layer",
+    "internal:vendored_attribution",
+    "internal:vendored_banner",
 }
 ADDITIVE_MATCH_KEYS = {
     "matched_fuzzy_hash_count",
@@ -58,6 +71,13 @@ ADDITIVE_MATCH_KEYS = {
     "matched_cfg_hashes",
     "matched_import_hash_count",
     "matched_import_hashes",
+    # P4.3 member-layer evidence keys, present on evidence rows only when the
+    # member layer fired.
+    "blintdb_attribution",
+    "blintdb_member_layer",
+    "blintdb_matched_member_count",
+    "blintdb_member_score",
+    "blintdb_members",
 }
 
 DRIVER = """
