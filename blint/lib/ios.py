@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import zipfile
 
+from blint.lib.swift_metadata import swift_field_names
 from blint.lib.provisioning import (
     decode_provisioning_profile,
     load_embedded_profile,
@@ -489,13 +490,17 @@ def _undeclared_required_reason_tokens(metadata: dict, bundle_info: dict) -> lis
 
 
 def _symbol_haystack(metadata: dict) -> str:
-    """Build a lowercase blob of symbol and ObjC-runtime names for matching."""
+    """Build a lowercase blob of symbol and runtime names for matching."""
     names: list[str] = []
     for key in ("dynamic_symbols", "symtab_symbols"):
         names += [sym.get("name", "") for sym in metadata.get(key) or []]
     if objc := metadata.get("objc_metadata"):
         names += objc.get("selectors") or []
         names += objc.get("external_classes") or []
+    # Swift type and property names: a Swift property `creationDate` carries
+    # the same required-reason signal as the C symbol spellings, and Swift
+    # binaries expose their field vocabulary only through reflection metadata.
+    names += swift_field_names(metadata)
     return "\n".join(name for name in names if name).lower()
 
 

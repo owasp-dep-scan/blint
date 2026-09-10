@@ -48,6 +48,7 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
@@ -3187,6 +3188,13 @@ def parse(
         # (compact unwind, eh_frame); recover the function starts they list so
         # disassembly and reviews are not blind on exactly these inputs.
         if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
+            # Swift reflection metadata (__swift5_* on Mach-O, .swift5_* on
+            # ELF) names every Swift type, its fields and its metadata access
+            # functions — evidence in its own right and a function oracle for
+            # stripped Swift binaries (issue #109 for the ELF spelling).
+            if swift_metadata := parse_swift_metadata(parsed_obj):
+                metadata["swift_metadata"] = swift_metadata
+                metadata = merge_swift_functions(metadata)
             metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
         # SDK-assisted attribution has to precede the dependency graph: it
