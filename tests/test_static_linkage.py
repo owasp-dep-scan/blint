@@ -356,7 +356,11 @@ def test_genuine_member_qualifies_and_noise_does_not(tmp_path):
     assert member["member_name"] == "add.o"
     assert member["archive_name"] == "libdemo.a"
     assert member["member_coverage"] == 1.0
-    assert member["qualification"] == "fuzzy+exact"
+    # Fuzzy alone: the fixture member holds eight functions, too few for the
+    # exact path's coverage gate to be able to fail (see
+    # MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS). The attribution is the same
+    # either way — this records which path earned it.
+    assert member["qualification"] == "fuzzy"
 
 
 def test_exact_matches_without_coverage_never_qualify(tmp_path):
@@ -505,6 +509,12 @@ def test_banner_signatures_reject_unanchored_versions():
         "SQLite format 3",  # library marker without any version
         "inflate 1",  # not a full version
         "lua 5.4",  # lua banner requires the Copyright tail
+        # "deflate"/"inflate" are ordinary verbs as well as an algorithm
+        # name; only the copyright tail makes the string zlib's own. Every
+        # real vendored copy emits it (checked against libmongoc 2.2 and
+        # libturbojpeg 0.5, which carry zlib 1.3.1 and 1.3.2).
+        "failed to inflate 1.5 MB of payload",
+        "deflate 1.3.1 stream ready",
     ]
     for value in negatives:
         assert not is_probable_banner_string(value), value
@@ -543,3 +553,122 @@ def test_banner_detection_states_and_dedup():
     assert detect_vendored_banners(
         {"strings": [{"value": long_string, "entropy": 0, "secret_type": None}]}
     )["banners"] == []
+
+
+# --- gates the real-archive corpus did not sample ---
+
+EXTRA_EXACT_HASHES = [f"x{index:02x}" * 16 for index in range(8)]
+
+
+def _add_exact_member(db_file, *, member_functions, matched, archive_name="libtiny.a"):
+    """Add a member of `member_functions` functions, `matched` of them carrying
+    hashes the query also holds."""
+    connection = sqlite3.connect(db_file)
+    connection.execute("INSERT INTO Projects VALUES(5, 'tiny', 'pkg:generic/tiny@5.0.0')")
+    connection.execute("INSERT INTO Builds(build_id, project_id) VALUES(5, 5)")
+    connection.execute(
+        "INSERT INTO Binaries(binary_id, build_id, name, binary_type, archive_name)"
+        " VALUES(6, 5, 'tiny.o', 'ELF', ?)",
+        (archive_name,),
+    )
+    rows = [
+        (6, f"0x{index:02x}::tiny", f"tiny_{index}", f"0x{index:02x}", exact, None, 10)
+        for index, exact in enumerate(EXTRA_EXACT_HASHES[:matched])
+    ]
+    rows += [
+        (6, f"0x{index:02x}::pad", f"tiny_pad_{index}", f"0x{index:02x}", None, None, 10)
+        for index in range(matched, member_functions)
+    ]
+    connection.executemany(
+        "INSERT INTO FunctionFingerprints(binary_id, function_key, name, address,"
+        " instruction_hash, fuzzy_hash, instruction_count) VALUES(?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    connection.commit()
+    connection.close()
+
+
+def _with_extra_exact_functions(metadata, count, *, base=0x300000, stride=0x20, scattered=False):
+    """Give the query `count` functions carrying EXTRA_EXACT_HASHES."""
+    for index, exact in enumerate(EXTRA_EXACT_HASHES[:count]):
+        address = base + index * (0x10000 if scattered else stride)
+        name = f"extra_fn_{index}"
+        metadata["disassembled_functions"][name] = {
+            "name": name,
+            "address": hex(address),
+            "instruction_hash": exact,
+            "instruction_count": 10,
+        }
+        metadata["functions"].append({"name": name, "address": hex(address), "size": 0x20})
+    return metadata
+
+
+def test_a_member_too_small_for_coverage_to_judge_never_qualifies(tmp_path):
+    """Coverage is a ratio, so it cannot fail on a small enough member.
+
+    Three exact matches clear 0.35 on any member of eight functions or fewer,
+    whatever those three hashes are — and archives are full of members that
+    small. Such a member is out of scope, not attributed.
+    """
+    db_file = tmp_path / "v4.db"
+    _create_v4_blintdb(str(db_file))
+    _add_exact_member(str(db_file), member_functions=4, matched=3)
+    metadata = _with_extra_exact_functions(_member_query_metadata(), 3)
+    matches, state = lookup_member_matches(metadata, db_file=str(db_file))
+    assert state == MEMBER_LAYER_ACTIVE
+    assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
+
+
+def test_the_exact_path_still_qualifies_a_judgeable_member(tmp_path):
+    """The floor rejects members coverage cannot judge, not exact evidence."""
+    db_file = tmp_path / "v4.db"
+    _create_v4_blintdb(str(db_file))
+    _add_exact_member(str(db_file), member_functions=10, matched=8)
+    metadata = _with_extra_exact_functions(_member_query_metadata(), 8)
+    matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
+    tiny = [m for m in matches if m["project_purl"] == "pkg:generic/tiny@5.0.0"]
+    assert tiny and tiny[0]["members"][0]["qualification"] == "exact"
+
+
+def test_scattered_exact_matches_never_qualify(tmp_path):
+    """A linked member is one address run whichever hash matched it.
+
+    The same member and the same eight exact matches, spread across the query
+    instead of emitted together, are collision-shaped.
+    """
+    db_file = tmp_path / "v4.db"
+    _create_v4_blintdb(str(db_file))
+    _add_exact_member(str(db_file), member_functions=10, matched=8)
+    metadata = _with_extra_exact_functions(_member_query_metadata(), 8, scattered=True)
+    matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
+    assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
+
+
+def test_member_matches_are_unioned_across_query_batches(tmp_path, monkeypatch):
+    """A member matched in two batches must count both.
+
+    The whole-binary path unions batch rows through _merge_hash_rows; keeping
+    only the first batch\'s row would divide an undercounted numerator by the
+    member\'s full population and drop genuine members.
+    """
+    db_file = tmp_path / "v4.db"
+    _create_v4_blintdb(str(db_file))
+    real_batched = db_module._batched
+    monkeypatch.setattr(
+        db_module, "_batched", lambda values, batch_size=2: real_batched(values, batch_size)
+    )
+    matches, _state = lookup_member_matches(_member_query_metadata(), db_file=str(db_file))
+    assert [match["project_purl"] for match in matches] == ["pkg:generic/demo@1.0.0"]
+    assert matches[0]["members"][0]["member_coverage"] == 1.0
+
+
+def test_an_empty_archive_name_is_not_a_member(tmp_path):
+    """'' means absent everywhere else the schema is probed, so also here: a
+    whole-binary row must never be scored under the member gates."""
+    db_file = tmp_path / "v4.db"
+    _create_v4_blintdb(str(db_file))
+    _add_exact_member(str(db_file), member_functions=10, matched=8, archive_name="")
+    metadata = _with_extra_exact_functions(_member_query_metadata(), 8)
+    matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
+    assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
+

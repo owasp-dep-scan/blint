@@ -105,27 +105,40 @@ CALLGRAPH_MATCH_SCORE_CAP = 60.0
 #   needs the coverage gate, not just a match count.
 #
 # The contiguity ratio (address-adjacency of the matched query functions) is
-# kept as a corroborating gate on the fuzzy path — genuine member matches all
-# measured >= 0.62 — but it does not separate by itself: the same 1808-function
-# noise member's three scattered matches landed adjacent by coincidence.
+# a corroborating gate on both paths — genuine member matches all measured
+# >= 0.62 — but it does not separate by itself: the same 1808-function noise
+# member's three scattered matches landed adjacent by coincidence. Member
+# coverage cannot carry the exact path alone, because a member small enough
+# is covered by any three generic hashes it happens to share.
 
 # Distinct fuzzy-hash matches required before fuzzy evidence alone can qualify
 # a member. Measured: every fuzzy-path genuine member matched >= 6; noise
 # members matched at most 1.
 MEMBER_MIN_FUZZY_MATCH_HASHES = 6
 # Distinct exact (instruction) hash matches that can qualify a member via the
-# exact path (with the coverage gate below). Measured: genuine exact-path
-# members matched 3; the count alone is not a gate — the 1808-function noise
-# member also collected 3 — the coverage gate is what rejects it.
+# exact path (with the coverage and contiguity gates below). Measured: genuine
+# exact-path members matched 3; the count alone is not a gate — the
+# 1808-function noise member also collected 3.
 MEMBER_MIN_EXACT_MATCH_HASHES = 3
 # Fraction of the member's own fingerprint population that must be matched.
 # One gate for both paths because the measured distributions agree:
 # genuine members cover 0.33..0.87 of themselves, noise members <= 0.08. The
 # gate sits just above four times the observed noise maximum.
 MEMBER_MIN_MEMBER_COVERAGE = 0.35
+# Smallest member population the coverage gate can actually judge. Coverage is
+# a ratio, so a member with few enough functions is covered by whatever handful
+# of generic hashes it happens to share: at or below
+# MEMBER_MIN_EXACT_MATCH_HASHES / MEMBER_MIN_MEMBER_COVERAGE functions the
+# exact path's coverage gate cannot fail, and archives are full of members that
+# small. Such a member carries no evidence to judge, so it is out of scope
+# rather than admitted — the same boundary the measurement reported for small
+# dead-stripped members on the recall side.
+MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS = (
+    int(MEMBER_MIN_EXACT_MATCH_HASHES / MEMBER_MIN_MEMBER_COVERAGE) + 1
+)
 # Fraction of the member's matched query functions that must sit address-
 # adjacent to the next matched function (gap <= MEMBER_CONTIGUITY_GAP_BYTES
-# past the function's end). Applied to the fuzzy path only when the member
+# past the function's end). Applied to both paths, and only when the member
 # matched at two or more distinct query addresses; single-address matches pass
 # by definition (an adjacency ratio needs two points).
 MEMBER_MIN_CONTIGUITY_RATIO = 0.5
@@ -654,12 +667,37 @@ def _query_member_hash_matches(
         WHERE Projects.purl IS NOT NULL
             AND Projects.purl != ''
             AND Binaries.archive_name IS NOT NULL
+            AND Binaries.archive_name != ''
             AND FunctionFingerprints.{hash_column} IN ({placeholders})
         GROUP BY Binaries.binary_id
         ORDER BY matched_function_count DESC, Binaries.binary_id ASC
         LIMIT ?
     """
     return _execute(connection, query, params)
+
+
+def _collect_member_candidates(
+    connection: apsw.Connection,
+    hash_values: list[str],
+    *,
+    hash_column: str,
+) -> dict[int, dict]:
+    """Collect per-member matched hashes across every query batch.
+
+    A member matched by hashes in two different batches must union them, the
+    way the whole-binary path unions through _merge_hash_rows: keeping only the
+    first batch's row would undercount the matches the coverage gate divides.
+    """
+    candidates: dict[int, dict] = {}
+    for batch in _batched(_clean_nonempty_values(hash_values)):
+        for row in _query_member_hash_matches(
+            connection, batch, hash_column=hash_column
+        ):
+            candidate = candidates.setdefault(
+                int(row["binary_id"]), {"row": row, "hashes": set()}
+            )
+            candidate["hashes"].update(_decode_csv_set(row["matched_hashes"]))
+    return candidates
 
 
 def _query_member_totals(
@@ -1373,9 +1411,10 @@ def lookup_member_matches(
     set), not the whole project. Coverage is measured against the member's own
     fingerprint population, not against the query — the property that
     separates a genuinely linked member from cross-project hash collisions.
-    Two qualification paths per member, both requiring the same coverage gate:
-    a fuzzy path (distinct fuzzy matches plus address-adjacency of the matched
-    query functions) and an exact path (distinct instruction-hash matches).
+    Two qualification paths per member, both requiring the same coverage gate
+    and the same address-adjacency of the matched query functions: a fuzzy
+    path (distinct fuzzy matches) and an exact path (distinct instruction-hash
+    matches).
 
     The layer is deliberately independent of the whole-binary gates: qualifying
     here never waives the symbol-only filter or any other gate in
@@ -1399,18 +1438,12 @@ def lookup_member_matches(
     try:
         if not _blintdb_has_required_tables(connection):
             return [], state
-        fuzzy_candidates = {}
-        for batch in _batched(query_fuzzy):
-            for row in _query_member_hash_matches(
-                connection, batch, hash_column="fuzzy_hash"
-            ):
-                fuzzy_candidates.setdefault(int(row["binary_id"]), row)
-        exact_candidates = {}
-        for batch in _batched(query_exact):
-            for row in _query_member_hash_matches(
-                connection, batch, hash_column="instruction_hash"
-            ):
-                exact_candidates.setdefault(int(row["binary_id"]), row)
+        fuzzy_candidates = _collect_member_candidates(
+            connection, query_fuzzy, hash_column="fuzzy_hash"
+        )
+        exact_candidates = _collect_member_candidates(
+            connection, query_exact, hash_column="instruction_hash"
+        )
         if not fuzzy_candidates and not exact_candidates:
             return [], state
         totals = _query_member_totals(
@@ -1427,22 +1460,22 @@ def lookup_member_matches(
         ("fuzzy", fuzzy_candidates),
         ("exact", exact_candidates),
     ):
-        for binary_id, row in candidates.items():
-            member_rows.setdefault(binary_id, {"row": row, "matched": {}})["matched"][
-                hash_kind
-            ] = {
-                h.strip()
-                for h in str(row["matched_hashes"] or "").split(",")
-                if h.strip()
-            }
+        for binary_id, candidate in candidates.items():
+            member_rows.setdefault(
+                binary_id, {"row": candidate["row"], "matched": {}}
+            )["matched"][hash_kind] = candidate["hashes"]
     for binary_id, entry in sorted(member_rows.items()):
         row = entry["row"]
         matched_fuzzy = entry["matched"].get("fuzzy") or set()
         matched_exact = entry["matched"].get("exact") or set()
         total_functions = totals.get(binary_id, {}).get("total_functions", 0)
+        # Contiguity reads both hash kinds: a linked member is one address run
+        # whichever hash matched it, and the exact path needs the corroboration
+        # more than the fuzzy path does — three generic hashes is the whole of
+        # its evidence.
         matched_positions = [
             p
-            for h in matched_fuzzy
+            for h in matched_fuzzy | matched_exact
             for p in positions.get(h, [])
         ]
         contiguity_ratio = _member_contiguity(matched_positions) if matched_positions else 0.0
@@ -1459,7 +1492,9 @@ def lookup_member_matches(
         )
         exact_qualified = (
             len(matched_exact) >= MEMBER_MIN_EXACT_MATCH_HASHES
+            and total_functions >= MEMBER_MIN_COVERAGE_JUDGEABLE_FUNCTIONS
             and exact_coverage >= MEMBER_MIN_MEMBER_COVERAGE
+            and contiguity_ratio >= MEMBER_MIN_CONTIGUITY_RATIO
         )
         if not (fuzzy_qualified or exact_qualified):
             continue

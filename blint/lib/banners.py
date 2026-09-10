@@ -26,16 +26,19 @@ BANNER_SIGNATURES = (
     {
         "library": "zlib",
         "purl": "pkg:generic/zlib",
+        # "deflate"/"inflate" name an algorithm, not the library, and both are
+        # ordinary verbs — "failed to inflate 1.5 MB" is not a zlib banner. The
+        # copyright line is what makes the string zlib's own; every real copy
+        # emits it (deflate.c and inflate.c both carry it verbatim).
         "regex": re.compile(
-            r"\bdeflate (?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE
+            r"\bdeflate (?P<version>\d+\.\d+(?:\.\d+)?)\s+Copyright", re.IGNORECASE
         ),
     },
     {
         "library": "zlib",
         "purl": "pkg:generic/zlib",
-        # zlib builds also emit this pairing in zlibCompileFlags()/gzerror paths
         "regex": re.compile(
-            r"\binflate (?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE
+            r"\binflate (?P<version>\d+\.\d+(?:\.\d+)?)\s+Copyright", re.IGNORECASE
         ),
     },
     {
