@@ -290,9 +290,13 @@ def create_sbom(
         if len(sbom.metadata.component.components) == 1:
             sbom.metadata.component = sbom.metadata.component.components[0]
         else:
-            root_depends_on = [
+            # sorted(), same reason as the dependencies_dict serialization
+            # above: the component list arrives in directory-scan order, which
+            # is not stable across platforms (Windows scandir order differs
+            # from POSIX), and a dependsOn list has no meaningful order.
+            root_depends_on = sorted(
                 ac.bom_ref.model_dump(mode="python") for ac in sbom.metadata.component.components
-            ]
+            )
             dependencies.append(
                 {
                     "ref": sbom.metadata.component.bom_ref.model_dump(mode="python"),

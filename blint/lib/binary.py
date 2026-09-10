@@ -2239,6 +2239,47 @@ def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
     return False
 
 
+# PE spellings of the stack-protector runtime, matched as lowercase substrings
+# so x86 decoration (`@__security_check_cookie@8`) still matches.
+PE_STACK_CHK_MARKERS = (
+    "security_check_cookie",
+    "stack_chk_fail",
+    "stack_chk_guard",
+    "rtc_checkstackvars",
+)
+
+
+def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
+    """Explicit canary verdict for a PE, or None when there is no evidence.
+
+    Drives ``has_canary`` (and through it CHECK_CANARY) the same way the ELF
+    and Mach-O paths do — the rule only fires on an explicit ``False``, so a
+    PE that never set the key silently read as protected. Evidence order:
+    the stack-protector runtime symbols the binary itself references win over
+    the load-config guard flag, which is the same source
+    ``construct_security_properties`` uses for ``security_properties.canary``.
+    A PE with no load configuration and no marker symbol gets no verdict:
+    unknown is reported as absent, not as clean (rule 14).
+    """
+    for source in ("symtab_symbols", "imports"):
+        for symbol in metadata.get(source) or []:
+            if not isinstance(symbol, dict):
+                continue
+            name = symbol.get("short_name") or symbol.get("name") or ""
+            if isinstance(name, str) and any(
+                marker in name.lower() for marker in PE_STACK_CHK_MARKERS
+            ):
+                return True
+    try:
+        if not parsed_obj.has_configuration:
+            return None
+        load_config = parsed_obj.load_configuration
+        guard_flags = lief.PE.LoadConfiguration.IMAGE_GUARD
+        return not load_config.has(guard_flags.SECURITY_COOKIE_UNUSED)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
     """True when the slice carries an embedded code-signature blob.
 
@@ -4118,6 +4159,11 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["imports"],
             metadata["dynamic_entries"],
         ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
+        # Stack-protector evidence, same as the ELF and Mach-O paths: an
+        # explicit verdict (or none) rather than a silently absent key that
+        # CHECK_CANARY collapses into "protected".
+        if (pe_canary := _pe_has_canary(parsed_obj, metadata)) is not None:
+            metadata["has_canary"] = pe_canary
         # Attempt to detect if this PE is a driver
         if metadata["dynamic_entries"]:
             for e in metadata["dynamic_entries"]:

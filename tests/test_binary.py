@@ -2586,3 +2586,53 @@ def test_coerce_to_text_never_raises_for_any_byte_sequence():
     import orjson
 
     orjson.dumps({"value": coerce_to_text(bytes(range(256)))})
+
+
+class _FakeLoadConfig:
+    def __init__(self, cookie_unused: bool):
+        self._cookie_unused = cookie_unused
+
+    def has(self, _flag) -> bool:
+        return self._cookie_unused
+
+
+class _FakePE:
+    """Just enough of lief.PE.Binary for _pe_has_canary's two probes."""
+
+    def __init__(self, has_configuration: bool, cookie_unused: bool = False):
+        self._has_configuration = has_configuration
+        self._load_configuration = _FakeLoadConfig(cookie_unused)
+
+    @property
+    def has_configuration(self) -> bool:
+        return self._has_configuration
+
+    @property
+    def load_configuration(self) -> _FakeLoadConfig:
+        return self._load_configuration
+
+
+def test_pe_has_canary_symbol_evidence_beats_the_guard_flag():
+    # The binary itself references the stack-protector runtime: canary is on
+    # even if the load-config guard flag claims the cookie is unused.
+    metadata = {"symtab_symbols": [{"short_name": "__security_check_cookie"}]}
+    assert binary_module._pe_has_canary(_FakePE(True, True), metadata) is True
+    metadata = {"imports": [{"short_name": "__stack_chk_fail"}]}
+    assert binary_module._pe_has_canary(_FakePE(False), metadata) is True
+    # x86 decorated spelling survives the substring match.
+    metadata = {"imports": [{"name": "vcruntime140.dll::@__security_check_cookie@8"}]}
+    assert binary_module._pe_has_canary(_FakePE(False), metadata) is True
+
+
+def test_pe_has_canary_load_config_verdicts():
+    # SECURITY_COOKIE_UNUSED set: a cookie is present but never checked, so
+    # the verdict is an explicit False — this is what CHECK_CANARY fires on.
+    assert binary_module._pe_has_canary(_FakePE(True, True), {}) is False
+    # Guard flag clear: the image performs cookie checks.
+    assert binary_module._pe_has_canary(_FakePE(True, False), {}) is True
+
+
+def test_pe_has_canary_no_evidence_is_none_not_clean():
+    # No load configuration and no marker symbol: unknown, deliberately not
+    # False and not True, so the rule engine neither fires nor vouches.
+    assert binary_module._pe_has_canary(_FakePE(False), {}) is None
