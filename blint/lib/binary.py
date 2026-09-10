@@ -48,9 +48,9 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
-from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
+from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
 from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (

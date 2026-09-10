@@ -14,12 +14,12 @@ import shutil
 import tempfile
 import zipfile
 
-from blint.lib.swift_metadata import swift_field_names
 from blint.lib.provisioning import (
     decode_provisioning_profile,
     load_embedded_profile,
     summarize_for_metadata,
 )
+from blint.lib.swift_metadata import swift_field_names
 from blint.lib.utils import is_exe
 from blint.logger import LOG
 
