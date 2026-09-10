@@ -95,6 +95,29 @@ _NON_CODE_DIRS = frozenset({"Resources", "Headers", "Modules", "_CodeSignature",
 _MAX_BINARIES = 2000
 
 
+# Mach-O magic numbers (32/64-bit, both endiannesses) and fat-binary magic.
+# ``is_exe`` only checks that a file has binary content — .nib archives pass
+# it — so the helper sweep qualifies candidates by file header.
+_MACHO_MAGICS = (
+    b"\xcf\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xce",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf",
+)
+
+
+def _is_macho_file(path: str) -> bool:
+    try:
+        with open(path, "rb") as fp:
+            head = fp.read(4)
+    except OSError:
+        return False
+    return head in _MACHO_MAGICS
+
+
 def is_macos_bundle(path) -> bool:
     """Return True when the path is a macOS bundle directory."""
     return (
@@ -280,22 +303,34 @@ def _walk_bundle(
         embedded_dir = os.path.join(bundle_dir, *relative.split("/"))
         if not os.path.isdir(embedded_dir):
             continue
-        for entry in sorted(os.listdir(embedded_dir)):
-            full = os.path.join(embedded_dir, entry)
-            if os.path.isdir(full) and is_macos_bundle(full):
-                _walk_embedded_bundle(full, binaries, bundle_dir)
-            elif entry.endswith(".dylib") and os.path.isfile(full):
-                _add_binary(binaries, full, "dylib", bundle_dir)
-            elif (
-                os.path.isfile(full)
-                and relative.endswith("Library")
-                # Privileged helpers and login items live under
-                # Contents/Library (SMJobBless, SMAppService): the loose
-                # executables there run with elevated or persistent
-                # rights, which makes them audit surface.
-                and is_exe(full)
-            ):
-                _add_binary(binaries, full, "helper", bundle_dir)
+        in_library = relative.split("/")[-1] == "Library"
+        # Recursive: components nest (Contents/Library/LoginItems/*.app,
+        # Contents/Library/LaunchServices/<helper>, PlugIns/<vendor>/*.appex).
+        for walk_root, walk_dirs, walk_files in os.walk(embedded_dir):
+            walk_dirs[:] = sorted(walk_dirs)
+            for d in list(walk_dirs):
+                full = os.path.join(walk_root, d)
+                if is_macos_bundle(full):
+                    walk_dirs.remove(d)
+                    _walk_embedded_bundle(full, binaries, bundle_dir)
+            for entry in sorted(walk_files):
+                full = os.path.join(walk_root, entry)
+                if entry.endswith(".dylib") and os.path.isfile(full):
+                    _add_binary(binaries, full, "dylib", bundle_dir)
+                elif (
+                    os.path.isfile(full)
+                    and in_library
+                    # Privileged helpers and login items live under
+                    # Contents/Library (SMJobBless, SMAppService): the loose
+                    # executables there run with elevated or persistent
+                    # rights, which makes them audit surface. The Mach-O
+                    # magic check matters here: Library also holds binary
+                    # resource files (.nib archives) that pass the weak
+                    # executable sniff.
+                    and is_exe(full)
+                    and _is_macho_file(full)
+                ):
+                    _add_binary(binaries, full, "helper", bundle_dir)
 
     # Auxiliary executables shipped beside the main binary (a privileged
     # helper is not one of these; those live under Contents/Library above) —
@@ -348,7 +383,10 @@ def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_di
                         # bundle, headers and module maps beside its code;
                         # .nib/.strings archive files are binary content and
                         # would pass the executable sniff, so they are pruned
-                        # by name rather than collected as tools.
+                        # by name rather than collected as tools. App bundles
+                        # do hide in Resources (Sparkle ships Autoupdate.app
+                        # there), so bundles inside are still walked.
+                        _walk_bundles_under(os.path.join(root, d), binaries, top_dir)
                         dirs.remove(d)
                 for entry in sorted(files):
                     _add_binary(binaries, os.path.join(root, entry), "tool", top_dir)
@@ -356,6 +394,19 @@ def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_di
                     break
 
         _walk(sweep_root, recurse)
+
+
+def _walk_bundles_under(directory: str, binaries: list[dict], top_dir: str) -> None:
+    """Walk any bundle directories directly or nested under ``directory``."""
+    if not os.path.isdir(directory):
+        return
+    for root, dirs, _files in os.walk(directory):
+        dirs[:] = sorted(dirs)
+        for d in list(dirs):
+            full = os.path.join(root, d)
+            if is_macos_bundle(full):
+                dirs.remove(d)
+                _walk_embedded_bundle(full, binaries, top_dir)
 
 
 def _walk_embedded_bundle(bundle_dir: str, binaries: list[dict], top_dir: str) -> None:

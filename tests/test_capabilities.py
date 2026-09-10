@@ -74,7 +74,7 @@ def test_all_ids_unique(index):
 def test_check_count_and_engine_parity(index):
     """The catalog's checks are exactly the rules the engine dispatches."""
     checks = _by_kind(index, "check")
-    assert len(checks) == 24  # rules.yml today
+    assert len(checks) == 28  # rules.yml today (24 + the four provisioning/objc-load rules)
     assert {e["id"] for e in checks} == set(analysis_mod.rules_dict)
 
 
