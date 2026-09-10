@@ -1,0 +1,44 @@
+tests/test_swift_metadata.py
+  s_526190b23001e8::t_a36ec70fcd6794 138,166-176
+  s_526190b23001e8::t_7bf4e00bbcd114 17
+  s_526190b23001e8::t_e011b588e005ac 177-178
+blint/lib/provisioning.py
+  s_526190b23001e8::t_e246c6a4971e93 261-266
+  s_526190b23001e8::t_82a8ee2c15172d 106-109
+blint/lib/swift_metadata.py
+  s_526190b23001e8::t_ee642d77948624 135-137,140,148,219,240-241
+  s_526190b23001e8::t_b99a267fba0da2 82-85
+  s_526190b23001e8::t_cdf69fb7ae6a54 80-81,86
+  s_526190b23001e8::t_73f74ab13f4f61 179-182
+  s_526190b23001e8::t_5d246e321c13e1 89-91
+tests/test_macho_objc.py
+  s_526190b23001e8::t_de19a60cb13267 28,44-46,219-221,223,225,228-229,236-238,240-242
+blint/lib/macho_objc.py
+  s_526190b23001e8::t_c113574066ec65 631-635
+  s_526190b23001e8::t_8bf06eb7f0988e 234-238,248-250,254-255
+  s_526190b23001e8::t_783b12cc00b80d 70-73
+  s_526190b23001e8::t_f595cd81b90b77 266-267,277-279,283-284
+  s_526190b23001e8::t_167f48fbc0cc4a 102-105
+blint/lib/macos_bundle.py
+  s_526190b23001e8::t_47dd81c8cd481b 234
+  s_526190b23001e8::t_361dd6b4cfaa79 235-237,244,249
+  s_526190b23001e8::t_963ef2f9fb4a03 176-178
+tests/test_provisioning.py
+  s_526190b23001e8::t_3afda02e6380d7 209-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a2c68e3f4bd67f2b7d8f28fe5a89cd75ceb73a2",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
