@@ -173,6 +173,9 @@ def collect_macos_bundle_detailed(bundle_dir: str) -> tuple[dict | None, str | N
     if not binaries:
         LOG.warning(f"No Mach-O binaries found in macOS bundle {bundle_dir}; skipping")
         return None, "no_binaries"
+    # The resolved path is walk bookkeeping, not part of the collection.
+    for entry in binaries:
+        entry.pop("real_path", None)
     return {
         "bundle_dir": bundle_dir,
         "kind": kind,
@@ -228,18 +231,22 @@ def _add_binary(binaries: list[dict], path: str, role: str, bundle_dir: str) -> 
 
     Deduplication is by real path: a framework's ``Versions/Current`` symlink
     chain and its ``Versions/A`` real directory reach the same Mach-O through
-    two names, and both would otherwise be analysed (and reported) twice.
+    two names, and both would otherwise be analysed (and reported) twice. The
+    resolved path is kept on the entry rather than recomputed per candidate,
+    which at the walk cap is the difference between one realpath per binary
+    and one per pair.
     """
     if len(binaries) >= _MAX_BINARIES:
         return False
     if not (os.path.isfile(path) and is_exe(path)):
         return False
     real = os.path.realpath(path)
-    if any(os.path.realpath(existing["path"]) == real for existing in binaries):
+    if any(existing["real_path"] == real for existing in binaries):
         return False
     binaries.append(
         {
             "path": path,
+            "real_path": real,
             "role": role,
             "bundle_path": os.path.relpath(path, bundle_dir).replace(os.sep, "/"),
         }

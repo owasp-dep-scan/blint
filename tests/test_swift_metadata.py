@@ -14,6 +14,7 @@ import struct
 
 import pytest
 
+from blint.lib import swift_metadata
 from blint.lib.swift_metadata import (
     merge_swift_functions,
     parse_swift_metadata,
@@ -134,7 +135,7 @@ def _make_swift_binary(elf_style=False, extra_unreachable=0):
     protos_va = img.base + len(img.buf)
     img.alloc(_i32(proto_desc - protos_va))
 
-    img.buf += b"\x00" * (4096 - len(img.buf))  # page-pad: late reads must not run off the end
+    img.buf += b"\x00" * 16  # a little slack, not the 256 bytes a full-width read wants
     b.add_image(img.base, bytes(img.buf))
     b.sections.append(FakeSection(f"{prefix}swift5_types", types_va, 4 * (3 + extra_unreachable)))
     b.sections.append(FakeSection(f"{prefix}swift5_fieldmd", fd_car, fd_struct - fd_car + 12 * 5))
@@ -160,6 +161,19 @@ def test_parse_swift_metadata_macho_and_elf_aliases():
         assert md["protocol_count"] == 1
         assert md["protocols"] == ["Draggable"]
         assert md["access_function_count"] == 3
+
+
+def test_name_at_the_end_of_the_image_is_still_read():
+    """A string closer to the end of the image than the read width.
+
+    The reflection string section is commonly the last thing in the image,
+    so a reader that demands its full read width reports every name near the
+    end as absent.
+    """
+    binary = FakeBinary()
+    binary.add_image(0x1000, bytearray(b"TrailingType\x00"))
+    reader = swift_metadata._SwiftReader(binary)
+    assert reader.cstring(0x1000) == "TrailingType"
 
 
 def test_binary_without_swift_sections_is_empty():

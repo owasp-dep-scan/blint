@@ -67,6 +67,10 @@ class _MachoReader:
 
     def __init__(self, parsed_obj: lief.MachO.Binary) -> None:
         self._obj = parsed_obj
+        # Structures this reader could not resolve, counted by token. Parsers
+        # reached through the reader record here so an unmodelled layout is
+        # reported rather than read as an absent one.
+        self.degradations: dict[str, int] = {}
         self.imagebase: int = 0
         with contextlib.suppress(Exception):
             self.imagebase = parsed_obj.imagebase
@@ -94,6 +98,10 @@ class _MachoReader:
                 start = section.virtual_address
                 if start:
                     self._va_ranges.append((start, start + section.size))
+
+    def degrade(self, token: str) -> None:
+        """Count one structure this reader could not resolve."""
+        self.degradations[token] = self.degradations.get(token, 0) + 1
 
     def bytes_at(self, va: int, size: int) -> bytes | None:
         with contextlib.suppress(Exception):
@@ -223,12 +231,11 @@ def _parse_method_list(reader: _MachoReader, mlist_va: int | None) -> list[str]:
 def _parse_ivar_list(reader: _MachoReader, ilist_va: int | None) -> list[dict]:
     """Parse an ``ivar_list_t`` into ``[{"name", "type"}]``.
 
-    Two entry encodings exist (objc4): the legacy 32-byte ``ivar_t`` —
-    pointer to the offset slot, name pointer, type pointer, then alignment
-    and size — and the relative (small) 20-byte form used by chained-fixup
-    binaries, whose ``name``/``type`` members are int32 offsets from the
-    field's own address. The encoding is selected by the list's entsize;
-    anything else is reported as a degradation rather than misread.
+    objc4 has one ``ivar_t`` encoding: 32 bytes of pointer to the offset
+    slot, name pointer, type pointer, alignment and size. Unlike method
+    lists, ivar lists have no relative (small) form, so an entsize this
+    parser does not model is counted as a degradation rather than read
+    against a guessed layout.
     """
     if not ilist_va:
         return []
@@ -238,23 +245,14 @@ def _parse_ivar_list(reader: _MachoReader, ilist_va: int | None) -> list[dict]:
         return []
     count = min(count, _MAX_IVARS_PER_LIST)
     entsize = entsize_and_flags & _ENTSIZE_MASK
+    if entsize != 32:
+        reader.degrade(f"unmodelled_ivar_entsize_{entsize}")
+        return []
     ivars = []
     for i in range(count):
         entry = ilist_va + 8 + i * entsize
-        if entsize == 32:  # legacy: offset ptr, name ptr, type ptr, align, size
-            name = reader.cstring(reader.ptr(entry + 8))
-            ivar_type = reader.cstring(reader.ptr(entry + 16))
-        elif entsize == 20:  # relative: offset, name, type (int32), align, size
-            name_off = reader.i32(entry + 4)
-            type_off = reader.i32(entry + 8)
-            name = reader.cstring(
-                reader.ptr(entry + 4 + name_off) if name_off is not None else None
-            )
-            ivar_type = reader.cstring(
-                reader.ptr(entry + 8 + type_off) if type_off is not None else None
-            )
-        else:
-            return ivars
+        name = reader.cstring(reader.ptr(entry + 8))
+        ivar_type = reader.cstring(reader.ptr(entry + 16))
         if name:
             ivars.append({"name": name, "type": ivar_type})
     return ivars
@@ -265,8 +263,8 @@ def _parse_property_list(reader: _MachoReader, plist_va: int | None) -> list[dic
 
     ``attributes`` is the type-encoding string the runtime keeps (e.g.
     ``T@"NSString",C,N``), which carries mutability and memory semantics.
-    Legacy entries are two pointers (entsize 16); relative entries are two
-    int32 offsets from each field's own address (entsize 8).
+    A ``property_t`` is two pointers (entsize 16) and has no relative form;
+    any other entsize is counted as a degradation rather than guessed at.
     """
     if not plist_va:
         return []
@@ -276,21 +274,14 @@ def _parse_property_list(reader: _MachoReader, plist_va: int | None) -> list[dic
         return []
     count = min(count, _MAX_PROPERTIES_PER_LIST)
     entsize = entsize_and_flags & _ENTSIZE_MASK
+    if entsize != 16:
+        reader.degrade(f"unmodelled_property_entsize_{entsize}")
+        return []
     props = []
     for i in range(count):
         entry = plist_va + 8 + i * entsize
-        if entsize == 16:  # legacy: name ptr, attributes ptr
-            name = reader.cstring(reader.ptr(entry))
-            attributes = reader.cstring(reader.ptr(entry + 8))
-        elif entsize == 8:  # relative
-            name_off = reader.i32(entry)
-            attr_off = reader.i32(entry + 4)
-            name = reader.cstring(reader.ptr(entry + name_off) if name_off is not None else None)
-            attributes = reader.cstring(
-                reader.ptr(entry + 4 + attr_off) if attr_off is not None else None
-            )
-        else:
-            return props
+        name = reader.cstring(reader.ptr(entry))
+        attributes = reader.cstring(reader.ptr(entry + 8))
         if name:
             props.append({"name": name, "attributes": attributes})
     return props
@@ -637,6 +628,11 @@ def parse_objc_metadata(parsed_obj) -> dict:
     if nonlazy_categories:
         out["nonlazy_category_count"] = len(nonlazy_categories)
         out["nonlazy_categories"] = nonlazy_categories
+    # Degradations recorded deeper in the walk (an ivar or property list in a
+    # layout this parser does not model) are reported alongside the ones the
+    # section walks above counted themselves.
+    for token, count in reader.degradations.items():
+        degradations[token] = degradations.get(token, 0) + count
     if degradations:
         out["parse_degradations"] = [
             f"{token}:{count}" for token, count in sorted(degradations.items())

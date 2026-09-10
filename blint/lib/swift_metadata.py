@@ -77,9 +77,18 @@ class _SwiftReader:
         return va + struct.unpack("<i", data)[0]
 
     def cstring(self, va: int) -> str:
+        """The NUL-terminated string at ``va``, up to ``_MAX_STRING`` bytes.
+
+        Read directly rather than through ``read``, which requires the full
+        width: a string sitting within the last ``_MAX_STRING`` bytes of
+        readable space — the reflection string section is commonly the last
+        thing in the image — would otherwise read as absent.
+        """
         if not va:
             return ""
-        data = self.read(va, _MAX_STRING)
+        data = b""
+        with contextlib.suppress(Exception):
+            data = bytes(self._obj.get_content_from_virtual_address(va, _MAX_STRING))
         if not data:
             return ""
         nul = data.find(b"\x00")
@@ -123,10 +132,12 @@ def _parse_field_descriptor(reader: _SwiftReader, fd_va: int) -> list[str]:
     return names
 
 
-def _parse_type_section(reader: _SwiftReader) -> tuple[list[dict], list[dict], dict[str, int]]:
+def _parse_type_section(
+    reader: _SwiftReader,
+) -> tuple[list[dict], list[dict], dict[str, int], bool]:
     """Walk ``__swift5_types``: one entry per Swift type in the binary.
 
-    Returns ``(types, access_functions, kind_counts)``. Type entries carry
+    Returns ``(types, access_functions, kind_counts, truncated)``. Type entries carry
     the fields that name and locate the type; access functions are real
     code addresses the disassembler can seed even on stripped binaries.
     """
@@ -134,7 +145,7 @@ def _parse_type_section(reader: _SwiftReader) -> tuple[list[dict], list[dict], d
     access_functions: list[dict] = []
     kind_counts: dict[str, int] = {}
     if not reader.has_section("swift5_types"):
-        return types, access_functions, kind_counts
+        return types, access_functions, kind_counts, False
     section_va, section_size = reader.sections["swift5_types"]
     count = min(section_size // 4, _MAX_TYPES)
     truncated = section_size // 4 > _MAX_TYPES
@@ -165,8 +176,10 @@ def _parse_type_section(reader: _SwiftReader) -> tuple[list[dict], list[dict], d
             entry["field_count"] = len(fields)
         types.append(entry)
     if truncated:
-        kind_counts["truncated_over_cap"] = _MAX_TYPES
-    return types, access_functions, kind_counts
+        # Kept out of kind_counts: that dict is a histogram over type kinds,
+        # and a cap notice counted as a kind reads as a type that exists.
+        LOG.debug("Swift type section exceeds the %d-type cap; the rest is not parsed", _MAX_TYPES)
+    return types, access_functions, kind_counts, truncated
 
 
 def _parse_protos_section(reader: _SwiftReader) -> list[str]:
@@ -203,7 +216,7 @@ def parse_swift_metadata(parsed_obj) -> dict:
     if not reader.has_section("swift5_types"):
         return {}
 
-    types, access_functions, kind_counts = _parse_type_section(reader)
+    types, access_functions, kind_counts, truncated = _parse_type_section(reader)
     protocols = _parse_protos_section(reader)
     if not types:
         return {}
@@ -224,6 +237,8 @@ def parse_swift_metadata(parsed_obj) -> dict:
         "access_function_count": len(access_functions),
         "access_functions": access_functions,
     }
+    if truncated:
+        out["types_truncated"] = True
     return out
 
 

@@ -206,6 +206,28 @@ def test_garbage_input_degrades_to_parse_failed():
         assert profile["entitlements"] is None
 
 
+def test_signed_data_without_encapsulated_content_does_not_raise():
+    """A well-formed envelope around a SignedData carrying no SEQUENCE member.
+
+    The profile bytes come out of an app bundle, so a malformed one must
+    decode to a parse_error like any other garbage rather than raise out of
+    the parser and abort the bundle's analysis.
+    """
+
+    def der(tag: int, payload: bytes) -> bytes:
+        if len(payload) < 128:
+            return bytes([tag, len(payload)]) + payload
+        length = len(payload).to_bytes((len(payload).bit_length() + 7) // 8, "big")
+        return bytes([tag, 0x80 | len(length)]) + length + payload
+
+    signed_data = der(0x02, b"\x01") + der(0x31, b"")  # version, digestAlgorithms
+    oid = bytes.fromhex("2a864886f70d010702")  # 1.2.840.113549.1.7.2
+    envelope = der(0x30, der(0x06, oid) + der(0xA0, der(0x30, signed_data)))
+    profile = decode_provisioning_profile(envelope)
+    assert profile["parse_status"] == "parsed"
+    assert profile["plist"]["parse_error"] == "no_encapsulated_content"
+
+
 def test_plist_failure_is_recorded_on_its_own_block(tmp_path):
     """A CMS that parses but wraps a non-plist payload is 'parsed' with the
     failure recorded on the plist block, never silent (rule 14)."""

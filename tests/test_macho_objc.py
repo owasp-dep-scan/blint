@@ -25,6 +25,7 @@ class FakeReader:
         self.mem = mem or {}  # address -> raw bytes (for u32/i32)
         self.ptrs = ptrs or {}  # address -> resolved pointer target
         self.strings = strings or {}  # address -> python str
+        self.degradations = {}  # token -> count, as the real reader keeps
 
     def u32(self, va):
         data = self.mem.get(va)
@@ -39,6 +40,9 @@ class FakeReader:
 
     def cstring(self, va):
         return self.strings.get(va, "")
+
+    def degrade(self, token):
+        self.degradations[token] = self.degradations.get(token, 0) + 1
 
 
 def test_parse_small_method_list_resolves_selrefs():
@@ -212,47 +216,30 @@ def test_parse_ivar_list_legacy_entsize_32():
     assert ivars == [{"name": "_count", "type": "q"}, {"name": "_items", "type": '@"NSArray"'}]
 
 
-def test_parse_ivar_list_relative_entsize_20():
-    # Relative ivar_t (20 bytes): name/type are int32 offsets from their own
-    # field address — the encoding chained-fixup binaries use.
-    ilist = 0x2100
-    mem = {ilist: struct.pack("<I", 20), ilist + 4: struct.pack("<I", 1)}
-    entry = ilist + 8
-    name_field = entry + 4
-    type_field = entry + 8
-    mem[name_field] = struct.pack("<i", 0x40)
-    mem[type_field] = struct.pack("<i", 0x80)
-    ptrs = {name_field + 0x40: 0x6000, type_field + 0x80: 0x6100}
-    strings = {0x6000: "_flag", 0x6100: "B"}
-    ivars = macho_objc._parse_ivar_list(FakeReader(mem=mem, ptrs=ptrs, strings=strings), ilist)
-    assert ivars == [{"name": "_flag", "type": "B"}]
-
-
-def test_parse_ivar_list_unknown_entsize_degrades_to_partial():
-    # An entsize blint does not model must return nothing rather than guess.
+def test_parse_ivar_list_unmodelled_entsize_is_counted_not_guessed():
+    # objc4 has no relative ivar_t: an entsize this parser does not model
+    # must be reported, never read against an invented layout.
     ilist = 0x2200
-    reader = FakeReader(mem={ilist: struct.pack("<I", 24), ilist + 4: struct.pack("<I", 1)})
+    reader = FakeReader(mem={ilist: struct.pack("<I", 20), ilist + 4: struct.pack("<I", 1)})
     assert macho_objc._parse_ivar_list(reader, ilist) == []
+    assert reader.degradations == {"unmodelled_ivar_entsize_20": 1}
 
 
-def test_parse_property_list_legacy_and_relative():
-    # Legacy: entsize 16, name pointer, attributes pointer.
+def test_parse_property_list_legacy_entsize_16():
+    # property_t is two pointers: name and the type-encoding attributes.
     props = 0x2300
     mem = {props: struct.pack("<I", 16), props + 4: struct.pack("<I", 1)}
     ptrs = {props + 8: 0x7000, props + 16: 0x7100}
     strings = {0x7000: "bundleIdentifier", 0x7100: 'T@"NSString",R,N'}
     out = macho_objc._parse_property_list(FakeReader(mem=mem, ptrs=ptrs, strings=strings), props)
     assert out == [{"name": "bundleIdentifier", "attributes": 'T@"NSString",R,N'}]
-    # Relative: entsize 8, two int32 offsets from each field's own address.
+
+
+def test_parse_property_list_unmodelled_entsize_is_counted_not_guessed():
     props = 0x2400
-    mem = {props: struct.pack("<I", 8), props + 4: struct.pack("<I", 1)}
-    name_field, attr_field = props + 8, props + 12
-    mem[name_field] = struct.pack("<i", 0x30)
-    mem[attr_field] = struct.pack("<i", 0x60)
-    ptrs = {name_field + 0x30: 0x7200, attr_field + 0x60: 0x7300}
-    strings = {0x7200: "tag", 0x7300: 'T@"NSString",C,N'}
-    out = macho_objc._parse_property_list(FakeReader(mem=mem, ptrs=ptrs, strings=strings), props)
-    assert out == [{"name": "tag", "attributes": 'T@"NSString",C,N'}]
+    reader = FakeReader(mem={props: struct.pack("<I", 8), props + 4: struct.pack("<I", 1)})
+    assert macho_objc._parse_property_list(reader, props) == []
+    assert reader.degradations == {"unmodelled_property_entsize_8": 1}
 
 
 def test_parse_category_fields_and_imp_names():

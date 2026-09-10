@@ -103,6 +103,10 @@ def decode_provisioning_profile(data: bytes) -> dict:
         # eContent (an OCTET STRING).
         sd_pos = 0
         sd_end = len(signed_data)
+        # Bound before the loop: SignedData whose members hold no SEQUENCE at
+        # all never reaches the assignment inside it, and a malformed profile
+        # must decode to a parse_error rather than raise.
+        encap_oid = None
         while sd_pos < sd_end:
             tag, value, sd_pos = _ber_read(signed_data, sd_pos, sd_end)
             if tag != 0x30:
@@ -254,7 +258,12 @@ def summarize_for_metadata(profile: dict) -> dict:
 
 
 def is_expired(profile: dict, now: datetime | None = None) -> bool:
-    """True when the profile's expiry is in the past (or unparseable)."""
+    """True when the profile's expiry is in the past.
+
+    A missing or unreadable date is not an expiry: the check reports what the
+    profile states, and a profile that states nothing is left to its own
+    ``parse_status`` rather than failed on a guess.
+    """
     expires = profile.get("expires")
     if not expires:
         return False
