@@ -81,7 +81,18 @@ def test_join_drops_register_conflicting_between_paths():
     assert all(not entry["value"].startswith(("A", "B")) for entry in entries)
 
 
-def test_join_drops_slot_bytes_written_on_one_arm_only():
+def test_string_built_on_one_arm_is_reported_as_construction_evidence():
+    """A string assembled on one path is evidence, even though a later merge
+    makes the slot unknown from there onward.
+
+    The other arm stores nothing, so the merge's in-state drops the bytes and
+    an exit-aggregated reading would report nothing — but the block that
+    completed the string still holds it, and the function did construct it.
+    This is the shape that cost the exit-aggregated traversal 85 of the 99
+    strings the straight-line pass recovered on the measurement corpus:
+    buffers rebuilt for a second purpose on the dominant path (dyld's
+    ``dlopen`` wrapper, OrbStack's ObjC selectors).
+    """
     lines = [
         "cmp ecx, 1",
         "jne 4098",
@@ -93,7 +104,78 @@ def test_join_drops_slot_bytes_written_on_one_arm_only():
     cfg = _cfg([2, 2, 2], [(0, 1, "conditional"), (0, 2, "conditional"), (1, 2, "jump")])
     entries, method = _recover(lines, cfg)
     assert method == "dataflow"
-    assert [entry["value"] for entry in entries] == []
+    assert [entry["value"] for entry in entries] == ["ABCD"]
+
+
+def test_string_conflicting_at_a_merge_does_not_leak_past_the_merge():
+    """The convergence, not the decode filter, kills conflicting values.
+
+    Both arms build *different* strings in the same slot; each is reported
+    from the block that built it, but after the merge the slot's value is
+    unknown (the arms disagree), so a post-merge store fed from a register
+    the merge made unknown completes no run of its own.
+    """
+    lines = [
+        "cmp ecx, 1",
+        "jne 4098",
+        "mov dword ptr [rbp - 16], 1145258561",  # arm 1: 'ABCD'
+        "jmp 4100",
+        "mov dword ptr [rbp - 16], 1212630597",  # arm 2: 'EFGH'
+        "nop",  # merge: [rbp - 16] differs per path -> unknown from here
+        "mov byte ptr [rbp - 32], al",  # al is unknown at the merge
+        "mov byte ptr [rbp - 31], 73",  # 'I'
+        "mov byte ptr [rbp - 30], 74",  # 'J'
+        "mov byte ptr [rbp - 29], 75",  # 'K'
+        "ret",
+    ]
+    cfg = _cfg([2, 2, 7], [(0, 1, "conditional"), (0, 2, "conditional"), (1, 2, "jump")])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    values = [entry["value"] for entry in entries]
+    # Each arm's string is reported from the block that built it; 'IJK' is a
+    # real construction of known immediates; and the merge-unknown slot
+    # cannot splice any of them together into a longer run.
+    assert sorted(values) == ["ABCD", "EFGH", "IJK"]
+
+
+def test_later_slot_reuse_does_not_un_construct_an_earlier_string():
+    """The dyld ``dlopen`` shape: string built late, slot reused on the
+    dominant path after a merge, no exit holding the bytes.
+
+    The function builds 'ABCD' at [rbp-16] on one path; the loop before it
+    reuses the same slot for a counter value, so the slot is unknown along
+    the path that reaches the exit without the string. An exit-aggregated
+    picture reports nothing here; the construction still happened and the
+    block that completed it carries it.
+    """
+    lines = [
+        "xor ecx, ecx",  # block 0: loop head
+        "mov dword ptr [rbp - 16], ecx",  # slot reused for a counter
+        "add ecx, 1",
+        "cmp ecx, 10",
+        "jl 4096",  # back edge to block 0
+        "cmp edx, 3",  # block 1: loop exit, branch on something else
+        "jne 4104",
+        "mov dword ptr [rbp - 16], 1145258561",  # block 2: 'ABCD'
+        "jmp 4105",
+        "nop",  # block 3: merge — slot is 'ABCD' on one path, counter on the other
+        "mov eax, dword ptr [rbp - 16]",  # read (value unknown at the merge)
+        "ret",  # block 4: the only exit; no exit state holds 'ABCD'
+    ]
+    cfg = _cfg(
+        [5, 2, 2, 1, 2],
+        [
+            (0, 0, "conditional"),
+            (0, 1, "conditional"),
+            (1, 2, "conditional"),
+            (1, 3, "conditional"),
+            (2, 3, "jump"),
+            (3, 4, "fallthrough"),
+        ],
+    )
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert "ABCD" in [entry["value"] for entry in entries]
 
 
 def test_join_keeps_slot_bytes_written_identically_on_both_arms():

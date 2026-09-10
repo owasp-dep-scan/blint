@@ -24,12 +24,21 @@ with a worklist; at a merge point a register (or frame-slot byte) survives
 only when every contributing path agrees on its value — a value assembled
 on a not-taken branch path can no longer leak into the reported result,
 which is what the decode filters used to compensate for. Unreachable
-blocks never enter the worklist and contribute nothing. The recovered
-frame picture is the join of the out-states of the reachable exit blocks,
-so a string is reported only when every path to leaving the function
-leaves those bytes in place. Blocks that follow an indirect branch have no
-incoming edge in the CFG (an indirect transfer can land anywhere), so they
-are unreachable to this pass as well.
+blocks never enter the worklist and contribute nothing, so residue after a
+``ret`` or behind an indirect branch stays excluded. Blocks that follow an
+indirect branch have no incoming edge in the CFG (an indirect transfer can
+land anywhere), so they are unreachable to this pass as well.
+
+What is *reported* is the set of strings fully assembled in any reachable
+block's state (``harvest_strings_over_cfg``): evidence of construction. A
+buffer a function builds on one path and reuses for something else on
+another makes the slot unknown from the merge onward, but the block that
+completed the string still holds it, and a later reuse cannot un-construct
+what was built — which is exactly the case an exit-aggregated picture (or
+the straight-line pass's last-write-wins scan) loses. Values that conflict
+at a merge go unknown and never complete a run downstream of the conflict,
+so the convergence, not the decode filters, is what keeps loop-carried and
+path-dependent garbage out.
 
 Loops terminate by iteration cap: a block is visited at most
 ``MAX_BLOCK_VISITS`` times. Registers under loop-carried arithmetic meet
@@ -1066,7 +1075,12 @@ def interpret_over_cfg(
     """Iterate the function's blocks to a fixed point; None when the cap is hit.
 
     The state returned is the join over the reachable exit blocks'
-    out-states: the frame picture every path out of the function agrees on.
+    out-states: what holds at every way out of the function. That is the
+    right aggregate for a caller that needs a value guaranteed to hold at
+    exit, and the wrong one for construction evidence — a string rebuilt for
+    a second purpose on another path is gone from every exit's state, so
+    string recovery uses :func:`harvest_strings_over_cfg` instead.
+
     Blocks with no successor (ret/trap/unresolved jumps) are the exits; when
     every block has one - a loop back to the top that leaves the function
     only through a call or a trap - the join runs over every visited block
@@ -1096,6 +1110,49 @@ def interpret_over_cfg(
     # function nothing was learned about, not a cap hit. Those are two
     # different outcomes to the caller, so this returns an empty state.
     return result if result is not None else FrameState(model)
+
+
+def harvest_strings_over_cfg(
+    lines: list[str],
+    model: ArchModel,
+    blocks: list[dict],
+    edges: list[dict],
+) -> list[dict] | None:
+    """Recover the strings a function constructs at any reachable program point.
+
+    Runs the same converged dataflow as :func:`interpret_over_cfg`, but reads
+    the result out of every reachable block's out-state instead of one
+    exit-aggregated picture. A string a function assembles on one path is
+    evidence of construction even when a later merge sees the slot reused for
+    something else on another path: the reuse makes the slot unknown from the
+    merge onward, so an exit-aggregated reading loses the earlier
+    construction, while the block whose state completed it still holds it.
+    Unreachable blocks have no out-state and contribute nothing, and values
+    conflicting at a merge go unknown exactly as before, so nothing downstream
+    of a conflict can complete a run. The same run reported from several
+    blocks' states is kept once.
+
+    Returns None when the iteration cap was hit. Raises ValueError when the
+    blocks do not tile the assembly text.
+    """
+    converged = _converge_over_cfg(lines, model, blocks, edges)
+    if converged is None:
+        return None
+    _, _, _, out_states = converged
+    recovered: list[dict] = []
+    seen: set[str] = set()
+    for state in out_states:
+        if state is None:
+            continue
+        for run in _decode_runs(iter_frame_runs(state)):
+            key = run["value"].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            recovered.append(run)
+            if len(recovered) >= MAX_RUNS_PER_FUNCTION:
+                return recovered
+    return recovered
 
 
 # ---------------------------------------------------------------------------
@@ -1351,10 +1408,12 @@ def recover_function_stack_strings_with_method(
     """Recover one function's stack-built strings, preferring the CFG dataflow.
 
     Returns ``(entries, method)`` where method names how the function was
-    analyzed: ``"dataflow"`` (CFG fixed point), ``"fallback"`` (no usable
-    CFG, or one past the instruction budget — straight-line pass), ``"cap_hit"`` (iteration cap reached; no
-    entries, because a half-converged state is exactly the residue this
-    pass exists to remove) or ``"skipped"`` (nothing to analyze).
+    analyzed: ``"dataflow"`` (CFG fixed point, harvested from every reachable
+    block's state — see :func:`harvest_strings_over_cfg`), ``"fallback"``
+    (no usable CFG, or one past the instruction budget — straight-line pass),
+    ``"cap_hit"`` (iteration cap reached; no entries, because a
+    half-converged state is exactly the residue this pass exists to remove)
+    or ``"skipped"`` (nothing to analyze).
     """
     assembly = func_data.get("assembly") or ""
     if not assembly:
@@ -1370,10 +1429,10 @@ def recover_function_stack_strings_with_method(
     # hide exactly that bug, so it warns.
     tiles = _block_line_spans(blocks, lines) is not None
     if tiles and len(lines) <= MAX_INSTRUCTIONS:
-        state = interpret_over_cfg(lines, model, blocks, edges)
-        if state is None:
+        runs = harvest_strings_over_cfg(lines, model, blocks, edges)
+        if runs is None:
             return [], "cap_hit"
-        return _decode_runs(iter_frame_runs(state)), "dataflow"
+        return runs, "dataflow"
     if blocks and not tiles:
         LOG.warning(
             "stack strings: CFG blocks do not tile the %d-line assembly text for %s;"
