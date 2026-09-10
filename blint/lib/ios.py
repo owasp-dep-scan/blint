@@ -14,6 +14,11 @@ import shutil
 import tempfile
 import zipfile
 
+from blint.lib.provisioning import (
+    decode_provisioning_profile,
+    load_embedded_profile,
+    summarize_for_metadata,
+)
 from blint.lib.utils import is_exe
 from blint.logger import LOG
 
@@ -369,6 +374,14 @@ def _collect_ios_app_in(temp_dir: str, app_file: str) -> tuple[dict | None, str 
     bundle_info = _read_bundle_info(app_dir)
     if manifest := read_privacy_manifest(app_dir):
         bundle_info["privacy_manifest"] = manifest
+    # The provisioning profile ties the bundle to a signing identity and an
+    # app ID; its validity window and entitlements are findings-grade facts
+    # (expired / development / wildcard) that live outside the Mach-O.
+    if embedded := load_embedded_profile(app_dir):
+        source_name, raw = embedded
+        profile = decode_provisioning_profile(raw)
+        profile["source"] = source_name
+        bundle_info["provisioning_profile"] = summarize_for_metadata(profile)
     binaries = _collect_bundle_binaries(app_dir, bundle_info)
     if not binaries:
         LOG.warning(f"No Mach-O binaries found in iOS app {app_file}; skipping")
@@ -397,6 +410,11 @@ def enrich_with_bundle_context(
     if bundle_path:
         context["bundle_path"] = bundle_path
     metadata[context_key] = context
+    # The provisioning profile governs the whole bundle; every member carries
+    # the block so the profile checks run per binary. Decoded at collection
+    # time (pure bytes→dict), validity is evaluated per run by the checks.
+    if profile := bundle_info.get("provisioning_profile"):
+        metadata["provisioning_profile"] = profile
     # Replace the extraction temp path with a stable bundle-relative path so
     # reports identify the binary by its location inside the app.
     if bundle_path:

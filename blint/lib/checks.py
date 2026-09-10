@@ -2,6 +2,7 @@
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
+from blint.lib.provisioning import application_identifier, is_development, is_expired, is_wildcard
 from blint.lib.utils import parse_pe_manifest
 
 
@@ -75,6 +76,70 @@ def check_codesign(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -
     if metadata.get("code_signature"):
         code_signature = metadata.get("code_signature")
         return not code_signature or code_signature.get("available") is not False
+    return True
+
+
+def _profile_or_clean(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """The bundle's decoded provisioning profile, or None when nothing is judged.
+
+    A binary without an embedded profile is clean for the profile rules: the
+    absence of a profile is the ordinary case (App Store distribution), and
+    an unparseable profile is reported through its own ``parse_status``
+    rather than guessed at.
+    """
+    profile = metadata.get("provisioning_profile")
+    if isinstance(profile, dict) and profile.get("parse_status") == "parsed":
+        return profile
+    return None
+
+
+def check_profile_expired(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Fails when the embedded profile's validity window closed.
+
+    An expired profile stops the app from launching (or blocks distribution
+    in the enterprise case), so this reports the date it lapsed.
+    """
+    profile = _profile_or_clean(metadata)
+    if profile is None:
+        return True
+    if is_expired(profile):
+        return f"profile '{profile.get('name')}' expired {profile.get('expires')}"
+    return True
+
+
+def check_profile_development(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Fails when the shipped profile provisions a development build.
+
+    A development profile signs ``get-task-allow``: any process entitled to
+    debug can attach to the shipping binary, and the app only runs on the
+    devices listed in the profile. Release builds must not carry one.
+    """
+    profile = _profile_or_clean(metadata)
+    if profile is None:
+        return True
+    if is_development(profile):
+        detail = f"get-task-allow in profile '{profile.get('name')}'"
+        if (profile.get("entitlements") or {}).get("aps-environment") == "development":
+            detail += ", development APNs environment"
+        return detail
+    return True
+
+
+def check_profile_wildcard(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Fails when the profile's application identifier is a wildcard.
+
+    A ``<team-id>.*`` identifier lets the signing identity cover any bundle
+    ID, which weakens what the signature attests.
+    """
+    profile = _profile_or_clean(metadata)
+    if profile is None:
+        return True
+    if is_wildcard(profile):
+        return f"wildcard application identifier '{application_identifier(profile)}'"
     return True
 
 

@@ -18,6 +18,11 @@ import os
 import plistlib
 
 from blint.lib.ios import bundle_info_from_plist, read_privacy_manifest
+from blint.lib.provisioning import (
+    decode_provisioning_profile,
+    load_embedded_profile,
+    summarize_for_metadata,
+)
 from blint.lib.utils import is_exe
 from blint.logger import LOG
 
@@ -184,6 +189,14 @@ def _bundle_info(bundle_dir: str, kind: str) -> dict:
         info.setdefault("bundle_name", os.path.basename(bundle_dir.rstrip(os.sep)))
     if manifest := read_privacy_manifest(bundle_dir, _EMBEDDED_DIRS.get(kind, ())):
         info["privacy_manifest"] = manifest
+    # macOS distribution builds carry Contents/embedded.provisionprofile;
+    # the iOS spelling (embedded.mobileprovision at the bundle root) is
+    # accepted too so one reader serves both bundle shapes.
+    if embedded := load_embedded_profile(bundle_dir):
+        source_name, raw = embedded
+        profile = decode_provisioning_profile(raw)
+        profile["source"] = source_name
+        info["provisioning_profile"] = summarize_for_metadata(profile)
     return info
 
 

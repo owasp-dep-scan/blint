@@ -199,6 +199,42 @@
     - gobinary
     - x86_64-executable
     - x86_64-exec
+- id: CHECK_PROFILE_EXPIRED
+  title: Expired Provisioning Profile
+  description: |
+    The binary ships inside a bundle whose embedded provisioning profile
+    (embedded.mobileprovision / embedded.provisionprofile) has passed its
+    ExpirationDate. The profile is what ties the code signature to a signing
+    identity and an app ID; once it lapses the app stops launching (or stops
+    distributing, for enterprise builds). Expiry is evaluated at scan time
+    from the profile's own dates.
+  severity: high
+  exe_types:
+    - MachO
+    - genericbinary
+- id: CHECK_PROFILE_DEVELOPMENT
+  title: Development Provisioning Profile Shipped
+  description: |
+    The binary ships inside a bundle whose embedded provisioning profile is
+    a development profile: it signs the get-task-allow entitlement, which
+    lets any entitled debugger attach to the shipping binary, and it only
+    runs on the devices listed in the profile. Release and distribution
+    builds must be signed with a distribution profile instead.
+  severity: medium
+  exe_types:
+    - MachO
+    - genericbinary
+- id: CHECK_PROFILE_WILDCARD
+  title: Wildcard Provisioning Profile
+  description: |
+    The binary ships inside a bundle whose embedded provisioning profile
+    covers a wildcard application identifier (<team-id>.*). A wildcard lets
+    the signing identity attest any bundle ID, which weakens what the
+    signature proves about the shipping app.
+  severity: medium
+  exe_types:
+    - MachO
+    - genericbinary
 - id: CHECK_TRUST_INFO
   title: Requires Elevated Execution
   description: |
