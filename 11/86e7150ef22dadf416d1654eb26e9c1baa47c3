@@ -1,0 +1,18 @@
+blint/lib/absint.py
+  h_6a4cc5cdf68def 44-51,58-64,130-135,398-408,417-420,424-445,550-551,804-807,809-810,1135-1147,1360,1374-1376,1391,1417-1421,1463,1465
+tests/test_absint_call_args.py
+  h_6a4cc5cdf68def 329-331,396-475,617-649
+tests/test_absint_dataflow.py
+  h_6a4cc5cdf68def 590-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1186e7150ef22dadf416d1654eb26e9c1baa47c3",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
