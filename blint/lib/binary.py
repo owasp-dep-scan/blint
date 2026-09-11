@@ -9,7 +9,7 @@ import sys
 import warnings
 import zlib
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import lief
@@ -23,6 +23,7 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.absint import analyze_call_site_arguments, decode_pointer_string
 from blint.lib.banners import is_probable_banner_string
 from blint.lib.codesign_macho import SUPERBLOB_MAGIC, parse_superblob, signature_summary
 from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
@@ -3282,6 +3283,20 @@ def parse(
             metadata["stack_strings_coverage"] = stack_strings_coverage
             if stack_strings:
                 metadata["stack_strings"] = stack_strings
+            # Call-site constant arguments (P4.7): the recovered constants an
+            # image passes to resolved callees, aggregated into one bounded
+            # block. This is the only format-aware spot the recovery needs:
+            # pointing a constant at the string section it names is a question
+            # about this binary's memory, answered here and nowhere else.
+            callsite_entries, callsite_coverage = analyze_call_site_arguments(
+                metadata["disassembled_functions"],
+                metadata.get("llvm_target_tuple", ""),
+                metadata.get("binary_type", ""),
+                resolve_string=_pointer_string_resolver(parsed_obj),
+            )
+            metadata["call_site_arguments_coverage"] = callsite_coverage
+            if callsite_entries:
+                metadata["call_site_arguments"] = callsite_entries
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
                     metadata["disassembled_functions"],
@@ -4100,6 +4115,58 @@ def _pe_section_bytes(parsed_obj: lief.PE.Binary, wanted: Iterable[str]) -> list
 def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
     """Return the raw bytes of the PE data sections that can hold IOCTL tables."""
     return _pe_section_bytes(parsed_obj, IOCTL_TABLE_SECTIONS)
+
+
+# A recovered call-site constant is only treated as a candidate pointer when
+# it could name an address: below this it is a small integer (a flag, a size,
+# a count) and resolving it would be reading a section it does not name.
+_POINTER_STRING_MIN_VALUE = 0x10000
+# How many bytes to read at a candidate pointer, and how long the run must be
+# to count as the string it points at. The longer minimum (the stack-string
+# decoder accepts three) keeps near-coincidental three-byte decodes out.
+_POINTER_STRING_MAX_READ = 256
+_POINTER_STRING_MIN_LEN = 4
+
+
+def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
+    """Build the constant→string resolver for the call-site arguments block.
+
+    Returns a callable mapping one recovered integer constant to the string
+    it points at in this image, or None. The constant is a candidate pointer
+    only when it lands inside a mapped section of *this* binary — the one
+    format-aware fact the format-agnostic recovery cannot know for itself.
+    Results are memoized per constant because the same value is recovered at
+    many call sites.
+    """
+    ranges: list[tuple[int, int]] = []
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for section in parsed_obj.sections:
+            va = int(section.virtual_address or 0)
+            size = int(section.size or 0)
+            if va and size:
+                ranges.append((va, va + size))
+    ranges.sort()
+    resolved: dict[int, str | None] = {}
+
+    def resolve(value: int) -> str | None:
+        if value < _POINTER_STRING_MIN_VALUE:
+            return None
+        if value in resolved:
+            return resolved[value]
+        result = None
+        if any(start <= value < end for start, end in ranges):
+            data = b""
+            with contextlib.suppress(Exception):
+                data = bytes(
+                    parsed_obj.get_content_from_virtual_address(
+                        value, _POINTER_STRING_MAX_READ
+                    )
+                )
+            result = decode_pointer_string(data, _POINTER_STRING_MIN_LEN)
+        resolved[value] = result
+        return result
+
+    return resolve
 
 
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
