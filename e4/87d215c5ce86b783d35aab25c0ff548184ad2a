@@ -1,0 +1,30 @@
+blint/data/annotations/review_callsites_generic.yml
+  h_6a4cc5cdf68def 1-36
+blint/lib/absint.py
+  h_6a4cc5cdf68def 82,84,1479-1663
+blint/lib/binary.py
+  h_6a4cc5cdf68def 12,26,3286-3299,4120-4171
+blint/lib/binary_reviews.py
+  h_6a4cc5cdf68def 16,103-243,359-361,400
+blint/lib/cache.py
+  h_6a4cc5cdf68def 77-80
+blint/lib/driver_ioctl.py
+  h_6a4cc5cdf68def 640-643,651-658,660,664-684,686-703
+docs/METADATA.md
+  h_6a4cc5cdf68def 138-143
+tests/test_absint_call_args.py
+  h_6a4cc5cdf68def 650-678
+tests/test_callsite_block.py
+  h_6a4cc5cdf68def 1-294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e487d215c5ce86b783d35aab25c0ff548184ad2a",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
