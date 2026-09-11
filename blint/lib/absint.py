@@ -1106,10 +1106,12 @@ def _converge_over_cfg(
     join of its visited predecessors' out-states (the join's identity is the
     unconstrained state, not the empty one); when out-states stop changing
     the pass has reached its fixed point. Blocks are limited to
-    ``MAX_BLOCK_VISITS`` visits — loop-carried values meet at conflicts and
-    go unknown long before that, so the cap only fires on pathological
-    inputs, and returning None (rather than a half-converged state) keeps
-    such a function's residue out of every result built on this pass.
+    ``MAX_BLOCK_VISITS`` visits — conflicting values go unknown within a few
+    rounds, but a change propagates along every intra-function branch edge,
+    so a long function reaches its fixed point over many revisit waves and
+    the cap is the backstop for the pathological remainder. Returning None
+    (rather than a half-converged state) keeps such a function's residue out
+    of every result built on this pass.
 
     Returns the block→line spans, the successor and predecessor lists and
     the final out-state per block (None for blocks never reached), or None

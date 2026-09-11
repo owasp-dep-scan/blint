@@ -114,11 +114,14 @@ DEVICE_IOCTL_IMPORTS: set[str] = {
 
 # Callees whose named argument is the path being opened. Only an entry whose
 # constant resolved to a string in the image reports — a path assembled at
-# runtime is the stack-string lane's evidence, not this rule's.
+# runtime is the stack-string lane's evidence, not this rule's. The wide
+# forms are listed for the position, not for reach: the block's resolver
+# decodes ASCII only, so CreateFileW cannot report until it decodes UTF-16.
 CALLSITE_PATH_ARGUMENTS: dict[str, int] = {
-    "createfilea": 2,
-    "createfilew": 2,
-    "createfile2": 1,
+    # lpFileName is the first parameter of every CreateFile form.
+    "createfilea": 0,
+    "createfilew": 0,
+    "createfile2": 0,
     "open": 0,
     "open64": 0,
     "fopen": 0,
@@ -142,6 +145,8 @@ CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS: dict[str, int] = {
 }
 # Callees that take the algorithm as a *name*: only an entry whose constant
 # resolved to a string reports, and the string is the algorithm name itself.
+# BCryptOpenAlgorithmProvider's pszAlgId is a wide string, so it carries the
+# same ASCII-only limit the path table notes.
 CALLSITE_CRYPTO_ALGORITHM_STRING_ARGUMENTS: dict[str, int] = {
     "bcryptopenalgorithmprovider": 1,
     "evp_get_cipherbyname": 0,
@@ -154,6 +159,22 @@ CALLSITE_PORT_ARGUMENTS: dict[str, int] = {
     "htons": 0,
     "ntohs": 0,
 }
+
+
+def _reusable_call_site_block(metadata: dict) -> list[dict] | None:
+    """The exported call-site block when it can stand in for the recovery.
+
+    Returns the entries — an empty list included, which is an answer and not
+    an absence — when the block was built and is complete, and None when the
+    caller must run the per-function recovery itself. A block the parse never
+    built has no coverage; a block that hit its entry bound is missing
+    entries, and a control code dropped by that bound must not read as a
+    control code the image does not issue.
+    """
+    coverage = metadata.get("call_site_arguments_coverage")
+    if not isinstance(coverage, dict) or coverage.get("entries_truncated"):
+        return None
+    return metadata.get("call_site_arguments") or []
 
 
 def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
@@ -397,7 +418,7 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
             metadata.get("disassembled_functions") or {},
             arch_target=str(metadata.get("llvm_target_tuple") or ""),
             binary_format=str(metadata.get("binary_type") or "PE"),
-            call_site_entries=metadata.get("call_site_arguments"),
+            call_site_entries=_reusable_call_site_block(metadata),
         )
         if not client_codes:
             return []

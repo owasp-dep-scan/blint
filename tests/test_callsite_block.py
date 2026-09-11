@@ -14,10 +14,12 @@ Three layers:
   call: which path, which algorithm, which port.
 """
 
+import pytest
+
 from blint.lib.absint import (
     MAX_CALLSITE_ARGUMENT_ENTRIES,
-    MAX_CALLSITE_ENTRIES_PER_FUNCTION,
     analyze_call_site_arguments,
+    decode_pointer_string,
 )
 from blint.lib.driver_ioctl import collect_client_ioctls
 
@@ -237,7 +239,7 @@ def test_capability_rule_names_path_algorithm_and_port():
         [
             {
                 "callee": "KERNEL32.dll::CreateFileW",
-                "argument": 2,
+                "argument": 0,
                 "value": 4198412,
                 "string": "\\\\.\\PhysicalDrive0",
                 "functions": ["open_device"],
@@ -269,10 +271,11 @@ def test_capability_rule_stays_quiet_on_uninterpretable_positions():
 
     metadata = _rule_metadata(
         [
-            # Right callee, wrong position.
-            {"callee": "CreateFileW", "argument": 0, "value": 1, "string": "x", "functions": ["f"]},
+            # Right callee, wrong position: lpFileName is argument 0, so a
+            # string sitting in dwShareMode's position is not a path.
+            {"callee": "CreateFileW", "argument": 2, "value": 1, "string": "x", "functions": ["f"]},
             # Path callee whose constant resolved to no string.
-            {"callee": "CreateFileW", "argument": 2, "value": 42, "functions": ["f"]},
+            {"callee": "CreateFileW", "argument": 0, "value": 42, "functions": ["f"]},
             # Crypto callee whose constant is no documented algorithm.
             {"callee": "CCCrypt", "argument": 1, "value": 12345, "functions": ["f"]},
             # No block at all.
@@ -291,4 +294,84 @@ def test_capability_rule_is_registered_and_loads():
     sources = review_rule_sources.get("CALL_SITE_CONSTANT_ARGUMENTS")
     assert sources and any("review_callsites_generic" in str(source) for source in sources), (
         "the rule's annotation file was not loaded"
+    )
+
+
+def test_pointer_string_resolver_reads_a_real_image():
+    """The resolver's plumbing, proved against a real binary's own sections.
+
+    The dataflow rarely hands it a pointer — position-independent code
+    materialises string addresses with ``adrp``/``add`` and rip-relative
+    ``lea``, which the model keeps symbolic — so the resolver is exercised
+    here with an address taken from the image itself rather than from a
+    recovered constant. Without this the whole seam ships untested on any
+    real input.
+    """
+    import lief
+
+    from blint.lib.binary import _pointer_string_resolver
+
+    parsed = lief.parse("/bin/ls")
+    if parsed is None:  # pragma: no cover - platform without the fixture
+        pytest.skip("/bin/ls is not parseable here")
+    resolve = _pointer_string_resolver(parsed)
+    section = next(
+        (s for s in parsed.sections if s.name == "__cstring" and s.size), None
+    )
+    if section is None:  # pragma: no cover - no C string section
+        pytest.skip("no __cstring section")
+    blob = bytes(parsed.get_content_from_virtual_address(section.virtual_address, 4096))
+    offset = 0
+    expected = None
+    while offset < len(blob) and expected is None:
+        end = blob.find(b"\x00", offset)
+        if end == -1:
+            break
+        candidate = blob[offset:end].decode("ascii", "replace")
+        if decode_pointer_string(blob[offset:]) == candidate:
+            expected = candidate
+            break
+        offset = end + 1
+    assert expected, "no decodable C string found to resolve against"
+    assert resolve(section.virtual_address + offset) == expected
+    # An address in no mapped section, and a small integer, stay unresolved.
+    assert resolve(1) is None
+    assert resolve(0xDEAD_BEEF_0000) is None
+
+
+def test_decode_pointer_string_rejects_residue():
+    assert decode_pointer_string(b"/etc/passwd\x00rest") == "/etc/passwd"
+    # Below the longer minimum this decoder uses: three printable bytes are
+    # too easy to land on by chance.
+    assert decode_pointer_string(b"abc\x00") is None
+    assert decode_pointer_string(b"\x80\x81\x82\x83") is None
+    assert decode_pointer_string(b"") is None
+
+
+def test_driver_codes_fall_back_when_the_block_is_absent_or_truncated():
+    """A block that cannot stand in for the recovery must not be believed.
+
+    An empty block is an answer (the recovery ran and found nothing); a
+    missing or truncated one is not, and a control code dropped by the
+    entry bound must not read as a code the image does not issue.
+    """
+    from blint.lib.binary_reviews import _reusable_call_site_block
+
+    assert _reusable_call_site_block({}) is None
+    assert _reusable_call_site_block({"call_site_arguments_coverage": {"entries": 0}}) == []
+    entries = [{"callee": "DeviceIoControl", "argument": 1, "value": 0x222000}]
+    assert (
+        _reusable_call_site_block(
+            {"call_site_arguments": entries, "call_site_arguments_coverage": {"entries": 1}}
+        )
+        == entries
+    )
+    assert (
+        _reusable_call_site_block(
+            {
+                "call_site_arguments": entries,
+                "call_site_arguments_coverage": {"entries": 1, "entries_truncated": True},
+            }
+        )
+        is None
     )
