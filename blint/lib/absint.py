@@ -41,19 +41,27 @@ so the convergence, not the decode filters, is what keeps loop-carried and
 path-dependent garbage out.
 
 Loops terminate by iteration cap: a block is visited at most
-``MAX_BLOCK_VISITS`` times. Registers under loop-carried arithmetic meet
-at conflicting values and go unknown within a couple of rounds, so the cap
-is a backstop, not the normal exit. When it is hit the function's state is
-untrustworthy and *no strings are returned for it*; the caller counts the
-event in ``stack_strings_coverage.functions_iteration_cap_hit`` so a cap
-hit is observable rather than silent.
+``MAX_BLOCK_VISITS`` times. Values that conflict at a merge go unknown
+within a few rounds, but each out-state change propagates along every
+intra-function branch edge, so long functions converge through many revisit
+waves before the fixed point; the cap is a backstop for the pathological
+remainder. When it is hit the function's state is untrustworthy and *no
+strings are returned for it*; the caller counts the event in
+``stack_strings_coverage.functions_iteration_cap_hit`` so a cap hit is
+observable rather than silent.
 
 Functions whose metadata carries no usable CFG (blocks that do not tile
 the assembly text, or no CFG at all) fall back to the straight-line pass,
 which is also what the public helpers here run when handed a bare
 assembly listing. A ``bl``/``blr`` (ARM64) or ``call`` (x86) clobbers the
 caller-saved registers exactly as the ABI demands; callee-saved registers
-and the frame registers survive. Any instruction writing a register the
+and the frame registers survive. Tail-kind branches (``jmp`` on x86,
+``b``/``br`` on ARM64) share one semantics across the models: a branch
+whose target is inside the function is pure control flow — the CFG
+carries the edge and the state flows along it — while a branch that
+leaves the function is a tail call and clobbers (:meth:`ArchModel.
+apply_branch` is the one place that line is drawn; without a CFG the
+conservative reading applies). Any instruction writing a register the
 model does not understand invalidates it, and stores through unknown
 registers are ignored.
 
@@ -119,8 +127,12 @@ MAX_RUNS_PER_FUNCTION = 64
 # activity, and scanning entire large functions costs more than it recovers.
 MAX_INSTRUCTIONS = 4000
 # A block is visited at most this many times before the function is declared
-# non-converged and dropped from recovery (see module docstring).
-MAX_BLOCK_VISITS = 32
+# non-converged and dropped from recovery (see module docstring). Values that
+# conflict go unknown within a few rounds, but a change now propagates along
+# every intra-function branch edge, so long functions need more revisit waves
+# than the pre-edge semantics did; at 64 the functions the cap still drops on
+# real Rust binaries are the genuinely pathological handful.
+MAX_BLOCK_VISITS = 64
 
 # Characters that appear in the string literals worth recovering: paths,
 # registry keys, device names, module names and API names. The set is ASCII-only
@@ -383,7 +395,17 @@ class ArchModel:
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def step(self, state: FrameState, text: str) -> None:  # pragma: no cover - interface
+    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:  # pragma: no cover - interface
+        """Apply one instruction's semantics to the state.
+
+        ``leaves_function`` says what the caller knows about a tail-kind
+        branch's target (``jmp`` on x86, ``b``/``br`` on ARM64): False when
+        the CFG carries the branch's edge to a block inside the function,
+        True when it does not — the straight-line pass, any block whose
+        terminator left no edge, and any tail-kind mnemonic off a block's
+        final line, where the target cannot be placed. Only tail-kind
+        mnemonics consult it; the default is the conservative reading.
+        """
         raise NotImplementedError
 
     def call_kind(self, mnemonic: str) -> str | None:  # pragma: no cover - interface
@@ -392,11 +414,34 @@ class ArchModel:
         'call' means the mnemonic always transfers control to a callee (x86
         ``call``, ARM64 ``bl``/``blr``); 'tail' means the mnemonic is an
         ordinary branch that only becomes a call when its resolved target
-        leaves the function, which the disassembler annotates only for the
-        function's final instruction. Callers must not treat a 'tail' line
-        as a call site without that annotation.
+        leaves the function — the test :meth:`apply_branch` applies, from the
+        CFG's edges during the dataflow and from the disassembler's
+        last-line annotation when resolving callee names. Callers must not
+        treat a 'tail' line as a call site without one of those two tests.
         """
         raise NotImplementedError
+
+    def apply_branch(self, state: FrameState, text: str, leaves_function: bool) -> bool:
+        """Consume one control-transfer instruction, applying the branch semantics.
+
+        This is the single place the call-vs-branch clobber decision lives,
+        shared by both models. One semantics: a 'call' mnemonic always
+        clobbers the caller-saved registers exactly as the ABI demands; a
+        'tail' branch clobbers only when it leaves the function, because a
+        branch whose target is inside the function is pure control flow —
+        the CFG already carries that edge, and destroying the state that
+        flows along it truncates recovery at every block ending in an
+        unconditional jump. Returns True when the instruction was a
+        control transfer, False when the caller must decode it as an
+        ordinary instruction.
+        """
+        parts = text.split(None, 1) if text else []
+        kind = self.call_kind(parts[0]) if parts else None
+        if kind is None:
+            return False
+        if kind == "call" or leaves_function:
+            self.clobber_call_registers(state)
+        return True
 
     def clobber_call_registers(self, state: FrameState) -> None:
         for name in self.call_clobbered:
@@ -502,11 +547,8 @@ class X86_64Model(ArchModel):
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:
         state.registers[family] = value & ((1 << (width * 8)) - 1)
 
-    def step(self, state: FrameState, text: str) -> None:
-        if text.startswith(("call", "jmp")):
-            # A call returns a value in rax and destroys the volatile registers;
-            # keeping stale values across it is how a reconstruction goes wrong.
-            self.clobber_call_registers(state)
+    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:
+        if self.apply_branch(state, text, leaves_function):
             return
 
         if store := _STORE_RE.match(text):
@@ -759,14 +801,13 @@ class Arm64Model(ArchModel):
             return "sp", value[1]
         return None
 
-    def step(self, state: FrameState, text: str) -> None:
-        lowered = text.split(None, 1)[0].lower() if text else ""
-        if lowered in ("bl", "blr", "blraa", "blrab"):
-            self.clobber_call_registers(state)
+    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:
+        # bl/blr always call; b/br are tail calls exactly when they leave the
+        # function (see apply_branch — the one place that line is drawn).
+        if self.apply_branch(state, text, leaves_function):
             return
-        if lowered.startswith("b.") or lowered in (
-            "b", "br", "ret", "brk", "cbz", "cbnz", "tbz", "tbnz"
-        ):
+        lowered = text.split(None, 1)[0].lower() if text else ""
+        if lowered.startswith("b.") or lowered in ("ret", "brk", "cbz", "cbnz", "tbz", "tbnz"):
             # Pure control flow writes nothing.
             return
 
@@ -1091,8 +1132,19 @@ def _converge_over_cfg(
             visits[index] -= 1
             continue
         start, end = spans[index]
-        for line in lines[start:end]:
-            model.step(state, line.strip())
+        # A tail-kind terminator clobbers only when it leaves the function:
+        # an outgoing edge means the branch stays inside, no edge means the
+        # target is outside the window (tail call) or unresolvable
+        # (indirect), and both are treated as leaving. Only the block's last
+        # line can be its terminator; earlier lines default to the
+        # conservative reading.
+        block_leaves_function = not successors[index]
+        for offset, line in enumerate(lines[start:end]):
+            model.step(
+                state,
+                line.strip(),
+                leaves_function=block_leaves_function if offset == end - start - 1 else True,
+            )
         previous = out_states[index]
         if (
             previous is None
@@ -1305,6 +1357,7 @@ def _call_site_records(
     lines: list[str],
     model: ArchModel,
     spans: list[tuple[int, int]],
+    successors: list[list[int]],
     predecessors: list[list[int]],
     out_states: list[FrameState | None],
     arg_families: tuple[str, ...],
@@ -1318,7 +1371,9 @@ def _call_site_records(
     clobbers the argument registers at the call itself, so this is the only
     point the incoming arguments are observable. Only integer constants are
     reported; a symbolic pointer or an unknown value yields None for that
-    position, never a stale value from before the call sequence.
+    position, never a stale value from before the call sequence. Tail-kind
+    branches step with the same leaves-function decision the convergence
+    pass used, so the replayed state matches it exactly.
 
     The replay is O(lines) time and holds one FrameState at a time; the
     records are O(call sites) small dicts, which is the only extra memory
@@ -1333,6 +1388,7 @@ def _call_site_records(
         state = _block_in_state(model, block_index, predecessors, out_states)
         if state is None:
             continue
+        block_leaves_function = not successors[block_index]
         for offset, line in enumerate(lines[start:end]):
             text = line.strip()
             if not text:
@@ -1358,7 +1414,11 @@ def _call_site_records(
                         "arguments": arguments,
                     }
                 )
-            model.step(state, text)
+            model.step(
+                state,
+                text,
+                leaves_function=block_leaves_function if offset == end - start - 1 else True,
+            )
     return records
 
 
@@ -1400,9 +1460,9 @@ def recover_call_site_arguments_with_method(
     converged = _converge_over_cfg(lines, model, blocks, edges)
     if converged is None:
         return [], "cap_hit"
-    spans, _, predecessors, out_states = converged
+    spans, successors, predecessors, out_states = converged
     records = _call_site_records(
-        lines, model, spans, predecessors, out_states, arg_families,
+        lines, model, spans, successors, predecessors, out_states, arg_families,
         func_data.get("direct_call_targets"),
     )
     return records, "dataflow"

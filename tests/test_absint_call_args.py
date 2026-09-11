@@ -326,38 +326,11 @@ def test_iteration_cap_yields_no_records(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _pe64_client() -> bytes:
-    """A minimal PE64 client exporting IoDispatch, which calls
-    KERNEL32.dll!DeviceIoControl through the IAT with the two ground-truth
-    control codes in edx, plus the two decoys that must not be reported."""
+def _pe64_image(code: bytes) -> bytes:
+    """Wrap .text machine code into a minimal PE64 image whose export
+    ``IoDispatch`` is the entry the disassembler is pointed at."""
     image_base, text_rva, idata_rva = 0x140000000, 0x1000, 0x2000
     text_file, idata_file = 0x200, 0x400
-    iat_slot = image_base + idata_rva + 0x30
-
-    def call_rip(target: int, next_insn: int) -> bytes:
-        return b"\xff\x15" + struct.pack("<i", target - next_insn)
-
-    code = b""
-    code += b"\x55"                          # push rbp
-    code += b"\x48\x89\xe5"                  # mov rbp, rsp
-    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)   # mov edx, code 1
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
-    nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)   # mov edx, code 2
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
-    nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
-    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)        # mov eax, decoy
-    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)    # mov ebp, decoy
-    code += b"\x31\xc0"                      # xor eax, eax
-    code += b"\xc9"                          # leave
-    code += b"\xc3"                          # ret
 
     idata = bytearray(0x200)
     struct.pack_into("<IIIII", idata, 0x00, 0x2028, 0, 0, 0x2060, 0x2030)
@@ -418,6 +391,86 @@ def _pe64_client() -> bytes:
     image[text_file:text_file + len(code)] = code
     image[idata_file:idata_file + len(idata)] = idata
     return bytes(image)
+
+
+def _pe64_client() -> bytes:
+    """A minimal PE64 client exporting IoDispatch, which calls
+    KERNEL32.dll!DeviceIoControl through the IAT with the two ground-truth
+    control codes in edx, plus the two decoys that must not be reported."""
+    image_base, text_rva = 0x140000000, 0x1000
+    iat_slot = image_base + 0x2000 + 0x30
+
+    def call_rip(target: int, next_insn: int) -> bytes:
+        return b"\xff\x15" + struct.pack("<i", target - next_insn)
+
+    code = b""
+    code += b"\x55"                          # push rbp
+    code += b"\x48\x89\xe5"                  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
+    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)   # mov edx, code 1
+    code += b"\x45\x33\xc0"                  # xor r8d, r8d
+    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    nxt = image_base + text_rva + len(code) + 6
+    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
+    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)   # mov edx, code 2
+    code += b"\x45\x33\xc0"                  # xor r8d, r8d
+    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    nxt = image_base + text_rva + len(code) + 6
+    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
+    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)        # mov eax, decoy
+    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)    # mov ebp, decoy
+    code += b"\x31\xc0"                      # xor eax, eax
+    code += b"\xc9"                          # leave
+    code += b"\xc3"                          # ret
+    return _pe64_image(code)
+
+
+def _pe64_client_jmp_edge() -> bytes:
+    """The same client with the first DeviceIoControl call reached across a
+    real intra-function ``jmp`` (E9 rel32). The control code is loaded before
+    the branch, so it reaches the call site only if the dataflow carries
+    state along that edge — clobbering the volatiles at the branch, the
+    pre-P4.8 x86 behavior, loses it. The decoy block sitting between the
+    ``jmp`` and its target has no incoming edge, so its plausible code must
+    stay excluded as unreachable."""
+    image_base, text_rva = 0x140000000, 0x1000
+    iat_slot = image_base + 0x2000 + 0x30
+
+    def call_rip(target: int, next_insn: int) -> bytes:
+        return b"\xff\x15" + struct.pack("<i", target - next_insn)
+
+    code = b""
+    code += b"\x55"                          # push rbp
+    code += b"\x48\x89\xe5"                  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
+    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)   # mov edx, code 1
+    code += b"\x45\x33\xc0"                  # xor r8d, r8d
+    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    jmp_offset = len(code)
+    code += b"\xe9\x00\x00\x00\x00"          # jmp .go (rel32 patched below)
+    code += b"\xba" + struct.pack("<I", RETURNED_DECOY)        # mov edx, decoy
+    go_offset = len(code)
+    code = bytearray(code)
+    # rel32 counts from the instruction after the jmp.
+    struct.pack_into("<i", code, jmp_offset + 1, go_offset - (jmp_offset + 5))
+    code = bytes(code)
+    nxt = image_base + text_rva + len(code) + 6
+    code += call_rip(iat_slot, nxt)          # .go: call [rip+..] -> DeviceIoControl
+    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)   # mov edx, code 2
+    code += b"\x45\x33\xc0"                  # xor r8d, r8d
+    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    nxt = image_base + text_rva + len(code) + 6
+    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
+    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)        # mov eax, decoy
+    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)    # mov ebp, decoy
+    code += b"\x31\xc0"                      # xor eax, eax
+    code += b"\xc9"                          # leave
+    code += b"\xc3"                          # ret
+    return _pe64_image(code)
 
 
 def _elf64_exec(machine: int, text: bytes, symbols: list[tuple[str, int]]) -> bytes:
@@ -559,6 +612,39 @@ def test_pe64_client_ground_truth(tmp_path, monkeypatch):
     # The decoys are plausible codes that never sit in an argument register.
     assert f"0x{RETURNED_DECOY:08X}" not in codes
     assert f"0x{CALLEE_SAVED_DECOY:08X}" not in codes
+
+
+def test_pe64_client_jmp_edge_ground_truth(tmp_path):
+    """The control code reaches DeviceIoControl across a real ``jmp`` edge.
+
+    Machine-code ground truth for the branch semantics: the code is loaded
+    before an unconditional jump and used at the call site after it, so the
+    recovery works only while state flows along the CFG edge the jump
+    carries. Clobbering the volatiles at the branch (the pre-P4.8 x86
+    behavior) reports the second code alone; the CFG edge is real, resolved
+    by blint's own CFG builder out of the E9 encoding, and the decoy between
+    the jump and its target is unreachable text that must stay excluded.
+    """
+    from blint.lib.binary import parse
+    from blint.lib.driver_ioctl import collect_client_ioctls
+
+    nyxstone_imports()
+    exe = tmp_path / "client_pe64_jmp.exe"
+    exe.write_bytes(_pe64_client_jmp_edge())
+    metadata = parse(str(exe), disassemble=True)
+    functions = metadata.get("disassembled_functions") or {}
+    assert functions, "the hand-built PE must yield disassembled functions"
+    # The jmp really resolved as an intra-function edge in the CFG.
+    func = next(iter(functions.values()))
+    assert any(edge["kind"] == "jump" for edge in func["cfg"]["edges"])
+    assert any(line.startswith("jmp ") for line in func["assembly"].split("\n"))
+    entries = collect_client_ioctls(functions, binary_format="PE")
+    codes = {entry["code"] for entry in entries}
+    assert codes == {"0x83352A01", "0x83352A05"}, (
+        f"code 1 was loaded before a jmp edge and must survive it: {codes}"
+    )
+    # The unreachable decoy block's plausible code never reaches the call.
+    assert f"0x{RETURNED_DECOY:08X}" not in codes
 
 
 def nyxstone_imports():
