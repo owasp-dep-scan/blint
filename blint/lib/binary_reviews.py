@@ -13,6 +13,7 @@ from typing import Any
 
 from blint.lib.driver_ioctl import (
     USER_BUFFER_PROBE_IMPORTS,
+    _normalized_callee,
     collect_client_ioctls,
     is_kernel_driver,
 )
@@ -98,6 +99,147 @@ DEVICE_IOCTL_IMPORTS: set[str] = {
     "ntdeviceiocontrolfile",
     "zwdeviceiocontrolfile",
 }
+
+# ---------------------------------------------------------------------------
+# CALL_SITE_CONSTANT_ARGUMENTS: naming *what* reaches a resolved call.
+#
+# Linkage-level capability rules (CRYPTO_API and its siblings) can only say a
+# binary is linked to an API. The call-site arguments block says what the
+# binary actually passes: the tables below map the resolved callees whose
+# named argument carries a security-relevant value, keyed by the normalized
+# callee name, holding that argument's 0-based position (the block's own
+# indexing). A callee missing from every table simply has no interpretable
+# position; absence from a table proves nothing about the API.
+# ---------------------------------------------------------------------------
+
+# Callees whose named argument is the path being opened. Only an entry whose
+# constant resolved to a string in the image reports — a path assembled at
+# runtime is the stack-string lane's evidence, not this rule's.
+CALLSITE_PATH_ARGUMENTS: dict[str, int] = {
+    "createfilea": 2,
+    "createfilew": 2,
+    "createfile2": 1,
+    "open": 0,
+    "open64": 0,
+    "fopen": 0,
+    "fopen64": 0,
+}
+
+# CommonCrypto kCCAlgorithm* values (documented in CommonCrypto.h); the
+# argument position they travel in differs per callee below.
+CALLSITE_CRYPTO_ALGORITHM_VALUES: dict[int, str] = {
+    0: "AES",
+    1: "DES",
+    2: "3DES",
+    3: "CAST",
+    4: "RC4",
+    5: "RC2",
+    6: "Blowfish",
+}
+CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS: dict[str, int] = {
+    "cccrypt": 1,
+    "cccryptorcreate": 1,
+}
+# Callees that take the algorithm as a *name*: only an entry whose constant
+# resolved to a string reports, and the string is the algorithm name itself.
+CALLSITE_CRYPTO_ALGORITHM_STRING_ARGUMENTS: dict[str, int] = {
+    "bcryptopenalgorithmprovider": 1,
+    "evp_get_cipherbyname": 0,
+}
+
+# Byte-order callees: a constant argument is the port in host byte order.
+# Compilers inline these to a byte-swap more often than not, so a hit is
+# real but the absence of one proves nothing.
+CALLSITE_PORT_ARGUMENTS: dict[str, int] = {
+    "htons": 0,
+    "ntohs": 0,
+}
+
+
+def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
+    """Surface the recovered constants that name what reaches a resolved call.
+
+    Reads the exported ``call_site_arguments`` block (P4.7) and interprets
+    only the argument positions the tables above name, so every emitted
+    value is anchored to a documented ABI position: an integer is reported
+    only where it matches a documented constant, a string only where the
+    callee's argument is that string. This is what lets a capability finding
+    say *which* paths are opened, *which* algorithm reaches a crypto call
+    and *which* port a constant encodes, instead of only that the API is
+    linked.
+    """
+    evidence: list[dict] = []
+    seen: set[tuple] = set()
+    for entry in metadata.get("call_site_arguments") or []:
+        callee = _normalized_callee(entry.get("callee"))
+        argument = entry.get("argument")
+        value = entry.get("value")
+        string = entry.get("string")
+        base = {
+            "callee": entry.get("callee"),
+            "argument": argument,
+            "function": (entry.get("functions") or [None])[0],
+        }
+        if callee in CALLSITE_PATH_ARGUMENTS:
+            if argument != CALLSITE_PATH_ARGUMENTS[callee] or not string:
+                continue
+            item = {
+                **base,
+                "kind": "path",
+                "path": string,
+                "detail": (
+                    f"The dataflow holds the path '{string}' in {entry.get('callee')}'s "
+                    f"path argument at a resolved call site: the image opens it by name."
+                ),
+            }
+        elif callee in CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS:
+            if argument != CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS[callee]:
+                continue
+            algorithm = CALLSITE_CRYPTO_ALGORITHM_VALUES.get(value) if isinstance(value, int) else None
+            if not algorithm:
+                continue
+            item = {
+                **base,
+                "kind": "crypto_algorithm",
+                "algorithm": algorithm,
+                "detail": (
+                    f"The dataflow holds algorithm constant {algorithm} (argument {argument}) "
+                    f"at a resolved {entry.get('callee')} call site."
+                ),
+            }
+        elif callee in CALLSITE_CRYPTO_ALGORITHM_STRING_ARGUMENTS:
+            if argument != CALLSITE_CRYPTO_ALGORITHM_STRING_ARGUMENTS[callee] or not string:
+                continue
+            item = {
+                **base,
+                "kind": "crypto_algorithm",
+                "algorithm": string,
+                "detail": (
+                    f"The dataflow holds algorithm name '{string}' at a resolved "
+                    f"{entry.get('callee')} call site."
+                ),
+            }
+        elif callee in CALLSITE_PORT_ARGUMENTS:
+            if argument != CALLSITE_PORT_ARGUMENTS[callee] or not isinstance(value, int):
+                continue
+            port = value & 0xFFFF
+            item = {
+                **base,
+                "kind": "port",
+                "port": port,
+                "detail": (
+                    f"The dataflow holds {port} as the port argument of a resolved "
+                    f"{entry.get('callee')} call site."
+                ),
+            }
+        else:
+            continue
+        key = (item["kind"], item["callee"], item.get("path") or item.get("algorithm") or item.get("port"))
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence.append(item)
+    return evidence
 
 # Installing and starting a kernel service is how a BYOVD chain loads its driver.
 SERVICE_MANAGER_IMPORTS: set[str] = {
@@ -214,6 +356,9 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     if rule_id in IMPLANT_RULE_EVALUATORS:
         return evaluate_implant_rule(rule_id, metadata)
 
+    if rule_id == "CALL_SITE_CONSTANT_ARGUMENTS":
+        return _evaluate_callsite_constant_arguments(metadata)
+
     import_names = _collect_import_names(metadata)
 
     if rule_id == "DRIVER_INSECURE_DEVICE_OBJECT":
@@ -252,6 +397,7 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
             metadata.get("disassembled_functions") or {},
             arch_target=str(metadata.get("llvm_target_tuple") or ""),
             binary_format=str(metadata.get("binary_type") or "PE"),
+            call_site_entries=metadata.get("call_site_arguments"),
         )
         if not client_codes:
             return []

@@ -647,6 +647,35 @@ def test_pe64_client_jmp_edge_ground_truth(tmp_path):
     assert f"0x{RETURNED_DECOY:08X}" not in codes
 
 
+def test_pe64_client_exports_callsite_block(tmp_path):
+    """The parse pipeline exports the jmp-edge values as the metadata block.
+
+    Every consumer downstream of metadata (the capability rules) must see
+    the dataflow's answer, not a re-derivation of it: the block carries the
+    ground-truth codes at DeviceIoControl's argument position 1, each citing
+    the call instruction it was held at.
+    """
+    from blint.lib.binary import parse
+
+    nyxstone_imports()
+    exe = tmp_path / "client_pe64_jmp.exe"
+    exe.write_bytes(_pe64_client_jmp_edge())
+    metadata = parse(str(exe), disassemble=True)
+    block = metadata.get("call_site_arguments") or []
+    ioctl_entries = [
+        entry
+        for entry in block
+        if "deviceiocontrol" in str(entry.get("callee", "")).lower()
+        and entry.get("argument") == 1
+    ]
+    assert {entry["value"] for entry in ioctl_entries} == {GROUND_TRUTH_CODE_1, GROUND_TRUTH_CODE_2}
+    # The example citation names the call instruction the value was held at.
+    assert all(str(entry["example"]["instruction"]).startswith("call") for entry in ioctl_entries)
+    # Coverage names every function's analysis method; nothing is silent.
+    coverage = metadata.get("call_site_arguments_coverage") or {}
+    assert coverage.get("functions_total") == len(metadata.get("disassembled_functions") or {})
+
+
 def nyxstone_imports():
     from blint.lib import disassembler
 
