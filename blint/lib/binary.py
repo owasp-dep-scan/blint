@@ -3364,6 +3364,17 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
         degradations.append("dependency_attribution_unresolved")
+    # Pointer-materialisation blind spots (P4.9), mirrored from the
+    # call-site block's coverage so a consumer reading only this block
+    # still sees them: a pc-relative materialisation that stayed symbolic
+    # because the listing could not be located, and why.
+    callsite_coverage = metadata.get("call_site_arguments_coverage") or {}
+    if callsite_coverage.get("functions_extent_mismatch"):
+        degradations.append("callsite_block_extent_mismatch")
+    if callsite_coverage.get("functions_no_line_addresses"):
+        degradations.append("callsite_no_line_addresses")
+    if callsite_coverage.get("functions_unmodelled_pc_relative"):
+        degradations.append("callsite_unmodelled_pc_relative")
     coverage = {
         "functions": {
             "symbolic": symbolic_count,
