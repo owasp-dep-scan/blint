@@ -282,8 +282,11 @@ class FrameState:
     Register values are plain ints, or tuples naming a symbolic pointer: a
     ``("sp", offset)`` names a slot relative to the *initial* stack pointer
     (so ``add x8, sp, #8`` followed by ``str x9, [x8]`` lands in the frame
-    even after ``sub sp`` moved the base) and ``("adrp", 0)`` names a page
-    pointer stores through which are not frame slots. ``sp_adjustment`` is
+    even after ``sub sp`` moved the base), ``("adrp", 0)`` names a page
+    pointer whose page could not be computed, and ``("ptr", address)`` names
+    a *materialised* pointer whose absolute address the model folded from a
+    pc-relative form (ARM64 ``adrp`` [+ ``add``], x86 rip-relative ``lea``).
+    Stores through any of these are not frame slots. ``sp_adjustment`` is
     the ARM64 running sp offset; ``None`` means incoming paths disagree on
     it, after which sp-relative stores cannot be located.
 
@@ -383,6 +386,11 @@ class ArchModel:
 
     frame_bases: frozenset[str] = frozenset()
     call_clobbered: tuple[str, ...] = ()
+    # Fixed instruction encoding size in bytes, or None when instructions
+    # vary. The call-site recovery uses it (with the disassembler's exported
+    # per-instruction lengths, when available) to reconstruct where a line
+    # sits, which is what pc-relative materialisations fold against.
+    instruction_stride: int | None = None
 
     def register(self, name: str) -> tuple[str, int] | None:  # pragma: no cover - interface
         raise NotImplementedError
@@ -396,7 +404,7 @@ class ArchModel:
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:  # pragma: no cover - interface
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:  # pragma: no cover - interface
         """Apply one instruction's semantics to the state.
 
         ``leaves_function`` says what the caller knows about a tail-kind
@@ -406,6 +414,14 @@ class ArchModel:
         terminator left no edge, and any tail-kind mnemonic off a block's
         final line, where the target cannot be placed. Only tail-kind
         mnemonics consult it; the default is the conservative reading.
+
+        ``address_span`` is the (start, end) virtual address of this
+        instruction when the caller can place it — the call-site recovery
+        reconstructs them from the CFG blocks' VAs and the disassembler's
+        per-instruction lengths; the stack-string paths deliberately do
+        not. Only pc-relative address materialisations (``adrp``, rip-relative
+        ``lea``) consult it; every other instruction ignores it, and None
+        must reproduce exactly the pre-materialisation semantics.
         """
         raise NotImplementedError
 
@@ -517,6 +533,7 @@ class X86_64Model(ArchModel):
 
     frame_bases = _X86_FRAME_REGISTERS
     call_clobbered = _X86_CALL_CLOBBERED
+    instruction_stride = None  # x86 instruction lengths vary
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _X86_REGISTER_INFO.get(name.strip().lower())
@@ -534,6 +551,12 @@ class X86_64Model(ArchModel):
         if not info:
             return
         family, width = info
+        # A materialised pointer passes through untouched: masking it would
+        # destroy the address it names (the tuple itself is what the frame
+        # store guard and the call-site snapshot read).
+        if isinstance(value, tuple):
+            state.registers[family] = value
+            return
         # Writing a sub-register leaves the upper bytes of the family intact,
         # except for the 32-bit forms, which zero-extend on x86-64.
         if width == 8 or width == 4:
@@ -548,7 +571,7 @@ class X86_64Model(ArchModel):
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:
         state.registers[family] = value & ((1 << (width * 8)) - 1)
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
         if self.apply_branch(state, text, leaves_function):
             return
 
@@ -575,11 +598,19 @@ class X86_64Model(ArchModel):
             if source is None:
                 state.invalidate(match.group(1))
             else:
+                # mov copies a pointer as a pointer, but a widening move
+                # (movzx/movsx/movsxd) reads narrow bits of it — that is
+                # not the pointer, so the destination goes unknown.
+                if not isinstance(source[0], int) and match.group(0).strip().lower().startswith(
+                    ("movzx", "movsx", "movsxd")
+                ):
+                    state.invalidate(match.group(1))
+                    return
                 state.write_operand(match.group(1), source[0])
             return
 
         if match := _LEA_RE.match(text):
-            self._apply_lea(state, match)
+            self._apply_lea(state, match, address_span)
             return
 
         if match := _ARITH_REG_IMM_RE.match(text):
@@ -622,9 +653,10 @@ class X86_64Model(ArchModel):
             return
 
         source = state.get_register(value_token)
-        if source is None:
-            # The slot is written with something unknown, so any earlier bytes there
-            # must be dropped rather than read as part of a string.
+        if source is None or not isinstance(source[0], int):
+            # The slot is written with something unknown (or a symbolic or
+            # materialised pointer), so any earlier bytes there must be
+            # dropped rather than read as part of a string.
             width = _X86_SIZE_HINTS.get((size_hint or "").lower()) or 1
             state.drop(base_info[0], offset, width)
             return
@@ -634,7 +666,9 @@ class X86_64Model(ArchModel):
         width = _X86_SIZE_HINTS.get((size_hint or "").lower(), width)
         state.store(base_info[0], offset, value, width)
 
-    def _apply_lea(self, state: FrameState, match: re.Match) -> None:
+    def _apply_lea(
+        self, state: FrameState, match: re.Match, address_span: tuple[int, int] | None = None
+    ) -> None:
         """Apply `lea dest, [src +/- imm]`, the folded arithmetic form."""
         dest, source_reg, sign, offset_token = match.groups()
         source_info = self.register(source_reg)
@@ -642,6 +676,26 @@ class X86_64Model(ArchModel):
         # computing a character, so the destination holds a pointer, not a value.
         if source_info and source_info[0] in self.frame_bases:
             state.invalidate(dest)
+            return
+        if source_reg.lower() == "rip":
+            # `lea rax, [rip + N]` is how position-independent code
+            # materialises the address of a static object: rip reads as the
+            # address of the *next* instruction, so the target is known the
+            # moment this instruction's own extent is. The target is tracked
+            # as a materialised ("ptr", address) pointer — the same encoding
+            # ARM64's completed adrp pairs use — so a store through it is
+            # not a frame slot and the call-site snapshot reads the address
+            # it names. Without the address the destination stays unknown —
+            # never a guessed address.
+            delta = _parse_immediate(offset_token) if offset_token else 0
+            if address_span is None or delta is None:
+                state.invalidate(dest)
+                return
+            if sign == "-":
+                delta = -delta
+            state.write_operand(
+                dest, ("ptr", (address_span[1] + delta) & 0xFFFFFFFFFFFFFFFF)
+            )
             return
         source = state.get_register(source_reg)
         if source is None:
@@ -653,6 +707,12 @@ class X86_64Model(ArchModel):
             return
         if sign == "-":
             delta = -delta
+        if isinstance(source[0], tuple):
+            # Folding arithmetic on a symbolic or materialised pointer moves
+            # the pointer; it never becomes an integer.
+            base_kind, base_offset = source[0]
+            state.write_operand(dest, (base_kind, base_offset + delta))
+            return
         state.write_operand(dest, (source[0] + delta) & 0xFFFFFFFFFFFFFFFF)
 
     def _apply_arith(self, state: FrameState, match: re.Match) -> None:
@@ -664,6 +724,18 @@ class X86_64Model(ArchModel):
             state.invalidate(register)
             return
         value, _ = current
+        if isinstance(value, tuple):
+            # Arithmetic on a materialised pointer: add/sub complete or move
+            # it (the same semantics ARM64's adrp completions use); a bitwise
+            # op destroys the address, so the register goes unknown.
+            base_kind, base_offset = value
+            if op.lower() == "add":
+                state.write_operand(register, (base_kind, base_offset + immediate))
+            elif op.lower() == "sub":
+                state.write_operand(register, (base_kind, base_offset - immediate))
+            else:
+                state.invalidate(register)
+            return
         if op.lower() == "add":
             result = value + immediate
         elif op.lower() == "sub":
@@ -716,6 +788,12 @@ _ARM64_STR_RE = re.compile(
     rf"\[\s*({_ARM64_REG})\s*(?:,\s*({_IMM})\s*)?\](!?)\s*(?:,\s*({_IMM}))?\s*$",
     re.IGNORECASE,
 )
+# adrp renders as `adrp x0, #<delta>`: the delta is the page displacement
+# from the instruction's own page (`pc & ~0xFFF`), so the computed page is
+# `(pc & ~0xFFF) + delta`. Negative when the target lies below the page.
+_ARM64_ADRP_RE = re.compile(
+    rf"^\s*adrp\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE
+)
 
 # Any other instruction whose first operand is a register kills the known
 # value it held. Keeping this strict is what prevents stale values from being
@@ -753,6 +831,7 @@ class Arm64Model(ArchModel):
 
     frame_bases = ARM64_FRAME_BASES
     call_clobbered = ARM64_CALL_CLOBBERED
+    instruction_stride = 4  # AArch64 instructions are one fixed word
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _arm64_register_family(name)
@@ -802,7 +881,7 @@ class Arm64Model(ArchModel):
             return "sp", value[1]
         return None
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True) -> None:
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
         # bl/blr always call; b/br are tail calls exactly when they leave the
         # function (see apply_branch — the one place that line is drawn).
         if self.apply_branch(state, text, leaves_function):
@@ -869,15 +948,28 @@ class Arm64Model(ArchModel):
             self._apply_arith(state, match)
             return
 
-        # adrp computes a page address (nyxstone renders the page
-        # displacement). Stores through it are not frame slots, so the
-        # register is tracked as a non-frame symbolic pointer: it is no longer
-        # an integer, and `add xN, xN, #imm` keeps it symbolic instead of
-        # producing a bogus value.
-        if lowered == "adrp":
-            dest = text.split(None, 1)[1].split(",")[0].strip() if len(text.split(None, 1)) > 1 else ""
-            if self.register(dest):
-                state.write_family(self.register(dest)[0], ("adrp", 0), 8)
+        # adrp computes a page address: `pc & ~0xFFF` plus the page
+        # displacement the disassembler renders. When the instruction's own
+        # address is known the page is computed and tracked as a *materialised
+        # pointer* — a ("ptr", address) tuple, so a store through it is still
+        # not a frame slot and an `add xN, xN, #imm` completes it into the
+        # absolute address instead of manufacturing an integer. A
+        # `ldr xN, [xM, #off]` off an adrp base is a load *through* the
+        # pointer, not the pointer: it is not matched here and falls through
+        # to the invalidating handler below, so a dereference is never
+        # reported as the address. Without the instruction's address the
+        # page cannot be computed and the register keeps the legacy
+        # non-frame symbolic marker.
+        if match := _ARM64_ADRP_RE.match(text):
+            info = self.register(match.group(1))
+            if info is None:
+                return
+            delta = _parse_immediate(match.group(2))
+            if address_span is None or delta is None:
+                state.write_family(info[0], ("adrp", 0), 8)
+                return
+            page = ((address_span[0] & ~0xFFF) + delta) & 0xFFFFFFFFFFFFFFFF
+            state.write_family(info[0], ("ptr", page), 8)
             return
 
         # Anything else writing its first-operand register invalidates it.
@@ -1025,6 +1117,64 @@ def _block_line_spans(blocks: list[dict], lines: list[str]) -> list[tuple[int, i
     return spans
 
 
+def _line_address_spans(
+    model: ArchModel,
+    lines: list[str],
+    blocks: list[dict],
+    spans: list[tuple[int, int]],
+    instruction_lengths: list[int] | None,
+) -> tuple[list[tuple[int, int]] | None, str]:
+    """Reconstruct each assembly line's (start, end) address, or refuse.
+
+    The CFG blocks carry their start and end VAs and the disassembler
+    exports per-instruction lengths (``instruction_lengths``, aligned
+    one-to-one with the assembly lines); a line's address is its block's
+    start VA plus the strides of the lines before it in that block. On a
+    model with a fixed instruction stride (ARM64's 4-byte word) the
+    exported lengths may be absent and the stride serves instead.
+
+    Returns ``(address_spans, reason)``. ``reason`` names a refusal so the
+    caller can count it rather than stay silent: ``"no_addresses"`` when a
+    block carries no usable start/end VAs (or the lengths array does not
+    align with the listing), ``"extent_mismatch"`` when a block's extent
+    contradicts the strides its lines claim to cover. Any disagreement
+    refuses the whole function: a wrong address here would fold into a
+    confidently wrong pointer, which is worse than no pointer.
+    """
+    if len(blocks) != len(spans):
+        return None, "no_addresses"
+    strides: list[int] | None = None
+    if isinstance(instruction_lengths, list) and len(instruction_lengths) == len(lines):
+        strides = instruction_lengths
+    result: list[tuple[int, int]] = []
+    for block, (start, end) in zip(blocks, spans):
+        try:
+            block_start = int(str(block.get("start")), 16)
+            block_end = int(str(block.get("end")), 16)
+        except (TypeError, ValueError):
+            return None, "no_addresses"
+        count = end - start
+        extent = block_end - block_start
+        if strides is not None:
+            block_strides = strides[start:end]
+        else:
+            stride = model.instruction_stride
+            if stride is None:
+                # Variable-length encodings cannot be located without the
+                # exported lengths.
+                return None, "no_addresses"
+            block_strides = [stride] * count
+        if extent <= 0 or sum(block_strides) != extent:
+            return None, "extent_mismatch"
+        address = block_start
+        for stride in block_strides:
+            result.append((address, address + stride))
+            address += stride
+    if len(result) != len(lines):
+        return None, "no_addresses"
+    return result, "ok"
+
+
 def _cfg_spans_and_graph(
     lines: list[str], blocks: list[dict], edges: list[dict]
 ) -> tuple[list[tuple[int, int]], list[list[int]], list[list[int]]]:
@@ -1096,6 +1246,7 @@ def _converge_over_cfg(
     model: ArchModel,
     blocks: list[dict],
     edges: list[dict],
+    address_spans: list[tuple[int, int]] | None = None,
 ) -> tuple[
     list[tuple[int, int]], list[list[int]], list[list[int]], list[FrameState | None]
 ] | None:
@@ -1147,6 +1298,7 @@ def _converge_over_cfg(
                 state,
                 line.strip(),
                 leaves_function=block_leaves_function if offset == end - start - 1 else True,
+                address_span=address_spans[start + offset] if address_spans else None,
             )
         previous = out_states[index]
         if (
@@ -1365,6 +1517,7 @@ def _call_site_records(
     out_states: list[FrameState | None],
     arg_families: tuple[str, ...],
     direct_call_targets: list[dict] | None,
+    address_spans: list[tuple[int, int]] | None = None,
 ) -> list[dict]:
     """Snapshot the argument registers at every call instruction.
 
@@ -1374,9 +1527,14 @@ def _call_site_records(
     clobbers the argument registers at the call itself, so this is the only
     point the incoming arguments are observable. Only integer constants are
     reported; a symbolic pointer or an unknown value yields None for that
-    position, never a stale value from before the call sequence. Tail-kind
-    branches step with the same leaves-function decision the convergence
-    pass used, so the replayed state matches it exactly.
+    position, never a stale value from before the call sequence. A
+    *materialised* pointer — a (``"ptr"``, address) tuple the model folded
+    from a pc-relative form when the caller could place the instruction —
+    is reported as the address it names, and counted in the record's
+    ``materialised`` field (``materialised_page`` for bare pages, which an
+    uncompleted ``adrp`` leaves behind). Tail-kind branches step with the
+    same leaves-function decision the convergence pass used, and the same
+    address spans, so the replayed state matches it exactly.
 
     The replay is O(lines) time and holds one FrameState at a time; the
     records are O(call sites) small dicts, which is the only extra memory
@@ -1405,9 +1563,24 @@ def _call_site_records(
                     model, text, call_operands, tail_operands, start + offset == last_line
                 )
                 arguments = []
+                materialised = 0
+                materialised_page = 0
                 for family in arg_families:
                     value = state.registers.get(family)
-                    arguments.append(value if isinstance(value, int) else None)
+                    if isinstance(value, int):
+                        arguments.append(value)
+                        continue
+                    if isinstance(value, tuple) and value[0] == "ptr" and isinstance(value[1], int):
+                        arguments.append(value[1])
+                        materialised += 1
+                        if value[1] % 4096 == 0:
+                            # A bare page: an adrp its `add` never completed,
+                            # or a target that really is page-aligned. The
+                            # page is still what the register held, so it is
+                            # reported and counted, never hidden.
+                            materialised_page += 1
+                        continue
+                    arguments.append(None)
                 records.append(
                     {
                         "line": start + offset,
@@ -1415,12 +1588,15 @@ def _call_site_records(
                         "callee": callee,
                         "registers": tuple(arg_families),
                         "arguments": arguments,
+                        "materialised": materialised,
+                        "materialised_page": materialised_page,
                     }
                 )
             model.step(
                 state,
                 text,
                 leaves_function=block_leaves_function if offset == end - start - 1 else True,
+                address_span=address_spans[start + offset] if address_spans else None,
             )
     return records
 
@@ -1434,7 +1610,10 @@ def recover_call_site_arguments_with_method(
     (``line`` index into the assembly text, ``instruction`` text), the
     ``callee`` the disassembler resolved it to (None when unresolved), the
     ABI's ``registers`` tuple and the integer constants in ``arguments`` at
-    that point (None where the model does not know one). ``method`` names
+    that point (None where the model does not know one). A constant the
+    model materialised from a pc-relative form (ARM64 ``adrp`` [+ ``add``],
+    x86 rip-relative ``lea``) is reported as the address it names, counted
+    in the record's ``materialised`` field. ``method`` names
     how the function was analyzed: ``"dataflow"`` (CFG fixed point),
     ``"no_cfg"`` / ``"cfg_mismatch"`` (no CFG, or one that does not tile the
     text — there is deliberately no straight-line fallback, which would
@@ -1458,15 +1637,24 @@ def recover_call_site_arguments_with_method(
     edges = cfg.get("edges") or []
     if not blocks:
         return [], "no_cfg"
-    if _block_line_spans(blocks, lines) is None:
+    spans = _block_line_spans(blocks, lines)
+    if spans is None:
         return [], "cfg_mismatch"
-    converged = _converge_over_cfg(lines, model, blocks, edges)
+    # Reconstruct where each line sits so pc-relative materialisations
+    # (adrp, rip-relative lea) fold into absolute pointers. A refusal is
+    # fine — the model then keeps those registers symbolic, and the block
+    # builder counts the reason — but the spans must be the same for the
+    # convergence and the replay, or the replayed state would not match.
+    address_spans, _ = _line_address_spans(
+        model, lines, blocks, spans, func_data.get("instruction_lengths")
+    )
+    converged = _converge_over_cfg(lines, model, blocks, edges, address_spans=address_spans)
     if converged is None:
         return [], "cap_hit"
     spans, successors, predecessors, out_states = converged
     records = _call_site_records(
         lines, model, spans, successors, predecessors, out_states, arg_families,
-        func_data.get("direct_call_targets"),
+        func_data.get("direct_call_targets"), address_spans=address_spans,
     )
     return records, "dataflow"
 
@@ -1568,6 +1756,14 @@ def analyze_call_site_arguments(
         "functions_skipped": 0,
         "functions_entries_capped": 0,
         "records_unresolved_callee": 0,
+        # Pointer materialisation (P4.9): every way a pc-relative
+        # materialisation can fail to light up is named here, never silent.
+        "functions_no_line_addresses": 0,
+        "functions_extent_mismatch": 0,
+        "functions_unmodelled_pc_relative": 0,
+        "arguments_materialised": 0,
+        "pointer_values_page_only": 0,
+        "strings_resolved": 0,
         "max_entries": max(0, max_entries),
     }
     if not max_entries or not disassembled_functions:
@@ -1577,6 +1773,7 @@ def analyze_call_site_arguments(
     aggregated: dict[tuple[str, int, int], dict] = {}
     truncated_by_function: list[str] = []
     truncated = False
+    model = model_for_target(arch_target)
     for func_key, func_data in disassembled_functions.items():
         if not isinstance(func_data, dict):
             continue
@@ -1590,6 +1787,13 @@ def analyze_call_site_arguments(
             coverage[f"functions_{method}"] += 1
         if method != "dataflow":
             continue
+        _count_materialisation_coverage(coverage, func_data, model)
+        coverage["arguments_materialised"] += sum(
+            record.get("materialised") or 0 for record in records
+        )
+        coverage["pointer_values_page_only"] += sum(
+            record.get("materialised_page") or 0 for record in records
+        )
         function_name = str(func_data.get("name") or func_key)
         contributed = 0
         function_capped = False
@@ -1660,7 +1864,52 @@ def analyze_call_site_arguments(
                 entry["string"] = string
         entries.append(entry)
     coverage["entries"] = len(entries)
+    coverage["strings_resolved"] = sum(1 for entry in entries if entry.get("string"))
     return entries, coverage
+
+
+def _count_materialisation_coverage(
+    coverage: dict, func_data: dict, model: ArchModel
+) -> None:
+    """Name how this function's pc-relative materialisations fared.
+
+    Only functions whose listing actually carries an address-materialising
+    form are counted: an ``adrp`` on ARM64 or a rip-relative ``lea`` on
+    x86. When the line addresses those forms need could not be
+    reconstructed, the reason is counted (``functions_no_line_addresses``
+    for blocks without usable VAs or without the exported lengths;
+    ``functions_extent_mismatch`` when a block's extent contradicted the
+    strides its lines claim). An ``adr`` — ARM64's other pc-relative form,
+    which the model deliberately does not fold — is counted as
+    ``functions_unmodelled_pc_relative`` so its silence is named.
+    """
+    assembly = str(func_data.get("assembly") or "")
+    if not assembly:
+        return
+    if isinstance(model, Arm64Model):
+        candidates = assembly.count("adrp")
+        unmodelled = re.search(r"(?<![\w.])adr\s", assembly) is not None
+    elif isinstance(model, X86_64Model):
+        candidates = len(re.findall(r"lea\s+[^\s,]+,\s*\[\s*rip", assembly, re.IGNORECASE))
+        unmodelled = False
+    else:
+        return
+    if unmodelled:
+        coverage["functions_unmodelled_pc_relative"] += 1
+    if not candidates:
+        return
+    lines = assembly.split("\n")
+    blocks = (func_data.get("cfg") or {}).get("blocks") or []
+    spans = _block_line_spans(blocks, lines)
+    if spans is None:
+        return  # already counted as functions_cfg_mismatch
+    _, reason = _line_address_spans(
+        model, lines, blocks, spans, func_data.get("instruction_lengths")
+    )
+    if reason == "extent_mismatch":
+        coverage["functions_extent_mismatch"] += 1
+    elif reason == "no_addresses":
+        coverage["functions_no_line_addresses"] += 1
 
 
 def model_for_target(arch_target: str) -> ArchModel:
