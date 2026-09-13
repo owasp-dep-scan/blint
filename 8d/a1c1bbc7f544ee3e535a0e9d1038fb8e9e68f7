@@ -1,0 +1,28 @@
+blint/lib/absint.py
+  h_6a4cc5cdf68def 285-289,389-393,407,417-424,536,554-559,574,601-608,613,656-659,669-671,680-699,710-715,727-738,791-796,834,884,951-972,1120-1177,1249,1301,1520,1530-1537,1566-1567,1570-1583,1591-1592,1599,1613-1616,1640-1641,1643-1651,1657,1759-1766,1776,1790-1796,1867,1871-1914
+blint/lib/binary.py
+  h_6a4cc5cdf68def 3367-3377
+blint/lib/disassembler.py
+  h_6a4cc5cdf68def 2355-2362,2425
+docs/DISASSEMBLE.md
+  h_6a4cc5cdf68def 32
+docs/METADATA.md
+  h_6a4cc5cdf68def 143
+tests/scripts/measure_pointer_materialisation.py
+  h_6a4cc5cdf68def 1-109
+tests/scripts/verify_pointer_precision.py
+  h_6a4cc5cdf68def 1-345
+tests/test_pointer_materialisation.py
+  h_6a4cc5cdf68def 1-374
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8da1c1bbc7f544ee3e535a0e9d1038fb8e9e68f7",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
