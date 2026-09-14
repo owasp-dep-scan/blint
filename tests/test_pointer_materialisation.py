@@ -348,27 +348,50 @@ def test_line_address_spans_rejects_missing_block_vas():
 def test_materialised_strings_resolve_in_a_real_image():
     """Any string the materialised pointer names must really live there.
 
-    The block builder's addresses are checked against the one authority
-    that did not produce them: a lief read of the image's own bytes at the
-    recovered address. A fixture cannot certify address arithmetic — this
-    can.
+    Checked against the one authority that did not produce it: the image's
+    own bytes, read straight off the recovered address. Re-running the
+    resolver would only prove it is deterministic — it is the function that
+    produced the string in the first place — so the bytes are compared
+    here instead. A fixture cannot certify address arithmetic; this can.
     """
     import lief
+    import pytest
 
-    from blint.lib.binary import _pointer_string_resolver, parse
+    from blint.lib.binary import parse
 
     parsed = lief.parse("/bin/ls")
     if parsed is None:  # pragma: no cover - platform without the fixture
-        import pytest
-
         pytest.skip("/bin/ls is not parseable here")
     metadata = parse("/bin/ls", disassemble=True)
     entries = metadata.get("call_site_arguments") or []
     resolved = [entry for entry in entries if entry.get("string")]
     if not resolved:  # pragma: no cover - disassembly unavailable on this run
-        import pytest
-
         pytest.skip("no strings resolved on this platform's slice")
-    resolve = _pointer_string_resolver(parsed)
     for entry in resolved[:20]:
-        assert resolve(entry["value"]) == entry["string"]
+        expected = entry["string"].encode("utf-8")
+        raw = bytes(parsed.get_content_from_virtual_address(entry["value"], len(expected) + 1))
+        assert raw == expected + b"\x00"
+
+
+def test_narrow_write_of_a_materialised_pointer_reports_nothing():
+    """A w-register holds the low half of an address, which is not the address.
+
+    Passing the full 64-bit value on would name a pointer the hardware
+    never formed — and the block would then resolve whatever string
+    happens to live there.
+    """
+    state = FrameState(ARM64_MODEL)
+    ARM64_MODEL.step(state, "adrp x9, #1155072", address_span=(0x100000AB8, 0x100000ABC))
+    ARM64_MODEL.step(state, "mov w0, w9")
+    assert state.registers.get("x0") is None
+    # The same on the completion path: `add w9, w9, #4` cannot carry it either.
+    ARM64_MODEL.step(state, "add w9, w9, #4")
+    assert state.registers.get("x9") is None
+
+    state = FrameState(X86_64_MODEL)
+    X86_64_MODEL.step(state, "lea rax, [rip + 7978]", address_span=(0x1000, 0x1007))
+    X86_64_MODEL.step(state, "mov edi, eax")
+    assert state.registers.get("rdi") is None
+    # The full-width move still carries it.
+    X86_64_MODEL.step(state, "mov rsi, rax")
+    assert state.registers.get("rsi") == ("ptr", 0x1000 + 7 + 7978)

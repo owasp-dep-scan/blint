@@ -551,11 +551,17 @@ class X86_64Model(ArchModel):
         if not info:
             return
         family, width = info
-        # A materialised pointer passes through untouched: masking it would
-        # destroy the address it names (the tuple itself is what the frame
-        # store guard and the call-site snapshot read).
+        # A materialised pointer passes through untouched at full width:
+        # masking it would destroy the address it names (the tuple itself is
+        # what the frame store guard and the call-site snapshot read). A
+        # narrower write keeps only the low bytes, which are not the address,
+        # so the register goes unknown instead of naming a pointer the
+        # hardware never formed.
         if isinstance(value, tuple):
-            state.registers[family] = value
+            if width < 8:
+                state.registers.pop(family, None)
+            else:
+                state.registers[family] = value
             return
         # Writing a sub-register leaves the upper bytes of the family intact,
         # except for the 32-bit forms, which zero-extend on x86-64.
@@ -856,9 +862,17 @@ class Arm64Model(ArchModel):
         if width >= 8:
             state.registers[family] = value
             return
-        # 32-bit writes zero-extend the upper half of the 64-bit register and
-        # cannot carry a symbolic pointer.
-        state.registers[family] = value & 0xFFFFFFFF if isinstance(value, int) else value
+        # 32-bit writes zero-extend the upper half of the 64-bit register, so
+        # they keep only the low half of a materialised address — which is not
+        # that address. Drop it rather than report a pointer the hardware
+        # never formed.
+        if isinstance(value, tuple):
+            if value[0] == "ptr":
+                state.registers.pop(family, None)
+            else:
+                state.registers[family] = value
+            return
+        state.registers[family] = value & 0xFFFFFFFF
 
     def resolve_base(self, state: FrameState, base_reg: str) -> tuple[str, int] | None:
         """Resolve a store's base operand to a (frame base, offset) pair.
@@ -1058,7 +1072,10 @@ class Arm64Model(ArchModel):
                 state.invalidate(dest)
                 return
             delta = immediate if op.lower() == "add" else -immediate
-            state.write_family(info[0], (base_kind, base_offset + delta), 8)
+            # The destination's own width decides: a w-register cannot hold a
+            # materialised address (write_family drops it), while the derived
+            # frame-pointer tuples keep the semantics they have always had.
+            state.write_family(info[0], (base_kind, base_offset + delta), info[1])
             return
         if info[0] == "sp":
             # `add sp, sp, #imm` / `sub sp, sp, #imm` move the frame base.
