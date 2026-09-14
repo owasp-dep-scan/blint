@@ -14,22 +14,21 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 3420,
+        "external_edges": 3402,
         "external_reason_buckets": {
-          "address_space_miss:indirect_hint": 2,
           "import": 3162,
           "import:indirect_hint": 3,
           "import:tailcall": 22,
-          "unresolved:tailcall": 231
+          "unresolved:tailcall": 215
         },
-        "functions_total": 26971,
-        "functions_with_direct_targets": 23239,
+        "functions_total": 22093,
+        "functions_with_direct_targets": 18675,
         "internal_edge_kinds": {
-          "direct": 80806,
-          "indirect_hint": 433,
-          "tailcall": 9181
+          "direct": 68341,
+          "indirect_hint": 390,
+          "tailcall": 7088
         },
-        "internal_edges": 90420
+        "internal_edges": 75819
       }
     },
     "aarch64-pc-windows-msvc": {
@@ -105,24 +104,23 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 10418,
+        "external_edges": 8357,
         "external_reason_buckets": {
-          "address_space_miss:indirect_hint": 202,
-          "address_space_miss:tailcall": 189,
+          "ambiguous_address:indirect_hint": 1,
           "import": 3407,
-          "symbol_only_miss:indirect_hint": 18,
-          "symbol_only_miss:tailcall": 5418,
-          "unresolved:indirect_hint": 990,
-          "unresolved:tailcall": 194
+          "symbol_only_miss:indirect_hint": 17,
+          "symbol_only_miss:tailcall": 4031,
+          "unresolved:indirect_hint": 718,
+          "unresolved:tailcall": 183
         },
-        "functions_total": 27083,
-        "functions_with_direct_targets": 20862,
+        "functions_total": 22187,
+        "functions_with_direct_targets": 17001,
         "internal_edge_kinds": {
-          "direct": 65625,
-          "indirect_hint": 269,
-          "tailcall": 2004
+          "direct": 55074,
+          "indirect_hint": 392,
+          "tailcall": 2066
         },
-        "internal_edges": 67898
+        "internal_edges": 57532
       }
     },
     "x86_64-pc-windows-msvc": {

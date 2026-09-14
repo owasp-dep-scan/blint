@@ -26,9 +26,11 @@ MANIFEST_PATH = REPO_ROOT / "tests" / "corpus" / "manifest.json"
 def _known_function_addresses(metadata: dict) -> set[int]:
     """Addresses claimed by the symbol-driven function buckets.
 
-    Mach-O metadata mixes two address spaces: LIEF function lists carry
-    image-relative addresses while symbol tables carry absolute ones. Both
-    are normalized into the image-relative space before comparison.
+    Mach-O metadata is normalized to the virtual address space where the
+    function lists are built (P5.1), so this rebase is the identity for
+    current output; it is kept because the comparison deliberately runs in
+    the image-relative space and must stay correct for any metadata produced
+    before that normalization.
     """
     imagebase = metadata.get("imagebase")
     imagebase = imagebase if isinstance(imagebase, int) else 0

@@ -77,7 +77,10 @@ from blint.logger import LOG
 # Bumped for the dataflow lane: P4.8 changes the *values* the recovery
 # produces for unchanged inputs (stack strings, call-site arguments), and a
 # warm cache must not keep serving the pre-P4.8 answers.
-CACHE_SCHEMA_VERSION = 3
+# Bumped for P5.1: Mach-O function metadata is normalized to the virtual
+# address space, so function addresses, sub_<addr> names, disassembly keys
+# and discovery records all change value for unchanged inputs.
+CACHE_SCHEMA_VERSION = 4
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

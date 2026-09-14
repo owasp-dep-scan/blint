@@ -80,11 +80,13 @@ def test_macho_compressed_page_discovery():
     segment = _FakeSegment("__TEXT", 0x100000000)
     fake = _FakeMacho({"__unwind_info": section}, [segment])
     entries = discover_macho_unwind_functions(fake)
-    # The sentinel sits at base + 0x200 and bounds the last function.
+    # Compact-unwind offsets are __TEXT-relative; entries are emitted as
+    # virtual addresses (text_vmaddr + offset), the space the Mach-O
+    # function lists are normalized into (P5.1).
     assert [(e["address"], e["size"]) for e in entries] == [
-        (0x460, 0xD4),
-        (0x534, 0x94),
-        (0x5C8, 0x98),
+        (0x100000460, 0xD4),
+        (0x100000534, 0x94),
+        (0x1000005C8, 0x98),
     ]
     assert all(e["source"] == "unwind" for e in entries)
 
@@ -98,6 +100,7 @@ def test_macho_sentinel_bounds_last_function():
     entries = discover_macho_unwind_functions(fake)
     # The sentinel offset (0x460 + 0x200) bounds the final entry.
     assert entries[-1]["size"] == 0x660 - 0x534
+    assert entries[-1]["address"] == 0x100000534
 
 
 def test_macho_bad_version_returns_empty():

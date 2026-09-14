@@ -14,7 +14,10 @@ import blint.lib.binary as binary_module
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 
 from blint.lib.binary import (
+    _macho_address_to_virtual,
+    _macho_content_segment_ranges,
     _macho_signature_blob,
+    _normalize_macho_function_list,
     _parse_address,
     build_disassembly_callgraph_metadata,
     build_wasm_callgraph,
@@ -77,6 +80,236 @@ def test_merge_function_starts_adds_unnamed_and_reuses_symbol_names():
     assert by_addr["0x5000"] == "main"
     assert by_addr["0x6000"] == "sub_6000"
     assert len(merged) == 3
+
+
+class _FakeSegmentLayout:
+    """A Mach-O segment stand-in exposing the range fields the classifier reads."""
+
+    def __init__(self, name, va, vsz, fo, fsz):
+        self.name = name
+        self.virtual_address = va
+        self.virtual_size = vsz
+        self.file_offset = fo
+        self.file_size = fsz
+
+
+class _FakeBinaryWithSegments:
+    """A Mach-O stand-in with segment ranges, imagebase and function starts."""
+
+    def __init__(self, segments, imagebase, starts=None):
+        self._segments = segments
+        self.imagebase = imagebase
+        self.function_starts = _FakeFunctionStarts(starts or [])
+
+    @property
+    def segments(self):
+        return self._segments
+
+
+def _x264_like_layout():
+    """The segment layout shape of a PIE executable such as x264.
+
+    __TEXT spans file [0, 0x20000) and virtual [0x100000000, 0x100020000);
+    __PAGEZERO maps the whole low half virtually but carries no file bytes.
+    """
+    return [
+        _FakeSegmentLayout("__PAGEZERO", 0, 0x100000000, 0, 0),
+        _FakeSegmentLayout("__TEXT", 0x100000000, 0x20000, 0, 0x20000),
+    ]
+
+
+def test_macho_address_space_detection_from_segment_ranges():
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    assert ranges is not None
+    virtual, file = ranges
+    # __PAGEZERO contributes no range at all: it has no file content.
+    assert file == [(0, 0x20000)]
+    assert virtual == [(0x100000000, 0x100020000)]
+
+    ib = 0x100000000
+    # A symtab-style address inside the virtual range is already absolute.
+    assert _macho_address_to_virtual(0x10000ddd4, ranges, ib) == 0x10000ddd4
+    # A function-starts offset inside the file range is file-relative and is
+    # rebased by the imagebase.
+    assert _macho_address_to_virtual(0xddd4, ranges, ib) == 0x10000ddd4
+    # Addresses in neither range are returned unchanged for the caller to
+    # count, not guessed at.
+    assert _macho_address_to_virtual(0x50000000, ranges, ib) == 0x50000000
+
+
+def test_macho_address_space_detection_coinciding_ranges():
+    # A dylib-style image (imagebase 0): virtual and file ranges coincide, so
+    # an address in both is the same number in either space and stays put.
+    layout = [_FakeSegmentLayout("__TEXT", 0, 0x20000, 0, 0x20000)]
+    fake = _FakeBinaryWithSegments(layout, 0)
+    ranges = _macho_content_segment_ranges(fake)
+    assert _macho_address_to_virtual(0x1234, ranges, 0) == 0x1234
+
+
+def test_macho_address_space_detection_ambiguous_overlap_is_left_alone():
+    # Overlapping virtual/file ranges with a non-zero imagebase: the image
+    # cannot say which space the address is in, so it must be returned
+    # unchanged rather than rebased on a guess.
+    layout = [
+        _FakeSegmentLayout("__TEXT", 0x1000, 0x20000, 0, 0x20000),
+    ]
+    fake = _FakeBinaryWithSegments(layout, 0x1000)
+    ranges = _macho_content_segment_ranges(fake)
+    # 0x1800 is inside both the virtual range [0x1000, 0x21000) and the file
+    # range [0, 0x20000).
+    assert _macho_address_to_virtual(0x1800, ranges, 0x1000) == 0x1800
+
+
+def test_macho_pagezero_does_not_swallow_relative_addresses():
+    # The negative fixture for the classifier: a reader that counted
+    # __PAGEZERO's virtual range (it covers the entire low half of the
+    # address space) would classify every file-relative address as absolute
+    # and never rebase anything.
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    assert _macho_address_to_virtual(0xddd4, ranges, 0x100000000) == 0x10000ddd4
+
+
+def test_normalize_macho_function_list_rebases_and_renames_synthetic_names():
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    functions = [
+        {"index": 0, "name": "_main", "address": "0x100000a80", "size": 0, "flags": None},
+        {"index": 1, "name": "sub_ddd4", "address": "0xddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    by_name = {f["name"]: f for f in normalized}
+    # The relative entry is rebased, and its synthetic name — which encodes
+    # the pre-rebase address — is renamed to stay consistent with it.
+    assert by_name["sub_10000ddd4"]["address"] == "0x10000ddd4"
+    assert by_name["sub_10000ddd4"]["size"] == 76
+    assert stats["rebased"] == 1
+    assert stats["ambiguous"] == 0
+    assert stats["unresolved"] == 0
+    # Indexes are re-assigned in list order.
+    assert [f["index"] for f in normalized] == [0, 1]
+
+
+def test_normalize_macho_function_list_merges_synthetic_duplicate_of_named():
+    # The x264 bug in miniature: one function twice — named from the symtab
+    # (absolute) and sub_* from function_starts (file-relative).
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    functions = [
+        {"index": 0, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 613, "name": "sub_ddd4", "address": "0xddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    entry = normalized[0]
+    assert entry["name"] == "_x264_mdate"
+    assert entry["address"] == "0x10000ddd4"
+    # The synthetic twin's exact size survives the merge.
+    assert entry["size"] == 76
+    assert stats["duplicates_merged"] == 1
+    assert stats["names_recovered"] == 1
+
+
+def test_normalize_macho_function_list_keeps_two_named_entries_at_one_address():
+    # Two genuinely named entries at one address are aliases, not the
+    # two-source duplicate: both are kept, as every earlier version did.
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    functions = [
+        {"index": 0, "name": "_real", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 1, "name": "_alias", "address": "0x10000ddd4", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert sorted(f["name"] for f in normalized) == ["_alias", "_real"]
+    assert stats["duplicates_merged"] == 0
+
+
+def test_normalize_macho_function_list_counts_unplaceable_addresses():
+    # Addresses the segment ranges cannot place (in both ranges with a
+    # non-zero imagebase, or in neither) are left unchanged and counted.
+    overlapping = [_FakeSegmentLayout("__TEXT", 0x1000, 0x20000, 0, 0x20000)]
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(overlapping, 0x1000))
+    functions = [
+        {"index": 0, "name": "sub_1800", "address": "0x1800", "size": 0, "flags": None},
+        {"index": 1, "name": "_far", "address": "0x50000000", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x1000)
+    by_name = {f["name"]: f for f in normalized}
+    assert by_name["sub_1800"]["address"] == "0x1800"
+    assert by_name["_far"]["address"] == "0x50000000"
+    assert stats["ambiguous"] == 1
+    assert stats["unresolved"] == 1
+    assert stats["rebased"] == 0
+
+
+def test_merge_function_starts_rebases_starts_and_dedupes_across_spaces():
+    # lief's aggregate holds the symtab entry (absolute); the load command
+    # holds the same function as a file-relative offset. The merge must
+    # rebase the start, recognise the duplicate and not append it.
+    parsed = _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000, starts=[0xddd4, 0x2000])
+    functions = [
+        {"index": 0, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 0, "flags": None},
+    ]
+    symtab = [{"short_name": "_sym_at_2000", "address": "0x100002000"}]
+    merged = merge_macho_function_starts(functions, symtab, parsed)
+    by_addr = {f["address"]: f["name"] for f in merged}
+    assert by_addr == {"0x10000ddd4": "_x264_mdate", "0x100002000": "_sym_at_2000"}
+    # A start with no surviving symbol is synthesised with the virtual address.
+    parsed = _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000, starts=[0x3000])
+    merged = merge_macho_function_starts([], [], parsed)
+    assert [(f["name"], f["address"]) for f in merged] == [("sub_100003000", "0x100003000")]
+
+
+def test_merge_function_starts_names_nameless_entries_from_symtab():
+    # lief's aggregate can keep an entry's address but drop its symbol name;
+    # the symtab still has the name and the merge adopts it (on an unstripped
+    # dylib this is the difference between reading as symbolized and reading
+    # as stripped).
+    parsed = _FakeBinaryWithSegments(
+        [_FakeSegmentLayout("__TEXT", 0, 0x20000, 0, 0x20000)], 0, starts=[0x1234]
+    )
+    functions = [
+        {"index": 0, "name": None, "address": "0x1234", "size": 0, "flags": None},
+        {"index": 1, "name": "sub_5678", "address": "0x5678", "size": 0, "flags": None},
+    ]
+    symtab = [
+        {"short_name": "_real_name", "address": "0x1234"},
+        {"short_name": "_second_name", "address": "0x5678"},
+    ]
+    merged = merge_macho_function_starts(functions, symtab, parsed)
+    by_addr = {f["address"]: f["name"] for f in merged}
+    assert by_addr["0x1234"] == "_real_name"
+    # A synthetic sub_<addr> name is upgraded too, not only a missing one.
+    assert by_addr["0x5678"] == "_second_name"
+
+
+@pytest.mark.skipif(not os.path.exists("/usr/bin/curl"), reason="needs a real macOS system binary")
+def test_real_macho_functions_live_in_one_address_space():
+    # /usr/bin/curl is a stripped universal binary; blint analyses slice 0
+    # (x86_64, imagebase 0x100000000). Ground truth for the one surviving
+    # symbol is the __TEXT vmaddr the load commands carry: llvm-nm and otool
+    # both report __mh_execute_header exactly at the imagebase.
+    metadata = parse("/usr/bin/curl")
+    imagebase = metadata["imagebase"]
+    addresses = [int(str(f["address"]), 16) for f in metadata["functions"]]
+    assert addresses
+    # One address space: nothing file-relative below the imagebase.
+    assert all(addr >= imagebase for addr in addresses)
+    # No function listed twice.
+    assert len(addresses) == len(set(addresses))
+    header_entry = [f for f in metadata["functions"] if f.get("name") == "__mh_execute_header"]
+    assert header_entry and int(str(header_entry[0]["address"]), 16) == imagebase
+    space = metadata["macho_function_address_space"]
+    assert space["normalized_to"] == "virtual"
+    assert space["imagebase"] == imagebase
+    assert space["ambiguous_entries"] == 0
+    assert space["unresolved_entries"] == 0
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not os.path.exists("/usr/bin/curl"), reason="needs a real macOS system binary")
+def test_real_macho_disassembly_keys_are_not_double_rebased():
+    metadata = parse("/usr/bin/curl", disassemble=True)
+    imagebase = metadata["imagebase"]
+    keys = [int(k.split("::", 1)[0], 16) for k in metadata["disassembled_functions"]]
+    assert keys
+    assert all(imagebase <= addr < 2 * imagebase for addr in keys)
 
 
 def test_merge_objc_functions_upgrades_synthesised_names():

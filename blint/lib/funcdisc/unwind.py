@@ -116,12 +116,15 @@ def discover_macho_unwind_functions(parsed_obj) -> list[dict]:
     """Parse ``__unwind_info`` into ``[{address, size, source}, ...]``.
 
     Compact unwind stores function offsets relative to the ``__TEXT`` segment
-    start. LIEF's Mach-O function lists (and therefore the rest of blint) use
-    that same imagebase-relative space, so addresses are emitted relative to
-    the imagebase rather than as absolute virtual addresses. Sizes come from
-    the gap to the next function, which the sorted offset list makes exact.
-    The last top-level index entry is a sentinel whose function offset marks
-    the end of the covered functions, bounding the final entry.
+    start, so the emitted address is the true virtual address
+    (``text_vmaddr + offset``). Mach-O function metadata is normalized to
+    the virtual space where it is built (P5.1), and discovery records must
+    land in that same space or every merge would compare offsets against
+    virtual addresses and re-create the duplicate entries the normalization
+    removed. Sizes come from the gap to the next function, which the sorted
+    offset list makes exact. The last top-level index entry is a sentinel
+    whose function offset marks the end of the covered functions, bounding
+    the final entry.
     """
     text_vmaddr = _macho_text_vmaddr(parsed_obj)
     if text_vmaddr is None:
@@ -161,12 +164,7 @@ def discover_macho_unwind_functions(parsed_obj) -> list[dict]:
                     results[function_offset] = 0
     except (struct.error, TypeError, ValueError):
         pass
-    imagebase = getattr(parsed_obj, "imagebase", None)
-    rebase = text_vmaddr - imagebase if isinstance(imagebase, int) else 0
-    entries = _offsets_to_entries(results, 0, end_offset or None)
-    for entry in entries:
-        entry["address"] += rebase
-    return entries
+    return _offsets_to_entries(results, text_vmaddr, end_offset or None)
 
 
 def _read_regular_page(data: bytes, page_offset: int) -> list[int]:
