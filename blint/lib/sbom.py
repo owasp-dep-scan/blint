@@ -340,7 +340,7 @@ def create_sbom(
             os.makedirs(output_dir)
 
         file_write(
-            os.path.join(output_dir, output_file_str),
+            output_file_str,
             sbom.model_dump_json(
                 indent=None if deep_mode else 2,
                 exclude_none=True,
