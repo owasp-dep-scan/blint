@@ -316,7 +316,10 @@ def parallel_fixtures(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("parallel-fixtures")
     source = workdir / "demo.c"
     source.write_text(_DEMO_C, encoding="utf-8")
-    binary = workdir / "demo-bin"
+    # A Windows compiler appends `.exe` when `-o` carries no suffix, which
+    # would silently drop this unit from the corpus and turn every count
+    # below into an off-by-one.
+    binary = workdir / ("demo-bin.exe" if os.name == "nt" else "demo-bin")
     subprocess.run(
         [compiler, "-O1", "-o", str(binary), str(source)],
         check=True,

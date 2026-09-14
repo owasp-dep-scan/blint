@@ -81,7 +81,10 @@ def native_binary(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("cache-fixtures")
     source = workdir / "demo.c"
     source.write_text(_DEMO_C, encoding="utf-8")
-    binary = workdir / "demo-bin"
+    # Name the suffix rather than let the toolchain pick it: a Windows
+    # compiler appends `.exe` when `-o` has none, and the fixture then
+    # returns a path to a file that does not exist.
+    binary = workdir / ("demo-bin.exe" if os.name == "nt" else "demo-bin")
     subprocess.run(
         [compiler, "-O1", "-o", str(binary), str(source)],
         check=True,

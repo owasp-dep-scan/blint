@@ -2241,6 +2241,36 @@ def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
     return False
 
 
+# ELF spellings of the stack-protector runtime: the glibc/musl entry points
+# plus ICC's cookie object.
+ELF_STACK_CHK_SYMBOLS = STACK_CHK_SYMBOLS | {"__intel_security_cookie"}
+
+
+def _elf_has_canary(parsed_obj: lief.ELF.Binary) -> bool | None:
+    """Explicit canary verdict for an ELF, or None when there is no evidence.
+
+    An ELF built with the stack protector references the runtime by name, so
+    the symbol tables are the evidence. A binary stripped of every symbol
+    leaves nothing to read and gets no verdict: unknown is reported as
+    absent, not as clean (rule 14). Symbols are read rather than
+    ``get_symbol`` lookups so that "there were names to search" is itself
+    observable — the verdict for a binary with symbols and no marker is
+    ``False``, which is what makes CHECK_CANARY able to fire at all.
+    """
+    seen_named_symbol = False
+    try:
+        for symbol in parsed_obj.symbols:
+            name = symbol.name
+            if not isinstance(name, str) or not (name := name.strip()):
+                continue
+            seen_named_symbol = True
+            if name in ELF_STACK_CHK_SYMBOLS:
+                return True
+    except (AttributeError, TypeError):
+        return None
+    return False if seen_named_symbol else None
+
+
 # PE spellings of the stack-protector runtime, matched as lowercase substrings
 # so x86 decoration (`@__security_check_cookie@8`) still matches.
 PE_STACK_CHK_MARKERS = (
@@ -3471,15 +3501,11 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["eof_offset"] = parsed_obj.eof_offset
     metadata["relro"] = parse_relro(parsed_obj)
     metadata["exe_type"] = detect_exe_type(parsed_obj, metadata)
-    # Canary check
-    canary_sections = ["__stack_chk_fail", "__intel_security_cookie"]
-    for section in canary_sections:
-        if parsed_obj.get_symbol(section):
-            if isinstance(parsed_obj.get_symbol(section), lief.lief_errors):
-                metadata["has_canary"] = False
-            else:
-                metadata["has_canary"] = True
-                break
+    # Stack-protector evidence, the same tristate the PE and Mach-O paths
+    # use: an explicit verdict or no key at all, never a silently absent key
+    # that CHECK_CANARY collapses into "protected".
+    if (elf_canary := _elf_has_canary(parsed_obj)) is not None:
+        metadata["has_canary"] = elf_canary
     # rpath check
     rpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RPATH)
     if isinstance(rpath, lief.lief_errors):

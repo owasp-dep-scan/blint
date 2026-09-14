@@ -2636,3 +2636,40 @@ def test_pe_has_canary_no_evidence_is_none_not_clean():
     # No load configuration and no marker symbol: unknown, deliberately not
     # False and not True, so the rule engine neither fires nor vouches.
     assert binary_module._pe_has_canary(_FakePE(False), {}) is None
+
+
+class _FakeELFSymbol:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeELF:
+    """Just enough of lief.ELF.Binary for _elf_has_canary's one probe."""
+
+    def __init__(self, names):
+        self.symbols = [_FakeELFSymbol(name) for name in names]
+
+
+def test_elf_has_canary_marker_symbol_is_true():
+    assert binary_module._elf_has_canary(_FakeELF(["main", "__stack_chk_fail"])) is True
+    # ICC's cookie object counts as the same evidence.
+    assert binary_module._elf_has_canary(_FakeELF(["__intel_security_cookie"])) is True
+
+
+def test_elf_has_canary_symbols_without_the_marker_are_an_explicit_false():
+    """The verdict CHECK_CANARY actually fires on.
+
+    The previous code only assigned ``has_canary`` on a hit — LIEF returns
+    None for a missing symbol, so a `-fno-stack-protector` ELF left the key
+    unset and the rule, which fires only on an explicit False, read it as
+    protected. Every ELF was reported canary-protected.
+    """
+    assert binary_module._elf_has_canary(_FakeELF(["main", "printf", "puts"])) is False
+
+
+def test_elf_has_canary_no_symbols_is_none_not_clean():
+    # A fully stripped static ELF: nothing to read, so no verdict. Unknown is
+    # reported as absent, not as clean.
+    assert binary_module._elf_has_canary(_FakeELF([])) is None
+    # Entries with no usable name are not evidence that a search happened.
+    assert binary_module._elf_has_canary(_FakeELF(["", "   ", None])) is None
