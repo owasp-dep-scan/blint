@@ -77,6 +77,22 @@ _SPAWNS_PER_UNIT = 1
 _EXTRA_SPAWNS = 32
 
 
+def default_context() -> multiprocessing.context.BaseContext:
+    """The start method the pool uses when the caller does not choose one.
+
+    Never ``fork``. By the time a scan reaches the pool the parent holds
+    locks taken by threads it does not own -- the progress renderer, the
+    logging handlers, LIEF -- and a forked child inherits those locks held
+    by threads that do not exist in it, so its first log line blocks
+    forever. Falls back to ``forkserver``, then ``spawn``.
+    """
+    available = multiprocessing.get_all_start_methods()
+    for method in ("forkserver", "spawn"):
+        if method in available:
+            return multiprocessing.get_context(method)
+    return multiprocessing.get_context()
+
+
 class PoolStartupError(RuntimeError):
     """Raised when the worker pool cannot be started or cannot make progress.
 
@@ -301,8 +317,8 @@ def run_pool(
             count; the pool is only used with more than one unit.
         worker_spec: The :class:`WorkerSpec` every worker runs.
         mp_context: Optional multiprocessing context (tests inject ``fork``
-            to unit-test worker death with patched state; production uses the
-            platform default — spawn on macOS/Windows, fork on Linux).
+            to unit-test worker death with patched state; production uses
+            :func:`default_context`, which never forks).
         on_done: Parent-side callback invoked with the unit index as each
             result arrives (advances the progress bar in completion order —
             display only, never merge order).
@@ -320,7 +336,7 @@ def run_pool(
         return {}, {}
     if num_workers < 1:
         raise PoolStartupError(f"num_workers must be >= 1, got {num_workers}")
-    ctx = mp_context or multiprocessing.get_context()
+    ctx = mp_context or default_context()
     num_workers = min(num_workers, len(units))
     # Task queues are created per *generation* of a worker, in spawn() below,
     # never once per slot. A worker can die after the parent has put a unit on

@@ -25,6 +25,7 @@ jobs:
     # time. MSVC is preinstalled on the runner; no WDK is needed.
     name: build driver fixture
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -53,6 +54,7 @@ jobs:
     name: verify IOCTL recovery
     needs: build-fixture
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -100,6 +102,7 @@ jobs:
     # disassembly-dependent rules stay silent here by construction.
     name: inbox driver false-positive sweep
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:

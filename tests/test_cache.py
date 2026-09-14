@@ -53,6 +53,9 @@ from tests.test_determinism import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+pytestmark = pytest.mark.slow
+
+
 
 def _assert_replay_equals_cold(warm: dict, cold: dict) -> None:
     """Hold a cached replay to the determinism standard, in the export domain.

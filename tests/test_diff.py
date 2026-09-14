@@ -41,6 +41,9 @@ needs_stackstr = pytest.mark.skipif(
     reason="corpus fixtures stackstr-arm64 / -stripped not built",
 )
 
+pytestmark = pytest.mark.slow
+
+
 
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic sides

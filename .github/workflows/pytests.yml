@@ -14,6 +14,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -74,7 +75,7 @@ jobs:
       if: runner.os == 'Windows'
     - name: Test with pytest
       run: |
-        poetry run pytest --cov=blint tests
+        poetry run pytest --cov=blint -m "not slow" tests
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names

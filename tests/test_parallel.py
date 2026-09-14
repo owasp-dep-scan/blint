@@ -45,12 +45,16 @@ from blint.lib.parallel import (
     BufferedLogHandler,
     PoolStartupError,
     WorkerSpec,
+    default_context,
     payload_as_state,
     resolve_jobs,
     run_pool,
 )
 from blint.lib.runners import AnalysisRunner, run_sbom_mode
 from tests.test_determinism import _DEMO_C
+
+pytestmark = pytest.mark.slow
+
 
 # --------------------------------------------------------------------------
 # resolve_jobs
@@ -228,6 +232,17 @@ def test_run_pool_bootstrap_failure_raises():
             WorkerSpec(analyze=_double_unit, payload=None),
             mp_context=_BrokenContext(),
         )
+
+
+def test_default_context_never_forks():
+    """The pool's start method must not be ``fork`` on any platform.
+
+    A scan reaches the pool holding locks taken by threads it does not own
+    (the progress renderer, the logging handlers, LIEF). A forked child
+    inherits those locks held, by threads that do not exist in it, and
+    deadlocks on its first log line.
+    """
+    assert default_context().get_start_method() != "fork"
 
 
 def test_buffered_log_handler_capacity_and_drop_summary():

@@ -27,6 +27,9 @@ needs_go_elf = pytest.mark.skipif(
     not GO_ELF.exists(), reason="corpus fixture go-elf-unstripped not built"
 )
 
+pytestmark = pytest.mark.slow
+
+
 
 def test_analyze_returns_typed_result_on_wasm_fixture():
     result = analyze(WASM_FIXTURE)

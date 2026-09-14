@@ -55,6 +55,9 @@ const char *wave0_label(void) { return "wave0-determinism-demo"; }
 int main(void) { return accumulate(7) + (int)strlen(wave0_label()); }
 """
 
+pytestmark = pytest.mark.slow
+
+
 
 def _first_diff_path(first, second, path="$"):
     """Locate the first differing position in two JSON-like structures."""

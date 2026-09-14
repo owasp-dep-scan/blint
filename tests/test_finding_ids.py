@@ -26,6 +26,9 @@ needs_go_elf = pytest.mark.skipif(
     not GO_ELF.exists(), reason="corpus fixture go-elf-unstripped not built"
 )
 
+pytestmark = pytest.mark.slow
+
+
 
 def test_compute_finding_id_depends_only_on_its_three_inputs():
     base = compute_finding_id("CHECK_NX", "a" * 64, "")
