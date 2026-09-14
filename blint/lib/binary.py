@@ -1852,7 +1852,12 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
             - dll_list (list[dict])
     """
     imports_list: list[dict] = []
-    dlls = set()
+    # Insertion-ordered rather than a set: this list is exported as
+    # ``dynamic_entries`` and seeds the SBOM's dependency refs, so set
+    # iteration order made both vary with PYTHONHASHSEED. First-seen order is
+    # the import directory's own order, which is what ELF's DT_NEEDED list
+    # already reports.
+    dlls: dict[str, None] = {}
     if not imports or isinstance(imports, lief.lief_errors):
         return imports_list, []
     for import_ in imports:
@@ -1865,7 +1870,7 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
         for entry in entries:
             try:
                 if entry.name:
-                    dlls.add(import_.name)
+                    dlls[import_.name] = None
                     imports_list.append(
                         {
                             "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
@@ -1880,7 +1885,7 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
                     )
             except AttributeError:
                 continue
-    dll_list = [{"name": d, "tag": "NEEDED"} for d in list(dlls)]
+    dll_list = [{"name": d, "tag": "NEEDED"} for d in dlls]
     return imports_list, dll_list
 
 

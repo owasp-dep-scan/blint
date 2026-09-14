@@ -2638,6 +2638,52 @@ def test_pe_has_canary_no_evidence_is_none_not_clean():
     assert binary_module._pe_has_canary(_FakePE(False), {}) is None
 
 
+class _FakePEImportEntry:
+    def __init__(self, name):
+        self.name = name
+        self.data = 0
+        self.iat_value = 0
+        self.hint = 0
+        self.iat_address = 0
+
+
+class _FakePEImport:
+    def __init__(self, name, entry_names):
+        self.name = name
+        self.entries = [_FakePEImportEntry(n) for n in entry_names]
+
+
+def test_pe_dynamic_entries_keep_the_import_directory_order():
+    """``dynamic_entries`` must not depend on PYTHONHASHSEED.
+
+    The DLL names were collected in a set, so their order came straight from
+    set iteration: two runs of the same blint over the same PE produced
+    different metadata bytes and different SBOM dependency refs. It only
+    showed on Windows, where a binary links enough sibling DLLs for an order
+    to exist at all. First-seen order is the import directory's own.
+    """
+    imports = [
+        _FakePEImport("zeta.dll", ["a", "b"]),
+        _FakePEImport("alpha.dll", ["c"]),
+        _FakePEImport("mid.dll", ["d"]),
+    ]
+    _symbols, dll_list = binary_module.parse_pe_imports(imports, 0)
+    assert [d["name"] for d in dll_list] == ["zeta.dll", "alpha.dll", "mid.dll"]
+    assert all(d["tag"] == "NEEDED" for d in dll_list)
+
+
+def test_pe_dynamic_entries_deduplicate_at_first_sight():
+    # A DLL named by two import descriptors appears once, in the position it
+    # was first seen — dropping the dedupe would be a different bug.
+    imports = [
+        _FakePEImport("zeta.dll", ["a"]),
+        _FakePEImport("alpha.dll", ["b"]),
+        _FakePEImport("zeta.dll", ["c"]),
+    ]
+    _symbols, dll_list = binary_module.parse_pe_imports(imports, 0)
+    assert [d["name"] for d in dll_list] == ["zeta.dll", "alpha.dll"]
+
+
 class _FakeELFSymbol:
     def __init__(self, name):
         self.name = name
