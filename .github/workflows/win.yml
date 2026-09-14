@@ -13,6 +13,7 @@ permissions: {}
 jobs:
   Blint-Build:
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
       contents: write
       packages: write

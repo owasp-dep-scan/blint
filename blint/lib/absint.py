@@ -41,19 +41,27 @@ so the convergence, not the decode filters, is what keeps loop-carried and
 path-dependent garbage out.
 
 Loops terminate by iteration cap: a block is visited at most
-``MAX_BLOCK_VISITS`` times. Registers under loop-carried arithmetic meet
-at conflicting values and go unknown within a couple of rounds, so the cap
-is a backstop, not the normal exit. When it is hit the function's state is
-untrustworthy and *no strings are returned for it*; the caller counts the
-event in ``stack_strings_coverage.functions_iteration_cap_hit`` so a cap
-hit is observable rather than silent.
+``MAX_BLOCK_VISITS`` times. Values that conflict at a merge go unknown
+within a few rounds, but each out-state change propagates along every
+intra-function branch edge, so long functions converge through many revisit
+waves before the fixed point; the cap is a backstop for the pathological
+remainder. When it is hit the function's state is untrustworthy and *no
+strings are returned for it*; the caller counts the event in
+``stack_strings_coverage.functions_iteration_cap_hit`` so a cap hit is
+observable rather than silent.
 
 Functions whose metadata carries no usable CFG (blocks that do not tile
 the assembly text, or no CFG at all) fall back to the straight-line pass,
 which is also what the public helpers here run when handed a bare
 assembly listing. A ``bl``/``blr`` (ARM64) or ``call`` (x86) clobbers the
 caller-saved registers exactly as the ABI demands; callee-saved registers
-and the frame registers survive. Any instruction writing a register the
+and the frame registers survive. Tail-kind branches (``jmp`` on x86,
+``b``/``br`` on ARM64) share one semantics across the models: a branch
+whose target is inside the function is pure control flow — the CFG
+carries the edge and the state flows along it — while a branch that
+leaves the function is a tail call and clobbers (:meth:`ArchModel.
+apply_branch` is the one place that line is drawn; without a CFG the
+conservative reading applies). Any instruction writing a register the
 model does not understand invalidates it, and stores through unknown
 registers are ignored.
 
@@ -71,8 +79,9 @@ recovery, because a fallback would resurface exactly those leaked values.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
+from blint.config import get_int_from_env
 from blint.logger import LOG
 
 # ---------------------------------------------------------------------------
@@ -119,8 +128,12 @@ MAX_RUNS_PER_FUNCTION = 64
 # activity, and scanning entire large functions costs more than it recovers.
 MAX_INSTRUCTIONS = 4000
 # A block is visited at most this many times before the function is declared
-# non-converged and dropped from recovery (see module docstring).
-MAX_BLOCK_VISITS = 32
+# non-converged and dropped from recovery (see module docstring). Values that
+# conflict go unknown within a few rounds, but a change now propagates along
+# every intra-function branch edge, so long functions need more revisit waves
+# than the pre-edge semantics did; at 64 the functions the cap still drops on
+# real Rust binaries are the genuinely pathological handful.
+MAX_BLOCK_VISITS = 64
 
 # Characters that appear in the string literals worth recovering: paths,
 # registry keys, device names, module names and API names. The set is ASCII-only
@@ -269,8 +282,11 @@ class FrameState:
     Register values are plain ints, or tuples naming a symbolic pointer: a
     ``("sp", offset)`` names a slot relative to the *initial* stack pointer
     (so ``add x8, sp, #8`` followed by ``str x9, [x8]`` lands in the frame
-    even after ``sub sp`` moved the base) and ``("adrp", 0)`` names a page
-    pointer stores through which are not frame slots. ``sp_adjustment`` is
+    even after ``sub sp`` moved the base), ``("adrp", 0)`` names a page
+    pointer whose page could not be computed, and ``("ptr", address)`` names
+    a *materialised* pointer whose absolute address the model folded from a
+    pc-relative form (ARM64 ``adrp`` [+ ``add``], x86 rip-relative ``lea``).
+    Stores through any of these are not frame slots. ``sp_adjustment`` is
     the ARM64 running sp offset; ``None`` means incoming paths disagree on
     it, after which sp-relative stores cannot be located.
 
@@ -370,6 +386,11 @@ class ArchModel:
 
     frame_bases: frozenset[str] = frozenset()
     call_clobbered: tuple[str, ...] = ()
+    # Fixed instruction encoding size in bytes, or None when instructions
+    # vary. The call-site recovery uses it (with the disassembler's exported
+    # per-instruction lengths, when available) to reconstruct where a line
+    # sits, which is what pc-relative materialisations fold against.
+    instruction_stride: int | None = None
 
     def register(self, name: str) -> tuple[str, int] | None:  # pragma: no cover - interface
         raise NotImplementedError
@@ -383,7 +404,25 @@ class ArchModel:
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def step(self, state: FrameState, text: str) -> None:  # pragma: no cover - interface
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:  # pragma: no cover - interface
+        """Apply one instruction's semantics to the state.
+
+        ``leaves_function`` says what the caller knows about a tail-kind
+        branch's target (``jmp`` on x86, ``b``/``br`` on ARM64): False when
+        the CFG carries the branch's edge to a block inside the function,
+        True when it does not — the straight-line pass, any block whose
+        terminator left no edge, and any tail-kind mnemonic off a block's
+        final line, where the target cannot be placed. Only tail-kind
+        mnemonics consult it; the default is the conservative reading.
+
+        ``address_span`` is the (start, end) virtual address of this
+        instruction when the caller can place it — the call-site recovery
+        reconstructs them from the CFG blocks' VAs and the disassembler's
+        per-instruction lengths; the stack-string paths deliberately do
+        not. Only pc-relative address materialisations (``adrp``, rip-relative
+        ``lea``) consult it; every other instruction ignores it, and None
+        must reproduce exactly the pre-materialisation semantics.
+        """
         raise NotImplementedError
 
     def call_kind(self, mnemonic: str) -> str | None:  # pragma: no cover - interface
@@ -392,11 +431,34 @@ class ArchModel:
         'call' means the mnemonic always transfers control to a callee (x86
         ``call``, ARM64 ``bl``/``blr``); 'tail' means the mnemonic is an
         ordinary branch that only becomes a call when its resolved target
-        leaves the function, which the disassembler annotates only for the
-        function's final instruction. Callers must not treat a 'tail' line
-        as a call site without that annotation.
+        leaves the function — the test :meth:`apply_branch` applies, from the
+        CFG's edges during the dataflow and from the disassembler's
+        last-line annotation when resolving callee names. Callers must not
+        treat a 'tail' line as a call site without one of those two tests.
         """
         raise NotImplementedError
+
+    def apply_branch(self, state: FrameState, text: str, leaves_function: bool) -> bool:
+        """Consume one control-transfer instruction, applying the branch semantics.
+
+        This is the single place the call-vs-branch clobber decision lives,
+        shared by both models. One semantics: a 'call' mnemonic always
+        clobbers the caller-saved registers exactly as the ABI demands; a
+        'tail' branch clobbers only when it leaves the function, because a
+        branch whose target is inside the function is pure control flow —
+        the CFG already carries that edge, and destroying the state that
+        flows along it truncates recovery at every block ending in an
+        unconditional jump. Returns True when the instruction was a
+        control transfer, False when the caller must decode it as an
+        ordinary instruction.
+        """
+        parts = text.split(None, 1) if text else []
+        kind = self.call_kind(parts[0]) if parts else None
+        if kind is None:
+            return False
+        if kind == "call" or leaves_function:
+            self.clobber_call_registers(state)
+        return True
 
     def clobber_call_registers(self, state: FrameState) -> None:
         for name in self.call_clobbered:
@@ -471,6 +533,7 @@ class X86_64Model(ArchModel):
 
     frame_bases = _X86_FRAME_REGISTERS
     call_clobbered = _X86_CALL_CLOBBERED
+    instruction_stride = None  # x86 instruction lengths vary
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _X86_REGISTER_INFO.get(name.strip().lower())
@@ -488,6 +551,18 @@ class X86_64Model(ArchModel):
         if not info:
             return
         family, width = info
+        # A materialised pointer passes through untouched at full width:
+        # masking it would destroy the address it names (the tuple itself is
+        # what the frame store guard and the call-site snapshot read). A
+        # narrower write keeps only the low bytes, which are not the address,
+        # so the register goes unknown instead of naming a pointer the
+        # hardware never formed.
+        if isinstance(value, tuple):
+            if width < 8:
+                state.registers.pop(family, None)
+            else:
+                state.registers[family] = value
+            return
         # Writing a sub-register leaves the upper bytes of the family intact,
         # except for the 32-bit forms, which zero-extend on x86-64.
         if width == 8 or width == 4:
@@ -502,11 +577,8 @@ class X86_64Model(ArchModel):
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:
         state.registers[family] = value & ((1 << (width * 8)) - 1)
 
-    def step(self, state: FrameState, text: str) -> None:
-        if text.startswith(("call", "jmp")):
-            # A call returns a value in rax and destroys the volatile registers;
-            # keeping stale values across it is how a reconstruction goes wrong.
-            self.clobber_call_registers(state)
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
+        if self.apply_branch(state, text, leaves_function):
             return
 
         if store := _STORE_RE.match(text):
@@ -532,11 +604,19 @@ class X86_64Model(ArchModel):
             if source is None:
                 state.invalidate(match.group(1))
             else:
+                # mov copies a pointer as a pointer, but a widening move
+                # (movzx/movsx/movsxd) reads narrow bits of it — that is
+                # not the pointer, so the destination goes unknown.
+                if not isinstance(source[0], int) and match.group(0).strip().lower().startswith(
+                    ("movzx", "movsx", "movsxd")
+                ):
+                    state.invalidate(match.group(1))
+                    return
                 state.write_operand(match.group(1), source[0])
             return
 
         if match := _LEA_RE.match(text):
-            self._apply_lea(state, match)
+            self._apply_lea(state, match, address_span)
             return
 
         if match := _ARITH_REG_IMM_RE.match(text):
@@ -579,9 +659,10 @@ class X86_64Model(ArchModel):
             return
 
         source = state.get_register(value_token)
-        if source is None:
-            # The slot is written with something unknown, so any earlier bytes there
-            # must be dropped rather than read as part of a string.
+        if source is None or not isinstance(source[0], int):
+            # The slot is written with something unknown (or a symbolic or
+            # materialised pointer), so any earlier bytes there must be
+            # dropped rather than read as part of a string.
             width = _X86_SIZE_HINTS.get((size_hint or "").lower()) or 1
             state.drop(base_info[0], offset, width)
             return
@@ -591,7 +672,9 @@ class X86_64Model(ArchModel):
         width = _X86_SIZE_HINTS.get((size_hint or "").lower(), width)
         state.store(base_info[0], offset, value, width)
 
-    def _apply_lea(self, state: FrameState, match: re.Match) -> None:
+    def _apply_lea(
+        self, state: FrameState, match: re.Match, address_span: tuple[int, int] | None = None
+    ) -> None:
         """Apply `lea dest, [src +/- imm]`, the folded arithmetic form."""
         dest, source_reg, sign, offset_token = match.groups()
         source_info = self.register(source_reg)
@@ -599,6 +682,26 @@ class X86_64Model(ArchModel):
         # computing a character, so the destination holds a pointer, not a value.
         if source_info and source_info[0] in self.frame_bases:
             state.invalidate(dest)
+            return
+        if source_reg.lower() == "rip":
+            # `lea rax, [rip + N]` is how position-independent code
+            # materialises the address of a static object: rip reads as the
+            # address of the *next* instruction, so the target is known the
+            # moment this instruction's own extent is. The target is tracked
+            # as a materialised ("ptr", address) pointer — the same encoding
+            # ARM64's completed adrp pairs use — so a store through it is
+            # not a frame slot and the call-site snapshot reads the address
+            # it names. Without the address the destination stays unknown —
+            # never a guessed address.
+            delta = _parse_immediate(offset_token) if offset_token else 0
+            if address_span is None or delta is None:
+                state.invalidate(dest)
+                return
+            if sign == "-":
+                delta = -delta
+            state.write_operand(
+                dest, ("ptr", (address_span[1] + delta) & 0xFFFFFFFFFFFFFFFF)
+            )
             return
         source = state.get_register(source_reg)
         if source is None:
@@ -610,6 +713,12 @@ class X86_64Model(ArchModel):
             return
         if sign == "-":
             delta = -delta
+        if isinstance(source[0], tuple):
+            # Folding arithmetic on a symbolic or materialised pointer moves
+            # the pointer; it never becomes an integer.
+            base_kind, base_offset = source[0]
+            state.write_operand(dest, (base_kind, base_offset + delta))
+            return
         state.write_operand(dest, (source[0] + delta) & 0xFFFFFFFFFFFFFFFF)
 
     def _apply_arith(self, state: FrameState, match: re.Match) -> None:
@@ -621,6 +730,18 @@ class X86_64Model(ArchModel):
             state.invalidate(register)
             return
         value, _ = current
+        if isinstance(value, tuple):
+            # Arithmetic on a materialised pointer: add/sub complete or move
+            # it (the same semantics ARM64's adrp completions use); a bitwise
+            # op destroys the address, so the register goes unknown.
+            base_kind, base_offset = value
+            if op.lower() == "add":
+                state.write_operand(register, (base_kind, base_offset + immediate))
+            elif op.lower() == "sub":
+                state.write_operand(register, (base_kind, base_offset - immediate))
+            else:
+                state.invalidate(register)
+            return
         if op.lower() == "add":
             result = value + immediate
         elif op.lower() == "sub":
@@ -673,6 +794,12 @@ _ARM64_STR_RE = re.compile(
     rf"\[\s*({_ARM64_REG})\s*(?:,\s*({_IMM})\s*)?\](!?)\s*(?:,\s*({_IMM}))?\s*$",
     re.IGNORECASE,
 )
+# adrp renders as `adrp x0, #<delta>`: the delta is the page displacement
+# from the instruction's own page (`pc & ~0xFFF`), so the computed page is
+# `(pc & ~0xFFF) + delta`. Negative when the target lies below the page.
+_ARM64_ADRP_RE = re.compile(
+    rf"^\s*adrp\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE
+)
 
 # Any other instruction whose first operand is a register kills the known
 # value it held. Keeping this strict is what prevents stale values from being
@@ -710,6 +837,7 @@ class Arm64Model(ArchModel):
 
     frame_bases = ARM64_FRAME_BASES
     call_clobbered = ARM64_CALL_CLOBBERED
+    instruction_stride = 4  # AArch64 instructions are one fixed word
 
     def register(self, name: str) -> tuple[str, int] | None:
         return _arm64_register_family(name)
@@ -734,9 +862,17 @@ class Arm64Model(ArchModel):
         if width >= 8:
             state.registers[family] = value
             return
-        # 32-bit writes zero-extend the upper half of the 64-bit register and
-        # cannot carry a symbolic pointer.
-        state.registers[family] = value & 0xFFFFFFFF if isinstance(value, int) else value
+        # 32-bit writes zero-extend the upper half of the 64-bit register, so
+        # they keep only the low half of a materialised address — which is not
+        # that address. Drop it rather than report a pointer the hardware
+        # never formed.
+        if isinstance(value, tuple):
+            if value[0] == "ptr":
+                state.registers.pop(family, None)
+            else:
+                state.registers[family] = value
+            return
+        state.registers[family] = value & 0xFFFFFFFF
 
     def resolve_base(self, state: FrameState, base_reg: str) -> tuple[str, int] | None:
         """Resolve a store's base operand to a (frame base, offset) pair.
@@ -759,14 +895,13 @@ class Arm64Model(ArchModel):
             return "sp", value[1]
         return None
 
-    def step(self, state: FrameState, text: str) -> None:
-        lowered = text.split(None, 1)[0].lower() if text else ""
-        if lowered in ("bl", "blr", "blraa", "blrab"):
-            self.clobber_call_registers(state)
+    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
+        # bl/blr always call; b/br are tail calls exactly when they leave the
+        # function (see apply_branch — the one place that line is drawn).
+        if self.apply_branch(state, text, leaves_function):
             return
-        if lowered.startswith("b.") or lowered in (
-            "b", "br", "ret", "brk", "cbz", "cbnz", "tbz", "tbnz"
-        ):
+        lowered = text.split(None, 1)[0].lower() if text else ""
+        if lowered.startswith("b.") or lowered in ("ret", "brk", "cbz", "cbnz", "tbz", "tbnz"):
             # Pure control flow writes nothing.
             return
 
@@ -827,15 +962,28 @@ class Arm64Model(ArchModel):
             self._apply_arith(state, match)
             return
 
-        # adrp computes a page address (nyxstone renders the page
-        # displacement). Stores through it are not frame slots, so the
-        # register is tracked as a non-frame symbolic pointer: it is no longer
-        # an integer, and `add xN, xN, #imm` keeps it symbolic instead of
-        # producing a bogus value.
-        if lowered == "adrp":
-            dest = text.split(None, 1)[1].split(",")[0].strip() if len(text.split(None, 1)) > 1 else ""
-            if self.register(dest):
-                state.write_family(self.register(dest)[0], ("adrp", 0), 8)
+        # adrp computes a page address: `pc & ~0xFFF` plus the page
+        # displacement the disassembler renders. When the instruction's own
+        # address is known the page is computed and tracked as a *materialised
+        # pointer* — a ("ptr", address) tuple, so a store through it is still
+        # not a frame slot and an `add xN, xN, #imm` completes it into the
+        # absolute address instead of manufacturing an integer. A
+        # `ldr xN, [xM, #off]` off an adrp base is a load *through* the
+        # pointer, not the pointer: it is not matched here and falls through
+        # to the invalidating handler below, so a dereference is never
+        # reported as the address. Without the instruction's address the
+        # page cannot be computed and the register keeps the legacy
+        # non-frame symbolic marker.
+        if match := _ARM64_ADRP_RE.match(text):
+            info = self.register(match.group(1))
+            if info is None:
+                return
+            delta = _parse_immediate(match.group(2))
+            if address_span is None or delta is None:
+                state.write_family(info[0], ("adrp", 0), 8)
+                return
+            page = ((address_span[0] & ~0xFFF) + delta) & 0xFFFFFFFFFFFFFFFF
+            state.write_family(info[0], ("ptr", page), 8)
             return
 
         # Anything else writing its first-operand register invalidates it.
@@ -924,7 +1072,10 @@ class Arm64Model(ArchModel):
                 state.invalidate(dest)
                 return
             delta = immediate if op.lower() == "add" else -immediate
-            state.write_family(info[0], (base_kind, base_offset + delta), 8)
+            # The destination's own width decides: a w-register cannot hold a
+            # materialised address (write_family drops it), while the derived
+            # frame-pointer tuples keep the semantics they have always had.
+            state.write_family(info[0], (base_kind, base_offset + delta), info[1])
             return
         if info[0] == "sp":
             # `add sp, sp, #imm` / `sub sp, sp, #imm` move the frame base.
@@ -981,6 +1132,64 @@ def _block_line_spans(blocks: list[dict], lines: list[str]) -> list[tuple[int, i
     if cursor != len(lines) or any(not line.strip() for line in lines):
         return None
     return spans
+
+
+def _line_address_spans(
+    model: ArchModel,
+    lines: list[str],
+    blocks: list[dict],
+    spans: list[tuple[int, int]],
+    instruction_lengths: list[int] | None,
+) -> tuple[list[tuple[int, int]] | None, str]:
+    """Reconstruct each assembly line's (start, end) address, or refuse.
+
+    The CFG blocks carry their start and end VAs and the disassembler
+    exports per-instruction lengths (``instruction_lengths``, aligned
+    one-to-one with the assembly lines); a line's address is its block's
+    start VA plus the strides of the lines before it in that block. On a
+    model with a fixed instruction stride (ARM64's 4-byte word) the
+    exported lengths may be absent and the stride serves instead.
+
+    Returns ``(address_spans, reason)``. ``reason`` names a refusal so the
+    caller can count it rather than stay silent: ``"no_addresses"`` when a
+    block carries no usable start/end VAs (or the lengths array does not
+    align with the listing), ``"extent_mismatch"`` when a block's extent
+    contradicts the strides its lines claim to cover. Any disagreement
+    refuses the whole function: a wrong address here would fold into a
+    confidently wrong pointer, which is worse than no pointer.
+    """
+    if len(blocks) != len(spans):
+        return None, "no_addresses"
+    strides: list[int] | None = None
+    if isinstance(instruction_lengths, list) and len(instruction_lengths) == len(lines):
+        strides = instruction_lengths
+    result: list[tuple[int, int]] = []
+    for block, (start, end) in zip(blocks, spans):
+        try:
+            block_start = int(str(block.get("start")), 16)
+            block_end = int(str(block.get("end")), 16)
+        except (TypeError, ValueError):
+            return None, "no_addresses"
+        count = end - start
+        extent = block_end - block_start
+        if strides is not None:
+            block_strides = strides[start:end]
+        else:
+            stride = model.instruction_stride
+            if stride is None:
+                # Variable-length encodings cannot be located without the
+                # exported lengths.
+                return None, "no_addresses"
+            block_strides = [stride] * count
+        if extent <= 0 or sum(block_strides) != extent:
+            return None, "extent_mismatch"
+        address = block_start
+        for stride in block_strides:
+            result.append((address, address + stride))
+            address += stride
+    if len(result) != len(lines):
+        return None, "no_addresses"
+    return result, "ok"
 
 
 def _cfg_spans_and_graph(
@@ -1054,6 +1263,7 @@ def _converge_over_cfg(
     model: ArchModel,
     blocks: list[dict],
     edges: list[dict],
+    address_spans: list[tuple[int, int]] | None = None,
 ) -> tuple[
     list[tuple[int, int]], list[list[int]], list[list[int]], list[FrameState | None]
 ] | None:
@@ -1064,10 +1274,12 @@ def _converge_over_cfg(
     join of its visited predecessors' out-states (the join's identity is the
     unconstrained state, not the empty one); when out-states stop changing
     the pass has reached its fixed point. Blocks are limited to
-    ``MAX_BLOCK_VISITS`` visits — loop-carried values meet at conflicts and
-    go unknown long before that, so the cap only fires on pathological
-    inputs, and returning None (rather than a half-converged state) keeps
-    such a function's residue out of every result built on this pass.
+    ``MAX_BLOCK_VISITS`` visits — conflicting values go unknown within a few
+    rounds, but a change propagates along every intra-function branch edge,
+    so a long function reaches its fixed point over many revisit waves and
+    the cap is the backstop for the pathological remainder. Returning None
+    (rather than a half-converged state) keeps such a function's residue out
+    of every result built on this pass.
 
     Returns the block→line spans, the successor and predecessor lists and
     the final out-state per block (None for blocks never reached), or None
@@ -1091,8 +1303,20 @@ def _converge_over_cfg(
             visits[index] -= 1
             continue
         start, end = spans[index]
-        for line in lines[start:end]:
-            model.step(state, line.strip())
+        # A tail-kind terminator clobbers only when it leaves the function:
+        # an outgoing edge means the branch stays inside, no edge means the
+        # target is outside the window (tail call) or unresolvable
+        # (indirect), and both are treated as leaving. Only the block's last
+        # line can be its terminator; earlier lines default to the
+        # conservative reading.
+        block_leaves_function = not successors[index]
+        for offset, line in enumerate(lines[start:end]):
+            model.step(
+                state,
+                line.strip(),
+                leaves_function=block_leaves_function if offset == end - start - 1 else True,
+                address_span=address_spans[start + offset] if address_spans else None,
+            )
         previous = out_states[index]
         if (
             previous is None
@@ -1305,10 +1529,12 @@ def _call_site_records(
     lines: list[str],
     model: ArchModel,
     spans: list[tuple[int, int]],
+    successors: list[list[int]],
     predecessors: list[list[int]],
     out_states: list[FrameState | None],
     arg_families: tuple[str, ...],
     direct_call_targets: list[dict] | None,
+    address_spans: list[tuple[int, int]] | None = None,
 ) -> list[dict]:
     """Snapshot the argument registers at every call instruction.
 
@@ -1318,7 +1544,14 @@ def _call_site_records(
     clobbers the argument registers at the call itself, so this is the only
     point the incoming arguments are observable. Only integer constants are
     reported; a symbolic pointer or an unknown value yields None for that
-    position, never a stale value from before the call sequence.
+    position, never a stale value from before the call sequence. A
+    *materialised* pointer — a (``"ptr"``, address) tuple the model folded
+    from a pc-relative form when the caller could place the instruction —
+    is reported as the address it names, and counted in the record's
+    ``materialised`` field (``materialised_page`` for bare pages, which an
+    uncompleted ``adrp`` leaves behind). Tail-kind branches step with the
+    same leaves-function decision the convergence pass used, and the same
+    address spans, so the replayed state matches it exactly.
 
     The replay is O(lines) time and holds one FrameState at a time; the
     records are O(call sites) small dicts, which is the only extra memory
@@ -1333,6 +1566,7 @@ def _call_site_records(
         state = _block_in_state(model, block_index, predecessors, out_states)
         if state is None:
             continue
+        block_leaves_function = not successors[block_index]
         for offset, line in enumerate(lines[start:end]):
             text = line.strip()
             if not text:
@@ -1346,9 +1580,24 @@ def _call_site_records(
                     model, text, call_operands, tail_operands, start + offset == last_line
                 )
                 arguments = []
+                materialised = 0
+                materialised_page = 0
                 for family in arg_families:
                     value = state.registers.get(family)
-                    arguments.append(value if isinstance(value, int) else None)
+                    if isinstance(value, int):
+                        arguments.append(value)
+                        continue
+                    if isinstance(value, tuple) and value[0] == "ptr" and isinstance(value[1], int):
+                        arguments.append(value[1])
+                        materialised += 1
+                        if value[1] % 4096 == 0:
+                            # A bare page: an adrp its `add` never completed,
+                            # or a target that really is page-aligned. The
+                            # page is still what the register held, so it is
+                            # reported and counted, never hidden.
+                            materialised_page += 1
+                        continue
+                    arguments.append(None)
                 records.append(
                     {
                         "line": start + offset,
@@ -1356,9 +1605,16 @@ def _call_site_records(
                         "callee": callee,
                         "registers": tuple(arg_families),
                         "arguments": arguments,
+                        "materialised": materialised,
+                        "materialised_page": materialised_page,
                     }
                 )
-            model.step(state, text)
+            model.step(
+                state,
+                text,
+                leaves_function=block_leaves_function if offset == end - start - 1 else True,
+                address_span=address_spans[start + offset] if address_spans else None,
+            )
     return records
 
 
@@ -1371,7 +1627,10 @@ def recover_call_site_arguments_with_method(
     (``line`` index into the assembly text, ``instruction`` text), the
     ``callee`` the disassembler resolved it to (None when unresolved), the
     ABI's ``registers`` tuple and the integer constants in ``arguments`` at
-    that point (None where the model does not know one). ``method`` names
+    that point (None where the model does not know one). A constant the
+    model materialised from a pc-relative form (ARM64 ``adrp`` [+ ``add``],
+    x86 rip-relative ``lea``) is reported as the address it names, counted
+    in the record's ``materialised`` field. ``method`` names
     how the function was analyzed: ``"dataflow"`` (CFG fixed point),
     ``"no_cfg"`` / ``"cfg_mismatch"`` (no CFG, or one that does not tile the
     text — there is deliberately no straight-line fallback, which would
@@ -1395,15 +1654,24 @@ def recover_call_site_arguments_with_method(
     edges = cfg.get("edges") or []
     if not blocks:
         return [], "no_cfg"
-    if _block_line_spans(blocks, lines) is None:
+    spans = _block_line_spans(blocks, lines)
+    if spans is None:
         return [], "cfg_mismatch"
-    converged = _converge_over_cfg(lines, model, blocks, edges)
+    # Reconstruct where each line sits so pc-relative materialisations
+    # (adrp, rip-relative lea) fold into absolute pointers. A refusal is
+    # fine — the model then keeps those registers symbolic, and the block
+    # builder counts the reason — but the spans must be the same for the
+    # convergence and the replay, or the replayed state would not match.
+    address_spans, _ = _line_address_spans(
+        model, lines, blocks, spans, func_data.get("instruction_lengths")
+    )
+    converged = _converge_over_cfg(lines, model, blocks, edges, address_spans=address_spans)
     if converged is None:
         return [], "cap_hit"
-    spans, _, predecessors, out_states = converged
+    spans, successors, predecessors, out_states = converged
     records = _call_site_records(
-        lines, model, spans, predecessors, out_states, arg_families,
-        func_data.get("direct_call_targets"),
+        lines, model, spans, successors, predecessors, out_states, arg_families,
+        func_data.get("direct_call_targets"), address_spans=address_spans,
     )
     return records, "dataflow"
 
@@ -1413,6 +1681,252 @@ def recover_call_site_arguments(
 ) -> list[dict]:
     """Recover one function's call-site constant arguments (see _with_method)."""
     return recover_call_site_arguments_with_method(func_data, arch_target, binary_format)[0]
+
+
+# ---------------------------------------------------------------------------
+# The call-site constant-argument metadata block (P4.7).
+# ---------------------------------------------------------------------------
+
+# Size budget of the exported block, stated up front (see the packet this
+# implements): the block is the *next per-function emitter* after the CFG
+# block listing, and without a bound it would carry a record per call site
+# with a constant — tens of thousands on a large Rust binary. The exported
+# form is therefore one entry per distinct (callee, argument index, value)
+# triple, and the bounds below cap it further. All are named when they trip,
+# in the coverage counters, never silently.
+#
+# BLINT_MAX_CALLSITE_ARGUMENTS overrides the per-binary entry bound; 0
+# disables the block entirely.
+MAX_CALLSITE_ARGUMENT_ENTRIES = 4096
+# Distinct entries a single function may contribute before the rest of its
+# constants are counted as truncated. A function contributing hundreds of
+# distinct constants is initialising data through calls, not expressing
+# capability-relevant arguments.
+MAX_CALLSITE_ENTRIES_PER_FUNCTION = 256
+# Citing functions kept per entry; the full reach stays in ``site_count``.
+MAX_CALLSITE_SITES_PER_ENTRY = 3
+# Keep at most this many function names in the coverage counter that names
+# the functions whose contributions were cut by the per-function cap.
+MAX_NAMED_CAPPED_FUNCTIONS = 20
+
+
+def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
+    """Decode the NUL-terminated ASCII run at the start of ``data``.
+
+    The shared decoder for naming what a recovered call-site constant points
+    at: the same character filter as the stack-string decoder applies (only
+    path-, registry- and API-relevant characters pass), with a longer minimum
+    because a constant that happens to land on three printable bytes is too
+    easy to manufacture. Returns None when the bytes do not read as text.
+    """
+    if not data:
+        return None
+    nul = data.find(b"\x00")
+    usable = data[:nul] if nul != -1 else data
+    try:
+        text = usable.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    if len(text) < min_length or not _looks_like_text(text):
+        return None
+    return text
+
+
+def analyze_call_site_arguments(
+    disassembled_functions: dict | None,
+    arch_target: str = "",
+    binary_format: str = "",
+    resolve_string: Callable[[int], str | None] | None = None,
+    max_entries: int | None = None,
+) -> tuple[list[dict], dict]:
+    """Aggregate call-site constant arguments into the exported metadata block.
+
+    Runs :func:`recover_call_site_arguments_with_method` per disassembled
+    function and folds the per-site records into one entry per distinct
+    ``(callee, argument, value)`` triple, keeping the first citation as the
+    example and counting the rest. Records with an unresolved callee
+    contribute a counter, not an entry: an integer constant with no resolved
+    destination is the noise this block exists to keep out of reports.
+
+    ``resolve_string``, when given, is called once per distinct constant and
+    may return the string its value points at (the caller owns the
+    section-level answer; this module deliberately knows nothing about
+    sections). ``max_entries`` bounds the block and defaults to the
+    ``BLINT_MAX_CALLSITE_ARGUMENTS`` environment value or
+    :data:`MAX_CALLSITE_ARGUMENT_ENTRIES`; ``0`` disables the block, and a
+    tripped bound is reported in the coverage counters.
+
+    Returns ``(entries, coverage)``. Every way this can fail to recover a
+    constant is a named coverage counter — no silent gaps.
+    """
+    if max_entries is None:
+        max_entries = get_int_from_env(
+            "BLINT_MAX_CALLSITE_ARGUMENTS", MAX_CALLSITE_ARGUMENT_ENTRIES
+        )
+    coverage = {
+        "functions_total": 0,
+        "functions_dataflow": 0,
+        "functions_no_cfg": 0,
+        "functions_cfg_mismatch": 0,
+        "functions_cap_hit": 0,
+        "functions_no_abi": 0,
+        "functions_skipped": 0,
+        "functions_entries_capped": 0,
+        "records_unresolved_callee": 0,
+        # Pointer materialisation (P4.9): every way a pc-relative
+        # materialisation can fail to light up is named here, never silent.
+        "functions_no_line_addresses": 0,
+        "functions_extent_mismatch": 0,
+        "functions_unmodelled_pc_relative": 0,
+        "arguments_materialised": 0,
+        "pointer_values_page_only": 0,
+        "strings_resolved": 0,
+        "max_entries": max(0, max_entries),
+    }
+    if not max_entries or not disassembled_functions:
+        coverage["functions_total"] = len(disassembled_functions or {})
+        return [], coverage
+
+    aggregated: dict[tuple[str, int, int], dict] = {}
+    truncated_by_function: list[str] = []
+    truncated = False
+    model = model_for_target(arch_target)
+    for func_key, func_data in disassembled_functions.items():
+        if not isinstance(func_data, dict):
+            continue
+        coverage["functions_total"] += 1
+        records, method = recover_call_site_arguments_with_method(
+            func_data, arch_target, binary_format
+        )
+        if method == "dataflow":
+            coverage["functions_dataflow"] += 1
+        elif f"functions_{method}" in coverage:
+            coverage[f"functions_{method}"] += 1
+        if method != "dataflow":
+            continue
+        _count_materialisation_coverage(coverage, func_data, model)
+        coverage["arguments_materialised"] += sum(
+            record.get("materialised") or 0 for record in records
+        )
+        coverage["pointer_values_page_only"] += sum(
+            record.get("materialised_page") or 0 for record in records
+        )
+        function_name = str(func_data.get("name") or func_key)
+        contributed = 0
+        function_capped = False
+        for record in records:
+            callee = record.get("callee")
+            if not callee:
+                coverage["records_unresolved_callee"] += len(
+                    [value for value in record.get("arguments", []) if value is not None]
+                )
+                continue
+            for argument, value in enumerate(record.get("arguments") or []):
+                if value is None:
+                    continue
+                key = (callee, argument, value)
+                if key in aggregated:
+                    aggregated[key]["site_count"] += 1
+                    if (
+                        len(aggregated[key]["functions"]) < MAX_CALLSITE_SITES_PER_ENTRY
+                        and function_name not in aggregated[key]["functions"]
+                    ):
+                        aggregated[key]["functions"].append(function_name)
+                    continue
+                if truncated:
+                    continue
+                if contributed >= MAX_CALLSITE_ENTRIES_PER_FUNCTION:
+                    if not function_capped:
+                        function_capped = True
+                        coverage["functions_entries_capped"] += 1
+                        if len(truncated_by_function) < MAX_NAMED_CAPPED_FUNCTIONS:
+                            truncated_by_function.append(function_name)
+                    continue
+                contributed += 1
+                aggregated[key] = {
+                    "callee": callee,
+                    "argument": argument,
+                    "value": value,
+                    "site_count": 1,
+                    "functions": [function_name],
+                    "example": {
+                        "function": function_name,
+                        "line": record.get("line"),
+                        "instruction": record.get("instruction"),
+                    },
+                }
+                if len(aggregated) >= max_entries:
+                    truncated = True
+    if truncated:
+        coverage["entries_truncated"] = True
+    if truncated_by_function:
+        coverage["functions_entries_capped_names"] = truncated_by_function
+
+    resolved: dict[int, str | None] = {}
+    entries: list[dict] = []
+    for key in sorted(aggregated, key=lambda k: (k[0].lower(), k[1], k[2])):
+        item = aggregated[key]
+        entry = {
+            "callee": item["callee"],
+            "argument": item["argument"],
+            "value": item["value"],
+            "site_count": item["site_count"],
+            "functions": list(item["functions"]),
+            "example": item["example"],
+        }
+        if resolve_string is not None:
+            if item["value"] not in resolved:
+                resolved[item["value"]] = resolve_string(item["value"])
+            if string := resolved[item["value"]]:
+                entry["string"] = string
+        entries.append(entry)
+    coverage["entries"] = len(entries)
+    coverage["strings_resolved"] = sum(1 for entry in entries if entry.get("string"))
+    return entries, coverage
+
+
+def _count_materialisation_coverage(
+    coverage: dict, func_data: dict, model: ArchModel
+) -> None:
+    """Name how this function's pc-relative materialisations fared.
+
+    Only functions whose listing actually carries an address-materialising
+    form are counted: an ``adrp`` on ARM64 or a rip-relative ``lea`` on
+    x86. When the line addresses those forms need could not be
+    reconstructed, the reason is counted (``functions_no_line_addresses``
+    for blocks without usable VAs or without the exported lengths;
+    ``functions_extent_mismatch`` when a block's extent contradicted the
+    strides its lines claim). An ``adr`` — ARM64's other pc-relative form,
+    which the model deliberately does not fold — is counted as
+    ``functions_unmodelled_pc_relative`` so its silence is named.
+    """
+    assembly = str(func_data.get("assembly") or "")
+    if not assembly:
+        return
+    if isinstance(model, Arm64Model):
+        candidates = assembly.count("adrp")
+        unmodelled = re.search(r"(?<![\w.])adr\s", assembly) is not None
+    elif isinstance(model, X86_64Model):
+        candidates = len(re.findall(r"lea\s+[^\s,]+,\s*\[\s*rip", assembly, re.IGNORECASE))
+        unmodelled = False
+    else:
+        return
+    if unmodelled:
+        coverage["functions_unmodelled_pc_relative"] += 1
+    if not candidates:
+        return
+    lines = assembly.split("\n")
+    blocks = (func_data.get("cfg") or {}).get("blocks") or []
+    spans = _block_line_spans(blocks, lines)
+    if spans is None:
+        return  # already counted as functions_cfg_mismatch
+    _, reason = _line_address_spans(
+        model, lines, blocks, spans, func_data.get("instruction_lengths")
+    )
+    if reason == "extent_mismatch":
+        coverage["functions_extent_mismatch"] += 1
+    elif reason == "no_addresses":
+        coverage["functions_no_line_addresses"] += 1
 
 
 def model_for_target(arch_target: str) -> ArchModel:

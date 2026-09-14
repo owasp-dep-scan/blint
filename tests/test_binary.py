@@ -2586,3 +2586,136 @@ def test_coerce_to_text_never_raises_for_any_byte_sequence():
     import orjson
 
     orjson.dumps({"value": coerce_to_text(bytes(range(256)))})
+
+
+class _FakeLoadConfig:
+    def __init__(self, cookie_unused: bool):
+        self._cookie_unused = cookie_unused
+
+    def has(self, _flag) -> bool:
+        return self._cookie_unused
+
+
+class _FakePE:
+    """Just enough of lief.PE.Binary for _pe_has_canary's two probes."""
+
+    def __init__(self, has_configuration: bool, cookie_unused: bool = False):
+        self._has_configuration = has_configuration
+        self._load_configuration = _FakeLoadConfig(cookie_unused)
+
+    @property
+    def has_configuration(self) -> bool:
+        return self._has_configuration
+
+    @property
+    def load_configuration(self) -> _FakeLoadConfig:
+        return self._load_configuration
+
+
+def test_pe_has_canary_symbol_evidence_beats_the_guard_flag():
+    # The binary itself references the stack-protector runtime: canary is on
+    # even if the load-config guard flag claims the cookie is unused.
+    metadata = {"symtab_symbols": [{"short_name": "__security_check_cookie"}]}
+    assert binary_module._pe_has_canary(_FakePE(True, True), metadata) is True
+    metadata = {"imports": [{"short_name": "__stack_chk_fail"}]}
+    assert binary_module._pe_has_canary(_FakePE(False), metadata) is True
+    # x86 decorated spelling survives the substring match.
+    metadata = {"imports": [{"name": "vcruntime140.dll::@__security_check_cookie@8"}]}
+    assert binary_module._pe_has_canary(_FakePE(False), metadata) is True
+
+
+def test_pe_has_canary_load_config_verdicts():
+    # SECURITY_COOKIE_UNUSED set: a cookie is present but never checked, so
+    # the verdict is an explicit False — this is what CHECK_CANARY fires on.
+    assert binary_module._pe_has_canary(_FakePE(True, True), {}) is False
+    # Guard flag clear: the image performs cookie checks.
+    assert binary_module._pe_has_canary(_FakePE(True, False), {}) is True
+
+
+def test_pe_has_canary_no_evidence_is_none_not_clean():
+    # No load configuration and no marker symbol: unknown, deliberately not
+    # False and not True, so the rule engine neither fires nor vouches.
+    assert binary_module._pe_has_canary(_FakePE(False), {}) is None
+
+
+class _FakePEImportEntry:
+    def __init__(self, name):
+        self.name = name
+        self.data = 0
+        self.iat_value = 0
+        self.hint = 0
+        self.iat_address = 0
+
+
+class _FakePEImport:
+    def __init__(self, name, entry_names):
+        self.name = name
+        self.entries = [_FakePEImportEntry(n) for n in entry_names]
+
+
+def test_pe_dynamic_entries_keep_the_import_directory_order():
+    """``dynamic_entries`` must not depend on PYTHONHASHSEED.
+
+    The DLL names were collected in a set, so their order came straight from
+    set iteration: two runs of the same blint over the same PE produced
+    different metadata bytes and different SBOM dependency refs. It only
+    showed on Windows, where a binary links enough sibling DLLs for an order
+    to exist at all. First-seen order is the import directory's own.
+    """
+    imports = [
+        _FakePEImport("zeta.dll", ["a", "b"]),
+        _FakePEImport("alpha.dll", ["c"]),
+        _FakePEImport("mid.dll", ["d"]),
+    ]
+    _symbols, dll_list = binary_module.parse_pe_imports(imports, 0)
+    assert [d["name"] for d in dll_list] == ["zeta.dll", "alpha.dll", "mid.dll"]
+    assert all(d["tag"] == "NEEDED" for d in dll_list)
+
+
+def test_pe_dynamic_entries_deduplicate_at_first_sight():
+    # A DLL named by two import descriptors appears once, in the position it
+    # was first seen — dropping the dedupe would be a different bug.
+    imports = [
+        _FakePEImport("zeta.dll", ["a"]),
+        _FakePEImport("alpha.dll", ["b"]),
+        _FakePEImport("zeta.dll", ["c"]),
+    ]
+    _symbols, dll_list = binary_module.parse_pe_imports(imports, 0)
+    assert [d["name"] for d in dll_list] == ["zeta.dll", "alpha.dll"]
+
+
+class _FakeELFSymbol:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeELF:
+    """Just enough of lief.ELF.Binary for _elf_has_canary's one probe."""
+
+    def __init__(self, names):
+        self.symbols = [_FakeELFSymbol(name) for name in names]
+
+
+def test_elf_has_canary_marker_symbol_is_true():
+    assert binary_module._elf_has_canary(_FakeELF(["main", "__stack_chk_fail"])) is True
+    # ICC's cookie object counts as the same evidence.
+    assert binary_module._elf_has_canary(_FakeELF(["__intel_security_cookie"])) is True
+
+
+def test_elf_has_canary_symbols_without_the_marker_are_an_explicit_false():
+    """The verdict CHECK_CANARY actually fires on.
+
+    The previous code only assigned ``has_canary`` on a hit — LIEF returns
+    None for a missing symbol, so a `-fno-stack-protector` ELF left the key
+    unset and the rule, which fires only on an explicit False, read it as
+    protected. Every ELF was reported canary-protected.
+    """
+    assert binary_module._elf_has_canary(_FakeELF(["main", "printf", "puts"])) is False
+
+
+def test_elf_has_canary_no_symbols_is_none_not_clean():
+    # A fully stripped static ELF: nothing to read, so no verdict. Unknown is
+    # reported as absent, not as clean.
+    assert binary_module._elf_has_canary(_FakeELF([])) is None
+    # Entries with no usable name are not evidence that a search happened.
+    assert binary_module._elf_has_canary(_FakeELF(["", "   ", None])) is None

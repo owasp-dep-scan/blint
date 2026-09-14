@@ -7,6 +7,8 @@ method-list format (with the selref indirection) without a real Mach-O fixture.
 
 import struct
 
+import pytest
+
 from blint.lib import macho_objc
 from blint.lib.macho_objc import (
     _iter_method_entries,
@@ -23,6 +25,7 @@ class FakeReader:
         self.mem = mem or {}  # address -> raw bytes (for u32/i32)
         self.ptrs = ptrs or {}  # address -> resolved pointer target
         self.strings = strings or {}  # address -> python str
+        self.degradations = {}  # token -> count, as the real reader keeps
 
     def u32(self, va):
         data = self.mem.get(va)
@@ -37,6 +40,9 @@ class FakeReader:
 
     def cstring(self, va):
         return self.strings.get(va, "")
+
+    def degrade(self, token):
+        self.degradations[token] = self.degradations.get(token, 0) + 1
 
 
 def test_parse_small_method_list_resolves_selrefs():
@@ -191,3 +197,142 @@ def test_reader_detects_32bit_binary():
 
 def test_parse_objc_metadata_empty_for_non_macho():
     assert parse_objc_metadata(object()) == {}
+
+
+def test_parse_ivar_list_legacy_entsize_32():
+    # ivar_list_t at 0x2000: entsize 32 (legacy ivar_t), count 2.
+    ilist = 0x2000
+    mem = {ilist: struct.pack("<I", 32), ilist + 4: struct.pack("<I", 2)}
+    ptrs, strings = {}, {}
+    for i, (name, ivar_type) in enumerate((("_count", "q"), ("_items", '@"NSArray"'))):
+        entry = ilist + 8 + i * 32
+        off_slot, name_va, type_va = 0x3000 + i * 16, 0x4000 + i * 32, 0x5000 + i * 64
+        ptrs[entry] = off_slot
+        ptrs[entry + 8] = name_va
+        ptrs[entry + 16] = type_va
+        strings[name_va] = name
+        strings[type_va] = ivar_type
+    ivars = macho_objc._parse_ivar_list(FakeReader(mem=mem, ptrs=ptrs, strings=strings), ilist)
+    assert ivars == [{"name": "_count", "type": "q"}, {"name": "_items", "type": '@"NSArray"'}]
+
+
+def test_parse_ivar_list_unmodelled_entsize_is_counted_not_guessed():
+    # objc4 has no relative ivar_t: an entsize this parser does not model
+    # must be reported, never read against an invented layout.
+    ilist = 0x2200
+    reader = FakeReader(mem={ilist: struct.pack("<I", 20), ilist + 4: struct.pack("<I", 1)})
+    assert macho_objc._parse_ivar_list(reader, ilist) == []
+    assert reader.degradations == {"unmodelled_ivar_entsize_20": 1}
+
+
+def test_parse_property_list_legacy_entsize_16():
+    # property_t is two pointers: name and the type-encoding attributes.
+    props = 0x2300
+    mem = {props: struct.pack("<I", 16), props + 4: struct.pack("<I", 1)}
+    ptrs = {props + 8: 0x7000, props + 16: 0x7100}
+    strings = {0x7000: "bundleIdentifier", 0x7100: 'T@"NSString",R,N'}
+    out = macho_objc._parse_property_list(FakeReader(mem=mem, ptrs=ptrs, strings=strings), props)
+    assert out == [{"name": "bundleIdentifier", "attributes": 'T@"NSString",R,N'}]
+
+
+def test_parse_property_list_unmodelled_entsize_is_counted_not_guessed():
+    props = 0x2400
+    reader = FakeReader(mem={props: struct.pack("<I", 8), props + 4: struct.pack("<I", 1)})
+    assert macho_objc._parse_property_list(reader, props) == []
+    assert reader.degradations == {"unmodelled_property_entsize_8": 1}
+
+
+def test_parse_category_fields_and_imp_names():
+    # category_t at 0x100: clsName +0, cls +8, instanceMethods +0x10,
+    # classMethods +0x18, protocols +0x20, instanceProperties +0x28.
+    cat = 0x100
+    ptrs = {
+        cat: 0x8000,  # clsName string
+        cat + 8: 0x9000,  # internal class_t
+        cat + 0x10: 0x1000,  # instance method list (small, 1 method)
+        cat + 0x18: 0x1100,  # class method list (small, 1 method)
+        cat + 0x28: 0x1200,  # property list
+    }
+    strings = {0x8000: "Sentry", 0x9001: "NSProcessInfo"}
+    mem = {cat + 8: b"\x00" * 8}
+    # instanceMethods: entsize 12 small flag, count 1; nameOffset -> selref.
+    mem[0x1000] = struct.pack("<I", 12 | macho_objc._SMALL_METHOD_FLAG)
+    mem[0x1004] = struct.pack("<I", 1)
+    mem[0x1008] = struct.pack("<i", 0x10)
+    ptrs[0x1008 + 0x10] = 0xA000
+    strings[0xA000] = "swizzleForCrash"
+    mem[0x1010] = struct.pack("<i", 0x20)  # impOffset, at entry+8
+    # classMethods
+    mem[0x1100] = struct.pack("<I", 12 | macho_objc._SMALL_METHOD_FLAG)
+    mem[0x1104] = struct.pack("<I", 1)
+    mem[0x1108] = struct.pack("<i", 0x10)
+    ptrs[0x1108 + 0x10] = 0xA100
+    strings[0xA100] = "setup"
+    mem[0x1110] = struct.pack("<i", 0x20)
+    # property list (legacy entsize 16)
+    mem[0x1200] = struct.pack("<I", 16)
+    mem[0x1204] = struct.pack("<I", 1)
+    ptrs[0x1208] = 0xA200
+    ptrs[0x1210] = 0xA210
+    strings[0xA200] = "crashConfig"
+    strings[0xA210] = 'T@"NSDictionary",C,N'
+
+    reader = FakeReader(mem=mem, ptrs=ptrs, strings=strings)
+    # The category extends an external class via a binding slot.
+    reader.bind_map = {cat + 8: "_OBJC_CLASS_$_NSProcessInfo"}
+    imps = []
+    parsed = macho_objc._parse_category(reader, cat, imps)
+    assert parsed["name"] == "Sentry"
+    assert parsed["class_name"] == "NSProcessInfo"
+    assert parsed["methods"] == ["swizzleForCrash"]
+    assert parsed["class_methods"] == ["setup"]
+    assert parsed["properties"] == [{"name": "crashConfig", "attributes": 'T@"NSDictionary",C,N'}]
+    names = {imp["name"] for imp in imps}
+    assert "-[NSProcessInfo(Sentry) swizzleForCrash]" in names
+    assert "+[NSProcessInfo(Sentry) setup]" in names
+
+
+def test_find_load_imp_walks_the_metaclass():
+    # class_t at 0x100, its isa (+0) the metaclass at 0x200; the metaclass
+    # data (+32) & ~7 -> ro whose baseMethods (+0x20) carries "load".
+    mem = {}
+    ptrs = {0x100: 0x200}  # isa
+    ptrs[0x200 + 32] = 0x8051  # metaclass data, low bits set (swift/flag)
+    strings = {}
+    # metaclass ro at 0x8050; baseMethods at ro + 0x20.
+    ro = 0x8050
+    ptrs[ro + 0x20] = 0x1300
+    mem[0x1300] = struct.pack("<I", 12 | macho_objc._SMALL_METHOD_FLAG)
+    mem[0x1304] = struct.pack("<I", 1)
+    mem[0x1308] = struct.pack("<i", 0x10)
+    ptrs[0x1308 + 0x10] = 0xB000
+    strings[0xB000] = "load"
+    mem[0x1310] = struct.pack("<i", 0x20)  # impOffset, at entry+8
+    reader = FakeReader(mem=mem, ptrs={**ptrs, 0x1308 + 0x10: 0xB000}, strings=strings)
+    # imp = entry + 8 + impOffset = 0x1308 + 8 + 0x20.
+    assert macho_objc._find_load_imp(reader, 0x100) == 0x1308 + 8 + 0x20
+    # A class without +load: metaclass method list selects something else.
+    strings[0xB000] = "initialize"
+    assert macho_objc._find_load_imp(reader, 0x100) is None
+
+
+def test_real_binary_categories_and_nonlazy_classes():
+    """Ground truth on a real binary, when one is present: OrbStack's main
+    binary carries __objc_catlist/__objc_nlclslist whose contents otool(1)
+    printed (5 categories; Sentry classes own the +load methods)."""
+    import os
+
+    import lief
+
+    real = "/Applications/OrbStack.app/Contents/MacOS/OrbStack"
+    if not os.path.exists(real):
+        pytest.skip("OrbStack.app not installed on this machine")
+    md = parse_objc_metadata(lief.MachO.parse(real).at(0))
+    assert md, "ObjC metadata expected in this binary"
+    assert md.get("category_count") == 5  # otool -o catlist entry count
+    assert md.get("parse_degradation_count", 0) == 0
+    extended = {c["class_name"] for c in md["categories"]}
+    assert "NSTextView" in extended  # patches a framework class
+    nonlazy_names = {n["name"] for n in md.get("nonlazy_classes") or []}
+    assert any(n.startswith("Sentry") for n in nonlazy_names)
+    assert all(n.get("load_imp") for n in md.get("nonlazy_classes") or [])

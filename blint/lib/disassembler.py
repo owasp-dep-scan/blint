@@ -2352,6 +2352,14 @@ def disassemble_functions(
             lower_assembly = plain_assembly_text.lower()
             assembly_hash = hashlib.sha256(plain_assembly_text.encode("utf-8")).hexdigest()
             instruction_count = len(truncated_instr_list)
+            # Per-line instruction lengths, aligned one-to-one with the
+            # assembly lines. nyxstone hands these back with the text, so
+            # this costs nothing to produce; it is what lets a metadata
+            # reader reconstruct each line's address (prefix sum from the
+            # CFG block's start VA) without re-disassembling. The arm64
+            # fixed 4-byte stride needs no array, but exporting it keeps
+            # every architecture on one address-reconstruction path.
+            instruction_lengths = [len(i.bytes) for i in truncated_instr_list]
             parsed_instrs = [
                 _parse_instruction_text(instr.assembly) for instr in truncated_instr_list
             ]
@@ -2414,6 +2422,7 @@ def disassemble_functions(
                 "assembly_hash": assembly_hash,
                 "instruction_hash": instruction_hash,
                 "instruction_count": instruction_count,
+                "instruction_lengths": instruction_lengths,
                 "instruction_metrics": instruction_metrics,
                 "direct_calls": direct_calls,
                 "direct_call_targets": direct_call_targets,

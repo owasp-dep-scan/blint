@@ -8,7 +8,7 @@ from blint.lib.ios import (
     _ats_tokens,
     _collect_privacy_signals,
     _privacy_tokens,
-    _read_privacy_manifest,
+    read_privacy_manifest,
     _summarize_ats,
     _undeclared_required_reason_tokens,
     collect_ios_app,
@@ -148,7 +148,7 @@ def test_collect_privacy_signals_empty_when_absent():
     assert _collect_privacy_signals({"CFBundleName": "x"}) == {}
 
 
-def test_read_privacy_manifest_aggregates(tmp_path):
+def testread_privacy_manifest_aggregates(tmp_path):
     app = tmp_path / "DemoApp.app"
     (app / "Frameworks" / "Ads.framework").mkdir(parents=True)
     app_manifest = {
@@ -171,7 +171,7 @@ def test_read_privacy_manifest_aggregates(tmp_path):
     (app / "Frameworks" / "Ads.framework" / "PrivacyInfo.xcprivacy").write_bytes(
         plistlib.dumps(fw_manifest)
     )
-    manifest = _read_privacy_manifest(str(app))
+    manifest = read_privacy_manifest(str(app))
     assert manifest["present"] is True
     assert manifest["manifest_count"] == 2
     # Tracking is true if any component declares it.
@@ -184,10 +184,10 @@ def test_read_privacy_manifest_aggregates(tmp_path):
     ]
 
 
-def test_read_privacy_manifest_absent(tmp_path):
+def testread_privacy_manifest_absent(tmp_path):
     app = tmp_path / "DemoApp.app"
     app.mkdir()
-    assert _read_privacy_manifest(str(app)) is None
+    assert read_privacy_manifest(str(app)) is None
 
 
 def test_privacy_tokens_for_posture():
@@ -366,7 +366,7 @@ def test_collect_ios_app_detailed_cleans_up_on_unexpected_error(tmp_path, monkey
     def boom(*_args):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(ios_mod, "_read_privacy_manifest", boom)
+    monkeypatch.setattr(ios_mod, "read_privacy_manifest", boom)
     before = _blint_ios_app_dir_count()
     with pytest.raises(RuntimeError, match="boom"):
         ios_mod.collect_ios_app_detailed(str(ipa_path))

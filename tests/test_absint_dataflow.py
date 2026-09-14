@@ -587,3 +587,117 @@ def test_loop_only_function_is_not_reported_as_a_cap_hit():
     entries, method = _recover(lines, cfg)
     assert method == "dataflow"
     assert entries == []
+
+
+# ---------------------------------------------------------------------------
+# Branch semantics (P4.8): one rule for both models. A tail-kind branch whose
+# target is inside the function is control flow — the CFG carries the edge and
+# the state flows along it; a branch that leaves the function is a tail call
+# and clobbers the volatiles.
+# ---------------------------------------------------------------------------
+
+
+def test_state_flows_along_an_intra_function_jmp_edge():
+    """A value must survive the unconditional jump that carries it to its use.
+
+    The x86 model used to clobber the volatiles on every ``jmp``, so any
+    constant moved into an argument register one block early was lost at the
+    block boundary — recovery was truncated at every block ending in an
+    unconditional jump while the ARM64 model kept the value flowing.
+    """
+    lines = [
+        "mov eax, 65",  # 'A' loaded before the jump
+        "jmp 4100",
+        "mov byte ptr [rbp - 8], al",  # block 1: the edge's destination
+        "mov byte ptr [rbp - 7], 66",
+        "mov byte ptr [rbp - 6], 67",
+        "ret",
+    ]
+    cfg = _cfg([2, 4], [(0, 1, "jump")])
+    entries, method = _recover(lines, cfg)
+    assert method == "dataflow"
+    assert [entry["value"] for entry in entries] == ["ABC"]
+
+
+def test_arm64_state_flows_along_an_intra_function_b_edge():
+    """The ARM64 model already treated ``b`` as pure control flow; pin it."""
+    lines = [
+        "movz w8, #0x752F",  # the '/usr' word assembled before the branch
+        "movk w8, #0x7273, lsl #16",
+        "b 4100",
+        "str w8, [sp, #8]",  # block 1: the edge's destination
+        "ret",
+    ]
+    cfg = _cfg([3, 2], [(0, 1, "jump")])
+    entries, method = _recover(lines, cfg, "aarch64-apple-darwin")
+    assert method == "dataflow"
+    assert "/usr" in [entry["value"] for entry in entries]
+
+
+def test_tail_jmp_with_no_cfg_edge_still_clobbers():
+    """A ``jmp`` whose block has no outgoing edge may leave the function.
+
+    Out-of-window targets (tail calls) and indirect transfers have no edge,
+    so the conservative reading applies and no value is carried across —
+    observable through the exit state the traversal returns.
+    """
+    lines = ["mov eax, 65", "jmp 4096"]
+    without_edge = _cfg([2], [])
+    state = interpret_over_cfg(
+        lines, X86_64_MODEL, without_edge["blocks"], without_edge["edges"]
+    )
+    assert state.registers == {}
+
+    # The same branch with its edge is control flow, and the value flows.
+    with_edge = _cfg([2], [(0, 0, "jump")])
+    state = interpret_over_cfg(
+        lines, X86_64_MODEL, with_edge["blocks"], with_edge["edges"]
+    )
+    assert state.registers.get("rax") == 65
+
+
+def test_tail_b_with_no_cfg_edge_still_clobbers():
+    """ARM64 ``b`` follows the same rule: no edge means clobber."""
+    from blint.lib.absint import ARM64_MODEL
+
+    lines = ["movz x0, #7", "b 4096"]
+    without_edge = _cfg([2], [])
+    state = interpret_over_cfg(
+        lines, ARM64_MODEL, without_edge["blocks"], without_edge["edges"]
+    )
+    assert state.registers == {}
+
+    with_edge = _cfg([2], [(0, 0, "jump")])
+    state = interpret_over_cfg(
+        lines, ARM64_MODEL, with_edge["blocks"], with_edge["edges"]
+    )
+    assert state.registers.get("x0") == 7
+
+
+def test_apply_branch_is_the_single_decision_point():
+    """Both models draw the call-vs-branch line in one place."""
+    from blint.lib.absint import ARM64_MODEL, FrameState
+
+    for model, reg, call, tail in (
+        (X86_64_MODEL, "eax", "call 4096", "jmp 4096"),
+        (ARM64_MODEL, "x0", "bl 4096", "b 4096"),
+    ):
+        state = FrameState(model)
+        state.write_operand(reg, 65)
+        assert model.apply_branch(state, call, leaves_function=False)
+        assert state.registers == {}  # a call always clobbers
+
+        state = FrameState(model)
+        state.write_operand(reg, 65)
+        assert model.apply_branch(state, tail, leaves_function=True)
+        assert state.registers == {}  # leaving the function is a tail call
+
+        state = FrameState(model)
+        state.write_operand(reg, 65)
+        assert model.apply_branch(state, tail, leaves_function=False)
+        assert state.registers  # an intra-function branch keeps the state
+
+        state = FrameState(model)
+        state.write_operand(reg, 65)
+        assert not model.apply_branch(state, "mov", leaves_function=True)
+        assert state.registers  # a non-branch is not consumed

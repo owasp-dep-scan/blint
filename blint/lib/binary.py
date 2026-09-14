@@ -9,7 +9,7 @@ import sys
 import warnings
 import zlib
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import lief
@@ -23,6 +23,7 @@ from blint.config import (
     get_float_from_env,
     get_int_from_env,
 )
+from blint.lib.absint import analyze_call_site_arguments, decode_pointer_string
 from blint.lib.banners import is_probable_banner_string
 from blint.lib.codesign_macho import SUPERBLOB_MAGIC, parse_superblob, signature_summary
 from blint.lib.crypto_constants import CRYPTO_SCAN_SECTIONS, analyze_crypto_material
@@ -50,6 +51,7 @@ from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
+from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY, enrich_macho_sdk_attribution
 from blint.lib.toolchain import infer_toolchain
 from blint.lib.utils import (
@@ -1850,7 +1852,12 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
             - dll_list (list[dict])
     """
     imports_list: list[dict] = []
-    dlls = set()
+    # Insertion-ordered rather than a set: this list is exported as
+    # ``dynamic_entries`` and seeds the SBOM's dependency refs, so set
+    # iteration order made both vary with PYTHONHASHSEED. First-seen order is
+    # the import directory's own order, which is what ELF's DT_NEEDED list
+    # already reports.
+    dlls: dict[str, None] = {}
     if not imports or isinstance(imports, lief.lief_errors):
         return imports_list, []
     for import_ in imports:
@@ -1863,7 +1870,7 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
         for entry in entries:
             try:
                 if entry.name:
-                    dlls.add(import_.name)
+                    dlls[import_.name] = None
                     imports_list.append(
                         {
                             "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
@@ -1878,7 +1885,7 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
                     )
             except AttributeError:
                 continue
-    dll_list = [{"name": d, "tag": "NEEDED"} for d in list(dlls)]
+    dll_list = [{"name": d, "tag": "NEEDED"} for d in dlls]
     return imports_list, dll_list
 
 
@@ -2237,6 +2244,77 @@ def _macho_symtab_has_canary(symtab_symbols: list[dict] | None) -> bool:
         if isinstance(name, str) and name.strip() in STACK_CHK_SYMBOLS:
             return True
     return False
+
+
+# ELF spellings of the stack-protector runtime: the glibc/musl entry points
+# plus ICC's cookie object.
+ELF_STACK_CHK_SYMBOLS = STACK_CHK_SYMBOLS | {"__intel_security_cookie"}
+
+
+def _elf_has_canary(parsed_obj: lief.ELF.Binary) -> bool | None:
+    """Explicit canary verdict for an ELF, or None when there is no evidence.
+
+    An ELF built with the stack protector references the runtime by name, so
+    the symbol tables are the evidence. A binary stripped of every symbol
+    leaves nothing to read and gets no verdict: unknown is reported as
+    absent, not as clean (rule 14). Symbols are read rather than
+    ``get_symbol`` lookups so that "there were names to search" is itself
+    observable — the verdict for a binary with symbols and no marker is
+    ``False``, which is what makes CHECK_CANARY able to fire at all.
+    """
+    seen_named_symbol = False
+    try:
+        for symbol in parsed_obj.symbols:
+            name = symbol.name
+            if not isinstance(name, str) or not (name := name.strip()):
+                continue
+            seen_named_symbol = True
+            if name in ELF_STACK_CHK_SYMBOLS:
+                return True
+    except (AttributeError, TypeError):
+        return None
+    return False if seen_named_symbol else None
+
+
+# PE spellings of the stack-protector runtime, matched as lowercase substrings
+# so x86 decoration (`@__security_check_cookie@8`) still matches.
+PE_STACK_CHK_MARKERS = (
+    "security_check_cookie",
+    "stack_chk_fail",
+    "stack_chk_guard",
+    "rtc_checkstackvars",
+)
+
+
+def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
+    """Explicit canary verdict for a PE, or None when there is no evidence.
+
+    Drives ``has_canary`` (and through it CHECK_CANARY) the same way the ELF
+    and Mach-O paths do — the rule only fires on an explicit ``False``, so a
+    PE that never set the key silently read as protected. Evidence order:
+    the stack-protector runtime symbols the binary itself references win over
+    the load-config guard flag, which is the same source
+    ``construct_security_properties`` uses for ``security_properties.canary``.
+    A PE with no load configuration and no marker symbol gets no verdict:
+    unknown is reported as absent, not as clean (rule 14).
+    """
+    for source in ("symtab_symbols", "imports"):
+        for symbol in metadata.get(source) or []:
+            if not isinstance(symbol, dict):
+                continue
+            name = symbol.get("short_name") or symbol.get("name") or ""
+            if isinstance(name, str) and any(
+                marker in name.lower() for marker in PE_STACK_CHK_MARKERS
+            ):
+                return True
+    try:
+        if not parsed_obj.has_configuration:
+            return None
+        load_config = parsed_obj.load_configuration
+        guard_flags = lief.PE.LoadConfiguration.IMAGE_GUARD
+        return not load_config.has(guard_flags.SECURITY_COOKIE_UNUSED)
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
@@ -3146,6 +3224,13 @@ def parse(
         # (compact unwind, eh_frame); recover the function starts they list so
         # disassembly and reviews are not blind on exactly these inputs.
         if isinstance(parsed_obj, (lief.ELF.Binary, lief.MachO.Binary)):
+            # Swift reflection metadata (__swift5_* on Mach-O, .swift5_* on
+            # ELF) names every Swift type, its fields and its metadata access
+            # functions — evidence in its own right and a function oracle for
+            # stripped Swift binaries (issue #109 for the ELF spelling).
+            if swift_metadata := parse_swift_metadata(parsed_obj):
+                metadata["swift_metadata"] = swift_metadata
+                metadata = merge_swift_functions(metadata)
             metadata = discover_and_merge_functions(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
         # SDK-assisted attribution has to precede the dependency graph: it
@@ -3233,6 +3318,20 @@ def parse(
             metadata["stack_strings_coverage"] = stack_strings_coverage
             if stack_strings:
                 metadata["stack_strings"] = stack_strings
+            # Call-site constant arguments (P4.7): the recovered constants an
+            # image passes to resolved callees, aggregated into one bounded
+            # block. This is the only format-aware spot the recovery needs:
+            # pointing a constant at the string section it names is a question
+            # about this binary's memory, answered here and nowhere else.
+            callsite_entries, callsite_coverage = analyze_call_site_arguments(
+                metadata["disassembled_functions"],
+                metadata.get("llvm_target_tuple", ""),
+                metadata.get("binary_type", ""),
+                resolve_string=_pointer_string_resolver(parsed_obj),
+            )
+            metadata["call_site_arguments_coverage"] = callsite_coverage
+            if callsite_entries:
+                metadata["call_site_arguments"] = callsite_entries
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
                     metadata["disassembled_functions"],
@@ -3300,6 +3399,17 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
         degradations.append("dependency_attribution_unresolved")
+    # Pointer-materialisation blind spots (P4.9), mirrored from the
+    # call-site block's coverage so a consumer reading only this block
+    # still sees them: a pc-relative materialisation that stayed symbolic
+    # because the listing could not be located, and why.
+    callsite_coverage = metadata.get("call_site_arguments_coverage") or {}
+    if callsite_coverage.get("functions_extent_mismatch"):
+        degradations.append("callsite_block_extent_mismatch")
+    if callsite_coverage.get("functions_no_line_addresses"):
+        degradations.append("callsite_no_line_addresses")
+    if callsite_coverage.get("functions_unmodelled_pc_relative"):
+        degradations.append("callsite_unmodelled_pc_relative")
     coverage = {
         "functions": {
             "symbolic": symbolic_count,
@@ -3396,15 +3506,11 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["eof_offset"] = parsed_obj.eof_offset
     metadata["relro"] = parse_relro(parsed_obj)
     metadata["exe_type"] = detect_exe_type(parsed_obj, metadata)
-    # Canary check
-    canary_sections = ["__stack_chk_fail", "__intel_security_cookie"]
-    for section in canary_sections:
-        if parsed_obj.get_symbol(section):
-            if isinstance(parsed_obj.get_symbol(section), lief.lief_errors):
-                metadata["has_canary"] = False
-            else:
-                metadata["has_canary"] = True
-                break
+    # Stack-protector evidence, the same tristate the PE and Mach-O paths
+    # use: an explicit verdict or no key at all, never a silently absent key
+    # that CHECK_CANARY collapses into "protected".
+    if (elf_canary := _elf_has_canary(parsed_obj)) is not None:
+        metadata["has_canary"] = elf_canary
     # rpath check
     rpath = parsed_obj.get(lief.ELF.DynamicEntry.TAG.RPATH)
     if isinstance(rpath, lief.lief_errors):
@@ -4053,6 +4159,58 @@ def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
     return _pe_section_bytes(parsed_obj, IOCTL_TABLE_SECTIONS)
 
 
+# A recovered call-site constant is only treated as a candidate pointer when
+# it could name an address: below this it is a small integer (a flag, a size,
+# a count) and resolving it would be reading a section it does not name.
+_POINTER_STRING_MIN_VALUE = 0x10000
+# How many bytes to read at a candidate pointer, and how long the run must be
+# to count as the string it points at. The longer minimum (the stack-string
+# decoder accepts three) keeps near-coincidental three-byte decodes out.
+_POINTER_STRING_MAX_READ = 256
+_POINTER_STRING_MIN_LEN = 4
+
+
+def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
+    """Build the constant→string resolver for the call-site arguments block.
+
+    Returns a callable mapping one recovered integer constant to the string
+    it points at in this image, or None. The constant is a candidate pointer
+    only when it lands inside a mapped section of *this* binary — the one
+    format-aware fact the format-agnostic recovery cannot know for itself.
+    Results are memoized per constant because the same value is recovered at
+    many call sites.
+    """
+    ranges: list[tuple[int, int]] = []
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for section in parsed_obj.sections:
+            va = int(section.virtual_address or 0)
+            size = int(section.size or 0)
+            if va and size:
+                ranges.append((va, va + size))
+    ranges.sort()
+    resolved: dict[int, str | None] = {}
+
+    def resolve(value: int) -> str | None:
+        if value < _POINTER_STRING_MIN_VALUE:
+            return None
+        if value in resolved:
+            return resolved[value]
+        result = None
+        if any(start <= value < end for start, end in ranges):
+            data = b""
+            with contextlib.suppress(Exception):
+                data = bytes(
+                    parsed_obj.get_content_from_virtual_address(
+                        value, _POINTER_STRING_MAX_READ
+                    )
+                )
+            result = decode_pointer_string(data, _POINTER_STRING_MIN_LEN)
+        resolved[value] = result
+        return result
+
+    return resolve
+
+
 def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
     """Adds PE metadata to the given metadata dictionary.
 
@@ -4118,6 +4276,11 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["imports"],
             metadata["dynamic_entries"],
         ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
+        # Stack-protector evidence, same as the ELF and Mach-O paths: an
+        # explicit verdict (or none) rather than a silently absent key that
+        # CHECK_CANARY collapses into "protected".
+        if (pe_canary := _pe_has_canary(parsed_obj, metadata)) is not None:
+            metadata["has_canary"] = pe_canary
         # Attempt to detect if this PE is a driver
         if metadata["dynamic_entries"]:
             for e in metadata["dynamic_entries"]:

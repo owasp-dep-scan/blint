@@ -13,6 +13,7 @@ permissions: {}
 jobs:
   Blint-GNU-Build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

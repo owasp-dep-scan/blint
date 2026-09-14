@@ -76,6 +76,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 addopts = "--verbose --cov-append --cov-report term --cov blint"
+markers = [
+    "slow: spawns subprocesses or re-runs whole scans; run locally, deselected in CI with -m 'not slow'",
+]
 
 [tool.pylint]
 generated-members = ["lief", "orjson"]

@@ -135,6 +135,13 @@ PE (Portable Executable) files are the standard for Windows.
   - Recovery is a fixed-point dataflow over the function's CFG: a register or frame byte survives a control-flow merge only when every incoming path agrees on its value, and blocks unreachable from the entry contribute nothing. A value assembled on one branch of a conditional is therefore not reported — treat entries as paths that certainly execute, and confirm the reconstruction before acting on it.
   - `stack_strings_coverage` records how the pass covered the binary: `functions_total`, `functions_dataflow` (CFG fixed point), `functions_fallback` (no usable CFG — straight-line pass), and `functions_iteration_cap_hit` (the loop iteration cap was reached; those functions contribute no entries, because a half-converged state is residue rather than evidence).
 
+- **Call-site constant arguments (`call_site_arguments`, requires `--disassemble`):** The integer constants an image holds in the ABI's argument registers at calls the disassembler resolved to a named callee. A capability review can only say an image is *linked* to an API; this block says *what* it passes to it — which control code reaches `DeviceIoControl`, which algorithm constant reaches `CCCrypt`, which path string reaches `CreateFile` when the constant points into a string section.
+  - One entry per distinct `(callee, argument, value)` triple, sorted, each with `argument` (0-based position in the callee's integer argument list), `site_count` (how many call sites were collapsed), up to three citing `functions`, and an `example` citation (`function`, `line`, `instruction`) so every value can be checked against the disassembly. When a constant points at a mapped section and decodes as text, the string rides along as `string`.
+  - A constant is reported only where every CFG path reaching the call agrees on it; unresolved call sites contribute a coverage counter, never an entry — an integer with no resolved destination stays out of the block.
+  - The block is bounded: `BLINT_MAX_CALLSITE_ARGUMENTS` (default 4096, `0` disables the block) caps entries per binary, one function contributes at most 256 distinct entries, and every tripped bound is named in `call_site_arguments_coverage` (`entries_truncated`, `functions_entries_capped`, `functions_entries_capped_names`).
+  - `call_site_arguments_coverage` also records the per-function analysis method counts (`functions_total`, `functions_dataflow`, `functions_no_cfg`, `functions_cfg_mismatch`, `functions_cap_hit`, `functions_no_abi`, `functions_skipped`) and `records_unresolved_callee`, so what the block cannot say is a number, not a silence.
+  - Position-independent code materialises string addresses in two instructions (ARM64 `adrp` + `add`, x86-64 rip-relative `lea`). When the disassembly can locate each instruction, those pairs are folded into the absolute address they compute and reported as the constant — so a `string` in this block is the text actually living at the address a call received. Each disassembled function therefore also carries `instruction_lengths` (per-line instruction sizes aligned with `assembly`; reconstruct a line's address by prefix-summing lengths from its CFG block's start VA). Materialisation failures are named, never silent: `functions_no_line_addresses` (blocks without usable VAs or without exported lengths), `functions_extent_mismatch` (a block's extent contradicts the strides its lines claim), `functions_unmodelled_pc_relative` (an `adr` the model deliberately does not fold), `arguments_materialised` / `pointer_values_page_only` (how many argument values were folded pointers, and how many of those are bare uncompleted pages), and `strings_resolved` (entries whose constant resolved to text). The same reasons surface in `analysis_coverage.degradations` as `callsite_*`.
+
 In the case of ARM64X, a single PE file encapsulates ARM64 and ARM64EC architectures. For `ARM64EC` nested PE binaries, an additional attribute `nested_binary` would contain the information such as `exports`, `exceptions`, `functions`, `ctor_functions`, and `dotnet_dependencies`.
 
 ### For Mach-O Binaries
@@ -173,6 +180,10 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `selectors`: distinct selectors referenced at message-send sites (`__objc_selrefs`).
   - `external_classes`: framework/runtime classes the binary links against (e.g. `CLLocationManager`, `CTTelephonyNetworkInfo`). Selectors and external classes feed the capability review, surfacing iOS privacy capabilities.
   - `method_imps`: recovered method implementations as `{name, address}`, where `name` is the readable `-[Class selector]` form and `address` is the implementation's virtual address. These seed and label the `functions` list (see below) so message handlers are disassembled and named even in stripped binaries.
+  - `category_count`, `categories`: categories from `__objc_catlist` — named extensions that patch existing (usually framework) classes. Each carries `name`, `class_name` (from the dyld binding table for external classes, otherwise the internal `class_ro_t` name), instance/class `methods`, `protocols` and `properties`. Category methods are seeded like class methods, spelled `-[Class(Category) selector]`.
+  - `nonlazy_class_count`, `nonlazy_classes`: classes in `__objc_nlclslist` — the runtime runs their `+load` before `main`. Each entry names the class (`runs_before_main: true`) and, when recovered, the `+load` implementation address; these seed `+[Name load]` functions. `nonlazy_category_count`/`nonlazy_categories` cover `__objc_nlcatlist`. Rule `CHECK_OBJC_LOAD_METHODS` (info) names the classes.
+  - `classes[].ivars` / `classes[].properties`: declared ivars (`name`, `type`) and properties (`name`, type-encoding `attributes` such as `T@"NSString",R,N`) from the class's read-only data, in both the legacy pointer and relative small encodings.
+  - `parse_degradations`, `parse_degradation_count`: counted tokens for every unresolvable pointer or unparsable list — partial reads are reported, never silent.
 
 - **Function recovery (`functions`):** For stripped release builds (the common case for shipped iOS/macOS apps) the symbol table exposes little beyond `__mh_execute_header`. blint augments the function list from the `LC_FUNCTION_STARTS` table — every entry point is recovered, reusing a surviving symbol name when one exists and synthesising a `sub_<address>` name otherwise. Recovered Objective-C implementations then upgrade matching `sub_<address>` entries to their `-[Class selector]` names. This is what allows disassembly and callgraph construction to work on stripped apps.
 
@@ -217,6 +228,30 @@ The bundle context also carries the app's privacy posture, parsed from the `Info
 For the main executable these are projected into `informative_strings` as `PRIV_*` tokens (mirroring the `ATS_*` tokens above) so the rule engine can flag the privacy surface — for example `PRIV_NSCameraUsageDescription`, `PRIV_LSApplicationQueriesSchemes`, `PRIV_NSPrivacyTracking`, `PRIV_PrivacyManifestMissing`, and `PRIV_UNDECLARED_<category>` for a required-reason API referenced by the binary without a matching manifest declaration.
 
 Embedded framework and app-extension binaries are additionally enriched with their _own_ `Info.plist` identity (`bundle_identifier`, `bundle_version`) so the SBOM can report the real product version of a bundled dependency rather than inheriting the host app's version.
+
+### macOS Bundle Directories (`.app` / `.framework` / `.dSYM`)
+
+A macOS bundle is a directory (unlike an `.ipa`, there is nothing to unpack). blint walks it — the main executable under `Contents/MacOS` (named by `CFBundleExecutable`), embedded frameworks (`Contents/Frameworks`), app extensions (`Contents/PlugIns/*.appex`), XPC services (`Contents/XPCServices/*.xpc`), login-item and LaunchServices helper apps under `Contents/Library`, a framework's own `Versions/` tree, and a `.dSYM`'s DWARF slices — and analyzes every Mach-O it finds. Auxiliary executables beside the main binary (installer tools, privileged helpers) are collected with role `tool`/`helper` so a bundle scan never loses them relative to a plain directory scan. Members are deduplicated through `Versions/Current` symlink aliasing, and a 2000-binary walk cap records `binary_walk_truncated` instead of stopping silently. In SBOM output the bundle is the parent application component and each binary a component with `pkg:macos` purls keyed by bundle-relative path.
+
+| Attribute      | Description                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `macos_bundle` | The same bundle-context shape as `ios_bundle` below (identity, role, `bundle_path`, ATS/URL-scheme/privacy keys) for binaries analyzed through a macOS bundle directory. |
+
+### Provisioning Profiles (`provisioning_profile`)
+
+Bundles signed for direct distribution carry a provisioning profile — `embedded.mobileprovision` (iOS shape) or `embedded.provisionprofile` (macOS, under `Contents/`). The profile is a CMS envelope around a plist; blint decodes it (`blint/lib/provisioning.py`) into:
+
+| Attribute                          | Description                                                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `parse_status`                     | `parsed` or `parse_failed` (with `parse_error`). A failed CMS or plist decode is reported, never guessed.           |
+| `name`, `team_name`, `team_identifiers` | The profile's identity and signing team.                                                                   |
+| `created`, `expires`               | ISO-8601 validity window. Validity is evaluated by the checks at scan time, keeping parse output deterministic.    |
+| `entitlements`                     | The signed `application-identifier`, `get-task-allow`, `aps-environment` and related entitlements.                |
+| `provisioned_device_count`         | Count only — device UDIDs never enter metadata.                                                                  |
+| `provisions_all_devices`           | Enterprise (in-house) distribution marker.                                                                       |
+| `signer_cn`                        | Common name of the CMS signer chain (names only; no trust validation).                                           |
+
+Three rules consume the block: `CHECK_PROFILE_EXPIRED` (high), `CHECK_PROFILE_DEVELOPMENT` (medium — a `get-task-allow` profile in a shipping bundle) and `CHECK_PROFILE_WILDCARD` (medium — a `team-id.*` application identifier).
 
 ### For WASM Binaries
 
@@ -639,6 +674,19 @@ Empty lists mean the format carries no such evidence — attribution is never pa
 ### `import_hash`
 
 A stable digest over the normalized import-name set (ELF dynamic symbols marked as imports, or the `imports` list for PE/Mach-O). Normalization strips ELF `@@VERSION` suffixes, PE `__imp_`/`_imp_` thunks and common leading-underscore decoration, so the same dependency set hashes identically across formats and minor version bumps. Empty for binaries that import nothing (fully static images).
+
+### `swift_metadata`
+
+Swift reflection metadata, parsed by `blint/lib/swift_metadata.py` from `__swift5_*` (Mach-O) or `.swift5_*` (ELF) sections — the same parser serves both formats (issue #109). The sections survive stripping and carry every Swift type's name, fields and metadata access functions.
+
+| Attribute               | Description                                                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type_count`, `types`   | Every Swift type: `name`, `kind` (`class`/`struct`/`enum`), the metadata `access_function` address, and the declared `fields` (property names).      |
+| `kind_counts`           | Per-kind totals.                                                                                                                                   |
+| `protocol_count`, `protocols` | Protocol names from `__swift5_protos`.                                                                                                        |
+| `access_function_count`, `access_functions` | Named code addresses (`metadata_access_function_for_<Type>`) seeded into `functions` so disassembly and callgraph work reaches Swift entry points on stripped binaries. |
+
+Swift type and field names also join the ObjC selectors and symbols in the privacy-marker haystack (`_symbol_haystack`), so a Swift property `creationDate` matches the required-reason API categories like the C symbol spellings do.
 
 ### `analysis_coverage`
 

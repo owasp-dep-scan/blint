@@ -55,6 +55,9 @@ const char *wave0_label(void) { return "wave0-determinism-demo"; }
 int main(void) { return accumulate(7) + (int)strlen(wave0_label()); }
 """
 
+pytestmark = pytest.mark.slow
+
+
 
 def _first_diff_path(first, second, path="$"):
     """Locate the first differing position in two JSON-like structures."""
@@ -115,7 +118,9 @@ def native_binary(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("determinism")
     source = workdir / "demo.c"
     source.write_text(_DEMO_C, encoding="utf-8")
-    binary = workdir / "demo-bin"
+    # A Windows compiler appends `.exe` when `-o` carries no suffix, so name
+    # it here rather than return a path to a file that does not exist.
+    binary = workdir / ("demo-bin.exe" if os.name == "nt" else "demo-bin")
     subprocess.run(
         [compiler, "-O1", "-o", str(binary), str(source)],
         check=True,
@@ -308,7 +313,9 @@ def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
     """
     scan_dir = tmp_path / "scan"
     scan_dir.mkdir()
-    shutil.copy(native_binary, scan_dir / "demo-bin")
+    # Keep the fixture's own filename so the copy stays executable-shaped on
+    # every platform.
+    shutil.copy(native_binary, scan_dir / native_binary.name)
     # The compiled demo links almost nothing, so on its own it yields no
     # dependsOn list long enough for an order to exist. A real system binary
     # links several libraries and gives the assertion something to bite on.
@@ -347,3 +354,36 @@ def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
     )
     for entry in depends:
         assert entry == sorted(entry), "dependsOn must be serialized in sorted order"
+
+
+def test_root_depends_on_is_sorted_regardless_of_component_order(tmp_path):
+    """The promoted-root ``dependsOn`` list must be sorted on the way out.
+
+    ``create_sbom`` builds the root component's ``dependsOn`` from the
+    component list, which arrives in directory-scan order. POSIX scandir
+    happens to be sorted for most directories, which is why the end-to-end
+    seed test above passed for years — on Windows the order differs and the
+    unsorted list shipped. Feed deliberately unsorted refs and assert the
+    emitted list is sorted (regression for the Windows CI failure).
+    """
+    from blint.cyclonedx.spec import BomFormat, Component, CycloneDX, Metadata, RefType, Type
+    from blint.lib.sbom import create_sbom
+
+    sbom = CycloneDX(bomFormat=BomFormat.CycloneDX, specVersion="1.6", version=1)
+    sbom.metadata = Metadata()
+    parent = Component(type=Type.application, name="scan-root")
+    parent.bom_ref = RefType("pkg:generic/scan-root")
+    sbom.metadata.component = parent
+    for ref in ("pkg:generic/zeta", "pkg:generic/alpha", "pkg:generic/mid"):
+        child = Component(type=Type.library, name=ref.rsplit("/", 1)[-1])
+        child.bom_ref = RefType(ref)
+        parent.components = [*(parent.components or []), child]
+
+    out_file = tmp_path / "sbom.json"
+    create_sbom(parent.components, [], str(out_file), sbom, False, {})
+    bom = json.loads(out_file.read_text())
+    root = next(
+        d for d in bom["dependencies"] if d["ref"] == "pkg:generic/scan-root"
+    )
+    assert root["dependsOn"] == sorted(root["dependsOn"])
+    assert root["dependsOn"] == ["pkg:generic/alpha", "pkg:generic/mid", "pkg:generic/zeta"]

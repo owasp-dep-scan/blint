@@ -13,6 +13,7 @@ permissions: {}
 jobs:
   Blint-Darwin-Build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

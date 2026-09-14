@@ -1,0 +1,36 @@
+---
+text: Review for the constants an image passes to security-relevant APIs
+group: BINARY_REVIEWS
+exe_type: [PE32, PE64, genericbinary, ELF, MachO]
+rules:
+  - id: CALL_SITE_CONSTANT_ARGUMENTS
+    title: Names what it passes to security-relevant APIs
+    summary: Device paths, crypto algorithm identifiers or port numbers recovered from the dataflow at resolved call sites, naming what a linked API is actually given.
+    description: |
+      Linkage-level capability rules (CRYPTO_API and its siblings) can only
+      say that an image is linked to an API. This rule names what the image
+      passes to it: the abstract interpreter's CFG dataflow recovers the
+      constant an argument register holds at a call site - reported only when
+      every path reaching the call agrees on the value, never a value that
+      merely sits in the register somewhere else - and the disassembler's
+      call-target resolution anchors the constant to a named callee.
+
+      Three argument shapes are interpreted, each tied to a documented ABI
+      position. A path: the constant points at a string in the image and
+      reaches a file-open API's path argument, so the finding names the exact
+      device or file opened rather than only that CreateFile is linked. An
+      algorithm: the documented CommonCrypto constant, or the algorithm name
+      a provider API takes, reaching a crypto call - which turns "linked to
+      CCCrypt" into "encrypts with RC4". A port: the argument of a
+      byte-order call, which is the port itself.
+
+      Limits, stated rather than hidden: only register-passed positions
+      recover, so a constant the ABI passes on the stack is out of reach;
+      unresolved call sites contribute nothing; paths are recovered from
+      ASCII string bytes, so a path built at runtime or stored as wide
+      characters is this rule's blind spot (the stack-string lane sees the
+      runtime-built ones); and byte-order calls are usually inlined by the
+      compiler, so no port hit does not mean no network code. Every emitted
+      value cites the function and call site it was recovered at, so each one
+      can be checked against the disassembly before being acted on.
+    check_type: binary_analysis

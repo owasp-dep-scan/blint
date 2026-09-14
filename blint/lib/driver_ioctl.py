@@ -637,7 +637,10 @@ def extract_client_ioctl_codes(
 
 
 def collect_client_ioctls(
-    disassembled_functions: dict, arch_target: str = "", binary_format: str = "PE"
+    disassembled_functions: dict,
+    arch_target: str = "",
+    binary_format: str = "PE",
+    call_site_entries: list[dict] | None = None,
 ) -> list[dict]:
     """Collect vendor-range control codes issued by a user-mode client.
 
@@ -645,20 +648,59 @@ def collect_client_ioctls(
     a resolved DeviceIoControl call site. ``arch_target`` and
     ``binary_format`` select the architecture model and calling convention;
     see extract_client_ioctl_codes.
+
+    ``call_site_entries`` is the exported ``call_site_arguments`` metadata
+    block (see blint.lib.absint.analyze_call_site_arguments). When given,
+    the codes are read from it instead of re-running the dataflow — the
+    block is the shared source of truth and the recovery must not run
+    twice. Metadata produced before the block existed (or a caller holding
+    only disassembled functions) still works: without entries the recovery
+    runs per function exactly as before.
     """
-    if not disassembled_functions:
+    if not disassembled_functions and not call_site_entries:
         return []
     results: list[dict] = []
     seen: set[int] = set()
-    for func_key, func_data in disassembled_functions.items():
-        for code in extract_client_ioctl_codes(func_data, arch_target, binary_format):
-            if code in seen:
+
+    def emit(code: int, function, address) -> None:
+        if code in seen:
+            return
+        seen.add(code)
+        entry = decode_ioctl(code)
+        entry["function"] = function
+        entry["address"] = address
+        results.append(entry)
+
+    if call_site_entries is not None:
+        functions_by_name = {
+            str(data.get("name") or key): data
+            for key, data in (disassembled_functions or {}).items()
+            if isinstance(data, dict)
+        }
+        for block_entry in call_site_entries:
+            position = DEVICE_IOCTL_CALLEE_CODE_POSITIONS.get(
+                _normalized_callee(block_entry.get("callee"))
+            )
+            if position is None or block_entry.get("argument") != position:
                 continue
-            seen.add(code)
-            entry = decode_ioctl(code)
-            entry["function"] = func_data.get("name", func_key)
-            entry["address"] = func_data.get("address")
-            results.append(entry)
+            code = block_entry.get("value")
+            if not isinstance(code, int) or not is_plausible_ioctl(code):
+                continue
+            # The block keeps up to MAX_CALLSITE_SITES_PER_ENTRY citing
+            # functions; each names a real call site for the same code.
+            names = [
+                name for name in block_entry.get("functions") or [] if isinstance(name, str)
+            ]
+            cited = [functions_by_name[name] for name in names if name in functions_by_name]
+            if cited:
+                for func_data in cited:
+                    emit(code, func_data.get("name", func_data.get("address")), func_data.get("address"))
+            else:
+                emit(code, names[0] if names else None, None)
+    else:
+        for func_key, func_data in disassembled_functions.items():
+            for code in extract_client_ioctl_codes(func_data, arch_target, binary_format):
+                emit(code, func_data.get("name", func_key), func_data.get("address"))
     results.sort(key=lambda entry: entry["code"])
     return results
 
