@@ -27,10 +27,9 @@ def _known_function_addresses(metadata: dict) -> set[int]:
     """Addresses claimed by the symbol-driven function buckets.
 
     Mach-O metadata is normalized to the virtual address space where the
-    function lists are built (P5.1), so this rebase is the identity for
-    current output; it is kept because the comparison deliberately runs in
-    the image-relative space and must stay correct for any metadata produced
-    before that normalization.
+    function lists are built (P5.1), so every address here is rebased down
+    to the image-relative space. The comparison runs in that space, and both
+    sides of it are rebased the same way.
     """
     imagebase = metadata.get("imagebase")
     imagebase = imagebase if isinstance(imagebase, int) else 0
@@ -54,18 +53,6 @@ def _known_function_addresses(metadata: dict) -> set[int]:
             addresses.add(_normalize(int(str(discovered["address"]).strip(), 16)))
         except (KeyError, ValueError):
             continue
-    return addresses
-
-
-def _disassembled_addresses(metadata: dict) -> set[int]:
-    addresses = set()
-    for func_data in (metadata.get("disassembled_functions") or {}).values():
-        raw = (func_data or {}).get("address")
-        if raw:
-            try:
-                addresses.add(int(str(raw).strip(), 16))
-            except ValueError:
-                continue
     return addresses
 
 

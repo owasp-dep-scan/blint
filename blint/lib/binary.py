@@ -5041,6 +5041,16 @@ def _is_synthetic_function_name(name) -> bool:
     return bool(name) and bool(MACHO_SYNTHETIC_FUNCTION_NAME_RE.match(str(name)))
 
 
+def _is_weak_function_name(name) -> bool:
+    """True when a name identifies nothing: absent, empty, or ``sub_<hex>``.
+
+    A weak name loses to a real symbol at the same address. lief leaves some
+    aggregate entries nameless, so absence has to rank with ``sub_<hex>``
+    rather than count as an identity of its own.
+    """
+    return not name or _is_synthetic_function_name(name)
+
+
 def _normalize_macho_function_list(
     functions: list[dict] | None, ranges, imagebase: int
 ) -> tuple[list[dict], dict]:
@@ -5106,21 +5116,32 @@ def _normalize_macho_function_list(
     normalized: list[dict] = []
     for addr in order:
         bucket = grouped[addr]
-        named = [e for e in bucket if not _is_synthetic_function_name(e.get("name"))]
-        if named:
-            kept = named
-            dropped = [e for e in bucket if _is_synthetic_function_name(e.get("name"))]
-        else:
-            kept = bucket[:1]
-            dropped = bucket[1:]
+        kept: list[dict] = []
+        dropped: list[tuple[dict, dict]] = []
+        by_name: dict[str, dict] = {}
+        for entry in bucket:
+            if _is_weak_function_name(entry.get("name")):
+                continue
+            survivor = by_name.get(str(entry["name"]))
+            if survivor is None:
+                by_name[str(entry["name"])] = entry
+                kept.append(entry)
+            else:
+                # The same symbol reached this address from two tables; one
+                # copy usually carries the size and the other does not.
+                dropped.append((entry, survivor))
+        weak = [e for e in bucket if _is_weak_function_name(e.get("name"))]
+        if not kept:
+            kept = weak[:1]
+            weak = weak[1:]
+        dropped.extend((entry, kept[0]) for entry in weak)
         if dropped:
             stats["duplicates_merged"] += len(dropped)
-            if named:
-                # One function that used to appear as sub_<addr> now appears
-                # under its symbol name: count the recovered identity.
+            if by_name and weak:
+                # A function that used to appear unnamed or as sub_<addr> now
+                # appears under its symbol name: count the recovered identity.
                 stats["names_recovered"] += 1
-            survivor = kept[0]
-            for dropped_entry in dropped:
+            for dropped_entry, survivor in dropped:
                 if _entry_size(dropped_entry) > _entry_size(survivor):
                     survivor["size"] = dropped_entry.get("size")
                 if survivor.get("flags") is None and dropped_entry.get("flags") is not None:
@@ -5303,6 +5324,19 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     # contain only ``__mh_execute_header``. Recover the real entry points from
     # the ``LC_FUNCTION_STARTS`` table so disassembly and callgraph
     # construction have a complete set of functions to work with.
+    ranges = _macho_content_segment_ranges(parsed_obj)
+    imagebase = _macho_imagebase_or_zero(parsed_obj)
+    # Addresses that identified nothing before the merge. A name can be
+    # recovered either by the merge (from a surviving symbol) or by the
+    # normalization (a real name outranking a sub_<addr> twin), so the
+    # recovery is counted once here, across both, rather than in either.
+    unidentified_before = {
+        _macho_address_to_virtual(_parse_address(fn.get("address")), ranges, imagebase)
+        for fn in metadata["functions"]
+        if _is_weak_function_name(fn.get("name"))
+    }
+    unidentified_before.discard(None)
+
     metadata["functions"] = merge_macho_function_starts(
         metadata["functions"], metadata["symtab_symbols"], parsed_obj
     )
@@ -5312,8 +5346,6 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     # the merge above appends virtual ones; normalize every function-bearing
     # list into the virtual space here — at the point the lists are built —
     # so no consumer ever has to guess which space an address is in.
-    ranges = _macho_content_segment_ranges(parsed_obj)
-    imagebase = _macho_imagebase_or_zero(parsed_obj)
     space_stats = {}
     for list_key in ("functions", "ctor_functions", "unwind_functions"):
         metadata[list_key], space_stats[list_key] = _normalize_macho_function_list(
@@ -5328,7 +5360,12 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
         "imagebase": metadata.get("imagebase", imagebase),
         "rebased_entries": sum(s["rebased"] for s in space_stats.values()),
         "duplicates_merged": sum(s["duplicates_merged"] for s in space_stats.values()),
-        "names_recovered": sum(s["names_recovered"] for s in space_stats.values()),
+        "names_recovered": sum(
+            1
+            for fn in metadata["functions"]
+            if not _is_weak_function_name(fn.get("name"))
+            and _parse_address(fn.get("address")) in unidentified_before
+        ),
         "ambiguous_entries": ambiguous,
         "unresolved_entries": unresolved,
     }

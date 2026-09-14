@@ -220,6 +220,36 @@ def test_normalize_macho_function_list_keeps_two_named_entries_at_one_address():
     assert stats["duplicates_merged"] == 0
 
 
+def test_normalize_macho_function_list_merges_same_symbol_from_two_tables():
+    # /usr/bin/swift in miniature: one symbol reaches an address from two
+    # tables, so both copies carry the same name and only one carries the
+    # size. Same name at one address is one function, not an alias pair.
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    functions = [
+        {"index": 0, "name": "_main", "address": "0x100000680", "size": 173, "flags": None},
+        {"index": 1, "name": "_main", "address": "0x100000680", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    assert normalized[0]["size"] == 173
+    assert stats["duplicates_merged"] == 1
+
+
+def test_normalize_macho_function_list_nameless_entry_loses_to_symbol():
+    # lief leaves some aggregate entries nameless. An absent name identifies
+    # nothing, so it must rank with sub_<addr> rather than survive alongside
+    # the real symbol at the same address.
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(_x264_like_layout(), 0x100000000))
+    functions = [
+        {"index": 0, "name": "", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 1, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    assert normalized[0]["name"] == "_x264_mdate"
+    assert stats["names_recovered"] == 1
+
+
 def test_normalize_macho_function_list_counts_unplaceable_addresses():
     # Addresses the segment ranges cannot place (in both ranges with a
     # non-zero imagebase, or in neither) are left unchanged and counted.
