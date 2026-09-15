@@ -157,9 +157,9 @@ def test_analyze_instructions_basic(mock_instructions):
     next_func_addr_in_sec = 0x2000
     (
         metrics,
-        mnemonics,
+        _mnemonics,
         has_indirect_call,
-        has_loop,
+        _has_loop,
         regs_read,
         regs_written,
         instrs_with_regs,
@@ -213,11 +213,13 @@ def test_analyze_instructions_loop_detection():
     instr1_corrected.address = 0x1000
     instrs_corrected.append(instr1_corrected)
     instr_addresses_corrected = [0x0FFE, 0x0FFF, 0x1000]
-    (metrics, mnemonics, has_indirect_call, has_loop, _, _, _, _, _, _, _) = _analyze_instructions(
-        instrs_corrected,
-        func_addr,
-        next_func_addr_in_sec,
-        instr_addresses_corrected,
+    (_metrics, _mnemonics, _has_indirect_call, has_loop, _, _, _, _, _, _, _) = (
+        _analyze_instructions(
+            instrs_corrected,
+            func_addr,
+            next_func_addr_in_sec,
+            instr_addresses_corrected,
+        )
     )
     assert has_loop == True
 
@@ -233,10 +235,10 @@ def test_apple_proprietary_instruction_detection():
     instr_addresses_corrected = [0x1000]
     mock_macho = MagicMock(spec=lief.MachO.Binary)
     (
-        metrics,
-        mnemonics,
-        has_indirect_call,
-        has_loop,
+        _metrics,
+        _mnemonics,
+        _has_indirect_call,
+        _has_loop,
         _,
         _,
         _,

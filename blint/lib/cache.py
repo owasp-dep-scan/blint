@@ -140,7 +140,7 @@ def _blint_version() -> str:
 
     try:
         return version("blint")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 

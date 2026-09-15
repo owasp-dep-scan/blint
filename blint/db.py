@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
+import itertools
 import os
 from pathlib import Path
 
@@ -261,8 +262,7 @@ def _normalize_binary_name(value: str | None) -> str:
         if name.endswith(suffix):
             name = name[: -len(suffix)]
             break
-    if name.startswith("lib"):
-        name = name[3:]
+    name = name.removeprefix("lib")
     name = name.split(".")[0]
     return "".join(ch for ch in name if ch.isalnum())
 
@@ -626,7 +626,7 @@ def _member_contiguity(positions: list[dict]) -> float:
     for p in positions:
         size_by_address.setdefault(p["address"], p["size"])
     adjacent = 0
-    for current, following in zip(addresses, addresses[1:]):
+    for current, following in itertools.pairwise(addresses):
         gap = following - (current + size_by_address.get(current, 0))
         if 0 <= gap <= MEMBER_CONTIGUITY_GAP_BYTES:
             adjacent += 1

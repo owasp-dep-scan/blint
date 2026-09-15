@@ -12,11 +12,11 @@ from blint.lib.provisioning import (
 from blint.lib.utils import parse_pe_manifest
 
 
-def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("has_nx") is not False
 
 
-def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     # A mapping that is writable and executable at the same time turns any
     # memory-write primitive into direct code execution, so the offending
     # segments are reported by name.
@@ -47,24 +47,24 @@ def check_objc_load_methods(
     return ", ".join(sorted(names)[:10])
 
 
-def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("is_pie") is not False
 
 
-def check_relro(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_relro(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("relro") != "no"
 
 
-def check_canary(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_canary(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("has_canary") is not False
 
 
-def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     # Do not recommend setting rpath or runpath
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
 
 
-def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     if virtual_size := metadata.get("virtual_size"):
         size_limit = 30
         if raw_limit := rule_obj.get("limit"):
@@ -75,7 +75,7 @@ def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     return True
 
 
-def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     if authenticode_obj := metadata.get("authenticode"):
         vf = authenticode_obj.get("verification_flags", "").lower()
         return False if vf != "ok" else bool(authenticode_obj.get("cert_signer"))
@@ -84,7 +84,7 @@ def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
 
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
-) -> bool | str:  # noqa
+) -> bool | str:
     missing: list[str] = []
     if dll_characteristics := metadata.get("dll_characteristics"):
         missing += [
@@ -95,7 +95,7 @@ def check_dll_characteristics(
     return True
 
 
-def check_codesign(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_codesign(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     if metadata.get("code_signature"):
         code_signature = metadata.get("code_signature")
         return not code_signature or code_signature.get("available") is not False
@@ -168,25 +168,24 @@ def check_profile_wildcard(
     return True
 
 
-def check_trust_info(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
-    if resources := metadata.get("resources"):
-        if manifest := resources.get("manifest"):
-            attribs_dict = parse_pe_manifest(manifest)
-            if not attribs_dict:
-                return True
-            allowed_values = rule_obj.get("allowed_values", {})
-            for k, v in allowed_values.items():
-                manifest_k = attribs_dict.get(k)
-                if isinstance(v, dict) and isinstance(manifest_k, dict):
-                    for vk, vv in v.items():
-                        if str(manifest_k.get(vk)).lower() != str(vv).lower():
-                            return f"{vk}:{manifest_k.get(vk)}"
+def check_trust_info(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    if (resources := metadata.get("resources")) and (manifest := resources.get("manifest")):
+        attribs_dict = parse_pe_manifest(manifest)
+        if not attribs_dict:
+            return True
+        allowed_values = rule_obj.get("allowed_values", {})
+        for k, v in allowed_values.items():
+            manifest_k = attribs_dict.get(k)
+            if isinstance(v, dict) and isinstance(manifest_k, dict):
+                for vk, vv in v.items():
+                    if str(manifest_k.get(vk)).lower() != str(vv).lower():
+                        return f"{vk}:{manifest_k.get(vk)}"
     return True
 
 
 def check_libc_portability(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
-) -> bool | str:  # noqa
+) -> bool | str:
     # An image that reaches into C library internals is bound to the
     # implementation it was built against, so report the interfaces by name
     # rather than a bare pass or fail.
@@ -197,7 +196,7 @@ def check_libc_portability(
     return ", ".join(names[:10])
 
 
-def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     # Fails when the binary requires a runtime newer than the configured
     # baseline, which is the version the deployment target is known to ship.
     abi = metadata.get("abi_analysis") or {}
@@ -214,7 +213,7 @@ def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) 
 
 def check_runtime_loading(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
-) -> bool | str:  # noqa
+) -> bool | str:
     # Libraries opened at runtime are absent from the dependency table, so an
     # image that loads them has a dependency surface no static list describes.
     recovered = metadata.get("recovered_dependencies") or []
@@ -226,7 +225,7 @@ def check_runtime_loading(
     return ", ".join(sorted(confident)[:10])
 
 
-def check_link_closure(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+def check_link_closure(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     # Only meaningful when closure resolution ran; an absent block means the
     # question was never asked, which is not a failure.
     closure = metadata.get("link_closure")
@@ -240,7 +239,7 @@ def check_link_closure(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     return ", ".join(problems[:10])
 
 
-def check_search_path(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+def check_search_path(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     # A search path entry that is relative or world writable lets a directory
     # outside the package decide which library answers first.
     closure = metadata.get("link_closure") or {}
@@ -252,7 +251,7 @@ def check_search_path(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 
 def check_unused_dependencies(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
-) -> bool | str:  # noqa
+) -> bool | str:
     # Only meaningful once symbols can be attributed to libraries; without that
     # every dependency looks unused.
     hygiene = metadata.get("link_hygiene") or {}
@@ -264,7 +263,7 @@ def check_unused_dependencies(
 
 def check_undeclared_dependencies(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
-) -> bool | str:  # noqa
+) -> bool | str:
     # A library supplying symbols without being declared is reached through
     # someone else's dependency list, which is not a contract.
     hygiene = metadata.get("link_hygiene") or {}
@@ -274,7 +273,7 @@ def check_undeclared_dependencies(
     return ", ".join(undeclared[:10])
 
 
-def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:  # noqa
+def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     properties = metadata.get("security_properties", {})
     key = rule_obj.get("property_key")
     if not key:
@@ -282,7 +281,7 @@ def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str
     return properties.get(key) is True
 
 
-def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:  # noqa
+def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     """Flag binaries whose entropy analysis found packing evidence.
 
     Follows the checks convention: True means clean, a string carries the

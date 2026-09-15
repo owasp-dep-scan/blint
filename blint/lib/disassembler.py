@@ -70,13 +70,10 @@ def _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key: str) -> 
     """Skip symbol buckets that are usually non-local to this binary."""
     if isinstance(parsed_obj, lief.PE.Binary) and func_list_key in ("imports",):
         return True
-    if isinstance(parsed_obj, lief.MachO.Binary) and func_list_key in (
-        "imports",
-        "symtab_symbols",
-        "dynamic_symbols",
-    ):
-        return True
-    return False
+    return bool(
+        isinstance(parsed_obj, lief.MachO.Binary)
+        and func_list_key in ("imports", "symtab_symbols", "dynamic_symbols")
+    )
 
 
 OPERAND_DELIMITERS_PATTERN = re.compile(r"[^a-zA-Z0-9_$]+")
@@ -806,7 +803,7 @@ def _extract_register_usage(
                 src2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
                 regs_read.update(src1_regs)
                 regs_read.update(src2_regs)
-        elif mnemonic.startswith("ldr") or mnemonic.startswith("str"):
+        elif mnemonic.startswith(("ldr", "str")):
             if num_operands >= 2:
                 data_reg = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 addr_parts = extract_regs_from_operand(operands[1], sorted_arch_regs)
@@ -816,7 +813,7 @@ def _extract_register_usage(
                 else:  # ldr
                     regs_written.update(data_reg)
                     regs_read.update(addr_parts)
-        elif mnemonic.startswith("ldp") or mnemonic.startswith("stp"):
+        elif mnemonic.startswith(("ldp", "stp")):
             if num_operands >= 3:
                 data_reg1 = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 data_reg2 = extract_regs_from_operand(operands[1], sorted_arch_regs)
@@ -834,7 +831,7 @@ def _extract_register_usage(
                     regs_written.update(data_reg1)
                     regs_written.update(data_reg2)
                     regs_read.update(addr_parts)
-        elif mnemonic.startswith("cb") or mnemonic.startswith("tb"):
+        elif mnemonic.startswith(("cb", "tb")):
             if num_operands >= 1:
                 src_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
                 regs_read.update(src_regs)
@@ -856,27 +853,30 @@ def _extract_register_usage(
                     regs_read.update(target_regs)
         elif mnemonic in ("ret", "eret"):
             pass
-        elif mnemonic in ("and", "orr", "eor", "bic", "tst") or mnemonic in (
-            "lsl",
-            "lsr",
-            "asr",
-            "ror",
-            "uxtw",
-            "sxtw",
-            "sxtx",
-            "uxtb",
-            "uxth",
-            "sxtb",
-            "sxth",
-        ):
-            if num_operands >= 2:
-                dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
-                src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
-                regs_written.update(dst_regs)
-                regs_read.update(src1_regs)
-                if num_operands >= 3:
-                    src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
-                    regs_read.update(src2_regs)
+        elif (
+            mnemonic in ("and", "orr", "eor", "bic", "tst")
+            or mnemonic
+            in (
+                "lsl",
+                "lsr",
+                "asr",
+                "ror",
+                "uxtw",
+                "sxtw",
+                "sxtx",
+                "uxtb",
+                "uxth",
+                "sxtb",
+                "sxth",
+            )
+        ) and num_operands >= 2:
+            dst_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+            src1_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
+            regs_written.update(dst_regs)
+            regs_read.update(src1_regs)
+            if num_operands >= 3:
+                src2_regs = extract_regs_from_operand(operands[2], sorted_arch_regs)
+                regs_read.update(src2_regs)
     elif is_mips:
         if mnemonic in MIPS_ARITH_LOGIC_3_OP or mnemonic in MIPS_SHIFT_3_OP:
             if num_operands >= 3:
@@ -917,13 +917,12 @@ def _extract_register_usage(
         elif mnemonic == "jr":
             if num_operands >= 1:
                 regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-        elif mnemonic in ("jalr", "bal"):
-            if num_operands >= 1:
-                if num_operands == 2:
-                    regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
-                    regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
-                else:
-                    regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+        elif mnemonic in ("jalr", "bal") and num_operands >= 1:
+            if num_operands == 2:
+                regs_written.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
+                regs_read.update(extract_regs_from_operand(operands[1], sorted_arch_regs))
+            else:
+                regs_read.update(extract_regs_from_operand(operands[0], sorted_arch_regs))
     else:
         if mnemonic in WRITE_DST_READ_SRC_INST or mnemonic.startswith("cmov"):
             if num_operands >= 2:
@@ -999,14 +998,13 @@ def _extract_register_usage(
                 if not op.startswith("0x") and not op.isdigit():
                     op_regs = extract_regs_from_operand(op, sorted_arch_regs)
                     regs_read.update(op_regs)
-        elif mnemonic == "xchg":
-            if num_operands >= 2:
-                op1_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
-                op2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
-                regs_read.update(op1_regs)
-                regs_written.update(op1_regs)
-                regs_read.update(op2_regs)
-                regs_written.update(op2_regs)
+        elif mnemonic == "xchg" and num_operands >= 2:
+            op1_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
+            op2_regs = extract_regs_from_operand(operands[1], sorted_arch_regs)
+            regs_read.update(op1_regs)
+            regs_written.update(op1_regs)
+            regs_read.update(op2_regs)
+            regs_written.update(op2_regs)
         if mnemonic in ("mul", "imul", "div", "idiv") and num_operands == 1:
             op_regs = extract_regs_from_operand(operands[0], sorted_arch_regs)
             regs_read.update(op_regs)
@@ -1103,11 +1101,10 @@ def _analyze_instructions(
         instruction_mnemonics.append(mnemonic)
         if mnemonic in ARM64_PAC_INST:
             has_pac = True
-        elif mnemonic == "hint":
-            if operand_text:
-                operand = operand_text.strip().replace("#", "")
-                if operand in ARM64_PAC_HINTS:
-                    has_pac = True
+        elif mnemonic == "hint" and operand_text:
+            operand = operand_text.strip().replace("#", "")
+            if operand in ARM64_PAC_HINTS:
+                has_pac = True
         if mnemonic in CALL_INST:
             instruction_metrics["call_count"] += 1
         elif mnemonic in CONDITIONAL_JMP_INST:
@@ -2103,7 +2100,7 @@ def disassemble_functions(
                     all_func_addrs.append(int(addr_str, 16))
                 except ValueError:
                     pass
-    all_func_addrs_sorted = sorted(list(set(all_func_addrs)))
+    all_func_addrs_sorted = sorted(set(all_func_addrs))
     # Call targets render as absolute virtual addresses, while stored function
     # addresses are image-relative for PE. Mach-O function metadata is
     # normalized to the virtual space where the list is built (P5.1), so its

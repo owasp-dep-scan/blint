@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 In-memory callgraph model shared by the source and binary loaders.
 
@@ -22,9 +21,9 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
-from blint.lib.callgraph.canon import CanonicalName, NameKind, canonicalize
+from blint.lib.callgraph.canon import CanonicalName, canonicalize
 
 # Per-function disassembly features that survive stripping. They are the
 # structural fingerprint used when no symbol names are available.
@@ -55,7 +54,7 @@ class GraphNode:
 
     id: str
     canon: CanonicalName
-    address: Optional[str] = None
+    address: str | None = None
     local: bool = True
     features: dict[str, Any] = field(default_factory=dict)
 
@@ -126,14 +125,14 @@ class CallGraph:
         return len(self.nodes)
 
 
-def _as_payload(source: Union[str, Path, dict[str, Any]]) -> dict[str, Any]:
+def _as_payload(source: str | Path | dict[str, Any]) -> dict[str, Any]:
     """Accept a path or an already-parsed mapping and return the mapping."""
     if isinstance(source, dict):
         return source
     return json.loads(Path(source).read_text(encoding="utf-8"))
 
 
-def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph:
+def load_source_callgraph(source: str | Path | dict[str, Any]) -> CallGraph:
     """Load a rusi source callgraph into a canonical-name-keyed :class:`CallGraph`.
 
     Args:
@@ -174,7 +173,7 @@ def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph
             id_to_canon[raw["id"]] = raw["canonical_name"]
         id_local[raw["id"]] = bool(raw.get("local"))
 
-    def _ensure(node_id: str) -> Optional[str]:
+    def _ensure(node_id: str) -> str | None:
         """Resolve a rusi id to a canonical node, creating it on first use."""
         qname = id_to_name.get(node_id)
         if not qname:
@@ -208,7 +207,7 @@ def load_source_callgraph(source: Union[str, Path, dict[str, Any]]) -> CallGraph
     return graph
 
 
-def load_binary_callgraph(metadata: Union[str, Path, dict[str, Any]]) -> CallGraph:
+def load_binary_callgraph(metadata: str | Path | dict[str, Any]) -> CallGraph:
     """Load a blint binary callgraph into an address-keyed :class:`CallGraph`.
 
     Args:
@@ -253,7 +252,7 @@ def load_binary_callgraph(metadata: Union[str, Path, dict[str, Any]]) -> CallGra
     return graph
 
 
-def _extract_features(disassembly: Optional[dict[str, Any]]) -> dict[str, Any]:
+def _extract_features(disassembly: dict[str, Any] | None) -> dict[str, Any]:
     """Pull the structural feature subset from a disassembled-function entry."""
     if not disassembly:
         return {}

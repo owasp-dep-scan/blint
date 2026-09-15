@@ -3,7 +3,6 @@ from collections import defaultdict
 from collections.abc import Iterator
 from typing import Any
 
-
 CLASS_253_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xfd|253)(?![a-z0-9])")
 SYSTEM_BUILD_VERSION_IMMEDIATE_RE = re.compile(r"(?<![a-z0-9])(0xde|222)(?![a-z0-9])")
 ZALLOC_RO_MUT_TARGET_LEN_ADD_RE = re.compile(r"\badds?\s+x9\s*,\s*x8\s*,\s*x4\b")
@@ -189,7 +188,6 @@ DEBUG_APIS: set[str] = {
     "ntsetinformationthread",
     "zwsetinformationthread",
     "openprocess",
-    "checkremotedebuggerpresent",
     "setunhandledexceptionfilter",
     "raiseexception",
     "rtladdvectoredexceptionhandler",
@@ -554,13 +552,12 @@ def _evaluate_function_analysis(
             func_data, PCI_CONFIG_APIS
         ) and not _function_has_any_call_fragment(func_data, ACCESS_CHECK_APIS):
             passed = True
-    elif rule_id == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS":
-        if (
-            _function_name_is_zalloc_ro_mut(func_data)
-            and _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly)
-            and not _zalloc_ro_mut_has_patched_per_cpu_bounds(assembly)
-        ):
-            passed = True
+    elif rule_id == "APPLE_MIE_ZALLOC_RO_MUT_PREPATCH_BOUNDS" and (
+        _function_name_is_zalloc_ro_mut(func_data)
+        and _zalloc_ro_mut_has_prepatch_wrap_check_shape(assembly)
+        and not _zalloc_ro_mut_has_patched_per_cpu_bounds(assembly)
+    ):
+        passed = True
 
     return passed, related_function
 

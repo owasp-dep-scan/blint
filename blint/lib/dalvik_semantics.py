@@ -18,7 +18,6 @@ a 32-bit ``int`` while its value and result are 64-bit ``long``).
 """
 
 from enum import Flag, auto
-from typing import List, Tuple
 
 from blint.lib.dalvik import Instruction
 
@@ -74,7 +73,7 @@ _WIDE_DEST = frozenset(
 )
 
 
-def _pair(reg: int) -> List[int]:
+def _pair(reg: int) -> list[int]:
     """A wide operand occupies the register and its successor."""
     return [reg, reg + 1]
 
@@ -102,7 +101,7 @@ def is_branch_source(inst: Instruction) -> bool:
     )
 
 
-def register_roles(inst: Instruction) -> Tuple[List[int], List[int]]:
+def register_roles(inst: Instruction) -> tuple[list[int], list[int]]:
     """
     Compute the (defs, uses) register sets for an instruction.
 
@@ -128,7 +127,7 @@ def register_roles(inst: Instruction) -> Tuple[List[int], List[int]]:
     return _other_roles(op, regs)
 
 
-def _arithmetic_roles(op: int, regs: List[int]) -> tuple[list[int] | None, list[int] | None]:
+def _arithmetic_roles(op: int, regs: list[int]) -> tuple[list[int] | None, list[int] | None]:
     """Roles for the regular ALU / conversion / move / const families.
 
     Returns ``(defs, uses)`` or ``(None, None)`` when ``op`` is not handled here
@@ -163,7 +162,7 @@ def _arithmetic_roles(op: int, regs: List[int]) -> tuple[list[int] | None, list[
     return None, None
 
 
-def _other_roles(op: int, regs: List[int]) -> tuple[list[int], list[int]]:
+def _other_roles(op: int, regs: list[int]) -> tuple[list[int], list[int]]:
     """Roles for non-ALU opcodes (moves, const, mem access, compares, ifs)."""
     r0 = regs[0]
     wide_dest = op in _WIDE_DEST

@@ -400,7 +400,7 @@ class AnalysisRunner:
                     self._mark_attempted("top-level")
                     try:
                         self._process_files(f, blint_options)
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         self._record_failure(f, "top-level", "process", e)
         finally:
             # Rule 18: the cache adds a SQLite connection to the run; it is
@@ -691,7 +691,7 @@ class AnalysisRunner:
                         bin_path, metadata, blint_options, wants_callgraph_outputs
                     )
                     self._mark_success("ipa-member")
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     self._record_failure(bin_path, "ipa-member", "process", e)
             return True
         finally:
@@ -738,7 +738,7 @@ class AnalysisRunner:
                 )
                 self._finalize_metadata(bin_path, metadata, blint_options, wants_callgraph_outputs)
                 self._mark_success("bundle-member")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 self._record_failure(bin_path, "bundle-member", "process", e)
         return True
 
@@ -891,7 +891,7 @@ def analyze_unit_default(file_path: str, state: dict[str, Any]) -> dict[str, Any
     runner._mark_attempted("top-level")
     try:
         runner._process_files(file_path, state["blint_options"])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         runner._record_failure(file_path, "top-level", "process", e)
     return {
         "findings": runner.findings,

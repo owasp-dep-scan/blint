@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Align a binary callgraph with a source callgraph.
 
@@ -24,7 +23,6 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Optional
 
 from blint.lib.callgraph.canon import NameKind
 from blint.lib.callgraph.fingerprint import gather_khop_voters, is_fingerprintable
@@ -104,7 +102,7 @@ PROFILES = {
 DEFAULT_PROFILE = "balanced"
 
 
-def options_for_profile(profile: str = DEFAULT_PROFILE, **overrides) -> "MatchOptions":
+def options_for_profile(profile: str = DEFAULT_PROFILE, **overrides) -> MatchOptions:
     """Build :class:`MatchOptions` from a named profile plus explicit overrides.
 
     Args:
@@ -191,7 +189,7 @@ def _vote(
     binary: CallGraph,
     result: MatchResult,
     node_id: str,
-) -> Optional[tuple[str, int, int]]:
+) -> tuple[str, int, int] | None:
     """Score source candidates for an unmatched binary node by neighbor agreement.
 
     Each already-mapped predecessor of ``node_id`` votes for the source
@@ -274,7 +272,7 @@ def _fingerprint_vote(
     result: MatchResult,
     node_id: str,
     options: MatchOptions,
-) -> Optional[tuple[str, float, float, int]]:
+) -> tuple[str, float, float, int] | None:
     """Score source candidates for an unmatched node by anchored-neighbor overlap.
 
     Candidate source functions are generated cheaply from the k-hop matched
@@ -371,7 +369,7 @@ def _fingerprint_match(
 def match_callgraphs(
     source: CallGraph,
     binary: CallGraph,
-    options: Optional[MatchOptions] = None,
+    options: MatchOptions | None = None,
 ) -> MatchResult:
     """Match a binary callgraph against a source callgraph.
 
@@ -403,7 +401,7 @@ def build_report(
     result: MatchResult,
     *,
     min_confidence: str = "low",
-    binary_file: Optional[str] = None,
+    binary_file: str | None = None,
 ) -> dict:
     """Build a serializable match report.
 

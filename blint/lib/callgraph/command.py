@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """Command orchestration and console rendering for ``blint callgraph-match``."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 from rich.box import ROUNDED
 from rich.panel import Panel
@@ -162,17 +160,17 @@ def render_match_report(report: dict, *, evidence_limit: int = 12) -> None:
 
 
 def run_callgraph_match(
-    source_callgraph: Optional[str],
-    binary: Optional[str],
-    binary_metadata: Optional[str],
-    output: Optional[str],
+    source_callgraph: str | None,
+    binary: str | None,
+    binary_metadata: str | None,
+    output: str | None,
     min_confidence: str = "low",
-    options: Optional[MatchOptions] = None,
+    options: MatchOptions | None = None,
     algorithm: str = DEFAULT_ALGORITHM,
     quiet: bool = False,
-    source_dir: Optional[str] = None,
+    source_dir: str | None = None,
     language: str = "rust",
-    rusi_command: Optional[str] = None,
+    rusi_command: str | None = None,
 ) -> dict:
     """Match a source callgraph against a binary and emit a report.
 

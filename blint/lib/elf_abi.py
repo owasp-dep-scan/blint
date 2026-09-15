@@ -309,7 +309,7 @@ def _detect_libc_flavour(metadata: dict, requirements: list[dict]) -> str:
         for entry in metadata.get("dynamic_entries") or []
         if entry.get("tag") == "NEEDED"
     }
-    if any(name.startswith("libc.musl") or name.startswith("ld-musl") for name in needed):
+    if any(name.startswith(("libc.musl", "ld-musl")) for name in needed):
         return "musl"
     if "libc.so.6" in needed:
         return "glibc"

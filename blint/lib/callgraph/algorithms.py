@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pluggable callgraph matching algorithms.
 
@@ -22,7 +21,6 @@ automatically.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Callable, Optional
 
 from blint.lib.callgraph.match import MatchOptions, MatchResult, match_callgraphs
 from blint.lib.callgraph.model import CallGraph
@@ -38,7 +36,7 @@ class CallgraphMatcher:
         self,
         source: CallGraph,
         binary: CallGraph,
-        options: Optional[MatchOptions] = None,
+        options: MatchOptions | None = None,
     ) -> MatchResult:
         """Match ``binary`` against ``source`` and return the mapping."""
         raise NotImplementedError
@@ -91,7 +89,7 @@ def algorithm_descriptions() -> dict[str, str]:
     return {name: _ALGORITHMS[name].description for name in available_algorithms()}
 
 
-def get_algorithm(name: Optional[str]) -> CallgraphMatcher:
+def get_algorithm(name: str | None) -> CallgraphMatcher:
     """Return the matcher registered under ``name`` (or the default).
 
     Raises:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Library entry point for callgraph matching.
 
@@ -13,7 +12,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional, Union
 
 from blint.lib.binary import parse
 from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM, get_algorithm
@@ -21,18 +19,17 @@ from blint.lib.callgraph.match import MatchOptions, MatchReport, build_report
 from blint.lib.callgraph.model import load_binary_callgraph, load_source_callgraph
 from blint.lib.callgraph.rusi import run_rusi_callgraph
 
-
 # Source-directory analyzers keyed by language. rusi handles Rust. Other
 # languages can register their own analyzer here without changing the matcher.
 _SOURCE_ANALYZERS = {"rust": run_rusi_callgraph}
 
 
 def _resolve_source_callgraph(
-    source_callgraph: Optional[Union[str, Path, dict]],
-    source_dir: Optional[Union[str, Path]],
-    rusi_command: Optional[str],
+    source_callgraph: str | Path | dict | None,
+    source_dir: str | Path | None,
+    rusi_command: str | None,
     language: str,
-) -> Union[str, Path, dict]:
+) -> str | Path | dict:
     """Return a source callgraph payload from a file, a dict, or a source dir.
 
     A source directory is analyzed only for languages with a registered
@@ -55,8 +52,8 @@ def _resolve_source_callgraph(
 
 
 def _resolve_binary_metadata(
-    binary: Optional[Union[str, Path]],
-    binary_metadata: Optional[Union[str, Path, dict]],
+    binary: str | Path | None,
+    binary_metadata: str | Path | dict | None,
 ) -> dict:
     """Return binary metadata from a metadata file/dict or by parsing a binary."""
     if binary_metadata is not None:
@@ -70,15 +67,15 @@ def _resolve_binary_metadata(
 
 def match_files(
     *,
-    source_callgraph: Optional[Union[str, Path, dict]] = None,
-    source_dir: Optional[Union[str, Path]] = None,
-    binary: Optional[Union[str, Path]] = None,
-    binary_metadata: Optional[Union[str, Path, dict]] = None,
-    options: Optional[MatchOptions] = None,
+    source_callgraph: str | Path | dict | None = None,
+    source_dir: str | Path | None = None,
+    binary: str | Path | None = None,
+    binary_metadata: str | Path | dict | None = None,
+    options: MatchOptions | None = None,
     algorithm: str = DEFAULT_ALGORITHM,
     min_confidence: str = "low",
     language: str = "rust",
-    rusi_command: Optional[str] = None,
+    rusi_command: str | None = None,
 ) -> MatchReport:
     """Match a binary against a source callgraph and return a typed report.
 

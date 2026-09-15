@@ -20,10 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from blint.config import BlintOptions  # noqa: E402
-from blint.lib.analysis import initialize_rules  # noqa: E402
-from blint.lib.binary import parse  # noqa: E402
-from blint.lib.review_runner import ReviewRunner  # noqa: E402
+from blint.config import BlintOptions
+from blint.lib.analysis import initialize_rules
+from blint.lib.binary import parse
+from blint.lib.review_runner import ReviewRunner
 
 # Ground truth, mirroring the CTL_CODE values in ioctl_driver.c.
 COMPARE_CODES = {0x80002400, 0x80002954, 0x80003444}

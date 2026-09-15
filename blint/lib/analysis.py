@@ -1,15 +1,15 @@
 import contextlib
 import html
-import importlib  # noqa
+import importlib
 import os
 import re
 import sys
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import islice
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from xml.etree import ElementTree as ET
 
 import yaml
@@ -17,32 +17,35 @@ from rich.terminal_theme import MONOKAI
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_from_env
 
+# These are the rule registry, not spare imports: ``run_rule`` resolves a rule
+# id to its implementation with ``getattr(sys.modules[__name__], cid.lower())``,
+# so a name missing from this module means that rule silently never runs.
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
-    check_abi_floor,
-    check_authenticode,
-    check_canary,
-    check_codesign,
-    check_dll_characteristics,
-    check_libc_portability,
-    check_link_closure,
-    check_nx,
-    check_objc_load_methods,
-    check_pie,
-    check_relro,
-    check_rpath,
-    check_runtime_loading,
-    check_search_path,
-    check_packed,
-    check_profile_development,
-    check_profile_expired,
-    check_profile_wildcard,
+    check_abi_floor,  # noqa: F401
+    check_authenticode,  # noqa: F401
+    check_canary,  # noqa: F401
+    check_codesign,  # noqa: F401
+    check_dll_characteristics,  # noqa: F401
+    check_libc_portability,  # noqa: F401
+    check_link_closure,  # noqa: F401
+    check_nx,  # noqa: F401
+    check_objc_load_methods,  # noqa: F401
+    check_packed,  # noqa: F401
+    check_pie,  # noqa: F401
+    check_profile_development,  # noqa: F401
+    check_profile_expired,  # noqa: F401
+    check_profile_wildcard,  # noqa: F401
+    check_relro,  # noqa: F401
+    check_rpath,  # noqa: F401
+    check_runtime_loading,  # noqa: F401
+    check_search_path,  # noqa: F401
     check_security_property,
-    check_trust_info,
-    check_undeclared_dependencies,
-    check_unused_dependencies,
-    check_virtual_size,
-    check_wx_segments,
+    check_trust_info,  # noqa: F401
+    check_undeclared_dependencies,  # noqa: F401
+    check_unused_dependencies,  # noqa: F401
+    check_virtual_size,  # noqa: F401
+    check_wx_segments,  # noqa: F401
 )
 from blint.lib.utils import (
     create_findings_table,
@@ -262,7 +265,7 @@ def load_default_rules() -> None:
 
 
 def load_custom_rules(
-    custom_dir_path: Optional[str],
+    custom_dir_path: str | None,
     review_rules_cache: dict[str, Any],
     review_exe_dict: defaultdict[str, list[dict[str, Any]]],
     review_methods_dict: defaultdict[str, list[dict[str, Any]]],
@@ -969,7 +972,7 @@ def report(
             blint_options.reports_dir,
             {
                 "scan_id": run_uuid,
-                "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
+                "created": f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S%z}",
                 **analysis_coverage,
             },
             "Analysis-Coverage",
@@ -997,7 +1000,7 @@ def report(
     run_uuid = os.environ.get("SCAN_ID", str(uuid.uuid4()))
     common_metadata = {
         "scan_id": run_uuid,
-        "created": f"{datetime.now():%Y-%m-%d %H:%M:%S%z}",
+        "created": f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S%z}",
     }
     if findings:
         print_findings_table(findings, exe_files)

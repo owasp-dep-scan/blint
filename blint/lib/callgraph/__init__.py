@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Callgraph analysis utilities for blint.
 
@@ -27,14 +26,14 @@ from blint.lib.callgraph.match import (
 )
 
 __all__ = [
+    "DEFAULT_PROFILE",
+    "PROFILES",
     "CanonicalName",
+    "MatchOptions",
+    "MatchReport",
     "NameKind",
     "canonicalize",
     "demangle",
     "match_files",
-    "MatchOptions",
-    "MatchReport",
     "options_for_profile",
-    "PROFILES",
-    "DEFAULT_PROFILE",
 ]

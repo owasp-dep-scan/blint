@@ -263,7 +263,6 @@ def test_cold_vs_warm_byte_identical_signed_macho(cache_options, tmp_path):
         _der_entitlements,
         _entitlements_blob,
         _superblob,
-        CSMAGIC_CODEDIRECTORY,
     )
 
     cd = _code_directory(

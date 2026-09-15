@@ -302,7 +302,7 @@ def main():
     for path in paths:
         try:
             metadata = parse(path)
-        except Exception as exc:  # noqa: BLE001 - one bad file must not end the sweep
+        except Exception as exc:
             report["parse_failures"].append(
                 {
                     "path": path,

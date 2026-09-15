@@ -23,7 +23,6 @@ a reported constant argument is one that holds on *every* path to the call.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from blint.lib.dalvik import DexPools, Instruction
 from blint.lib.dalvik_cfg import CFG, build_cfg
@@ -48,7 +47,7 @@ class AbstractValue:
     kind: str
     value: object = None  # int for INT/WIDE, descriptor str for STRING/CLASS/...
 
-    def as_string(self) -> Optional[str]:
+    def as_string(self) -> str | None:
         """The concrete string this value represents, if it is one."""
         if self.kind in (STRING, CLASS, METHOD_REF, NEW_INSTANCE, INVOKE_RESULT) and isinstance(
             self.value, str
@@ -62,13 +61,13 @@ class CallSite:
     """An invoke instruction with its resolved callee and argument values."""
 
     offset: int
-    method: Optional[str]  # resolved method/call-site descriptor
-    argument_registers: List[int]
-    arguments: List[Optional[AbstractValue]]  # abstract value per argument register
+    method: str | None  # resolved method/call-site descriptor
+    argument_registers: list[int]
+    arguments: list[AbstractValue | None]  # abstract value per argument register
 
-    def string_arguments(self) -> Dict[int, str]:
+    def string_arguments(self) -> dict[int, str]:
         """Argument index -> concrete string, for arguments known to be strings."""
-        out: Dict[int, str] = {}
+        out: dict[int, str] = {}
         for idx, val in enumerate(self.arguments):
             if val is not None and (s := val.as_string()) is not None:
                 out[idx] = s
@@ -90,19 +89,19 @@ class DataFlow:
     """The result of analysing one method."""
 
     cfg: CFG
-    state_before: Dict[int, Dict[int, AbstractValue]]  # instr offset -> reg -> value
-    call_sites: List[CallSite] = field(default_factory=list)
-    array_fills: List[ArrayFill] = field(default_factory=list)
+    state_before: dict[int, dict[int, AbstractValue]]  # instr offset -> reg -> value
+    call_sites: list[CallSite] = field(default_factory=list)
+    array_fills: list[ArrayFill] = field(default_factory=list)
 
 
-def _merge(states: List[Dict[int, AbstractValue]]) -> Dict[int, AbstractValue]:
+def _merge(states: list[dict[int, AbstractValue]]) -> dict[int, AbstractValue]:
     """Meet of several register states: keep a register only when all agree."""
     if not states:
         return {}
     common = set(states[0])
     for s in states[1:]:
         common &= set(s)
-    merged: Dict[int, AbstractValue] = {}
+    merged: dict[int, AbstractValue] = {}
     for reg in common:
         first = states[0][reg]
         if all(s[reg] == first for s in states):
@@ -110,7 +109,7 @@ def _merge(states: List[Dict[int, AbstractValue]]) -> Dict[int, AbstractValue]:
     return merged
 
 
-def _value_producers(inst: Instruction, state: Dict[int, AbstractValue], pending):
+def _value_producers(inst: Instruction, state: dict[int, AbstractValue], pending):
     """Abstract values an instruction writes to its destination register(s).
 
     Returns a ``{register: AbstractValue}`` mapping for the registers this
@@ -150,8 +149,8 @@ def _value_producers(inst: Instruction, state: Dict[int, AbstractValue], pending
 
 
 def _transfer(
-    inst: Instruction, state: Dict[int, AbstractValue], pending: Optional[AbstractValue]
-) -> Optional[AbstractValue]:
+    inst: Instruction, state: dict[int, AbstractValue], pending: AbstractValue | None
+) -> AbstractValue | None:
     """Apply one instruction to ``state`` in place; return its produced result.
 
     The produced result is the value a following ``move-result*`` would read
@@ -173,9 +172,9 @@ def _transfer(
 
 
 def analyze(
-    instructions: List[Instruction],
-    pools: Optional[DexPools] = None,
-    cfg: Optional[CFG] = None,
+    instructions: list[Instruction],
+    pools: DexPools | None = None,
+    cfg: CFG | None = None,
 ) -> DataFlow:
     """
     Run the intraprocedural data-flow analysis over a method.
@@ -197,8 +196,8 @@ def analyze(
     payloads = {i.offset: i for i in instructions if i.fmt == "payload"}
 
     # Fixpoint over the CFG: compute the register state entering each block.
-    block_in: Dict[int, Dict[int, AbstractValue]] = {b: {} for b in cfg.blocks}
-    block_out: Dict[int, Dict[int, AbstractValue]] = {b: {} for b in cfg.blocks}
+    block_in: dict[int, dict[int, AbstractValue]] = {b: {} for b in cfg.blocks}
+    block_out: dict[int, dict[int, AbstractValue]] = {b: {} for b in cfg.blocks}
     worklist = list(cfg.blocks)
     while worklist:
         b = worklist.pop()
@@ -216,9 +215,9 @@ def analyze(
                     worklist.append(s)
 
     # Final pass: record per-instruction state, call sites and array fills.
-    state_before: Dict[int, Dict[int, AbstractValue]] = {}
-    call_sites: List[CallSite] = []
-    array_fills: List[ArrayFill] = []
+    state_before: dict[int, dict[int, AbstractValue]] = {}
+    call_sites: list[CallSite] = []
+    array_fills: list[ArrayFill] = []
     for b in sorted(cfg.blocks):
         block = cfg.blocks[b]
         state = dict(block_in[b])

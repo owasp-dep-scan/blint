@@ -303,8 +303,8 @@ def consolidate_dlopen_dependencies(notes_data: list[dict]) -> list[dict]:
             {
                 "name": soname,
                 "priority": data["priority"],
-                "features": sorted(list(data["features"])),
-                "description": " | ".join(sorted(list(data["descriptions"]))),
+                "features": sorted(data["features"]),
+                "description": " | ".join(sorted(data["descriptions"])),
             }
         )
 
@@ -1737,7 +1737,7 @@ def parse_pe_authenticode(parsed_obj: lief.PE.Binary) -> dict:
         dict: A dictionary containing the Authenticode information
     """
     try:
-        sep = ":" if sys.version_info.minor > 7 else ()
+        sep = ":"  # blint requires Python 3.10+
         authenticode = {
             "md5_hash": parsed_obj.authentihash_md5.hex(*sep),
             "sha256_hash": parsed_obj.authentihash_sha256.hex(*sep),
@@ -2583,7 +2583,7 @@ def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dic
         for d in ("libstdc++", "openssl", "curl", "ffmpeg"):
             if d in dep_name:
                 runtimes.add("libstdc++")
-    composition["runtime_dependencies"] = sorted(list(runtimes))
+    composition["runtime_dependencies"] = sorted(runtimes)
     return composition
 
 
@@ -2908,9 +2908,9 @@ def build_disassembly_callgraph_metadata(metadata: dict) -> dict:
                 if target_addr:
                     primary_addr_int = int(target_addr, 16)
 
-            def _score_candidates(id_list, score):
+            def _score_candidates(id_list, score, scores=candidate_scores):
                 for cid in id_list or []:
-                    candidate_scores[cid] = max(candidate_scores[cid], score)
+                    scores[cid] = max(scores[cid], score)
 
             numeric_candidates = []
             if target_addr:
@@ -4736,7 +4736,7 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
             slice_summaries.append(
                 _macho_slice_summary(exe_file, slice_obj, index, slice_obj is primary)
             )
-        except Exception as e:  # noqa: BLE001 - one slice must not abort the file
+        except Exception as e:  # one slice must not abort the file
             LOG.error(f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}")
             slice_errors.append(
                 {

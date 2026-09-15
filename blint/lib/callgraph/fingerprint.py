@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Structural fingerprints for matching functions without relying on their names.
 
@@ -65,8 +64,8 @@ def is_fingerprintable(features: dict) -> bool:
 
 
 def gather_khop_voters(
-    binary: "CallGraph",
-    result: "MatchResult",
+    binary: CallGraph,
+    result: MatchResult,
     node_id: str,
     k: int,
 ) -> list[Voter]:

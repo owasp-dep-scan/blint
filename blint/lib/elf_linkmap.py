@@ -300,7 +300,7 @@ def resolve_link_closure(
     machine_type = metadata.get("machine_type") or ""
     resolver = LinkResolver(root=root, extra_search_paths=extra_search_paths)
 
-    resolved: "OrderedDict[str, dict]" = OrderedDict()
+    resolved: OrderedDict[str, dict] = OrderedDict()
     missing: list[dict] = []
     exports: set[str] = set()
     provider_by_symbol: dict[str, str] = {}

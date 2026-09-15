@@ -236,7 +236,7 @@ def hexdump(parsed_lief, addr: int, n: int) -> str:
     try:
         raw = bytes(parsed_lief.get_content_from_virtual_address(addr, n))
         return " ".join(f"{b:02x}" for b in raw)
-    except Exception:  # noqa: BLE001 — lief raises assorted errors on unmapped VAs
+    except Exception:
         return "<bytes unreadable>"
 
 

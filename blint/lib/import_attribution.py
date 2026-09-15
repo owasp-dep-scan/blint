@@ -47,9 +47,7 @@ def is_library_name(value: str) -> bool:
     indistinguishable from a library prefix, and reading it as one invents a
     dependency on a library called ``wasm_tools``.
     """
-    return bool(value) and (
-        "/" in value or value.endswith(".dylib") or ".so" in value or value.endswith(".dll")
-    )
+    return bool(value) and ("/" in value or value.endswith((".dylib", ".dll")) or ".so" in value)
 
 
 def build_symbol_provider_map(metadata: dict) -> tuple[dict[str, str], list[str]]:
@@ -174,11 +172,9 @@ def normalize_call_target(target: str) -> str:
     if separator and ("/" in prefix or ".so" in prefix or prefix.endswith(".dylib")):
         target = remainder
     for suffix in ("@plt", "@PLT", "@got", "@GOT", "@gotpcrel", "@GOTPCREL"):
-        if target.endswith(suffix):
-            target = target[: -len(suffix)]
+        target = target.removesuffix(suffix)
     for prefix in ("__imp_", "_imp_", "j_"):
-        if target.startswith(prefix):
-            target = target[len(prefix) :]
+        target = target.removeprefix(prefix)
     # A versioned reference names the same symbol as its unversioned form.
     return target.partition("@")[0].strip()
 

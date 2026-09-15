@@ -10,9 +10,8 @@ from pathlib import Path
 
 import lief
 import pytest
-import blint.lib.binary as binary_module
-from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 
+import blint.lib.binary as binary_module
 from blint.lib.binary import (
     _macho_address_to_virtual,
     _macho_content_segment_ranges,
@@ -31,16 +30,15 @@ from blint.lib.binary import (
     parse_informative_strings,
     parse_macho_symbols,
 )
+from blint.lib.codesign_macho import parse_superblob
+from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 from tests.test_codesign_macho import (
+    CSMAGIC_BLOBWRAPPER,
     _code_directory,
-    _der_cms,
-    _der_certificate,
     _der_entitlements,
     _entitlements_blob,
     _superblob,
-    CSMAGIC_BLOBWRAPPER,
 )
-from blint.lib.codesign_macho import CSMAGIC_CODEDIRECTORY, parse_superblob
 
 
 class _FakeFunctionStart:

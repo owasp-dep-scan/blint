@@ -1,8 +1,8 @@
 import sqlite3
 from types import SimpleNamespace
 
-from blint.config import BlintOptions
 from blint import db as db_module
+from blint.config import BlintOptions
 from blint.db import (
     CFG_HASH_MATCH_WEIGHT,
     FUZZY_ONLY_MATCH_THRESHOLD,

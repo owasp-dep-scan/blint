@@ -26,9 +26,9 @@ from pathlib import Path
 # Allow running from a source checkout without installing blint.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from blint.config import BlintOptions  # noqa: E402
-from blint.lib.analysis import initialize_rules  # noqa: E402
-from blint.lib.review_runner import ReviewRunner  # noqa: E402
+from blint.config import BlintOptions
+from blint.lib.analysis import initialize_rules
+from blint.lib.review_runner import ReviewRunner
 
 LOLDRIVERS_URL = "https://www.loldrivers.io/api/drivers.json"
 SNAPSHOT_PATH = Path(__file__).parent / "loldrivers-snapshot.json"
@@ -69,7 +69,7 @@ UNINTERESTING_IMPORTS = {
 
 def fetch_dataset(url: str = LOLDRIVERS_URL, timeout: int = 120) -> list:
     """Download the LOLDrivers dataset."""
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

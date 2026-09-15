@@ -6,7 +6,7 @@ import re
 import shutil
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, TextIO, cast
 
 import orjson
@@ -104,7 +104,7 @@ def default_metadata(src_dirs: list[str]) -> Metadata:
         Metadata: A Metadata object for SBOM generation.
     """
     metadata = Metadata()
-    metadata.timestamp = f"{datetime.now().isoformat(timespec='seconds')}Z"  # type: ignore[assignment]
+    metadata.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # type: ignore[assignment]
     metadata.component = default_parent(src_dirs)
     metadata.tools = Tools(
         components=[
@@ -1823,7 +1823,7 @@ def process_dotnet_dependencies(
         comp.bom_ref = RefType(purl)
         components.append(comp)
     targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
-    for _, tv in targets.items():
+    for tv in targets.values():
         for k, v in tv.items():
             tmp_a = k.split("/")
             purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"

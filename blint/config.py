@@ -1,11 +1,11 @@
 # pylint: disable=too-many-lines
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass, field
 import os
 import platform
 import re
+import sys
+from dataclasses import dataclass, field
 from typing import TextIO, cast
 
 from appdirs import user_data_dir
@@ -1412,9 +1412,10 @@ BLINTDB_IMAGE_URL = os.getenv(
     if SYSTEM == "darwin"
     else "ghcr.io/appthreat/blintdb-vcpkg:v2",
 )
-BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", False)
-if BLINTDB_REFRESH in ["true", "True", "1"]:
-    BLINTDB_REFRESH = True
+# Only the listed spellings enable a refresh. The default was False, a bool,
+# so every other value stayed the truthy string os.getenv returned and
+# BLINTDB_REFRESH=no refreshed.
+BLINTDB_REFRESH = os.getenv("BLINTDB_REFRESH", "") in ("true", "True", "1")
 
 SYMBOLS_LOOKUP_BATCH_LEN = get_int_from_env("SYMBOLS_LOOKUP_BATCH_LEN", 32000)
 MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)

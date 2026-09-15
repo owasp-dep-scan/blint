@@ -399,9 +399,8 @@ def strip_apk_data(data: str) -> str:
         str: The stripped data.
     """
     parts = data.split("\n")
-    if "JAVA_TOOL_OPTIONS" in data:
-        if parts and len(parts) > 0:
-            parts.pop(0)
+    if "JAVA_TOOL_OPTIONS" in data and parts and len(parts) > 0:
+        parts.pop(0)
     return "\n".join(parts)
 
 

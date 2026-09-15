@@ -1,9 +1,9 @@
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import orjson
-from importlib.metadata import PackageNotFoundError
 
-import blint.lib.utils as utils
+from blint.lib import utils
 from blint.lib.utils import (
     calculate_entropy,
     demangle_symbolic_name,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for canonical Rust name normalization used by the callgraph matcher."""
 
 import pytest

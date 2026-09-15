@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the callgraph model loaders and the binary-to-source matcher."""
 
 from blint.lib.callgraph.match import (

@@ -64,49 +64,21 @@ def test_wide_string_stored_as_immediates():
 
 
 def test_ascii_registry_value_recovered():
-    assembly = "\n".join(
-        [
-            "mov byte ptr [rbp - 16], 78",  # N
-            "mov byte ptr [rbp - 15], 117",  # u
-            "mov byte ptr [rbp - 14], 108",  # l
-            "mov byte ptr [rbp - 13], 108",  # l
-            "mov byte ptr [rbp - 12], 0",
-            "ret",
-        ]
-    )
+    assembly = "mov byte ptr [rbp - 16], 78\nmov byte ptr [rbp - 15], 117\nmov byte ptr [rbp - 14], 108\nmov byte ptr [rbp - 13], 108\nmov byte ptr [rbp - 12], 0\nret"
     values = [e["value"] for e in recover_function_stack_strings({"assembly": assembly})]
     assert "Null" in values
 
 
 def test_store_from_an_unknown_register_drops_the_slot():
     """A slot written with an unknown value must not keep an earlier byte."""
-    assembly = "\n".join(
-        [
-            "mov byte ptr [rbp - 16], 65",
-            "mov byte ptr [rbp - 15], 66",
-            "mov byte ptr [rbp - 14], 67",
-            "mov rax, qword ptr [rsi + 8]",
-            "mov byte ptr [rbp - 15], al",
-            "ret",
-        ]
-    )
+    assembly = "mov byte ptr [rbp - 16], 65\nmov byte ptr [rbp - 15], 66\nmov byte ptr [rbp - 14], 67\nmov rax, qword ptr [rsi + 8]\nmov byte ptr [rbp - 15], al\nret"
     values = [e["value"] for e in recover_function_stack_strings({"assembly": assembly})]
     assert not any(value.startswith("ABC") for value in values)
 
 
 def test_call_invalidates_volatile_registers():
     """A value in rax before a call must not be stored as a character after it."""
-    assembly = "\n".join(
-        [
-            "mov eax, 65",
-            "call qword ptr [rip + 100]",
-            "mov byte ptr [rbp - 16], al",
-            "mov byte ptr [rbp - 15], 66",
-            "mov byte ptr [rbp - 14], 67",
-            "mov byte ptr [rbp - 13], 68",
-            "ret",
-        ]
-    )
+    assembly = "mov eax, 65\ncall qword ptr [rip + 100]\nmov byte ptr [rbp - 16], al\nmov byte ptr [rbp - 15], 66\nmov byte ptr [rbp - 14], 67\nmov byte ptr [rbp - 13], 68\nret"
     values = [e["value"] for e in recover_function_stack_strings({"assembly": assembly})]
     # BCD is recoverable; anything claiming to start with 'A' is not.
     assert not any(value.startswith("A") for value in values)
@@ -120,32 +92,14 @@ def test_misaligned_wide_decode_is_rejected():
     reading.
     """
     # 'A\0B\0C\0D\0' shifted by one byte decodes to valid CJK code points.
-    assembly = "\n".join(
-        [
-            "mov byte ptr [rbp - 15], 65",
-            "mov byte ptr [rbp - 13], 66",
-            "mov byte ptr [rbp - 11], 67",
-            "mov byte ptr [rbp - 9], 68",
-            "ret",
-        ]
-    )
+    assembly = "mov byte ptr [rbp - 15], 65\nmov byte ptr [rbp - 13], 66\nmov byte ptr [rbp - 11], 67\nmov byte ptr [rbp - 9], 68\nret"
     for entry in recover_function_stack_strings({"assembly": assembly}):
         assert entry["value"].isascii()
 
 
 def test_arithmetic_residue_is_not_reported_as_text():
     """Call arguments and flags in a frame must not decode into findings."""
-    assembly = "\n".join(
-        [
-            "mov dword ptr [rsp + 32], 3",
-            "mov dword ptr [rsp + 40], 1073741824",
-            "mov edx, 2147483648",
-            "xor r9d, r9d",
-            "xor r8d, r8d",
-            "call qword ptr [rip + 33959]",
-            "ret",
-        ]
-    )
+    assembly = "mov dword ptr [rsp + 32], 3\nmov dword ptr [rsp + 40], 1073741824\nmov edx, 2147483648\nxor r9d, r9d\nxor r8d, r8d\ncall qword ptr [rip + 33959]\nret"
     assert recover_function_stack_strings({"assembly": assembly}) == []
 
 
