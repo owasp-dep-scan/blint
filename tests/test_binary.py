@@ -12,6 +12,8 @@ import lief
 import pytest
 
 import blint.lib.binary as binary_module
+import blint.lib.binary_macho as macho_module
+import blint.lib.binary_wasm as wasm_module
 from blint.lib.binary import (
     _macho_address_to_virtual,
     _macho_content_segment_ranges,
@@ -977,14 +979,14 @@ def test_parse_universal_slice_failure_is_isolated(tmp_path, monkeypatch):
         )
     )
 
-    real_summary = binary_module._macho_slice_summary
+    real_summary = macho_module._macho_slice_summary
 
     def _fail_on_arm64(exe_file, parsed_slice, index, is_primary):
         if index == 1:
             raise ValueError("boom")
         return real_summary(exe_file, parsed_slice, index, is_primary)
 
-    monkeypatch.setattr(binary_module, "_macho_slice_summary", _fail_on_arm64)
+    monkeypatch.setattr(macho_module, "_macho_slice_summary", _fail_on_arm64)
     metadata = parse(str(exe_file))
 
     assert metadata["is_universal"] is True
@@ -1567,7 +1569,7 @@ def test_parse_wasm_flags_omit_strings_and_call_graph():
 
 
 def test_trim_wasm_instruction_streams_bounds_total_budget(monkeypatch):
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 120)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 120)
 
     def fake_fn(name, count, fill):
         return {
@@ -1606,7 +1608,7 @@ def test_trim_wasm_instruction_streams_bounds_total_budget(monkeypatch):
 
 def test_trim_wasm_instruction_streams_redistributes_unused_share(monkeypatch):
     """A stream under its equal share releases the remainder to longer ones."""
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 90)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 90)
     short = {"instruction_count": 10, "instructions": [{"text": i} for i in range(10)]}
     long_a = {"instruction_count": 80, "instructions": [{"text": i} for i in range(80)]}
     long_b = {"instruction_count": 80, "instructions": [{"text": i} for i in range(80)]}
@@ -1624,14 +1626,14 @@ def test_trim_wasm_instruction_streams_redistributes_unused_share(monkeypatch):
 
 def test_trim_wasm_instruction_streams_records_nothing_when_under_budget(monkeypatch):
     """An untrimmed report carries no truncation block at all."""
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 100)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 100)
     report = {"functions": [{"instruction_count": 5, "instructions": [{"text": 1}] * 5}]}
     assert binary_module.trim_wasm_instruction_streams(report) == 0
     assert "blint_truncation" not in report
 
 
 def test_trim_wasm_instruction_streams_walks_nested_components(monkeypatch):
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 10)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 10)
     # Nested component entries keep their core modules at top level.
     report = {
         "functions": [],
@@ -1664,7 +1666,7 @@ def test_trim_wasm_instruction_streams_walks_nested_components(monkeypatch):
 
 def test_trim_wasm_instruction_streams_walks_doubly_nested_components(monkeypatch):
     """A nested component nests further at its own top level, not under "component"."""
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
     deep_fn = {"instruction_count": 6, "instructions": [{"text": i} for i in range(6)]}
     report = {
         "component": {
@@ -1680,7 +1682,7 @@ def test_trim_wasm_instruction_streams_walks_doubly_nested_components(monkeypatc
 
 def test_trim_wasm_instruction_streams_visits_aliased_functions_once(monkeypatch):
     """The same dict reachable twice is charged once and keeps a truthful count."""
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 4)
     shared_fn = {"instruction_count": 6, "instructions": [{"text": i} for i in range(6)]}
     report = {
         "functions": [shared_fn],
@@ -1691,7 +1693,7 @@ def test_trim_wasm_instruction_streams_visits_aliased_functions_once(monkeypatch
 
 
 def test_trim_wasm_instruction_streams_zero_disables(monkeypatch):
-    monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 0)
+    monkeypatch.setattr(wasm_module, "BLINT_MAX_WASM_INSTRUCTIONS", 0)
     report = {
         "functions": [{"instruction_count": 5, "instructions": [{"text": i} for i in range(5)]}]
     }
