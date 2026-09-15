@@ -10,6 +10,7 @@ signature here requires the version to appear *inside* a string that also
 names the library. A bare ``"3.46.0"`` is never a sqlite banner no matter how
 likely that looks.
 """
+
 import re
 
 # Named states for the banner layer, reported alongside its matches so that
@@ -44,44 +45,32 @@ BANNER_SIGNATURES = (
     {
         "library": "lua",
         "purl": "pkg:generic/lua",
-        "regex": re.compile(
-            r"\bLua (?P<version>\d+\.\d+(?:\.\d+)?)\s+Copyright", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\bLua (?P<version>\d+\.\d+(?:\.\d+)?)\s+Copyright", re.IGNORECASE),
     },
     {
         "library": "openssl",
         "purl": "pkg:generic/openssl",
-        "regex": re.compile(
-            r"\bOpenSSL[ /](?P<version>\d+\.\d+\.\d+[a-z]*)\b", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\bOpenSSL[ /](?P<version>\d+\.\d+\.\d+[a-z]*)\b", re.IGNORECASE),
     },
     {
         "library": "curl",
         "purl": "pkg:generic/curl",
-        "regex": re.compile(
-            r"\blibcurl/(?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\blibcurl/(?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE),
     },
     {
         "library": "expat",
         "purl": "pkg:generic/expat",
-        "regex": re.compile(
-            r"\bexpat_(?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\bexpat_(?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE),
     },
     {
         "library": "libpng",
         "purl": "pkg:generic/libpng",
-        "regex": re.compile(
-            r"\blibpng version (?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\blibpng version (?P<version>\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE),
     },
     {
         "library": "zstd",
         "purl": "pkg:generic/zstandard",
-        "regex": re.compile(
-            r"\bZstandard v(?P<version>\d+\.\d+\.\d+)\b", re.IGNORECASE
-        ),
+        "regex": re.compile(r"\bZstandard v(?P<version>\d+\.\d+\.\d+)\b", re.IGNORECASE),
     },
 )
 

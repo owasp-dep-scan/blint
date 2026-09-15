@@ -452,13 +452,11 @@ def run_pool(
                 if died_hard:
                     LOG.debug(
                         "Pool worker slot %d exited with code %s (assigned unit: %s)",
-                        slot, exitcode, orphan,
+                        slot,
+                        exitcode,
+                        orphan,
                     )
-                    if (
-                        sterile_deaths >= sterile_threshold
-                        and not envelopes
-                        and not hard_failures
-                    ):
+                    if sterile_deaths >= sterile_threshold and not envelopes and not hard_failures:
                         # Every worker so far died before finishing anything:
                         # the pool cannot make progress on this system.
                         raise PoolStartupError(
@@ -470,9 +468,7 @@ def run_pool(
     finally:
         _shutdown(procs, task_queues, result_queue)
     if pending:
-        raise PoolStartupError(
-            f"worker pool finished with {len(pending)} unit(s) unaccounted for"
-        )
+        raise PoolStartupError(f"worker pool finished with {len(pending)} unit(s) unaccounted for")
     return envelopes, hard_failures
 
 

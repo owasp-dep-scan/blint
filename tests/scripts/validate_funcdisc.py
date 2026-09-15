@@ -8,6 +8,7 @@ so this doubles as the CI gate for the function-discovery work.
 Usage:
     python tests/scripts/validate_funcdisc.py [--dir corpus-build]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -146,7 +147,9 @@ def assert_stack_strings(assertion: dict, corpus_dir: Path, report: list[dict]) 
     return ok
 
 
-def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, report: list[dict]) -> bool:
+def assert_parses(
+    assertion: dict, artifacts: list[str], corpus_dir: Path, report: list[dict]
+) -> bool:
     expected_keys = assertion.get("expect_metadata") or []
     slice_spec = assertion.get("expect_slices")
     ok = True
@@ -201,7 +204,11 @@ def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, repor
                 )
     if missing:
         report.append(
-            {"id": assertion["id"], "status": "SKIP", "detail": f"missing {len(missing)} artifacts"}
+            {
+                "id": assertion["id"],
+                "status": "SKIP",
+                "detail": f"missing {len(missing)} artifacts",
+            }
         )
         return True
     report.append(
@@ -244,12 +251,12 @@ def main() -> int:
                 if spec.get("kind") == "paths":
                     artifacts.extend(e["name"] for e in spec.get("entries", []))
                 elif spec.get("kind") == "apps":
-                    artifacts.extend(
-                        p.name for p in corpus_dir.glob("app-*") if p.is_file()
-                    )
+                    artifacts.extend(p.name for p in corpus_dir.glob("app-*") if p.is_file())
             all_ok &= assert_parses(assertion, artifacts, corpus_dir, report)
         else:
-            report.append({"id": assertion["id"], "status": "SKIP", "detail": f"unknown kind {kind}"})
+            report.append(
+                {"id": assertion["id"], "status": "SKIP", "detail": f"unknown kind {kind}"}
+            )
 
     print(f"{'id':28} {'status':6} detail")
     for entry in report:

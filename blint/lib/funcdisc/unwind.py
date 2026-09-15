@@ -253,7 +253,9 @@ def discover_elf_eh_frame_functions(parsed_obj) -> list[dict]:
     return entries
 
 
-def _decode_eh_value(data: bytes, offset: int, encoding: int, section_va: int) -> tuple[int | None, int]:
+def _decode_eh_value(
+    data: bytes, offset: int, encoding: int, section_va: int
+) -> tuple[int | None, int]:
     """Decode one DW_EH_PE value, returning (value, bytes_consumed).
 
     The value is the raw field content; callers apply the relocation flavor
@@ -525,10 +527,13 @@ def merge_discovered_functions(metadata: dict, discovered: list[dict]) -> dict:
     fresh.sort(key=lambda item: (item["address"], item.get("source", "")))
     metadata["discovered_functions"] = record_entries
     functions = list(metadata.get("functions") or [])
-    next_index = max(
-        (int(fn.get("index", -1)) for fn in functions if isinstance(fn.get("index"), int)),
-        default=-1,
-    ) + 1
+    next_index = (
+        max(
+            (int(fn.get("index", -1)) for fn in functions if isinstance(fn.get("index"), int)),
+            default=-1,
+        )
+        + 1
+    )
     for entry in fresh:
         functions.append(
             {

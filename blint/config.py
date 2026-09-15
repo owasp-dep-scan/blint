@@ -1421,9 +1421,7 @@ MIN_MATCH_SCORE = get_int_from_env("MIN_MATCH_SCORE", 10)
 BLINT_MAX_HEX_BYTES = max(0, get_int_from_env("BLINT_MAX_HEX_BYTES", 4096))
 # wasm-tools caps strings and call-graph edges, but function instruction
 # streams are unbounded and dominate wasm-report size for large modules.
-BLINT_MAX_WASM_INSTRUCTIONS = max(
-    0, get_int_from_env("BLINT_MAX_WASM_INSTRUCTIONS", 50000)
-)
+BLINT_MAX_WASM_INSTRUCTIONS = max(0, get_int_from_env("BLINT_MAX_WASM_INSTRUCTIONS", 50000))
 
 
 IMPLICIT_REGS_X86: dict[str, dict[str, set[str]]] = {

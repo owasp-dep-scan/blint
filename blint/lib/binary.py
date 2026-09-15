@@ -516,9 +516,7 @@ def _elf_notes_without_note_segment(parsed_obj: lief.ELF.Binary) -> list[dict]:
     legitimately outside the load image and were never covered by a segment.
     """
     with contextlib.suppress(AttributeError, TypeError, ValueError):
-        if any(
-            segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments
-        ):
+        if any(segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments):
             return []
         return [
             {
@@ -944,9 +942,7 @@ def parse_wasm_metadata(
         if str(cap).startswith("isa.")
     )
     type_kinds = Counter(
-        str(t.get("kind", "func"))
-        for t in (report.get("types") or [])
-        if isinstance(t, dict)
+        str(t.get("kind", "func")) for t in (report.get("types") or []) if isinstance(t, dict)
     )
     metadata["wasm_types_summary"] = {
         "total": type_kinds.total(),
@@ -1175,7 +1171,9 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
             "reason": reason,
             "confidence": "high" if reason == "import" else "low",
         }
-        for (src, target, reason), count in sorted(external_counts.items(), key=lambda item: item[0])
+        for (src, target, reason), count in sorted(
+            external_counts.items(), key=lambda item: item[0]
+        )
     ]
     return {
         "version": 2,
@@ -2446,9 +2444,7 @@ def _record_slice_variance(metadata: dict, properties: dict) -> None:
     # when true) is itself a disagreement, so compare over the union of keys.
     per_slice = [entry.get("security_properties") or {} for entry in slices]
     names = {name for entry in per_slice for name in entry}
-    variance = sorted(
-        name for name in names if len({entry.get(name) for entry in per_slice}) > 1
-    )
+    variance = sorted(name for name in names if len({entry.get(name) for entry in per_slice}) > 1)
     if variance:
         metadata["security_properties_slice_variance"] = variance
         LOG.debug(
@@ -2488,9 +2484,7 @@ def _record_code_signature_variance(metadata: dict) -> None:
     metadata["code_signature_scope"] = "primary_slice"
     variance = []
     for aspect in CODE_SIGNATURE_VARIANCE_ASPECTS:
-        values = [
-            (entry.get("code_signature") or {}).get(aspect) for entry in slices
-        ]
+        values = [(entry.get("code_signature") or {}).get(aspect) for entry in slices]
         first = values[0]
         if any(value != first for value in values[1:]):
             variance.append(aspect)
@@ -4217,9 +4211,7 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
             data = b""
             with contextlib.suppress(Exception):
                 data = bytes(
-                    parsed_obj.get_content_from_virtual_address(
-                        value, _POINTER_STRING_MAX_READ
-                    )
+                    parsed_obj.get_content_from_virtual_address(value, _POINTER_STRING_MAX_READ)
                 )
             result = decode_pointer_string(data, _POINTER_STRING_MIN_LEN)
         resolved[value] = result
@@ -4690,7 +4682,11 @@ def _macho_slice_signature(exe_file: str, parsed_slice: lief.MachO.Binary) -> di
             return {"available": False, "parse_status": "absent"}
         blob, _blob_source = _macho_signature_blob(exe_file, parsed_slice, code_signature)
         if not blob:
-            return {"available": True, "parse_status": "parse_failed", "parse_error": "blob_unreadable"}
+            return {
+                "available": True,
+                "parse_status": "parse_failed",
+                "parse_error": "blob_unreadable",
+            }
         return signature_summary(parse_superblob(blob))
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Slice signature parse failed for {exe_file}: {type(e).__name__}: {e}")
@@ -4729,7 +4725,11 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
         slice_obj = fat.at(index)
         if not slice_obj or isinstance(slice_obj, lief.lief_errors):
             slice_errors.append(
-                {"index": index, "exception_type": "LiefParseError", "message": "slice not parseable"}
+                {
+                    "index": index,
+                    "exception_type": "LiefParseError",
+                    "message": "slice not parseable",
+                }
             )
             continue
         try:
@@ -4737,9 +4737,7 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
                 _macho_slice_summary(exe_file, slice_obj, index, slice_obj is primary)
             )
         except Exception as e:  # noqa: BLE001 - one slice must not abort the file
-            LOG.error(
-                f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}"
-            )
+            LOG.error(f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}")
             slice_errors.append(
                 {
                     "index": index,

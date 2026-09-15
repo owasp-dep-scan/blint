@@ -513,7 +513,9 @@ def _parse_code_directory(blob: bytes, slot_name: str) -> dict | None:
     platform_id = blob[0x26]
     page_size = 1 << blob[0x27] if blob[0x27] < 32 else 0
     flags = {name: bool(flags_raw & bit) for name, bit in CD_FLAGS.items()}
-    if flags_raw & (CD_FLAGS["forced_library_validation"] | CD_FLAGS["require_library_validation"]):
+    if flags_raw & (
+        CD_FLAGS["forced_library_validation"] | CD_FLAGS["require_library_validation"]
+    ):
         flags["library_validation"] = True
     out: dict = {
         "slot_type": slot_name,
@@ -638,9 +640,7 @@ def parse_superblob(blob: bytes) -> dict:
                 primary_flags_raw = directory["flags_raw"]
             detail["code_directories"].append(directory)
         elif blob_magic == CSMAGIC_ENTITLEMENTS and detail["entitlements"] is None:
-            detail["entitlements"] = _parse_entitlements_payload(
-                content[BLOB_HEADER_LEN:], "xml"
-            )
+            detail["entitlements"] = _parse_entitlements_payload(content[BLOB_HEADER_LEN:], "xml")
         elif blob_magic == CSMAGIC_DER_ENTITLEMENTS and detail["entitlements_der"] is None:
             detail["entitlements_der"] = _parse_entitlements_payload(
                 content[BLOB_HEADER_LEN:], "der"

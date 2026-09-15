@@ -366,9 +366,7 @@ def test_mismatched_cfg_tiles_fall_back_loudly(caplog):
     assembly = "mov eax, 1\nret"
     cfg = {"blocks": [{"start": "0x1000", "end": "0x1009", "instructions": 9}], "edges": []}
     with caplog.at_level(logging.WARNING, logger="blint"):
-        _, method = recover_function_stack_strings_with_method(
-            {"assembly": assembly, "cfg": cfg}
-        )
+        _, method = recover_function_stack_strings_with_method({"assembly": assembly, "cfg": cfg})
     assert method == "fallback"
     assert any("do not tile" in record.getMessage() for record in caplog.records)
 
@@ -377,7 +375,12 @@ def test_analyze_stack_strings_counters():
     good = "mov dword ptr [rbp - 8], 1145258561\nret"
     cfg = _cfg([2], [])
     functions = {
-        "0x1000::sub_1000": {"name": "sub_1000", "address": "0x1000", "assembly": good, "cfg": cfg},
+        "0x1000::sub_1000": {
+            "name": "sub_1000",
+            "address": "0x1000",
+            "assembly": good,
+            "cfg": cfg,
+        },
         "0x2000::sub_2000": {"name": "sub_2000", "address": "0x2000", "assembly": good},
         "0x3000::sub_3000": {"name": "sub_3000", "address": "0x3000"},
     }
@@ -473,8 +476,7 @@ def _build_minimal_x86_elf() -> bytes:
         b"\x80\x3d\x01\x72\x05\x00\x00"  # cmp byte ptr [rip + 356865], 0
         b"\x75\x5f"  # jne +0x5f
         b"\x48\x83\x3d\x57\x4d\x05\x00"  # cmp qword ptr [rip + 347479], 0
-        b"\xc3"
-        + b"\xcc" * (105 - 7 - 2 - 7 - 1)
+        b"\xc3" + b"\xcc" * (105 - 7 - 2 - 7 - 1)
     )
     assert len(function) == 105
     code = decoy + function
@@ -512,9 +514,7 @@ def _build_minimal_x86_elf() -> bytes:
         len(code),
         0x1000,
     )
-    text_sh = struct.pack(
-        "<IIQQQQIIQQ", 1, 1, 0x6, text_addr, code_off, len(code), 0, 0, 16, 0
-    )
+    text_sh = struct.pack("<IIQQQQIIQQ", 1, 1, 0x6, text_addr, code_off, len(code), 0, 0, 16, 0)
     shstr_sh = struct.pack("<IIQQQQIIQQ", 7, 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0)
     out = bytearray(shoff + 3 * 64)
     out[0:64] = ehdr
@@ -643,16 +643,12 @@ def test_tail_jmp_with_no_cfg_edge_still_clobbers():
     """
     lines = ["mov eax, 65", "jmp 4096"]
     without_edge = _cfg([2], [])
-    state = interpret_over_cfg(
-        lines, X86_64_MODEL, without_edge["blocks"], without_edge["edges"]
-    )
+    state = interpret_over_cfg(lines, X86_64_MODEL, without_edge["blocks"], without_edge["edges"])
     assert state.registers == {}
 
     # The same branch with its edge is control flow, and the value flows.
     with_edge = _cfg([2], [(0, 0, "jump")])
-    state = interpret_over_cfg(
-        lines, X86_64_MODEL, with_edge["blocks"], with_edge["edges"]
-    )
+    state = interpret_over_cfg(lines, X86_64_MODEL, with_edge["blocks"], with_edge["edges"])
     assert state.registers.get("rax") == 65
 
 
@@ -662,15 +658,11 @@ def test_tail_b_with_no_cfg_edge_still_clobbers():
 
     lines = ["movz x0, #7", "b 4096"]
     without_edge = _cfg([2], [])
-    state = interpret_over_cfg(
-        lines, ARM64_MODEL, without_edge["blocks"], without_edge["edges"]
-    )
+    state = interpret_over_cfg(lines, ARM64_MODEL, without_edge["blocks"], without_edge["edges"])
     assert state.registers == {}
 
     with_edge = _cfg([2], [(0, 0, "jump")])
-    state = interpret_over_cfg(
-        lines, ARM64_MODEL, with_edge["blocks"], with_edge["edges"]
-    )
+    state = interpret_over_cfg(lines, ARM64_MODEL, with_edge["blocks"], with_edge["edges"])
     assert state.registers.get("x0") == 7
 
 

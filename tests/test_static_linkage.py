@@ -17,6 +17,7 @@ the real-archive measurement fixed
 - address-adjacency (contiguity) gates the fuzzy path, because a real
   member is emitted as one address run while collisions scatter.
 """
+
 import sqlite3
 from types import SimpleNamespace
 
@@ -145,14 +146,38 @@ def _create_v4_blintdb(db_file):
     )
     rows = []
     for index, fuzzy in enumerate(FUZZY_HASHES):
-        rows.append((2, f"0x{index:02d}::add", f"add_{index}", f"0x{index:02d}", EXACT_HASHES[index], fuzzy, 10))
+        rows.append(
+            (
+                2,
+                f"0x{index:02d}::add",
+                f"add_{index}",
+                f"0x{index:02d}",
+                EXACT_HASHES[index],
+                fuzzy,
+                10,
+            )
+        )
     rows.append((3, "0x99::other", "other_fn", "0x99", None, "9" * 16, 10))
     for index, exact in enumerate(NOISE_EXACT_HASHES):
-        rows.append((4, f"0x{index:02x}::noise", f"noise_{index}", f"0x{index:02x}", exact, None, 10))
+        rows.append(
+            (4, f"0x{index:02x}::noise", f"noise_{index}", f"0x{index:02x}", exact, None, 10)
+        )
     for index in range(3, 100):
-        rows.append((4, f"0x{index:02x}::noise_pad", f"noise_pad_{index}", f"0x{index:02x}", None, None, 10))
+        rows.append(
+            (
+                4,
+                f"0x{index:02x}::noise_pad",
+                f"noise_pad_{index}",
+                f"0x{index:02x}",
+                None,
+                None,
+                10,
+            )
+        )
     for index, fuzzy in enumerate(SCATTER_HASHES):
-        rows.append((5, f"0x{index:02x}::scat", f"scat_{index}", f"0x{index:02x}", None, fuzzy, 10))
+        rows.append(
+            (5, f"0x{index:02x}::scat", f"scat_{index}", f"0x{index:02x}", None, fuzzy, 10)
+        )
     connection.executemany(
         "INSERT INTO FunctionFingerprints(binary_id, function_key, name, address, instruction_hash, fuzzy_hash, instruction_count)"
         " VALUES(?, ?, ?, ?, ?, ?, ?)",
@@ -217,9 +242,7 @@ def _member_query_metadata():
 def test_contiguity_scores_a_run_high_and_scatter_low():
     run = [{"address": 0x1000 + index * 0x20, "size": 0x20} for index in range(8)]
     assert _member_contiguity(run) == 1.0
-    scatter = [
-        {"address": 0x10000 * (index + 1), "size": 0x20} for index in range(8)
-    ]
+    scatter = [{"address": 0x10000 * (index + 1), "size": 0x20} for index in range(8)]
     assert _member_contiguity(scatter) == 0.0
     assert _member_contiguity([{"address": 0x1000, "size": 0x20}]) == 1.0
     assert _member_contiguity([]) == 0.0
@@ -294,9 +317,7 @@ def test_member_layer_states(tmp_path):
             "f": {"name": "f", "address": "0x1000", "instruction_count": 2}
         },
     }
-    assert blintdb_member_layer_state(str(db_file), no_hashes) == (
-        MEMBER_LAYER_INACTIVE_NO_HASHES
-    )
+    assert blintdb_member_layer_state(str(db_file), no_hashes) == (MEMBER_LAYER_INACTIVE_NO_HASHES)
     assert blintdb_member_layer_state(str(db_file), _member_query_metadata()) == (
         MEMBER_LAYER_ACTIVE
     )
@@ -406,12 +427,8 @@ def test_member_layer_does_not_open_the_whole_binary_gates(tmp_path):
     )
     # demo is attributed through both layers; the weak-symbol path stays
     # closed for everything else.
-    assert evidence["pkg:generic/demo@1.0.0"]["blintdb_attribution"] == (
-        "whole_binary+member"
-    )
-    assert evidence["pkg:generic/demo@1.0.0"]["blintdb_member_layer"] == (
-        MEMBER_LAYER_ACTIVE
-    )
+    assert evidence["pkg:generic/demo@1.0.0"]["blintdb_attribution"] == ("whole_binary+member")
+    assert evidence["pkg:generic/demo@1.0.0"]["blintdb_member_layer"] == (MEMBER_LAYER_ACTIVE)
     assert evidence["pkg:generic/demo@1.0.0"]["blintdb_matched_member_count"] == 1
 
 
@@ -550,9 +567,12 @@ def test_banner_detection_states_and_dedup():
     versions = sorted(b["version"] for b in two_versions["banners"] if b["library"] == "zlib")
     assert versions == ["1.2.11", "1.3.1"]
     long_string = "deflate 1.3.1 Copyright " + "x" * 600
-    assert detect_vendored_banners(
-        {"strings": [{"value": long_string, "entropy": 0, "secret_type": None}]}
-    )["banners"] == []
+    assert (
+        detect_vendored_banners(
+            {"strings": [{"value": long_string, "entropy": 0, "secret_type": None}]}
+        )["banners"]
+        == []
+    )
 
 
 # --- gates the real-archive corpus did not sample ---
@@ -671,4 +691,3 @@ def test_an_empty_archive_name_is_not_a_member(tmp_path):
     metadata = _with_extra_exact_functions(_member_query_metadata(), 8)
     matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
     assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
-

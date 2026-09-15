@@ -763,9 +763,7 @@ def extract_ar(ar_file: str, to_dir: str | None = None) -> list[str]:
                     afile = os.path.join(to_dir, file_name)
                     # Defense in depth: never let a crafted member name write
                     # outside the extraction directory.
-                    if not os.path.abspath(afile).startswith(
-                        os.path.abspath(to_dir) + os.sep
-                    ):
+                    if not os.path.abspath(afile).startswith(os.path.abspath(to_dir) + os.sep):
                         continue
                     with open(afile, "wb") as output:
                         output.write(archive.open(entry, "rb").read())

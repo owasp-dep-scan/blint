@@ -122,9 +122,7 @@ def test_run_pool_worker_sigkill_recorded_and_run_completes():
     scenario the sequential path cannot have but a pool can.
     """
     units = [(i, (i, 0)) for i in range(8)]
-    spec = WorkerSpec(
-        analyze=_suicide_unit, setup=payload_as_state, payload={"victims": {2, 5}}
-    )
+    spec = WorkerSpec(analyze=_suicide_unit, setup=payload_as_state, payload={"victims": {2, 5}})
     envelopes, hard = run_pool(units, 3, spec)
     assert sorted(envelopes) == [0, 1, 3, 4, 6, 7]
     assert sorted(hard) == [2, 5]
@@ -443,7 +441,9 @@ def test_parallel_default_mode_worker_sigkill_isolated(parallel_fixtures, tmp_pa
     assert len(exported) == len(parallel_fixtures) - 1
 
 
-def test_parallel_default_mode_replays_worker_logs(parallel_fixtures, tmp_path, monkeypatch, caplog):
+def test_parallel_default_mode_replays_worker_logs(
+    parallel_fixtures, tmp_path, monkeypatch, caplog
+):
     """Worker log records are replayed by the parent, not printed by workers."""
     monkeypatch.setattr(
         runners_mod,

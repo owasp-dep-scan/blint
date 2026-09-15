@@ -321,11 +321,11 @@ Analyze a single binary in process, with the same engine the CLI uses:
 from blint import analyze, NotABinaryError
 
 result = analyze("/path/to/binary", disassemble=True)
-result.metadata    # parsed metadata (same content as *-metadata.json)
-result.findings    # security-check findings, each with a stable finding_id
-result.reviews     # capability reviews
-result.fuzzables   # fuzzable targets (suggest_fuzzable=True)
-result.coverage    # run-level analysis_coverage block (units, failures, skips)
+result.metadata  # parsed metadata (same content as *-metadata.json)
+result.findings  # security-check findings, each with a stable finding_id
+result.reviews  # capability reviews
+result.fuzzables  # fuzzable targets (suggest_fuzzable=True)
+result.coverage  # run-level analysis_coverage block (units, failures, skips)
 ```
 
 `analyze()` writes no report files. A missing path raises `FileNotFoundError`, a file blint cannot parse raises `NotABinaryError`, and a failed analysis raises `AnalysisFailedError` with the structured failure record attached — so a clean result can never be mistaken for a blind one. Calls are serialized by an internal lock (the engine's rule state is module-global); sequential calls with different options each see their own rules.

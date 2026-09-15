@@ -497,8 +497,8 @@ def blintdb_hash_capabilities(db_file: str | None = None) -> dict[str, bool]:
             for column, table in _HASH_COLUMN_TABLES.items():
                 present = column in table_columns[table]
                 capabilities[column] = present
-                capabilities[f"{column}_populated"] = (
-                    present and _column_populated(connection, table, column)
+                capabilities[f"{column}_populated"] = present and _column_populated(
+                    connection, table, column
                 )
         finally:
             connection.close()
@@ -506,9 +506,7 @@ def blintdb_hash_capabilities(db_file: str | None = None) -> dict[str, bool]:
     return capabilities
 
 
-def blintdb_fuzzy_layer_state(
-    db_file: str | None = None, metadata: dict | None = None
-) -> str:
+def blintdb_fuzzy_layer_state(db_file: str | None = None, metadata: dict | None = None) -> str:
     """Name why the fuzzy-hash layer did or did not take part in a lookup.
 
     Returns one of the HASH_LAYER_* states. Every non-active state is a reason
@@ -603,9 +601,10 @@ def build_query_function_positions(metadata: dict | None) -> dict[str, list[dict
         position = {"address": address, "size": size}
         if function_data.get("instruction_hash"):
             positions.setdefault(str(function_data["instruction_hash"]), []).append(position)
-        if (
-            int(instruction_count) >= MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP
-            and function_data.get("fuzzy_hash")
+        if int(
+            instruction_count
+        ) >= MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP and function_data.get(
+            "fuzzy_hash"
         ):
             positions.setdefault(str(function_data["fuzzy_hash"]), []).append(position)
     return positions
@@ -690,19 +689,13 @@ def _collect_member_candidates(
     """
     candidates: dict[int, dict] = {}
     for batch in _batched(_clean_nonempty_values(hash_values)):
-        for row in _query_member_hash_matches(
-            connection, batch, hash_column=hash_column
-        ):
-            candidate = candidates.setdefault(
-                int(row["binary_id"]), {"row": row, "hashes": set()}
-            )
+        for row in _query_member_hash_matches(connection, batch, hash_column=hash_column):
+            candidate = candidates.setdefault(int(row["binary_id"]), {"row": row, "hashes": set()})
             candidate["hashes"].update(_decode_csv_set(row["matched_hashes"]))
     return candidates
 
 
-def _query_member_totals(
-    connection: apsw.Connection, binary_ids: list[int]
-) -> dict[int, dict]:
+def _query_member_totals(connection: apsw.Connection, binary_ids: list[int]) -> dict[int, dict]:
     """Return per-member fingerprint totals needed for member-side coverage.
 
     The denominator is the member's whole fingerprint population, not the
@@ -1106,9 +1099,7 @@ def _finalize_project_matches(
         )
         if binary_name_match:
             base_score += float(max(MIN_MATCH_SCORE * 3, 18))
-        fuzzy_coverage = (
-            matched_fuzzy_hash_count / fuzzy_query_count if fuzzy_query_count else 0.0
-        )
+        fuzzy_coverage = matched_fuzzy_hash_count / fuzzy_query_count if fuzzy_query_count else 0.0
         score = (
             base_score
             + matched_fuzzy_hash_count * FUZZY_HASH_MATCH_WEIGHT
@@ -1461,9 +1452,9 @@ def lookup_member_matches(
         ("exact", exact_candidates),
     ):
         for binary_id, candidate in candidates.items():
-            member_rows.setdefault(
-                binary_id, {"row": candidate["row"], "matched": {}}
-            )["matched"][hash_kind] = candidate["hashes"]
+            member_rows.setdefault(binary_id, {"row": candidate["row"], "matched": {}})["matched"][
+                hash_kind
+            ] = candidate["hashes"]
     for binary_id, entry in sorted(member_rows.items()):
         row = entry["row"]
         matched_fuzzy = entry["matched"].get("fuzzy") or set()
@@ -1474,17 +1465,11 @@ def lookup_member_matches(
         # more than the fuzzy path does — three generic hashes is the whole of
         # its evidence.
         matched_positions = [
-            p
-            for h in matched_fuzzy | matched_exact
-            for p in positions.get(h, [])
+            p for h in matched_fuzzy | matched_exact for p in positions.get(h, [])
         ]
         contiguity_ratio = _member_contiguity(matched_positions) if matched_positions else 0.0
-        member_coverage = (
-            len(matched_fuzzy) / total_functions if total_functions else 0.0
-        )
-        exact_coverage = (
-            len(matched_exact) / total_functions if total_functions else 0.0
-        )
+        member_coverage = len(matched_fuzzy) / total_functions if total_functions else 0.0
+        exact_coverage = len(matched_exact) / total_functions if total_functions else 0.0
         fuzzy_qualified = (
             len(matched_fuzzy) >= MEMBER_MIN_FUZZY_MATCH_HASHES
             and member_coverage >= MEMBER_MIN_MEMBER_COVERAGE
@@ -1499,8 +1484,10 @@ def lookup_member_matches(
         if not (fuzzy_qualified or exact_qualified):
             continue
         qualification = (
-            "fuzzy+exact" if fuzzy_qualified and exact_qualified
-            else "exact" if exact_qualified
+            "fuzzy+exact"
+            if fuzzy_qualified and exact_qualified
+            else "exact"
+            if exact_qualified
             else "fuzzy"
         )
         purl = row["project_purl"]
@@ -1526,14 +1513,15 @@ def lookup_member_matches(
                 "member_exact_coverage": round(exact_coverage, 4),
                 "contiguity_ratio": round(contiguity_ratio, 4),
                 "qualification": qualification,
-                "matched_addresses": sorted(
-                    {hex(p["address"]) for p in matched_positions}
-                )[:DB_EVIDENCE_LIMIT],
+                "matched_addresses": sorted({hex(p["address"]) for p in matched_positions})[
+                    :DB_EVIDENCE_LIMIT
+                ],
             }
         )
-        match["score"] += len(matched_exact) * float(max(MIN_MATCH_SCORE, 12)) + len(
-            matched_fuzzy
-        ) * FUZZY_HASH_MATCH_WEIGHT
+        match["score"] += (
+            len(matched_exact) * float(max(MIN_MATCH_SCORE, 12))
+            + len(matched_fuzzy) * FUZZY_HASH_MATCH_WEIGHT
+        )
     matches = sorted(
         matches_by_purl.values(),
         key=lambda m: (m["score"], len(m["members"]), m["project_purl"]),
@@ -1606,9 +1594,7 @@ def detect_binaries_utilized(
     # rows; a whole-binary match never inherits member evidence and a
     # member-qualified project never relaxes the whole-binary gates — the two
     # layers fail independently and record their evidence separately.
-    member_matches, member_state = lookup_member_matches(
-        binary_metadata, db_file=db_file
-    )
+    member_matches, member_state = lookup_member_matches(binary_metadata, db_file=db_file)
     for member_match in member_matches:
         purl = member_match["project_purl"]
         member_evidence = {

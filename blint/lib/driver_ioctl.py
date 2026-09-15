@@ -688,13 +688,15 @@ def collect_client_ioctls(
                 continue
             # The block keeps up to MAX_CALLSITE_SITES_PER_ENTRY citing
             # functions; each names a real call site for the same code.
-            names = [
-                name for name in block_entry.get("functions") or [] if isinstance(name, str)
-            ]
+            names = [name for name in block_entry.get("functions") or [] if isinstance(name, str)]
             cited = [functions_by_name[name] for name in names if name in functions_by_name]
             if cited:
                 for func_data in cited:
-                    emit(code, func_data.get("name", func_data.get("address")), func_data.get("address"))
+                    emit(
+                        code,
+                        func_data.get("name", func_data.get("address")),
+                        func_data.get("address"),
+                    )
             else:
                 emit(code, names[0] if names else None, None)
     else:

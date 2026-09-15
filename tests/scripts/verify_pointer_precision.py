@@ -14,6 +14,7 @@ not produce the number.
 Usage:
     python tests/scripts/verify_pointer_precision.py BINARY [--arch arm64|x86]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -131,9 +132,7 @@ def main() -> int:
                     # for both x86's pairs and arm64's words.
                     truth_len = byte_column(truth[addr][1])
                     if truth_len and truth_len != lengths[global_line]:
-                        length_bad.append(
-                            (key, hex(addr), lengths[global_line], truth_len)
-                        )
+                        length_bad.append((key, hex(addr), lengths[global_line], truth_len))
                 else:
                     idx = bisect.bisect_right(span_starts, addr) - 1
                     if idx >= 0 and addr < span_ends[idx]:
@@ -214,9 +213,7 @@ def main() -> int:
                 if line.startswith("adrp ") and lengths[cursor_line + j] == 4:
                     delta = int(line.split()[-1].lstrip("#"), 0)
                     page = ((addr & ~0xFFF) + delta) & 0xFFFFFFFFFFFFFFFF
-                    raw = bytes(
-                        parsed_lief.get_content_from_virtual_address(addr, 4)
-                    )
+                    raw = bytes(parsed_lief.get_content_from_virtual_address(addr, 4))
                     decoded = decode_adrp(int.from_bytes(raw, "little")) if len(raw) == 4 else None
                     if decoded is None:
                         # Bytes unreadable through lief's VA API (a second
@@ -265,9 +262,7 @@ def main() -> int:
                         if t_target:
                             pc_checked += 1
                             if int(t_target.group(1), 16) != page:
-                                pc_bad.append(
-                                    (key, hex(addr_j), hex(page), t_target.group(1))
-                                )
+                                pc_bad.append((key, hex(addr_j), hex(page), t_target.group(1)))
                 elif args.arch == "x86" and re.match(r"lea\s+\S+,\s*\[\s*rip", line):
                     # llvm-objdump renders the raw displacement with the
                     # instruction's byte column: `100000779: 48 8d 05 14 4e
@@ -287,13 +282,13 @@ def main() -> int:
                         # llvm-objdump's byte column and displacement on the
                         # other: a real cross-validation of both.
                         expected = addr_j + lengths[cursor_line + j] + value
-                        actual = addr_j + t_len + int(
-                            t_disp.group(1), 16
-                        )
+                        actual = addr_j + t_len + int(t_disp.group(1), 16)
                         if expected != actual:
                             pc_bad.append(
                                 (
-                                    key, hex(addr_j), hex(expected),
+                                    key,
+                                    hex(addr_j),
+                                    hex(expected),
                                     hex(actual),
                                 )
                             )
@@ -313,9 +308,7 @@ def main() -> int:
     parsed = lief.parse(args.binary)
     resolver_bad = []
     for entry in resolved:
-        data = bytes(
-            parsed.get_content_from_virtual_address(entry["value"], 256)
-        )
+        data = bytes(parsed.get_content_from_virtual_address(entry["value"], 256))
         readings = []
         nul = data.find(b"\x00")
         with contextlib.suppress(UnicodeDecodeError):
@@ -323,9 +316,7 @@ def main() -> int:
         # A pointed-at literal may be UTF-16LE, so the check reads that form
         # too, terminating on an aligned NUL pair rather than a single byte.
         end = len(data) - (len(data) % 2)
-        wide_end = next(
-            (i for i in range(0, end, 2) if data[i] == 0 and data[i + 1] == 0), end
-        )
+        wide_end = next((i for i in range(0, end, 2) if data[i] == 0 and data[i + 1] == 0), end)
         with contextlib.suppress(UnicodeDecodeError, ValueError):
             readings.append(data[:wide_end].decode("utf-16-le"))
         if entry["string"] not in readings:
@@ -341,8 +332,7 @@ def main() -> int:
     sample = sorted({e["string"] for e in resolved})
     print(f"distinct strings ({len(sample)}): {sample[:40]}")
     verdict = (
-        ok and not length_bad and not interior and not pc_bad
-        and not resolver_bad and not enc_bad
+        ok and not length_bad and not interior and not pc_bad and not resolver_bad and not enc_bad
     )
     print("PRECISION VERDICT:", "PASS" if verdict else "FAIL")
     return 0 if verdict else 1

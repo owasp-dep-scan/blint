@@ -62,7 +62,12 @@ def load_ground_truth(apps_dir: Path, app: str) -> set[str]:
     gt_file = apps_dir / f"gt-{app}.txt"
     if not gt_file.exists():
         return set()
-    return {match.group("member") for line in gt_file.read_text().splitlines() for match in [_TRUTH_RE.search(line)] if match}
+    return {
+        match.group("member")
+        for line in gt_file.read_text().splitlines()
+        for match in [_TRUTH_RE.search(line)]
+        if match
+    }
 
 
 def candidate_rows(metadata: dict, db_file: str):
@@ -72,13 +77,19 @@ def candidate_rows(metadata: dict, db_file: str):
     connection = db_module.get(db_file)
     fuzzy_candidates = {}
     for batch in db_module._batched(hash_index.get("fuzzy_hashes") or []):
-        for row in db_module._query_member_hash_matches(connection, batch, hash_column="fuzzy_hash"):
+        for row in db_module._query_member_hash_matches(
+            connection, batch, hash_column="fuzzy_hash"
+        ):
             fuzzy_candidates.setdefault(int(row["binary_id"]), row)
     exact_candidates = {}
     for batch in db_module._batched(hash_index.get("instruction_hashes") or []):
-        for row in db_module._query_member_hash_matches(connection, batch, hash_column="instruction_hash"):
+        for row in db_module._query_member_hash_matches(
+            connection, batch, hash_column="instruction_hash"
+        ):
             exact_candidates.setdefault(int(row["binary_id"]), row)
-    totals = db_module._query_member_totals(connection, set(fuzzy_candidates) | set(exact_candidates))
+    totals = db_module._query_member_totals(
+        connection, set(fuzzy_candidates) | set(exact_candidates)
+    )
     connection.close()
     rows = []
     seen = set()
@@ -87,8 +98,24 @@ def candidate_rows(metadata: dict, db_file: str):
             continue
         seen.add(bid)
         row = fuzzy_candidates.get(bid) or exact_candidates[bid]
-        matched_fuzzy = {h.strip() for h in str(fuzzy_candidates[bid]["matched_hashes"]).split(",") if h.strip()} if bid in fuzzy_candidates else set()
-        matched_exact = {h.strip() for h in str(exact_candidates[bid]["matched_hashes"]).split(",") if h.strip()} if bid in exact_candidates else set()
+        matched_fuzzy = (
+            {
+                h.strip()
+                for h in str(fuzzy_candidates[bid]["matched_hashes"]).split(",")
+                if h.strip()
+            }
+            if bid in fuzzy_candidates
+            else set()
+        )
+        matched_exact = (
+            {
+                h.strip()
+                for h in str(exact_candidates[bid]["matched_hashes"]).split(",")
+                if h.strip()
+            }
+            if bid in exact_candidates
+            else set()
+        )
         total_functions = totals.get(bid, {}).get("total_functions", 0)
         matched_positions = [p for h in matched_fuzzy for p in positions.get(h, [])]
         rows.append(
@@ -101,7 +128,9 @@ def candidate_rows(metadata: dict, db_file: str):
                 "exact": len(matched_exact),
                 "exact_total": total_functions,
                 "exact_cov": (len(matched_exact) / total_functions) if total_functions else 0.0,
-                "contiguity": db_module._member_contiguity(matched_positions) if matched_positions else 0.0,
+                "contiguity": db_module._member_contiguity(matched_positions)
+                if matched_positions
+                else 0.0,
             }
         )
     return rows
@@ -110,7 +139,11 @@ def candidate_rows(metadata: dict, db_file: str):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus-dir", default=str(REPO_ROOT / ".tmp-static-linkage"))
-    parser.add_argument("--print-candidates", action="store_true", help="Print every candidate row, including rejected ones.")
+    parser.add_argument(
+        "--print-candidates",
+        action="store_true",
+        help="Print every candidate row, including rejected ones.",
+    )
     args = parser.parse_args()
     corpus = Path(args.corpus_dir).resolve()
     db_file = str(corpus / "blintdb-v4.db")
@@ -156,7 +189,9 @@ def main() -> None:
         claimed_purls = {purl for purl, _name in claimed}
         # Project truth: archives that contributed loaded members, via the
         # candidate table's project grouping.
-        project_truth = {row["purl"] for row in candidate_rows(metadata, db_file) if row["member"] in truth}
+        project_truth = {
+            row["purl"] for row in candidate_rows(metadata, db_file) if row["member"] in truth
+        }
         false_purls = claimed_purls - project_truth
 
         # Recall over the judgeable subset: the raw denominator counts every
@@ -196,14 +231,18 @@ def main() -> None:
         totals["false_projects"] += len(false_purls)
 
         print(f"== {app} (state={state}, members loaded={len(truth)})")
-        print(f"   attributed members: {len(claimed_names)} true={len(claimed_true)} false={len(false_members)}")
+        print(
+            f"   attributed members: {len(claimed_names)} true={len(claimed_true)} false={len(false_members)}"
+        )
         if false_members:
             print(f"   FALSE member claims: {sorted(false_members)}")
         print(f"   attributed projects: {sorted(claimed_purls)}")
         print(f"   truth projects:      {sorted(project_truth)}")
         if false_purls:
             print(f"   FALSE project attributions: {sorted(false_purls)}")
-        print(f"   timing: whole-binary lookup {whole_elapsed*1000:.1f} ms, member lookup {member_elapsed*1000:.1f} ms")
+        print(
+            f"   timing: whole-binary lookup {whole_elapsed * 1000:.1f} ms, member lookup {member_elapsed * 1000:.1f} ms"
+        )
 
         if args.print_candidates:
             print("   candidates (>=1 shared hash, before gates):")

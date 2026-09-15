@@ -30,6 +30,7 @@ Usage:
         [--workdir /tmp/gate] [--seeds 0,4242] [--skip-sbom] [--skip-cache]
 Exit code 0 iff every gate passed; failures print the differing file.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -100,12 +101,13 @@ def compare_snapshots(
     only_other = sorted(set(other) - set(baseline))
     differing = sorted(k for k in set(baseline) & set(other) if baseline[k] != other[k])
     raise SystemExit(
-        f"{label}: outputs differ. missing={only_base} extra={only_other} "
-        f"differing={differing}"
+        f"{label}: outputs differ. missing={only_base} extra={only_other} differing={differing}"
     )
 
 
-def gate_default_mode(corpus: Path, workdir: Path, seeds: list[str], jobs_values: list[int]) -> None:
+def gate_default_mode(
+    corpus: Path, workdir: Path, seeds: list[str], jobs_values: list[int]
+) -> None:
     print("== default mode: jobs x hash seeds, byte identity ==")
     baseline = None
     baseline_label = ""
@@ -148,7 +150,9 @@ def gate_cache(corpus: Path, workdir: Path, seed: str) -> None:
         run_env["SCAN_ID"] = "gate-cache-scan"
         run_env["BLINT_CACHE_DIR"] = str(cache_dir)
         cmd = [str(BLINT_BIN), "-q", "--no-banner", "-o", str(reports), *args, "--jobs", jobs]
-        result = subprocess.run(cmd, capture_output=True, text=True, env=run_env, cwd=str(REPO_ROOT))
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=run_env, cwd=str(REPO_ROOT)
+        )
         if result.returncode != 0:
             raise SystemExit(f"blint failed: {result.stderr[-2000:]}")
         coverage = json.loads((reports / "analysis-coverage.json").read_bytes())
@@ -165,12 +169,23 @@ def gate_cache(corpus: Path, workdir: Path, seed: str) -> None:
     # must (and does) differ between a cold and a warm run; the counters
     # are asserted below instead of byte-compared here.
     compare_snapshots(
-        snap_cold, snap_warm, "cache: cold vs warm parallel", workdir,
+        snap_cold,
+        snap_warm,
+        "cache: cold vs warm parallel",
+        workdir,
         ignore={"analysis-coverage.json"},
     )
     totals = {
-        "cold": (cov_cold["cache"]["misses"], cov_cold["cache"]["stored"], cov_cold["cache"]["hits"]),
-        "warm": (cov_warm["cache"]["misses"], cov_warm["cache"]["stored"], cov_warm["cache"]["hits"]),
+        "cold": (
+            cov_cold["cache"]["misses"],
+            cov_cold["cache"]["stored"],
+            cov_cold["cache"]["hits"],
+        ),
+        "warm": (
+            cov_warm["cache"]["misses"],
+            cov_warm["cache"]["stored"],
+            cov_warm["cache"]["hits"],
+        ),
         "seq": (cov_seq["cache"]["misses"], cov_seq["cache"]["stored"], cov_seq["cache"]["hits"]),
     }
     print(f"  counters (misses, stored, hits): {totals}")
@@ -180,7 +195,9 @@ def gate_cache(corpus: Path, workdir: Path, seed: str) -> None:
     assert totals["warm"][0] == 0, "warm run must not miss"
     assert totals["warm"][1] == 0, "warm run must not store"
     assert totals["warm"][2] >= top_level, "warm hits must cover the parsed units"
-    assert totals["cold"] == totals["seq"], "cold parallel counters must equal the sequential run's"
+    assert totals["cold"] == totals["seq"], (
+        "cold parallel counters must equal the sequential run's"
+    )
     print("  PASS: cold == warm == sequential bytes; counters equal")
 
 
@@ -234,7 +251,10 @@ def main() -> None:
     corpus = args.dir.resolve()
     if not corpus.exists():
         raise SystemExit(f"corpus not found at {corpus}; run tests/scripts/build_corpus.py")
-    workdir = args.workdir or Path(os.environ.get("TMPDIR", "/tmp")) / f"blint-jobs-gate-{int(time.time())}"
+    workdir = (
+        args.workdir
+        or Path(os.environ.get("TMPDIR", "/tmp")) / f"blint-jobs-gate-{int(time.time())}"
+    )
     workdir.mkdir(parents=True, exist_ok=True)
     seeds = [s.strip() for s in args.seeds.split(",") if s.strip()]
     jobs_values = [int(j) for j in args.jobs.split(",") if j.strip()]

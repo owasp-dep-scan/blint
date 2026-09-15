@@ -592,9 +592,7 @@ def test_v3_cfg_hash_is_evidence_without_weight(tmp_path):
     """cfg_hash matches are recorded but never move the score."""
     db_file = tmp_path / "blint.db"
     _create_v3_blintdb(db_file)
-    metadata = _fuzzy_metadata(
-        import_hash=None, name="/tmp/unknown/mystery-binary"
-    )
+    metadata = _fuzzy_metadata(import_hash=None, name="/tmp/unknown/mystery-binary")
     index = build_function_hash_index(metadata)
     assert "cfg_hashes" in index
 
@@ -777,10 +775,7 @@ def test_fuzzy_layer_state_without_disassembly(tmp_path):
     _create_v3_blintdb(db_file)
     metadata = _fuzzy_metadata()
     del metadata["disassembled_functions"]
-    assert (
-        blintdb_fuzzy_layer_state(str(db_file), metadata)
-        == HASH_LAYER_INACTIVE_NO_DISASSEMBLY
-    )
+    assert blintdb_fuzzy_layer_state(str(db_file), metadata) == HASH_LAYER_INACTIVE_NO_DISASSEMBLY
     # Disassembly ran but produced no fuzzy hashes (e.g. no assembly text).
     metadata_bare = _fuzzy_metadata()
     for function_data in metadata_bare["disassembled_functions"].values():
@@ -793,10 +788,7 @@ def test_fuzzy_layer_state_without_disassembly(tmp_path):
 
 def test_fuzzy_layer_state_database_problems(tmp_path):
     """Missing and unsupported databases are named states, never lookups."""
-    assert (
-        blintdb_fuzzy_layer_state("/nonexistent/blint.db")
-        == "unavailable_database_missing"
-    )
+    assert blintdb_fuzzy_layer_state("/nonexistent/blint.db") == "unavailable_database_missing"
     db_file = tmp_path / "future.db"
     connection = sqlite3.connect(db_file)
     connection.execute("CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -875,9 +867,7 @@ def test_process_exe_file_surfaces_fuzzy_evidence_and_layer_state(tmp_path, monk
 
     matched = next(comp for comp in components if comp.purl == "pkg:generic/demo@1.0.0")
     prop_map = {prop.name: prop.value for prop in matched.properties}
-    assert prop_map["internal:blintdb_matched_fuzzy_hash_count"] == str(
-        FUZZY_ONLY_MATCH_THRESHOLD
-    )
+    assert prop_map["internal:blintdb_matched_fuzzy_hash_count"] == str(FUZZY_ONLY_MATCH_THRESHOLD)
     assert prop_map["internal:blintdb_fuzzy_layer"] == HASH_LAYER_ACTIVE
     # Layer evidence follows the existing contract: present with its value.
     # Exact and assembly hashes found nothing here and read as zero, while the

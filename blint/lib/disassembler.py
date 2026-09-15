@@ -2114,9 +2114,7 @@ def disassemble_functions(
     if isinstance(parsed_obj, lief.PE.Binary):
         imagebase = int(parsed_obj.optional_header.imagebase)
     exec_ranges_true = executable_ranges(parsed_obj)
-    exec_ranges_stored = [
-        (start - imagebase, end - imagebase) for start, end in exec_ranges_true
-    ]
+    exec_ranges_stored = [(start - imagebase, end - imagebase) for start, end in exec_ranges_true]
     addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
     base_delta = 0
     if isinstance(parsed_obj, lief.ELF.Binary):
@@ -2135,9 +2133,8 @@ def disassemble_functions(
             # the segment start, and shifting those reads decodes a *different
             # function's* bytes (x86 decodes almost anything, so the wrong read
             # succeeds and the correct one is never tried).
-            if (
-                code_segment.virtual_address != min_func_addr
-                and not _addr_in_exec_ranges(min_func_addr, exec_ranges_true)
+            if code_segment.virtual_address != min_func_addr and not _addr_in_exec_ranges(
+                min_func_addr, exec_ranges_true
             ):
                 base_delta = code_segment.virtual_address - min_func_addr
                 LOG.debug(
@@ -2450,14 +2447,12 @@ def disassemble_functions(
                 if function_cfg:
                     disassembly_results[f"{func_addr_va_hex}::{func_name}"]["cfg"] = function_cfg
             if func_entry.get("discovered"):
-                disassembly_results[f"{func_addr_va_hex}::{func_name}"]["discovered"] = (
-                    func_entry["discovered"]
-                )
+                disassembly_results[f"{func_addr_va_hex}::{func_name}"]["discovered"] = func_entry[
+                    "discovered"
+                ]
             if promoted_count < MAX_PROMOTED_FUNCTIONS:
                 last_instr = truncated_instr_list[-1]
-                span_end = (
-                    last_instr.address + len(last_instr.bytes) - func_addr_va + func_addr
-                )
+                span_end = last_instr.address + len(last_instr.bytes) - func_addr_va + func_addr
                 bisect.insort(disassembled_spans, (func_addr, span_end))
                 promoted = _promote_call_targets(
                     direct_call_targets,

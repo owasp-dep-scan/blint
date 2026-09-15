@@ -58,7 +58,6 @@ int main(void) { return accumulate(7) + (int)strlen(wave0_label()); }
 pytestmark = pytest.mark.slow
 
 
-
 def _first_diff_path(first, second, path="$"):
     """Locate the first differing position in two JSON-like structures."""
     if type(first) is not type(second):
@@ -256,9 +255,7 @@ def test_determinism_sdk_path_on_and_off_across_hash_seeds(tmp_path):
             env=env,
         )
         outputs[seed] = result.stdout
-    assert outputs["0"] == outputs["4242"], (
-        "sdk_tbd bytes differ across PYTHONHASHSEED values"
-    )
+    assert outputs["0"] == outputs["4242"], "sdk_tbd bytes differ across PYTHONHASHSEED values"
     # The environment must not surface in the output: no absolute SDK path,
     # and no tmp-path fragments, in the metadata bytes.
     assert str(sdk_root).encode() not in outputs["0"]
@@ -297,9 +294,7 @@ def test_determinism_corpus_fixture_if_present(tmp_path):
     assert _disassembly_really_ran(first)
 
 
-def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
-    native_binary, tmp_path
-):
+def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(native_binary, tmp_path):
     """SBOM bytes must not depend on ``PYTHONHASHSEED``.
 
     ``dependsOn`` is accumulated in a ``set`` and was serialized with
@@ -330,8 +325,15 @@ def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
         out_file = tmp_path / f"sbom-{seed}.cdx.json"
         subprocess.run(
             [
-                sys.executable, "-m", "blint.cli", "sbom",
-                "-i", str(scan_dir), "-o", str(out_file), "-q",
+                sys.executable,
+                "-m",
+                "blint.cli",
+                "sbom",
+                "-i",
+                str(scan_dir),
+                "-o",
+                str(out_file),
+                "-q",
             ],
             check=True,
             capture_output=True,
@@ -343,9 +345,7 @@ def test_sbom_dependencies_are_ordered_independently_of_the_hash_seed(
         bom.pop("serialNumber", None)
         bom.get("metadata", {}).pop("timestamp", None)
         outputs[seed] = bom
-    depends = [
-        d.get("dependsOn") or [] for d in outputs["0"].get("dependencies") or []
-    ]
+    depends = [d.get("dependsOn") or [] for d in outputs["0"].get("dependencies") or []]
     if not any(len(d) > 1 for d in depends):
         pytest.skip("this binary produced no multi-entry dependsOn list to order")
     assert outputs["0"] == outputs["4242"], (
@@ -382,8 +382,6 @@ def test_root_depends_on_is_sorted_regardless_of_component_order(tmp_path):
     out_file = tmp_path / "sbom.json"
     create_sbom(parent.components, [], str(out_file), sbom, False, {})
     bom = json.loads(out_file.read_text())
-    root = next(
-        d for d in bom["dependencies"] if d["ref"] == "pkg:generic/scan-root"
-    )
+    root = next(d for d in bom["dependencies"] if d["ref"] == "pkg:generic/scan-root")
     assert root["dependsOn"] == sorted(root["dependsOn"])
     assert root["dependsOn"] == ["pkg:generic/alpha", "pkg:generic/mid", "pkg:generic/zeta"]

@@ -82,9 +82,11 @@ def main() -> None:
         except Exception as error:  # noqa: BLE001
             print(f"SKIP {binary.name}: {error}")
             continue
-        detected = {(b["library"], b["version"]): b for b in detect_vendored_banners(metadata)["banners"]}
+        detected = {
+            (b["library"], b["version"]): b for b in detect_vendored_banners(metadata)["banners"]
+        }
         expected = truth.get(binary.name, {})
-        for (library, version) in detected:
+        for library, version in detected:
             hits_total += 1
             if expected.get(library) == version:
                 hits_correct += 1
@@ -93,7 +95,9 @@ def main() -> None:
                 banner_text = detected[(library, version)]["banner"]
                 visible = any(banner_text.strip() in line for line in raw_strings(binary))
                 if not visible:
-                    print(f"UNCONFIRMED {binary.name}: {library} {version} banner not visible to strings(1)")
+                    print(
+                        f"UNCONFIRMED {binary.name}: {library} {version} banner not visible to strings(1)"
+                    )
             else:
                 false_positives.append((binary.name, library, version))
         for library, version in expected.items():

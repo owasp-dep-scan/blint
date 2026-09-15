@@ -142,6 +142,7 @@ _TbdLoader.add_multi_constructor("!", _construct_unknown)
 # stubs is the difference between a snappy first run and a small wait; fall
 # back to the pure-Python loader where PyYAML was built without libyaml.
 try:
+
     class _TbdCLoader(yaml.CSafeLoader):  # type: ignore[name-defined]
         """The libyaml equivalent of :class:`_TbdLoader`."""
 
@@ -484,9 +485,7 @@ def _build_reexports_closure(
         source_id = lib_ids.get(source)
         if source_id is None:
             continue
-        resolved = sorted(
-            {lib_ids[target] for target in targets if target in lib_ids}
-        )
+        resolved = sorted({lib_ids[target] for target in targets if target in lib_ids})
         if resolved:
             id_edges[source_id] = resolved
     closure: dict[int, list[int]] = {}
@@ -552,9 +551,7 @@ def load_or_build_index(sdk_path: str, use_disk_cache: bool = True) -> TbdIndex:
     if use_disk_cache:
         try:
             fingerprint = index_fingerprint(resolved)
-            artifact_path = os.path.join(
-                _cache_dir(), f"tbd-index-{fingerprint[:32]}.json.zlib"
-            )
+            artifact_path = os.path.join(_cache_dir(), f"tbd-index-{fingerprint[:32]}.json.zlib")
             if os.path.exists(artifact_path) and os.path.getsize(artifact_path) > 0:
                 with open(artifact_path, "rb") as handle:
                     index = TbdIndex.from_bytes(handle.read())
@@ -634,9 +631,7 @@ def enrich_macho_sdk_attribution(metadata: dict, sdk_path: str) -> dict | None:
             if separator and is_library_name(library):
                 # The bind itself names the library; the SDK can confirm or
                 # question it, never replace it.
-                provides, via_reexport = index.provides(
-                    library.rsplit("/", 1)[-1], symbol
-                )
+                provides, via_reexport = index.provides(library.rsplit("/", 1)[-1], symbol)
                 if provides:
                     confirmed_count += 1
                     if via_reexport:
@@ -655,9 +650,7 @@ def enrich_macho_sdk_attribution(metadata: dict, sdk_path: str) -> dict | None:
                     attributed[name] = owner
     block = {
         "attributed_symbol_count": len(attributed),
-        "attributed_symbols": dict(
-            sorted(attributed.items())[:ATTRIBUTED_SYMBOL_SAMPLE_CAP]
-        ),
+        "attributed_symbols": dict(sorted(attributed.items())[:ATTRIBUTED_SYMBOL_SAMPLE_CAP]),
         "confirmed_symbol_count": confirmed_count,
         "reexport_confirmed_symbol_count": reexport_confirmed_count,
         "unconfirmed_symbol_count": len(unconfirmed),

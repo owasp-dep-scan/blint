@@ -150,13 +150,7 @@ def test_value_assembled_on_one_arm_only_never_reaches_the_call():
 def test_unconditional_path_constant_survives_where_the_branch_one_dies():
     # Control for the test above: the same load moved onto the straight-line
     # path (both predecessors agree) is recovered.
-    assembly = (
-        "xor edi, edi\n"
-        "mov edx, 2201297921\n"
-        "je 2201299700\n"
-        "call qword ptr [rip + 4096]\n"
-        "ret"
-    )
+    assembly = "xor edi, edi\nmov edx, 2201297921\nje 2201299700\ncall qword ptr [rip + 4096]\nret"
     func = _win64_deviceioctl_func(
         assembly,
         blocks=[{"instructions": 3}, {"instructions": 2}],
@@ -171,7 +165,7 @@ def test_unconditional_path_constant_survives_where_the_branch_one_dies():
 
 def test_unresolved_callee_is_a_record_without_a_name():
     func = _win64_deviceioctl_func(
-        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",   # 0x83352401
+        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",  # 0x83352401
         direct_call_targets=[],
     )
     records, method = recover_call_site_arguments_with_method(func, "", "PE")
@@ -186,10 +180,18 @@ def test_ambiguous_operand_resolves_to_no_callee():
     # The same operand text reaching two different callees (a register or
     # slot reused for both) has no single callee; neither may win.
     func = _win64_deviceioctl_func(
-        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",   # 0x83352401
+        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",  # 0x83352401
         direct_call_targets=[
-            {"target_name": "KERNEL32.dll::DeviceIoControl", "raw_operand": "qword ptr [rip + 4096]", "kind": "indirect_hint"},
-            {"target_name": "KERNEL32.dll::CreateFileW", "raw_operand": "qword ptr [rip + 4096]", "kind": "indirect_hint"},
+            {
+                "target_name": "KERNEL32.dll::DeviceIoControl",
+                "raw_operand": "qword ptr [rip + 4096]",
+                "kind": "indirect_hint",
+            },
+            {
+                "target_name": "KERNEL32.dll::CreateFileW",
+                "raw_operand": "qword ptr [rip + 4096]",
+                "kind": "indirect_hint",
+            },
         ],
     )
     records, _ = recover_call_site_arguments_with_method(func, "", "PE")
@@ -199,7 +201,7 @@ def test_ambiguous_operand_resolves_to_no_callee():
 
 def test_callee_that_is_not_deviceioctl_contributes_nothing():
     func = _win64_deviceioctl_func(
-        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",   # 0x83352401
+        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",  # 0x83352401
         callee="KERNEL32.dll::CreateFileW",
     )
     assert extract_client_ioctl_codes(func) == []
@@ -220,12 +222,12 @@ def test_stack_passed_control_code_is_recoverable_under_sysv():
     # The same sixth argument lives in r9 under SysV, where six integer
     # arguments are register-passed.
     func = _resolved_func(
-        "mov r9d, 2201297921\ncall qword ptr [rip + 4096]",   # 0x83352401
+        "mov r9d, 2201297921\ncall qword ptr [rip + 4096]",  # 0x83352401
         callee="NtDeviceIoControlFile",
     )
-    assert extract_client_ioctl_codes(func, arch_target="x86_64-pc-linux-gnu", binary_format="ELF") == [
-        0x83352401
-    ]
+    assert extract_client_ioctl_codes(
+        func, arch_target="x86_64-pc-linux-gnu", binary_format="ELF"
+    ) == [0x83352401]
 
 
 def test_arm64_lane_pair_reaches_a_tail_call_on_the_last_line():
@@ -245,9 +247,7 @@ def test_arm64_lane_pair_reaches_a_tail_call_on_the_last_line():
     assert len(records) == 1
     assert records[0]["callee"] == "DeviceIoControl"
     assert records[0]["arguments"][1] == 0x80006498
-    assert 0x80006498 in extract_client_ioctl_codes(
-        func, arch_target="aarch64-pc-windows-msvc"
-    )
+    assert 0x80006498 in extract_client_ioctl_codes(func, arch_target="aarch64-pc-windows-msvc")
 
 
 def test_branch_instruction_off_the_last_line_is_not_a_call_site():
@@ -263,9 +263,7 @@ def test_branch_instruction_off_the_last_line_is_not_a_call_site():
             {"target_name": "DeviceIoControl", "raw_operand": "#-48", "kind": "tailcall"}
         ],
     )
-    records, _ = recover_call_site_arguments_with_method(
-        func, "aarch64-pc-windows-msvc", "PE"
-    )
+    records, _ = recover_call_site_arguments_with_method(func, "aarch64-pc-windows-msvc", "PE")
     assert [r["instruction"] for r in records] == ["bl #-96"]
     assert records[0]["callee"] is None
 
@@ -288,14 +286,14 @@ def test_computed_constant_is_followed_through_arithmetic():
 
 
 def test_missing_cfg_and_tiling_mismatch_and_unknown_abi_are_distinguished():
-    plain = {"assembly": "mov edx, 2201297921\ncall qword ptr [rip + 4096]"}   # 0x83352401
+    plain = {"assembly": "mov edx, 2201297921\ncall qword ptr [rip + 4096]"}  # 0x83352401
     records, method = recover_call_site_arguments_with_method(plain, "", "PE")
     assert records == [] and method == "no_cfg"
 
     # Blocks that do not tile the text: no straight-line fallback exists, so
     # scraped-not-passed values cannot resurface.
     mismatched = _win64_deviceioctl_func(
-        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",   # 0x83352401
+        "mov edx, 2201297921\ncall qword ptr [rip + 4096]",  # 0x83352401
         blocks=[{"instructions": 1}],
     )
     records, method = recover_call_site_arguments_with_method(mismatched, "", "PE")
@@ -338,22 +336,33 @@ def _pe64_image(code: bytes, import_name: bytes = b"DeviceIoControl", rdata: byt
 
     idata = bytearray(0x200)
     struct.pack_into("<IIIII", idata, 0x00, 0x2028, 0, 0, 0x2060, 0x2030)
-    struct.pack_into("<II", idata, 0x28, idata_rva + 0x40, 0)   # INT
-    struct.pack_into("<II", idata, 0x30, idata_rva + 0x40, 0)   # IAT
+    struct.pack_into("<II", idata, 0x28, idata_rva + 0x40, 0)  # INT
+    struct.pack_into("<II", idata, 0x30, idata_rva + 0x40, 0)  # IAT
     idata[0x40:0x42] = b"\x00\x00"
-    idata[0x42:0x42 + 16] = import_name.ljust(16, b"\x00")[:15] + b"\x00"
-    idata[0x60:0x60 + 13] = b"KERNEL32.dll\x00"
+    idata[0x42 : 0x42 + 16] = import_name.ljust(16, b"\x00")[:15] + b"\x00"
+    idata[0x60 : 0x60 + 13] = b"KERNEL32.dll\x00"
     export_rva = idata_rva + 0x100
     struct.pack_into(
-        "<IIHHIIIIIII", idata, 0x100,
-        0, 0, 0, 0, export_rva + 0x60, 1, 1, 1,
-        export_rva + 0x50, export_rva + 0x40, export_rva + 0x58,
+        "<IIHHIIIIIII",
+        idata,
+        0x100,
+        0,
+        0,
+        0,
+        0,
+        export_rva + 0x60,
+        1,
+        1,
+        1,
+        export_rva + 0x50,
+        export_rva + 0x40,
+        export_rva + 0x58,
     )
     struct.pack_into("<I", idata, 0x140, export_rva + 0x70)
     struct.pack_into("<I", idata, 0x150, text_rva)
     struct.pack_into("<H", idata, 0x158, 0)
-    idata[0x160:0x160 + 11] = b"client.exe\x00"
-    idata[0x170:0x170 + 11] = b"IoDispatch\x00"
+    idata[0x160 : 0x160 + 11] = b"client.exe\x00"
+    idata[0x170 : 0x170 + 11] = b"IoDispatch\x00"
 
     dos = bytearray(0x80)
     dos[0:2] = b"MZ"
@@ -361,45 +370,41 @@ def _pe64_image(code: bytes, import_name: bytes = b"DeviceIoControl", rdata: byt
     opt = bytearray(0xF0)
     struct.pack_into("<H", opt, 0x00, 0x20B)
     struct.pack_into("<I", opt, 0x04, len(code))
-    struct.pack_into("<I", opt, 0x10, text_rva)              # AddressOfEntryPoint
+    struct.pack_into("<I", opt, 0x10, text_rva)  # AddressOfEntryPoint
     struct.pack_into("<Q", opt, 0x18, image_base)
-    struct.pack_into("<I", opt, 0x20, 0x200)                 # SectionAlignment
-    struct.pack_into("<I", opt, 0x24, 0x200)                 # FileAlignment
-    struct.pack_into("<H", opt, 0x30, 6)                     # MajorSubsystemVersion
-    struct.pack_into("<I", opt, 0x38, 0x3000)                # SizeOfImage
-    struct.pack_into("<I", opt, 0x3C, 0x200)                 # SizeOfHeaders
-    struct.pack_into("<H", opt, 0x44, 3)                     # Subsystem: console
+    struct.pack_into("<I", opt, 0x20, 0x200)  # SectionAlignment
+    struct.pack_into("<I", opt, 0x24, 0x200)  # FileAlignment
+    struct.pack_into("<H", opt, 0x30, 6)  # MajorSubsystemVersion
+    struct.pack_into("<I", opt, 0x38, 0x3000)  # SizeOfImage
+    struct.pack_into("<I", opt, 0x3C, 0x200)  # SizeOfHeaders
+    struct.pack_into("<H", opt, 0x44, 3)  # Subsystem: console
     struct.pack_into("<Q", opt, 0x48, 0x100000)
     struct.pack_into("<Q", opt, 0x58, 0x100000)
-    struct.pack_into("<I", opt, 0x6C, 16)                    # NumberOfRvaAndSizes
+    struct.pack_into("<I", opt, 0x6C, 16)  # NumberOfRvaAndSizes
     dd = 0x70
     struct.pack_into("<II", opt, dd + 8 * 0, export_rva, 40)
     struct.pack_into("<II", opt, dd + 8 * 1, idata_rva, 40)
     struct.pack_into("<II", opt, dd + 8 * 12, idata_rva + 0x30, 8)
 
     def section(name, vsize, va, rsize, rptr, chars):
-        return struct.pack(
-            "<8sIIIIIIHHI", name, vsize, va, rsize, rptr, 0, 0, 0, 0, chars
-        )
+        return struct.pack("<8sIIIIIIHHI", name, vsize, va, rsize, rptr, 0, 0, 0, 0, chars)
 
     sections = [
         section(b".text", len(code), text_rva, 0x200, text_file, 0x60000020),
         section(b".idata", len(idata), idata_rva, 0x200, idata_file, 0xC0000040),
     ]
     if rdata:
-        sections.append(
-            section(b".rdata", len(rdata), rdata_rva, 0x200, rdata_file, 0x40000040)
-        )
+        sections.append(section(b".rdata", len(rdata), rdata_rva, 0x200, rdata_file, 0x40000040))
     coff = struct.pack("<HHIIIHH", 0x8664, len(sections), 0, 0, 0, 0xF0, 0x0022)
-    headers = (
-        bytes(dos) + b"PE\x00\x00" + coff + bytes(opt) + b"".join(sections)
-    ).ljust(0x200, b"\x00")
+    headers = (bytes(dos) + b"PE\x00\x00" + coff + bytes(opt) + b"".join(sections)).ljust(
+        0x200, b"\x00"
+    )
     image = bytearray(0x3000)
-    image[0:len(headers)] = headers
-    image[text_file:text_file + len(code)] = code
-    image[idata_file:idata_file + len(idata)] = idata
+    image[0 : len(headers)] = headers
+    image[text_file : text_file + len(code)] = code
+    image[idata_file : idata_file + len(idata)] = idata
     if rdata:
-        image[rdata_file:rdata_file + len(rdata)] = rdata
+        image[rdata_file : rdata_file + len(rdata)] = rdata
     return bytes(image)
 
 
@@ -414,26 +419,26 @@ def _pe64_client() -> bytes:
         return b"\xff\x15" + struct.pack("<i", target - next_insn)
 
     code = b""
-    code += b"\x55"                          # push rbp
-    code += b"\x48\x89\xe5"                  # mov rbp, rsp
-    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)   # mov edx, code 1
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    code += b"\x55"  # push rbp
+    code += b"\x48\x89\xe5"  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"  # sub rsp, 0x20
+    code += b"\xb9\x99\x01\x00\x00"  # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)  # mov edx, code 1
+    code += b"\x45\x33\xc0"  # xor r8d, r8d
+    code += b"\x45\x33\xc9"  # xor r9d, r9d
     nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)   # mov edx, code 2
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    code += call_rip(iat_slot, nxt)  # call [rip+..] -> DeviceIoControl
+    code += b"\xb9\x99\x01\x00\x00"  # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)  # mov edx, code 2
+    code += b"\x45\x33\xc0"  # xor r8d, r8d
+    code += b"\x45\x33\xc9"  # xor r9d, r9d
     nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
-    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)        # mov eax, decoy
-    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)    # mov ebp, decoy
-    code += b"\x31\xc0"                      # xor eax, eax
-    code += b"\xc9"                          # leave
-    code += b"\xc3"                          # ret
+    code += call_rip(iat_slot, nxt)  # call [rip+..] -> DeviceIoControl
+    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)  # mov eax, decoy
+    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)  # mov ebp, decoy
+    code += b"\x31\xc0"  # xor eax, eax
+    code += b"\xc9"  # leave
+    code += b"\xc3"  # ret
     return _pe64_image(code)
 
 
@@ -452,34 +457,34 @@ def _pe64_client_jmp_edge() -> bytes:
         return b"\xff\x15" + struct.pack("<i", target - next_insn)
 
     code = b""
-    code += b"\x55"                          # push rbp
-    code += b"\x48\x89\xe5"                  # mov rbp, rsp
-    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)   # mov edx, code 1
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    code += b"\x55"  # push rbp
+    code += b"\x48\x89\xe5"  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"  # sub rsp, 0x20
+    code += b"\xb9\x99\x01\x00\x00"  # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_1)  # mov edx, code 1
+    code += b"\x45\x33\xc0"  # xor r8d, r8d
+    code += b"\x45\x33\xc9"  # xor r9d, r9d
     jmp_offset = len(code)
-    code += b"\xe9\x00\x00\x00\x00"          # jmp .go (rel32 patched below)
-    code += b"\xba" + struct.pack("<I", RETURNED_DECOY)        # mov edx, decoy
+    code += b"\xe9\x00\x00\x00\x00"  # jmp .go (rel32 patched below)
+    code += b"\xba" + struct.pack("<I", RETURNED_DECOY)  # mov edx, decoy
     go_offset = len(code)
     code = bytearray(code)
     # rel32 counts from the instruction after the jmp.
     struct.pack_into("<i", code, jmp_offset + 1, go_offset - (jmp_offset + 5))
     code = bytes(code)
     nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # .go: call [rip+..] -> DeviceIoControl
-    code += b"\xb9\x99\x01\x00\x00"          # mov ecx, 0x199
-    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)   # mov edx, code 2
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    code += call_rip(iat_slot, nxt)  # .go: call [rip+..] -> DeviceIoControl
+    code += b"\xb9\x99\x01\x00\x00"  # mov ecx, 0x199
+    code += b"\xba" + struct.pack("<I", GROUND_TRUTH_CODE_2)  # mov edx, code 2
+    code += b"\x45\x33\xc0"  # xor r8d, r8d
+    code += b"\x45\x33\xc9"  # xor r9d, r9d
     nxt = image_base + text_rva + len(code) + 6
-    code += call_rip(iat_slot, nxt)          # call [rip+..] -> DeviceIoControl
-    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)        # mov eax, decoy
-    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)    # mov ebp, decoy
-    code += b"\x31\xc0"                      # xor eax, eax
-    code += b"\xc9"                          # leave
-    code += b"\xc3"                          # ret
+    code += call_rip(iat_slot, nxt)  # call [rip+..] -> DeviceIoControl
+    code += b"\xb8" + struct.pack("<I", RETURNED_DECOY)  # mov eax, decoy
+    code += b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)  # mov ebp, decoy
+    code += b"\x31\xc0"  # xor eax, eax
+    code += b"\xc9"  # leave
+    code += b"\xc3"  # ret
     return _pe64_image(code)
 
 
@@ -499,9 +504,7 @@ def _elf64_exec(machine: int, text: bytes, symbols: list[tuple[str, int]]) -> by
     strtab_off = shstr_off + len(shstr)
     symtab = b"\x00" * 24
     for name, addr in symbols:
-        symtab += struct.pack(
-            "<IBBHQQ", name_offsets[name], 0x12, 0, 1, base + addr, 0
-        )
+        symtab += struct.pack("<IBBHQQ", name_offsets[name], 0x12, 0, 1, base + addr, 0)
     symtab_off = strtab_off + len(strtab)
     shoff = (symtab_off + len(symtab) + 7) & ~7
 
@@ -524,31 +527,29 @@ def _elf64_exec(machine: int, text: bytes, symbols: list[tuple[str, int]]) -> by
     ehdr = struct.pack(
         "<16sHHIQQQIHHHHHH",
         eh_ident,  # e_ident
-        2,         # e_type: ET_EXEC
-        machine,   # e_machine
-        1,         # e_version
+        2,  # e_type: ET_EXEC
+        machine,  # e_machine
+        1,  # e_version
         base + text_off,  # e_entry
-        64,        # e_phoff
-        shoff,     # e_shoff
-        0,         # e_flags
-        64,        # e_ehsize
-        56,        # e_phentsize
-        1,         # e_phnum
-        64,        # e_shentsize
-        5,         # e_shnum
-        4,         # e_shstrndx
+        64,  # e_phoff
+        shoff,  # e_shoff
+        0,  # e_flags
+        64,  # e_ehsize
+        56,  # e_phentsize
+        1,  # e_phnum
+        64,  # e_shentsize
+        5,  # e_shnum
+        4,  # e_shstrndx
     )
-    phdr = struct.pack(
-        "<IIQQQQQQ", 1, 5, 0, base, base, total, total, 0x1000
-    )
+    phdr = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, total, total, 0x1000)
     image = bytearray(total)
-    image[0:len(ehdr)] = ehdr
-    image[64:64 + len(phdr)] = phdr
-    image[text_off:text_off + len(text)] = text
-    image[shstr_off:shstr_off + len(shstr)] = shstr
-    image[strtab_off:strtab_off + len(strtab)] = strtab
-    image[symtab_off:symtab_off + len(symtab)] = symtab
-    image[shoff:shoff + len(shdrs)] = shdrs
+    image[0 : len(ehdr)] = ehdr
+    image[64 : 64 + len(phdr)] = phdr
+    image[text_off : text_off + len(text)] = text
+    image[shstr_off : shstr_off + len(shstr)] = shstr
+    image[strtab_off : strtab_off + len(strtab)] = strtab
+    image[symtab_off : symtab_off + len(symtab)] = symtab
+    image[shoff : shoff + len(shdrs)] = shdrs
     return bytes(image)
 
 
@@ -556,19 +557,22 @@ def _x86_elf_code() -> tuple[bytes, list[tuple[str, int]]]:
     """Stub + caller + decoy, hand-assembled from encodings verified against
     LLVM: the caller puts the ground-truth code in esi (SysV argument 2) and
     calls the stub; the decoys never sit in an argument register at a call."""
-    stub = b"\x31\xc0\xc3"                                    # xor eax, eax; ret
+    stub = b"\x31\xc0\xc3"  # xor eax, eax; ret
     issue = (
-        b"\xbf\x99\x01\x00\x00"                               # mov edi, 0x199
-        + b"\xbe" + struct.pack("<I", GROUND_TRUTH_CODE_1)    # mov esi, code 1
-        + b"\x31\xd2"                                         # xor edx, edx
+        b"\xbf\x99\x01\x00\x00"  # mov edi, 0x199
+        + b"\xbe"
+        + struct.pack("<I", GROUND_TRUTH_CODE_1)  # mov esi, code 1
+        + b"\x31\xd2"  # xor edx, edx
     )
     # call stub: rel32 counts from the instruction *after* the call.
     call_addr = 0x103 + len(issue)
     issue += b"\xe8" + struct.pack("<i", 0x100 - (call_addr + 5)) + b"\xc3"
     decoy = (
-        b"\xb8" + struct.pack("<I", GROUND_TRUTH_CODE_2)      # mov eax, code 2
-        + b"\xbd" + struct.pack("<I", CALLEE_SAVED_DECOY)     # mov ebp, decoy
-        + b"\xc3"                                             # ret
+        b"\xb8"
+        + struct.pack("<I", GROUND_TRUTH_CODE_2)  # mov eax, code 2
+        + b"\xbd"
+        + struct.pack("<I", CALLEE_SAVED_DECOY)  # mov ebp, decoy
+        + b"\xc3"  # ret
     )
     text = stub + issue + decoy
     symbols = [
@@ -580,21 +584,21 @@ def _x86_elf_code() -> tuple[bytes, list[tuple[str, int]]]:
 
 
 def _aarch64_elf_code() -> tuple[bytes, list[tuple[str, int]]]:
-    stub = struct.pack("<I", 0xD65F03C0)                      # ret
+    stub = struct.pack("<I", 0xD65F03C0)  # ret
     issue = b"".join(
         struct.pack("<I", w)
         for w in (
-            0x52800000 | ((GROUND_TRUTH_CODE_1 & 0xFFFF) << 5) | 1,   # movz w1, #low
-            0xAA1F03E0,                                               # mov x0, xzr
-            0x72A00000 | ((GROUND_TRUTH_CODE_1 >> 16) << 5) | 1,      # movk w1, #high, lsl 16
+            0x52800000 | ((GROUND_TRUTH_CODE_1 & 0xFFFF) << 5) | 1,  # movz w1, #low
+            0xAA1F03E0,  # mov x0, xzr
+            0x72A00000 | ((GROUND_TRUTH_CODE_1 >> 16) << 5) | 1,  # movk w1, #high, lsl 16
         )
     )
     bl_addr = 0x104 + len(issue)
     issue += struct.pack("<I", 0x94000000 | ((0x100 - bl_addr) >> 2 & 0x3FFFFFF))
-    issue += struct.pack("<I", 0xD65F03C0)                    # ret
+    issue += struct.pack("<I", 0xD65F03C0)  # ret
     decoy = (
         struct.pack("<I", 0x52800000 | ((GROUND_TRUTH_CODE_2 & 0xFFFF) << 5) | 9)
-        + struct.pack("<I", 0xD65F03C0)                       # movz w9, #low; ret
+        + struct.pack("<I", 0xD65F03C0)  # movz w9, #low; ret
     )
     text = stub + issue + decoy
     symbols = [
@@ -675,10 +679,12 @@ def test_pe64_client_exports_callsite_block(tmp_path):
     ioctl_entries = [
         entry
         for entry in block
-        if "deviceiocontrol" in str(entry.get("callee", "")).lower()
-        and entry.get("argument") == 1
+        if "deviceiocontrol" in str(entry.get("callee", "")).lower() and entry.get("argument") == 1
     ]
-    assert {entry["value"] for entry in ioctl_entries} == {GROUND_TRUTH_CODE_1, GROUND_TRUTH_CODE_2}
+    assert {entry["value"] for entry in ioctl_entries} == {
+        GROUND_TRUTH_CODE_1,
+        GROUND_TRUTH_CODE_2,
+    }
     # The example citation names the call instruction the value was held at.
     assert all(str(entry["example"]["instruction"]).startswith("call") for entry in ioctl_entries)
     # Coverage names every function's analysis method; nothing is silent.
@@ -698,19 +704,19 @@ def _pe64_wide_client() -> bytes:
     rdata_va = image_base + rdata_rva
 
     code = b""
-    code += b"\x55"                          # push rbp
-    code += b"\x48\x89\xe5"                  # mov rbp, rsp
-    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
+    code += b"\x55"  # push rbp
+    code += b"\x48\x89\xe5"  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"  # sub rsp, 0x20
     nxt = image_base + text_rva + len(code) + 7
     code += b"\x48\x8d\x0d" + struct.pack("<i", rdata_va - nxt)  # lea rcx, [rip+..]
-    code += b"\xba\x00\x00\x00\x40"          # mov edx, GENERIC_WRITE
-    code += b"\x45\x33\xc0"                  # xor r8d, r8d
-    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    code += b"\xba\x00\x00\x00\x40"  # mov edx, GENERIC_WRITE
+    code += b"\x45\x33\xc0"  # xor r8d, r8d
+    code += b"\x45\x33\xc9"  # xor r9d, r9d
     nxt = image_base + text_rva + len(code) + 6
-    code += b"\xff\x15" + struct.pack("<i", iat_slot - nxt)      # call [rip+..]
-    code += b"\x31\xc0"                      # xor eax, eax
-    code += b"\xc9"                          # leave
-    code += b"\xc3"                          # ret
+    code += b"\xff\x15" + struct.pack("<i", iat_slot - nxt)  # call [rip+..]
+    code += b"\x31\xc0"  # xor eax, eax
+    code += b"\xc9"  # leave
+    code += b"\xc3"  # ret
     return _pe64_image(code, import_name=b"CreateFileW", rdata=rdata)
 
 
@@ -736,8 +742,7 @@ def test_pe64_wide_client_resolves_the_path_argument(tmp_path):
     path_entries = [
         entry
         for entry in block
-        if "createfilew" in str(entry.get("callee", "")).lower()
-        and entry.get("argument") == 0
+        if "createfilew" in str(entry.get("callee", "")).lower() and entry.get("argument") == 0
     ]
     assert len(path_entries) == 1
     entry = path_entries[0]
@@ -799,7 +804,7 @@ def test_aarch64_elf_client_ground_truth(tmp_path):
 
 def test_recover_call_site_arguments_public_wrapper():
     func = _win64_deviceioctl_func(
-        "mov edx, 2201297921\ncall qword ptr [rip + 4096]"   # 0x83352401
+        "mov edx, 2201297921\ncall qword ptr [rip + 4096]"  # 0x83352401
     )
     assert recover_call_site_arguments(func, "", "PE")[0]["arguments"][1] == 0x83352401
 

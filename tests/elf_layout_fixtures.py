@@ -78,7 +78,8 @@ def _phdr(p_type: int, flags: int, offset: int, vaddr: int, size: int) -> bytes:
 
 def _ehdr(entry: int, shoff: int, phnum: int, shnum: int) -> bytes:
     return (
-        b"\x7fELF\x02\x01\x01\x00" + bytes(8)
+        b"\x7fELF\x02\x01\x01\x00"
+        + bytes(8)
         + struct.pack(
             "<HHIQQQIHHHHHH",
             ET_EXEC,
@@ -154,8 +155,17 @@ def implanted_elf() -> bytearray:
     new_shoff = len(image)
     image += (
         _shdr("", 0, 0, 0, 0, 0)
-        + _shdr(".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, IMAGE_BASE + TEXT_OFF, TEXT_OFF, len(_TEXT))
-        + _shdr(".note.gnu.build-id", SHT_NOTE, SHF_ALLOC, IMAGE_BASE + NOTE_OFF, NOTE_OFF, len(_NOTE))
+        + _shdr(
+            ".text",
+            SHT_PROGBITS,
+            SHF_ALLOC | SHF_EXECINSTR,
+            IMAGE_BASE + TEXT_OFF,
+            TEXT_OFF,
+            len(_TEXT),
+        )
+        + _shdr(
+            ".note.gnu.build-id", SHT_NOTE, SHF_ALLOC, IMAGE_BASE + NOTE_OFF, NOTE_OFF, len(_NOTE)
+        )
         + _shdr(".shstrtab", SHT_STRTAB, 0, 0, SHSTRTAB_OFF, len(_SHSTRTAB))
         + _shdr(
             ".payload",

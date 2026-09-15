@@ -41,9 +41,7 @@ def check_objc_load_methods(
     than a defect.
     """
     objc = metadata.get("objc_metadata") or {}
-    names = [
-        entry.get("name") for entry in objc.get("nonlazy_classes") or [] if entry.get("name")
-    ]
+    names = [entry.get("name") for entry in objc.get("nonlazy_classes") or [] if entry.get("name")]
     if not names:
         return True
     return ", ".join(sorted(names)[:10])
@@ -118,7 +116,9 @@ def _profile_or_clean(metadata: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def check_profile_expired(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+def check_profile_expired(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
     """Fails when the embedded profile's validity window closed.
 
     An expired profile stops the app from launching (or blocks distribution

@@ -124,8 +124,7 @@ def run_blint(
     blintdb_home: Path | None = None,
 ) -> None:
     blint_entry = (
-        "import sys; sys.argv = ['blint'] + sys.argv[1:];"
-        " from blint.cli import main; main()"
+        "import sys; sys.argv = ['blint'] + sys.argv[1:]; from blint.cli import main; main()"
     )
     env = dict(os.environ)
     if blintdb_home:
@@ -248,9 +247,7 @@ def strip_sbom_additive(payload: str) -> str:
             properties = node.get("properties")
             if isinstance(properties, list):
                 node["properties"] = [
-                    prop
-                    for prop in properties
-                    if prop.get("name") not in ADDITIVE_PROPERTY_NAMES
+                    prop for prop in properties if prop.get("name") not in ADDITIVE_PROPERTY_NAMES
                 ]
             for value in node.values():
                 walk(value)
@@ -330,9 +327,7 @@ def main() -> int:
                 str(work_dir / "meta-control"),
             ],
         )
-        control_metadata_file = next(
-            (work_dir / "meta-control").glob("*-metadata.json")
-        )
+        control_metadata_file = next((work_dir / "meta-control").glob("*-metadata.json"))
         runs.append(("control", control, control_metadata_file))
 
     for label, checkout in (("current", REPO_ROOT), ("base", other_checkout)):

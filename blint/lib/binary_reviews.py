@@ -218,7 +218,9 @@ def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
         elif callee in CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS:
             if argument != CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS[callee]:
                 continue
-            algorithm = CALLSITE_CRYPTO_ALGORITHM_VALUES.get(value) if isinstance(value, int) else None
+            algorithm = (
+                CALLSITE_CRYPTO_ALGORITHM_VALUES.get(value) if isinstance(value, int) else None
+            )
             if not algorithm:
                 continue
             item = {
@@ -257,12 +259,17 @@ def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
             }
         else:
             continue
-        key = (item["kind"], item["callee"], item.get("path") or item.get("algorithm") or item.get("port"))
+        key = (
+            item["kind"],
+            item["callee"],
+            item.get("path") or item.get("algorithm") or item.get("port"),
+        )
         if key in seen:
             continue
         seen.add(key)
         evidence.append(item)
     return evidence
+
 
 # Installing and starting a kernel service is how a BYOVD chain loads its driver.
 SERVICE_MANAGER_IMPORTS: set[str] = {

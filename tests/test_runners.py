@@ -119,9 +119,7 @@ def test_run_default_mode_exports_wasm_callgraph_artifacts(tmp_path):
     assert "<graphml" in graphml_file.read_text(encoding="utf-8")
     assert "<gexf" in gexf_file.read_text(encoding="utf-8")
 
-    metadata = orjson.loads(
-        (tmp_path / f"{wasm_file.name}-metadata.json").read_bytes()
-    )
+    metadata = orjson.loads((tmp_path / f"{wasm_file.name}-metadata.json").read_bytes())
     callgraph = metadata["callgraph"]
     assert callgraph["version"] == 2
     assert callgraph["node_count"] == 2
@@ -144,9 +142,7 @@ def test_run_default_mode_wasm_opt_outs(tmp_path):
     # The string-derived finding disappears with its evidence source, so no
     # findings report is produced at all for this input.
     assert not (tmp_path / "findings.json").exists()
-    wasm_report = orjson.loads(
-        (tmp_path / f"{secrets_file.name}-wasm-report.json").read_bytes()
-    )
+    wasm_report = orjson.loads((tmp_path / f"{secrets_file.name}-wasm-report.json").read_bytes())
     assert wasm_report["strings"] == []
 
     component_file = Path(__file__).resolve().parent / "data" / "component_minimal.wasm"
@@ -163,9 +159,7 @@ def test_run_default_mode_wasm_opt_outs(tmp_path):
     run_default_mode(options)
 
     assert not (tmp_path / f"{component_file.name}-callgraph.mmd").exists()
-    metadata = orjson.loads(
-        (tmp_path / f"{component_file.name}-metadata.json").read_bytes()
-    )
+    metadata = orjson.loads((tmp_path / f"{component_file.name}-metadata.json").read_bytes())
     assert "callgraph" not in metadata
 
 
@@ -209,9 +203,7 @@ def test_run_default_mode_renders_mermaid_callgraph(tmp_path, monkeypatch):
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr(
-        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
-    )
+    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr(
         "blint.lib.runners.run_checks",
         lambda _f, _m: [
@@ -272,9 +264,7 @@ def test_run_default_mode_renders_mermaid_without_findings(tmp_path, monkeypatch
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr(
-        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
-    )
+    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
     run_default_mode(options)
@@ -324,9 +314,7 @@ def test_run_default_mode_exports_graphml_and_gexf_callgraphs(tmp_path, monkeypa
     }
 
     monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
-    monkeypatch.setattr(
-        "blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata)
-    )
+    monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
     run_default_mode(options)

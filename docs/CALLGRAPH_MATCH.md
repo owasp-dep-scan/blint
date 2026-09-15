@@ -174,8 +174,8 @@ and returns a typed `MatchReport`:
 from blint.lib.callgraph import match_files, options_for_profile
 
 report = match_files(
-    source_dir="path/to/crate-source",   # or source_callgraph="callgraph.json"
-    binary="path/to/binary",              # or binary_metadata="metadata.json"
+    source_dir="path/to/crate-source",  # or source_callgraph="callgraph.json"
+    binary="path/to/binary",  # or binary_metadata="metadata.json"
     options=options_for_profile("precision"),
     language="rust",
     rusi_command="/path/to/rusi",

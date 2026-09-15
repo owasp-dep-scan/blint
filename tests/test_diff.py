@@ -44,7 +44,6 @@ needs_stackstr = pytest.mark.skipif(
 pytestmark = pytest.mark.slow
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic sides
 

@@ -114,7 +114,9 @@ def _der_cms(certificates: list[bytes], signer_serial: int, indefinite: bool = F
         content_info = (
             b"\x30\x80"
             + _der_oid("1.2.840.113549.1.7.2")
-            + b"\xa0\x80" + signed_data + b"\x00\x00"
+            + b"\xa0\x80"
+            + signed_data
+            + b"\x00\x00"
             + b"\x00\x00"
         )
     else:
@@ -207,9 +209,7 @@ def _der_entitlements(entries: dict) -> bytes:
         elif isinstance(val, list):
             inner = b""
             for item in val:
-                inner += (
-                    _der_utf8(item) if isinstance(item, str) else _der_int(item)
-                )
+                inner += _der_utf8(item) if isinstance(item, str) else _der_int(item)
             value = _der(0x30, inner)
         else:
             value = _der_utf8(val)
@@ -311,15 +311,9 @@ def test_unknown_hash_type_named_without_cdhash():
 
 
 def test_provenance_adhoc_and_linker_signed():
-    adhoc = parse_superblob(
-        _superblob([(0, _code_directory(flags=0x2))])
-    )
+    adhoc = parse_superblob(_superblob([(0, _code_directory(flags=0x2))]))
     assert adhoc["provenance"] == "adhoc"
-    linker = parse_superblob(
-        _superblob(
-            [(0, _code_directory(flags=0x20000 | 0x2))]
-        )
-    )
+    linker = parse_superblob(_superblob([(0, _code_directory(flags=0x20000 | 0x2))]))
     assert linker["provenance"] == "linker_signed"
 
 
@@ -575,7 +569,5 @@ def test_superblob_output_is_plain_json():
     ],
 )
 def test_provenance_matrix_without_cms(flags, expected):
-    detail = parse_superblob(
-        _superblob([(0, _code_directory(flags=flags))])
-    )
+    detail = parse_superblob(_superblob([(0, _code_directory(flags=flags))]))
     assert detail["provenance"] == expected

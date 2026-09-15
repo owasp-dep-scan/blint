@@ -100,11 +100,7 @@ def evaluate_sample(metadata: dict) -> set:
     reviewer = ReviewRunner()
     reviewer.run_review(metadata)
     results = reviewer.process_review("sample", "sample")
-    return {
-        result["id"]
-        for result in results
-        if result["id"].startswith(DRIVER_RULE_PREFIXES)
-    }
+    return {result["id"] for result in results if result["id"].startswith(DRIVER_RULE_PREFIXES)}
 
 
 def sample_key(sample: dict) -> str:
@@ -195,10 +191,7 @@ def main() -> int:
 
     print(f"samples evaluated:  {report['samples_evaluated']}")
     print(f"new since snapshot: {report['samples_new_since_snapshot']}")
-    print(
-        f"undetected:         {report['undetected_count']} "
-        f"({report['undetected_percent']}%)"
-    )
+    print(f"undetected:         {report['undetected_count']} ({report['undetected_percent']}%)")
     print("rule hits:")
     for hit in report["rule_hits"]:
         print(f"  {hit['rule']}: {hit['samples']} ({hit['percent']}%)")

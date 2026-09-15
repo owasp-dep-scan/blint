@@ -50,13 +50,16 @@ def _deviceioctl_func(assembly: str, name: str = "sub_1400") -> dict:
 def test_block_aggregates_distinct_triples_with_citations():
     functions = {
         "0x1400::a": _deviceioctl_func(
-            "mov edx, 2201297921\ncall qword ptr [rip + 4096]", name="a"  # 0x83352401
+            "mov edx, 2201297921\ncall qword ptr [rip + 4096]",
+            name="a",  # 0x83352401
         ),
         "0x1500::b": _deviceioctl_func(
-            "mov edx, 2201297921\ncall qword ptr [rip + 4096]", name="b"  # same code
+            "mov edx, 2201297921\ncall qword ptr [rip + 4096]",
+            name="b",  # same code
         ),
         "0x1600::c": _deviceioctl_func(
-            "mov edx, 2201297937\ncall qword ptr [rip + 4096]", name="c"  # 0x83352411
+            "mov edx, 2201297937\ncall qword ptr [rip + 4096]",
+            name="c",  # 0x83352411
         ),
     }
     entries, coverage = analyze_call_site_arguments(functions, "", "PE")
@@ -138,23 +141,32 @@ def test_binary_cap_trips_and_is_named(monkeypatch):
 
 
 def test_zero_max_entries_disables_the_block():
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     entries, coverage = analyze_call_site_arguments(functions, "", "PE", max_entries=0)
     assert entries == []
     assert coverage["max_entries"] == 0
 
 
 def test_resolver_seams_strings_into_entries():
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     entries, _ = analyze_call_site_arguments(
-        functions, "", "PE", resolve_string=lambda value: "0x83352401" if value == 0x83352401 else None
+        functions,
+        "",
+        "PE",
+        resolve_string=lambda value: "0x83352401" if value == 0x83352401 else None,
     )
     assert entries[0]["string"] == "0x83352401"
 
 
 def test_default_entry_bound_is_exported_and_overridable(monkeypatch):
     monkeypatch.setenv("BLINT_MAX_CALLSITE_ARGUMENTS", "7")
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     _, coverage = analyze_call_site_arguments(functions, "", "PE")
     assert coverage["max_entries"] == 7
     monkeypatch.delenv("BLINT_MAX_CALLSITE_ARGUMENTS")
@@ -244,7 +256,13 @@ def test_capability_rule_names_path_algorithm_and_port():
                 "string": "\\\\.\\PhysicalDrive0",
                 "functions": ["open_device"],
             },
-            {"callee": "CCCrypt", "argument": 1, "value": 4, "functions": ["crypt"], "string": None},
+            {
+                "callee": "CCCrypt",
+                "argument": 1,
+                "value": 4,
+                "functions": ["crypt"],
+                "string": None,
+            },
             {
                 "callee": "bcrypt.dll::BCryptOpenAlgorithmProvider",
                 "argument": 1,
@@ -273,7 +291,13 @@ def test_capability_rule_stays_quiet_on_uninterpretable_positions():
         [
             # Right callee, wrong position: lpFileName is argument 0, so a
             # string sitting in dwShareMode's position is not a path.
-            {"callee": "CreateFileW", "argument": 2, "value": 1, "string": "x", "functions": ["f"]},
+            {
+                "callee": "CreateFileW",
+                "argument": 2,
+                "value": 1,
+                "string": "x",
+                "functions": ["f"],
+            },
             # Path callee whose constant resolved to no string.
             {"callee": "CreateFileW", "argument": 0, "value": 42, "functions": ["f"]},
             # Crypto callee whose constant is no documented algorithm.
@@ -315,9 +339,7 @@ def test_pointer_string_resolver_reads_a_real_image():
     if parsed is None:  # pragma: no cover - platform without the fixture
         pytest.skip("/bin/ls is not parseable here")
     resolve = _pointer_string_resolver(parsed)
-    section = next(
-        (s for s in parsed.sections if s.name == "__cstring" and s.size), None
-    )
+    section = next((s for s in parsed.sections if s.name == "__cstring" and s.size), None)
     if section is None:  # pragma: no cover - no C string section
         pytest.skip("no __cstring section")
     blob = bytes(parsed.get_content_from_virtual_address(section.virtual_address, 4096))

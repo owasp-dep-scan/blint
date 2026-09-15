@@ -46,9 +46,19 @@ STRIP = str(Path(LLVM_PREFIX) / "bin" / "llvm-strip")
 
 PROJECTS = (
     # (name, purl, url, build kind)
-    ("zlib", "pkg:generic/zlib@1.3.1", "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz", "zlib"),
+    (
+        "zlib",
+        "pkg:generic/zlib@1.3.1",
+        "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
+        "zlib",
+    ),
     ("lua", "pkg:generic/lua@5.4.6", "https://www.lua.org/ftp/lua-5.4.6.tar.gz", "lua"),
-    ("sqlite3", "pkg:generic/sqlite@3.46.0", "https://www.sqlite.org/2024/sqlite-amalgamation-3460000.zip", "sqlite"),
+    (
+        "sqlite3",
+        "pkg:generic/sqlite@3.46.0",
+        "https://www.sqlite.org/2024/sqlite-amalgamation-3460000.zip",
+        "sqlite",
+    ),
     ("cjson", "pkg:generic/cjson@1.7.18", None, "cjson"),
     # miniz is built but intentionally NOT ingested: it must stay absent from
     # the database so queries linked against it probe false attribution.
@@ -84,18 +94,46 @@ def build_project(kind: str, src_dir: Path, out: Path) -> None:
         run(["make", "libz.a"], cwd=src_dir, env=env, stdout=subprocess.DEVNULL)
         shutil.copy(src_dir / "libz.a", out)
     elif kind == "lua":
-        run(["make", "-s", "macosx", "MYCFLAGS=-O2", "-j4"], cwd=src_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run(
+            ["make", "-s", "macosx", "MYCFLAGS=-O2", "-j4"],
+            cwd=src_dir,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         shutil.copy(src_dir / "src" / "liblua.a", out)
     elif kind == "sqlite":
-        run([CLANG, *ARCH, "-O2", "-DSQLITE_ENABLE_FTS4", "-DSQLITE_ENABLE_RTREE", "-c", "sqlite-amalgamation-3460000/sqlite3.c", "-o", "sqlite3.o"], cwd=src_dir, env=env)
+        run(
+            [
+                CLANG,
+                *ARCH,
+                "-O2",
+                "-DSQLITE_ENABLE_FTS4",
+                "-DSQLITE_ENABLE_RTREE",
+                "-c",
+                "sqlite-amalgamation-3460000/sqlite3.c",
+                "-o",
+                "sqlite3.o",
+            ],
+            cwd=src_dir,
+            env=env,
+        )
         run(["ar", "cru", str(out), "sqlite3.o"], cwd=src_dir)
     elif kind == "cjson":
         run([CLANG, *ARCH, "-O2", "-I.", "-c", "cJSON.c", "-o", "cJSON.o"], cwd=src_dir, env=env)
         run(["ar", "cru", str(out), "cJSON.o"], cwd=src_dir)
     elif kind == "miniz":
         run([CLANG, *ARCH, "-O2", "-I.", "-c", "miniz.c", "-o", "miniz.o"], cwd=src_dir, env=env)
-        run([CLANG, *ARCH, "-O2", "-I.", "-c", "miniz_tdef.c", "-o", "miniz_tdef.o"], cwd=src_dir, env=env)
-        run([CLANG, *ARCH, "-O2", "-I.", "-c", "miniz_tinfl.c", "-o", "miniz_tinfl.o"], cwd=src_dir, env=env)
+        run(
+            [CLANG, *ARCH, "-O2", "-I.", "-c", "miniz_tdef.c", "-o", "miniz_tdef.o"],
+            cwd=src_dir,
+            env=env,
+        )
+        run(
+            [CLANG, *ARCH, "-O2", "-I.", "-c", "miniz_tinfl.c", "-o", "miniz_tinfl.o"],
+            cwd=src_dir,
+            env=env,
+        )
         run(["ar", "cru", str(out), "miniz.o", "miniz_tdef.o", "miniz_tinfl.o"], cwd=src_dir)
 
 
@@ -132,7 +170,10 @@ def main() -> None:
         if not archive.exists():
             if kind == "cjson":
                 for fname in ("cJSON.c", "cJSON.h"):
-                    download(f"https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.18/{fname}", project_dir / fname)
+                    download(
+                        f"https://raw.githubusercontent.com/DaveGamble/cJSON/v1.7.18/{fname}",
+                        project_dir / fname,
+                    )
                 build_project(kind, project_dir, archive)
             elif kind == "miniz":
                 tarball = project_dir / "miniz-2.1.0.tar.gz"
@@ -171,7 +212,17 @@ def main() -> None:
         binary = apps_dir / app
         why_load = apps_dir / f"gt-{app}.txt"
         result = subprocess.run(
-            [CLANG, *ARCH, "-O2", *include_args, str(apps_dir / source), *[str(p) for p in lib_paths], "-Wl,-why_load", "-o", str(binary)],
+            [
+                CLANG,
+                *ARCH,
+                "-O2",
+                *include_args,
+                str(apps_dir / source),
+                *[str(p) for p in lib_paths],
+                "-Wl,-why_load",
+                "-o",
+                str(binary),
+            ],
             cwd=apps_dir,
             capture_output=True,
             text=True,
@@ -179,13 +230,11 @@ def main() -> None:
         )
         if result.returncode:
             raise SystemExit(f"link failed for {app}: {result.stderr[:2000]}")
-        loaded = [
-            line
-            for line in result.stderr.splitlines()
-            if "caused load of" in line
-        ]
+        loaded = [line for line in result.stderr.splitlines() if "caused load of" in line]
         why_load.write_text("\n".join(loaded))
-        ground_truth[app] = sorted({part.split("(")[-1].rstrip(")") for line in loaded for part in [line] if "(" in line})
+        ground_truth[app] = sorted(
+            {part.split("(")[-1].rstrip(")") for line in loaded for part in [line] if "(" in line}
+        )
         run([STRIP, str(binary)])
 
     db_file = out_dir / "blintdb-v4.db"
@@ -198,10 +247,18 @@ def main() -> None:
         if purl is None:
             continue
         ingest_binary_file(
-            str(archives[name]), db_file=str(db_file), project_name=name, project_purl=purl, disassemble=True
+            str(archives[name]),
+            db_file=str(db_file),
+            project_name=name,
+            project_purl=purl,
+            disassemble=True,
         )
         members = ingest_archive_members(
-            str(archives[name]), db_file=str(db_file), project_name=name, project_purl=purl, disassemble=True
+            str(archives[name]),
+            db_file=str(db_file),
+            project_name=name,
+            project_purl=purl,
+            disassemble=True,
         )
         print(f"ingested {name}: {len(members)} members")
 

@@ -56,7 +56,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.slow
 
 
-
 def _assert_replay_equals_cold(warm: dict, cold: dict) -> None:
     """Hold a cached replay to the determinism standard, in the export domain.
 
@@ -297,9 +296,7 @@ def _corpus_files():
     corpus = REPO_ROOT / "corpus-build"
     if not corpus.is_dir():
         return []
-    return sorted(
-        p.name for p in corpus.iterdir() if p.is_file() and not p.name.startswith(".")
-    )
+    return sorted(p.name for p in corpus.iterdir() if p.is_file() and not p.name.startswith("."))
 
 
 @pytest.mark.parametrize(
@@ -643,8 +640,7 @@ def test_lru_eviction_honors_size_bound(tmp_path):
     assert cache.put("cc" * 32, "d", {"binary_type": "ELF", "blob": _incompressible_blob(3)})
 
     survivors = {
-        row[0]
-        for row in cache._connection().execute("SELECT file_sha256 FROM ParseCache")
+        row[0] for row in cache._connection().execute("SELECT file_sha256 FROM ParseCache")
     }
     # The least-recently-used entry (aa, never touched) must be evicted
     # first, and the just-stored entry must survive the pass.
