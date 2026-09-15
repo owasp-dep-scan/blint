@@ -4187,14 +4187,23 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     format-aware fact the format-agnostic recovery cannot know for itself.
     Results are memoized per constant because the same value is recovered at
     many call sites.
+
+    PE sections carry RVAs while the disassembly and the constants it
+    recovers live at absolute VAs — with the default image base a PE names
+    every address ``0x140...``, above any RVA the sections report — so the
+    image base is added to the ranges before the comparison. ELF and Mach-O
+    sections already carry absolute addresses and contribute nothing.
     """
     ranges: list[tuple[int, int]] = []
+    imagebase = 0
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        imagebase = int(parsed_obj.optional_header.imagebase or 0)
     with contextlib.suppress(AttributeError, TypeError, ValueError):
         for section in parsed_obj.sections:
             va = int(section.virtual_address or 0)
             size = int(section.size or 0)
             if va and size:
-                ranges.append((va, va + size))
+                ranges.append((va + imagebase, va + imagebase + size))
     ranges.sort()
     resolved: dict[int, str | None] = {}
 

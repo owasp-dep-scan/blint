@@ -326,18 +326,22 @@ def test_iteration_cap_yields_no_records(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _pe64_image(code: bytes) -> bytes:
+def _pe64_image(code: bytes, import_name: bytes = b"DeviceIoControl", rdata: bytes = b"") -> bytes:
     """Wrap .text machine code into a minimal PE64 image whose export
-    ``IoDispatch`` is the entry the disassembler is pointed at."""
+    ``IoDispatch`` is the entry the disassembler is pointed at. ``import_name``
+    is the single KERNEL32.dll import the IAT resolves; ``rdata``, when given,
+    becomes a .rdata section at RVA 0x2400 holding string literals the code
+    can point a rip-relative lea at."""
     image_base, text_rva, idata_rva = 0x140000000, 0x1000, 0x2000
-    text_file, idata_file = 0x200, 0x400
+    rdata_rva = 0x2400
+    text_file, idata_file, rdata_file = 0x200, 0x400, 0x600
 
     idata = bytearray(0x200)
     struct.pack_into("<IIIII", idata, 0x00, 0x2028, 0, 0, 0x2060, 0x2030)
     struct.pack_into("<II", idata, 0x28, idata_rva + 0x40, 0)   # INT
     struct.pack_into("<II", idata, 0x30, idata_rva + 0x40, 0)   # IAT
     idata[0x40:0x42] = b"\x00\x00"
-    idata[0x42:0x42 + 16] = b"DeviceIoControl\x00"
+    idata[0x42:0x42 + 16] = import_name.ljust(16, b"\x00")[:15] + b"\x00"
     idata[0x60:0x60 + 13] = b"KERNEL32.dll\x00"
     export_rva = idata_rva + 0x100
     struct.pack_into(
@@ -354,7 +358,6 @@ def _pe64_image(code: bytes) -> bytes:
     dos = bytearray(0x80)
     dos[0:2] = b"MZ"
     struct.pack_into("<I", dos, 0x3C, 0x80)
-    coff = struct.pack("<HHIIIHH", 0x8664, 2, 0, 0, 0, 0xF0, 0x0022)
     opt = bytearray(0xF0)
     struct.pack_into("<H", opt, 0x00, 0x20B)
     struct.pack_into("<I", opt, 0x04, len(code))
@@ -383,6 +386,11 @@ def _pe64_image(code: bytes) -> bytes:
         section(b".text", len(code), text_rva, 0x200, text_file, 0x60000020),
         section(b".idata", len(idata), idata_rva, 0x200, idata_file, 0xC0000040),
     ]
+    if rdata:
+        sections.append(
+            section(b".rdata", len(rdata), rdata_rva, 0x200, rdata_file, 0x40000040)
+        )
+    coff = struct.pack("<HHIIIHH", 0x8664, len(sections), 0, 0, 0, 0xF0, 0x0022)
     headers = (
         bytes(dos) + b"PE\x00\x00" + coff + bytes(opt) + b"".join(sections)
     ).ljust(0x200, b"\x00")
@@ -390,6 +398,8 @@ def _pe64_image(code: bytes) -> bytes:
     image[0:len(headers)] = headers
     image[text_file:text_file + len(code)] = code
     image[idata_file:idata_file + len(idata)] = idata
+    if rdata:
+        image[rdata_file:rdata_file + len(rdata)] = rdata
     return bytes(image)
 
 
@@ -674,6 +684,69 @@ def test_pe64_client_exports_callsite_block(tmp_path):
     # Coverage names every function's analysis method; nothing is silent.
     coverage = metadata.get("call_site_arguments_coverage") or {}
     assert coverage.get("functions_total") == len(metadata.get("disassembled_functions") or {})
+
+
+def _pe64_wide_client() -> bytes:
+    """A PE64 client that opens a device by wide name: IoDispatch points
+    ``lea rcx`` at a UTF-16LE ``\\\\.\\\\CONOUT$`` literal in .rdata and calls
+    KERNEL32.dll!CreateFileW through the IAT — the CreateFileW shape the
+    path-argument table exists for, wide from end to end."""
+    image_base, text_rva = 0x140000000, 0x1000
+    idata_rva, rdata_rva = 0x2000, 0x2400
+    iat_slot = image_base + idata_rva + 0x30
+    rdata = "\\\\.\\CONOUT$".encode("utf-16-le") + b"\x00\x00"
+    rdata_va = image_base + rdata_rva
+
+    code = b""
+    code += b"\x55"                          # push rbp
+    code += b"\x48\x89\xe5"                  # mov rbp, rsp
+    code += b"\x48\x83\xec\x20"              # sub rsp, 0x20
+    nxt = image_base + text_rva + len(code) + 7
+    code += b"\x48\x8d\x0d" + struct.pack("<i", rdata_va - nxt)  # lea rcx, [rip+..]
+    code += b"\xba\x00\x00\x00\x40"          # mov edx, GENERIC_WRITE
+    code += b"\x45\x33\xc0"                  # xor r8d, r8d
+    code += b"\x45\x33\xc9"                  # xor r9d, r9d
+    nxt = image_base + text_rva + len(code) + 6
+    code += b"\xff\x15" + struct.pack("<i", iat_slot - nxt)      # call [rip+..]
+    code += b"\x31\xc0"                      # xor eax, eax
+    code += b"\xc9"                          # leave
+    code += b"\xc3"                          # ret
+    return _pe64_image(code, import_name=b"CreateFileW", rdata=rdata)
+
+
+def test_pe64_wide_client_resolves_the_path_argument(tmp_path):
+    """A wide literal reaching CreateFileW's lpFileName, end to end.
+
+    Machine-code ground truth for the pointer-string lane's Windows half:
+    the constant the dataflow recovers at argument 0 is the absolute VA of
+    a UTF-16LE literal (PE sections report RVAs, so the resolver must add
+    the image base to even see it), and the block's ``string`` field carries
+    the decoded text — which the ASCII-only decoder this test replaced could
+    never produce, leaving every CreateFileW/CreateFile2/BCryptOpenAlgorithm-
+    Provider entry in the P4.7 tables permanently silent.
+    """
+    from blint.lib.binary import parse
+    from blint.lib.binary_reviews import _evaluate_callsite_constant_arguments
+
+    nyxstone_imports()
+    exe = tmp_path / "client_pe64_wide.exe"
+    exe.write_bytes(_pe64_wide_client())
+    metadata = parse(str(exe), disassemble=True)
+    block = metadata.get("call_site_arguments") or []
+    path_entries = [
+        entry
+        for entry in block
+        if "createfilew" in str(entry.get("callee", "")).lower()
+        and entry.get("argument") == 0
+    ]
+    assert len(path_entries) == 1
+    entry = path_entries[0]
+    assert entry["value"] == 0x140002400  # the literal's absolute VA
+    assert entry["string"] == "\\\\.\\CONOUT$"
+    assert (metadata.get("call_site_arguments_coverage") or {}).get("strings_resolved") == 1
+    # The capability rule reads the block and names the path it opens.
+    evidence = _evaluate_callsite_constant_arguments(metadata)
+    assert [(item["kind"], item["path"]) for item in evidence] == [("path", "\\\\.\\CONOUT$")]
 
 
 def nyxstone_imports():

@@ -80,7 +80,10 @@ from blint.logger import LOG
 # Bumped for P5.1: Mach-O function metadata is normalized to the virtual
 # address space, so function addresses, sub_<addr> names, disassembly keys
 # and discovery records all change value for unchanged inputs.
-CACHE_SCHEMA_VERSION = 4
+# Bumped for P5.2: the pointer-string resolver reads PE strings at all
+# (image-base offset) and decodes UTF-16LE, so call_site_arguments `string`
+# fields change value for unchanged PE inputs.
+CACHE_SCHEMA_VERSION = 5
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

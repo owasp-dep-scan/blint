@@ -1710,26 +1710,68 @@ MAX_CALLSITE_SITES_PER_ENTRY = 3
 MAX_NAMED_CAPPED_FUNCTIONS = 20
 
 
+def _wide_terminated_prefix(data: bytes) -> bytes:
+    """Return the bytes up to the first aligned UTF-16 NUL terminator.
+
+    Pairs are formed from the first byte of the run, so the terminator is a
+    ``\\x00\\x00`` at an even offset — the same bytes straddling odd offsets
+    are data, not a terminator. A run with no terminator yields its
+    even-length prefix: a trailing odd byte cannot be half of a character,
+    which is :func:`_decode_one`'s rule for the same situation.
+    """
+    end = len(data) - (len(data) % 2)
+    for i in range(0, end, 2):
+        if data[i] == 0 and data[i + 1] == 0:
+            return data[:i]
+    return data[:end]
+
+
 def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
-    """Decode the NUL-terminated ASCII run at the start of ``data``.
+    """Decode the NUL-terminated text run at the start of ``data``.
 
     The shared decoder for naming what a recovered call-site constant points
-    at: the same character filter as the stack-string decoder applies (only
-    path-, registry- and API-relevant characters pass), with a longer minimum
-    because a constant that happens to land on three printable bytes is too
-    easy to manufacture. Returns None when the bytes do not read as text.
+    at, reading both encodings a pointed-at literal uses — ASCII and
+    UTF-16LE — under the stack-string decoder's policy (:func:`_decode_run`):
+    both encodings are tried and the longer valid reading kept, the wide
+    attempt waits for ``min_length * 2`` bytes (a wide character costs two),
+    and the same character filter applies (:func:`_looks_like_text`), with a
+    longer minimum than the stack-string path because a constant that happens
+    to land on three printable bytes is too easy to manufacture. The minimum
+    counts decoded characters for both encodings. The two encodings cannot
+    both be valid: the filter is ASCII-only, so a valid wide reading forces
+    every high byte to zero and truncates the ASCII reading at one byte,
+    while a valid ASCII reading puts a non-zero byte inside the first wide
+    pair. Byte order is LE only, matching the decoder this policy comes from
+    and every Windows target the dataflow recovers constants for.
+
+    The terminator is located *before* decoding, unlike :func:`_decode_one`,
+    which decodes its whole input and splits afterwards: a pointer read is a
+    fixed-size window that continues past the string into whatever follows it
+    in the section, and under a whole-run decode a non-ASCII byte after an
+    ASCII string's NUL — or a lone surrogate after a wide string's — would
+    veto an otherwise valid reading. Returns None when the bytes do not read
+    as text in either encoding.
     """
     if not data:
         return None
-    nul = data.find(b"\x00")
-    usable = data[:nul] if nul != -1 else data
-    try:
-        text = usable.decode("ascii")
-    except UnicodeDecodeError:
-        return None
-    if len(text) < min_length or not _looks_like_text(text):
-        return None
-    return text
+    best: str | None = None
+    for encoding in ("utf-16-le", "ascii"):
+        if encoding == "utf-16-le":
+            if len(data) < min_length * 2:
+                continue
+            usable = _wide_terminated_prefix(data)
+        else:
+            nul = data.find(b"\x00")
+            usable = data if nul == -1 else data[:nul]
+        try:
+            text = usable.decode(encoding)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if len(text) < min_length or not _looks_like_text(text):
+            continue
+        if best is None or len(text) > len(best):
+            best = text
+    return best
 
 
 def analyze_call_site_arguments(
