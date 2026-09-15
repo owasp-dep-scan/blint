@@ -1,0 +1,20 @@
+tests/scripts/README.md
+  h_6a4cc5cdf68def 1-65
+tests/scripts/callgraph_kpi_baseline.py
+  h_6a4cc5cdf68def 2-19,32-35,45-64,67-73,104,121-135,149-161
+tests/scripts/verify_pointer_precision.py
+  h_6a4cc5cdf68def 4-9,15-39,41,47,49,62-85,101-103,119-233,236-241,243,247-255,258-266,268-271,286-287,306,327-329,344,346-356,404,413-414,428-429,446,449,457,488,501
+tests/test_verification_gates.py
+  h_6a4cc5cdf68def 1-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72c8d819c4bbf12c09e98e886fd6105ebca439ff",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
