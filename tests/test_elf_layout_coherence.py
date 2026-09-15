@@ -114,9 +114,7 @@ def test_entry_point_in_a_non_executable_section(tmp_path):
     image = clean_elf()
     # Point e_entry at the note section, which is SHF_ALLOC but not
     # SHF_EXECINSTR.
-    image[0 : fx.EHDR_SIZE] = fx._ehdr(
-        fx.IMAGE_BASE + fx.NOTE_OFF, fx.SHDR_OFF, 3, 4
-    )
+    image[0 : fx.EHDR_SIZE] = fx._ehdr(fx.IMAGE_BASE + fx.NOTE_OFF, fx.SHDR_OFF, 3, 4)
     metadata = parse(_write(tmp_path, "data-entry", image))
     assert "entry_point_in_non_executable_section" in _kinds(metadata)
     assert metadata["entry_point_section"] == ".note.gnu.build-id"

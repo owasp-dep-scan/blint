@@ -9,6 +9,7 @@ directory that tests/scripts/validate_funcdisc.py then runs assertions over.
 Usage:
     python tests/scripts/build_corpus.py [--dir corpus-build] [--force]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,8 +60,13 @@ def build_clang(spec: dict, out_dir: Path) -> list[str]:
     for post in spec.get("post") or []:
         if post["kind"] == "lipo":
             _run(
-                ["lipo", "-create", *map(lambda i: out_dir / i, post["inputs"]),
-                 "-output", out_dir / post["output"]]
+                [
+                    "lipo",
+                    "-create",
+                    *map(lambda i: out_dir / i, post["inputs"]),
+                    "-output",
+                    out_dir / post["output"],
+                ]
             )
             produced.append(post["output"])
         elif post["kind"] == "codesign":

@@ -50,13 +50,16 @@ def _deviceioctl_func(assembly: str, name: str = "sub_1400") -> dict:
 def test_block_aggregates_distinct_triples_with_citations():
     functions = {
         "0x1400::a": _deviceioctl_func(
-            "mov edx, 2201297921\ncall qword ptr [rip + 4096]", name="a"  # 0x83352401
+            "mov edx, 2201297921\ncall qword ptr [rip + 4096]",
+            name="a",  # 0x83352401
         ),
         "0x1500::b": _deviceioctl_func(
-            "mov edx, 2201297921\ncall qword ptr [rip + 4096]", name="b"  # same code
+            "mov edx, 2201297921\ncall qword ptr [rip + 4096]",
+            name="b",  # same code
         ),
         "0x1600::c": _deviceioctl_func(
-            "mov edx, 2201297937\ncall qword ptr [rip + 4096]", name="c"  # 0x83352411
+            "mov edx, 2201297937\ncall qword ptr [rip + 4096]",
+            name="c",  # 0x83352411
         ),
     }
     entries, coverage = analyze_call_site_arguments(functions, "", "PE")
@@ -138,23 +141,32 @@ def test_binary_cap_trips_and_is_named(monkeypatch):
 
 
 def test_zero_max_entries_disables_the_block():
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     entries, coverage = analyze_call_site_arguments(functions, "", "PE", max_entries=0)
     assert entries == []
     assert coverage["max_entries"] == 0
 
 
 def test_resolver_seams_strings_into_entries():
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     entries, _ = analyze_call_site_arguments(
-        functions, "", "PE", resolve_string=lambda value: "0x83352401" if value == 0x83352401 else None
+        functions,
+        "",
+        "PE",
+        resolve_string=lambda value: "0x83352401" if value == 0x83352401 else None,
     )
     assert entries[0]["string"] == "0x83352401"
 
 
 def test_default_entry_bound_is_exported_and_overridable(monkeypatch):
     monkeypatch.setenv("BLINT_MAX_CALLSITE_ARGUMENTS", "7")
-    functions = {"0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")}
+    functions = {
+        "0x1400::a": _deviceioctl_func("mov edx, 2201297921\ncall qword ptr [rip + 4096]")
+    }
     _, coverage = analyze_call_site_arguments(functions, "", "PE")
     assert coverage["max_entries"] == 7
     monkeypatch.delenv("BLINT_MAX_CALLSITE_ARGUMENTS")
@@ -244,7 +256,13 @@ def test_capability_rule_names_path_algorithm_and_port():
                 "string": "\\\\.\\PhysicalDrive0",
                 "functions": ["open_device"],
             },
-            {"callee": "CCCrypt", "argument": 1, "value": 4, "functions": ["crypt"], "string": None},
+            {
+                "callee": "CCCrypt",
+                "argument": 1,
+                "value": 4,
+                "functions": ["crypt"],
+                "string": None,
+            },
             {
                 "callee": "bcrypt.dll::BCryptOpenAlgorithmProvider",
                 "argument": 1,
@@ -273,7 +291,13 @@ def test_capability_rule_stays_quiet_on_uninterpretable_positions():
         [
             # Right callee, wrong position: lpFileName is argument 0, so a
             # string sitting in dwShareMode's position is not a path.
-            {"callee": "CreateFileW", "argument": 2, "value": 1, "string": "x", "functions": ["f"]},
+            {
+                "callee": "CreateFileW",
+                "argument": 2,
+                "value": 1,
+                "string": "x",
+                "functions": ["f"],
+            },
             # Path callee whose constant resolved to no string.
             {"callee": "CreateFileW", "argument": 0, "value": 42, "functions": ["f"]},
             # Crypto callee whose constant is no documented algorithm.
@@ -315,9 +339,7 @@ def test_pointer_string_resolver_reads_a_real_image():
     if parsed is None:  # pragma: no cover - platform without the fixture
         pytest.skip("/bin/ls is not parseable here")
     resolve = _pointer_string_resolver(parsed)
-    section = next(
-        (s for s in parsed.sections if s.name == "__cstring" and s.size), None
-    )
+    section = next((s for s in parsed.sections if s.name == "__cstring" and s.size), None)
     if section is None:  # pragma: no cover - no C string section
         pytest.skip("no __cstring section")
     blob = bytes(parsed.get_content_from_virtual_address(section.virtual_address, 4096))
@@ -346,6 +368,76 @@ def test_decode_pointer_string_rejects_residue():
     assert decode_pointer_string(b"abc\x00") is None
     assert decode_pointer_string(b"\x80\x81\x82\x83") is None
     assert decode_pointer_string(b"") is None
+
+
+def test_decode_pointer_string_reads_wide_strings():
+    """A pointed-at literal may be UTF-16LE (every CreateFileW-style API).
+
+    The wide reading uses the stack-string decoder's policy: attempted once
+    ``min_length * 2`` bytes exist, judged by the same character filter, and
+    kept only when it spells more than chance residue.
+    """
+    assert decode_pointer_string("CONOUT$".encode("utf-16-le") + b"\x00\x00") == "CONOUT$"
+    assert decode_pointer_string("/etc/passwd".encode("utf-16-le") + b"\x00\x00") == "/etc/passwd"
+    # The terminator is located before decoding: the pointer read is a fixed
+    # window that continues past the string, and what follows it in the
+    # section — wide text, non-ASCII bytes — must not veto the reading.
+    trailing = "next literal \xff\xfe".encode("utf-16-le") + b"\x00\xd8garbage"
+    assert (
+        decode_pointer_string("/etc/passwd".encode("utf-16-le") + b"\x00\x00" + trailing)
+        == "/etc/passwd"
+    )
+    # No terminator in the window: the even prefix is read, as the ASCII path
+    # reads an unterminated run, and a trailing odd byte is dropped.
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00") == "abcd"
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00e") == "abcd"
+    # A \x00\x00 straddling odd offsets is data, not a terminator: the pairs
+    # around it decode to non-text and the whole run is rejected.
+    assert decode_pointer_string(b"a\x00b\x00c\x00\x00d\x00e\x00f\x00") is None
+
+
+def test_decode_pointer_string_minimum_stays_a_character_count():
+    """The minimum counts decoded characters for both encodings.
+
+    A 3-character algorithm name (L"AES" reaching BCryptOpenAlgorithmProvider)
+    stays below the 4-character bar even though its wide encoding is 8 bytes:
+    the guard is on text, not on the bytes it cost.
+    """
+    assert decode_pointer_string("AES".encode("utf-16-le") + b"\x00\x00") is None
+    assert decode_pointer_string("SHA256".encode("utf-16-le") + b"\x00\x00") == "SHA256"
+    # ASCII-with-zero-padding residue must still spell four allowed
+    # characters, one of them a letter, to pass.
+    assert decode_pointer_string(b"1\x002\x003\x004\x00") is None
+    assert decode_pointer_string(b"a\x00b\x00c\x00") is None
+
+
+def test_decode_pointer_string_wide_residue_stays_out():
+    """The character filter is what keeps wide decoding honest.
+
+    Non-text bytes pair into well-formed CJK code points, and a wide run read
+    one byte out of phase does the same, so decoding success is not evidence
+    of a string — only the ASCII-only text filter separates them.
+    """
+    assert decode_pointer_string(b"\x80\x81\x82\x83\x84\x85\x86\x87") is None
+    assert decode_pointer_string(b"\xe4\xbd\xe0\xa0\xe4\xb8\x96\xe7\x95\x8c") is None
+    # A high byte set on any pair makes that character non-ASCII.
+    assert decode_pointer_string(b"a\x01b\x01c\x01d\x01") is None
+
+
+def test_decode_pointer_string_encodings_are_mutually_exclusive():
+    """One run never decodes validly as both encodings.
+
+    A valid wide reading spells ASCII-only characters (the filter admits
+    nothing else), so every high byte is zero and the ASCII reading truncates
+    at byte one; a valid ASCII reading of min_length characters puts a
+    non-zero byte inside the first wide pair, making it non-ASCII. The
+    longer-valid-wins rule is therefore inherited policy, not a live
+    tie-break.
+    """
+    # Pure ASCII: the wide reading of the same bytes is CJK and loses.
+    assert decode_pointer_string(b"abcdefgh\x00") == "abcdefgh"
+    # Zero-padded: the ASCII reading truncates to one character, wide wins.
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00") == "abcd"
 
 
 def test_driver_codes_fall_back_when_the_block_is_absent_or_truncated():

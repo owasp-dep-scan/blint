@@ -14,7 +14,10 @@ import blint.lib.binary as binary_module
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 
 from blint.lib.binary import (
+    _macho_address_to_virtual,
+    _macho_content_segment_ranges,
     _macho_signature_blob,
+    _normalize_macho_function_list,
     _parse_address,
     build_disassembly_callgraph_metadata,
     build_wasm_callgraph,
@@ -77,6 +80,286 @@ def test_merge_function_starts_adds_unnamed_and_reuses_symbol_names():
     assert by_addr["0x5000"] == "main"
     assert by_addr["0x6000"] == "sub_6000"
     assert len(merged) == 3
+
+
+class _FakeSegmentLayout:
+    """A Mach-O segment stand-in exposing the range fields the classifier reads."""
+
+    def __init__(self, name, va, vsz, fo, fsz):
+        self.name = name
+        self.virtual_address = va
+        self.virtual_size = vsz
+        self.file_offset = fo
+        self.file_size = fsz
+
+
+class _FakeBinaryWithSegments:
+    """A Mach-O stand-in with segment ranges, imagebase and function starts."""
+
+    def __init__(self, segments, imagebase, starts=None):
+        self._segments = segments
+        self.imagebase = imagebase
+        self.function_starts = _FakeFunctionStarts(starts or [])
+
+    @property
+    def segments(self):
+        return self._segments
+
+
+def _x264_like_layout():
+    """The segment layout shape of a PIE executable such as x264.
+
+    __TEXT spans file [0, 0x20000) and virtual [0x100000000, 0x100020000);
+    __PAGEZERO maps the whole low half virtually but carries no file bytes.
+    """
+    return [
+        _FakeSegmentLayout("__PAGEZERO", 0, 0x100000000, 0, 0),
+        _FakeSegmentLayout("__TEXT", 0x100000000, 0x20000, 0, 0x20000),
+    ]
+
+
+def test_macho_address_space_detection_from_segment_ranges():
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    assert ranges is not None
+    virtual, file = ranges
+    # __PAGEZERO contributes no range at all: it has no file content.
+    assert file == [(0, 0x20000)]
+    assert virtual == [(0x100000000, 0x100020000)]
+
+    ib = 0x100000000
+    # A symtab-style address inside the virtual range is already absolute.
+    assert _macho_address_to_virtual(0x10000DDD4, ranges, ib) == 0x10000DDD4
+    # A function-starts offset inside the file range is file-relative and is
+    # rebased by the imagebase.
+    assert _macho_address_to_virtual(0xDDD4, ranges, ib) == 0x10000DDD4
+    # Addresses in neither range are returned unchanged for the caller to
+    # count, not guessed at.
+    assert _macho_address_to_virtual(0x50000000, ranges, ib) == 0x50000000
+
+
+def test_macho_address_space_detection_coinciding_ranges():
+    # A dylib-style image (imagebase 0): virtual and file ranges coincide, so
+    # an address in both is the same number in either space and stays put.
+    layout = [_FakeSegmentLayout("__TEXT", 0, 0x20000, 0, 0x20000)]
+    fake = _FakeBinaryWithSegments(layout, 0)
+    ranges = _macho_content_segment_ranges(fake)
+    assert _macho_address_to_virtual(0x1234, ranges, 0) == 0x1234
+
+
+def test_macho_address_space_detection_ambiguous_overlap_is_left_alone():
+    # Overlapping virtual/file ranges with a non-zero imagebase: the image
+    # cannot say which space the address is in, so it must be returned
+    # unchanged rather than rebased on a guess.
+    layout = [
+        _FakeSegmentLayout("__TEXT", 0x1000, 0x20000, 0, 0x20000),
+    ]
+    fake = _FakeBinaryWithSegments(layout, 0x1000)
+    ranges = _macho_content_segment_ranges(fake)
+    # 0x1800 is inside both the virtual range [0x1000, 0x21000) and the file
+    # range [0, 0x20000).
+    assert _macho_address_to_virtual(0x1800, ranges, 0x1000) == 0x1800
+
+
+def test_macho_pagezero_does_not_swallow_relative_addresses():
+    # The negative fixture for the classifier: a reader that counted
+    # __PAGEZERO's virtual range (it covers the entire low half of the
+    # address space) would classify every file-relative address as absolute
+    # and never rebase anything.
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    assert _macho_address_to_virtual(0xDDD4, ranges, 0x100000000) == 0x10000DDD4
+
+
+def test_normalize_macho_function_list_rebases_and_renames_synthetic_names():
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    functions = [
+        {"index": 0, "name": "_main", "address": "0x100000a80", "size": 0, "flags": None},
+        {"index": 1, "name": "sub_ddd4", "address": "0xddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    by_name = {f["name"]: f for f in normalized}
+    # The relative entry is rebased, and its synthetic name — which encodes
+    # the pre-rebase address — is renamed to stay consistent with it.
+    assert by_name["sub_10000ddd4"]["address"] == "0x10000ddd4"
+    assert by_name["sub_10000ddd4"]["size"] == 76
+    assert stats["rebased"] == 1
+    assert stats["ambiguous"] == 0
+    assert stats["unresolved"] == 0
+    # Indexes are re-assigned in list order.
+    assert [f["index"] for f in normalized] == [0, 1]
+
+
+def test_normalize_macho_function_list_merges_synthetic_duplicate_of_named():
+    # The x264 bug in miniature: one function twice — named from the symtab
+    # (absolute) and sub_* from function_starts (file-relative).
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    functions = [
+        {"index": 0, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 613, "name": "sub_ddd4", "address": "0xddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    entry = normalized[0]
+    assert entry["name"] == "_x264_mdate"
+    assert entry["address"] == "0x10000ddd4"
+    # The synthetic twin's exact size survives the merge.
+    assert entry["size"] == 76
+    assert stats["duplicates_merged"] == 1
+    assert stats["names_recovered"] == 1
+
+
+def test_normalize_macho_function_list_keeps_two_named_entries_at_one_address():
+    # Two genuinely named entries at one address are aliases, not the
+    # two-source duplicate: both are kept, as every earlier version did.
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    functions = [
+        {"index": 0, "name": "_real", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 1, "name": "_alias", "address": "0x10000ddd4", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert sorted(f["name"] for f in normalized) == ["_alias", "_real"]
+    assert stats["duplicates_merged"] == 0
+
+
+def test_normalize_macho_function_list_merges_same_symbol_from_two_tables():
+    # /usr/bin/swift in miniature: one symbol reaches an address from two
+    # tables, so both copies carry the same name and only one carries the
+    # size. Same name at one address is one function, not an alias pair.
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    functions = [
+        {"index": 0, "name": "_main", "address": "0x100000680", "size": 173, "flags": None},
+        {"index": 1, "name": "_main", "address": "0x100000680", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    assert normalized[0]["size"] == 173
+    assert stats["duplicates_merged"] == 1
+
+
+def test_normalize_macho_function_list_nameless_entry_loses_to_symbol():
+    # lief leaves some aggregate entries nameless. An absent name identifies
+    # nothing, so it must rank with sub_<addr> rather than survive alongside
+    # the real symbol at the same address.
+    ranges = _macho_content_segment_ranges(
+        _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000)
+    )
+    functions = [
+        {"index": 0, "name": "", "address": "0x10000ddd4", "size": 0, "flags": None},
+        {"index": 1, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 76, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x100000000)
+    assert len(normalized) == 1
+    assert normalized[0]["name"] == "_x264_mdate"
+    assert stats["names_recovered"] == 1
+
+
+def test_normalize_macho_function_list_counts_unplaceable_addresses():
+    # Addresses the segment ranges cannot place (in both ranges with a
+    # non-zero imagebase, or in neither) are left unchanged and counted.
+    overlapping = [_FakeSegmentLayout("__TEXT", 0x1000, 0x20000, 0, 0x20000)]
+    ranges = _macho_content_segment_ranges(_FakeBinaryWithSegments(overlapping, 0x1000))
+    functions = [
+        {"index": 0, "name": "sub_1800", "address": "0x1800", "size": 0, "flags": None},
+        {"index": 1, "name": "_far", "address": "0x50000000", "size": 0, "flags": None},
+    ]
+    normalized, stats = _normalize_macho_function_list(functions, ranges, 0x1000)
+    by_name = {f["name"]: f for f in normalized}
+    assert by_name["sub_1800"]["address"] == "0x1800"
+    assert by_name["_far"]["address"] == "0x50000000"
+    assert stats["ambiguous"] == 1
+    assert stats["unresolved"] == 1
+    assert stats["rebased"] == 0
+
+
+def test_merge_function_starts_rebases_starts_and_dedupes_across_spaces():
+    # lief's aggregate holds the symtab entry (absolute); the load command
+    # holds the same function as a file-relative offset. The merge must
+    # rebase the start, recognise the duplicate and not append it.
+    parsed = _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000, starts=[0xDDD4, 0x2000])
+    functions = [
+        {"index": 0, "name": "_x264_mdate", "address": "0x10000ddd4", "size": 0, "flags": None},
+    ]
+    symtab = [{"short_name": "_sym_at_2000", "address": "0x100002000"}]
+    merged = merge_macho_function_starts(functions, symtab, parsed)
+    by_addr = {f["address"]: f["name"] for f in merged}
+    assert by_addr == {"0x10000ddd4": "_x264_mdate", "0x100002000": "_sym_at_2000"}
+    # A start with no surviving symbol is synthesised with the virtual address.
+    parsed = _FakeBinaryWithSegments(_x264_like_layout(), 0x100000000, starts=[0x3000])
+    merged = merge_macho_function_starts([], [], parsed)
+    assert [(f["name"], f["address"]) for f in merged] == [("sub_100003000", "0x100003000")]
+
+
+def test_merge_function_starts_names_nameless_entries_from_symtab():
+    # lief's aggregate can keep an entry's address but drop its symbol name;
+    # the symtab still has the name and the merge adopts it (on an unstripped
+    # dylib this is the difference between reading as symbolized and reading
+    # as stripped).
+    parsed = _FakeBinaryWithSegments(
+        [_FakeSegmentLayout("__TEXT", 0, 0x20000, 0, 0x20000)], 0, starts=[0x1234]
+    )
+    functions = [
+        {"index": 0, "name": None, "address": "0x1234", "size": 0, "flags": None},
+        {"index": 1, "name": "sub_5678", "address": "0x5678", "size": 0, "flags": None},
+    ]
+    symtab = [
+        {"short_name": "_real_name", "address": "0x1234"},
+        {"short_name": "_second_name", "address": "0x5678"},
+    ]
+    merged = merge_macho_function_starts(functions, symtab, parsed)
+    by_addr = {f["address"]: f["name"] for f in merged}
+    assert by_addr["0x1234"] == "_real_name"
+    # A synthetic sub_<addr> name is upgraded too, not only a missing one.
+    assert by_addr["0x5678"] == "_second_name"
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/curl")),
+    reason="needs a real macOS system binary",
+)
+def test_real_macho_functions_live_in_one_address_space():
+    # /usr/bin/curl is a stripped universal binary; blint analyses slice 0
+    # (x86_64, imagebase 0x100000000). Ground truth for the one surviving
+    # symbol is the __TEXT vmaddr the load commands carry: llvm-nm and otool
+    # both report __mh_execute_header exactly at the imagebase.
+    metadata = parse("/usr/bin/curl")
+    imagebase = metadata["imagebase"]
+    addresses = [int(str(f["address"]), 16) for f in metadata["functions"]]
+    assert addresses
+    # One address space: nothing file-relative below the imagebase.
+    assert all(addr >= imagebase for addr in addresses)
+    # No function listed twice.
+    assert len(addresses) == len(set(addresses))
+    header_entry = [f for f in metadata["functions"] if f.get("name") == "__mh_execute_header"]
+    assert header_entry and int(str(header_entry[0]["address"]), 16) == imagebase
+    space = metadata["macho_function_address_space"]
+    assert space["normalized_to"] == "virtual"
+    assert space["imagebase"] == imagebase
+    assert space["ambiguous_entries"] == 0
+    assert space["unresolved_entries"] == 0
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/curl")),
+    reason="needs a real macOS system binary",
+)
+def test_real_macho_disassembly_keys_are_not_double_rebased():
+    metadata = parse("/usr/bin/curl", disassemble=True)
+    imagebase = metadata["imagebase"]
+    keys = [int(k.split("::", 1)[0], 16) for k in metadata["disassembled_functions"]]
+    assert keys
+    assert all(imagebase <= addr < 2 * imagebase for addr in keys)
 
 
 def test_merge_objc_functions_upgrades_synthesised_names():
@@ -262,11 +545,7 @@ def test_parse_wasm_dos003_loop_grow_evidence():
 
     # wasm-tools 2.1 tightened WASM-DOS-003 to fire on memory.grow inside a
     # loop body and reports the loop-context counts in the evidence.
-    finding = next(
-        f
-        for f in metadata["wasm_analysis"]["findings"]
-        if f["id"] == "WASM-DOS-003"
-    )
+    finding = next(f for f in metadata["wasm_analysis"]["findings"] if f["id"] == "WASM-DOS-003")
     assert finding["evidence"]["memory_grow_ops"] > 0
     assert finding["evidence"]["loop_memory_grow_ops"] > 0
 
@@ -307,10 +586,7 @@ def test_parse_wasm_debug_info_present(tmp_path):
     # wasm-tools 2.1 flags unstripped DWARF builds and mines .debug_str.
     assert metadata["wasm_debug_info_present"] is True
     assert ".debug_str" in {s["name"] for s in metadata["sections"]}
-    assert any(
-        s.get("source") == "custom:.debug_str"
-        for s in metadata["wasm_report"]["strings"]
-    )
+    assert any(s.get("source") == "custom:.debug_str" for s in metadata["wasm_report"]["strings"])
 
 
 def test_parse_wasm_debug_info_absent():
@@ -430,7 +706,9 @@ def _macho_fat_image(slices: list[tuple[int, int, bytes, int]]) -> bytes:
     out = bytearray(offset)
     struct.pack_into(">II", out, 0, 0xCAFEBABE, len(slices))
     for index, (cpu_type, cpu_subtype, slice_offset, size, align, _) in enumerate(placements):
-        struct.pack_into(">IIIII", out, 8 + 20 * index, cpu_type, cpu_subtype, slice_offset, size, align)
+        struct.pack_into(
+            ">IIIII", out, 8 + 20 * index, cpu_type, cpu_subtype, slice_offset, size, align
+        )
     for _, _, slice_offset, _, _, image in placements:
         out[slice_offset : slice_offset + len(image)] = image
     return bytes(out)
@@ -548,30 +826,41 @@ def test_macho_security_properties_are_computed_not_defaulted(tmp_path):
 def test_macho_symtab_name_helpers():
     # The strip discriminator: undefined imports and strip survivors
     # (__mh_execute_header, radr:// linker notes) are not name evidence.
-    assert binary_module._macho_symtab_has_names(
-        [{"category": "CATEGORY.UNDEFINED", "short_name": "_printf"}]
-    ) is False
-    assert binary_module._macho_symtab_has_names(
-        [{"category": "CATEGORY.EXTERNAL", "short_name": "__mh_execute_header"}]
-    ) is False
-    assert binary_module._macho_symtab_has_names(
-        [{"category": "CATEGORY.LOCAL", "short_name": "radr://5614542"}]
-    ) is False
-    assert binary_module._macho_symtab_has_names(
-        [{"category": "CATEGORY.LOCAL", "short_name": "_main"}]
-    ) is True
+    assert (
+        binary_module._macho_symtab_has_names(
+            [{"category": "CATEGORY.UNDEFINED", "short_name": "_printf"}]
+        )
+        is False
+    )
+    assert (
+        binary_module._macho_symtab_has_names(
+            [{"category": "CATEGORY.EXTERNAL", "short_name": "__mh_execute_header"}]
+        )
+        is False
+    )
+    assert (
+        binary_module._macho_symtab_has_names(
+            [{"category": "CATEGORY.LOCAL", "short_name": "radr://5614542"}]
+        )
+        is False
+    )
+    assert (
+        binary_module._macho_symtab_has_names(
+            [{"category": "CATEGORY.LOCAL", "short_name": "_main"}]
+        )
+        is True
+    )
     # Canary evidence: the stack-protector runtime symbols, in either the
     # ELF or the Mach-O spelling.
-    assert binary_module._macho_symtab_has_canary(
-        [{"short_name": "___stack_chk_fail"}]
-    ) is True
-    assert binary_module._macho_symtab_has_canary(
-        [{"short_name": "___stack_chk_guard"}]
-    ) is True
+    assert binary_module._macho_symtab_has_canary([{"short_name": "___stack_chk_fail"}]) is True
+    assert binary_module._macho_symtab_has_canary([{"short_name": "___stack_chk_guard"}]) is True
     # Negative fixture (rule 11): ordinary imports prove nothing.
-    assert binary_module._macho_symtab_has_canary(
-        [{"short_name": "_printf"}, {"short_name": "__stack_chk_smash"}]
-    ) is False
+    assert (
+        binary_module._macho_symtab_has_canary(
+            [{"short_name": "_printf"}, {"short_name": "__stack_chk_smash"}]
+        )
+        is False
+    )
 
 
 def test_parse_universal_macho_summarizes_every_slice(tmp_path):
@@ -586,7 +875,9 @@ def test_parse_universal_macho_summarizes_every_slice(tmp_path):
                 (
                     MACHO_CPU_ARM64,
                     MACHO_CPU_ARM64E_SUBTYPE,
-                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=MACHO_CPU_ARM64E_SUBTYPE),
+                    _wx_macho_binary(
+                        0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=MACHO_CPU_ARM64E_SUBTYPE
+                    ),
                     14,
                 ),
             ]
@@ -820,7 +1111,9 @@ def _synthetic_signature(
     if entitlements is not None:
         entries.append((7, _entitlements_blob(_der_entitlements(entitlements), der=True)))
     if cms_der is not None:
-        entries.append((0x10000, struct.pack(">II", CSMAGIC_BLOBWRAPPER, 8 + len(cms_der)) + cms_der))
+        entries.append(
+            (0x10000, struct.pack(">II", CSMAGIC_BLOBWRAPPER, 8 + len(cms_der)) + cms_der)
+        )
     return _superblob(entries), cd
 
 
@@ -971,9 +1264,10 @@ def test_universal_slices_carry_own_signatures_and_variance(tmp_path):
     assert by_arch["arm64e"]["security_properties"]["get_task_allow"] is True
     assert "hardened_runtime" in metadata["security_properties_slice_variance"]
     # Top-level block: the primary (slice 0, x86_64) answer, declared as such.
-    assert metadata["code_signature"]["superblob"]["code_directories"][0][
-        "identifier"
-    ] == "com.example.a"
+    assert (
+        metadata["code_signature"]["superblob"]["code_directories"][0]["identifier"]
+        == "com.example.a"
+    )
     assert metadata["analysis_coverage"]["code_signature_scope"] == "primary_slice"
     assert metadata["analysis_coverage"]["code_signature_slice_variance"] == variance
 
@@ -1027,9 +1321,7 @@ def test_codesign_system_binary_matches_ground_truth(tmp_path):
     identifier = next(
         line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Identifier=")
     )
-    team_line = next(
-        line for line in details.splitlines() if line.startswith("TeamIdentifier=")
-    )
+    team_line = next(line for line in details.splitlines() if line.startswith("TeamIdentifier="))
     flags_line = next(line for line in details.splitlines() if "flags=0x" in line)
     expected_flags = int(flags_line.split("flags=0x")[1].split("(")[0], 16)
 
@@ -1050,9 +1342,7 @@ def test_codesign_system_binary_matches_ground_truth(tmp_path):
         )
         assert entry["code_signature"]["cdhash"] == expected_cdhash
     if metadata.get("is_universal"):
-        cdhashes = {
-            entry["code_signature"]["cdhash"] for entry in metadata.get("slices", [])
-        }
+        cdhashes = {entry["code_signature"]["cdhash"] for entry in metadata.get("slices", [])}
         if len(metadata.get("slices", [])) > 1:
             assert len(cdhashes) > 1
 
@@ -1082,9 +1372,7 @@ def test_codesign_cms_signer_chain_is_named_on_a_real_signature():
         ["codesign", "-dvvv", system_binary], capture_output=True, text=True
     ).stderr
     authority = next(
-        line.split("=", 1)[1]
-        for line in details.splitlines()
-        if line.startswith("Authority=")
+        line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Authority=")
     )
     assert cms["signer_cn"] == authority
     assert cms["signer_cn"] != cms["certificates"][0]["subject_cn"]
@@ -1119,10 +1407,7 @@ def test_codesign_file_range_fallback_reads_the_right_slice(tmp_path):
         detail = parse_superblob(blob)
         assert detail["parse_status"] == "parsed"
         expected = parse_superblob(bytes(fat.at(index).code_signature.content))
-        assert (
-            detail["code_directories"][0]["cdhash"]
-            == expected["code_directories"][0]["cdhash"]
-        )
+        assert detail["code_directories"][0]["cdhash"] == expected["code_directories"][0]["cdhash"]
 
 
 def test_codesign_adhoc_binary_matches_ground_truth(tmp_path):
@@ -1410,9 +1695,7 @@ def test_trim_wasm_instruction_streams_visits_aliased_functions_once(monkeypatch
 def test_trim_wasm_instruction_streams_zero_disables(monkeypatch):
     monkeypatch.setattr(binary_module, "BLINT_MAX_WASM_INSTRUCTIONS", 0)
     report = {
-        "functions": [
-            {"instruction_count": 5, "instructions": [{"text": i} for i in range(5)]}
-        ]
+        "functions": [{"instruction_count": 5, "instructions": [{"text": i} for i in range(5)]}]
     }
     assert binary_module.trim_wasm_instruction_streams(report) == 0
     assert len(report["functions"][0]["instructions"]) == 5
@@ -1754,9 +2037,7 @@ def test_parse_macho_symbols_records_import_and_export_flags():
     not (sys.platform == "darwin" and os.path.exists("/usr/bin/git")),
     reason="needs a real Mach-O binary so parse() takes the Mach-O branch",
 )
-def test_parse_drops_the_private_sdk_map_even_when_a_later_step_raises(
-    monkeypatch, tmp_path
-):
+def test_parse_drops_the_private_sdk_map_even_when_a_later_step_raises(monkeypatch, tmp_path):
     """The full SDK attribution map must never reach exported metadata.
 
     It rides a private key so the dependency graph sees every symbol while

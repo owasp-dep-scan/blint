@@ -516,9 +516,7 @@ def _elf_notes_without_note_segment(parsed_obj: lief.ELF.Binary) -> list[dict]:
     legitimately outside the load image and were never covered by a segment.
     """
     with contextlib.suppress(AttributeError, TypeError, ValueError):
-        if any(
-            segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments
-        ):
+        if any(segment.type == lief.ELF.Segment.TYPE.NOTE for segment in parsed_obj.segments):
             return []
         return [
             {
@@ -944,9 +942,7 @@ def parse_wasm_metadata(
         if str(cap).startswith("isa.")
     )
     type_kinds = Counter(
-        str(t.get("kind", "func"))
-        for t in (report.get("types") or [])
-        if isinstance(t, dict)
+        str(t.get("kind", "func")) for t in (report.get("types") or []) if isinstance(t, dict)
     )
     metadata["wasm_types_summary"] = {
         "total": type_kinds.total(),
@@ -1175,7 +1171,9 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
             "reason": reason,
             "confidence": "high" if reason == "import" else "low",
         }
-        for (src, target, reason), count in sorted(external_counts.items(), key=lambda item: item[0])
+        for (src, target, reason), count in sorted(
+            external_counts.items(), key=lambda item: item[0]
+        )
     ]
     return {
         "version": 2,
@@ -2446,9 +2444,7 @@ def _record_slice_variance(metadata: dict, properties: dict) -> None:
     # when true) is itself a disagreement, so compare over the union of keys.
     per_slice = [entry.get("security_properties") or {} for entry in slices]
     names = {name for entry in per_slice for name in entry}
-    variance = sorted(
-        name for name in names if len({entry.get(name) for entry in per_slice}) > 1
-    )
+    variance = sorted(name for name in names if len({entry.get(name) for entry in per_slice}) > 1)
     if variance:
         metadata["security_properties_slice_variance"] = variance
         LOG.debug(
@@ -2488,9 +2484,7 @@ def _record_code_signature_variance(metadata: dict) -> None:
     metadata["code_signature_scope"] = "primary_slice"
     variance = []
     for aspect in CODE_SIGNATURE_VARIANCE_ASPECTS:
-        values = [
-            (entry.get("code_signature") or {}).get(aspect) for entry in slices
-        ]
+        values = [(entry.get("code_signature") or {}).get(aspect) for entry in slices]
         first = values[0]
         if any(value != first for value in values[1:]):
             variance.append(aspect)
@@ -3410,6 +3404,14 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         degradations.append("callsite_no_line_addresses")
     if callsite_coverage.get("functions_unmodelled_pc_relative"):
         degradations.append("callsite_unmodelled_pc_relative")
+    # Mach-O function addresses the segment ranges could not place in one
+    # space (P5.1): these entries are left in their raw space rather than
+    # guessed at, which a consumer of the function lists must know about.
+    macho_space = metadata.get("macho_function_address_space") or {}
+    if macho_space.get("ambiguous_entries"):
+        degradations.append("macho_function_space_ambiguous")
+    if macho_space.get("unresolved_entries"):
+        degradations.append("macho_function_space_unresolved")
     coverage = {
         "functions": {
             "symbolic": symbolic_count,
@@ -4179,14 +4181,23 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     format-aware fact the format-agnostic recovery cannot know for itself.
     Results are memoized per constant because the same value is recovered at
     many call sites.
+
+    PE sections carry RVAs while the disassembly and the constants it
+    recovers live at absolute VAs — with the default image base a PE names
+    every address ``0x140...``, above any RVA the sections report — so the
+    image base is added to the ranges before the comparison. ELF and Mach-O
+    sections already carry absolute addresses and contribute nothing.
     """
     ranges: list[tuple[int, int]] = []
+    imagebase = 0
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        imagebase = int(parsed_obj.optional_header.imagebase or 0)
     with contextlib.suppress(AttributeError, TypeError, ValueError):
         for section in parsed_obj.sections:
             va = int(section.virtual_address or 0)
             size = int(section.size or 0)
             if va and size:
-                ranges.append((va, va + size))
+                ranges.append((va + imagebase, va + imagebase + size))
     ranges.sort()
     resolved: dict[int, str | None] = {}
 
@@ -4200,9 +4211,7 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
             data = b""
             with contextlib.suppress(Exception):
                 data = bytes(
-                    parsed_obj.get_content_from_virtual_address(
-                        value, _POINTER_STRING_MAX_READ
-                    )
+                    parsed_obj.get_content_from_virtual_address(value, _POINTER_STRING_MAX_READ)
                 )
             result = decode_pointer_string(data, _POINTER_STRING_MIN_LEN)
         resolved[value] = result
@@ -4673,7 +4682,11 @@ def _macho_slice_signature(exe_file: str, parsed_slice: lief.MachO.Binary) -> di
             return {"available": False, "parse_status": "absent"}
         blob, _blob_source = _macho_signature_blob(exe_file, parsed_slice, code_signature)
         if not blob:
-            return {"available": True, "parse_status": "parse_failed", "parse_error": "blob_unreadable"}
+            return {
+                "available": True,
+                "parse_status": "parse_failed",
+                "parse_error": "blob_unreadable",
+            }
         return signature_summary(parse_superblob(blob))
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Slice signature parse failed for {exe_file}: {type(e).__name__}: {e}")
@@ -4712,7 +4725,11 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
         slice_obj = fat.at(index)
         if not slice_obj or isinstance(slice_obj, lief.lief_errors):
             slice_errors.append(
-                {"index": index, "exception_type": "LiefParseError", "message": "slice not parseable"}
+                {
+                    "index": index,
+                    "exception_type": "LiefParseError",
+                    "message": "slice not parseable",
+                }
             )
             continue
         try:
@@ -4720,9 +4737,7 @@ def _parse_macho(exe_file: str, metadata: dict) -> lief.MachO.Binary | None:
                 _macho_slice_summary(exe_file, slice_obj, index, slice_obj is primary)
             )
         except Exception as e:  # noqa: BLE001 - one slice must not abort the file
-            LOG.error(
-                f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}"
-            )
+            LOG.error(f"Slice {index} summary failed for {exe_file}: {type(e).__name__}: {e}")
             slice_errors.append(
                 {
                     "index": index,
@@ -4962,6 +4977,195 @@ def discover_and_merge_functions(metadata: dict, parsed_obj) -> dict:
     return merge_discovered_functions(metadata, discovered)
 
 
+MACHO_SYNTHETIC_FUNCTION_NAME_RE = re.compile(r"^sub_[0-9a-f]+$")
+
+
+def _macho_content_segment_ranges(parsed_obj) -> tuple[list, list] | None:
+    """Virtual and file ranges of the content-bearing segments, or ``None``.
+
+    Only segments with file content may classify an address. ``__PAGEZERO``
+    and other zero-file-size segments are excluded from the virtual side on
+    purpose: ``__PAGEZERO`` maps the entire low half of the address space, so
+    counting its virtual range would make every file-relative address
+    classify as absolute.
+    """
+    virtual_ranges = []
+    file_ranges = []
+    try:
+        segments = list(parsed_obj.segments)
+    except (AttributeError, TypeError):
+        return None
+    for segment in segments:
+        try:
+            va = int(segment.virtual_address)
+            vsz = int(segment.virtual_size)
+            fo = int(segment.file_offset)
+            fsz = int(segment.file_size)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if fsz <= 0:
+            continue
+        file_ranges.append((fo, fo + fsz))
+        virtual_ranges.append((va, va + (vsz if vsz > 0 else fsz)))
+    if not virtual_ranges or not file_ranges:
+        return None
+    return virtual_ranges, file_ranges
+
+
+def _macho_imagebase_or_zero(parsed_obj) -> int:
+    """The image's base virtual address, or 0 when unavailable."""
+    imagebase = getattr(parsed_obj, "imagebase", 0)
+    return imagebase if isinstance(imagebase, int) and imagebase > 0 else 0
+
+
+def _macho_address_to_virtual(addr, ranges, imagebase: int) -> int | None:
+    """Rebase one address into the virtual space, decided by segment ranges.
+
+    The address's space is determined from the image, never from the table it
+    arrived in: inside a content segment's virtual range it is already a
+    virtual address and is kept; inside a file range it is file-relative and
+    is rebased by ``imagebase``. An address in *both* ranges is only
+    unambiguous when ``imagebase`` is 0 (the two spaces hold the same number,
+    so the rebase is the identity); with a non-zero imagebase the image does
+    not say what the address means and it is returned unchanged for the
+    caller to count rather than guess. Addresses in neither range are
+    returned unchanged for the same reason.
+    """
+    if not isinstance(addr, int):
+        return addr
+    if ranges is None:
+        return addr
+    virtual_ranges, file_ranges = ranges
+    in_virtual = any(lo <= addr < hi for lo, hi in virtual_ranges)
+    in_file = any(lo <= addr < hi for lo, hi in file_ranges)
+    if in_file and not in_virtual:
+        return addr + imagebase
+    return addr
+
+
+def _is_synthetic_function_name(name) -> bool:
+    """True for the ``sub_<hex>`` names blint synthesises for unnamed code."""
+    return bool(name) and bool(MACHO_SYNTHETIC_FUNCTION_NAME_RE.match(str(name)))
+
+
+def _is_weak_function_name(name) -> bool:
+    """True when a name identifies nothing: absent, empty, or ``sub_<hex>``.
+
+    A weak name loses to a real symbol at the same address. lief leaves some
+    aggregate entries nameless, so absence has to rank with ``sub_<hex>``
+    rather than count as an identity of its own.
+    """
+    return not name or _is_synthetic_function_name(name)
+
+
+def _normalize_macho_function_list(
+    functions: list[dict] | None, ranges, imagebase: int
+) -> tuple[list[dict], dict]:
+    """Rebase a Mach-O function list into one address space (the virtual one).
+
+    Each entry's space is classified against the image's segment ranges
+    (:func:`_macho_address_to_virtual`) — not against the entry's origin —
+    and file-relative entries are rebased by ``imagebase``. Entries whose
+    synthetic ``sub_<addr>`` name encodes the pre-rebase address are renamed
+    to the rebased address so name and address stay consistent. Entries that
+    collapse onto one address after rebasing are merged: a real symbol name
+    wins over a synthetic one (counted as a recovered name), the largest
+    known size survives, and two *named* entries at one address are both
+    kept as separate entries exactly as before. Indexes are re-assigned in
+    list order.
+
+    Returns the normalized list and counters: ``rebased``,
+    ``duplicates_merged``, ``names_recovered``, ``ambiguous`` (address in
+    both ranges with a non-zero imagebase — left unchanged) and
+    ``unresolved`` (address in neither range — left unchanged).
+    """
+    stats = {
+        "rebased": 0,
+        "duplicates_merged": 0,
+        "names_recovered": 0,
+        "ambiguous": 0,
+        "unresolved": 0,
+    }
+    if ranges is not None:
+        virtual_ranges, file_ranges = ranges
+    else:
+        virtual_ranges, file_ranges = [], []
+    grouped: dict[int, list[dict]] = {}
+    order: list[int] = []
+    unaddressed: list[dict] = []
+    for fn in functions or []:
+        entry = dict(fn)
+        addr = _parse_address(entry.get("address"))
+        if addr is None:
+            unaddressed.append(entry)
+            continue
+        if ranges is not None:
+            in_virtual = any(lo <= addr < hi for lo, hi in virtual_ranges)
+            in_file = any(lo <= addr < hi for lo, hi in file_ranges)
+            if in_file and in_virtual and imagebase != 0:
+                stats["ambiguous"] += 1
+            elif not in_file and not in_virtual:
+                stats["unresolved"] += 1
+            if in_file and not in_virtual:
+                rebased_addr = addr + imagebase
+                name = entry.get("name")
+                if _is_synthetic_function_name(name) and int(str(name)[4:], 16) == addr:
+                    entry["name"] = f"sub_{rebased_addr:x}"
+                addr = rebased_addr
+                entry["address"] = ADDRESS_FMT.format(addr).strip()
+                stats["rebased"] += 1
+        bucket = grouped.get(addr)
+        if bucket is None:
+            grouped[addr] = [entry]
+            order.append(addr)
+            continue
+        bucket.append(entry)
+    normalized: list[dict] = []
+    for addr in order:
+        bucket = grouped[addr]
+        kept: list[dict] = []
+        dropped: list[tuple[dict, dict]] = []
+        by_name: dict[str, dict] = {}
+        for entry in bucket:
+            if _is_weak_function_name(entry.get("name")):
+                continue
+            survivor = by_name.get(str(entry["name"]))
+            if survivor is None:
+                by_name[str(entry["name"])] = entry
+                kept.append(entry)
+            else:
+                # The same symbol reached this address from two tables; one
+                # copy usually carries the size and the other does not.
+                dropped.append((entry, survivor))
+        weak = [e for e in bucket if _is_weak_function_name(e.get("name"))]
+        if not kept:
+            kept = weak[:1]
+            weak = weak[1:]
+        dropped.extend((entry, kept[0]) for entry in weak)
+        if dropped:
+            stats["duplicates_merged"] += len(dropped)
+            if by_name and weak:
+                # A function that used to appear unnamed or as sub_<addr> now
+                # appears under its symbol name: count the recovered identity.
+                stats["names_recovered"] += 1
+            for dropped_entry, survivor in dropped:
+                if _entry_size(dropped_entry) > _entry_size(survivor):
+                    survivor["size"] = dropped_entry.get("size")
+                if survivor.get("flags") is None and dropped_entry.get("flags") is not None:
+                    survivor["flags"] = dropped_entry.get("flags")
+        normalized.extend(kept)
+    normalized.extend(unaddressed)
+    for idx, entry in enumerate(normalized):
+        entry["index"] = idx
+    return normalized, stats
+
+
+def _entry_size(entry: dict) -> int:
+    """A function entry's size as a non-negative int, 0 when absent."""
+    size = entry.get("size")
+    return size if isinstance(size, int) and size > 0 else 0
+
+
 def merge_macho_function_starts(
     functions: list[dict], symtab_symbols: list[dict], parsed_obj: lief.MachO.Binary
 ) -> list[dict]:
@@ -4974,8 +5178,21 @@ def merge_macho_function_starts(
     reusing any name already known for the address (from a surviving symbol) and
     synthesising a ``sub_<address>`` name otherwise, so the disassembler can
     recover and link the full set of functions.
+
+    Every load-command entry and symtab address is classified against the
+    image's segment ranges by :func:`_macho_address_to_virtual` and expressed
+    as a virtual address before it is used, so the appended entries are in
+    one space regardless of which space a source table used (P5.1: lief's
+    aggregate mixes symtab virtual addresses with file-relative
+    function-starts offsets without normalising). Entries lief left nameless
+    adopt a surviving symbol's name for their address. The caller runs
+    :func:`_normalize_macho_function_list` over the merged result, which
+    rebases the incoming entries into the same space and collapses the
+    duplicates that mixing created.
     """
     functions = list(functions or [])
+    ranges = _macho_content_segment_ranges(parsed_obj)
+    imagebase = _macho_imagebase_or_zero(parsed_obj)
     known_addresses = set()
     for fn in functions:
         addr = _parse_address(fn.get("address"))
@@ -4983,12 +5200,28 @@ def merge_macho_function_starts(
             known_addresses.add(addr)
 
     # Address -> best available symbol name, used to label recovered entries.
+    # Symtab addresses are classified through the same segment-range rule as
+    # everything else rather than assumed to already be virtual.
     address_names = {}
     for symbol in symtab_symbols or []:
-        addr = _parse_address(symbol.get("address"))
+        addr = _macho_address_to_virtual(_parse_address(symbol.get("address")), ranges, imagebase)
         name = symbol.get("short_name") or symbol.get("name")
         if addr and name and addr not in address_names:
             address_names[addr] = name
+
+    # Pre-existing entries lief left nameless (its aggregate keeps the address
+    # but not the symbol) adopt the surviving symbol's name here, before the
+    # discovery merge would label them sub_<addr>: on an unstripped dylib the
+    # symtab name is right there and dropping it reads as a stripped binary.
+    for fn in functions:
+        name = fn.get("name")
+        addr = _macho_address_to_virtual(_parse_address(fn.get("address")), ranges, imagebase)
+        if addr is None:
+            continue
+        if not name or _is_synthetic_function_name(name):
+            symbol_name = address_names.get(addr)
+            if symbol_name:
+                fn["name"] = symbol_name
 
     start_addresses = []
     with contextlib.suppress(AttributeError, TypeError):
@@ -5000,7 +5233,7 @@ def merge_macho_function_starts(
                     start_addresses.append(addr)
 
     next_index = len(functions)
-    for addr in sorted(set(start_addresses)):
+    for addr in sorted({_macho_address_to_virtual(a, ranges, imagebase) for a in start_addresses}):
         if addr in known_addresses:
             continue
         known_addresses.add(addr)
@@ -5098,9 +5331,51 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
     # contain only ``__mh_execute_header``. Recover the real entry points from
     # the ``LC_FUNCTION_STARTS`` table so disassembly and callgraph
     # construction have a complete set of functions to work with.
+    ranges = _macho_content_segment_ranges(parsed_obj)
+    imagebase = _macho_imagebase_or_zero(parsed_obj)
+    # Addresses that identified nothing before the merge. A name can be
+    # recovered either by the merge (from a surviving symbol) or by the
+    # normalization (a real name outranking a sub_<addr> twin), so the
+    # recovery is counted once here, across both, rather than in either.
+    unidentified_before = {
+        _macho_address_to_virtual(_parse_address(fn.get("address")), ranges, imagebase)
+        for fn in metadata["functions"]
+        if _is_weak_function_name(fn.get("name"))
+    }
+    unidentified_before.discard(None)
+
     metadata["functions"] = merge_macho_function_starts(
         metadata["functions"], metadata["symtab_symbols"], parsed_obj
     )
+
+    # One address space for the function lists (P5.1). lief's aggregate mixes
+    # symtab virtual addresses with file-relative function-starts offsets, and
+    # the merge above appends virtual ones; normalize every function-bearing
+    # list into the virtual space here — at the point the lists are built —
+    # so no consumer ever has to guess which space an address is in.
+    space_stats = {}
+    for list_key in ("functions", "ctor_functions", "unwind_functions"):
+        metadata[list_key], space_stats[list_key] = _normalize_macho_function_list(
+            metadata.get(list_key), ranges, imagebase
+        )
+    ambiguous = sum(s["ambiguous"] for s in space_stats.values())
+    unresolved = sum(s["unresolved"] for s in space_stats.values())
+    metadata["macho_function_address_space"] = {
+        "normalized_to": "virtual",
+        # The rebase anchor: a reader turns a virtual address back into a
+        # file-relative offset by subtracting this (metadata["imagebase"]).
+        "imagebase": metadata.get("imagebase", imagebase),
+        "rebased_entries": sum(s["rebased"] for s in space_stats.values()),
+        "duplicates_merged": sum(s["duplicates_merged"] for s in space_stats.values()),
+        "names_recovered": sum(
+            1
+            for fn in metadata["functions"]
+            if not _is_weak_function_name(fn.get("name"))
+            and _parse_address(fn.get("address")) in unidentified_before
+        ),
+        "ambiguous_entries": ambiguous,
+        "unresolved_entries": unresolved,
+    }
 
     if exe_type:
         metadata["exe_type"] = exe_type

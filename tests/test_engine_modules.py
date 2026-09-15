@@ -113,9 +113,7 @@ class TestFunctionCfg:
 
 class TestArm64Absint:
     def test_movz_movk_builds_value(self):
-        state = interpret_arm64(
-            ["movz x8, #0x2F", "movk x8, #0x75, lsl #8"]
-        )
+        state = interpret_arm64(["movz x8, #0x2F", "movk x8, #0x75, lsl #8"])
         value, width = state.get_register("x8")
         assert value == 0x752F
         assert width == 8
@@ -186,12 +184,26 @@ class TestEntropy:
 
     def test_packer_signature_high(self):
         sections = [
-            {"name": ".text", "virtual_address": 0x1000, "virtual_size": 0x100,
-             "raw_size": 0x100, "file_offset": 0x400, "executable": True,
-             "writable": False, "bytes": b"\x90" * 256},
-            {"name": "UPX0", "virtual_address": 0x2000, "virtual_size": 0x100,
-             "raw_size": 0x100, "file_offset": 0x800, "executable": True,
-             "writable": True, "bytes": bytes(range(256)) * 4},
+            {
+                "name": ".text",
+                "virtual_address": 0x1000,
+                "virtual_size": 0x100,
+                "raw_size": 0x100,
+                "file_offset": 0x400,
+                "executable": True,
+                "writable": False,
+                "bytes": b"\x90" * 256,
+            },
+            {
+                "name": "UPX0",
+                "virtual_address": 0x2000,
+                "virtual_size": 0x100,
+                "raw_size": 0x100,
+                "file_offset": 0x800,
+                "executable": True,
+                "writable": True,
+                "bytes": bytes(range(256)) * 4,
+            },
         ]
         result = analyze_packing(sections, 0x1000, 5, 0x2000)
         assert result["packed_likelihood"] == "high"
@@ -201,9 +213,16 @@ class TestEntropy:
     def test_clean_binary_low(self):
         code = b"".join(struct.pack("<B", i % 7) for i in range(512))
         sections = [
-            {"name": ".text", "virtual_address": 0x1000, "virtual_size": 0x200,
-             "raw_size": 0x200, "file_offset": 0x400, "executable": True,
-             "writable": False, "bytes": code},
+            {
+                "name": ".text",
+                "virtual_address": 0x1000,
+                "virtual_size": 0x200,
+                "raw_size": 0x200,
+                "file_offset": 0x400,
+                "executable": True,
+                "writable": False,
+                "bytes": code,
+            },
         ]
         result = analyze_packing(sections, 0x1000, 40, 0x1000)
         assert result["packed_likelihood"] == "low"
@@ -212,9 +231,16 @@ class TestEntropy:
     def test_macho_overlay_skipped(self):
         code = b"\x90" * 32
         sections = [
-            {"name": "__text", "virtual_address": 0x1000, "virtual_size": 0x20,
-             "raw_size": 0x20, "file_offset": 0x100, "executable": True,
-             "writable": False, "bytes": code},
+            {
+                "name": "__text",
+                "virtual_address": 0x1000,
+                "virtual_size": 0x20,
+                "raw_size": 0x20,
+                "file_offset": 0x100,
+                "executable": True,
+                "writable": False,
+                "bytes": code,
+            },
         ]
         # A large tail (the code signature on real binaries) must not fire.
         result = analyze_packing(sections, 0x1000, 30, 0x10000, is_macho=True)
@@ -287,6 +313,8 @@ class TestToolchain:
     def test_empty_metadata_is_honest(self):
         toolchain = infer_toolchain({})
         assert toolchain == {"compilers": [], "linkers": [], "runtimes": [], "libc": None}
+
+
 class TestCfgSemantics:
     def test_svc_is_not_a_trap(self):
         # A syscall returns control, so the block after it stays reachable.

@@ -17,6 +17,7 @@ Usage:
     python tests/scripts/jobs_bench.py [--dir corpus-build] [--jobs 1,2,4,8]
         [--disassemble] [--repeat N]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,7 +69,9 @@ def run_once(corpus: Path, jobs: int, disassemble: bool, repeat: int) -> dict:
         env = dict(os.environ)
         env["SCAN_ID"] = f"jobs-bench-{jobs}"
         started = time.time()
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        proc = subprocess.Popen(
+            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env
+        )
         peak = 0
         while proc.poll() is None:
             peak = max(peak, _process_tree_rss(proc.pid))

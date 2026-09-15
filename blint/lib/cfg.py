@@ -179,7 +179,9 @@ def build_function_cfg(
             if index + 1 < count:
                 leaders.add(index + 1)
             if kind == "jump":
-                target_index, _reason = _branch_target(instr, parsed_instr, arch, index, addr_to_index)
+                target_index, _reason = _branch_target(
+                    instr, parsed_instr, arch, index, addr_to_index
+                )
                 if target_index is not None:
                     leaders.add(target_index)
     leader_list = sorted(leaders)

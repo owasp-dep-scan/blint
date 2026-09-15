@@ -68,7 +68,9 @@ def _build_unwind_info(function_offsets, base=0x460, common_encodings=(), kind=3
     index_size = 2 * 12  # one real entry + the sentinel
     page_offset = index_offset + index_size
     # compressed page: kind, entryPageOffset(12), entryCount, encPages, encCount
-    page = struct.pack("<IHHHH", kind, 12, len(function_offsets), 12 + 4 * len(function_offsets), 0)
+    page = struct.pack(
+        "<IHHHH", kind, 12, len(function_offsets), 12 + 4 * len(function_offsets), 0
+    )
     entries = b"".join(struct.pack("<I", off - base) for off in function_offsets)
     index = struct.pack("<3I", base, page_offset, 0) + struct.pack("<3I", base + 0x200, 0, 0)
     return header + common + index + page + entries
@@ -80,11 +82,13 @@ def test_macho_compressed_page_discovery():
     segment = _FakeSegment("__TEXT", 0x100000000)
     fake = _FakeMacho({"__unwind_info": section}, [segment])
     entries = discover_macho_unwind_functions(fake)
-    # The sentinel sits at base + 0x200 and bounds the last function.
+    # Compact-unwind offsets are __TEXT-relative; entries are emitted as
+    # virtual addresses (text_vmaddr + offset), the space the Mach-O
+    # function lists are normalized into (P5.1).
     assert [(e["address"], e["size"]) for e in entries] == [
-        (0x460, 0xD4),
-        (0x534, 0x94),
-        (0x5C8, 0x98),
+        (0x100000460, 0xD4),
+        (0x100000534, 0x94),
+        (0x1000005C8, 0x98),
     ]
     assert all(e["source"] == "unwind" for e in entries)
 
@@ -92,21 +96,18 @@ def test_macho_compressed_page_discovery():
 def test_macho_sentinel_bounds_last_function():
     data = _build_unwind_info([0x460, 0x534], base=0x460)
     section = _FakeSection("__unwind_info", 0x100000660, data)
-    fake = _FakeMacho(
-        {"__unwind_info": section}, [_FakeSegment("__TEXT", 0x100000000)]
-    )
+    fake = _FakeMacho({"__unwind_info": section}, [_FakeSegment("__TEXT", 0x100000000)])
     entries = discover_macho_unwind_functions(fake)
     # The sentinel offset (0x460 + 0x200) bounds the final entry.
     assert entries[-1]["size"] == 0x660 - 0x534
+    assert entries[-1]["address"] == 0x100000534
 
 
 def test_macho_bad_version_returns_empty():
     data = _build_unwind_info([0x460])
     data = b"\x99\x00\x00\x00" + data[4:]
     section = _FakeSection("__unwind_info", 0x100000660, data)
-    fake = _FakeMacho(
-        {"__unwind_info": section}, [_FakeSegment("__TEXT", 0x100000000)]
-    )
+    fake = _FakeMacho({"__unwind_info": section}, [_FakeSegment("__TEXT", 0x100000000)])
     assert discover_macho_unwind_functions(fake) == []
 
 
@@ -204,32 +205,24 @@ def _span_extents():
 
 def test_promotable_call_target_accepts_gap_addresses():
     assert (
-        promotable_call_target(
-            0x1800, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)]
-        )
+        promotable_call_target(0x1800, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)])
         == 0x1800
     )
 
 
 def test_promotable_call_target_declines_disassembled_extents():
     assert (
-        promotable_call_target(
-            0x1050, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)]
-        )
+        promotable_call_target(0x1050, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)])
         is None
     )
     assert (
-        promotable_call_target(
-            0x1000, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)]
-        )
+        promotable_call_target(0x1000, [0x1000, 0x2000], _span_extents(), [(0x1000, 0x3000)])
         is None
     )
 
 
 def test_promotable_call_target_declines_outside_executable_memory():
-    assert (
-        promotable_call_target(0x9000, [0x1000], [], [(0x1000, 0x3000)]) is None
-    )
+    assert promotable_call_target(0x9000, [0x1000], [], [(0x1000, 0x3000)]) is None
 
 
 def test_arm64_prologue_encoding_constants():
@@ -241,6 +234,7 @@ def test_arm64_prologue_encoding_constants():
     assert ARM64_PACIASP == 0xD503233F
     assert ARM64_MOV_FP_SP == 0x910003FD
 
+
 def _build_unwind_info_regular_page(function_offsets, base=0x100000):
     """Build an `__unwind_info` whose second-level page is a *regular* page.
 
@@ -249,14 +243,19 @@ def _build_unwind_info_regular_page(function_offsets, base=0x100000):
     are exactly what a stride-4 reader would misread as offsets.
     """
     header = struct.pack(
-        "<7I", 1, 28, 0, 0, 0, 28, 2,
+        "<7I",
+        1,
+        28,
+        0,
+        0,
+        0,
+        28,
+        2,
     )
     index_offset = 28
     page_offset = index_offset + 24
     page = struct.pack("<IHH", 2, 8, len(function_offsets))
-    entries = b"".join(
-        struct.pack("<II", off, 0x04000000) for off in function_offsets
-    )
+    entries = b"".join(struct.pack("<II", off, 0x04000000) for off in function_offsets)
     index = struct.pack("<3I", base, page_offset, 0) + struct.pack("<3I", base + 0x300, 0, 0)
     return header + index + page + entries
 
@@ -300,6 +299,7 @@ def test_prologue_scan_x86_patterns():
     from blint.lib.funcdisc.complete import _scan_x86_prologues
 
     base = 0x401000
+
     def at(offset, payload):
         buf = bytearray(b"\x90" * 64)
         buf[offset : offset + len(payload)] = payload

@@ -14,7 +14,12 @@ Decoding reuses the DER walker from the code-signature parser (same CMS
 envelope). Two deliberate boundaries:
 
 - Device UDIDs are sensitive and huge; only their count is reported, never
-  the identifiers.
+  the identifiers. Entitlements, by contrast, are published in full — every
+  key Apple signed, verbatim, with its value — matching the code-signature
+  block (:func:`blint.lib.codesign_macho.parse_superblob`), which publishes
+  the binary's own entitlements the same way. A key filter here would be a
+  silent prediction of Apple's vocabulary: an unreported grant would read
+  as an absent one.
 - Expiry is a property of *now*, not of the file, so the block records the
   profile's dates and the checks layer evaluates them at run time — parse
   output stays a pure function of the input bytes (the determinism gate).
@@ -29,6 +34,7 @@ from blint.lib.codesign_macho import (
     _Asn1Error,
     _ber_read,
     _parse_cms_signature,
+    _plist_to_plain,
 )
 
 # Caps mirroring the code-signature parser: a hostile payload must degrade
@@ -179,18 +185,27 @@ def _plist_fields(plist: dict) -> dict:
     fields["provisioned_device_count"] = len(devices) if isinstance(devices, list) else None
     fields["provisioned_device_count_available"] = isinstance(devices, list)
     entitlements = plist.get("Entitlements")
-    if isinstance(entitlements, dict):
-        keep = {}
-        for key in (
-            "application-identifier",
-            "get-task-allow",
-            "aps-environment",
-            "beta-reports-active",
-        ):
-            if key in entitlements:
-                keep[key] = entitlements[key]
-        fields["entitlements"] = keep
+    if entitlements is not None:
+        fields["entitlements"] = _entitlements_block(entitlements)
     return fields
+
+
+def _entitlements_block(entitlements: object) -> dict:
+    """Every entitlement the profile grants, keyed and valued as signed.
+
+    No allow-list: the key namespace is Apple's to extend, and a dropped key
+    is indistinguishable from an absent grant (the four-key iOS-spelling
+    list this replaced matched nothing on macOS profiles, where the
+    application-identifier is ``com.apple.application-identifier``). Keys
+    are reported verbatim so this block can be diffed against the
+    code-signature entitlements of the same bundle, and values go through
+    the same plist-to-JSON policy (:func:`_plist_to_plain`) — one
+    normalization shared with the code-signature parser. Device identity
+    never appears as an entitlement value; the one field that carries it
+    (``ProvisionedDevices``) is count-only above.
+    """
+    plain = _plist_to_plain(entitlements)
+    return plain if isinstance(plain, dict) else {"__root__": plain}
 
 
 def _cms_summary(data: bytes) -> dict | None:
@@ -277,11 +292,32 @@ def is_expired(profile: dict, now: datetime | None = None) -> bool:
     return expires_dt < now
 
 
-def application_identifier(profile: dict) -> str | None:
-    """The signed ``<team-id>.<bundle-id>`` application identifier."""
+# macOS spells the entitlements iOS names bare under one of these prefixes:
+# ``com.apple.application-identifier``, ``com.apple.security.get-task-allow``,
+# ``com.apple.developer.aps-environment``. The published block keeps the
+# profile's own spelling, so every accessor resolves across both.
+_MACOS_PREFIXES = ("com.apple.", "com.apple.security.", "com.apple.developer.")
+
+
+def entitlement(profile: dict, key: str, default=None):
+    """An entitlement value under the iOS name or its macOS spelling."""
     entitlements = profile.get("entitlements") or {}
-    app_id = entitlements.get("application-identifier")
-    if app_id:
+    if not isinstance(entitlements, dict):
+        return default
+    for name in (key, *(prefix + key for prefix in _MACOS_PREFIXES)):
+        if name in entitlements:
+            return entitlements[name]
+    return default
+
+
+def application_identifier(profile: dict) -> str | None:
+    """The signed ``<team-id>.<bundle-id>`` application identifier.
+
+    Both spellings are read — iOS profiles sign ``application-identifier``,
+    macOS profiles ``com.apple.application-identifier`` — because the
+    published block keeps the profile's own spelling verbatim.
+    """
+    if app_id := entitlement(profile, "application-identifier"):
         return str(app_id)
     # Older profiles carry it only as a prefix list.
     prefixes = profile.get("application_identifier_prefixes") or []
@@ -301,8 +337,7 @@ def is_development(profile: dict) -> bool:
     attach to the shipping binary. Provisioned devices and the development
     APS environment corroborate, but the entitlement is the decision.
     """
-    entitlements = profile.get("entitlements") or {}
-    return entitlements.get("get-task-allow") is True
+    return entitlement(profile, "get-task-allow") is True
 
 
 def _clean_str(value) -> str | None:

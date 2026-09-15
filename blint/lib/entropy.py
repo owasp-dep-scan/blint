@@ -323,8 +323,10 @@ def analyze_packing(
             if overlay_size > 0x1000:
                 findings.append("file_overlay")
 
-    if packers or "high_entropy_exec_with_few_imports" in findings or (
-        writable_executable and max_exec_entropy >= HIGH_ENTROPY_THRESHOLD
+    if (
+        packers
+        or "high_entropy_exec_with_few_imports" in findings
+        or (writable_executable and max_exec_entropy >= HIGH_ENTROPY_THRESHOLD)
     ):
         likelihood = "high"
     elif findings:

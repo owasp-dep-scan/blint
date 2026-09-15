@@ -16,6 +16,7 @@ Usage:
     python tests/scripts/measure_pointer_materialisation.py BIN [BIN ...]
         [--json OUT] [--sample N]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -63,9 +64,14 @@ def run(path: str) -> dict:
         "capability_findings": len(evidence),
         "distinct_strings": sorted({e["string"] for e in resolved}),
         "string_examples": [
-            {"string": e["string"], "value": e["value"], "callee": e["callee"],
-             "argument": e["argument"], "function": e["functions"][0] if e.get("functions") else None,
-             "instruction": (e.get("example") or {}).get("instruction")}
+            {
+                "string": e["string"],
+                "value": e["value"],
+                "callee": e["callee"],
+                "argument": e["argument"],
+                "function": e["functions"][0] if e.get("functions") else None,
+                "instruction": (e.get("example") or {}).get("instruction"),
+            }
             for e in resolved[:200]
         ],
         "coverage": coverage,
@@ -98,9 +104,16 @@ def main() -> int:
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(results, indent=2))
         print(f"wrote {args.json_out}")
-    totals = {k: sum(r.get(k) or 0 for r in results) for k in
-              ("adrp_sites", "lea_rip_sites", "callsite_entries", "strings_resolved",
-               "capability_findings")}
+    totals = {
+        k: sum(r.get(k) or 0 for r in results)
+        for k in (
+            "adrp_sites",
+            "lea_rip_sites",
+            "callsite_entries",
+            "strings_resolved",
+            "capability_findings",
+        )
+    }
     print("TOTAL", json.dumps(totals))
     return 0
 

@@ -45,7 +45,7 @@ def _normalize_import_name(name: str) -> str:
     name = _ELF_VERSION_SUFFIX.sub("", name)
     for decoration in _IMPORT_DECORATIONS:
         if name.startswith(decoration):
-            name = name[len(decoration):]
+            name = name[len(decoration) :]
             break
     # Both PE (leading underscore for cdecl) and Mach-O (leading underscore
     # for everything) prepend underscores that ELF symbols do not carry.
@@ -143,7 +143,9 @@ def function_cfg_hash(cfg: dict | None) -> str:
         for _ in range(min(block_count, 8)):
             colors = [
                 _stable_digest(
-                    colors[index] + "|" + ",".join(sorted(colors[succ] for succ in successors[index]))
+                    colors[index]
+                    + "|"
+                    + ",".join(sorted(colors[succ] for succ in successors[index]))
                 )
                 for index in range(block_count)
             ]

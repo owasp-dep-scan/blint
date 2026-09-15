@@ -107,7 +107,9 @@ def executable_ranges(parsed_obj) -> list[tuple[int, int]]:
                 if max(virtual_size, raw_size) <= 0:
                     continue
                 if section.has_characteristic(lief.PE.Section.CHARACTERISTICS.MEM_EXECUTE):
-                    start = int(section.virtual_address) + int(parsed_obj.optional_header.imagebase)
+                    start = int(section.virtual_address) + int(
+                        parsed_obj.optional_header.imagebase
+                    )
                     ranges.append((start, start + max(virtual_size, raw_size)))
     except (AttributeError, TypeError, ValueError):
         return ranges
@@ -207,9 +209,9 @@ def find_prologue_candidates(
             candidates.update(_scan_arm64_prologues(start, content))
         else:
             candidates.update(_scan_x86_prologues(start, content))
-    return sorted(
-        addr for addr in candidates if _in_ranges(addr, exec_ranges)
-    )[:MAX_PROLOGUE_CANDIDATES]
+    return sorted(addr for addr in candidates if _in_ranges(addr, exec_ranges))[
+        :MAX_PROLOGUE_CANDIDATES
+    ]
 
 
 def _scan_x86_prologues(start: int, content: bytes) -> set[int]:
@@ -259,11 +261,16 @@ def _has_morestack_branch(content: bytes, cursor: int, pattern_len: int) -> bool
         byte = window[index]
         if byte == 0x76:
             return True
-        if byte == 0x0F and index + 1 < len(window) and window[index + 1] in (
-            0x82,
-            0x83,
-            0x86,
-            0x87,
+        if (
+            byte == 0x0F
+            and index + 1 < len(window)
+            and window[index + 1]
+            in (
+                0x82,
+                0x83,
+                0x86,
+                0x87,
+            )
         ):
             # jb/jae/jbe/ja rel32 — the unsigned comparisons Go uses.
             return True

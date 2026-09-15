@@ -8,6 +8,7 @@ so this doubles as the CI gate for the function-discovery work.
 Usage:
     python tests/scripts/validate_funcdisc.py [--dir corpus-build]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,9 +27,10 @@ MANIFEST_PATH = REPO_ROOT / "tests" / "corpus" / "manifest.json"
 def _known_function_addresses(metadata: dict) -> set[int]:
     """Addresses claimed by the symbol-driven function buckets.
 
-    Mach-O metadata mixes two address spaces: LIEF function lists carry
-    image-relative addresses while symbol tables carry absolute ones. Both
-    are normalized into the image-relative space before comparison.
+    Mach-O metadata is normalized to the virtual address space where the
+    function lists are built (P5.1), so every address here is rebased down
+    to the image-relative space. The comparison runs in that space, and both
+    sides of it are rebased the same way.
     """
     imagebase = metadata.get("imagebase")
     imagebase = imagebase if isinstance(imagebase, int) else 0
@@ -52,18 +54,6 @@ def _known_function_addresses(metadata: dict) -> set[int]:
             addresses.add(_normalize(int(str(discovered["address"]).strip(), 16)))
         except (KeyError, ValueError):
             continue
-    return addresses
-
-
-def _disassembled_addresses(metadata: dict) -> set[int]:
-    addresses = set()
-    for func_data in (metadata.get("disassembled_functions") or {}).values():
-        raw = (func_data or {}).get("address")
-        if raw:
-            try:
-                addresses.add(int(str(raw).strip(), 16))
-            except ValueError:
-                continue
     return addresses
 
 
@@ -157,7 +147,9 @@ def assert_stack_strings(assertion: dict, corpus_dir: Path, report: list[dict]) 
     return ok
 
 
-def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, report: list[dict]) -> bool:
+def assert_parses(
+    assertion: dict, artifacts: list[str], corpus_dir: Path, report: list[dict]
+) -> bool:
     expected_keys = assertion.get("expect_metadata") or []
     slice_spec = assertion.get("expect_slices")
     ok = True
@@ -212,7 +204,11 @@ def assert_parses(assertion: dict, artifacts: list[str], corpus_dir: Path, repor
                 )
     if missing:
         report.append(
-            {"id": assertion["id"], "status": "SKIP", "detail": f"missing {len(missing)} artifacts"}
+            {
+                "id": assertion["id"],
+                "status": "SKIP",
+                "detail": f"missing {len(missing)} artifacts",
+            }
         )
         return True
     report.append(
@@ -255,12 +251,12 @@ def main() -> int:
                 if spec.get("kind") == "paths":
                     artifacts.extend(e["name"] for e in spec.get("entries", []))
                 elif spec.get("kind") == "apps":
-                    artifacts.extend(
-                        p.name for p in corpus_dir.glob("app-*") if p.is_file()
-                    )
+                    artifacts.extend(p.name for p in corpus_dir.glob("app-*") if p.is_file())
             all_ok &= assert_parses(assertion, artifacts, corpus_dir, report)
         else:
-            report.append({"id": assertion["id"], "status": "SKIP", "detail": f"unknown kind {kind}"})
+            report.append(
+                {"id": assertion["id"], "status": "SKIP", "detail": f"unknown kind {kind}"}
+            )
 
     print(f"{'id':28} {'status':6} detail")
     for entry in report:

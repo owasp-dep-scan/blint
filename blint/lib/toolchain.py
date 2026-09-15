@@ -36,7 +36,9 @@ MSVC_CRT_SYMBOLS = ("__scrt_common_main_seh", "__security_init_cookie", "_CRT_IN
 MINGW_SYMBOLS = ("__mingw_get_crt_info", "__mingw_raise_matherr", "pei386_runtime_relocator")
 
 _GCC_VERSION = re.compile(r"(?:gcc|GCC)[^\d]*([0-9]+\.[0-9]+\.[0-9]+)")
-_CLANG_VERSION = re.compile(r"(?:clang|Apple[ ]clang)[^\d]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+_CLANG_VERSION = re.compile(
+    r"(?:clang|Apple[ ]clang)[^\d]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE
+)
 _RUSTC_VERSION = re.compile(r"rustc[ ]version[ ]([0-9a-f.]+)", re.IGNORECASE)
 _LLD_VERSION = re.compile(r"LLD[ ]([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
 
@@ -66,7 +68,12 @@ def _extract_comment_compilers(comment_content: str) -> list[dict]:
         if match := _CLANG_VERSION.search(chunk):
             name = "apple-clang" if "apple" in lowered else "clang"
             compilers.append(
-                {"name": name, "version": match.group(1), "source": ".comment", "confidence": "high"}
+                {
+                    "name": name,
+                    "version": match.group(1),
+                    "source": ".comment",
+                    "confidence": "high",
+                }
             )
         elif match := _GCC_VERSION.search(chunk):
             compilers.append(
@@ -180,7 +187,13 @@ def infer_toolchain(metadata: dict) -> dict:
     if metadata.get("is_musl"):
         libc = "musl"
     if libc:
-        runtimes.append({"name": libc, "source": "symbol_versions" if not metadata.get("is_musl") else "interpreter", "confidence": "high"})
+        runtimes.append(
+            {
+                "name": libc,
+                "source": "symbol_versions" if not metadata.get("is_musl") else "interpreter",
+                "confidence": "high",
+            }
+        )
 
     # --- language runtimes ------------------------------------------------
     if metadata.get("go_dependencies") or metadata.get("go_formulation"):
@@ -189,7 +202,14 @@ def infer_toolchain(metadata: dict) -> dict:
         runtimes.append({"name": "rust", "source": "buildinfo", "confidence": "high"})
 
     names = _symbol_names(metadata)
-    found = {"go": False, "rust": False, "swift": False, "objc": False, "msvc": False, "mingw": False}
+    found = {
+        "go": False,
+        "rust": False,
+        "swift": False,
+        "objc": False,
+        "msvc": False,
+        "mingw": False,
+    }
     for name in names:
         if not found["go"] and name.startswith(GO_RUNTIME_PREFIXES):
             found["go"] = True

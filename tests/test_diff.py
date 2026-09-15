@@ -44,7 +44,6 @@ needs_stackstr = pytest.mark.skipif(
 pytestmark = pytest.mark.slow
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build synthetic sides
 
@@ -739,7 +738,15 @@ def test_stackstr_stripped_pair_code_is_not_reported_rewritten():
     assert functions["changed_count"] == 0, "same build: no code may be reported rewritten"
     assert functions["unchanged_count"] >= 3
     assert functions["added_count"] == 0
-    assert functions["removed_count"] >= 1, "the stripped side disassembles fewer functions"
+    # P5.1 removed the phantom function entries: pre-fix the unstripped side
+    # disassembled its symtab-named functions a second time at imagebase-
+    # doubled addresses (e.g. _build_secret at 0x200000414, 36 garbage
+    # instructions beside the real 42-instruction body at 0x100000414), and
+    # those phantoms were what read as "the stripped side disassembles
+    # fewer functions" (removed_count 3, unchanged 4). With both sides in
+    # one address space the pair is at full parity: 5 functions each, all
+    # content-identical.
+    assert functions["removed_count"] == 0, "the stripped side disassembles every function"
     # The symbol-table change is visible at the symbol layer with names.
     assert report["symbols"]["removed_count"] >= 1
     assert report["symbols"]["removed"] == ["_build_secret", "_leak", "_main"]

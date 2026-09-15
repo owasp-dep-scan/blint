@@ -401,10 +401,18 @@ class ArchModel:
     def write_operand(self, state: FrameState, name: str, value) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def write_family(self, state: FrameState, family: str, value, width: int) -> None:  # pragma: no cover
+    def write_family(
+        self, state: FrameState, family: str, value, width: int
+    ) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:  # pragma: no cover - interface
+    def step(
+        self,
+        state: FrameState,
+        text: str,
+        leaves_function: bool = True,
+        address_span: tuple[int, int] | None = None,
+    ) -> None:  # pragma: no cover - interface
         """Apply one instruction's semantics to the state.
 
         ``leaves_function`` says what the caller knows about a tail-kind
@@ -577,7 +585,13 @@ class X86_64Model(ArchModel):
     def write_family(self, state: FrameState, family: str, value, width: int) -> None:
         state.registers[family] = value & ((1 << (width * 8)) - 1)
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
+    def step(
+        self,
+        state: FrameState,
+        text: str,
+        leaves_function: bool = True,
+        address_span: tuple[int, int] | None = None,
+    ) -> None:
         if self.apply_branch(state, text, leaves_function):
             return
 
@@ -699,9 +713,7 @@ class X86_64Model(ArchModel):
                 return
             if sign == "-":
                 delta = -delta
-            state.write_operand(
-                dest, ("ptr", (address_span[1] + delta) & 0xFFFFFFFFFFFFFFFF)
-            )
+            state.write_operand(dest, ("ptr", (address_span[1] + delta) & 0xFFFFFFFFFFFFFFFF))
             return
         source = state.get_register(source_reg)
         if source is None:
@@ -765,15 +777,11 @@ ARM64_FRAME_BASES = frozenset({"sp", "x29", "fp"})
 
 # Caller-saved registers under the AAPCS64 ABI. After a call their values are
 # unknown; x19-x28 (callee-saved), x29 (fp), x30 (lr) and sp survive.
-ARM64_CALL_CLOBBERED = tuple(
-    sorted({f"x{i}" for i in range(19)} | {f"w{i}" for i in range(19)})
-)
+ARM64_CALL_CLOBBERED = tuple(sorted({f"x{i}" for i in range(19)} | {f"w{i}" for i in range(19)}))
 
 _ARM64_REG = r"[wx]\d+|xzr|wzr|sp|fp|lr"
 
-_ARM64_MOV_IMM_RE = re.compile(
-    rf"^\s*mov\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE
-)
+_ARM64_MOV_IMM_RE = re.compile(rf"^\s*mov\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE)
 _ARM64_MOVZ_RE = re.compile(
     rf"^\s*movz\s+({_ARM64_REG})\s*,\s*({_IMM})(?:\s*,\s*(?:lsl|LSL)\s*#?(\d+))?\s*$",
     re.IGNORECASE,
@@ -797,21 +805,20 @@ _ARM64_STR_RE = re.compile(
 # adrp renders as `adrp x0, #<delta>`: the delta is the page displacement
 # from the instruction's own page (`pc & ~0xFFF`), so the computed page is
 # `(pc & ~0xFFF) + delta`. Negative when the target lies below the page.
-_ARM64_ADRP_RE = re.compile(
-    rf"^\s*adrp\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE
-)
+_ARM64_ADRP_RE = re.compile(rf"^\s*adrp\s+({_ARM64_REG})\s*,\s*({_IMM})\s*$", re.IGNORECASE)
 
 # Any other instruction whose first operand is a register kills the known
 # value it held. Keeping this strict is what prevents stale values from being
 # decoded as characters they never were.
-_ARM64_DEST_REG_RE = re.compile(
-    rf"^\s*[a-z][a-z0-9.]*\s+({_ARM64_REG})\s*(?:,|$)", re.IGNORECASE
-)
+_ARM64_DEST_REG_RE = re.compile(rf"^\s*[a-z][a-z0-9.]*\s+({_ARM64_REG})\s*(?:,|$)", re.IGNORECASE)
 
 _ARM64_STORE_WIDTHS = {
-    "strb": 1, "sturb": 1,
-    "strh": 2, "sturh": 2,
-    "str": None, "stur": None,  # width comes from the register
+    "strb": 1,
+    "sturb": 1,
+    "strh": 2,
+    "sturh": 2,
+    "str": None,
+    "stur": None,  # width comes from the register
     "stp": None,
 }
 
@@ -895,7 +902,13 @@ class Arm64Model(ArchModel):
             return "sp", value[1]
         return None
 
-    def step(self, state: FrameState, text: str, leaves_function: bool = True, address_span: tuple[int, int] | None = None) -> None:
+    def step(
+        self,
+        state: FrameState,
+        text: str,
+        leaves_function: bool = True,
+        address_span: tuple[int, int] | None = None,
+    ) -> None:
         # bl/blr always call; b/br are tail calls exactly when they leave the
         # function (see apply_branch — the one place that line is drawn).
         if self.apply_branch(state, text, leaves_function):
@@ -1014,7 +1027,9 @@ class Arm64Model(ArchModel):
             # Store pair: both registers land side by side.
             info_a = self.register(reg_a)
             width_a = (
-                source_a[1] if source_a and isinstance(source_a[0], int) else (info_a or (None, 8))[1]
+                source_a[1]
+                if source_a and isinstance(source_a[0], int)
+                else (info_a or (None, 8))[1]
             ) or 8
             if source_a is not None and isinstance(source_a[0], int):
                 state.store(frame_base, effective_offset, source_a[0], width_a)
@@ -1264,9 +1279,9 @@ def _converge_over_cfg(
     blocks: list[dict],
     edges: list[dict],
     address_spans: list[tuple[int, int]] | None = None,
-) -> tuple[
-    list[tuple[int, int]], list[list[int]], list[list[int]], list[FrameState | None]
-] | None:
+) -> (
+    tuple[list[tuple[int, int]], list[list[int]], list[list[int]], list[FrameState | None]] | None
+):
     """Iterate the function's blocks to a fixed point over the CFG.
 
     The worklist starts at block 0 and follows the CFG's edges, so
@@ -1452,9 +1467,7 @@ def argument_registers(binary_format: str, arch_target: str) -> tuple[str, ...] 
     lowered = (arch_target or "").lower()
     if "aarch64" in lowered or "arm64" in lowered:
         return ARM64_ARGUMENT_REGISTERS
-    if not lowered or any(
-        marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")
-    ):
+    if not lowered or any(marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")):
         fmt = (binary_format or "").lower()
         if "pe" in fmt:
             return X86_WIN64_ARGUMENT_REGISTERS
@@ -1587,7 +1600,11 @@ def _call_site_records(
                     if isinstance(value, int):
                         arguments.append(value)
                         continue
-                    if isinstance(value, tuple) and value[0] == "ptr" and isinstance(value[1], int):
+                    if (
+                        isinstance(value, tuple)
+                        and value[0] == "ptr"
+                        and isinstance(value[1], int)
+                    ):
                         arguments.append(value[1])
                         materialised += 1
                         if value[1] % 4096 == 0:
@@ -1670,8 +1687,15 @@ def recover_call_site_arguments_with_method(
         return [], "cap_hit"
     spans, successors, predecessors, out_states = converged
     records = _call_site_records(
-        lines, model, spans, successors, predecessors, out_states, arg_families,
-        func_data.get("direct_call_targets"), address_spans=address_spans,
+        lines,
+        model,
+        spans,
+        successors,
+        predecessors,
+        out_states,
+        arg_families,
+        func_data.get("direct_call_targets"),
+        address_spans=address_spans,
     )
     return records, "dataflow"
 
@@ -1710,26 +1734,68 @@ MAX_CALLSITE_SITES_PER_ENTRY = 3
 MAX_NAMED_CAPPED_FUNCTIONS = 20
 
 
+def _wide_terminated_prefix(data: bytes) -> bytes:
+    """Return the bytes up to the first aligned UTF-16 NUL terminator.
+
+    Pairs are formed from the first byte of the run, so the terminator is a
+    ``\\x00\\x00`` at an even offset — the same bytes straddling odd offsets
+    are data, not a terminator. A run with no terminator yields its
+    even-length prefix: a trailing odd byte cannot be half of a character,
+    which is :func:`_decode_one`'s rule for the same situation.
+    """
+    end = len(data) - (len(data) % 2)
+    for i in range(0, end, 2):
+        if data[i] == 0 and data[i + 1] == 0:
+            return data[:i]
+    return data[:end]
+
+
 def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
-    """Decode the NUL-terminated ASCII run at the start of ``data``.
+    """Decode the NUL-terminated text run at the start of ``data``.
 
     The shared decoder for naming what a recovered call-site constant points
-    at: the same character filter as the stack-string decoder applies (only
-    path-, registry- and API-relevant characters pass), with a longer minimum
-    because a constant that happens to land on three printable bytes is too
-    easy to manufacture. Returns None when the bytes do not read as text.
+    at, reading both encodings a pointed-at literal uses — ASCII and
+    UTF-16LE — under the stack-string decoder's policy (:func:`_decode_run`):
+    both encodings are tried and the longer valid reading kept, the wide
+    attempt waits for ``min_length * 2`` bytes (a wide character costs two),
+    and the same character filter applies (:func:`_looks_like_text`), with a
+    longer minimum than the stack-string path because a constant that happens
+    to land on three printable bytes is too easy to manufacture. The minimum
+    counts decoded characters for both encodings. The two encodings cannot
+    both be valid: the filter is ASCII-only, so a valid wide reading forces
+    every high byte to zero and truncates the ASCII reading at one byte,
+    while a valid ASCII reading puts a non-zero byte inside the first wide
+    pair. Byte order is LE only, matching the decoder this policy comes from
+    and every Windows target the dataflow recovers constants for.
+
+    The terminator is located *before* decoding, unlike :func:`_decode_one`,
+    which decodes its whole input and splits afterwards: a pointer read is a
+    fixed-size window that continues past the string into whatever follows it
+    in the section, and under a whole-run decode a non-ASCII byte after an
+    ASCII string's NUL — or a lone surrogate after a wide string's — would
+    veto an otherwise valid reading. Returns None when the bytes do not read
+    as text in either encoding.
     """
     if not data:
         return None
-    nul = data.find(b"\x00")
-    usable = data[:nul] if nul != -1 else data
-    try:
-        text = usable.decode("ascii")
-    except UnicodeDecodeError:
-        return None
-    if len(text) < min_length or not _looks_like_text(text):
-        return None
-    return text
+    best: str | None = None
+    for encoding in ("utf-16-le", "ascii"):
+        if encoding == "utf-16-le":
+            if len(data) < min_length * 2:
+                continue
+            usable = _wide_terminated_prefix(data)
+        else:
+            nul = data.find(b"\x00")
+            usable = data if nul == -1 else data[:nul]
+        try:
+            text = usable.decode(encoding)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if len(text) < min_length or not _looks_like_text(text):
+            continue
+        if best is None or len(text) > len(best):
+            best = text
+    return best
 
 
 def analyze_call_site_arguments(
@@ -1885,9 +1951,7 @@ def analyze_call_site_arguments(
     return entries, coverage
 
 
-def _count_materialisation_coverage(
-    coverage: dict, func_data: dict, model: ArchModel
-) -> None:
+def _count_materialisation_coverage(coverage: dict, func_data: dict, model: ArchModel) -> None:
     """Name how this function's pc-relative materialisations fared.
 
     Only functions whose listing actually carries an address-materialising

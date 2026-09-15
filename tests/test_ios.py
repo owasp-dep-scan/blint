@@ -313,7 +313,7 @@ def test_read_bundle_info_rejects_non_dict_plist_roots(tmp_path):
     for plist_bytes in (
         b'<plist version="1.0"/>',
         b'<plist version="1.0"><array><string>x</string></array></plist>',
-        b"<plist version=\"1.0\"><string>just a string</string></plist>",
+        b'<plist version="1.0"><string>just a string</string></plist>',
     ):
         app_dir = tmp_path / "App.app"
         app_dir.mkdir(exist_ok=True)

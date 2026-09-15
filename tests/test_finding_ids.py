@@ -29,7 +29,6 @@ needs_go_elf = pytest.mark.skipif(
 pytestmark = pytest.mark.slow
 
 
-
 def test_compute_finding_id_depends_only_on_its_three_inputs():
     base = compute_finding_id("CHECK_NX", "a" * 64, "")
     # Stable for identical inputs.

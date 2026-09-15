@@ -5,51 +5,51 @@
       "assertions": [
         {
           "type": "internal",
-          "src": "sub_b28@0x100000b28",
-          "dst": "sub_7324@0x100007324",
+          "src": "wasm_tools::dump::Dump::print_module@0x100000b28",
+          "dst": "wasm_tools::dump::Dump::print_module::{{closure}}::{{closure}}@0x100007324",
           "kind": "direct",
           "expect_present": true,
-          "note": "Known startup direct edge after system-library filtering"
+          "note": "Known startup direct edge after system-library filtering. Identity re-recorded for P5.1: the addresses are unchanged, but the nodes carry their real symbols now that Mach-O function metadata lives in one address space (the sub_<offset> twins the labels used before were the mixed-space duplicates P5.1 removed)."
         },
         {
           "type": "internal",
-          "src": "sub_b28@0x100000b28",
-          "dst": "sub_752c@0x10000752c",
+          "src": "wasm_tools::dump::Dump::print_module@0x100000b28",
+          "dst": "wasm_tools::dump::Dump::print_name_map@0x10000752c",
           "kind": "direct",
           "expect_present": true,
-          "note": "Known startup-to-helper direct edge"
+          "note": "Known startup-to-helper direct edge; identity re-recorded for P5.1"
         },
         {
           "type": "internal",
-          "src": "sub_b28@0x100000b28",
-          "dst": "sub_b28@0x100000b28",
+          "src": "wasm_tools::dump::Dump::print_module@0x100000b28",
+          "dst": "wasm_tools::dump::Dump::print_module@0x100000b28",
           "kind": "tailcall",
           "expect_present": true,
-          "note": "Self tailcall detected in baseline"
+          "note": "Self tailcall detected in baseline; identity re-recorded for P5.1"
         },
         {
           "type": "external",
-          "src": "sub_14bf74@0x10014bf74",
+          "src": "core::error::Error::cause@0x10014bf74",
           "target": "x2",
           "reason": "unresolved:tailcall",
           "expect_present": true,
-          "note": "Representative unresolved tailcall after system-library filtering"
+          "note": "Representative unresolved tailcall after system-library filtering; identity re-recorded for P5.1"
         },
         {
           "type": "internal",
-          "src": "sub_8c0@0x1000008c0",
+          "src": "<core::fmt::Error as core::fmt::Debug>::fmt@0x1000008c0",
           "dst": "sub_deadbeef@0x100deadbe",
           "kind": "direct",
           "expect_present": false,
-          "note": "Guardrail for obvious false-positive edges"
+          "note": "Guardrail for obvious false-positive edges; identity re-recorded for P5.1"
         },
         {
           "type": "external",
-          "src": "sub_7750@0x100007750",
+          "src": "wasm_tools::dump::Dump::print_byte_header@0x100007750",
           "target": "#999999",
           "reason": "address_space_miss",
           "expect_present": false,
-          "note": "Guardrail for obvious false-positive external bucket entries"
+          "note": "Guardrail for obvious false-positive external bucket entries; identity re-recorded for P5.1"
         }
       ]
     },

@@ -630,9 +630,7 @@ def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _merge_dependency_updates(
-    dependencies_dict: dict[str, set], updates: dict[str, list]
-) -> None:
+def _merge_dependency_updates(dependencies_dict: dict[str, set], updates: dict[str, list]) -> None:
     """Fold one unit's dependency-graph updates into the run's dict.
 
     Order is irrelevant here: ``generate()`` sorts every ``dependsOn`` list
@@ -1076,8 +1074,7 @@ def process_exe_file(
                 "blintdb_member_layer": evidence.get("blintdb_member_layer"),
                 "blintdb_matched_member_count": evidence.get("blintdb_matched_member_count"),
                 "blintdb_member_names": [
-                    member["member_name"]
-                    for member in evidence.get("blintdb_members", [])
+                    member["member_name"] for member in evidence.get("blintdb_members", [])
                 ],
                 "blintdb_member_details": [
                     f"{member['member_name']} coverage={member['member_coverage']}"
@@ -1112,11 +1109,7 @@ def process_exe_file(
             "vendored_banner": banner["banner"],
         }
         existing = next(
-            (
-                comp
-                for comp in lib_components
-                if getattr(comp, "purl", None) == banner["purl"]
-            ),
+            (comp for comp in lib_components if getattr(comp, "purl", None) == banner["purl"]),
             None,
         )
         if existing is not None:

@@ -217,9 +217,7 @@ def test_umbrella_provides_reexported_symbols_via_closure(sdk_index):
     # The load-bearing attribution decision: the symbol an umbrella re-exports
     # belongs to the umbrella's surface, because a Mach-O two-level bind names
     # the library the binary declared, and dyld walks re-exports from there.
-    provides, via_reexport = sdk_index.provides(
-        "/usr/lib/libUmbrella.B.dylib", "_dispatch_once"
-    )
+    provides, via_reexport = sdk_index.provides("/usr/lib/libUmbrella.B.dylib", "_dispatch_once")
     assert provides is True
     assert via_reexport is True
     # The implementing library provides it directly.
@@ -509,6 +507,7 @@ def test_counts_stay_exact_when_samples_are_capped(sdk_root):
     assert block["unconfirmed_symbol_count"] == over_cap
     assert len(block["unconfirmed_symbols"]) == UNCONFIRMED_SYMBOL_SAMPLE_CAP
 
+
 def test_attributed_count_is_exact_above_the_sample_cap(tmp_path):
     """The same contract on the attribution side, with its own SDK tree.
 
@@ -532,8 +531,7 @@ def test_attributed_count_is_exact_above_the_sample_cap(tmp_path):
         "binary_type": "MachO",
         "libraries": [{"name": "/usr/lib/libbulk.dylib"}],
         "symtab_symbols": [
-            {"name": f"_bulk_{index:03d}", "is_imported": True}
-            for index in range(attributable)
+            {"name": f"_bulk_{index:03d}", "is_imported": True} for index in range(attributable)
         ],
     }
     block = enrich_macho_sdk_attribution(metadata, str(tmp_path / "Bulk.sdk"))
@@ -566,11 +564,7 @@ def test_enrich_without_declared_libraries_is_a_no_op(sdk_root):
 def test_enrich_never_leaks_the_sdk_path(sdk_root):
     metadata = _git_like_metadata()
     enrich_macho_sdk_attribution(metadata, str(sdk_root))
-    exported = {
-        key: value
-        for key, value in metadata.items()
-        if key != SDK_ATTRIBUTIONS_KEY
-    }
+    exported = {key: value for key, value in metadata.items() if key != SDK_ATTRIBUTIONS_KEY}
     assert str(sdk_root).encode() not in orjson.dumps(exported)
 
 
@@ -678,9 +672,7 @@ def test_index_confirms_the_binds_dyld_reports_for_a_real_binary(real_index):
     assert declared
     confirmed = 0
     for symbol, from_short in pairs:
-        candidates = [
-            name for name in declared if from_short in Path(name).name
-        ]
+        candidates = [name for name in declared if from_short in Path(name).name]
         assert candidates, f"no declared library matches dyld's '{from_short}'"
         hits = [bool(real_index.provides(name, symbol)[0]) for name in candidates]
         assert any(hits), (
@@ -711,9 +703,11 @@ def test_index_matches_a_real_dylibs_exports(real_index):
         if line.strip() and not line.strip().startswith(("-", "offset", "/usr"))
     ]
     assert exports, "dyld_info -exports returned nothing to test against"
-    install = subprocess.run(
-        ["/usr/bin/otool", "-D", dylib], capture_output=True, text=True, check=True
-    ).stdout.splitlines()[-1].strip()
+    install = (
+        subprocess.run(["/usr/bin/otool", "-D", dylib], capture_output=True, text=True, check=True)
+        .stdout.splitlines()[-1]
+        .strip()
+    )
     assert install.startswith("/"), f"unexpected install name: {install!r}"
     sampled = exports[:40]
     confirmed = [symbol for symbol in sampled if real_index.provides(install, symbol)[0]]

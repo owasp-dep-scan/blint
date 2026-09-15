@@ -168,6 +168,4 @@ def test_generate_includes_wasm_components_only_with_flag(tmp_path):
     assert not any(
         "type=wasm" in component.get("purl", "") for component in data.get("components", [])
     )
-    assert not any(
-        WASI_CLI_PURL in str(dep) for dep in data.get("dependencies", [])
-    )
+    assert not any(WASI_CLI_PURL in str(dep) for dep in data.get("dependencies", []))

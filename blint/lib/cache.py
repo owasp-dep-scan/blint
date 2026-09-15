@@ -77,7 +77,13 @@ from blint.logger import LOG
 # Bumped for the dataflow lane: P4.8 changes the *values* the recovery
 # produces for unchanged inputs (stack strings, call-site arguments), and a
 # warm cache must not keep serving the pre-P4.8 answers.
-CACHE_SCHEMA_VERSION = 3
+# Bumped for P5.1: Mach-O function metadata is normalized to the virtual
+# address space, so function addresses, sub_<addr> names, disassembly keys
+# and discovery records all change value for unchanged inputs.
+# Bumped for P5.2: the pointer-string resolver reads PE strings at all
+# (image-base offset) and decodes UTF-16LE, so call_site_arguments `string`
+# fields change value for unchanged PE inputs.
+CACHE_SCHEMA_VERSION = 5
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that
@@ -171,9 +177,7 @@ def compute_options_digest(
     """
     parse_fn = parse_fn or binary_parse
     if wasm_instruction_budget is None:
-        wasm_instruction_budget = binary_parse.__globals__.get(
-            "BLINT_MAX_WASM_INSTRUCTIONS", 0
-        )
+        wasm_instruction_budget = binary_parse.__globals__.get("BLINT_MAX_WASM_INSTRUCTIONS", 0)
     payload: dict[str, Any] = {
         "cache_schema": CACHE_SCHEMA_VERSION,
         "BLINT_MAX_WASM_INSTRUCTIONS": wasm_instruction_budget,
@@ -210,9 +214,7 @@ def compute_options_digest(
         from blint.lib.tbd_index import TbdSdkError, index_fingerprint
 
         try:
-            payload["sdk_index_fingerprint"] = index_fingerprint(
-                str(payload["sdk_path"])
-            )
+            payload["sdk_index_fingerprint"] = index_fingerprint(str(payload["sdk_path"]))
         except (OSError, TbdSdkError) as exc:
             raise CacheKeyError(
                 f"sdk_path {payload['sdk_path']!r} cannot be fingerprinted for "
@@ -264,9 +266,7 @@ class ParseCache:
             # directory outright (CantOpenError), which on macOS means every
             # location under /var/folders — i.e. all temp dirs.
             if os.path.islink(self.db_path):
-                LOG.warning(
-                    "Parse cache at %s is a symlink; refusing to use it", self.db_path
-                )
+                LOG.warning("Parse cache at %s is a symlink; refusing to use it", self.db_path)
                 return None
             if create:
                 os.makedirs(self.cache_dir, exist_ok=True)
@@ -314,9 +314,7 @@ class ParseCache:
             )
             """
         )
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS ParseCacheLru ON ParseCache (last_used)"
-        )
+        connection.execute("CREATE INDEX IF NOT EXISTS ParseCacheLru ON ParseCache (last_used)")
 
     def close(self) -> None:
         """Close the SQLite connection; idempotent."""
@@ -396,7 +394,9 @@ class ParseCache:
                 for key, item in value.items()
             }
         if isinstance(value, list):
-            return [ParseCache._rewrite_stored_path(item, stored_path, current_path) for item in value]
+            return [
+                ParseCache._rewrite_stored_path(item, stored_path, current_path) for item in value
+            ]
         return value
 
     def put(self, file_sha256: str, options_digest: str, metadata: dict) -> bool:
@@ -453,8 +453,7 @@ class ParseCache:
             return
         rows = _execute(
             connection,
-            "SELECT cache_key, stored_size FROM ParseCache "
-            "ORDER BY last_used ASC, created_at ASC",
+            "SELECT cache_key, stored_size FROM ParseCache ORDER BY last_used ASC, created_at ASC",
             [],
         )
         total = sum(int(row["stored_size"]) for row in rows)
@@ -462,9 +461,7 @@ class ParseCache:
         for row in rows:
             if total <= self.max_bytes:
                 break
-            connection.execute(
-                "DELETE FROM ParseCache WHERE cache_key = ?", [row["cache_key"]]
-            )
+            connection.execute("DELETE FROM ParseCache WHERE cache_key = ?", [row["cache_key"]])
             total -= int(row["stored_size"])
             evicted += 1
         if evicted:

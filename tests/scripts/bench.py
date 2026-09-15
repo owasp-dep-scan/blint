@@ -38,6 +38,7 @@ artifacts are skipped cleanly, so the script works wherever a partial corpus
 exists. Exit code is always 0 unless arguments are wrong; compare results
 are reported as a table, not an exit status.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -231,9 +232,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    artifacts = sorted(
-        p for p in args.dir.iterdir() if p.is_file() and args.only in p.name
-    ) if args.dir.is_dir() else []
+    artifacts = (
+        sorted(p for p in args.dir.iterdir() if p.is_file() and args.only in p.name)
+        if args.dir.is_dir()
+        else []
+    )
     if not artifacts:
         print(
             f"No artifacts in {args.dir}; materialize the corpus first with "
@@ -261,8 +264,9 @@ def main() -> int:
         blint_version = "unknown"
 
     results = []
-    print(f"Benching {len(artifacts)} artifact(s), repeat={args.repeat}, "
-          f"disassemble={disassemble}\n")
+    print(
+        f"Benching {len(artifacts)} artifact(s), repeat={args.repeat}, disassemble={disassemble}\n"
+    )
     for path in artifacts:
         # Same isolation contract as the analyzer itself: one bad artifact
         # records an error and the bench continues with the rest.
@@ -272,7 +276,9 @@ def main() -> int:
                 for _ in range(args.repeat)
             ]
         except Exception as e:  # noqa: BLE001
-            results.append({"name": path.name, "path": str(path), "error": f"{type(e).__name__}: {e}"})
+            results.append(
+                {"name": path.name, "path": str(path), "error": f"{type(e).__name__}: {e}"}
+            )
             print(f"{path.name:32} ERROR {type(e).__name__}: {e}")
             continue
         # Keep the minimum per phase: the least-noisy estimate of true cost.

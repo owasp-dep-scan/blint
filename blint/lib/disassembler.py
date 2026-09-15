@@ -2105,17 +2105,16 @@ def disassemble_functions(
                     pass
     all_func_addrs_sorted = sorted(list(set(all_func_addrs)))
     # Call targets render as absolute virtual addresses, while stored function
-    # addresses are image-relative for PE and Mach-O. All discovery work below
-    # happens in stored space, so executable ranges are rebased once here.
+    # addresses are image-relative for PE. Mach-O function metadata is
+    # normalized to the virtual space where the list is built (P5.1), so its
+    # stored space *is* the virtual space and the rebase delta is zero. All
+    # discovery work below happens in stored space, so executable ranges are
+    # rebased once here.
     imagebase = 0
     if isinstance(parsed_obj, lief.PE.Binary):
         imagebase = int(parsed_obj.optional_header.imagebase)
-    elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, "imagebase"):
-        imagebase = int(parsed_obj.imagebase)
     exec_ranges_true = executable_ranges(parsed_obj)
-    exec_ranges_stored = [
-        (start - imagebase, end - imagebase) for start, end in exec_ranges_true
-    ]
+    exec_ranges_stored = [(start - imagebase, end - imagebase) for start, end in exec_ranges_true]
     addr_to_index = {addr: i for i, addr in enumerate(all_func_addrs_sorted)}
     base_delta = 0
     if isinstance(parsed_obj, lief.ELF.Binary):
@@ -2134,9 +2133,8 @@ def disassemble_functions(
             # the segment start, and shifting those reads decodes a *different
             # function's* bytes (x86 decodes almost anything, so the wrong read
             # succeeds and the correct one is never tried).
-            if (
-                code_segment.virtual_address != min_func_addr
-                and not _addr_in_exec_ranges(min_func_addr, exec_ranges_true)
+            if code_segment.virtual_address != min_func_addr and not _addr_in_exec_ranges(
+                min_func_addr, exec_ranges_true
             ):
                 base_delta = code_segment.virtual_address - min_func_addr
                 LOG.debug(
@@ -2232,9 +2230,7 @@ def disassemble_functions(
             continue
         func_addr_va = func_addr
         if isinstance(parsed_obj, lief.PE.Binary):
-            func_addr_va = func_addr + parsed_obj.optional_header.imagebase
-        elif isinstance(parsed_obj, lief.MachO.Binary) and hasattr(parsed_obj, "imagebase"):
-            func_addr_va = func_addr + parsed_obj.imagebase
+            func_addr_va = func_addr + imagebase
         lief_lookup_va = func_addr + base_delta
         func_addr_va_hex = hex(func_addr_va)
         is_executable = True
@@ -2451,14 +2447,12 @@ def disassemble_functions(
                 if function_cfg:
                     disassembly_results[f"{func_addr_va_hex}::{func_name}"]["cfg"] = function_cfg
             if func_entry.get("discovered"):
-                disassembly_results[f"{func_addr_va_hex}::{func_name}"]["discovered"] = (
-                    func_entry["discovered"]
-                )
+                disassembly_results[f"{func_addr_va_hex}::{func_name}"]["discovered"] = func_entry[
+                    "discovered"
+                ]
             if promoted_count < MAX_PROMOTED_FUNCTIONS:
                 last_instr = truncated_instr_list[-1]
-                span_end = (
-                    last_instr.address + len(last_instr.bytes) - func_addr_va + func_addr
-                )
+                span_end = last_instr.address + len(last_instr.bytes) - func_addr_va + func_addr
                 bisect.insort(disassembled_spans, (func_addr, span_end))
                 promoted = _promote_call_targets(
                     direct_call_targets,
@@ -2491,8 +2485,9 @@ def disassemble_functions(
     if promoted_count:
         # Surface call-site discoveries in the metadata record so downstream
         # consumers can tell symbol-derived functions from promoted ones.
-        # Stored addresses keep the same image-relative space as the unwind
-        # discovery records.
+        # For Mach-O the stored space is the virtual space (P5.1), so the
+        # unwind and callsite discovery records share one address space; PE
+        # keeps its image-relative stored space.
         promoted_entries = [
             {
                 "name": func.get("name", key.split("::", 1)[1]),

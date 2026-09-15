@@ -39,7 +39,13 @@ def _arm64_func(assembly: str, blocks: list[dict] | None = None, **overrides) ->
         "instruction_lengths": [4] * len(lines),
         "cfg": {
             "blocks": blocks
-            or [{"start": "0x100000ab4", "end": hex(0x100000AB4 + 4 * len(lines)), "instructions": len(lines)}],
+            or [
+                {
+                    "start": "0x100000ab4",
+                    "end": hex(0x100000AB4 + 4 * len(lines)),
+                    "instructions": len(lines),
+                }
+            ],
             "edges": [],
         },
         "direct_call_targets": [
@@ -50,7 +56,9 @@ def _arm64_func(assembly: str, blocks: list[dict] | None = None, **overrides) ->
     return func
 
 
-def _x86_func(assembly: str, lengths: list[int], blocks: list[dict] | None = None, **overrides) -> dict:
+def _x86_func(
+    assembly: str, lengths: list[int], blocks: list[dict] | None = None, **overrides
+) -> dict:
     lines = assembly.split("\n")
     func = {
         "name": "smoke_x86",
@@ -216,9 +224,7 @@ def test_x86_rip_relative_lea_materialises_next_instruction_target():
     # reads rip as 0x1007, so the target is 0x2f2f.
     assembly = "lea rdi, [rip + 7978]\nxor esi, esi\nxor edx, edx\ncall qword ptr [rip + 4096]"
     func = _x86_func(assembly, [7, 3, 3, 6])
-    records, method = recover_call_site_arguments_with_method(
-        func, "x86_64-apple-macosx", "MachO"
-    )
+    records, method = recover_call_site_arguments_with_method(func, "x86_64-apple-macosx", "MachO")
     assert method == "dataflow"
     calls = [r for r in records if r["instruction"].startswith("call")]
     assert calls[0]["arguments"][0] == 0x1000 + 7 + 7978
@@ -228,9 +234,7 @@ def test_x86_rip_relative_lea_materialises_next_instruction_target():
 def test_x86_rip_relative_lea_negative_displacement():
     assembly = "lea rax, [rip - 32]\nmov rdi, rax\ncall qword ptr [rip + 4096]"
     func = _x86_func(assembly, [7, 3, 6])
-    records, method = recover_call_site_arguments_with_method(
-        func, "x86_64-apple-macosx", "MachO"
-    )
+    records, method = recover_call_site_arguments_with_method(func, "x86_64-apple-macosx", "MachO")
     assert method == "dataflow"
     calls = [r for r in records if r["instruction"].startswith("call")]
     assert calls[0]["arguments"][0] == 0x1000 + 7 - 32
@@ -244,9 +248,7 @@ def test_x86_lea_rip_without_addresses_is_invalidated_and_named():
         blocks=[{"instructions": 2}],
     )
     del func["instruction_lengths"]
-    records, method = recover_call_site_arguments_with_method(
-        func, "x86_64-apple-macosx", "MachO"
-    )
+    records, method = recover_call_site_arguments_with_method(func, "x86_64-apple-macosx", "MachO")
     assert method == "dataflow"
     calls = [r for r in records if r["instruction"].startswith("call")]
     assert calls[0]["arguments"][0] is None
@@ -287,9 +289,7 @@ def test_block_counts_materialised_arguments_and_resolved_strings():
     assembly = "adrp x0, #1155072\nadd x0, x0, #1852\nbl _printf"
     func = _arm64_func(
         assembly,
-        direct_call_targets=[
-            {"target_name": "printf", "raw_operand": "_printf", "kind": "call"}
-        ],
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
     )
     entries, coverage = analyze_call_site_arguments(
         {"k": func},
@@ -309,16 +309,12 @@ def test_materialised_and_immediate_sites_aggregate_without_conflict():
     # once with an immediate stays two distinct entries: values differ.
     arm = _arm64_func(
         "adrp x0, #1155072\nadd x0, x0, #1852\nbl _printf",
-        direct_call_targets=[
-            {"target_name": "printf", "raw_operand": "_printf", "kind": "call"}
-        ],
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
     )
     arm2 = _arm64_func(
         "mov x0, #5\nbl _printf",
         name="arm2",
-        direct_call_targets=[
-            {"target_name": "printf", "raw_operand": "_printf", "kind": "call"}
-        ],
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
     )
     entries, coverage = analyze_call_site_arguments(
         {"a": arm, "b": arm2}, "aarch64-apple-macosx", "MachO"

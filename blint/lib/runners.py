@@ -234,12 +234,16 @@ class AnalysisRunner:
 
     def _mark_attempted(self, unit_role: str) -> None:
         self.units_attempted += 1
-        self.units_attempted_by_role[unit_role] = self.units_attempted_by_role.get(unit_role, 0) + 1
+        self.units_attempted_by_role[unit_role] = (
+            self.units_attempted_by_role.get(unit_role, 0) + 1
+        )
         self.events.append(("attempted", unit_role))
 
     def _mark_success(self, unit_role: str) -> None:
         self.units_succeeded += 1
-        self.units_succeeded_by_role[unit_role] = self.units_succeeded_by_role.get(unit_role, 0) + 1
+        self.units_succeeded_by_role[unit_role] = (
+            self.units_succeeded_by_role.get(unit_role, 0) + 1
+        )
         self.events.append(("succeeded", unit_role))
 
     def _record_failure(
@@ -430,9 +434,7 @@ class AnalysisRunner:
         if for_workers:
             return True
         self.parse_cache = ParseCache()
-        LOG.debug(
-            "Parse cache enabled at %s", self.parse_cache.db_path
-        )
+        LOG.debug("Parse cache enabled at %s", self.parse_cache.db_path)
         return True
 
     def _worker_spec(self, blint_options: BlintOptions, cache_enabled: bool) -> WorkerSpec:
@@ -551,8 +553,7 @@ class AnalysisRunner:
         self.unit_failures.append(record)
         self.events.append(("failure", record))
         LOG.error(
-            f"Analysis of top-level unit {file_path} failed at stage worker: "
-            f"WorkerDied: {reason}"
+            f"Analysis of top-level unit {file_path} failed at stage worker: WorkerDied: {reason}"
         )
         self._advance_progress(0)
 
@@ -635,7 +636,9 @@ class AnalysisRunner:
                 self._mark_success("top-level")
             return
         elif is_macos_bundle(f):
-            bundle_processed = self._process_macos_bundle(f, blint_options, wants_callgraph_outputs)
+            bundle_processed = self._process_macos_bundle(
+                f, blint_options, wants_callgraph_outputs
+            )
             self.progress.advance(self.task)
             if bundle_processed:
                 self._mark_success("top-level")

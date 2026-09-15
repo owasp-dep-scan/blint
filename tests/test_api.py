@@ -30,7 +30,6 @@ needs_go_elf = pytest.mark.skipif(
 pytestmark = pytest.mark.slow
 
 
-
 def test_analyze_returns_typed_result_on_wasm_fixture():
     result = analyze(WASM_FIXTURE)
 

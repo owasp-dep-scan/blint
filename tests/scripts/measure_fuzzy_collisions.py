@@ -127,9 +127,7 @@ def collision_report(entries: list[dict], floor: int, hash_key: str) -> dict:
         "distinct_values": len(by_hash),
         "colliding_values": len(colliding_values),
         "colliding_functions": len(colliding_functions),
-        "collision_rate": (
-            len(colliding_functions) / len(at_floor) if at_floor else 0.0
-        ),
+        "collision_rate": (len(colliding_functions) / len(at_floor) if at_floor else 0.0),
         "worst_pairs": worst_pairs,
     }
 
@@ -201,9 +199,7 @@ def build_v3_db(connection: sqlite3.Connection, artifacts: dict[str, dict]) -> N
                 [(binary_id, name, source) for name in names],
             )
         rows = []
-        for function_key, func_data in (
-            metadata.get("disassembled_functions") or {}
-        ).items():
+        for function_key, func_data in (metadata.get("disassembled_functions") or {}).items():
             if not isinstance(func_data, dict):
                 continue
             rows.append(
@@ -293,9 +289,7 @@ def false_attribution_probe(
     return false_findings, true_findings
 
 
-def single_project_probe(
-    artifacts: dict[str, dict], db_project: str, floor: int
-) -> list[dict]:
+def single_project_probe(artifacts: dict[str, dict], db_project: str, floor: int) -> list[dict]:
     """Build a database holding ONE project and query it with every other.
 
     The packet's headline gate in its rawest form: the db contains a single
@@ -304,9 +298,7 @@ def single_project_probe(
     """
     db_module.MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP = floor
     subset = {
-        artifact: data
-        for artifact, data in artifacts.items()
-        if data["project"] == db_project
+        artifact: data for artifact, data in artifacts.items() if data["project"] == db_project
     }
     others = {a: d for a, d in artifacts.items() if d["project"] != db_project}
     findings = []
@@ -335,7 +327,13 @@ def single_project_probe(
                         "fuzzy": match.get("matched_fuzzy_hash_count", 0),
                         "coverage": (
                             match.get("matched_fuzzy_hash_count", 0)
-                            / max(1, len(build_function_hash_index(data["metadata"]).get("fuzzy_hashes") or []))
+                            / max(
+                                1,
+                                len(
+                                    build_function_hash_index(data["metadata"]).get("fuzzy_hashes")
+                                    or []
+                                ),
+                            )
                         ),
                         "exact": match.get("matched_instruction_hash_count", 0)
                         + match.get("matched_assembly_hash_count", 0),
@@ -373,8 +371,10 @@ def main() -> int:
     if len(artifacts) < 2:
         print("Need at least two artifacts; run blint --disassemble over a corpus first.")
         return 2
-    print(f"Loaded {len(artifacts)} artifacts across "
-          f"{len({d['project'] for d in artifacts.values()})} projects")
+    print(
+        f"Loaded {len(artifacts)} artifacts across "
+        f"{len({d['project'] for d in artifacts.values()})} projects"
+    )
 
     entries = []
     for artifact, data in sorted(artifacts.items()):
@@ -386,13 +386,19 @@ def main() -> int:
 
     for hash_key, label in (("fuzzy_hash", "fuzzy_hash"), ("cfg_hash", "cfg_hash")):
         print(f"\n=== {label}: cross-project collision rate by floor ===")
-        print(f"{'floor':>5} {'functions':>10} {'distinct':>9} {'colliding':>10} "
-              f"{'rate':>8}  worst project pairs")
+        print(
+            f"{'floor':>5} {'functions':>10} {'distinct':>9} {'colliding':>10} "
+            f"{'rate':>8}  worst project pairs"
+        )
         for floor in [int(f) for f in args.floors.split(",")]:
             report = collision_report(entries, floor, hash_key)
-            pairs = ", ".join(f"{pair[0]}~{pair[1]}={count}" for pair, count in report["worst_pairs"])
-            print(f"{report['floor']:>5} {report['functions']:>10} {report['distinct_values']:>9} "
-                  f"{report['colliding_functions']:>10} {report['collision_rate']:>7.2%}  {pairs}")
+            pairs = ", ".join(
+                f"{pair[0]}~{pair[1]}={count}" for pair, count in report["worst_pairs"]
+            )
+            print(
+                f"{report['floor']:>5} {report['functions']:>10} {report['distinct_values']:>9} "
+                f"{report['colliding_functions']:>10} {report['collision_rate']:>7.2%}  {pairs}"
+            )
 
     print("\n=== import_hash uniqueness across binaries ===")
     by_import: dict[str, list[str]] = defaultdict(list)

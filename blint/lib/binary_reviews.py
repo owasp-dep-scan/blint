@@ -115,8 +115,9 @@ DEVICE_IOCTL_IMPORTS: set[str] = {
 # Callees whose named argument is the path being opened. Only an entry whose
 # constant resolved to a string in the image reports — a path assembled at
 # runtime is the stack-string lane's evidence, not this rule's. The wide
-# forms are listed for the position, not for reach: the block's resolver
-# decodes ASCII only, so CreateFileW cannot report until it decodes UTF-16.
+# forms (CreateFileW, CreateFile2) reach this table through the pointer
+# resolver's UTF-16LE reading; their literals must still clear the decoder's
+# four-character minimum, so a three-character wide name stays out.
 CALLSITE_PATH_ARGUMENTS: dict[str, int] = {
     # lpFileName is the first parameter of every CreateFile form.
     "createfilea": 0,
@@ -145,8 +146,9 @@ CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS: dict[str, int] = {
 }
 # Callees that take the algorithm as a *name*: only an entry whose constant
 # resolved to a string reports, and the string is the algorithm name itself.
-# BCryptOpenAlgorithmProvider's pszAlgId is a wide string, so it carries the
-# same ASCII-only limit the path table notes.
+# BCryptOpenAlgorithmProvider's pszAlgId is a wide string; the pointer
+# resolver reads it as UTF-16LE, subject to the same four-character minimum
+# (so L"AES" and L"MD5" stay below the bar while L"SHA256" reports).
 CALLSITE_CRYPTO_ALGORITHM_STRING_ARGUMENTS: dict[str, int] = {
     "bcryptopenalgorithmprovider": 1,
     "evp_get_cipherbyname": 0,
@@ -216,7 +218,9 @@ def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
         elif callee in CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS:
             if argument != CALLSITE_CRYPTO_ALGORITHM_INT_ARGUMENTS[callee]:
                 continue
-            algorithm = CALLSITE_CRYPTO_ALGORITHM_VALUES.get(value) if isinstance(value, int) else None
+            algorithm = (
+                CALLSITE_CRYPTO_ALGORITHM_VALUES.get(value) if isinstance(value, int) else None
+            )
             if not algorithm:
                 continue
             item = {
@@ -255,12 +259,17 @@ def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
             }
         else:
             continue
-        key = (item["kind"], item["callee"], item.get("path") or item.get("algorithm") or item.get("port"))
+        key = (
+            item["kind"],
+            item["callee"],
+            item.get("path") or item.get("algorithm") or item.get("port"),
+        )
         if key in seen:
             continue
         seen.add(key)
         evidence.append(item)
     return evidence
+
 
 # Installing and starting a kernel service is how a BYOVD chain loads its driver.
 SERVICE_MANAGER_IMPORTS: set[str] = {

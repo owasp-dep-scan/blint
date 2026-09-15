@@ -183,8 +183,7 @@ def test_weak_access_flags_file_any_access():
             "name": "Dispatch",
             "address": "0x140001500",
             "assembly": (
-                f"cmp eax, {any_access_code:#x}\nje loc_a\n"
-                f"cmp eax, {any_access_code + 4:#x}\n"
+                f"cmp eax, {any_access_code:#x}\nje loc_a\ncmp eax, {any_access_code + 4:#x}\n"
             ),
         }
     }
@@ -525,9 +524,7 @@ def test_aarch64_movz_movk_lane_code_is_recovered_at_a_call_site():
 
     # 0x80006498 == (0x8000 << 16) | 0x6498; 0x6498 == 25752.
     assembly = "movz w1, #25752\nmov x0, xzr\nmovk w1, #32768, lsl #16\nbl #-48"
-    func = _client_function(
-        assembly, operand="#-48", callee="DeviceIoControl"
-    )
+    func = _client_function(assembly, operand="#-48", callee="DeviceIoControl")
     codes = extract_client_ioctl_codes(func, arch_target="aarch64-pc-windows-msvc")
     assert THROTTLESTOP_PHYS_READ in codes
 
@@ -568,6 +565,7 @@ def test_vendor_function_code_floor_rejects_reserved_and_sign_bit_constants():
 
 def _exploit_client_metadata():
     """Metadata shaped like the CVE-2025-7771 proof-of-concept client."""
+
     def client_func(address: str, name: str, assembly: str) -> dict:
         lines = assembly.split("\n")
         return {
@@ -1015,8 +1013,7 @@ def test_exploit_client_evidence_names_the_target_device():
                 "name": "exploit",
                 "address": "0x401000",
                 "assembly": (
-                    f"mov edx, {THROTTLESTOP_PHYS_WRITE:#x}\n"
-                    "call qword ptr [rip + 4096]"
+                    f"mov edx, {THROTTLESTOP_PHYS_WRITE:#x}\ncall qword ptr [rip + 4096]"
                 ),
                 "instruction_count": 2,
                 "cfg": {"blocks": [{"instructions": 2}], "edges": []},
