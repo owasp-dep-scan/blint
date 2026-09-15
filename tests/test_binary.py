@@ -323,7 +323,10 @@ def test_merge_function_starts_names_nameless_entries_from_symtab():
     assert by_addr["0x5678"] == "_second_name"
 
 
-@pytest.mark.skipif(not os.path.exists("/usr/bin/curl"), reason="needs a real macOS system binary")
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/curl")),
+    reason="needs a real macOS system binary",
+)
 def test_real_macho_functions_live_in_one_address_space():
     # /usr/bin/curl is a stripped universal binary; blint analyses slice 0
     # (x86_64, imagebase 0x100000000). Ground truth for the one surviving
@@ -347,7 +350,10 @@ def test_real_macho_functions_live_in_one_address_space():
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not os.path.exists("/usr/bin/curl"), reason="needs a real macOS system binary")
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" and os.path.exists("/usr/bin/curl")),
+    reason="needs a real macOS system binary",
+)
 def test_real_macho_disassembly_keys_are_not_double_rebased():
     metadata = parse("/usr/bin/curl", disassemble=True)
     imagebase = metadata["imagebase"]
