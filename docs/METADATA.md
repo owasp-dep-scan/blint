@@ -248,7 +248,7 @@ Bundles signed for direct distribution carry a provisioning profile — `embedde
 | `parse_status`                     | `parsed` or `parse_failed` (with `parse_error`). A failed CMS or plist decode is reported, never guessed.           |
 | `name`, `team_name`, `team_identifiers` | The profile's identity and signing team.                                                                   |
 | `created`, `expires`               | ISO-8601 validity window. Validity is evaluated by the checks at scan time, keeping parse output deterministic.    |
-| `entitlements`                     | The signed `application-identifier`, `get-task-allow`, `aps-environment` and related entitlements.                |
+| `entitlements`                     | Every entitlement key the profile grants, with its value, spelled exactly as signed — no allow-list, the same policy as the code-signature `superblob.entitlements` block. iOS profiles sign `application-identifier`; macOS profiles sign `com.apple.application-identifier`; both spellings are the same entitlement and are reported verbatim (consumers should read either). |
 | `provisioned_device_count`         | Count only — device UDIDs never enter metadata.                                                                  |
 | `provisions_all_devices`           | Enterprise (in-house) distribution marker.                                                                       |
 | `signer_cn`                        | Common name of the CMS signer chain (names only; no trust validation).                                           |

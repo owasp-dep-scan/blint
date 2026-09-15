@@ -2,7 +2,13 @@
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
-from blint.lib.provisioning import application_identifier, is_development, is_expired, is_wildcard
+from blint.lib.provisioning import (
+    application_identifier,
+    entitlement,
+    is_development,
+    is_expired,
+    is_wildcard,
+)
 from blint.lib.utils import parse_pe_manifest
 
 
@@ -140,7 +146,7 @@ def check_profile_development(
         return True
     if is_development(profile):
         detail = f"get-task-allow in profile '{profile.get('name')}'"
-        if (profile.get("entitlements") or {}).get("aps-environment") == "development":
+        if entitlement(profile, "aps-environment") == "development":
             detail += ", development APNs environment"
         return detail
     return True

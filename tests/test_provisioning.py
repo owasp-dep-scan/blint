@@ -10,8 +10,10 @@ an Apple-CA-shaped chain, so the openssl pair is the standing reference.
 
 The plist payload fixtures cover the profile variants Apple issues:
 development (get-task-allow, provisioned devices), distribution
-(ad-hoc devices, no get-task-allow), enterprise (ProvisionsAllDevices) and
-wildcard (``*`` application identifier).
+(ad-hoc devices, no get-task-allow), enterprise (ProvisionsAllDevices),
+wildcard (``*`` application identifier) and the macOS entitlement spelling
+(``com.apple.``-prefixed keys, including the system-extension /
+network-extension / virtualization grants iOS profiles never carry).
 """
 
 import plistlib
@@ -68,6 +70,31 @@ _PLIST_ENTERPRISE_WILDCARD = {
     },
     "ProvisionsAllDevices": True,
     "ExpirationDate": datetime(2035, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+}
+
+# macOS profile shape: the same entitlements iOS spells bare carry the
+# com.apple. prefix here, and the security-relevant grants (system
+# extensions, network extensions, virtualization) only exist with it.
+_PLIST_MACOS = {
+    "Name": "MacSys Distribution",
+    "TeamName": "Example Incorporated",
+    "TeamIdentifier": ["ABCDEF1234"],
+    "ApplicationIdentifierPrefix": ["ABCDEF1234"],
+    "CreationDate": datetime(2026, 2, 1, 0, 0, 0, tzinfo=timezone.utc),
+    "ExpirationDate": datetime(2027, 2, 1, 0, 0, 0, tzinfo=timezone.utc),
+    "Entitlements": {
+        "com.apple.application-identifier": "ABCDEF1234.com.example.macsys",
+        "com.apple.developer.team-identifier": "ABCDEF1234",
+        "com.apple.developer.system-extension.install": True,
+        "com.apple.developer.networking.networkextension": [
+            "packet-tunnel-provider-systemextension",
+            "dns-proxy-systemextension",
+        ],
+        "com.apple.security.virtualization": True,
+        "com.apple.vm.networking": True,
+        "com.apple.security.application-groups": ["group.ABCDEF1234.com.example.macsys"],
+        "keychain-access-groups": ["ABCDEF1234.*"],
+    },
 }
 
 
@@ -195,6 +222,94 @@ def test_enterprise_wildcard_profile(tmp_path):
     assert is_wildcard(profile) is True
     assert application_identifier(profile) == "TEAMXYZ789.*"
     assert not is_expired(profile)
+
+
+def test_macos_profile_entitlements_published_in_full(tmp_path):
+    """A macOS profile grants its entitlements under com.apple.-prefixed
+    keys; every key must be reported, verbatim, with its value.
+
+    The four-key iOS-spelling list this replaces matched nothing on macOS
+    profiles (measured on the real Tailscale/Parallels/OrbStack profiles
+    under /Applications): the block came back {} while the profile granted
+    system-extension, network-extension and virtualization rights.
+    """
+    if not OPENSSL:
+        pytest.skip("needs openssl")
+    profile_bytes = _openssl_sign(_PLIST_MACOS, tmp_path)
+    profile = decode_provisioning_profile(profile_bytes)
+    truth = _openssl_payload(profile_bytes, tmp_path)["Entitlements"]
+    assert profile["entitlements"] == truth
+    assert "com.apple.developer.system-extension.install" in profile["entitlements"]
+    assert profile["entitlements"]["com.apple.security.virtualization"] is True
+
+
+def test_entitlements_absent_empty_and_malformed_stay_distinct(tmp_path):
+    """Rule 14: no Entitlements key, an empty one, and a malformed non-dict
+    one must not collapse into the same answer."""
+    if not OPENSSL:
+        pytest.skip("needs openssl")
+    base = dict(_PLIST_DISTRIBUTION)
+    no_ent = {k: v for k, v in base.items() if k != "Entitlements"}
+    profile = decode_provisioning_profile(_openssl_sign(no_ent, tmp_path))
+    assert profile["entitlements"] is None
+    empty = dict(base, Entitlements={})
+    profile = decode_provisioning_profile(_openssl_sign(empty, tmp_path))
+    assert profile["entitlements"] == {}
+    malformed = dict(base, Entitlements="not a dict")
+    profile = decode_provisioning_profile(_openssl_sign(malformed, tmp_path))
+    # Same wrapper the code-signature entitlements parser uses for a
+    # non-dict root: the value is carried, never silently dropped.
+    assert profile["entitlements"] == {"__root__": "not a dict"}
+
+
+def test_application_identifier_reads_both_spellings():
+    """The macOS spelling is the same entitlement; the accessors (and with
+    them CHECK_PROFILE_WILDCARD) must not silently miss a macOS wildcard."""
+    macos = {"entitlements": {"com.apple.application-identifier": "TEAM.*"}}
+    assert application_identifier(macos) == "TEAM.*"
+    assert is_wildcard(macos) is True
+    ios = {"entitlements": {"application-identifier": "TEAM.app"}}
+    assert application_identifier(ios) == "TEAM.app"
+    # Neither spelling present: the prefix-list fallback still applies.
+    assert application_identifier({"application_identifier_prefixes": ["TEAM"]}) == "TEAM"
+
+
+def test_macos_spellings_reach_the_development_checks():
+    """get-task-allow and aps-environment carry macOS prefixes too, and both
+    are read by a check. Publishing the whole block is what exposes them: the
+    keys were unreachable while the macOS block came back empty."""
+    from blint.lib.checks import check_profile_development
+
+    macos = {
+        "name": "MacSys",
+        "parse_status": "parsed",
+        "entitlements": {
+            "com.apple.security.get-task-allow": True,
+            "com.apple.developer.aps-environment": "development",
+        },
+    }
+    assert is_development(macos) is True
+    detail = check_profile_development("f", {"provisioning_profile": macos}, {})
+    assert "development APNs environment" in detail
+    assert is_development({"entitlements": {"com.apple.security.get-task-allow": False}}) is False
+
+
+def test_aps_environment_consumer_keeps_working(tmp_path):
+    """checks.py reads entitlements["aps-environment"]; none of the real
+    profiles at hand carries that key, so this test is the bound (rule 17):
+    an iOS development profile with a development APNs environment must
+    still surface it through the whole decode -> summarize -> check path."""
+    from blint.lib.checks import check_profile_development
+    from blint.lib.provisioning import summarize_for_metadata
+
+    if not OPENSSL:
+        pytest.skip("needs openssl")
+    profile = decode_provisioning_profile(_openssl_sign(_PLIST_DEVELOPMENT, tmp_path))
+    block = summarize_for_metadata(profile)
+    metadata = {"provisioning_profile": block}
+    result = check_profile_development("f", metadata, {})
+    assert isinstance(result, str)
+    assert "development APNs environment" in result
 
 
 def test_garbage_input_degrades_to_parse_failed():
