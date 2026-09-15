@@ -1,24 +1,52 @@
 #!/usr/bin/env python3
 """Verify pointer materialisation precision against llvm-objdump (P4.9 gate 5).
 
-For one arm64 binary, disassembles with blint, recomputes every `adrp`
-page in every function with an *independent* decoder (llvm-objdump's own
-disassembly of the same file), and checks the interpreter's reconstructed
-instruction addresses against llvm-objdump's instruction addresses. Any
-single disagreement is a precision failure.
+For one binary, disassembles with blint, recomputes every `adrp` page
+(arm64) or rip-relative `lea` target (x86) in every function with an
+*independent* decoder (llvm-objdump's own disassembly of the same file),
+and checks the interpreter's reconstructed instruction addresses against
+llvm-objdump's instruction addresses. Any single disagreement is a
+precision failure.
 
 For the resolved strings, checks each entry's string against a lief read
 of the image bytes at the recovered address — the one authority that did
 not produce the number.
 
+The architecture is taken from the metadata blint exported — the primary
+Mach-O slice's `arch` (blint labels the arm64e slice `arm64e`, the same
+spelling `lipo -archs` and llvm-objdump use), or `machine_type` for other
+formats. For Mach-O the name is passed to llvm-objdump verbatim. The
+`--arch` flag is only a cross-check: it must agree with the slice blint
+analysed, and the run refuses to compare against a different slice.
+
+An unusable input — a path that does not parse, a binary with no
+disassembly, an llvm-objdump that is missing, fails, or decodes nothing —
+is an *unknown*: the harness exits 2 with a message naming the missing
+precondition before printing any count that could be read as a verdict.
+An unknown is never a pass, never a blint failure, and never a zero.
+
+A reconstructed address that lands inside an objdump instruction which
+*also spans that function's own entry* is classified as an objdump
+linear-sweep artifact, not a blint misplacement: the function's entry
+comes from the symbol table or LC_FUNCTION_STARTS, evidence independent
+of any decoding, and no instruction can span a branch target. Every such
+classification prints the bytes of the sweep's instruction and of the
+function entry. Landings inside objdump instructions that cross no
+function entry remain misplacements and fail the gate.
+
+Exit codes: 0 PASS, 1 FAIL (a measured disagreement with objdump or the
+image bytes), 2 unusable input (no measurement happened).
+
 Usage:
-    python tests/scripts/verify_pointer_precision.py BINARY [--arch arm64|x86]
+    python tests/scripts/verify_pointer_precision.py BINARY [--arch arm64|arm64e|x86]
 """
 
 from __future__ import annotations
 
 import argparse
+import bisect
 import contextlib
+import os
 import re
 import subprocess
 import sys
@@ -31,7 +59,30 @@ import lief
 
 from blint.lib.binary import parse
 
-LLVM_OBJDUMP = "/opt/homebrew/opt/llvm@18/bin/llvm-objdump"
+LLVM_OBJDUMP = os.environ.get("BLINT_LLVM_OBJDUMP", "/opt/homebrew/opt/llvm@18/bin/llvm-objdump")
+
+X86_ARCH_NAMES = {"x86_64", "x86", "amd64"}
+ARM64_ARCH_NAMES = {"arm64", "arm64e", "aarch64"}
+ARCH_FLAG_ALIASES = {
+    "arm64": ARM64_ARCH_NAMES,
+    "arm64e": {"arm64e"},
+    "x86": X86_ARCH_NAMES,
+}
+MASK64 = 0xFFFFFFFFFFFFFFFF
+
+
+class UnusableInput(Exception):
+    """An input the gate cannot measure; reported as an unknown, never a count."""
+
+
+def unusable(reason: str) -> int:
+    """Exit as an unusable input: name the missing precondition, measure nothing."""
+    print(f"ERROR: {reason}", file=sys.stderr)
+    print(
+        "  the gate could not measure anything — this is an unusable input, not a blint failure",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def byte_column(line: str) -> int:
@@ -47,11 +98,9 @@ def byte_column(line: str) -> int:
     return len(field.replace(" ", "")) // 2
 
 
-def objdump_instructions(binary: str, arch: str) -> dict[int, tuple[str, int]]:
-    """Parse llvm-objdump's disassembly into {address: (mnemonic, size)}."""
-    cmd = [LLVM_OBJDUMP, "-d", binary, f"--arch={'arm64' if arch == 'arm64' else 'x86_64'}"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
-    instrs = {}
+def parse_objdump_text(out: str) -> dict[int, tuple[str, str]]:
+    """Parse llvm-objdump's disassembly into {address: (mnemonic, line)}."""
+    instrs: dict[int, tuple[str, str]] = {}
     # Matches:  100000a80: 900009c8  adrp x8, 0x100138000 ...
     pat = re.compile(r"^\s*([0-9a-f]+):.*?\t([a-z][a-z0-9.]*)\s*(.*)$")
     for line in out.splitlines():
@@ -67,19 +116,159 @@ def objdump_instructions(binary: str, arch: str) -> dict[int, tuple[str, int]]:
     return instrs
 
 
-def main() -> int:
+def run_objdump(binary: str, arch_name: str | None, is_macho: bool) -> dict[int, tuple[str, str]]:
+    """Run llvm-objdump and return its instruction starts.
+
+    Every failure mode — objdump missing, a nonzero exit, an error printed
+    to stderr without a nonzero exit (llvm-objdump exits 0 when --arch is
+    not in the file), or zero instructions decoded — raises UnusableInput.
+    """
+    cmd = [LLVM_OBJDUMP, "-d", binary]
+    if is_macho:
+        if not arch_name:
+            raise UnusableInput(
+                f"{binary}: the Mach-O metadata names no slice architecture, so "
+                "llvm-objdump cannot be told which slice blint disassembled"
+            )
+        cmd.append(f"--arch={arch_name}")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        raise UnusableInput(
+            f"llvm-objdump not found at {LLVM_OBJDUMP} — install llvm@18 or set BLINT_LLVM_OBJDUMP"
+        ) from None
+    if proc.returncode != 0:
+        raise UnusableInput(
+            f"llvm-objdump failed on {binary} (exit {proc.returncode}): "
+            f"{proc.stderr.strip()[:300] or 'no stderr'}"
+        )
+    instrs = parse_objdump_text(proc.stdout)
+    if not instrs:
+        detail = proc.stderr.strip()[:300]
+        raise UnusableInput(
+            f"llvm-objdump decoded no instructions for {binary}"
+            + (f" (--arch={arch_name})" if is_macho else "")
+            + (f"; it printed: {detail}" if detail else "")
+        )
+    return instrs
+
+
+def analysed_arch_name(metadata: dict) -> str | None:
+    """Name of the slice blint analysed, in llvm-objdump's spelling.
+
+    Fat Mach-O: the primary slice's `arch` field (`x86_64`, `arm64`,
+    `arm64e`). Other formats: `machine_type` lowercased (`X86_64` →
+    `x86_64`), falling back to `cpu_type` for thin Mach-O, which carries
+    neither `slices` nor `machine_type` (`ARM64` → `arm64`). None when
+    the metadata names no architecture at all.
+    """
+    slices = metadata.get("slices") or []
+    if slices:
+        primary = next((s for s in slices if s.get("is_primary")), slices[0])
+        name = str(primary.get("arch") or "").strip().lower()
+        return name or None
+    for key in ("machine_type", "cpu_type"):
+        name = str(metadata.get(key) or "").strip().lower()
+        if name:
+            return name
+    return None
+
+
+def check_arch_flag(args: argparse.Namespace, arch_name: str | None, is_macho: bool) -> None:
+    """Refuse a run whose --arch names a slice blint did not analyse.
+
+    A mismatch does not announce itself through the addresses: an address
+    can be an instruction start in two slices of one fat binary at once
+    (0x100000718 is, in /bin/ls), so comparing against the wrong slice can
+    silently align and read as a pass.
+    """
+    if not args.arch:
+        return
+    wanted = ARCH_FLAG_ALIASES[args.arch]
+    if arch_name in wanted:
+        return
+    analysed = arch_name or "an unnamed architecture"
+    raise UnusableInput(
+        f"{args.binary}: blint analysed the {analysed} slice but --arch {args.arch} "
+        f"selects {sorted(wanted)}. The gate refuses to compare one slice against "
+        "another's ground truth."
+    )
+
+
+def classify_landing(landing: int, walked_entry: int, span_start: int) -> str:
+    """Classify a reconstructed address that keys no objdump instruction.
+
+    Returns "artifact" when objdump's instruction containing the landing
+    begins strictly before the walked function's own entry — its linear
+    sweep decoded across a function boundary, which the entry's provenance
+    (symbol table / LC_FUNCTION_STARTS) rules out independently of any
+    decoding. Any other landing is "interior": a real misplacement.
+    """
+    if span_start < walked_entry <= landing:
+        return "artifact"
+    return "interior"
+
+
+def span_start_label(raw: bytes | None) -> str:
+    """Why the sweep mis-decoded here: padding start, or earlier drift."""
+    if not raw:
+        return "bytes unreadable"
+    if raw[0] in (0x00, 0x90, 0xCC):
+        return "the sweep instruction begins in an alignment pad byte"
+    if len(raw) >= 2 and raw[0] == 0x66 and raw[1] == 0x90:
+        return "the sweep instruction begins in an alignment pad byte"
+    if len(raw) >= 2 and raw[0] == 0x0F and raw[1] == 0x1F:
+        return "the sweep instruction begins in a multi-byte nop"
+    return "the sweep had already drifted into misaligned decoding"
+
+
+def hexdump(parsed_lief, addr: int, n: int) -> str:
+    try:
+        raw = bytes(parsed_lief.get_content_from_virtual_address(addr, n))
+        return " ".join(f"{b:02x}" for b in raw)
+    except Exception:  # noqa: BLE001 — lief raises bareblooded errors on unmapped VAs
+        return "<bytes unreadable>"
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary")
-    parser.add_argument("--arch", default="arm64", choices=["arm64", "x86"])
+    parser.add_argument(
+        "--arch",
+        default=None,
+        choices=sorted(ARCH_FLAG_ALIASES),
+        help="cross-check only: must match the slice blint analysed",
+    )
     parser.add_argument("--objdump-sample", type=int, default=200)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     metadata = parse(args.binary, disassemble=True)
     funcs = metadata.get("disassembled_functions") or {}
+    if not funcs:
+        if not metadata.get("functions"):
+            return unusable(
+                f"{args.binary} did not parse as a supported binary — the metadata is empty"
+            )
+        return unusable(
+            f"{args.binary}: disassembly produced no functions — "
+            "nyxstone needs LLVM 18 (set NYXSTONE_LLVM_PREFIX), or the binary has no code"
+        )
     print(f"functions disassembled: {len(funcs)}")
 
+    arch_name = analysed_arch_name(metadata)
+    is_macho = bool(metadata.get("slices"))
+    try:
+        check_arch_flag(args, arch_name, is_macho)
+    except UnusableInput as exc:
+        return unusable(str(exc))
+    if is_macho:
+        print(f"analysed slice architecture: {arch_name}")
+
     # ---- 1. Reconstructed line addresses vs llvm-objdump addresses ----
-    truth = objdump_instructions(args.binary, args.arch)
+    try:
+        truth = run_objdump(args.binary, arch_name, is_macho)
+    except UnusableInput as exc:
+        return unusable(str(exc))
     print(f"llvm-objdump instructions decoded: {len(truth)}")
 
     # The failure mode this gate exists for: a reconstructed address that
@@ -94,10 +283,8 @@ def main() -> int:
     sweep_artifacts = []
     length_bad = []
     # Sorted objdump instruction spans, to tell an address that lands
-    # strictly inside one of its instructions (a real misplacement) from
-    # one objdump simply never disassembled (its sweep's blind spot).
-    import bisect
-
+    # strictly inside one of its instructions from one objdump simply
+    # never disassembled (its sweep's blind spot).
     span_starts = []
     span_ends = []
     for addr_t, entry in sorted(truth.items()):
@@ -116,6 +303,7 @@ def main() -> int:
         if not blocks or not lengths or len(lengths) != len(assembly):
             continue
         sampled_functions += 1
+        walked_entry = int(str(func.get("address")), 16)
         # Walk every block, prefix-sum lengths from block start, compare
         # against llvm-objdump's instruction addresses and byte column.
         cursor_line = 0
@@ -136,18 +324,9 @@ def main() -> int:
                 else:
                     idx = bisect.bisect_right(span_starts, addr) - 1
                     if idx >= 0 and addr < span_ends[idx]:
-                        # A landing inside an objdump instruction is a real
-                        # misplacement — unless objdump's linear sweep
-                        # swallowed this exact byte (its coverage jumps to
-                        # addr+1 while a symbol-derived function starts here,
-                        # evidence independent of any decoding).
-                        sweep_ate_the_byte = (
-                            hex(addr + 1) != ""
-                            and (addr + 1) in truth
-                            and func.get("address") == hex(addr)
-                        )
-                        if sweep_ate_the_byte:
-                            sweep_artifacts.append((key, hex(addr)))
+                        kind = classify_landing(addr, walked_entry, span_starts[idx])
+                        if kind == "artifact":
+                            sweep_artifacts.append((key, hex(addr), hex(span_starts[idx])))
                         else:
                             interior.append((key, hex(addr), hex(span_starts[idx])))
                     else:
@@ -162,8 +341,19 @@ def main() -> int:
         f" objdump-sweep swallowed-byte boundaries: {len(sweep_artifacts)},"
         f" absent from objdump's sweep: {len(misaligned)}"
     )
+    parsed_lief = lief.parse(args.binary)
     for m in sweep_artifacts[:5]:
-        print("  OBJDUMP SWEEP ARTIFACT (function entry objdump skipped):", m)
+        key, landing, span_start = m
+        s = int(span_start, 16)
+        t_line = truth.get(s, ("", ""))[1]
+        raw = None
+        with contextlib.suppress(Exception):
+            raw = bytes(parsed_lief.get_content_from_virtual_address(s, byte_column(t_line) or 1))
+        print(f"  OBJDUMP SWEEP ARTIFACT at {landing} (function {key}):")
+        print(f"    sweep instruction @ {span_start}: {t_line.strip()}")
+        print(f"    {span_start_label(raw)}; sweep bytes: {hexdump(parsed_lief, s, 8)}")
+        entry = int(str((funcs.get(key) or {}).get("address")), 16)
+        print(f"    blint's entry bytes at {hex(entry)}: {hexdump(parsed_lief, entry, 8)}")
     print(f"lengths disagreeing with llvm-objdump byte columns: {len(length_bad)}")
     for m in length_bad[:10]:
         print("  LENGTH MISMATCH", m)
@@ -182,7 +372,6 @@ def main() -> int:
     # page is (pc & ~0xFFF) + imm, computed from bytes lief reads at the
     # instruction address. This verifies the nyxstone rendering and the
     # page formula against the CPU's own field layout everywhere.
-    parsed_lief = lief.parse(args.binary)
 
     def decode_adrp(word: int) -> int | None:
         if word & 0x9F000000 != 0x90000000:
@@ -212,7 +401,7 @@ def main() -> int:
                 line = assembly[cursor_line + j].strip()
                 if line.startswith("adrp ") and lengths[cursor_line + j] == 4:
                     delta = int(line.split()[-1].lstrip("#"), 0)
-                    page = ((addr & ~0xFFF) + delta) & 0xFFFFFFFFFFFFFFFF
+                    page = ((addr & ~0xFFF) + delta) & MASK64
                     raw = bytes(parsed_lief.get_content_from_virtual_address(addr, 4))
                     decoded = decode_adrp(int.from_bytes(raw, "little")) if len(raw) == 4 else None
                     if decoded is None:
@@ -221,8 +410,8 @@ def main() -> int:
                         # see the address-space finding in the P4.9 report)
                         # or not an adrp encoding at this address.
                         enc_skipped += 1
-                        imm12 = decoded
-                        enc_page = ((addr & ~0xFFF) + imm12) & 0xFFFFFFFFFFFFFFFF
+                    else:
+                        enc_page = ((addr & ~0xFFF) + decoded) & MASK64
                         enc_checked += 1
                         if enc_page != page:
                             enc_bad.append((key, hex(addr), hex(page), hex(enc_page)))
@@ -236,6 +425,8 @@ def main() -> int:
         print("  ENCODING MISMATCH", b)
 
     # ---- 2. Every pc-relative page/target vs llvm-objdump ----
+    is_arm64 = arch_name in ARM64_ARCH_NAMES
+    is_x86 = arch_name in X86_ARCH_NAMES
     pc_checked = 0
     pc_bad = []
     for key, func in funcs.items():
@@ -252,10 +443,10 @@ def main() -> int:
             for j in range(count):
                 line = assembly[cursor_line + j].strip()
                 addr_j = addr
-                if args.arch == "arm64" and line.startswith("adrp "):
+                if is_arm64 and line.startswith("adrp "):
                     parts = line.split()
                     delta = int(parts[-1].lstrip("#"), 0)
-                    page = ((addr_j & ~0xFFF) + delta) & 0xFFFFFFFFFFFFFFFF
+                    page = ((addr_j & ~0xFFF) + delta) & MASK64
                     if addr_j in truth and truth[addr_j][0] == "adrp":
                         t_line = truth[addr_j][1]
                         t_target = re.search(r"adrp\s+\S+,\s*(0x[0-9a-f]+)", t_line)
@@ -263,7 +454,7 @@ def main() -> int:
                             pc_checked += 1
                             if int(t_target.group(1), 16) != page:
                                 pc_bad.append((key, hex(addr_j), hex(page), t_target.group(1)))
-                elif args.arch == "x86" and re.match(r"lea\s+\S+,\s*\[\s*rip", line):
+                elif is_x86 and re.match(r"lea\s+\S+,\s*\[\s*rip", line):
                     # llvm-objdump renders the raw displacement with the
                     # instruction's byte column: `100000779: 48 8d 05 14 4e
                     # 00 00  leaq 0x4e14(%rip), %rax`. The target is the
@@ -294,7 +485,7 @@ def main() -> int:
                             )
                 addr += lengths[cursor_line + j]
             cursor_line += count
-    kind = "adrp pages" if args.arch == "arm64" else "rip-relative lea targets"
+    kind = "adrp pages" if is_arm64 else "rip-relative lea targets"
     print(f"{kind} checked against llvm-objdump targets: {pc_checked}, wrong: {len(pc_bad)}")
     for b in pc_bad[:10]:
         print("  WRONG TARGET", b)
@@ -305,10 +496,9 @@ def main() -> int:
     # ---- 3. Resolved strings vs the image bytes ----
     entries = metadata.get("call_site_arguments") or []
     resolved = [e for e in entries if e.get("string")]
-    parsed = lief.parse(args.binary)
     resolver_bad = []
     for entry in resolved:
-        data = bytes(parsed.get_content_from_virtual_address(entry["value"], 256))
+        data = bytes(parsed_lief.get_content_from_virtual_address(entry["value"], 256))
         readings = []
         nul = data.find(b"\x00")
         with contextlib.suppress(UnicodeDecodeError):
