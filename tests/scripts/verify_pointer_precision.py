@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import re
 import subprocess
 import sys
@@ -315,14 +316,20 @@ def main() -> int:
         data = bytes(
             parsed.get_content_from_virtual_address(entry["value"], 256)
         )
+        readings = []
         nul = data.find(b"\x00")
-        usable = data[:nul] if nul != -1 else data
-        try:
-            text = usable.decode("ascii")
-        except UnicodeDecodeError:
-            text = None
-        if text != entry["string"]:
-            resolver_bad.append((entry["string"], entry["value"], text))
+        with contextlib.suppress(UnicodeDecodeError):
+            readings.append((data[:nul] if nul != -1 else data).decode("ascii"))
+        # A pointed-at literal may be UTF-16LE, so the check reads that form
+        # too, terminating on an aligned NUL pair rather than a single byte.
+        end = len(data) - (len(data) % 2)
+        wide_end = next(
+            (i for i in range(0, end, 2) if data[i] == 0 and data[i + 1] == 0), end
+        )
+        with contextlib.suppress(UnicodeDecodeError, ValueError):
+            readings.append(data[:wide_end].decode("utf-16-le"))
+        if entry["string"] not in readings:
+            resolver_bad.append((entry["string"], entry["value"], readings))
     print(
         f"strings resolved: {len(resolved)}; verified against image bytes: "
         f"{len(resolved) - len(resolver_bad)}; wrong: {len(resolver_bad)}"
