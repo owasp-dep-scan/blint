@@ -1,0 +1,134 @@
+blint/lib/disassembler.py
+  s_526190b23001e8::t_724d9a5af291cc 2117,2136-2137,2450-2452,2455
+tests/scripts/measure_static_linkage.py
+  s_526190b23001e8::t_724d9a5af291cc 65-70,80-82,86-88,90-92,101-118,131-133,142-146,192-194,234-236,243-245
+tests/test_cache.py
+  s_526190b23001e8::t_724d9a5af291cc 299,643
+tests/test_tbd_index.py
+  s_526190b23001e8::t_724d9a5af291cc 220,510,534,567,675,706-710
+blint/lib/checks.py
+  s_526190b23001e8::t_724d9a5af291cc 44,119-121
+tests/test_absint_call_args.py
+  s_526190b23001e8::t_724d9a5af291cc 153,168,183,185-194,204,225,228-230,250,266,289,296,339-340,342-343,346-359,364-365,373,375-380,383,390,397,399-401,403-405,407,422-428,430-434,436-441,460-466,468-469,476-480,482-487,507,530-532,534-542,544,546-552,560,562-565,571-575,587,591-593,598,601,682,684-687,707-709,712-714,716-719,745,807
+tests/test_driver_ioctl.py
+  s_526190b23001e8::t_724d9a5af291cc 186,527,568,1016
+tests/test_engine_modules.py
+  s_526190b23001e8::t_724d9a5af291cc 116,187-206,216-225,234-243,316-317
+tests/scripts/build_static_linkage_corpus.py
+  s_526190b23001e8::t_724d9a5af291cc 49-54,56-61,97-103,106-120,127-136,173-176,215-225,233,235-237,250-254,257-261
+blint/lib/toolchain.py
+  s_526190b23001e8::t_724d9a5af291cc 39-41,71-76,190-196,205-212
+tests/test_pointer_materialisation.py
+  s_526190b23001e8::t_724d9a5af291cc 42-48,59-61,227,237,251,292,312,317
+blint/config.py
+  s_526190b23001e8::t_724d9a5af291cc 1424
+tests/scripts/determinism_jobs.py
+  s_526190b23001e8::t_724d9a5af291cc 33,104,108-110,153-155,172-175,179-188,198-200,254-257
+blint/db.py
+  s_526190b23001e8::t_724d9a5af291cc 500-501,509,604-607,692-693,698,1102,1455-1457,1468,1471-1472,1487-1490,1516-1518,1521-1524,1597
+tests/test_callsite_block.py
+  s_526190b23001e8::t_724d9a5af291cc 53-54,57-58,61-62,144-146,153-155,157-160,167-169,259-265,294-300,342
+tests/test_parallel.py
+  s_526190b23001e8::t_724d9a5af291cc 125,444-446
+tests/test_codesign_macho.py
+  s_526190b23001e8::t_724d9a5af291cc 117-119,212,314,316,572
+blint/lib/entropy.py
+  s_526190b23001e8::t_724d9a5af291cc 326-329
+tests/test_determinism.py
+  s_526190b23001e8::t_724d9a5af291cc 258,297,328-336,348,385
+tests/scripts/jobs_bench.py
+  s_526190b23001e8::t_724d9a5af291cc 20,72-74
+tests/test_runners.py
+  s_526190b23001e8::t_724d9a5af291cc 122,145,162,206,267,317
+tests/scripts/validate_funcdisc.py
+  s_526190b23001e8::t_724d9a5af291cc 11,150-152,207-211,254,257-259
+blint/lib/parallel.py
+  s_526190b23001e8::t_724d9a5af291cc 455-457,459,471
+blint/lib/binary_reviews.py
+  s_526190b23001e8::t_724d9a5af291cc 221-223,262-266
+  s_526190b23001e8::t_de474bafcbabe0 273
+tests/test_binary.py
+  s_526190b23001e8::t_724d9a5af291cc 122-124,133,136,170-173,177-179,200-202,221-223,237-239,254-256,289,542,583,703-705,823-846,849-850,852-857,872-874,1108-1110,1261-1264,1318,1339,1369,1404,1692,2034
+tests/test_sbom_wasm.py
+  s_526190b23001e8::t_724d9a5af291cc 171
+tests/test_sbom_ios.py
+  s_526190b23001e8::t_724d9a5af291cc 164-166
+blint/lib/funcdisc/complete.py
+  s_526190b23001e8::t_724d9a5af291cc 110-112,212-214,264-273
+tests/scripts/build_corpus.py
+  s_526190b23001e8::t_724d9a5af291cc 12,63-69
+blint/lib/codesign_macho.py
+  s_526190b23001e8::t_724d9a5af291cc 516-518,643
+tests/scripts/measure_fuzzy_collisions.py
+  s_526190b23001e8::t_724d9a5af291cc 130,202,292,301,330-336,374-377,389-392,395-401
+tests/test_static_linkage.py
+  s_526190b23001e8::t_724d9a5af291cc 20,149-159,162-164,166-176,178-180,245,320,430-431,570-575
+tests/test_funcdisc.py
+  s_526190b23001e8::t_724d9a5af291cc 71-73,99,110,208,215,219,225,237,246-253,258,302
+blint/lib/similarity.py
+  s_526190b23001e8::t_724d9a5af291cc 48,146-148
+blint/lib/tbd_index.py
+  s_526190b23001e8::t_724d9a5af291cc 145,488,554,634,653
+tests/scripts/bench.py
+  s_526190b23001e8::t_724d9a5af291cc 41,235-239,267-269,279-281
+blint/lib/cache.py
+  s_526190b23001e8::t_724d9a5af291cc 180,217,269,317,397-399,456,464
+blint/lib/cfg.py
+  s_526190b23001e8::t_724d9a5af291cc 182-184
+tests/test_sbom_blintdb.py
+  s_526190b23001e8::t_724d9a5af291cc 595,778,791,870
+tests/test_absint_dataflow.py
+  s_526190b23001e8::t_724d9a5af291cc 369,378-383,479,517,646,651,661,665
+blint/lib/binary.py
+  s_526190b23001e8::t_724d9a5af291cc 519,945,1174-1176,2447,2487,4214,4685-4689,4728-4732,4740
+blint/lib/funcdisc/unwind.py
+  s_526190b23001e8::t_724d9a5af291cc 256-258,530-536
+blint/lib/utils.py
+  s_526190b23001e8::t_724d9a5af291cc 766
+docs/CALLGRAPH_MATCH.md
+  s_526190b23001e8::t_724d9a5af291cc 177-178
+blint/lib/absint.py
+  s_526190b23001e8::t_724d9a5af291cc 404-406,409-415,588-594,716,780,784,808,813,816-821,905-911,1030-1032,1282-1284,1470,1603-1607,1690-1698,1954
+blint/lib/banners.py
+  s_526190b23001e8::t_724d9a5af291cc 13,48,53,58,63,68,73
+blint/lib/runners.py
+  s_526190b23001e8::t_724d9a5af291cc 237-239,244-246,437,556,639-641
+tests/test_elf_layout_coherence.py
+  s_526190b23001e8::t_724d9a5af291cc 117
+tests/scripts/verify_pointer_precision.py
+  s_526190b23001e8::t_724d9a5af291cc 17,135,216,265,285,289-291,311,319,335
+blint/lib/driver_ioctl.py
+  s_526190b23001e8::t_724d9a5af291cc 691,695-699
+tests/scripts/measure_banner_precision.py
+  s_526190b23001e8::t_724d9a5af291cc 85-87,89,98-100
+contrib/loldrivers/sync_loldrivers.py
+  s_526190b23001e8::t_724d9a5af291cc 103,194
+tests/scripts/measure_pointer_materialisation.py
+  s_526190b23001e8::t_724d9a5af291cc 19,67-74,107-116
+tests/elf_layout_fixtures.py
+  s_526190b23001e8::t_724d9a5af291cc 81-82,158-168
+tests/scripts/ab_blintdb_v2_identity.py
+  s_526190b23001e8::t_724d9a5af291cc 127,250,330
+tests/test_ios.py
+  s_526190b23001e8::t_724d9a5af291cc 316
+README.md
+  s_526190b23001e8::t_724d9a5af291cc 324-328
+blint/lib/sbom.py
+  s_526190b23001e8::t_724d9a5af291cc 633,1077,1112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6948d8555f3328c7cdd40b0d1e4218f44583a0e",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
