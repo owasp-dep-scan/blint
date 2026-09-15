@@ -174,7 +174,7 @@ def analysed_arch_name(metadata: dict) -> str | None:
     return None
 
 
-def check_arch_flag(args: argparse.Namespace, arch_name: str | None, is_macho: bool) -> None:
+def check_arch_flag(args: argparse.Namespace, arch_name: str | None) -> None:
     """Refuse a run whose --arch names a slice blint did not analyse.
 
     A mismatch does not announce itself through the addresses: an address
@@ -195,18 +195,28 @@ def check_arch_flag(args: argparse.Namespace, arch_name: str | None, is_macho: b
     )
 
 
-def classify_landing(landing: int, walked_entry: int, span_start: int) -> str:
+def classify_landing(landing: int, walked_entry: int, span_start: int, desynced: bool) -> str:
     """Classify a reconstructed address that keys no objdump instruction.
 
-    Returns "artifact" when objdump's instruction containing the landing
-    begins strictly before the walked function's own entry — its linear
-    sweep decoded across a function boundary, which the entry's provenance
-    (symbol table / LC_FUNCTION_STARTS) rules out independently of any
-    decoding. Any other landing is "interior": a real misplacement.
+    Returns "artifact" in two cases, both of which mean objdump's linear
+    sweep — not blint — is the one without ground truth here:
+
+    * the objdump instruction containing the landing begins strictly
+      before the walked function's own entry, so the sweep decoded across
+      a function boundary. The entry's provenance (symbol table /
+      LC_FUNCTION_STARTS) rules that out independently of any decoding.
+    * the sweep already derailed that way earlier in this function and
+      has not yet re-agreed with blint on an address. A sweep that
+      entered a function mid-instruction stays wrong for several spans,
+      not just the one that crossed the entry.
+
+    Derailment ends at the first address the two agree on, which is the
+    caller's job to signal by clearing `desynced`. Any other landing is
+    "interior": a real misplacement, and the gate fails.
     """
     if span_start < walked_entry <= landing:
         return "artifact"
-    return "interior"
+    return "artifact" if desynced else "interior"
 
 
 def span_start_label(raw: bytes | None) -> str:
@@ -226,7 +236,7 @@ def hexdump(parsed_lief, addr: int, n: int) -> str:
     try:
         raw = bytes(parsed_lief.get_content_from_virtual_address(addr, n))
         return " ".join(f"{b:02x}" for b in raw)
-    except Exception:  # noqa: BLE001 — lief raises bareblooded errors on unmapped VAs
+    except Exception:  # noqa: BLE001 — lief raises assorted errors on unmapped VAs
         return "<bytes unreadable>"
 
 
@@ -258,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     arch_name = analysed_arch_name(metadata)
     is_macho = bool(metadata.get("slices"))
     try:
-        check_arch_flag(args, arch_name, is_macho)
+        check_arch_flag(args, arch_name)
     except UnusableInput as exc:
         return unusable(str(exc))
     if is_macho:
@@ -304,6 +314,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         sampled_functions += 1
         walked_entry = int(str(func.get("address")), 16)
+        # Set once objdump's sweep is proven derailed in this function, and
+        # cleared the moment the two agree on an address again.
+        desynced = False
         # Walk every block, prefix-sum lengths from block start, compare
         # against llvm-objdump's instruction addresses and byte column.
         cursor_line = 0
@@ -314,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
             for j in range(count):
                 global_line = cursor_line + j
                 if addr in truth:
+                    desynced = False
                     checked += 1
                     # The byte column is the second tab-separated field of
                     # objdump's line; hex characters halved is the byte count
@@ -324,8 +338,9 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     idx = bisect.bisect_right(span_starts, addr) - 1
                     if idx >= 0 and addr < span_ends[idx]:
-                        kind = classify_landing(addr, walked_entry, span_starts[idx])
+                        kind = classify_landing(addr, walked_entry, span_starts[idx], desynced)
                         if kind == "artifact":
+                            desynced = True
                             sweep_artifacts.append((key, hex(addr), hex(span_starts[idx])))
                         else:
                             interior.append((key, hex(addr), hex(span_starts[idx])))

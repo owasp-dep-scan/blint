@@ -108,7 +108,7 @@ def test_kpi_gate_update_refuses_all_zero_kpi(tmp_path, capsys):
     )
 
     assert rc == 2
-    assert "all-zero KPI" in capsys.readouterr().err
+    assert "no callgraph at all" in capsys.readouterr().err
     assert not baseline.exists()
 
 
@@ -191,9 +191,14 @@ def test_kpi_gate_reports_regressions(tmp_path):
 
 
 def test_kpi_gate_explicit_platform_still_flows_through(tmp_path):
+    """--platform names a platform for metadata carrying no target tuple."""
     metadata = _write_metadata(
         tmp_path / "plain-metadata.json",
-        {"file_path": "/x/fake.exe", "disassembled_functions": {}, "callgraph": None},
+        {
+            "file_path": "/x/fake.exe",
+            "disassembled_functions": {"0x1000::f": {"direct_call_targets": ["0x2000"]}},
+            "callgraph": {"edges": [{"src": 0, "dst": 0, "kind": "direct"}], "external": []},
+        },
     )
 
     rc = kpi_gate.main(
@@ -208,6 +213,44 @@ def test_kpi_gate_explicit_platform_still_flows_through(tmp_path):
     )
 
     assert rc == 1  # no baseline entry for the platform is a regression, not an error
+
+
+def test_kpi_gate_refuses_to_compare_an_empty_callgraph(tmp_path, capsys):
+    """An input that disassembled to nothing is an unknown on the compare path
+    too, not a total regression of every counter in the baseline. Without this
+    the gate reports the disassembler lost everything when what is missing is
+    LLVM 18."""
+    metadata = _write_metadata(
+        tmp_path / "zero-metadata.json",
+        {
+            "file_path": "/x/empty.bin",
+            "llvm_target_tuple": "x86_64-unknown-zero-test",
+            "disassembled_functions": {},
+            "callgraph": {"edges": [], "external": []},
+        },
+    )
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    "x86_64-unknown-zero-test": {
+                        "kpi": {"functions_total": 500, "internal_edges": 900},
+                        "allowed_drop": {"functions_total": 0, "internal_edges": 0},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = kpi_gate.main(["--metadata", str(metadata), "--baseline", str(baseline)])
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "no callgraph at all" in err
+    assert "regressed" not in err
 
 
 # ---- verify_pointer_precision.py ----
@@ -226,14 +269,33 @@ def test_precision_gate_classifies_landings_against_the_walked_entry():
     crossed_entry_span = 0x1000018FB  # objdump's drift instruction on /bin/ls
     entry = 0x100001900
     # The function's entry itself and its second instruction: sweep artifacts.
-    assert precision_gate.classify_landing(entry, entry, crossed_entry_span) == "artifact"
-    assert precision_gate.classify_landing(entry + 1, entry, crossed_entry_span) == "artifact"
+    assert precision_gate.classify_landing(entry, entry, crossed_entry_span, False) == "artifact"
+    assert (
+        precision_gate.classify_landing(entry + 1, entry, crossed_entry_span, False) == "artifact"
+    )
     # A landing before the crossed entry, or inside a span that crosses no
     # entry of the walked function: a misplaced address, and the gate fails.
-    assert precision_gate.classify_landing(entry - 3, entry, crossed_entry_span) == "interior"
     assert (
-        precision_gate.classify_landing(entry + 1, 0x100002000, crossed_entry_span) == "interior"
+        precision_gate.classify_landing(entry - 3, entry, crossed_entry_span, False) == "interior"
     )
+    assert (
+        precision_gate.classify_landing(entry + 1, 0x100002000, crossed_entry_span, False)
+        == "interior"
+    )
+
+
+def test_precision_gate_treats_a_derailed_sweep_as_artifact_until_it_resyncs():
+    """Once objdump's sweep has decoded across a function entry it stays wrong
+    for several spans, not just the one that crossed. On /usr/bin/curl the
+    sweep enters the padding before 0x100004304, and its *next* span starts at
+    0x100004306 — after the entry — so the entry-crossing rule alone reports
+    blint's correct `test rdi, rdi; je; push rbp` as two misplacements."""
+    later_span = 0x100004306
+    entry = 0x100004304
+    assert precision_gate.classify_landing(0x100004307, entry, later_span, True) == "artifact"
+    # The same landing without a prior derailment is still a misplacement:
+    # desync is only ever entered by crossing a symbol-derived entry.
+    assert precision_gate.classify_landing(0x100004307, entry, later_span, False) == "interior"
 
 
 def test_precision_gate_labels_why_the_sweep_misdecoded():
@@ -256,8 +318,9 @@ def test_precision_gate_bin_ls_passes(capsys):
     """The full /bin/ls gate: arch cross-check, objdump ground truth, verdict.
 
     Misuse — asking for a slice blint did not analyse — must exit 2, and the
-    gate on the slice blint did analyse must PASS (8 objdump linear-sweep
-    artifacts on this build, every one classified from the bytes).
+    gate on the slice blint did analyse must PASS. The artifact count varies
+    with the macOS build; what may not vary is that every landing objdump
+    disagrees about is classified from the bytes, leaving no interior ones.
     """
     assert precision_gate.main(["/bin/ls", "--arch", "arm64"]) == 2
     err = capsys.readouterr().err

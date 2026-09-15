@@ -5,10 +5,11 @@ An unusable input — a metadata file that is not valid JSON, a path that
 does not parse as a supported binary, or metadata carrying no
 `llvm_target_tuple` while no `--platform` was given — is an *unknown*:
 the script exits 2 with a message naming the missing precondition. It
-never falls back to a platform named `unknown`, and it never writes a
-baseline entry whose KPI is all zero: against an expected value of 0,
-`compare_kpi`'s `drop = expected - actual` can never go positive, so a
-zeroed entry could never fail again.
+never falls back to a platform named `unknown`. An input that produced
+no callgraph at all is the same unknown: against a baseline every
+counter reads as a total regression, and written to one it could never
+fail again, because `compare_kpi`'s `drop = expected - actual` is never
+positive against an expected 0. Both directions are refused.
 
 Exit codes: 0 no regressions, 1 regressions found, 2 unusable input.
 
@@ -141,6 +142,18 @@ def main(argv: list[str] | None = None) -> int:
 
     regressions: list[str] = []
     if args.baseline:
+        # Gate mode. An empty callgraph is an unknown in both directions:
+        # written to the baseline it can never regress again, and compared
+        # against one it reports the whole baseline as a loss the change
+        # did not cause.
+        if _kpi_is_all_zero(report["kpi"]):
+            return _unusable(
+                f"the input produced no callgraph at all for platform '{platform}' — it did "
+                "not disassemble (nyxstone needs LLVM 18: set NYXSTONE_LLVM_PREFIX), or the "
+                "binary has no code. Every counter would read as a total regression, and a "
+                "zeroed baseline entry could never regress again: compare_kpi's "
+                "drop = expected - actual is never positive against an expected 0."
+            )
         baseline_path = Path(args.baseline)
         baseline = _load_json(baseline_path) if baseline_path.exists() else {"entries": {}}
         entries = baseline.setdefault("entries", {})
@@ -150,14 +163,6 @@ def main(argv: list[str] | None = None) -> int:
                 return _unusable(
                     "'unknown' is the fallback spelling this script no longer emits; "
                     "pass the real platform name"
-                )
-            if _kpi_is_all_zero(report["kpi"]):
-                return _unusable(
-                    f"refusing to write an all-zero KPI for platform '{platform}' — the input "
-                    "produced no callgraph (it did not parse, or disassembly produced "
-                    "nothing). A zeroed entry could never regress: compare_kpi's "
-                    "drop = expected - actual is never positive against an expected 0. "
-                    "Fix the input instead."
                 )
             entry = entries.setdefault(platform, {})
             entry["kpi"] = report["kpi"]
