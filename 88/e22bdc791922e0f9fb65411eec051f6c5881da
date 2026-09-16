@@ -1,0 +1,18 @@
+README.md
+  h_6a4cc5cdf68def 105-112,195-197,202-210,217-218,224-239,241-243,245-247,249-250,252-253,255-269,275,277-282,284,293-297,301-310,316-333,339-348,351-367,371-446,459-460,477-478,486-491,498-540
+SKILL.md
+  h_6a4cc5cdf68def 7
+docs/METADATA.md
+  h_6a4cc5cdf68def 154-155,424,439-446,479-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "88e22bdc791922e0f9fb65411eec051f6c5881da",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
