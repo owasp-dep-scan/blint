@@ -34,7 +34,12 @@ from blint.lib.binary import (
     parse_informative_strings,
     parse_macho_symbols,
 )
-from blint.lib.binary_common import parse_go_toolchain_version
+from blint.lib.binary_common import (
+    _parse_go_buildinfo_text,
+    _parse_go_modinfo,
+    _read_go_inline_blob,
+    parse_go_toolchain_version,
+)
 from blint.lib.codesign_macho import parse_superblob
 from blint.lib.tbd_index import SDK_ATTRIBUTIONS_KEY
 from tests.test_codesign_macho import (
@@ -3051,6 +3056,19 @@ func main() {
 }
 """
 
+_GO_PATHFUL_MAIN_SRC = """package main
+
+import (
+	"fmt"
+
+	"example.com/blint-fixture/jsonpath"
+)
+
+func main() {
+	fmt.Println(jsonpath.Match())
+}
+"""
+
 
 def _go_build_env():
     """A hermetic environment for fixture builds: no network, no workspace."""
@@ -3072,6 +3090,51 @@ def _go_version_of_toolchain(go_exe, binary):
     if result.returncode != 0 or ": " not in line:
         pytest.skip(f"go version refused the fixture: {line or result.stderr.strip()}")
     return line.split(": ", 1)[1]
+
+
+def _go_buildinfo_identity(go_exe, binary):
+    """The build's own path and module as `go version -m` reports them."""
+    result = subprocess.run([go_exe, "version", "-m", str(binary)], capture_output=True, text=True)
+    if result.returncode != 0:
+        pytest.skip(f"go version -m refused the fixture: {result.stderr.strip()}")
+    path = module = None
+    for line in result.stdout.splitlines():
+        parts = [part for part in line.split("\t") if part]
+        if parts[:1] == ["path"] and len(parts) > 1:
+            path = parts[1]
+        elif parts[:1] == ["mod"] and len(parts) > 1:
+            module = parts[1]
+    if path is None or module is None:
+        pytest.skip(f"go version -m reported no path/module for {binary}")
+    return path, module
+
+
+# cmd/go/internal/modload's framing sentinels, used by the synthetic blob
+# builder so hand-built fixtures match what a real linker emits.
+_GO_INFO_START = bytes.fromhex("3077af0c9274080241e1c107e6d618e6")
+_GO_INFO_END = bytes.fromhex("f932433186182072008242104116d8f2")
+
+
+def _go_uvarint(value):
+    out = bytearray()
+    while True:
+        low = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(low | 0x80)
+        else:
+            out.append(low)
+            return bytes(out)
+
+
+def _go_inline_blob(version, modinfo_text):
+    """A buildinfo blob in go/src/debug/buildinfo's >= 1.18 inline layout."""
+    header = bytearray(b"\xff Go buildinf:")
+    header.append(8)  # ptrSize
+    header.append(0x2)  # flags: version + modinfo inline
+    header += b"\x00" * 16
+    framed = _GO_INFO_START + modinfo_text + _GO_INFO_END
+    return bytes(header) + _go_uvarint(len(version)) + version + _go_uvarint(len(framed)) + framed
 
 
 @pytest.fixture(scope="module")
@@ -3120,6 +3183,38 @@ def go_fixtures(tmp_path_factory):
     if result.returncode != 0:
         pytest.skip(f"host go cannot build the module fixture: {result.stderr.strip()}")
 
+    # Module build with a dependency whose name ends in "path". The buildinfo
+    # dep line ("dep\t…/jsonpath\tv1.0.0") used to win over the real path
+    # entry under the substring match; a plain fixture module has no such
+    # dependency, so this case is constructed deliberately rather than hoped
+    # for from a hello-world.
+    pathful_dir = workdir / "pathful"
+    (pathful_dir / "jsonpath").mkdir(parents=True)
+    (pathful_dir / "go.mod").write_text(
+        "module example.com/blint-fixture/pathful\n\n"
+        "go 1.18\n\n"
+        "require example.com/blint-fixture/jsonpath v1.0.0\n\n"
+        "replace example.com/blint-fixture/jsonpath => ./jsonpath\n",
+        encoding="utf-8",
+    )
+    (pathful_dir / "main.go").write_text(_GO_PATHFUL_MAIN_SRC, encoding="utf-8")
+    (pathful_dir / "jsonpath" / "go.mod").write_text(
+        "module example.com/blint-fixture/jsonpath\n\ngo 1.18\n", encoding="utf-8"
+    )
+    (pathful_dir / "jsonpath" / "jsonpath.go").write_text(
+        "package jsonpath\n\nfunc Match() bool { return true }\n", encoding="utf-8"
+    )
+    pathful_bin = pathful_dir / "pathful-bin"
+    result = subprocess.run(
+        [go_exe, "build", "-o", str(pathful_bin), "."],
+        cwd=pathful_dir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"host go cannot build the pathful fixture: {result.stderr.strip()}")
+
     # Module-less build: `go build file.go` outside any module.
     bare_dir = workdir / "bare"
     bare_dir.mkdir()
@@ -3151,6 +3246,7 @@ def go_fixtures(tmp_path_factory):
     return {
         "go_exe": go_exe,
         "module_bin": module_bin,
+        "pathful_bin": pathful_bin,
         "bare_bin": bare_bin,
         "pe_bin": pe_bin,
     }
@@ -3183,6 +3279,59 @@ def test_go_buildinfo_toolchain_version_pe_cross_compile(go_fixtures):
     # A bare-file build has no module path; the settings text still parses.
     assert formulation["path"] == "command-line-arguments"
     assert deps == {}
+    # `go version -m` reports no mod line for a module-less build, so the
+    # module key must not exist at all — absent, not empty (rule 14).
+    assert "module" not in formulation
+
+
+def test_go_buildinfo_module_matches_oracle_module_build(go_fixtures):
+    # The module line is "mod\t<path>\t<version>\t<hash>"; the version and
+    # hash used to be glued onto the module name by the remainder-taking
+    # split. Assert the identity fields against `go version -m` as oracle.
+    deps, formulation = parse_go_buildinfo(lief.parse(str(go_fixtures["module_bin"])))
+    path, module = _go_buildinfo_identity(go_fixtures["go_exe"], go_fixtures["module_bin"])
+    assert formulation["path"] == path
+    assert formulation["module"] == module
+
+
+def test_go_buildinfo_path_survives_dependency_ending_in_path(go_fixtures):
+    # The defect needed a dependency whose name ends in "path": the real
+    # path line plus "dep …/jsonpath …" all matched `"path " in line`, and
+    # with no break the last match won, so path held the dependency's
+    # version and hash. The fixture above deliberately builds one.
+    deps, formulation = parse_go_buildinfo(lief.parse(str(go_fixtures["pathful_bin"])))
+    path, module = _go_buildinfo_identity(go_fixtures["go_exe"], go_fixtures["pathful_bin"])
+    assert formulation["path"] == path
+    assert formulation["module"] == module
+    assert deps["example.com/blint-fixture/jsonpath"]["version"] == "v1.0.0"
+
+
+def test_go_buildinfo_fallback_when_blob_unreadable(go_fixtures, tmp_path):
+    # Force the flattened-text fallback on a real artifact (rule 23): clear
+    # the inline flag byte so the blob reader refuses the section, exactly
+    # as a pre-1.18 pointer-layout blob would. Dependencies and build
+    # settings still come back from the flattened text, while path, module
+    # and go_version stay absent — the identity fields cannot be recovered
+    # from flattened text, and absent is the fail-closed answer.
+    patched = tmp_path / go_fixtures["pathful_bin"].name
+    patched.write_bytes(go_fixtures["pathful_bin"].read_bytes())
+    parsed = lief.parse(str(patched))
+    section = None
+    for name in ("__go_buildinfo", ".go.buildinfo"):
+        section = parsed.get_section(name)
+        if section and section.size:
+            break
+    if not (section and section.size):
+        pytest.skip("fixture has no readable buildinfo section to patch")
+    data = bytearray(patched.read_bytes())
+    data[section.offset + 15] &= ~0x2
+    patched.write_bytes(bytes(data))
+    deps, formulation = parse_go_buildinfo(lief.parse(str(patched)))
+    assert deps["example.com/blint-fixture/jsonpath"]["version"] == "v1.0.0"
+    assert "GOARCH" in formulation
+    assert "path" not in formulation
+    assert "module" not in formulation
+    assert "go_version" not in formulation
 
 
 def test_go_buildinfo_absent_on_non_go_binary(tmp_path):
@@ -3258,6 +3407,116 @@ def test_parse_go_toolchain_version_fails_closed_on_unusable_input():
     garbage[len(header)] = 8
     garbage[len(header) + 1 : len(header) + 9] = b"\x01\x02\x03\x04\x05\x06\x07\x08"
     assert parse_go_toolchain_version(bytes(garbage)) is None
+
+
+def test_read_go_inline_blob_recovers_framed_modinfo():
+    # The synthetic blob pins the documented layout so the framing and field
+    # mechanics stay exercised on hosts with no Go toolchain; the
+    # go_fixtures tests above are the real-artifact validation. The modinfo
+    # text deliberately includes the shapes that were mishandled by the
+    # flattened-text reader: a module named "…/mod" (the old split on
+    # "mod " kept its version), a dependency named "…/jsonpath", a build
+    # value containing "=", and dep lines with missing/empty hash fields.
+    version = b"go1.27.1"
+    modinfo_text = (
+        b"path\texample.com/blint-fixture/pathful\n"
+        b"mod\texample.com/mod\tv1.2.3\th1:abcdef\n"
+        b"dep\texample.com/Intevation/jsonpath\tv0.0.0-20210407135951-1de76d718b3f\th1:Wl78ApPPB2Wvf\n"
+        b"dep\texample.com/no-hash\tv1.0.0\n"
+        b"dep\texample.com/empty-hash\tv1.0.0\t\n"
+        b"dep\texample.com/lonely\n"
+        b"=>\t./local\t(devel)\t\n"
+        b"build\t-trimpath=true\n"
+        b"build\tDefaultGODEBUG=tracebacklabels=0,x509sslcertoverrideplatform=0\n"
+        b"build\tbroken-no-equals\n"
+        b"build\t=novalue\n"
+        b"mod\t\n"
+        b"path\t\n"
+    )
+    blob = _go_inline_blob(version, modinfo_text)
+    got_version, got_modinfo = _read_go_inline_blob(blob)
+    assert got_version == "go1.27.1"
+    assert got_modinfo == modinfo_text.decode()
+
+    deps = {}
+    formulation = {}
+    _parse_go_modinfo(got_modinfo, deps, formulation)
+    # Identity fields take their own column, never the remainder.
+    assert formulation["path"] == "example.com/blint-fixture/pathful"
+    assert formulation["module"] == "example.com/mod"
+    assert deps["example.com/Intevation/jsonpath"] == {
+        "version": "v0.0.0-20210407135951-1de76d718b3f",
+        "hash": "h1:Wl78ApPPB2Wvf",
+    }
+    assert deps["example.com/no-hash"] == {"version": "v1.0.0", "hash": None}
+    assert deps["example.com/empty-hash"] == {"version": "v1.0.0", "hash": None}
+    assert deps["example.com/lonely"] == {"version": None, "hash": None}
+    # Replacement lines are not dependencies.
+    assert "./local" not in deps
+    # The build value is cut at the first "=" only, dash-keys keep the
+    # historical "-"-stripped spelling, and malformed lines are skipped.
+    assert formulation["DefaultGODEBUG"] == "tracebacklabels=0,x509sslcertoverrideplatform=0"
+    assert formulation["trimpath"] == "true"
+    assert "broken-no-equals" not in formulation
+    assert "novalue" not in formulation
+
+
+def test_read_go_inline_blob_modinfo_fails_closed():
+    # Every unusable modinfo yields None while the version — which precedes
+    # it in the blob — still resolves (rule 14: each field fails on its own).
+    version = b"go1.27.1"
+    text = b"path\texample.com/x\nmod\texample.com/x\tv1.0.0\n"
+    blob = _go_inline_blob(version, text)
+    assert _read_go_inline_blob(blob) == ("go1.27.1", text.decode())
+
+    # Framing check: the byte before the end sentinel must be a newline.
+    unframed = _GO_INFO_START + b"path\texample.com/x" + _GO_INFO_END
+    assert _read_go_inline_blob(_go_inline_blob(version, unframed)) == ("go1.27.1", None)
+    # Too short to carry both sentinels and one content byte.
+    tiny = _GO_INFO_START + _GO_INFO_END
+    assert _read_go_inline_blob(_go_inline_blob(version, tiny)) == ("go1.27.1", None)
+    # Content that strips to the empty string is treated as absent.
+    newline_only = _GO_INFO_START + b"\n" + _GO_INFO_END
+    assert _read_go_inline_blob(_go_inline_blob(version, newline_only)) == ("go1.27.1", None)
+    # Truncated inside the modinfo string: the length prefix promises more
+    # than the buffer holds, so modinfo is None but the version survives.
+    assert _read_go_inline_blob(blob[:-8]) == ("go1.27.1", None)
+    # An absurd modinfo length prefix must not be trusted.
+    absurd = bytearray(blob)
+    absurd[41] = 0xFF
+    absurd[42] = 0xFF
+    absurd[43] = 0xFF
+    absurd[44] = 0xFF
+    assert _read_go_inline_blob(bytes(absurd)) == ("go1.27.1", None)
+
+
+def test_parse_go_buildinfo_text_fallback_is_anchored_and_hardened():
+    # The fallback parses only dep and build lines, anchored on their
+    # keyword, and must survive malformed lines that used to raise
+    # IndexError (a dep with no version, a build line with no "=").
+    text = (
+        "path example.com/keep-out\n"
+        "mod example.com/keep-out v1.0.0 h1:x\n"
+        "dep example.com/Intevation/jsonpath v0.0.0-20210407135951-1de76d718b3f h1:Wl78Ap\n"
+        "dep example.com/lonely\n"
+        "build DefaultGODEBUG=tracebacklabels=0,x509sslcertoverrideplatform=0\n"
+        "build broken-no-equals\n"
+        "build =novalue"
+    )
+    deps = {}
+    formulation = {}
+    _parse_go_buildinfo_text(text, deps, formulation)
+    assert deps == {
+        "example.com/Intevation/jsonpath": {
+            "version": "v0.0.0-20210407135951-1de76d718b3f",
+            "hash": "h1:Wl78Ap",
+        },
+        "example.com/lonely": {"version": None, "hash": None},
+    }
+    # No identity fields from flattened text, ever.
+    assert "path" not in formulation
+    assert "module" not in formulation
+    assert formulation == {"DefaultGODEBUG": "tracebacklabels=0,x509sslcertoverrideplatform=0"}
 
 
 def test_add_derived_attributes_omits_unrecoverable_go_version():

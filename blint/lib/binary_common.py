@@ -803,6 +803,17 @@ GO_BUILDINFO_HEADER_LEN = 32
 # a date. A longer length prefix means the header was misread, not that the
 # version is big.
 GO_BUILDINFO_MAX_VERSION_LEN = 128
+# The modinfo string carries one line per dependency; release binaries hold
+# 250-400 lines (~40 KB), so 1 MiB is a sanity bound against a misread length
+# prefix, not a tight budget.
+GO_BUILDINFO_MAX_MODINFO_LEN = 1 << 20
+# go/src/debug/buildinfo: the inline modinfo string is framed by 16-byte
+# sentinels (cmd/go/internal/modload infoStart/infoEnd) and is only usable
+# when at least 33 bytes long with a newline immediately before the end
+# sentinel — go's own framing check, which a random slice of the section
+# does not pass.
+GO_MODINFO_SENTINEL_LEN = 16
+GO_MODINFO_MIN_FRAMED_LEN = 33
 GO_VERSION_TEXT_RE = re.compile(r"^(?:go\d|devel)[\x20-\x7e]*$")
 
 
@@ -824,6 +835,62 @@ def _read_uvarint(data: bytes) -> tuple[int, int]:
     return 0, 0
 
 
+def _read_go_inline_blob(build_info_bytes: bytes) -> tuple[str | None, str | None]:
+    """Read the (toolchain version, modinfo text) pair from raw buildinfo bytes.
+
+    Mirrors go/src/debug/buildinfo's readRawBuildInfo for the >= 1.18 inline
+    layout: a 32-byte header, then a uvarint-length-prefixed version string,
+    then a uvarint-length-prefixed modinfo string. The modinfo string is
+    framed by 16-byte sentinels on both ends; the framing is stripped only
+    when go's own check passes (newline immediately before the end
+    sentinel), so a misread length cannot smuggle in section noise. Each
+    field fails independently and closed: a bad version returns
+    ``(None, None)``, while an unusable modinfo still returns the version.
+    The pre-1.18 pointer layout is not implemented — its strings live
+    outside the blob, so it also yields ``(None, None)`` and callers leave
+    the fields absent rather than guess.
+    """
+    offset = build_info_bytes.find(GO_BUILDINFO_MAGIC)
+    if offset < 0:
+        return None, None
+    header_end = offset + GO_BUILDINFO_HEADER_LEN
+    if header_end > len(build_info_bytes):
+        return None, None
+    if not build_info_bytes[offset + 15] & GO_BUILDINFO_FLAGS_INLINE:
+        return None, None
+    length, consumed = _read_uvarint(build_info_bytes[header_end : header_end + 10])
+    if not 0 < length <= GO_BUILDINFO_MAX_VERSION_LEN:
+        return None, None
+    version_start = header_end + consumed
+    version_end = version_start + length
+    if version_end > len(build_info_bytes):
+        return None, None
+    try:
+        version = build_info_bytes[version_start:version_end].decode("ascii")
+    except UnicodeDecodeError:
+        return None, None
+    if not GO_VERSION_TEXT_RE.match(version):
+        return None, None
+    modinfo: str | None = None
+    mod_length, mod_consumed = _read_uvarint(build_info_bytes[version_end : version_end + 10])
+    if 0 < mod_length <= GO_BUILDINFO_MAX_MODINFO_LEN:
+        mod_start = version_end + mod_consumed
+        mod_end = mod_start + mod_length
+        if mod_end <= len(build_info_bytes):
+            framed = build_info_bytes[mod_start:mod_end]
+            if (
+                len(framed) >= GO_MODINFO_MIN_FRAMED_LEN
+                and framed[len(framed) - GO_MODINFO_SENTINEL_LEN - 1] == 0x0A
+            ):
+                modinfo = (
+                    framed[GO_MODINFO_SENTINEL_LEN:-GO_MODINFO_SENTINEL_LEN].decode(
+                        "utf-8", errors="replace"
+                    )
+                    or None
+                )
+    return version, modinfo
+
+
 def parse_go_toolchain_version(build_info_bytes: bytes) -> str | None:
     """Recover the Go toolchain version from the raw buildinfo bytes.
 
@@ -836,35 +903,92 @@ def parse_go_toolchain_version(build_info_bytes: bytes) -> str | None:
     pointer layout, truncated or over-long length prefix, or content that is
     not a Go version shape.
     """
-    offset = build_info_bytes.find(GO_BUILDINFO_MAGIC)
-    if offset < 0:
-        return None
-    header_end = offset + GO_BUILDINFO_HEADER_LEN
-    if header_end > len(build_info_bytes):
-        return None
-    if not build_info_bytes[offset + 15] & GO_BUILDINFO_FLAGS_INLINE:
-        return None
-    length, consumed = _read_uvarint(build_info_bytes[header_end : header_end + 10])
-    if not 0 < length <= GO_BUILDINFO_MAX_VERSION_LEN:
-        return None
-    start = header_end + consumed
-    end = start + length
-    if end > len(build_info_bytes):
-        return None
-    try:
-        version = build_info_bytes[start:end].decode("ascii")
-    except UnicodeDecodeError:
-        return None
-    if not GO_VERSION_TEXT_RE.match(version):
-        return None
+    version, _ = _read_go_inline_blob(build_info_bytes)
     return version
+
+
+def _parse_go_modinfo(modinfo_text: str, deps: dict, formulation: dict) -> None:
+    """Parse the framing-stripped modinfo text into deps and formulation.
+
+    Follows go/src/runtime/debug ParseBuildInfo: lines are separated by
+    ``\\n`` and fields by ``\\t``, and every line type is anchored on its
+    ``keyword\\t`` prefix. ``path`` is the single field after the prefix;
+    ``mod``/``dep`` carry up to three tab-separated columns (name, version,
+    hash) and only the *name* becomes ``module``/a deps key — the version
+    and hash are real data, not part of the identity. ``build`` settings are
+    cut at the first ``=`` so values like ``a=b,c=d`` survive whole.
+    Unrecognised or empty lines (including ``=>`` replacement lines) are
+    ignored, as go's own printer-strictness is not blint's concern.
+    """
+    for line in modinfo_text.split("\n"):
+        if line.startswith("path\t"):
+            value = line[len("path\t") :]
+            if value:
+                formulation["path"] = value
+        elif line.startswith("mod\t"):
+            fields = line[len("mod\t") :].split("\t")
+            if fields[0]:
+                formulation["module"] = fields[0]
+        elif line.startswith("dep\t"):
+            fields = line[len("dep\t") :].split("\t")
+            if fields[0]:
+                deps[fields[0]] = {
+                    "version": fields[1] if len(fields) > 1 else None,
+                    "hash": fields[2]
+                    if len(fields) == 3 and fields[2].startswith("h1:")
+                    else None,
+                }
+        elif line.startswith("build\t"):
+            key, sep, value = line[len("build\t") :].partition("=")
+            if sep and key:
+                formulation[key.replace("-", "")] = value
+
+
+def _parse_go_buildinfo_text(build_info_str: str, deps: dict, formulation: dict) -> None:
+    """Flattened-text fallback for deps and build settings only.
+
+    Used only when the buildinfo blob cannot be read at the byte level (for
+    example a pre-1.18 pointer layout): the NUL-stripped, tab-flattened
+    section text still carries the ``dep`` and ``build`` lines, which are
+    anchored on their keyword so a dependency named ``…/jsonpath`` cannot
+    match. ``path`` and ``module`` are deliberately not recovered here — in
+    flattened text their field boundaries are destroyed (the version glues
+    onto the path, the version and hash glue onto the module name), so they
+    stay absent rather than arrive wrong.
+    """
+    for line in build_info_str.split("\n"):
+        if line.startswith("dep "):
+            fields = line.removeprefix("dep ").split(" ")
+            if fields[0]:
+                deps[fields[0]] = {
+                    "version": fields[1] if len(fields) > 1 else None,
+                    "hash": fields[2]
+                    if len(fields) == 3 and fields[2].startswith("h1:")
+                    else None,
+                }
+        elif line.startswith("build "):
+            key, sep, value = line.removeprefix("build ").partition("=")
+            if sep and key:
+                formulation[key.replace("-", "")] = value
 
 
 def parse_go_buildinfo(
     parsed_obj: lief.Binary,
 ) -> tuple[dict[str, dict[str, str | None]], dict[str, str]]:
-    """
-    Parse the go build info section to extract go dependencies
+    """Parse the go build info blob to extract go dependencies and identity fields.
+
+    The primary read is at the byte level, exactly as go/src/debug/buildinfo
+    lays the blob out: the uvarint-length-prefixed toolchain version, then
+    the framed modinfo string whose tab-separated ``path``/``mod``/``dep``/
+    ``build`` lines are parsed with their field boundaries intact. On ELF
+    and Mach-O the dedicated buildinfo section is read whole; on PE the
+    magic is searched in the whole ``.data`` section because the modinfo
+    string can be far larger than the text window the fallback uses. When
+    the blob is unreadable (not a Go binary, truncated, or the pre-1.18
+    pointer layout) the NUL-stripped flattened text is scanned for ``dep``
+    and ``build`` lines only — ``path`` and ``module`` cannot be recovered
+    from flattened text and stay absent rather than arrive concatenated.
+
     Args:
         parsed_obj (lief.Binary): The parsed object representing the binary.
 
@@ -894,10 +1018,15 @@ def parse_go_buildinfo(
         # For PE binaries look for .data section
         s: lief.PE.Section = parsed_obj.get_section(".data")
         if s and not isinstance(s, lief.lief_errors):
-            build_info_bytes = s.content.tobytes()[: int(s.size / 32)]
+            section_bytes = s.content.tobytes()
+            # The blob is located in the full section: its uvarint length
+            # prefixes describe a modinfo string that routinely exceeds the
+            # text window, which is kept only for the flattened-text
+            # fallback below.
+            build_info_bytes = section_bytes
             build_info_str = (
                 codecs.decode(
-                    s.content.tobytes()[: int(s.size / 32)],
+                    section_bytes[: int(s.size / 32)],
                     encoding="ascii",
                     errors="replace",
                 )
@@ -905,28 +1034,13 @@ def parse_go_buildinfo(
                 .replace("\ufffd", "")
                 .replace("\t", " ")
             )
-    # The toolchain version is recovered from the raw bytes before they are
-    # NUL-stripped; in the stripped text it shares a line with the path entry.
-    go_version = parse_go_toolchain_version(build_info_bytes)
+    go_version, modinfo_text = _read_go_inline_blob(build_info_bytes)
     if go_version:
         formulation["go_version"] = go_version
-    lines = build_info_str.split("\n")
-    for line in lines:
-        if "path " in line:
-            tmp_a = line.split("path ")
-            formulation["path"] = tmp_a[-1]
-        if line.startswith("mod "):
-            tmp_a = line.split("mod ")
-            formulation["module"] = tmp_a[-1]
-        if line.startswith("dep "):
-            tmp_a = line.removeprefix("dep ").split(" ")
-            deps[tmp_a[0]] = {
-                "version": tmp_a[1],
-                "hash": tmp_a[2] if len(tmp_a) == 3 and tmp_a[2].startswith("h1:") else None,
-            }
-        if line.startswith("build "):
-            tmp_a = line.removeprefix("build ").split("=")
-            formulation[tmp_a[0].replace("-", "")] = tmp_a[1]
+    if modinfo_text is not None:
+        _parse_go_modinfo(modinfo_text, deps, formulation)
+    else:
+        _parse_go_buildinfo_text(build_info_str, deps, formulation)
 
     return deps, formulation
 
