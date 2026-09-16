@@ -73,6 +73,14 @@ def _load_metadata(args: argparse.Namespace) -> dict[str, Any]:
         except OSError as exc:
             raise Unusable(f"{path} could not be read: {exc}") from None
     if args.binary:
+        # Check before parsing rather than after. LIEF is handed the path
+        # directly, and what it does with a directory is platform-dependent:
+        # it returns None on macOS but raises std::bad_alloc on Linux, which
+        # escapes as MemoryError and kills the gate before any guard below can
+        # report the input as unusable.
+        path = Path(args.binary)
+        if not path.is_file():
+            raise Unusable(f"{path} is not a readable file, so there is nothing to parse")
         return parse(args.binary, disassemble=True)
     raise ValueError("Pass either --metadata or --binary")
 

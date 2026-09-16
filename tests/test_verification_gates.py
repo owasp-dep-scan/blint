@@ -56,19 +56,30 @@ def _write_metadata(path: Path, payload: dict) -> Path:
 
 
 def test_kpi_gate_names_unparseable_binary_as_unusable(tmp_path, capsys):
-    rc = kpi_gate.main(["--binary", NONEXISTENT, "--baseline", str(tmp_path / "baseline.json")])
+    # A real file that is not a binary, so the run reaches the platform guard.
+    # A missing path would stop at the earlier is-it-a-file check and leave
+    # this branch untested.
+    not_a_binary = tmp_path / "not-a-binary.txt"
+    not_a_binary.write_text("plain text, no magic\n", encoding="utf-8")
+
+    rc = kpi_gate.main(
+        ["--binary", str(not_a_binary), "--baseline", str(tmp_path / "baseline.json")]
+    )
 
     assert rc == 2
     err = capsys.readouterr().err
     assert "llvm_target_tuple" in err
-    assert NONEXISTENT in err
+    assert str(not_a_binary) in err
 
 
 def test_kpi_gate_refuses_directory_input(tmp_path, capsys):
     rc = kpi_gate.main(["--binary", str(tmp_path), "--baseline", str(tmp_path / "b.json")])
 
     assert rc == 2
-    assert "llvm_target_tuple" in capsys.readouterr().err
+    # Named as a non-file rather than as an unsupported binary: LIEF raises
+    # std::bad_alloc on a directory on Linux, so reaching this message at all
+    # proves the gate refused before handing the path over.
+    assert "is not a readable file" in capsys.readouterr().err
 
 
 def test_kpi_gate_names_invalid_metadata_json(tmp_path, capsys):
@@ -87,7 +98,7 @@ def test_kpi_gate_update_refuses_unparseable_input_without_writing(tmp_path, cap
     rc = kpi_gate.main(["--binary", NONEXISTENT, "--baseline", str(baseline), "--update-baseline"])
 
     assert rc == 2
-    assert "llvm_target_tuple" in capsys.readouterr().err
+    assert "is not a readable file" in capsys.readouterr().err
     assert not baseline.exists()
 
 
