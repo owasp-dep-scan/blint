@@ -1,0 +1,14 @@
+tests/test_parallel.py
+  h_6a4cc5cdf68def 506-511,531-535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "405e769f6840c47768b3d11f45d991ac8208ab6c",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
