@@ -1,0 +1,25 @@
+tests/scripts/callgraph_kpi_baseline.py
+  s_526190b23001e8::t_8760566483f66e 76-83
+tests/test_verification_gates.py
+  s_526190b23001e8::t_61e6232cc05cbf 101
+  s_526190b23001e8::t_00abc0f73a5d0c 79-82
+  s_526190b23001e8::t_e058b0b65f471e 65-67
+  s_526190b23001e8::t_32c7881a7ff754 59-63,72
+  s_526190b23001e8::t_15daee251f03a1 64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "306cd025e16fff457cbe65dd8c9be7036f5a45f5",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
