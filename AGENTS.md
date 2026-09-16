@@ -22,7 +22,9 @@ Primary workflows:
 - `blint/lib/review_runner.py`: `ReviewRunner` coordination for imports/symbols/entries/functions.
 - `blint/lib/review_utils.py`: generic pattern-review matching and rule-option coercion.
 - `blint/lib/function_reviews.py`: `FUNCTION_REVIEWS` heuristics and metric evaluation.
-- `blint/lib/binary.py`: format parsing and metadata extraction (ELF/PE/Mach-O/WASM).
+- `blint/lib/binary.py`: the `parse` entry point, callgraph assembly, and security properties. Every previously importable name is still re-exported from here, so existing imports keep working, but the definitions now live in the siblings below.
+- `blint/lib/binary_common.py`: helpers shared by every format reader (Go/Rust buildinfo, entropy, symbol demangling).
+- `blint/lib/binary_elf.py`, `binary_pe.py`, `binary_macho.py`, `binary_wasm.py`: per-format metadata extraction.
 - `blint/lib/disassembler.py`: nyxstone-backed function disassembly and metrics.
 - `blint/lib/sbom.py`: CycloneDX object construction and dependency modeling.
 - `blint/lib/android.py`: APK/AAB metadata extraction and component mapping.
@@ -78,7 +80,7 @@ Primary workflows:
 
 ### Add metadata extraction for a format
 
-1. Extend relevant parser section in `blint/lib/binary.py`.
+1. Extend the reader for that format: `blint/lib/binary_elf.py`, `binary_pe.py`, `binary_macho.py` or `binary_wasm.py`, putting anything shared by two or more of them in `binary_common.py`.
 2. Keep cleanup compatibility (`cleanup_dict_lief_errors`).
 3. Update `docs/METADATA.md` for any new top-level or nested keys.
 4. Add focused tests and fixtures under `tests/data/`.
@@ -92,7 +94,7 @@ Primary workflows:
 
 ### WASM: wasm-tools upgrades
 
-`blint/lib/binary.py::parse_wasm_metadata` normalizes the `wasm_tools` library's report into blint metadata. When bumping the `wasm-tools` floor in `pyproject.toml` (and `poetry.lock`):
+`blint/lib/binary_wasm.py::parse_wasm_metadata` (re-exported from `blint/lib/binary.py`) normalizes the `wasm_tools` library's report into blint metadata. When bumping the `wasm-tools` floor in `pyproject.toml` (and `poetry.lock`):
 
 1. Diff the library's release notes/changelog between the old and new pinned versions to find new `analysis` keys (capabilities, detections, findings) and new `types[]`/`sections[]`/`strings[]` fields.
 2. Map new attributes additively into `parse_wasm_metadata` — never rename or drop existing keys. Prefer small summary fields (e.g. `wasm_isa_capabilities`, `wasm_types_summary`, `wasm_debug_info_present`) over re-exporting the full raw structure; the full payload always stays available in the companion `*-wasm-report.json`.
@@ -135,7 +137,7 @@ The generated `summary.json` keeps per-ecosystem provenance in `ecosystems.<name
 ### Callgraph regression validation policy
 
 For any change that can affect disassembly or callgraph output (for example edits in
-`blint/lib/disassembler.py`, `blint/lib/binary.py`, `blint/lib/callgraph_kpi.py`,
+`blint/lib/disassembler.py`, `blint/lib/binary.py` and its `binary_*.py` siblings, `blint/lib/callgraph_kpi.py`,
 callgraph export/matching code, or callgraph fixture baselines/labels), agents must
 validate KPI baseline + label accuracy for **all architecture entries** present in:
 
