@@ -503,7 +503,12 @@ def _sbom_setup(payload):
 
 
 def test_sbom_parallel_matches_sequential(parallel_fixtures, tmp_path):
-    """Parallel SBOM equals sequential (modulo the random serialNumber).
+    """Parallel SBOM equals sequential (modulo per-generation values).
+
+    Both the random serialNumber and the wall-clock ``metadata.timestamp``
+    (seconds precision, taken at generation time) differ between the two
+    runs whenever a second boundary falls between them, so both are
+    normalized before the byte comparison.
 
     Includes the wasm files with --wasm-sbom so both wasm paths (component
     interfaces and core-module skip) are part of the comparison.
@@ -523,7 +528,11 @@ def test_sbom_parallel_matches_sequential(parallel_fixtures, tmp_path):
         outputs[jobs] = re.sub(
             rb'"serialNumber": "urn:uuid:[^"]*"',
             b'"serialNumber": ""',
-            (tmp_path / name).read_bytes(),
+            re.sub(
+                rb'"timestamp": "[^"]*"',
+                b'"timestamp": ""',
+                (tmp_path / name).read_bytes(),
+            ),
         )
     assert outputs[4] == outputs[1]
 
