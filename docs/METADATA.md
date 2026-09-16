@@ -151,6 +151,8 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
 - **Header (`header`):**
   - `cpu_type`: The target architecture (e.g., `ARM64`).
   - `file_type`: Identifies the binary as an `EXECUTABLE`, `DYLIB` (shared library), etc.
+  - `magic`: The Mach-O magic as a name (observed `"MAGIC_64"` on an arm64 macOS executable). A top-level key, like the other header fields here.
+  - `is_neural_model`: `true` only when the header magic is Apple's neural-model file magic (`0xbeefface`, LIEF's `MACHO_TYPES.NEURAL_MODEL`); `false` on ordinary Mach-O images (observed `false` on `/bin/ls`, `gh`, and Go toolchain binaries). Present on every Mach-O metadata — it names the file type the header declares, not an analysis verdict, so `false` is the expected value for binaries and libraries.
 
 - **Load Commands:** Mach-O uses load commands instead of a dynamic section.
   - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF.
@@ -419,7 +421,7 @@ This object summarizes key information about the toolchain and primary language 
 | Property           | Description                                                                                                                                         | Use Case                                                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `language`         | The primary programming language detected (e.g., `Go`, `Rust`, `.NET`). This is inferred from language-specific sections or symbols.                | Guides the reverse engineering process by setting expectations for runtime behavior, calling conventions, and data structures. |
-| `go_version`       | If the language is Go, this specifies the exact version of the Go compiler toolchain used (e.g., `go1.18.3`).                                       | Allows for checking against known vulnerabilities in specific versions of the Go compiler or standard library.                 |
+| `go_version`       | If the language is Go, the value copied from `go_formulation.go_version`. On current Go toolchains that field carries the module path rather than the toolchain version — a known extractor defect; see [`go_formulation`](#go_formulation) before using it.  | Intended for checking against known vulnerabilities in specific versions of the Go compiler or standard library; treat the value as unreliable until the extractor is fixed.                 |
 | `linker_version`   | The version of the linker program (e.g., from `ld` or `link.exe`) that produced the final executable, if this information is present in the binary. | Can help fingerprint the build environment (e.g., a specific Linux distribution or version of Visual Studio).                  |
 | `compiler_version` | The compiler identification string, often extracted from the `.comment` section in ELF files (e.g., `GCC: (Ubuntu 11.2.0-19ubuntu1) 11.2.0`).       | Precisely identifies the compiler and its version, which is useful for tracking toolchain vulnerabilities.                     |
 
@@ -433,6 +435,14 @@ These attributes provide detailed lists of third-party libraries and packages co
 | `rust_dependencies`   | A list of Rust crates used to build the binary, extracted from the `.dep-v0` section created by the `cargo-auditable` feature. Includes crate name, version, and kind.                                                                                              | Similar to Go, this enables precise SCA for Rust applications, mapping crates to known CVEs. **Limitation**: This section is only present if the developer explicitly enables the `cargo-auditable` feature during compilation.                |
 | `dotnet_dependencies` | A structured list of NuGet packages and their versions, extracted from the `deps.json` file embedded in the PE overlay of self-contained .NET applications.                                                                                                         | Provides precise SCA for .NET applications, allowing for vulnerability mapping. **Limitation**: This is only available for .NET Core/5+ applications published in "self-contained" mode and is not present in framework-dependent deployments. |
 | `import_dependencies` | A structured graph detailing which shared libraries (`.dll`, `.so`, `.dylib`) are imported by the main binary and which specific symbols are used from each library. See [Symbol attribution](#symbol-attribution) for what the attribution is based on per format. | Provides a clear, high-level view of runtime dependencies. Helps identify the use of sensitive APIs (e.g., crypto, networking) and from which library they originate. This is a foundational element for behavior analysis.                    |
+
+### `go_formulation`
+
+Companion to `go_dependencies`: the Go build's own description of itself, parsed from the embedded buildinfo (`.go.buildinfo` on ELF, `__go_buildinfo` on Mach-O, a `.data` section scan on PE). A flat object:
+
+- `go_version`, `path` and `module` appear when the corresponding buildinfo lines do, plus one entry per `build KEY=VALUE` setting with `-` stripped from the key. Observed on a Go 1.26 arm64/darwin build: `-buildmode=exe` → `"buildmode": "exe"` and `-compiler=gc` → `"compiler": "gc"`, while environment-style keys keep their spelling unchanged (`"CGO_ENABLED": "1"`, `"GOARCH": "arm64"`, `"GOOS": "darwin"`, `"GOARM64": "v8.0"`).
+- The key is present on every binary parsed by the ELF/PE/Mach-O readers — `{}` for non-Go binaries (observed `{}` on `/bin/ls`) — so an empty object means "not a Go binary or no readable buildinfo", not "Go with no build settings". On PE the `.data` heuristic found no version line in testing, so `go_version` is absent from the dict there while the `build` settings still parse.
+- **Known defect (engine-side, reported — not contract):** on current Go toolchains (observed on go1.26.5 and go1.27.1 builds, on ELF, Mach-O and PE alike) `go_version` does not carry the toolchain version. It carries the module path — `"github.com/cli/cli/v2/cmd/gh"` on a real Homebrew `gh` binary whose actual toolchain is `go1.27.1` — or `"command-line-arguments"` for module-less builds. The version token and the `path` entry share the buildinfo's first line once NUL bytes are stripped, and the extractor takes the last space-separated token of that line. The real version string is present in the binary and recoverable; `build_info.go_version` and the SBOM's `internal:go_version` component property inherit the defective value.
 
 ---
 
@@ -465,6 +475,15 @@ For WASM binaries the same payload is produced by converting the `wasm_tools` st
 - Imported host functions become `external` targets with reason `import` (e.g. `wasi_snapshot_preview1.fd_write`) rather than nodes; the nodes are the locally defined functions.
 - Edge `kind` keeps the upstream semantics: `direct` edges are exact, `indirect-approx` (element-segment over-approximation for `call_indirect`) and `typed-approx` (signature-based approximation for `call_ref`) are candidates, and only `direct` edges carry `high` confidence.
 - Call sites to the same target collapse into edge `count`; node `key` uses the function body offset as its address.
+
+### `import_call_addresses` (Mach-O, requires `--disassemble`)
+
+A top-level dict mapping Mach-O import landing addresses to the imported symbol's name, built once when disassembly starts (`blint/lib/disassembler.py::build_macho_import_address_map`). Mach-O has no ELF-style PLT/GOT relocations, so imported calls would otherwise land on anonymous `sub_*` stub nodes; this table is what lets the callgraph builder classify such calls as external import edges instead of misattributing them to whichever internal function happens to span the slot address (the mechanism the Swift-symbols note above refers to).
+
+- Two address families are covered: dyld binding-table slots (`__got` and the lazy/non-lazy symbol-pointer sections) and `__stubs` entries (indexed through the indirect symbol table via the section's `reserved1`/`reserved2`).
+- Keys are hex virtual-address strings; values are demangled symbol names. Observed on `/bin/ls` (175 entries), e.g. `"0x100005000": "__DefaultRuneLocale"`, and on `/usr/bin/log` (793 entries), where the C++ mangled binding `__ZNSt3__112__next_primeEm` appears as `"0x100037340": "std::__1::__next_prime(unsigned long)"`.
+- The key appears only for Mach-O inputs and only when disassembly runs; without `--disassemble` it is absent (not empty). An empty dict would mean a Mach-O with no bindings and no stubs — distinct from the key never having been built. ELF needs no such table: imported names are resolved from GOT/PLT relocations directly.
+- The callgraph's `external` edges consume it: a call target that lands on a known slot is a call out to a dynamic library, never an internal edge, and the recovered name is what makes the edge's `library` attribution (and its confidence raise from `low` to `medium`) possible.
 
 ### `abi_analysis`
 
