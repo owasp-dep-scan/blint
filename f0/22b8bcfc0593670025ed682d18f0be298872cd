@@ -1,0 +1,24 @@
+AGENTS.md
+  s_526190b23001e8::t_cc8804a9f9ac80 97
+  s_526190b23001e8::t_5121f5b253cfe0 25-27
+  s_526190b23001e8::t_b6810e999d3df7 83
+  s_526190b23001e8::t_c56695c300d0d7 140
+SKILL.md
+  s_526190b23001e8::t_48f75f3dca9e24 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f022b8bcfc0593670025ed682d18f0be298872cd",
+  "prompts": {},
+  "sessions": {
+    "s_526190b23001e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a7ce33f-29e2-4c58-8c37-d6bd29ae0016",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
