@@ -19,7 +19,7 @@ roles, control-flow and data-flow - lives in the ``dalvik_semantics``,
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional
 
 # Map of opcode byte -> (mnemonic, format id). Unused opcodes are intentionally
 # omitted and handled as single-code-unit unknowns so the instruction stream
@@ -320,13 +320,13 @@ class DexPools:
 
     def __init__(
         self,
-        strings: List[str],
-        types: List[str],
-        fields: List[str],
-        methods: List[str],
-        protos: Optional[List[str]] = None,
-        method_handles: Optional[List[str]] = None,
-        call_sites: Optional[List[str]] = None,
+        strings: list[str],
+        types: list[str],
+        fields: list[str],
+        methods: list[str],
+        protos: list[str] | None = None,
+        method_handles: list[str] | None = None,
+        call_sites: list[str] | None = None,
     ) -> None:
         self.strings = strings
         self.types = types
@@ -403,12 +403,12 @@ class DexPools:
             return ""
 
     @staticmethod
-    def _lookup(pool: List[str], index: int) -> Optional[str]:
+    def _lookup(pool: list[str], index: int) -> str | None:
         if 0 <= index < len(pool):
             return pool[index]
         return None
 
-    def resolve(self, opcode: int, fmt: str, index: int) -> Optional[str]:
+    def resolve(self, opcode: int, fmt: str, index: int) -> str | None:
         """Resolve a constant-pool index to its descriptor for the given opcode.
 
         ``fmt`` is accepted for symmetry with the decoder but the pool is
@@ -458,7 +458,7 @@ class Payload:
     """
 
     kind: str
-    switch: List[SwitchEntry] = field(default_factory=list)
+    switch: list[SwitchEntry] = field(default_factory=list)
     element_width: int = 0
     element_count: int = 0
     data: bytes = b""
@@ -473,12 +473,12 @@ class Instruction:
     name: str
     fmt: str
     length: int  # length in 16-bit code units
-    registers: List[int] = field(default_factory=list)
-    literal: Optional[int] = None
-    branch: Optional[int] = None  # relative branch target in code units
-    index: Optional[int] = None  # constant-pool index
-    proto_index: Optional[int] = None  # second index for polymorphic calls
-    target: Optional[str] = None  # resolved descriptor for the pool index
+    registers: list[int] = field(default_factory=list)
+    literal: int | None = None
+    branch: int | None = None  # relative branch target in code units
+    index: int | None = None  # constant-pool index
+    proto_index: int | None = None  # second index for polymorphic calls
+    target: str | None = None  # resolved descriptor for the pool index
     payload: Optional["Payload"] = None  # decoded switch / array-data payload
 
     def to_smali(self) -> str:
@@ -502,7 +502,7 @@ class Instruction:
         return " ".join(parts)
 
 
-def _to_bytes(bytecode: Union[bytes, bytearray, list]) -> bytes:
+def _to_bytes(bytecode: bytes | bytearray | list) -> bytes:
     """Normalize a bytecode operand (bytes / bytearray / list of ints) to bytes."""
     if isinstance(bytecode, (bytes, bytearray)):
         return bytes(bytecode)
@@ -528,7 +528,7 @@ def _u32(data: bytes, unit: int) -> int:
 
 def _decode_payload(
     ident: int, data: bytes, unit: int, total_units: int
-) -> tuple[int, Optional[Payload]]:
+) -> tuple[int, Payload | None]:
     """
     Decode a payload pseudo-instruction into its length and structured contents.
 
@@ -677,9 +677,7 @@ def _decode_3rc(inst: Instruction, data: bytes, unit: int, high: int) -> None:
     inst.registers = list(range(first, first + count))
 
 
-def decode(
-    bytecode: Union[bytes, bytearray, list], pools: Optional[DexPools] = None
-) -> List[Instruction]:
+def decode(bytecode: bytes | bytearray | list, pools: DexPools | None = None) -> list[Instruction]:
     """
     Decode raw Dalvik bytecode into a list of instructions.
 
@@ -696,7 +694,7 @@ def decode(
     """
     data = _to_bytes(bytecode)
     total_units = len(data) // 2
-    instructions: List[Instruction] = []
+    instructions: list[Instruction] = []
     unit = 0
     while unit < total_units:
         unit0 = _u16(data, unit)
@@ -738,7 +736,7 @@ def decode(
     return instructions
 
 
-def disassemble_method(method, pools: Optional[DexPools] = None) -> List[Instruction]:
+def disassemble_method(method, pools: DexPools | None = None) -> list[Instruction]:
     """
     Disassemble a LIEF DEX method.
 
@@ -755,7 +753,7 @@ def disassemble_method(method, pools: Optional[DexPools] = None) -> List[Instruc
     return decode(bytecode, pools)
 
 
-def opcode_histogram(instructions: List[Instruction]) -> dict[str, int]:
+def opcode_histogram(instructions: list[Instruction]) -> dict[str, int]:
     """Count instructions by mnemonic - a compact summary for analysis."""
     histogram: dict[str, int] = {}
     for inst in instructions:

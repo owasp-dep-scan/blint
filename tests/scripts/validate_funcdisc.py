@@ -19,7 +19,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from blint.lib.binary import parse  # noqa: E402
+from blint.lib.binary import parse
 
 MANIFEST_PATH = REPO_ROOT / "tests" / "corpus" / "manifest.json"
 

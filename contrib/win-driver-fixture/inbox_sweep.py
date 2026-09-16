@@ -22,10 +22,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from blint.config import BlintOptions  # noqa: E402
-from blint.lib.analysis import initialize_rules, review_methods_dict  # noqa: E402
-from blint.lib.binary import parse  # noqa: E402
-from blint.lib.review_runner import ReviewRunner  # noqa: E402
+from blint.config import BlintOptions
+from blint.lib.analysis import initialize_rules, review_methods_dict
+from blint.lib.binary import parse
+from blint.lib.review_runner import ReviewRunner
 
 DRIVER_RULE_PREFIXES = ("DRIVER_", "BYOVD_")
 
@@ -44,7 +44,7 @@ def sweep(driver_paths: list) -> dict:
     for path in driver_paths:
         try:
             metadata = parse(str(path))
-        except Exception as exc:  # noqa: BLE001 - one bad image must not stop the sweep
+        except Exception as exc:
             failed.append((path.name, str(exc)))
             continue
         if not metadata:

@@ -19,7 +19,6 @@ layer.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from blint.lib.dalvik import Instruction
 from blint.lib.dalvik_semantics import OpFlags, flags
@@ -30,9 +29,9 @@ class BasicBlock:
     """A maximal straight-line run of instructions with explicit edges."""
 
     start: int  # code-unit offset of the first instruction
-    instructions: List[Instruction] = field(default_factory=list)
-    successors: List[int] = field(default_factory=list)  # successor block starts
-    predecessors: List[int] = field(default_factory=list)  # predecessor block starts
+    instructions: list[Instruction] = field(default_factory=list)
+    successors: list[int] = field(default_factory=list)  # successor block starts
+    predecessors: list[int] = field(default_factory=list)  # predecessor block starts
 
     @property
     def end(self) -> int:
@@ -47,18 +46,18 @@ class BasicBlock:
 class CFG:
     """A method's control-flow graph, keyed by block start offset."""
 
-    blocks: Dict[int, BasicBlock]
+    blocks: dict[int, BasicBlock]
     entry: int
 
-    def block_at(self, offset: int) -> Optional[BasicBlock]:
+    def block_at(self, offset: int) -> BasicBlock | None:
         """Return the block beginning at ``offset`` (or ``None``)."""
         return self.blocks.get(offset)
 
-    def ordered_blocks(self) -> List[BasicBlock]:
+    def ordered_blocks(self) -> list[BasicBlock]:
         """Blocks in ascending start-offset order."""
         return [self.blocks[k] for k in sorted(self.blocks)]
 
-    def dominators(self) -> Dict[int, set]:
+    def dominators(self) -> dict[int, set]:
         """
         Compute the dominator set of every block (iterative data-flow).
 
@@ -66,7 +65,7 @@ class CFG:
         from the entry to ``b`` passes through them, ``b`` included).
         """
         starts = set(self.blocks)
-        dom: Dict[int, set] = {b: set(starts) for b in starts}
+        dom: dict[int, set] = {b: set(starts) for b in starts}
         if self.entry in dom:
             dom[self.entry] = {self.entry}
         changed = True
@@ -88,7 +87,7 @@ class CFG:
         return dom
 
 
-def _switch_targets(inst: Instruction, payloads: Dict[int, Instruction]) -> List[int]:
+def _switch_targets(inst: Instruction, payloads: dict[int, Instruction]) -> list[int]:
     """Absolute targets of a switch instruction via its referenced payload."""
     if inst.branch is None:
         return []
@@ -99,7 +98,7 @@ def _switch_targets(inst: Instruction, payloads: Dict[int, Instruction]) -> List
     return [inst.offset + entry.target for entry in payload_inst.payload.switch]
 
 
-def _find_leaders(reals: List[Instruction], payloads: Dict[int, Instruction]) -> set:
+def _find_leaders(reals: list[Instruction], payloads: dict[int, Instruction]) -> set:
     """Collect the offsets that begin a basic block."""
     if not reals:
         return set()
@@ -107,10 +106,12 @@ def _find_leaders(reals: List[Instruction], payloads: Dict[int, Instruction]) ->
     for inst in reals:
         fl = flags(inst.opcode)
         fallthrough = inst.offset + inst.length
-        if fl & OpFlags.GOTO and inst.branch is not None:
-            leaders.add(inst.offset + inst.branch)
-            leaders.add(fallthrough)
-        elif fl & OpFlags.IF and inst.branch is not None:
+        if (
+            fl & OpFlags.GOTO
+            and inst.branch is not None
+            or fl & OpFlags.IF
+            and inst.branch is not None
+        ):
             leaders.add(inst.offset + inst.branch)
             leaders.add(fallthrough)
         elif fl & OpFlags.SWITCH:
@@ -123,15 +124,15 @@ def _find_leaders(reals: List[Instruction], payloads: Dict[int, Instruction]) ->
 
 
 def _successors(
-    block: BasicBlock, payloads: Dict[int, Instruction], real_offsets: set
-) -> List[int]:
+    block: BasicBlock, payloads: dict[int, Instruction], real_offsets: set
+) -> list[int]:
     """Successor block starts for a block, based on its last instruction."""
     if not block.instructions:
         return []
     last = block.instructions[-1]
     fl = flags(last.opcode)
     fallthrough = last.offset + last.length
-    succ: List[int] = []
+    succ: list[int] = []
     if fl & OpFlags.RETURN or fl & OpFlags.THROW:
         return []
     if fl & OpFlags.GOTO and last.branch is not None:
@@ -154,7 +155,7 @@ def _successors(
     return result
 
 
-def build_cfg(instructions: List[Instruction]) -> CFG:
+def build_cfg(instructions: list[Instruction]) -> CFG:
     """
     Build the control-flow graph for a method's decoded instructions.
 
@@ -175,7 +176,7 @@ def build_cfg(instructions: List[Instruction]) -> CFG:
     leader_list = sorted(leaders)
 
     # Partition the instruction stream into blocks bounded by consecutive leaders.
-    blocks: Dict[int, BasicBlock] = {}
+    blocks: dict[int, BasicBlock] = {}
     next_leader = {leader_list[i]: leader_list[i + 1] for i in range(len(leader_list) - 1)}
     for leader in leader_list:
         boundary = next_leader.get(leader)

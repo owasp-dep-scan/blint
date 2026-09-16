@@ -102,6 +102,14 @@ For Android deep analysis, enable deep mode so the dex classes are parsed. This 
 blint sbom -i /path/to/app.apkm -o sbom.cdx.json --deep --disassembly
 ```
 
+Attribute Mach-O imports against an Xcode SDK's `.tbd` stubs, so each imported symbol is confirmed against — and attributed to — the system library that actually exports it (see [`.tbd` SDK index](./docs/METADATA.md#the-tbd-sdk-index---sdk-path) in the metadata guide):
+
+```shell
+blint -i /path/to/macho-binary -o /tmp/blint --sdk-path "$(xcrun --show-sdk-path)"
+```
+
+The same flag exists on `blint sbom`, where it attributes and confirms the Mach-O dependency edges in the BOM.
+
 ## Understanding the Output
 
 blint produces several JSON artifacts in the specified reports directory.
@@ -184,47 +192,96 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 
 ## Command-Line Reference
 
+Every block below is the output of `<command> --help` on this version
+(default paths shown as `<user data dir>` are platform dependent).
+
 <details>
 <summary><strong>Main Command Help</strong></summary>
 
 ```shell
-usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR] [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings] [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb] [--cache] [--jobs JOBS] {sbom,callgraph-match,canonicalize,db,cache} ...
+usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR]
+             [--no-error] [--no-banner] [--no-reviews] [--no-wasm-strings]
+             [--no-wasm-call-graph] [--suggest-fuzzable] [--use-blintdb]
+             [--disassemble] [--export-callgraph-mermaid]
+             [--export-callgraph-graphml] [--export-callgraph-gexf]
+             [--callgraph-min-confidence {low,medium,high}]
+             [--custom-rules-dir CUSTOM_RULES_DIR] [--sdk-path SDK_PATH]
+             [--cache] [--jobs JOBS] [-q]
+             {sbom,callgraph-match,canonicalize,capabilities,diff,db,cache} ...
 
 Binary linter and SBOM generator.
 
 options:
   -h, --help            show this help message and exit
   -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
-                        Source directories, container images or binary files. Defaults to current directory.
+                        Source directories, container images or binary files.
+                        Defaults to current directory.
   -o, --reports REPORTS_DIR
                         Reports directory. Defaults to reports.
   --no-error            Continue on error to prevent build from breaking.
   --no-banner           Do not display banner.
   --no-reviews          Do not perform method reviews.
-  --no-wasm-strings     Do not extract strings from wasm files. Shrinks the wasm report and disables the string-based wasm findings (e.g. WASM-STR-007).
-  --no-wasm-call-graph  Do not build the wasm_tools call graph for wasm files. Shrinks the wasm report and disables wasm callgraph exports.
-  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a dictionary.
-  --use-blintdb         Use blintdb v2 for symbol resolution. Use environment variables: BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH for customization.
-  --disassemble         Disassemble functions and store the instructions in the metadata. Requires blint extended group to be installed.
+  --no-wasm-strings     Do not extract strings from wasm files. Shrinks the
+                        wasm report and disables the string-based wasm
+                        findings (e.g. WASM-STR-007).
+  --no-wasm-call-graph  Do not build the wasm_tools call graph for wasm files.
+                        Shrinks the wasm report and disables wasm callgraph
+                        exports.
+  --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a
+                        dictionary.
+  --use-blintdb         Use blintdb v2 for symbol resolution where supported.
+                        Defaults to true if the file exists at
+                        <user data dir>/blintdb/blint.db. Use environment variables:
+                        BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH
+                        for customization.
+  --disassemble         Disassemble functions and store the instructions in
+                        the metadata. Requires blint extended group to be
+                        installed.
   --export-callgraph-mermaid
-                        Export callgraph as Mermaid (.mmd) files and embed diagrams into blint-output.html. Effective when --disassemble is enabled.
+                        Export callgraph as Mermaid (.mmd) files and embed
+                        diagrams into blint-output.html. Effective when
+                        --disassemble is enabled.
   --export-callgraph-graphml
-                        Export callgraph as GraphML for external graph analysis tools. Effective when --disassemble is enabled.
+                        Export callgraph as GraphML for external graph
+                        analysis tools. Effective when --disassemble is
+                        enabled.
   --export-callgraph-gexf
-                        Export callgraph as GEXF for Gephi and other graph tooling. Effective when --disassemble is enabled.
+                        Export callgraph as GEXF for Gephi and other graph
+                        tooling. Effective when --disassemble is enabled.
   --callgraph-min-confidence {low,medium,high}
-                        Filter exported callgraph edges/external links by confidence. Defaults to low (no filtering).
+                        Filter exported callgraph edges/external links by
+                        confidence. Defaults to low (no filtering).
   --custom-rules-dir CUSTOM_RULES_DIR
-                        Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.
-  --jobs JOBS           Analyze up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
+                        Path to a directory containing custom YAML rule files
+                        (.yml or .yaml). These will be loaded in addition to
+                        default rules.
+  --sdk-path SDK_PATH   Path to an Apple SDK root whose .tbd stubs are used to
+                        attribute and confirm Mach-O imports (for example the
+                        path printed by `xcrun --show-sdk-path`). Off by
+                        default; the path must contain .tbd files or the run
+                        aborts.
+  --cache               Use the content-addressed parse metadata cache: reuse
+                        the parse result for a binary already analyzed with
+                        the same bytes, blint version and options. Off by
+                        default; see `blint cache stats`.
+  --jobs JOBS           Analyze up to N binaries in parallel worker processes.
+                        Accepts a positive integer, 0 or 'auto' for the CPU
+                        count. Defaults to 1 (sequential, unchanged behavior).
   -q, --quiet           Disable logging and progress bars.
 
 sub-commands:
   Additional sub-commands
 
-  {sbom}
+  {sbom,callgraph-match,canonicalize,capabilities,diff,db,cache}
     sbom                Command to generate SBOM for supported binaries.
+    callgraph-match     Match a source callgraph against a binary callgraph.
+    canonicalize        Show the canonical form of one or more function names.
+    capabilities        Emit the catalog of checks and reviews blint analyzes
+                        with.
+    diff                Compare two versions of a binary (binaries or
+                        *-metadata.json files).
     db                  Command to manage the pre-compiled database.
+    cache               Manage the content-addressed parse metadata cache.
 ```
 
 </details>
@@ -233,41 +290,160 @@ sub-commands:
 <summary><strong>SBOM Sub-command Help</strong></summary>
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
-                  [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]] [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
-                  [--wasm-sbom] [--jobs JOBS]
+usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT]
+                  [--deep] [--stdout] [-q]
+                  [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]]
+                  [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
+                  [--wasm-sbom] [--jobs JOBS] [--sdk-path SDK_PATH]
 
 options:
   -h, --help            show this help message and exit
-  -i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...], --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
-                        Source directories, container images or binary files. Defaults to current directory.
-  -o SBOM_OUTPUT, --output-file SBOM_OUTPUT
-                        SBOM output file. Defaults to sbom-binary-postbuild.cdx.json in current directory.
-  --deep                Enable deep mode to collect more used symbols and modules aggressively. Slow operation. When combined with --use-blintdb, disassembly is enabled automatically to use function-hash lookup.
+  -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
+                        Source directories, container images or binary files.
+                        Defaults to current directory.
+  -o, --output-file SBOM_OUTPUT
+                        SBOM output file. Defaults to sbom-binary-
+                        postbuild.cdx.json in current directory.
+  --deep                Enable deep mode to collect more used symbols and
+                        modules aggressively. Slow operation. Enables
+                        disassembly automatically (function-hash lookup with
+                        --use-blintdb, dex callgraph export for android apps).
   --stdout              Print the SBOM to stdout instead of a file.
   -q, --quiet           Disable logging and progress bars.
   --exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]
                         prefixes for the exports to be included in the SBOM.
   --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
-                        Directories containing pre-build and build BOMs. Use to improve the precision.
-  --use-blintdb         Use blintdb v2 for symbol and disassembly-hash resolution. Defaults to true if the local database file exists.
-  --wasm-sbom           Emit SBOM components from WebAssembly Component Model binaries using their imported WIT interface packages (e.g. wasi:cli@0.2.0) as exact evidence. Core modules without component-model evidence are skipped.
-  --jobs JOBS           Parse up to N binaries in parallel worker processes. Accepts a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 (sequential, unchanged behavior).
+                        Directories containing pre-build and build BOMs. Use
+                        to improve the precision.
+  --use-blintdb         Use blintdb v2 for symbol and disassembly-hash
+                        resolution. Defaults to true if the file exists at
+                        <user data dir>/blintdb/blint.db. Use environment variables:
+                        BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH
+                        for customization.
+  --wasm-sbom           Emit SBOM components from WebAssembly Component Model
+                        binaries using their imported WIT interface packages
+                        (e.g. wasi:cli@0.2.0) as exact evidence. Core modules
+                        without component-model evidence are skipped.
+  --jobs JOBS           Parse up to N binaries in parallel worker processes.
+                        Accepts a positive integer, 0 or 'auto' for the CPU
+                        count. Defaults to 1 (sequential, unchanged behavior).
+  --sdk-path SDK_PATH   Path to an Apple SDK root whose .tbd stubs are used to
+                        attribute and confirm Mach-O dependency edges. Off by
+                        default; the path must contain .tbd files or the run
+                        aborts.
 ```
 
 </details>
 
 <details>
-<summary><strong>DB Sub-command Help</strong></summary>
+<summary><strong>Callgraph-Match Sub-command Help</strong></summary>
+
+Matches a callgraph recovered from a compiled binary against one produced from
+source code, so binary functions can be identified even when the binary is
+stripped. Give it a source side (<code>--source</code> JSON or <code>--source-dir</code>,
+analyzed for you when it is a Rust crate) and a binary side (<code>--binary</code>, or
+<code>--binary-metadata</code> from a previous blint run). The primary quality knob is
+<code>--profile</code>; the <code>--min-votes</code>/<code>--margin</code>/<code>--khop</code>/<code>--fp-*</code>
+flags are expert overrides of that preset. The full guide — layers, defaults, honest
+accuracy results — is [Callgraph matching](./docs/CALLGRAPH_MATCH.md).
 
 ```shell
-usage: blint db [-h] [--download] [--image-url IMAGE_URL]
+usage: blint callgraph-match [-h] [--source SOURCE_CALLGRAPH]
+                             [--source-dir SOURCE_DIR] [-l MATCH_LANGUAGE]
+                             [--rusi-cmd MATCH_RUSI_CMD]
+                             [--profile {precision,balanced,recall}]
+                             [--binary MATCH_BINARY]
+                             [--binary-metadata MATCH_BINARY_METADATA]
+                             [-o MATCH_OUTPUT]
+                             [--min-confidence {low,medium,high}]
+                             [--algorithm {anchors,layered}]
+                             [--no-propagation] [--with-fingerprint]
+                             [--min-votes MATCH_MIN_VOTES]
+                             [--margin MATCH_MARGIN]
+                             [--max-iterations MATCH_MAX_ITERATIONS]
+                             [--khop MATCH_KHOP]
+                             [--fp-min-shared MATCH_FP_MIN_SHARED]
+                             [--fp-min-score MATCH_FP_MIN_SCORE]
+                             [--fp-margin MATCH_FP_MARGIN] [-q]
 
 options:
   -h, --help            show this help message and exit
-  --download            Download the pre-compiled database to the /Volumes/Work/blintdb/ directory. Use the environment variable `BLINTDB_HOME` to override.
-  --image-url IMAGE_URL
-                        blintdb image url. Defaults to ghcr.io/appthreat/blintdb-vcpkg-arm64:v2. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.
+  --source SOURCE_CALLGRAPH
+                        Path to a source-analysis callgraph JSON file.
+                        Alternatively use --source-dir to analyze a source
+                        tree directly.
+  --source-dir SOURCE_DIR
+                        Path to a source tree to analyze (instead of
+                        --source). For Rust this runs rusi for you; set
+                        --rusi-cmd or the RUSI_CMD environment variable.
+  -l, --language MATCH_LANGUAGE
+                        Source language for --source-dir analysis. Defaults to
+                        rust. rusi is invoked only when the language is rust.
+  --rusi-cmd MATCH_RUSI_CMD
+                        Base command used to invoke rusi when --source-dir is
+                        a Rust project, for example 'cargo run -p rusi-cli --'
+                        or a path to a rusi binary. Falls back to the RUSI_CMD
+                        environment variable.
+  --profile {precision,balanced,recall}
+                        Confidence preset that sets the matching knobs.
+                        precision favors high-confidence matches, recall
+                        enables structural fingerprinting, balanced is the
+                        default. Individual --min-votes/--margin/--khop/--fp-*
+                        flags override the preset.
+  --binary MATCH_BINARY
+                        Path to a binary to parse with disassembly. Used when
+                        --binary-metadata is not supplied.
+  --binary-metadata MATCH_BINARY_METADATA
+                        Path to a pre-generated blint *-metadata.json file.
+  -o, --output MATCH_OUTPUT
+                        Write the full JSON match report to this path.
+  --min-confidence {low,medium,high}
+                        Minimum confidence for matches listed in the report.
+                        Defaults to low.
+  --algorithm {anchors,layered}
+                        Matching algorithm to use. Defaults to layered.
+  --no-propagation      Disable structural propagation and report only name-
+                        based anchors.
+  --with-fingerprint    Enable experimental Layer 2 structural fingerprint
+                        matching. Best suited to densely resolved callgraphs;
+                        may reduce precision on sparse ones.
+  --min-votes MATCH_MIN_VOTES
+                        Layer 1: minimum agreeing matched neighbors to accept
+                        a propagated match. Overrides the --profile preset.
+  --margin MATCH_MARGIN
+                        Layer 1: minimum vote lead over the runner-up.
+                        Overrides the preset.
+  --max-iterations MATCH_MAX_ITERATIONS
+                        Maximum propagation/fingerprint rounds. Overrides the
+                        preset.
+  --khop MATCH_KHOP     Layer 2: hop radius for fingerprint context. Overrides
+                        the preset.
+  --fp-min-shared MATCH_FP_MIN_SHARED
+                        Layer 2: minimum shared anchored neighbor names.
+                        Overrides the preset.
+  --fp-min-score MATCH_FP_MIN_SCORE
+                        Layer 2: minimum combined Jaccard score to accept.
+                        Overrides the preset.
+  --fp-margin MATCH_FP_MARGIN
+                        Layer 2: minimum Jaccard lead over the runner-up.
+                        Overrides the preset.
+  -q, --quiet           Disable logging and progress bars.
+```
+
+</details>
+
+<details>
+<summary><strong>Canonicalize Sub-command Help</strong></summary>
+
+```shell
+usage: blint canonicalize [-h] [--json] names [names ...]
+
+positional arguments:
+  names       Function names or raw mangled symbols to canonicalize.
+
+options:
+  -h, --help  show this help message and exit
+  --json      Emit the result as JSON instead of a table.
 ```
 
 </details>
@@ -280,7 +456,8 @@ usage: blint capabilities [-h] [--json]
 
 options:
   -h, --help  show this help message and exit
-  --json      Emit the catalog as JSON (machine readable; for agents and tooling).
+  --json      Emit the catalog as JSON (machine readable; for agents and
+              tooling).
 ```
 
 </details>
@@ -297,7 +474,8 @@ capability-review deltas paired across rebuilds, and — with
 so a recompile is not reported as rewritten code.
 
 ```shell
-usage: blint diff [-h] [--json] [--disassemble] [--no-reviews] [-q] old_input new_input
+usage: blint diff [-h] [--json] [--disassemble] [--no-reviews] [-q]
+                  old_input new_input
 
 positional arguments:
   old_input      Old version: a binary or a blint *-metadata.json export.
@@ -305,10 +483,57 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --json         Emit the diff report as JSON (machine readable; for agents and tooling).
-  --disassemble  Disassemble binary inputs so the function-level delta (added/removed/changed by content hash) can be computed. Metadata-JSON inputs carry disassembly only if they were generated with --disassemble.
+  --json         Emit the diff report as JSON (machine readable; for agents
+                 and tooling).
+  --disassemble  Disassemble binary inputs so the function-level delta
+                 (added/removed/changed by content hash) can be computed.
+                 Metadata-JSON inputs carry disassembly only if they were
+                 generated with --disassemble.
   --no-reviews   Skip the capability-review delta.
   -q, --quiet    Disable logging and progress bars.
+```
+
+</details>
+
+<details>
+<summary><strong>DB Sub-command Help</strong></summary>
+
+```shell
+usage: blint db [-h] [--download]
+                [--image-url {ghcr.io/appthreat/blintdb-vcpkg:v2,ghcr.io/appthreat/blintdb-vcpkg-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-musl:v2,ghcr.io/appthreat/blintdb-meson:v2,ghcr.io/appthreat/blintdb-meson-arm64:v2,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v2,ghcr.io/appthreat/blintdb-meson-musl:v2}]
+
+options:
+  -h, --help            show this help message and exit
+  --download            Download the pre-compiled database to the
+                        <user data dir>/blintdb
+                        directory. Use the environment variable `BLINTDB_HOME`
+                        to override.
+  --image-url {ghcr.io/appthreat/blintdb-vcpkg:v2,ghcr.io/appthreat/blintdb-vcpkg-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-musl:v2,ghcr.io/appthreat/blintdb-meson:v2,ghcr.io/appthreat/blintdb-meson-arm64:v2,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v2,ghcr.io/appthreat/blintdb-meson-musl:v2}
+                        Blintdb image url. Defaults to
+                        ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2. The
+                        environment variable `BLINTDB_IMAGE_URL` is an
+                        alternative way to set this value.
+```
+
+The default `--image-url` is platform dependent (the dump above was captured on macOS arm64, hence the `darwin-arm64` image); pick the image matching your platform and architecture from the listed choices.
+
+</details>
+
+<details>
+<summary><strong>Cache Sub-command Help</strong></summary>
+
+```shell
+usage: blint cache [-h] {clear,stats} ...
+
+options:
+  -h, --help     show this help message and exit
+
+cache-actions:
+  Cache management actions
+
+  {clear,stats}
+    clear        Delete all cached parse metadata.
+    stats        Show cache location, entry count and actual size on disk.
 ```
 
 </details>

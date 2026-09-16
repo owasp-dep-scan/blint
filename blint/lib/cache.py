@@ -140,7 +140,7 @@ def _blint_version() -> str:
 
     try:
         return version("blint")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 
@@ -251,11 +251,19 @@ class ParseCache:
             max_bytes = get_int_from_env("BLINT_CACHE_MAX_BYTES", DEFAULT_MAX_CACHE_BYTES)
         self.max_bytes = max(0, int(max_bytes))
         self._conn: apsw.Connection | None = None
+        self._schema_ready = False
 
     # -- connection handling -------------------------------------------------
 
     def _connection(self, create: bool = False) -> apsw.Connection | None:
         if self._conn is not None:
+            # A connection opened for a read carries no schema: ``get`` opens
+            # with create=False, and under --jobs N it can open the store in
+            # the instant another worker has created the file but not yet the
+            # table. Reusing it for a store would lose the row, so ensure the
+            # schema on the first write through any connection.
+            if create and not self._schema_ready and not self._ensure_schema(self._conn):
+                return None
             return self._conn
         if not create and not os.path.exists(self.db_path):
             return None
@@ -283,13 +291,30 @@ class ParseCache:
             # persistent property of the database file and content-neutral.
             with contextlib.suppress(apsw.Error):
                 self._conn.execute("PRAGMA journal_mode = WAL")
-            if create:
-                self._create_schema(self._conn)
+            if create and not self._ensure_schema(self._conn):
+                return None
         except (apsw.Error, OSError) as exc:
             LOG.debug("Parse cache unavailable at %s: %s", self.db_path, exc)
             self.close()
             return None
         return self._conn
+
+    def _ensure_schema(self, connection: apsw.Connection) -> bool:
+        """Create the schema if this connection has not yet done so.
+
+        ``CREATE TABLE IF NOT EXISTS`` is idempotent and cheap, so this runs
+        once per connection rather than once per store: another worker may
+        own the file, and only SQLite knows whether the table is really
+        there. A locked store leaves the flag unset, so the next write tries
+        again instead of storing into a table that may not exist.
+        """
+        try:
+            self._create_schema(connection)
+        except apsw.Error as exc:
+            LOG.debug("Parse cache schema unavailable at %s: %s", self.db_path, exc)
+            return False
+        self._schema_ready = True
+        return True
 
     @staticmethod
     def _create_schema(connection: apsw.Connection) -> None:
@@ -322,6 +347,7 @@ class ParseCache:
             with contextlib.suppress(Exception):
                 self._conn.close()
             self._conn = None
+        self._schema_ready = False
 
     # -- core operations -----------------------------------------------------
 

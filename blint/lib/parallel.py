@@ -257,7 +257,7 @@ def worker_main(
             idx, unit_payload = unit
             try:
                 envelope = spec.analyze(unit_payload, state)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if spec.record_errors:
                     envelope = _recorded_failure_envelope(unit_payload, exc, spec.unit_role)
                 else:

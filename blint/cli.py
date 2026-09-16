@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import argparse
 import os
 import sys
 
+from blint.config import BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC, BlintOptions
 from blint.lib.parallel import resolve_jobs
 from blint.lib.runners import run_default_mode, run_sbom_mode
-from blint.config import BlintOptions, BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC
 from blint.lib.utils import blintdb_setup
 from blint.logger import LOG
 
@@ -556,9 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Cache management actions",
         dest="cache_action",
     )
-    cache_clear_parser = cache_subparsers.add_parser(
-        "clear", help="Delete all cached parse metadata."
-    )
+    cache_subparsers.add_parser("clear", help="Delete all cached parse metadata.")
     cache_stats_parser = cache_subparsers.add_parser(
         "stats", help="Show cache location, entry count and actual size on disk."
     )

@@ -4,8 +4,8 @@ import orjson
 
 from blint.lib.analysis import (
     EVIDENCE_LIMIT,
-    _filter_callgraph_by_min_confidence,
     _build_mermaid_callgraph_text,
+    _filter_callgraph_by_min_confidence,
     _safe_mermaid_label,
     load_default_rules,
     run_checks,
@@ -540,35 +540,14 @@ def test_apple_mie_zalloc_ro_mut_prepatch_disassembly_review():
             "0xfffffe000b4e3560::_zalloc_ro_mut": {
                 "name": "_zalloc_ro_mut",
                 "address": "0xfffffe000b4e3560",
-                "assembly": "\n".join(
-                    [
-                        "cmp x8, x29",
-                        "b.lo skip_stack_check",
-                        "and x9, x8, #0xffffffffffffc000",
-                        "adds x9, x8, x4",
-                        "b.hs range_check",
-                        "cmp x8, x10",
-                    ]
-                ),
+                "assembly": "cmp x8, x29\nb.lo skip_stack_check\nand x9, x8, #0xffffffffffffc000\nadds x9, x8, x4\nb.hs range_check\ncmp x8, x10",
                 "instruction_metrics": {},
                 "instruction_count": 6,
             },
             "0xfffffe000b4e84d0::_zalloc_ro_mut_patched_copy": {
                 "name": "_zalloc_ro_mut",
                 "address": "0xfffffe000b4e84d0",
-                "assembly": "\n".join(
-                    [
-                        "mrs x10, TPIDR_EL1",
-                        "adds x9, x8, x4",
-                        "b.hs per_cpu_check",
-                        "ldr x11, [x10, #0x158]",
-                        "ldr x10, [x10, #0xe8]",
-                        "cmp x8, x11",
-                        "ccmp x9, x11, #0x0, hs",
-                        "ccmp x9, x10, #0x2, hs",
-                        "b.ls panic",
-                    ]
-                ),
+                "assembly": "mrs x10, TPIDR_EL1\nadds x9, x8, x4\nb.hs per_cpu_check\nldr x11, [x10, #0x158]\nldr x10, [x10, #0xe8]\ncmp x8, x11\nccmp x9, x11, #0x0, hs\nccmp x9, x10, #0x2, hs\nb.ls panic",
                 "instruction_metrics": {},
                 "instruction_count": 9,
             },

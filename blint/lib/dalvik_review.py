@@ -14,8 +14,8 @@ the ``dexbinary`` exe type) and are matched by the shared ``run_pattern_reviews`
 logic. There is no separate rule loader or matcher here.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional
 
 from blint.lib.dalvik import DexPools, disassemble_method
 from blint.lib.dalvik_dataflow import analyze
@@ -35,7 +35,7 @@ _DATAFLOW_MAX_INSTRUCTIONS = 4000
 _MIN_EMBEDDED_STRING_LEN = 4
 
 
-def _embedded_strings(data: bytes) -> List[str]:
+def _embedded_strings(data: bytes) -> list[str]:
     """Extract printable ASCII runs from raw ``fill-array-data`` bytes.
 
     Obfuscated apps frequently stage URLs, class names and keys as ``byte[]`` /
@@ -43,8 +43,8 @@ def _embedded_strings(data: bytes) -> List[str]:
     the dex string pool. Recovering them gives the review rules something to
     match on.
     """
-    runs: List[str] = []
-    current: List[str] = []
+    runs: list[str] = []
+    current: list[str] = []
     for byte in data:
         if 0x20 <= byte < 0x7F:
             current.append(chr(byte))
@@ -65,7 +65,7 @@ class Finding:
     title: str
     severity: str
     count: int = 0
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -77,7 +77,7 @@ class Finding:
         }
 
 
-def build_review_metadata(metadata: dict, pools: Optional[DexPools] = None) -> dict:
+def build_review_metadata(metadata: dict, pools: DexPools | None = None) -> dict:
     """
     Build review metadata from a parsed dex.
 
@@ -145,7 +145,7 @@ def _collect_embedded_strings(instructions) -> set:
     return found
 
 
-def analyze_dex(metadata: dict, pools: Optional[DexPools] = None) -> List[Finding]:
+def analyze_dex(metadata: dict, pools: DexPools | None = None) -> list[Finding]:
     """
     Review a parsed dex for behavioural findings using the shared review engine.
 
@@ -176,7 +176,7 @@ def analyze_dex(metadata: dict, pools: Optional[DexPools] = None) -> List[Findin
         return []
     reviewer = ReviewRunner()
     results = reviewer.run_review(review_metadata)
-    findings: List[Finding] = []
+    findings: list[Finding] = []
     for cid, evidence in results.items():
         rule = review_rules_cache.get(cid, {})
         samples = [e.get("function", "") for e in evidence][:EVIDENCE_LIMIT]
@@ -192,7 +192,7 @@ def analyze_dex(metadata: dict, pools: Optional[DexPools] = None) -> List[Findin
     return sorted(findings, key=lambda x: (severity_rank(x.severity), -x.count))
 
 
-def merge_findings(groups: Iterable[List[Finding]]) -> List[Finding]:
+def merge_findings(groups: Iterable[list[Finding]]) -> list[Finding]:
     """Merge findings produced for several dex files into one aggregated list."""
     merged: dict[str, Finding] = {}
     for group in groups:

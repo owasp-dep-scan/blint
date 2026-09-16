@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for blintdb callgraph-corpus matching in blint.db."""
 
 import sqlite3

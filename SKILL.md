@@ -4,10 +4,10 @@ This file defines practical skills an AI agent should apply when working on `bli
 
 ## Skill: Navigate blint architecture quickly
 
-- Start at `blint/cli.py` to identify mode (`default`, `sbom`, `db`).
+- Start at `blint/cli.py` to identify mode (`default`, `sbom`, `callgraph-match`, `canonicalize`, `capabilities`, `diff`, `db`, `cache`).
 - Follow orchestration in `blint/lib/runners.py`.
 - Review coordination lives in `blint/lib/review_runner.py`.
-- For extraction logic, use `blint/lib/binary.py` and `blint/lib/android.py`.
+- For extraction logic, use the per-format readers `blint/lib/binary_{elf,pe,macho,wasm}.py` (shared helpers in `binary_common.py`, entry point and callgraph in `binary.py`) and `blint/lib/android.py`.
 - For rule behavior, use `blint/lib/analysis.py`, `blint/lib/review_utils.py`, `blint/lib/function_reviews.py`, and `blint/data/annotations/*.yml`.
 - For SBOM behavior, use `blint/lib/sbom.py` and `blint/cyclonedx/spec.py`.
 

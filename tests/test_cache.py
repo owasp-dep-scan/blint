@@ -263,7 +263,6 @@ def test_cold_vs_warm_byte_identical_signed_macho(cache_options, tmp_path):
         _der_entitlements,
         _entitlements_blob,
         _superblob,
-        CSMAGIC_CODEDIRECTORY,
     )
 
     cd = _code_directory(
@@ -780,3 +779,44 @@ def test_digest_covers_link_closure_env_toggle(cache_options, monkeypatch):
     finally:
         monkeypatch.undo()
     assert compute_options_digest(cache_options) == digest_off
+
+
+def test_store_survives_opening_before_another_worker_created_the_schema(tmp_path):
+    """A worker that read the store before its table existed can still store.
+
+    Under ``--jobs N`` every worker opens its own connection and the store is
+    created lazily by whichever worker writes first. Opening with
+    ``SQLITE_OPEN_CREATE`` makes the file exist immediately, so a second
+    worker's ``get`` — which opens with create=False and caches the
+    connection — can land between the file appearing and the ``CREATE TABLE``
+    committing. That connection carries no schema, and ``_connection``
+    returned it for the later store without honouring ``create=True``, so the
+    row was dropped with only a debug log. The ordering here is the race made
+    deterministic, not a sleep.
+    """
+    import apsw
+
+    db_path = tmp_path / "parse-cache.db"
+    # The creating worker, paused between opening the file and creating the
+    # table — the window it spends applying pragmas.
+    creator = apsw.Connection(
+        str(db_path), flags=apsw.SQLITE_OPEN_READWRITE | apsw.SQLITE_OPEN_CREATE
+    )
+    assert db_path.exists() and db_path.stat().st_size == 0
+
+    reader = cache_mod.ParseCache(cache_dir=str(tmp_path))
+    assert reader.get("deadbeef", "/x/f", "opt") is None
+    assert reader._conn is not None, "the reader must have cached a schema-less connection"
+
+    metadata = {"file_path": "/x/f", "binary_type": "ELF", "name": "f"}
+    assert reader.put("deadbeef", "opt", metadata) is True
+
+    cache_mod.ParseCache._create_schema(creator)
+    creator.close()
+    assert reader.put("cafe", "opt", {**metadata, "file_path": "/x/g", "name": "g"}) is True
+    reader.close()
+
+    probe = apsw.Connection(str(db_path))
+    stored = next(probe.execute("SELECT COUNT(*) FROM ParseCache"))[0]
+    probe.close()
+    assert stored == 2

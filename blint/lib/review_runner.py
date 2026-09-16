@@ -216,8 +216,7 @@ class ReviewRunner:
                 "filename": f,
                 "exe_name": exe_name,
             }
-            if "patterns" in aresult:
-                del aresult["patterns"]
+            aresult.pop("patterns", None)
             reviews.append(aresult)
         return reviews
 

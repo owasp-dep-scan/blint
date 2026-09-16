@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for Layer 2 structural fingerprint matching."""
 
 from blint.lib.callgraph.canon import CanonicalName, NameKind

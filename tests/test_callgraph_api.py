@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the callgraph library entry point, profiles, and rusi gating."""
 
 import json
@@ -102,7 +101,7 @@ def test_match_files_source_dir_rust_invokes_analyzer(tmp_path, monkeypatch):
         return _SOURCE
 
     # Patch the analyzer registered for rust.
-    import blint.lib.callgraph.api as api
+    from blint.lib.callgraph import api
 
     monkeypatch.setitem(api._SOURCE_ANALYZERS, "rust", fake_rusi)
     report = match_files(

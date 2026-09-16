@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the callgraph-match command orchestration and console rendering."""
 
 import json

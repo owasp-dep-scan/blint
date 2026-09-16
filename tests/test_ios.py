@@ -1,19 +1,19 @@
-import pytest
+import os
 import plistlib
 import zipfile
 
-import os
+import pytest
 
 from blint.lib.ios import (
     _ats_tokens,
     _collect_privacy_signals,
     _privacy_tokens,
-    read_privacy_manifest,
     _summarize_ats,
     _undeclared_required_reason_tokens,
     collect_ios_app,
     enrich_with_bundle_context,
     is_ios_app,
+    read_privacy_manifest,
 )
 
 # Minimal Mach-O magic so is_exe() treats the fixture files as binaries.
@@ -329,8 +329,9 @@ def test_collect_ios_app_non_dict_plist_root_no_crash_no_leak(tmp_path):
     and the extraction directory must be gone when collection fails or
     returns.
     """
-    from blint.lib.ios import collect_ios_app_detailed
     import shutil
+
+    from blint.lib.ios import collect_ios_app_detailed
 
     ipa_path = tmp_path / "app1.ipa"
     with zipfile.ZipFile(ipa_path, "w") as zf:

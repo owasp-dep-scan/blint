@@ -259,7 +259,7 @@ def recover_runtime_dependencies(metadata: dict, parsed_obj=None) -> list[dict]:
         # reference; the same name elsewhere is more likely to be incidental.
         in_string_section = bool(sections & STRING_SECTIONS)
         if in_string_section:
-            evidence.append(f"string literal in {sorted(sections & STRING_SECTIONS)[0]}")
+            evidence.append(f"string literal in {min(sections & STRING_SECTIONS)}")
         if candidate["paths"]:
             evidence.append(f"absolute path {candidate['paths'][0]}")
         if in_string_section and (candidate["paths"] or name.startswith("lib")):

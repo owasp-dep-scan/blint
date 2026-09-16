@@ -125,8 +125,8 @@ def select_preferred_artifact(
             or artifact_path.name.lower().startswith(preferred_lower)
         ]
         if matching_paths:
-            return str(sorted(matching_paths, key=_artifact_rank)[0])
-    return str(sorted(artifact_paths, key=_artifact_rank)[0])
+            return str(min(matching_paths, key=_artifact_rank))
+    return str(min(artifact_paths, key=_artifact_rank))
 
 
 def _run_command(

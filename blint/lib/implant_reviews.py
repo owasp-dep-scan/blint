@@ -162,11 +162,11 @@ OUTBOUND_CONFIG_IMPORTS: frozenset[str] = frozenset(
 
 # A hardcoded destination in the strings: a URL, a bare hostname, or a dotted
 # quad. Any of these means the image knows where to call out to.
-_URL_RE = re.compile(r"\b(?:https?|ftp|wss?)://", re.I)
+_URL_RE = re.compile(r"\b(?:https?|ftp|wss?)://", re.IGNORECASE)
 _HOSTNAME_RE = re.compile(
     r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
     r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\.(?:com|net|org|io|ru|cn|info|biz|xyz|top|site|online|club|pw|cc|me|co|dev|app)\b",
-    re.I,
+    re.IGNORECASE,
 )
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"
@@ -234,7 +234,7 @@ _SENSITIVE_STRING_MARKERS: tuple[tuple[str, str], ...] = (
 # A loadable library name. Executables are deliberately excluded: LoadLibrary of
 # an .exe is rare, whereas an .exe name in a DLL is usually the host process it
 # checks for, which PE_HOST_PROCESS_NAME_GATE reports with the right meaning.
-_LOADABLE_MODULE_RE = re.compile(r"^[\w.\-]{1,60}\.(?:dll|sys|cpl|ocx|drv)$", re.I)
+_LOADABLE_MODULE_RE = re.compile(r"^[\w.\-]{1,60}\.(?:dll|sys|cpl|ocx|drv)$", re.IGNORECASE)
 
 # Windows modules that ordinary software resolves at runtime as a matter of
 # course, either because the feature is optional or because the import is
@@ -252,7 +252,6 @@ _COMMON_RUNTIME_LOADED_MODULES: frozenset[str] = frozenset(
         "imagehlp.dll",
         "kernel32.dll",
         "kernelbase.dll",
-        "ole32.dll",
         "ole32.dll",
         "oleaut32.dll",
         "opengl32.dll",
@@ -317,12 +316,12 @@ def _is_near_miss_of(candidate: str, reference: str) -> bool:
 # and it is what a command interpreter's operation table looks like.
 MIN_DISPATCH_TABLE_POINTERS = 8
 _RIP_RELATIVE_LEA_RE = re.compile(
-    r"^\s*lea\s+([a-z][a-z0-9]*)\s*,\s*\[\s*rip\s*[+-]\s*[^\]]+\]\s*$", re.I
+    r"^\s*lea\s+([a-z][a-z0-9]*)\s*,\s*\[\s*rip\s*[+-]\s*[^\]]+\]\s*$", re.IGNORECASE
 )
 _POINTER_STORE_RE = re.compile(
     r"^\s*mov\s+(?:qword|dword)\s+ptr\s+"
     r"\[\s*([a-z][a-z0-9]*)\s*(?:([+-])\s*(\d+|0x[0-9a-f]+)\s*)?\]\s*,\s*([a-z][a-z0-9]*)\s*$",
-    re.I,
+    re.IGNORECASE,
 )
 
 # Executable-memory primitives. A dispatch table is only a command interpreter if

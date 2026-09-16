@@ -79,7 +79,7 @@ def main() -> None:
     for binary in binaries:
         try:
             metadata = parse(str(binary))
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             print(f"SKIP {binary.name}: {error}")
             continue
         detected = {

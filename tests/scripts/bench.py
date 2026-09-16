@@ -51,13 +51,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-import orjson  # noqa: E402
+import orjson
 
-from blint.config import BlintOptions  # noqa: E402
-from blint.lib import binary as binary_mod  # noqa: E402
-from blint.lib.analysis import initialize_rules, run_checks  # noqa: E402
-from blint.lib.cache import ParseCache, compute_options_digest, sha256_file  # noqa: E402
-from blint.lib.review_runner import ReviewRunner  # noqa: E402
+from blint.config import BlintOptions
+from blint.lib import binary as binary_mod
+from blint.lib.analysis import initialize_rules, run_checks
+from blint.lib.cache import ParseCache, compute_options_digest, sha256_file
+from blint.lib.review_runner import ReviewRunner
 
 # (module attribute in blint.lib.binary, phase name). All of these are
 # resolved as module globals when parse() calls them, so patching the
@@ -164,7 +164,7 @@ def bench_artifact(
             run_checks(path, metadata)
             if not review_options.no_reviews:
                 ReviewRunner().run_review(metadata)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             reviews_error = f"{type(e).__name__}: {e}"
         clock["reviews"] += time.perf_counter() - review_start
     finally:
@@ -260,7 +260,7 @@ def main() -> int:
         from importlib.metadata import version as _pkg_version
 
         blint_version = _pkg_version("blint")
-    except Exception:  # noqa: BLE001
+    except Exception:
         blint_version = "unknown"
 
     results = []
@@ -275,7 +275,7 @@ def main() -> int:
                 bench_artifact(str(path), disassemble, review_options, parse_cache, options_digest)
                 for _ in range(args.repeat)
             ]
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             results.append(
                 {"name": path.name, "path": str(path), "error": f"{type(e).__name__}: {e}"}
             )

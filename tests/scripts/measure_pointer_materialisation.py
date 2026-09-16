@@ -89,7 +89,7 @@ def main() -> int:
         print(f"== {path}", flush=True)
         try:
             result = run(path)
-        except Exception as exc:  # noqa: BLE001 - a missing binary must not stop the run
+        except Exception as exc:
             print(f"   FAILED: {exc}", flush=True)
             result = {"binary": path, "error": str(exc)}
         print(

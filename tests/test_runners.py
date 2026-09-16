@@ -530,7 +530,6 @@ def test_run_default_mode_non_dict_plist_ipas_no_crash_no_leak(tmp_path):
     the failure paths isolation makes survivable.
     """
     import glob
-    import plistlib
     import tempfile
     import zipfile
 

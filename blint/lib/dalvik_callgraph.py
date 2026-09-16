@@ -13,7 +13,7 @@ fingerprint / match tooling. DOT and GraphML exporters are provided for
 visualization and interchange.
 """
 
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 from xml.sax.saxutils import escape, quoteattr
 
 from blint.lib.dalvik import INDEX_POOL_BY_OPCODE, DexPools, disassemble_method
@@ -21,7 +21,7 @@ from blint.lib.dalvik_semantics import is_invoke
 from blint.logger import LOG
 
 
-def build_callgraph(metadata: dict, pools: Optional[DexPools] = None) -> dict:
+def build_callgraph(metadata: dict, pools: DexPools | None = None) -> dict:
     """
     Build a DEX callgraph from a ``parse_dex`` metadata dict.
 
@@ -175,6 +175,6 @@ def export_callgraph(callgraph: dict, fmt: str, name: str = "dex") -> str:
     raise ValueError(f"Unsupported callgraph export format: {fmt}")
 
 
-def build_app_callgraph(metadatas: List[dict]) -> dict:
+def build_app_callgraph(metadatas: list[dict]) -> dict:
     """Build a merged callgraph for an app from a list of per-dex metadata dicts."""
     return merge_callgraphs(build_callgraph(md) for md in metadatas)

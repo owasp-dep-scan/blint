@@ -33,8 +33,8 @@ from collections import Counter, defaultdict
 # Allow running straight from a checkout without installing.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from blint.lib.binary import parse  # noqa: E402
-from blint.lib.elf_linkmap import resolve_link_closure  # noqa: E402
+from blint.lib.binary import parse
+from blint.lib.elf_linkmap import resolve_link_closure
 
 ELF_MAGIC = b"\x7fELF"
 
@@ -92,7 +92,7 @@ def sweep(paths: list[str], resolve_closure: bool, root: str) -> dict:
     for path in paths:
         try:
             metadata = parse(path)
-        except Exception as exc:  # noqa: BLE001 - a corpus run must not stop at one file
+        except Exception as exc:
             stats["failed"] += 1
             failures.append({"path": path, "error": f"{type(exc).__name__}: {exc}"})
             if os.getenv("SWEEP_TRACEBACK"):

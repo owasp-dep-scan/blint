@@ -5,7 +5,7 @@ import plistlib
 import zipfile
 from types import SimpleNamespace
 
-from blint.cyclonedx.spec import Scope, Type
+from blint.cyclonedx.spec import Type
 from blint.lib.sbom import (
     _callgraph_sidecar_slug,
     _ios_purl,

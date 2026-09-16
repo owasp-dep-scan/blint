@@ -63,7 +63,7 @@ def build_clang(spec: dict, out_dir: Path) -> list[str]:
                 [
                     "lipo",
                     "-create",
-                    *map(lambda i: out_dir / i, post["inputs"]),
+                    *(out_dir / i for i in post["inputs"]),
                     "-output",
                     out_dir / post["output"],
                 ]

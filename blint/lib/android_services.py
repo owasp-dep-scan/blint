@@ -15,7 +15,6 @@ refine this.
 
 import importlib.resources
 import json
-from typing import List, Optional
 
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import (
@@ -28,7 +27,6 @@ from blint.cyclonedx.spec import (
     ServiceData,
 )
 from blint.logger import LOG
-
 
 # Data-flow direction inferred from a service/tracker category. Detection is
 # presence-based, so these encode the *intended* direction of the SDK rather
@@ -82,9 +80,9 @@ def _load_dictionary(resource: str, key: str) -> list:
         return []
 
 
-def _collect_class_names(app_components: List[Component]) -> List[str]:
+def _collect_class_names(app_components: list[Component]) -> list[str]:
     """Gather the dot-separated class names recorded on dex components."""
-    classes: List[str] = []
+    classes: list[str] = []
     for component in app_components or []:
         for prop in component.properties or []:
             if prop.name == "internal:classes" and prop.value:
@@ -92,7 +90,7 @@ def _collect_class_names(app_components: List[Component]) -> List[str]:
     return classes
 
 
-def _matches(namespaces: List[str], class_names: List[str]) -> bool:
+def _matches(namespaces: list[str], class_names: list[str]) -> bool:
     """
     Check whether any class name matches one of the namespaces.
 
@@ -115,7 +113,7 @@ def _build_service(
     category: str,
     local: bool,
     is_tracker: bool,
-    hosts: Optional[List[str]] = None,
+    hosts: list[str] | None = None,
 ) -> Service:
     """Build a CycloneDX service entry for a detected SDK."""
     service = Service(
@@ -144,7 +142,7 @@ def _build_service(
     return service
 
 
-def detect_services(app_components: List[Component]) -> List[Service]:
+def detect_services(app_components: list[Component]) -> list[Service]:
     """
     Detect remote services and trackers bundled in an Android app.
 

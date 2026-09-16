@@ -164,13 +164,7 @@ class TestArm64Absint:
     def test_recover_stack_string(self):
         # '/usr' as one 32-bit little-endian store: 0x7273752F puts the bytes
         # 2F 75 72 73 at sp+8. movz supplies the low half, movk the high one.
-        assembly = "\n".join(
-            [
-                "movz w8, #0x752F",
-                "movk w8, #0x7273, lsl #16",
-                "str w8, [sp, #8]",
-            ]
-        )
+        assembly = "movz w8, #0x752F\nmovk w8, #0x7273, lsl #16\nstr w8, [sp, #8]"
         recovered = recover_arm64_stack_strings(assembly)
         values = [entry["value"] for entry in recovered]
         assert "/usr" in values

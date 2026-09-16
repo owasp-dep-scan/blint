@@ -8,10 +8,10 @@ import shutil
 import string
 import tempfile
 import zipfile
+from collections.abc import Iterable
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
-from collections.abc import Iterable
 from typing import Any
 
 import lief
@@ -28,10 +28,10 @@ from rich.table import Table
 from blint.config import (
     BLINT_MAX_HEX_BYTES,
     BLINTDB_HOME,
-    BlintOptions,
     BLINTDB_IMAGE_URL,
     BLINTDB_LOC,
     BLINTDB_REFRESH,
+    BlintOptions,
     fuzzable_names,
     ignore_directories,
     ignore_files,
@@ -851,6 +851,6 @@ def calculate_hashes(file_path: str) -> dict[str, str]:
             hashes["md5"] = hashlib.md5(file_bytes).hexdigest()
             hashes["sha1"] = hashlib.sha1(file_bytes).hexdigest()
             hashes["sha256"] = hashlib.sha256(file_bytes).hexdigest()
-    except IOError as e:
+    except OSError as e:
         LOG.error(f"Could not read file {file_path} to calculate hashes: {e}")
     return hashes

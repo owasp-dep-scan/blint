@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Run the rusi source analyzer to produce a source callgraph.
 
@@ -19,7 +18,6 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
 
 from blint.logger import LOG
 
@@ -27,7 +25,7 @@ from blint.logger import LOG
 _DEFAULT_RUSI_TIMEOUT = int(os.getenv("BLINT_RUSI_TIMEOUT", "1800"))
 
 
-def resolve_rusi_command(explicit_command: Optional[str] = None) -> list[str]:
+def resolve_rusi_command(explicit_command: str | None = None) -> list[str]:
     """Return the rusi base command as an argument list, or an empty list.
 
     The explicit command takes precedence over the ``RUSI_CMD`` and
@@ -41,10 +39,10 @@ def resolve_rusi_command(explicit_command: Optional[str] = None) -> list[str]:
 
 
 def run_rusi_callgraph(
-    source_dir: Union[str, Path],
+    source_dir: str | Path,
     *,
-    rusi_command: Optional[str] = None,
-    work_dir: Optional[Union[str, Path]] = None,
+    rusi_command: str | None = None,
+    work_dir: str | Path | None = None,
     timeout: int = _DEFAULT_RUSI_TIMEOUT,
 ) -> dict:
     """Run rusi over a source tree and return the parsed callgraph as a dict.

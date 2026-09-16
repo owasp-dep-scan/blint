@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Canonical naming for Rust function identifiers.
 
@@ -23,10 +22,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Optional
 
 import multi_demangle
-
 
 # Trailing Rust symbol-hash suffix, e.g. ``::h41b828a7ca01b8c4``.
 _HASH_SUFFIX = re.compile(r"::h[0-9a-f]{8,}\b")
@@ -103,7 +100,7 @@ class CanonicalName:
 
 
 @lru_cache(maxsize=1)
-def _matching_normalizer() -> "multi_demangle.Normalizer":
+def _matching_normalizer() -> multi_demangle.Normalizer:
     """The matching-profile normalizer, built once for the whole process."""
     return multi_demangle.Normalizer.matching()
 
@@ -158,7 +155,7 @@ def _strip_generics(name: str) -> str:
     return "".join(out)
 
 
-def _split_balanced_angle(name: str) -> Optional[tuple[str, str]]:
+def _split_balanced_angle(name: str) -> tuple[str, str] | None:
     """Split a leading balanced ``<...>`` group from the remainder.
 
     Returns a ``(inner, rest)`` tuple when ``name`` begins with ``<`` and the

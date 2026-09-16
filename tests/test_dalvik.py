@@ -1,4 +1,4 @@
-from blint.lib.dalvik import DexPools, decode, opcode_histogram, OPCODES, FORMAT_UNITS
+from blint.lib.dalvik import FORMAT_UNITS, OPCODES, DexPools, decode, opcode_histogram
 
 
 def test_const4_decodes_register_and_literal():

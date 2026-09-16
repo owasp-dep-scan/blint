@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the pluggable callgraph matcher algorithm registry."""
 
 import pytest
