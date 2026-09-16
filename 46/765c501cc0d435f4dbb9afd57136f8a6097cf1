@@ -1,0 +1,20 @@
+blint/lib/binary.py
+  h_6a4cc5cdf68def 662-664
+blint/lib/binary_common.py
+  h_6a4cc5cdf68def 794-862,877,885,897,908-912
+docs/METADATA.md
+  h_6a4cc5cdf68def 424,443-445
+tests/test_binary.py
+  h_6a4cc5cdf68def 23,33,37,3006-3269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "46765c501cc0d435f4dbb9afd57136f8a6097cf1",
+  "prompts": {},
+  "humans": {
+    "h_6a4cc5cdf68def": {
+      "author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
