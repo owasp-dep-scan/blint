@@ -791,6 +791,75 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
+GO_BUILDINFO_MAGIC = b"\xff Go buildinf:"
+# go/src/debug/buildinfo: the blob opens with a 32-byte header — the magic, a
+# pointer size and a flags byte. Flags bit 0x2 marks the inline layout
+# (Go >= 1.18) where the toolchain version and the modinfo string follow the
+# header as uvarint-length-prefixed contents. In the pre-1.18 layout the
+# header instead holds pointers to strings that live outside the blob.
+GO_BUILDINFO_FLAGS_INLINE = 0x2
+GO_BUILDINFO_HEADER_LEN = 32
+# Release strings ("go1.27.1") are ~10 bytes; devel strings carry a hash and
+# a date. A longer length prefix means the header was misread, not that the
+# version is big.
+GO_BUILDINFO_MAX_VERSION_LEN = 128
+GO_VERSION_TEXT_RE = re.compile(r"^(?:go\d|devel)[\x20-\x7e]*$")
+
+
+def _read_uvarint(data: bytes) -> tuple[int, int]:
+    """Decode an unsigned LEB128 varint, returning (value, bytes_consumed).
+
+    Returns (0, 0) when the buffer ends mid-value or the value exceeds 64
+    bits, mirroring Go's binary.Uvarint n <= 0 error convention.
+    """
+    result = 0
+    shift = 0
+    for index, byte in enumerate(data):
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return result, index + 1
+        shift += 7
+        if shift >= 64:
+            break
+    return 0, 0
+
+
+def parse_go_toolchain_version(build_info_bytes: bytes) -> str | None:
+    """Recover the Go toolchain version from the raw buildinfo bytes.
+
+    The version string is uvarint-length-prefixed inside the blob (Go's own
+    layout, go/src/debug/buildinfo), so it is read at the byte level rather
+    than from the NUL-stripped text, where it glues onto the ``path`` entry
+    and used to be read back as the module path. Every failure returns None
+    so callers leave ``go_version`` absent instead of inventing a
+    plausible-looking value: no buildinfo magic in the bytes, pre-1.18
+    pointer layout, truncated or over-long length prefix, or content that is
+    not a Go version shape.
+    """
+    offset = build_info_bytes.find(GO_BUILDINFO_MAGIC)
+    if offset < 0:
+        return None
+    header_end = offset + GO_BUILDINFO_HEADER_LEN
+    if header_end > len(build_info_bytes):
+        return None
+    if not build_info_bytes[offset + 15] & GO_BUILDINFO_FLAGS_INLINE:
+        return None
+    length, consumed = _read_uvarint(build_info_bytes[header_end : header_end + 10])
+    if not 0 < length <= GO_BUILDINFO_MAX_VERSION_LEN:
+        return None
+    start = header_end + consumed
+    end = start + length
+    if end > len(build_info_bytes):
+        return None
+    try:
+        version = build_info_bytes[start:end].decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    if not GO_VERSION_TEXT_RE.match(version):
+        return None
+    return version
+
+
 def parse_go_buildinfo(
     parsed_obj: lief.Binary,
 ) -> tuple[dict[str, dict[str, str | None]], dict[str, str]]:
@@ -805,6 +874,7 @@ def parse_go_buildinfo(
     formulation = {}
     deps = {}
     build_info_str: str = ""
+    build_info_bytes: bytes = b""
     # Look for specific buildinfo sections for ELF and MachO binaries
     build_info: lief.Section | None = None
     if isinstance(parsed_obj, lief.ELF.Binary):
@@ -812,6 +882,7 @@ def parse_go_buildinfo(
     elif isinstance(parsed_obj, lief.MachO.Binary):
         build_info = parsed_obj.get_section("__go_buildinfo")
     if build_info and build_info.size:
+        build_info_bytes = build_info.content.tobytes()
         build_info_str = (
             codecs.decode(build_info.content.tobytes(), encoding="utf-8", errors="replace")
             .replace("\0", "")
@@ -823,6 +894,7 @@ def parse_go_buildinfo(
         # For PE binaries look for .data section
         s: lief.PE.Section = parsed_obj.get_section(".data")
         if s and not isinstance(s, lief.lief_errors):
+            build_info_bytes = s.content.tobytes()[: int(s.size / 32)]
             build_info_str = (
                 codecs.decode(
                     s.content.tobytes()[: int(s.size / 32)],
@@ -833,11 +905,13 @@ def parse_go_buildinfo(
                 .replace("\ufffd", "")
                 .replace("\t", " ")
             )
+    # The toolchain version is recovered from the raw bytes before they are
+    # NUL-stripped; in the stripped text it shares a line with the path entry.
+    go_version = parse_go_toolchain_version(build_info_bytes)
+    if go_version:
+        formulation["go_version"] = go_version
     lines = build_info_str.split("\n")
     for line in lines:
-        if line.startswith("Go buildinf:"):
-            tmp_a = line.split("Go buildinf:")
-            formulation["go_version"] = tmp_a[-1].split("\x19")[0].split(" ")[-1]
         if "path " in line:
             tmp_a = line.split("path ")
             formulation["path"] = tmp_a[-1]

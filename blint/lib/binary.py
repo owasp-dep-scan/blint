@@ -659,7 +659,9 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     build_info = {}
     if go_formulation := metadata.get("go_formulation"):
         build_info["language"] = "Go"
-        build_info["go_version"] = go_formulation.get("go_version")
+        # Absent, not null, when the toolchain version could not be recovered.
+        if go_version := go_formulation.get("go_version"):
+            build_info["go_version"] = go_version
     elif metadata.get("rust_dependencies"):
         build_info["language"] = "Rust"
     elif metadata.get("is_dotnet"):
