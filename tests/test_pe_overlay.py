@@ -16,6 +16,7 @@ scripts/windows/build_sfx.ps1).
 
 from blint.lib.pe_overlay import (
     DOTNET_BUNDLE_MARKER,
+    HEAD_WINDOW,
     UNKNOWN_HIGH_ENTROPY,
     UNKNOWN_LOW_ENTROPY,
     classify_overlay,
@@ -154,6 +155,28 @@ def test_classify_pe_overlay_without_certificate(tmp_path):
     assert info["security_directory"] is None
     assert info["size"] == len(payload)
     assert info["classification"] == "cab"
+
+
+def test_classify_pe_overlay_finds_the_bundle_marker_past_the_head_window(tmp_path):
+    """A real single-file bundle is tens of megabytes, and its marker sits at
+    the *end* of the file — nothing recognisable is in the first window.
+
+    The small in-memory fixtures above cannot see this: their whole residue
+    fits in one window, so a classifier that reads only the head still labels
+    them correctly while labelling every real bundle unknown_high_entropy —
+    the one label that counts towards packing evidence, which is the false
+    positive this packet exists to remove.
+    """
+    section_end = 0x400
+    payload = (bytes(range(256)) * (HEAD_WINDOW // 128)) + DOTNET_BUNDLE_MARKER + b"\x00" * 16
+    assert len(payload) > HEAD_WINDOW
+    exe = tmp_path / "singlefile.exe"
+    exe.write_bytes(b"\x00" * section_end + payload)
+    parsed = _FakePE(section_end=section_end)
+
+    info = classify_pe_overlay(parsed, str(exe), file_size=section_end + len(payload))
+    assert info["size"] == len(payload)
+    assert info["classification"] == "dotnet_single_file_bundle"
 
 
 def test_classify_pe_overlay_no_overlay_region(tmp_path):

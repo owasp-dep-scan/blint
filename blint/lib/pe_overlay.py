@@ -115,6 +115,7 @@ def _end_of_sections(parsed_obj) -> int:
 def classify_overlay(
     data: bytes,
     *,
+    tail: bytes | None = None,
     high_entropy_threshold: float = 7.2,
 ) -> str:
     """Label one residue byte string. Pure and shared with tests.
@@ -125,8 +126,16 @@ def classify_overlay(
     verdicts. ``authenticode`` is deliberately absent — the certificate table
     is subtracted before this function is called, so it never appears as a
     residue label.
+
+    ``tail`` carries the last bytes of the residue when the caller read the
+    two ends of a large overlay separately. It must be given whenever ``data``
+    is a window rather than the whole residue: the .NET bundle marker sits at
+    the *end* of the file, so a real single-file app — tens of megabytes of
+    embedded assemblies — has nothing recognisable in its first window and
+    would otherwise be labelled ``unknown_high_entropy``, the one label that
+    counts towards packing evidence.
     """
-    if not data:
+    if not data and not tail:
         return UNKNOWN_LOW_ENTROPY
     head = data[:HEAD_WINDOW]
     if head.startswith(_ZIP_MAGIC):
@@ -143,12 +152,19 @@ def classify_overlay(
         return "inno"
     if b"InstallShield" in head:
         return "installshield"
-    tail = data[-TAIL_WINDOW:] if len(data) > TAIL_WINDOW else data
-    if DOTNET_BUNDLE_MARKER in tail:
+    # Entropy is measured over everything the caller handed us, which is the
+    # whole residue for a small overlay and the two sampled ends for a large
+    # one — never the tail twice.
+    sample = data + tail if tail else data
+    # The marker is looked for in the last window of whatever we hold: the end
+    # of ``data`` when it is the whole residue, and ``tail`` when the caller
+    # read the two ends separately (``tail`` is then empty only because the
+    # head window already reached the end).
+    if DOTNET_BUNDLE_MARKER in data[-TAIL_WINDOW:] + (tail or b""):
         return "dotnet_single_file_bundle"
     if _GO_BUILDINFO_MAGIC in head:
         return "go_buildinfo"
-    if _shannon(data) >= high_entropy_threshold:
+    if _shannon(sample) >= high_entropy_threshold:
         return UNKNOWN_HIGH_ENTROPY
     return UNKNOWN_LOW_ENTROPY
 
@@ -188,22 +204,23 @@ def classify_pe_overlay(parsed_obj, exe_file: str, file_size: int | None = None)
                 clipped.append((max(cert_offset + cert_size, seg_start), seg_end))
         segments = clipped
     residue_size = sum(end - seg_start for seg_start, end in segments)
-    residue = b""
+    residue_head = b""
+    residue_tail = b""
     if residue_size:
+        # Two bounded windows — the start of the residue, where archive and
+        # installer magic lives, and its end, where the .NET bundle marker
+        # lives — so a multi-GB installer overlay is never read in full on
+        # the default scan path. Both ends must be read: reading only the
+        # head labels every real single-file bundle unknown_high_entropy.
         with contextlib.suppress(OSError, ValueError), open(exe_file, "rb") as handle:
-            chunks = []
-            for seg_start, seg_end in segments[:2]:
-                handle.seek(seg_start)
-                chunks.append(handle.read(min(seg_end - seg_start, HEAD_WINDOW)))
-            if len(segments) > 2:
-                last_start, last_end = segments[-1]
-                handle.seek(max(last_start, last_end - HEAD_WINDOW))
-                chunks.append(handle.read(HEAD_WINDOW))
-            residue = b"".join(chunks)
-        # Entropy over the head/tail windows is representative for the
-        # high-vs-low verdict and keeps a multi-GB installer overlay from
-        # being hashed in full on the default scan path.
-        sample = residue[:HEAD_WINDOW] + residue[-HEAD_WINDOW:]
+            head_start, head_end = segments[0]
+            handle.seek(head_start)
+            residue_head = handle.read(min(head_end - head_start, HEAD_WINDOW))
+            tail_end = segments[-1][1]
+            tail_start = max(segments[-1][0], tail_end - TAIL_WINDOW, head_start + len(residue_head))
+            if tail_end > tail_start:
+                handle.seek(tail_start)
+                residue_tail = handle.read(tail_end - tail_start)
     overlay["security_directory"] = security or None
     overlay["size"] = residue_size
     if residue_size == 0:
@@ -212,6 +229,6 @@ def classify_pe_overlay(parsed_obj, exe_file: str, file_size: int | None = None)
         overlay["classification"] = UNKNOWN_LOW_ENTROPY
     else:
         overlay["offset"] = segments[0][0]
-        overlay["entropy"] = round(_shannon(sample), 4)
-        overlay["classification"] = classify_overlay(residue)
+        overlay["entropy"] = round(_shannon(residue_head + residue_tail), 4)
+        overlay["classification"] = classify_overlay(residue_head, tail=residue_tail)
     return overlay
