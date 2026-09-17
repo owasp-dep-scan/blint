@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""A/B byte-identity gate for the blintdb v2 path (P4.2a, extended by P4.3).
+"""A/B byte-identity gate for the blintdb v2 path.
 
-Proves the similarity-hash columns (P4.2a) and the member-level + banner
-layers (P4.3) are additive: with a v2 database, matches, scores and SBOM
+Proves the similarity-hash columns and the member-level + banner
+layers are additive: with a v2 database, matches, scores and SBOM
 component attribution are byte-identical to the base commit.
 
 The script builds one v2 blintdb from a fixture binary's own metadata (exact
@@ -17,7 +17,7 @@ compared per checkout:
 2. the SBOM JSON produced by ``blint sbom --use-blintdb``,
 3. a no-match control (a binary absent from the database).
 
-Comparison runs twice: raw, and after removing the keys this packet declares
+Comparison runs twice: raw, and after removing the keys this layer declares
 additive (the ``internal:blintdb_matched_{fuzzy,cfg,import}_*`` component
 properties and ``internal:blintdb_fuzzy_layer``). The gate passes when the
 filtered comparison is byte-identical and the raw comparison differs only by
@@ -41,7 +41,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Component properties this packet adds. Everything else in the SBOM and in
+# Component properties this layer adds. Everything else in the SBOM and in
 # the lookup dumps must be byte-identical to the base commit.
 ADDITIVE_PROPERTY_NAMES = {
     "internal:blintdb_matched_fuzzy_hash_count",
@@ -51,7 +51,7 @@ ADDITIVE_PROPERTY_NAMES = {
     "internal:blintdb_matched_import_hash_count",
     "internal:blintdb_matched_import_hashes",
     "internal:blintdb_fuzzy_layer",
-    # P4.3: the attribution label every blintdb component now carries, the
+    # The attribution label every blintdb component now carries, the
     # member-layer evidence keys, and the vendored-banner properties. On a
     # member-less database the member keys are absent; the attribution label
     # and banner properties are the only ones a v2 run can still emit.
@@ -71,7 +71,7 @@ ADDITIVE_MATCH_KEYS = {
     "matched_cfg_hashes",
     "matched_import_hash_count",
     "matched_import_hashes",
-    # P4.3 member-layer evidence keys, present on evidence rows only when the
+    # Member-layer evidence keys, present on evidence rows only when the
     # member layer fired.
     "blintdb_attribution",
     "blintdb_member_layer",
@@ -224,7 +224,7 @@ def build_v2_db(db_file: Path, metadata: dict, artifact_name: str) -> None:
 
 
 def strip_additive(payload: str) -> str:
-    """Remove this packet's additive keys from a lookup-dump artifact."""
+    """Remove this layer's additive keys from a lookup-dump artifact."""
     data = json.loads(payload)
     for match in data.get("matches", []):
         for key in ADDITIVE_MATCH_KEYS:

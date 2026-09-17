@@ -12,7 +12,7 @@ options on every run, so sequential ``analyze()`` calls each see exactly the
 rules they asked for — the same results a fresh process would produce. The
 globals cannot be shared by *concurrent* calls, so a module-level lock
 serializes them: threads calling ``analyze()`` block on each other rather
-than interleaving rule state. A full per-run rule-state refactor is P3.2's
+than interleaving rule state. A full per-run rule-state refactor is the
 ``RuleCatalog`` concern, not this API's.
 """
 
@@ -53,7 +53,7 @@ class NotABinaryError(BlintApiError):
 class AnalysisFailedError(BlintApiError):
     """blint attempted the unit and failed; the failure record is attached.
 
-    The engine isolates per-unit failures rather than aborting (P0.1); for a
+    The engine isolates per-unit failures rather than aborting; for a
     single-input API call the isolation record is turned back into an
     exception so a caller cannot mistake a failed analysis for a clean one.
     """

@@ -162,7 +162,7 @@ full-scale regression against the baseline rather than as an error:
   `wasm-tools.exe`; a wrong path reads exactly like a total regression.
 
 Check `functions_total` is non-zero before believing any comparison. `compare_kpi`
-only flags counters that *drop*, so a baseline recorded from a weaker run keeps
+only flags counters that _drop_, so a baseline recorded from a weaker run keeps
 passing while silently losing its ability to catch a regression — which is why
 baselines need refreshing when output legitimately grows, not only when they fail.
 

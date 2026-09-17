@@ -1,8 +1,8 @@
-"""Tests for the .tbd SDK symbol index (P2.6).
+"""Tests for the .tbd SDK symbol index.
 
 Coverage map:
 
-- **TAPI variants** (workplan rule 10: a fixture per format variant). The
+- **TAPI variants**: a fixture per format variant. The
   reader claims v1-v4 and multi-document streams; each shape has a fixture
   here, because only the v4 shape is exercised by the real SDK the
   ground-truth test runs against.
@@ -13,7 +13,7 @@ Coverage map:
 - **Determinism**. Two builds over the same tree serialize identically, and
   neither the artifact nor the metadata block carries the SDK's absolute
   path.
-- **Ground truth** (workplan rule 22). One test runs against a real Xcode
+- **Ground truth**. One test runs against a real Xcode
   SDK and derives its expectations from ``dyld_info`` on a real binary;
   it asserts non-empty results and skips cleanly where that toolchain is
   absent. A hand-built fixture can only confirm the fixture author's
@@ -594,7 +594,7 @@ def test_load_commands_evidence_outranks_sdk_attribution(sdk_root):
     assert providers["_getenv"] == "libpcre.0.dylib"
 
 
-# --- ground truth against real artifacts (workplan rule 22) -------------------
+# --- ground truth against real artifacts --------------------------------------
 
 
 def _real_sdk() -> str | None:
@@ -664,7 +664,7 @@ def test_index_confirms_the_binds_dyld_reports_for_a_real_binary(real_index):
     Both sides of the comparison come from outside blint: the imports and
     their libraries from ``dyld_info``, the declared install-names from
     ``otool -L``. The assertion is on a non-empty result set -- a parser
-    that returned nothing would satisfy everything else (rule 22).
+    that returned nothing would satisfy everything else.
     """
     pairs = _dyld_info_imports("/usr/bin/git")
     assert len(pairs) >= 10, f"dyld_info returned too little to test against: {pairs}"

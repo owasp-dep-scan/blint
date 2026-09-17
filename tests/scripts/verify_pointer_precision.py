@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pointer materialisation precision against llvm-objdump (P4.9 gate 5).
+"""Verify pointer materialisation precision against llvm-objdump.
 
 For one binary, disassembles with blint, recomputes every `adrp` page
 (arm64) or rip-relative `lea` target (x86) in every function with an
@@ -422,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
                     if decoded is None:
                         # Bytes unreadable through lief's VA API (a second
                         # mapping this image's segment list does not back —
-                        # see the address-space finding in the P4.9 report)
+                        # see the address-space finding in the measurement report)
                         # or not an adrp encoding at this address.
                         enc_skipped += 1
                     else:

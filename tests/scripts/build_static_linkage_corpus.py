@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Build the static-linkage measurement corpus (P4.3 gate 5).
+"""Build the static-linkage measurement corpus.
 
 Compiles real C projects as static archives, ingests them into a blint-db
 database at member granularity (requires a blint-db checkout carrying the

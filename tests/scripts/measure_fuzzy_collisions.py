@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Measure cross-project collision rates for the blintdb similarity hash columns.
 
-P4.2a ground work: the fuzzy-hash floor (MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP)
+Ground work for the similarity-hash layer: the fuzzy-hash floor (MIN_FUNCTION_INSTRUCTION_COUNT_FOR_FUZZY_HASH_LOOKUP)
 and the fuzzy-only attribution threshold must come from this measurement, not taste.
 
 Input: a directory of ``*-metadata.json`` exports produced by running
@@ -249,7 +249,7 @@ def false_attribution_probe(
         # active, which is how an ordinary SBOM run behaves when the binary
         # name is known. Pass 2 neutralizes the name: no project matches by
         # name, so the name-match filter is skipped and the fuzzy layer stands
-        # on its own — the static-linkage-recovery scenario this packet's
+        # on its own — the static-linkage-recovery scenario these
         # gates exist for.
         lookup_metadatas = [metadata]
         neutral = dict(metadata)
@@ -292,7 +292,7 @@ def false_attribution_probe(
 def single_project_probe(artifacts: dict[str, dict], db_project: str, floor: int) -> list[dict]:
     """Build a database holding ONE project and query it with every other.
 
-    The packet's headline gate in its rawest form: the db contains a single
+    The headline gate in its rawest form: the db contains a single
     project, so every attribution the lookup returns for a foreign binary is
     by construction a false attribution. Constants run at their real values.
     """

@@ -123,7 +123,7 @@ def test_finding_ids_change_when_bytes_change(tmp_path):
     """Documented identity semantics, pinned on purpose: the identity is
     the whole-file sha256, so any byte change mints new ids — including
     for findings whose own evidence did not change. Rebuild-stable identity
-    needs an engine-computed content primitive (P4.4's call), not a second
+    needs an engine-computed content primitive (the diff pairing's call), not a second
     parser bolted on here.
     """
     modified = tmp_path / "modified.wasm"
@@ -154,7 +154,7 @@ def test_different_binaries_same_rule_get_different_ids():
 
 
 def test_pairing_key_is_the_cross_version_counterpart_of_the_id():
-    """P4.4's pairing key omits exactly the axis the stable ID adds: the
+    """The diff pairing key omits exactly the axis the stable ID adds: the
     whole-file identity. Same rule + evidence pairs across rebuilds; the
     finding_id of the same finding does not. The two schemes must also
     never collide."""

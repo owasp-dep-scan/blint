@@ -1063,7 +1063,7 @@ def process_exe_file(
                 # blintdb_attribution names the evidence layer that earned this
                 # component its place: whole_binary (symbols/hashes matched at
                 # binary granularity), member (static-archive member evidence
-                # from the P4.3 layer), or whole_binary+member (both layers
+                # from the member layer), or whole_binary+member (both layers
                 # independently agree). A reader can therefore tell a member-
                 # level attribution from a whole-binary one without consulting
                 # the per-layer states.
@@ -1096,7 +1096,7 @@ def process_exe_file(
             )
             lib_components.append(comp)
 
-    # Vendored-source banners (P4.3): version strings a vendored copy leaves in
+    # Vendored-source banners: version strings a vendored copy leaves in
     # the binary. An evidence layer independent of blintdb — a banner claims
     # library and version directly — so it runs regardless of --use-blintdb.
     # A banner hit on a library blintdb already attributed corroborates that

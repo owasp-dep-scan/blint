@@ -6,7 +6,7 @@ they run on every CI platform. The walker itself is a directory reader; its
 plausible failure modes — wrong executable candidate, doubled members through
 the ``Versions/Current`` symlink alias, nested-bundle double reporting — are
 what these tests pin. Validation of the parsed *metadata* against real Apple
-artifacts is the lane's external ground-truth gate, not this file's job.
+artifacts is the external ground-truth gate's job, not this file's.
 """
 
 import os

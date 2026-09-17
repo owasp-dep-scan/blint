@@ -1,4 +1,4 @@
-"""Parse cache tests (P2.2).
+"""Parse cache tests.
 
 The cache's contract has four load-bearing parts, and each has a test that
 would fail loudly if the part broke:
@@ -18,7 +18,7 @@ would fail loudly if the part broke:
   every recorded failure is fresh; deterministically malformed input that
   ``parse()`` survives (a truncated wasm, which yields ``binary_type`` plus
   an ``errors`` list) *is* cached, and replays byte-identically.
-- **Resources** (workplan rule 18): the cache adds a SQLite connection and a
+- **Resources**: the cache adds a SQLite connection and a
   file hash to every run, on the hit path and the miss path. The failure test
   asserts the live-resource delta across failing parses, not merely that the
   cleanup code looks right.
@@ -253,7 +253,7 @@ def test_cold_vs_warm_byte_identical_signed_macho(cache_options, tmp_path):
     """A signed Mach-O caches and replays byte-identically.
 
     The signature detail is exactly the kind of nested dict structure a
-    serializer could mangle (rule 20), so a signed binary is the fixture
+    serializer could mangle, so a signed binary is the fixture
     that proves the rule holds for the new block: every value must survive
     the store/replay round trip, not just the top-level scalars.
     """
@@ -399,7 +399,7 @@ def test_invalidation_changed_option(native_binary, cache_options):
 
 
 # ---------------------------------------------------------------------------
-# The sdk_path option (P2.6)
+# The sdk_path option
 # ---------------------------------------------------------------------------
 
 
@@ -513,7 +513,7 @@ def test_invalidation_changed_sdk_option(cache_options, tmp_path):
 
 def test_failure_never_cached_and_resources_stable(native_binary, cache_options, monkeypatch):
     """A parse that raises is recorded as a fresh failure every time, nothing
-    is stored, and the run leaks no file descriptors (rule 18).
+    is stored, and the run leaks no file descriptors.
 
     The cache adds a SQLite connection and a file hash to the run on both
     the hit and the miss path; this asserts the live-resource delta across
@@ -567,7 +567,7 @@ def test_deterministic_corrupt_input_is_cached_and_replayed_identically(cache_op
 
 def test_hit_run_coverage_distinguishes_cached_units(cache_options):
     """The run-level coverage must let a consumer tell a cached run from a
-    cold one, including which roles were served from cache (rule 19)."""
+    cold one, including which roles were served from cache."""
     wasm = str(REPO_ROOT / "tests" / "data" / "complex_flow.wasm")
     first = _runner_run(cache_options, wasm)
     cold_block = first.analysis_coverage()["cache"]

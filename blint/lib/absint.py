@@ -1708,11 +1708,10 @@ def recover_call_site_arguments(
 
 
 # ---------------------------------------------------------------------------
-# The call-site constant-argument metadata block (P4.7).
+# The call-site constant-argument metadata block.
 # ---------------------------------------------------------------------------
 
-# Size budget of the exported block, stated up front (see the packet this
-# implements): the block is the *next per-function emitter* after the CFG
+# Size budget of the exported block, stated up front: the block is the *next per-function emitter* after the CFG
 # block listing, and without a bound it would carry a record per call site
 # with a constant — tens of thousands on a large Rust binary. The exported
 # form is therefore one entry per distinct (callee, argument index, value)
@@ -1839,7 +1838,7 @@ def analyze_call_site_arguments(
         "functions_skipped": 0,
         "functions_entries_capped": 0,
         "records_unresolved_callee": 0,
-        # Pointer materialisation (P4.9): every way a pc-relative
+        # Pointer materialisation: every way a pc-relative
         # materialisation can fail to light up is named here, never silent.
         "functions_no_line_addresses": 0,
         "functions_extent_mismatch": 0,

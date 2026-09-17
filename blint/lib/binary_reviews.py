@@ -114,7 +114,7 @@ DEVICE_IOCTL_IMPORTS: set[str] = {
 
 # Callees whose named argument is the path being opened. Only an entry whose
 # constant resolved to a string in the image reports — a path assembled at
-# runtime is the stack-string lane's evidence, not this rule's. The wide
+# runtime is the stack-string recovery's evidence, not this rule's. The wide
 # forms (CreateFileW, CreateFile2) reach this table through the pointer
 # resolver's UTF-16LE reading; their literals must still clear the decoder's
 # four-character minimum, so a three-character wide name stays out.
@@ -182,7 +182,7 @@ def _reusable_call_site_block(metadata: dict) -> list[dict] | None:
 def _evaluate_callsite_constant_arguments(metadata: dict) -> list[dict]:
     """Surface the recovered constants that name what reaches a resolved call.
 
-    Reads the exported ``call_site_arguments`` block (P4.7) and interprets
+    Reads the exported ``call_site_arguments`` block and interprets
     only the argument positions the tables above name, so every emitted
     value is anchored to a documented ABI position: an integer is reported
     only where it matches a documented constant, a string only where the

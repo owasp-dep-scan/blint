@@ -803,7 +803,7 @@ def test_parse_reports_no_wx_macho_segments_for_standard_images(tmp_path):
 
 
 def test_macho_security_properties_are_computed_not_defaulted(tmp_path):
-    # P1.1: Mach-O security_properties used to read ELF-only metadata keys and
+    # Mach-O security_properties used to read ELF-only metadata keys and
     # default every miss into a confident-sounding negative answer. The format
     # branch must compute what Mach-O can carry and omit what it cannot.
     exe_file = tmp_path / "thin.macho"
@@ -862,7 +862,7 @@ def test_macho_symtab_name_helpers():
     # ELF or the Mach-O spelling.
     assert binary_module._macho_symtab_has_canary([{"short_name": "___stack_chk_fail"}]) is True
     assert binary_module._macho_symtab_has_canary([{"short_name": "___stack_chk_guard"}]) is True
-    # Negative fixture (rule 11): ordinary imports prove nothing.
+    # Negative fixture: ordinary imports prove nothing.
     assert (
         binary_module._macho_symtab_has_canary(
             [{"short_name": "_printf"}, {"short_name": "__stack_chk_smash"}]
@@ -872,7 +872,7 @@ def test_macho_symtab_name_helpers():
 
 
 def test_parse_universal_macho_summarizes_every_slice(tmp_path):
-    # P1.2: lief.parse auto-selects one slice of a fat binary; every slice
+    # lief.parse auto-selects one slice of a fat binary; every slice
     # must be summarized, and hardening present in only one slice (PAC on the
     # arm64e slice here) must stay attributable to that slice.
     exe_file = tmp_path / "universal.macho"
@@ -926,7 +926,7 @@ def test_parse_universal_macho_summarizes_every_slice(tmp_path):
     # The top-level summary speaks for one slice, so it must say so: without
     # this, a fat binary whose PAC lives on its arm64e slice reads at a
     # glance exactly like one that was checked and found to lack PAC — the
-    # original P1.2 harm, surviving in the block consumers actually read.
+    # original harm, surviving in the block consumers actually read.
     assert metadata["security_properties_scope"] == "primary_slice"
     assert metadata["security_properties_slice_variance"] == ["pac"]
     assert metadata["analysis_coverage"]["security_properties_slice_variance"] == ["pac"]
@@ -1104,7 +1104,7 @@ def test_macho_canary_detected_from_symtab(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# P2.4: embedded code-signature SuperBlob parsing
+# Embedded code-signature SuperBlob parsing
 # ---------------------------------------------------------------------------
 def _synthetic_signature(
     identifier="com.example.synth",
@@ -1179,7 +1179,7 @@ def test_parse_unsigned_macho_signature_block(tmp_path):
 
 
 def test_parse_garbage_signature_blob_records_gap(tmp_path):
-    # Gate 5: a garbage SuperBlob must not raise and must not read as
+    # A garbage SuperBlob must not raise and must not read as
     # "unsigned" or "no entitlements": is_signed stays True (the blob is
     # there), the parse failure is a declared gap and a degradation.
     exe_file = tmp_path / "garbage-sig.macho"
@@ -1281,7 +1281,7 @@ def test_universal_slices_carry_own_signatures_and_variance(tmp_path):
 
 
 def test_universal_signature_agreement_has_no_variance(tmp_path):
-    # The negative fixture (rule 11): slices signed identically must not
+    # The negative fixture: slices signed identically must not
     # report variance — the scope declaration alone remains.
     blob, _cd = _synthetic_signature()
     exe_file = tmp_path / "universal-same-sig.macho"
@@ -1304,7 +1304,7 @@ def test_universal_signature_agreement_has_no_variance(tmp_path):
 
 
 def test_codesign_system_binary_matches_ground_truth(tmp_path):
-    # Gate 3: assert against codesign, not against blint's own parser. The
+    # Assert against codesign, not against blint's own parser. The
     # Apple-signed system binary's identifier, team, flags and per-slice
     # cdhashes must match `codesign -dvvv` output exactly.
     if sys.platform != "darwin" or shutil.which("codesign") is None:
@@ -1339,7 +1339,7 @@ def test_codesign_system_binary_matches_ground_truth(tmp_path):
     expected_team = None if team_line.endswith("not set") else team_line.split("=", 1)[1]
     assert primary.get("team_id") == expected_team
 
-    # Per-slice cdhashes (rule 21): every slice's cdhash matches codesign's
+    # Per-slice cdhashes: every slice's cdhash matches codesign's
     # answer for that architecture, and a fat binary's slices differ.
     for entry in metadata.get("slices", []):
         arch_details = codesign_details(entry["arch"])
@@ -1419,7 +1419,7 @@ def test_codesign_file_range_fallback_reads_the_right_slice(tmp_path):
 
 
 def test_codesign_adhoc_binary_matches_ground_truth(tmp_path):
-    # Gate 3: an ad-hoc signed binary (`codesign -s -`) must classify as
+    # An ad-hoc signed binary (`codesign -s -`) must classify as
     # adhoc and carry the exact cdhash codesign reports.
     if sys.platform != "darwin" or shutil.which("codesign") is None:
         pytest.skip("codesign is macOS-only")
@@ -1454,7 +1454,7 @@ def test_codesign_adhoc_binary_matches_ground_truth(tmp_path):
 
 
 def test_codesign_entitlements_match_ground_truth(tmp_path):
-    # Gate 3: entitlements blint reports must equal what codesign reports
+    # Entitlements blint reports must equal what codesign reports
     # for the same binary, key by key.
     if sys.platform != "darwin" or shutil.which("codesign") is None:
         pytest.skip("codesign is macOS-only")
@@ -1501,7 +1501,7 @@ def test_codesign_entitlements_match_ground_truth(tmp_path):
 
 
 def test_codesign_universal_slices_with_differing_entitlements(tmp_path):
-    # Gate 4: a real fat binary whose slices carry different entitlements.
+    # A real fat binary whose slices carry different entitlements.
     # The variance must say so; no slice's answer may pass for the binary's.
     if sys.platform != "darwin" or shutil.which("codesign") is None:
         pytest.skip("codesign is macOS-only")
@@ -3280,7 +3280,7 @@ def test_go_buildinfo_toolchain_version_pe_cross_compile(go_fixtures):
     assert formulation["path"] == "command-line-arguments"
     assert deps == {}
     # `go version -m` reports no mod line for a module-less build, so the
-    # module key must not exist at all — absent, not empty (rule 14).
+    # module key must not exist at all — absent, not empty.
     assert "module" not in formulation
 
 
@@ -3307,7 +3307,7 @@ def test_go_buildinfo_path_survives_dependency_ending_in_path(go_fixtures):
 
 
 def test_go_buildinfo_fallback_when_blob_unreadable(go_fixtures, tmp_path):
-    # Force the flattened-text fallback on a real artifact (rule 23): clear
+    # Force the flattened-text fallback on a real artifact: clear
     # the inline flag byte so the blob reader refuses the section, exactly
     # as a pre-1.18 pointer-layout blob would. Dependencies and build
     # settings still come back from the flattened text, while path, module
@@ -3359,7 +3359,7 @@ def test_go_buildinfo_absent_on_non_go_binary(tmp_path):
 
 def test_parse_go_toolchain_version_fails_closed_on_unusable_input():
     # The helper, not the format, is under test here: every malformed input
-    # must return None so callers leave go_version absent (rule 14). The
+    # must return None so callers leave go_version absent. The
     # positive path against a real artifact is covered by the go_fixtures
     # tests; this synthetic blob only pins the documented byte layout so the
     # fail-closed branches stay exercised on hosts with no Go toolchain.
@@ -3463,7 +3463,7 @@ def test_read_go_inline_blob_recovers_framed_modinfo():
 
 def test_read_go_inline_blob_modinfo_fails_closed():
     # Every unusable modinfo yields None while the version — which precedes
-    # it in the blob — still resolves (rule 14: each field fails on its own).
+    # it in the blob — still resolves (each field fails on its own).
     version = b"go1.27.1"
     text = b"path\texample.com/x\nmod\texample.com/x\tv1.0.0\n"
     blob = _go_inline_blob(version, text)

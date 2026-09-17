@@ -305,8 +305,8 @@ def test_read_bundle_info_rejects_non_dict_plist_roots(tmp_path):
     """A legal plist with a non-dict root must not crash the bundle reader.
 
     plistlib returns None for an empty <plist/> and lists/strings for other
-    root element types; all are treated like an unreadable plist (rule 10:
-    one fixture per variant).
+    root element types; all are treated like an unreadable plist (one
+    fixture per variant).
     """
     from blint.lib.ios import _read_bundle_info
 

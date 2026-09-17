@@ -132,7 +132,7 @@ def _sample_metadata():
     }
 
 
-# --- P4.2a: similarity hash columns (fuzzy_hash / cfg_hash / import_hash) ---
+# --- similarity hash columns (fuzzy_hash / cfg_hash / import_hash) ---
 #
 # blint reads blintdb; it never builds one. A producer carrying the new
 # columns is emulated here with a v3 fixture built the same way the v2 one
@@ -794,7 +794,7 @@ def test_fuzzy_layer_state_database_problems(tmp_path):
     connection.execute("CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.executemany(
         "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
-        # P4.3 added schema 4 to the supported set; use a version no
+        # Schema 4 is in the supported set; use a version no
         # producer has ever stamped as the unsupported case.
         (("schema_family", "blint-db"), ("schema_version", "99")),
     )

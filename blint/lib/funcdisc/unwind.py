@@ -118,7 +118,7 @@ def discover_macho_unwind_functions(parsed_obj) -> list[dict]:
     Compact unwind stores function offsets relative to the ``__TEXT`` segment
     start, so the emitted address is the true virtual address
     (``text_vmaddr + offset``). Mach-O function metadata is normalized to
-    the virtual space where it is built (P5.1), and discovery records must
+    the virtual space where it is built, and discovery records must
     land in that same space or every merge would compare offsets against
     virtual addresses and re-create the duplicate entries the normalization
     removed. Sizes come from the gap to the next function, which the sorted

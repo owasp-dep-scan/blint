@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Measure member-level static-linkage attribution (P4.3 gate 5 and 8).
+"""Measure member-level static-linkage attribution.
 
 Reads the corpus produced by build_static_linkage_corpus.py and reports, per
 query binary:

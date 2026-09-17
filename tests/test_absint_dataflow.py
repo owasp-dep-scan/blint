@@ -409,7 +409,7 @@ def test_arm64_dataflow_recovers_string():
 
 
 # ---------------------------------------------------------------------------
-# Bounded growth (rule 12: per-function algorithms need a wall-clock bound).
+# Bounded growth: per-function algorithms need a wall-clock bound.
 # ---------------------------------------------------------------------------
 
 
@@ -453,7 +453,7 @@ def test_dense_cfg_completes_bounded():
 
 
 # ---------------------------------------------------------------------------
-# Decode ground truth (rule 22): raw bytes at a known address.
+# Decode ground truth: raw bytes at a known address.
 # ---------------------------------------------------------------------------
 
 
@@ -590,7 +590,7 @@ def test_loop_only_function_is_not_reported_as_a_cap_hit():
 
 
 # ---------------------------------------------------------------------------
-# Branch semantics (P4.8): one rule for both models. A tail-kind branch whose
+# Branch semantics: one rule for both models. A tail-kind branch whose
 # target is inside the function is control flow — the CFG carries the edge and
 # the state flows along it; a branch that leaves the function is a tail call
 # and clobbers the volatiles.

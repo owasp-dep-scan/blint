@@ -1,4 +1,4 @@
-"""Tests for Swift reflection metadata parsing (P3.3).
+"""Tests for Swift reflection metadata parsing.
 
 The descriptor ABI assertions here were pinned against a real Swift binary
 (OrbStack's main executable: kind bytes 16/17/18 for class/struct/enum,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wall-clock and peak-RSS curve for ``--jobs N`` (P3.2 gate 5).
+"""Wall-clock and peak-RSS curve for ``--jobs N``.
 
 Runs the real blint CLI over a corpus at several ``--jobs`` values and
 reports, per value:

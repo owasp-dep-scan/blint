@@ -1,4 +1,4 @@
-"""Determinism gate (P0.3): two runs over the same input must agree byte for byte.
+"""Determinism gate: two runs over the same input must agree byte for byte.
 
 Two shipped v4 features derive output from set iteration and dict merges
 (discovery ordering, CFG hashes), which is exactly the input this test exists
@@ -51,8 +51,8 @@ static int accumulate(int n) {
     }
     return acc;
 }
-const char *wave0_label(void) { return "wave0-determinism-demo"; }
-int main(void) { return accumulate(7) + (int)strlen(wave0_label()); }
+const char *demo_label(void) { return "determinism-demo"; }
+int main(void) { return accumulate(7) + (int)strlen(demo_label()); }
 """
 
 pytestmark = pytest.mark.slow
@@ -221,7 +221,7 @@ def test_determinism_wasm_fixture_across_hash_seeds():
 )
 def test_determinism_sdk_path_on_and_off_across_hash_seeds(tmp_path):
     """``--sdk-path`` must be deterministic on and off, and must never leak
-    the SDK's absolute path into metadata (P2.6).
+    the SDK's absolute path into metadata.
 
     The SDK is a deterministic function of the analyst's environment, but
     the *path naming it* is not part of the binary: it appears in no field,

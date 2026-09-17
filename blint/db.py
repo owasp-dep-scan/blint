@@ -56,8 +56,8 @@ FUZZY_ONLY_MATCH_THRESHOLD = 8
 # covers 12.5%/12.1%/8.9% of the query at floors 8/16 (1,055 shared hashes for
 # the app pair that bundles the same runtime) while every own-project match
 # covers 100%. This gate sits four times above the observed false maximum; it
-# is deliberately strict because the intended fuzzy-only consumer (P4.3,
-# stripped-binary linkage recovery) matches a binary against the project most
+# is deliberately strict because the intended fuzzy-only consumer (stripped-
+# binary linkage recovery) matches a binary against the project most
 # of its functions came from. Rows that fail the gate keep their fuzzy score
 # contribution — they are corroboration, never sole attribution.
 FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
@@ -70,7 +70,7 @@ IMPORT_HASH_MATCH_WEIGHT = 4.0
 # cfg_hash is recorded as match evidence but carries no score weight: the
 # block-graph shape is invariant under mnemonic substitution, so it identifies
 # shape classes rather than functions. Weighed against real archive-member
-# data in P4.3 (tests/scripts/measure_static_linkage.py) and kept at zero:
+# data (tests/scripts/measure_static_linkage.py) and kept at zero:
 # foreign members collect 1-5 cfg matches per member even when no fuzzy or
 # exact hash matches at all, so cfg evidence cannot distinguish presence from
 # a shared shape class.
@@ -81,7 +81,7 @@ CALLGRAPH_ONLY_MATCH_THRESHOLD = 8
 CALLGRAPH_MATCH_WEIGHT = 0.5
 CALLGRAPH_MATCH_SCORE_CAP = 60.0
 
-# --- Member-level (static archive) matching, P4.3 ---------------------------
+# --- Member-level (static archive) matching ----------------------------------
 #
 # A statically linked binary contains whole .a members at once, so a genuine
 # member match covers a small fraction of the query by construction — the

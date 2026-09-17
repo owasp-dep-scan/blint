@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Content-addressed cache for parse metadata (P2.2).
+"""Content-addressed cache for parse metadata.
 
 Caches the output of ``blint.lib.binary.parse`` keyed on
 ``(sha256(file bytes), blint version, options digest)`` in a SQLite database
@@ -71,16 +71,15 @@ from blint.db import _apply_runtime_pragmas, _execute
 from blint.lib.binary import parse as binary_parse
 from blint.logger import LOG
 
-# 2: parse output changed in P4.3 — vendored-banner strings matching
+# Schema history. 2: parse output changed — vendored-banner strings matching
 # blint.lib.banners signatures are now kept in `strings` — so entries written
 # by an earlier cache schema must not be served to a banner-expecting reader.
-# Bumped for the dataflow lane: P4.8 changes the *values* the recovery
-# produces for unchanged inputs (stack strings, call-site arguments), and a
-# warm cache must not keep serving the pre-P4.8 answers.
-# Bumped for P5.1: Mach-O function metadata is normalized to the virtual
-# address space, so function addresses, sub_<addr> names, disassembly keys
-# and discovery records all change value for unchanged inputs.
-# Bumped for P5.2: the pointer-string resolver reads PE strings at all
+# 3: unified branch semantics changed the *values* the recovery produces for
+# unchanged inputs (stack strings, call-site arguments), and a warm cache
+# must not keep serving the earlier answers. 4: Mach-O function metadata is
+# normalized to the virtual address space, so function addresses, sub_<addr>
+# names, disassembly keys and discovery records all change value for
+# unchanged inputs. 5: the pointer-string resolver reads PE strings at all
 # (image-base offset) and decodes UTF-16LE, so call_site_arguments `string`
 # fields change value for unchanged PE inputs.
 CACHE_SCHEMA_VERSION = 5

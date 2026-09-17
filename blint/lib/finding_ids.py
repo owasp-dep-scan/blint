@@ -28,9 +28,9 @@ rebuild that changes nothing the finding depends on. The alternative — a
 partial-content identity over "the bytes that matter" — cannot be computed
 without duplicating the parser's knowledge of where loadable content lives
 (the metadata carries no uniform layout list across formats), which is the
-drift trap this packet exists to avoid. Exact-bytes identity is the honest
+drift trap this module exists to avoid. Exact-bytes identity is the honest
 primitive; pairing findings across *rebuilt* binaries is similarity
-matching, which is P4.2's fuzzy-hash domain, not the ID's.
+matching, which is the fuzzy-hash layer's domain, not the ID's.
 """
 
 import hashlib

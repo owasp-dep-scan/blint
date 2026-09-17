@@ -503,7 +503,7 @@ def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
     the load-config guard flag, which is the same source
     ``construct_security_properties`` uses for ``security_properties.canary``.
     A PE with no load configuration and no marker symbol gets no verdict:
-    unknown is reported as absent, not as clean (rule 14).
+    unknown is reported as absent, not as clean.
     """
     for source in ("symtab_symbols", "imports"):
         for symbol in metadata.get(source) or []:

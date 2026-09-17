@@ -1,4 +1,4 @@
-"""Tests for the Mach-O code-signature SuperBlob parser (P2.4).
+"""Tests for the Mach-O code-signature SuperBlob parser.
 
 Every fixture is built inline from the format's own constants — no binary
 blobs are committed. The builders double as the format documentation: a
@@ -7,7 +7,7 @@ SuperBlob (big-endian) indexes blobs by slot type; each blob is
 offsets with version-gated extensions; entitlements ride in an XML-plist slot
 and/or a DER slot; the CMS signature is a ``0xfade0b01`` wrapper around
 PKCS#7 DER (codesign emits BER indefinite lengths in places, so both are
-exercised — rule 10: a fixture per format variant).
+exercised; a fixture per format variant).
 
 The cdhash assertion is computed independently here (hashlib over the raw
 CodeDirectory bytes), not by calling into the module under test.
@@ -479,7 +479,7 @@ def test_blob_index_offsets_and_sizes():
     assert detail["length"] == 28 + len(cd_blob) + len(der_blob)
 
 
-# Malformed inputs: recorded failures, never exceptions (gate 5).
+# Malformed inputs: recorded failures, never exceptions.
 def test_truncated_superblob_declared_length_beyond_input():
     blob = _superblob([(0, _code_directory())])
     detail = parse_superblob(blob[: len(blob) - 10])
@@ -528,7 +528,7 @@ def test_signature_summary_projects_lean_view():
     assert summary["team_id"] == "TEAM"
     assert summary["cdhash"] == hashlib.sha256(cd).hexdigest()[:40]
     assert summary["entitlements_der"] == {"get-task-allow": True}
-    assert orjson.dumps(summary)  # rule 20: plain JSON types only
+    assert orjson.dumps(summary)  # plain JSON types only
 
 
 def test_signature_summary_failed_parse():

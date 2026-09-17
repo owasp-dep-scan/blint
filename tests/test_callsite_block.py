@@ -1,4 +1,4 @@
-"""Tests for the call-site constant-argument metadata block (P4.7).
+"""Tests for the call-site constant-argument metadata block.
 
 Three layers:
 

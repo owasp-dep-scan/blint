@@ -377,7 +377,7 @@ def _elf_has_canary(parsed_obj: lief.ELF.Binary) -> bool | None:
     An ELF built with the stack protector references the runtime by name, so
     the symbol tables are the evidence. A binary stripped of every symbol
     leaves nothing to read and gets no verdict: unknown is reported as
-    absent, not as clean (rule 14). Symbols are read rather than
+    absent, not as clean. Symbols are read rather than
     ``get_symbol`` lookups so that "there were names to search" is itself
     observable — the verdict for a binary with symbols and no marker is
     ``False``, which is what makes CHECK_CANARY able to fire at all.

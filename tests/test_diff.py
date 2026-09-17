@@ -1,4 +1,4 @@
-"""Tests for ``blint diff`` (D1 / P4.4): pairing semantics, hardening
+"""Tests for ``blint diff``: pairing semantics, hardening
 polarity, layer deltas, mirror determinism, and the stripped/unstripped
 ground truth."""
 
@@ -738,7 +738,7 @@ def test_stackstr_stripped_pair_code_is_not_reported_rewritten():
     assert functions["changed_count"] == 0, "same build: no code may be reported rewritten"
     assert functions["unchanged_count"] >= 3
     assert functions["added_count"] == 0
-    # P5.1 removed the phantom function entries: pre-fix the unstripped side
+    # The address-space normalization removed the phantom function entries: pre-fix the unstripped side
     # disassembled its symtab-named functions a second time at imagebase-
     # doubled addresses (e.g. _build_secret at 0x200000414, 36 garbage
     # instructions beside the real 42-instruction body at 0x100000414), and

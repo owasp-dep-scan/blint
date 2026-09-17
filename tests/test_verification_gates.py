@@ -5,7 +5,7 @@
 
 `tests/scripts/verify_pointer_precision.py` and
 `tests/scripts/callgraph_kpi_baseline.py` decide whether the engine is
-correct. Both spent two packets reporting unusable inputs as measurements
+correct. Both repeatedly reported unusable inputs as measurements
 (the empty objdump sweep read as thousands of blint errors; an unparseable
 path read as `platform: unknown` with advice to commit a zeroed baseline)
 because nothing invoked them: no CI workflow runs any harness in
