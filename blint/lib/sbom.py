@@ -340,7 +340,7 @@ def create_sbom(
             os.makedirs(output_dir)
 
         file_write(
-            os.path.join(output_dir, output_file_str),
+            output_file_str,
             sbom.model_dump_json(
                 indent=None if deep_mode else 2,
                 exclude_none=True,
@@ -350,6 +350,10 @@ def create_sbom(
             ),
             log=LOG,
         )
+        # file_write logs OSError at debug level and returns, so without this
+        # check an unwritable destination looks like a successful run.
+        if not os.path.isfile(output_file_str):
+            LOG.error("Unable to write the SBOM to %s", output_file_str)
     return sbom
 
 
