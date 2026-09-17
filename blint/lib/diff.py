@@ -93,7 +93,11 @@ HARDENING_POLARITY: dict[str, str] = {
     "gs_canary": "hardening",
     "cfg": "hardening",
     "control_flow_guard": "hardening",
+    "forward_edge_cfi": "hardening",
     "xfg": "hardening",
+    "cast_guard": "hardening",
+    "safe_delay_load": "hardening",
+    "cfg_export_suppression": "hardening",
     "cet_shadow_stack": "hardening",
     "cet_shadow_stack_strict": "hardening",
     "rfg": "hardening",
@@ -103,6 +107,11 @@ HARDENING_POLARITY: dict[str, str] = {
     "arm64ec": "observe",
     "arm64x": "observe",
     "debug_info": "observe",
+    "debug_info_pdb_path": "observe",
+    # A scope change (embedded → catalog, once W2.3 resolves it) is worth
+    # reporting but is not itself a loss of protection; ``is_signed`` carries
+    # the hardening polarity.
+    "authenticode_scope": "observe",
 }
 
 # ``relro`` is the one ordered security value: any step down the rank is a

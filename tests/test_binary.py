@@ -3717,6 +3717,31 @@ def test_parse_pe_security_properties_load_config_guard_flags(tmp_path):
     assert "load_configuration" not in metadata_gaps(parse(str(exe_file)))
 
 
+def test_parse_pe_security_properties_all_have_a_diff_polarity(tmp_path):
+    """Every property the PE path emits must be classified in diff.py.
+
+    A key missing from HARDENING_POLARITY is reported as an unclassified
+    change, so losing CastGuard or delay-load IAT protection between two
+    builds would read as noise rather than as a hardening regression. The
+    fully featured image is the fixture precisely because it emits the widest
+    key set; the sparse fixtures above cannot catch an unclassified key.
+    """
+    from blint.lib.diff import HARDENING_POLARITY
+
+    exe_file = tmp_path / "wide.exe"
+    exe_file.write_bytes(
+        _pe64_image_with_load_config(
+            guard_flags=0x100 | 0x400 | 0x800 | 0x1000 | 0x8000 | 0x800000 | 0x1000000,
+            security_cookie=0x180001000,
+            ex_dllcharacteristics=0x03,
+        )
+    )
+    properties = parse(str(exe_file))["security_properties"]
+    assert len(properties) > 15
+    unclassified = sorted(set(properties) - set(HARDENING_POLARITY))
+    assert not unclassified
+
+
 def test_parse_pe_security_properties_gs_canary_cookie_unused(tmp_path):
     """A non-zero cookie with SECURITY_COOKIE_UNUSED set is a computed False,
     not a gap: the source was read and said no."""
