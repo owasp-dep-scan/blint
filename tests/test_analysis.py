@@ -1290,32 +1290,82 @@ def test_check_dll_characteristics_reports_everything_on_a_zero_bitfield():
     )
 
 
-def test_machine_types_gate_keeps_pac_rules_off_x86_64():
-    """V4: CHECK_PAC/CHECK_PAC_STRICT are ARM64-family rules; a fully
-    hardened x86-64 PE must not fire them."""
-    x64_metadata = {
-        "exe_type": "PE64",
-        "machine_type": "AMD64",
-        "machine_type_value": 0x8664,
-        "security_properties": {},
-    }
-    results = run_checks("python.exe", x64_metadata)
-    ids = {r["id"] for r in results}
-    assert "CHECK_PAC" not in ids
-    assert "CHECK_PAC_STRICT" not in ids
+def test_pac_rules_removed_with_their_false_recommendations():
+    """W0.3: CHECK_PAC/CHECK_PAC_STRICT no longer exist.
 
+    The findings they fired on every ARM64 PE were false recommendations:
+    no PE source records PAC at all. The GuardFlags bit blint read as PAC
+    (LIEF's RF_INSTRUMENTED) is Return Flow Guard per the Windows SDK's
+    winnt.h, and MSVC 19.44 offers no /guard:signret option to even produce
+    the advised artifact. A rule whose property can never truthfully be
+    True fires guaranteed noise.
+    """
+    from blint.lib import analysis as analysis_module
 
-def test_machine_types_gate_still_fires_pac_rules_on_arm64():
+    assert "CHECK_PAC" not in analysis_module.rules_dict
+    assert "CHECK_PAC_STRICT" not in analysis_module.rules_dict
     arm64_metadata = {
         "exe_type": "PE64",
         "machine_type": "ARM64",
         "machine_type_value": 0xAA64,
         "security_properties": {},
     }
-    results = run_checks("python-arm64.exe", arm64_metadata)
-    ids = {r["id"] for r in results}
-    assert "CHECK_PAC" in ids
-    assert "CHECK_PAC_STRICT" in ids
+    ids = {r["id"] for r in run_checks("python-arm64.exe", arm64_metadata)}
+    assert "CHECK_PAC" not in ids
+    assert "CHECK_PAC_STRICT" not in ids
+
+
+def test_optin_feature_rules_removed_from_the_registry():
+    """W0.3: CHECK_XFG/CHECK_CET/CHECK_ENCLAVE no longer exist.
+
+    Each fired "missing <feature>" on essentially every PE: the features are
+    opt-in (66/66 stock Microsoft-signed tier-0 binaries lack an enclave
+    configuration), and with an omitted property read as a failure they even
+    fired on .cat and .zip files blint cannot parse as PE. The properties
+    stay in security_properties, computed from their named sources.
+    """
+    from blint.lib import analysis as analysis_module
+
+    for rule_id in ("CHECK_XFG", "CHECK_CET", "CHECK_ENCLAVE"):
+        assert rule_id not in analysis_module.rules_dict
+
+
+def test_check_security_property_omitted_key_is_not_a_failure():
+    """The tristate discipline at the rule layer: a property absent from
+    security_properties means its source was absent (P2.4), so there is
+    nothing to claim. Reading omission as a failure is what made the
+    property rules fire on unparseable files (V4)."""
+    from blint.lib.checks import check_security_property
+
+    rule = {"property_key": "cet_shadow_stack"}
+    # Omitted property: no claim, rule silent.
+    assert check_security_property("t.exe", {"security_properties": {}}, rule_obj=rule)
+    assert check_security_property("t.exe", {}, rule_obj=rule)
+    # Computed False: the finding fires — it is backed by a source.
+    assert not check_security_property(
+        "t.exe", {"security_properties": {"cet_shadow_stack": False}}, rule_obj=rule
+    )
+    # Computed True: clean.
+    assert check_security_property(
+        "t.exe", {"security_properties": {"cet_shadow_stack": True}}, rule_obj=rule
+    )
+
+
+def test_unknown_exe_type_never_fires_a_scoped_rule():
+    """A rule's exe_types list is a scope declaration: a file whose exe_type
+    could not be resolved is outside every declared scope. This is the
+    .cat/.zip defect — those files carried no exe_type and still fired the
+    PE-scoped property rules."""
+    metadata = {
+        "dll_characteristics_structured": {"value": 0, "flags": [], "source": "optional_header"},
+        "dll_characteristics": "",
+    }
+    ids = {r["id"] for r in run_checks("python.cat", metadata)}
+    assert "CHECK_DLL_CHARACTERISTICS" not in ids
+    # The same file parsed as a PE does fire it — the gate is about scope,
+    # not about softening the check.
+    ids = {r["id"] for r in run_checks("python.exe", {**metadata, "exe_type": "PE64"})}
+    assert "CHECK_DLL_CHARACTERISTICS" in ids
 
 
 def test_rule_machine_type_gate_resolution_rules():

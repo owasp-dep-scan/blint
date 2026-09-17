@@ -12,7 +12,10 @@ structural checks whose evidence is unambiguous:
 - known packer section-name signatures (UPX, Themida, VMProtect, ASPack...)
 - an entrypoint outside the main executable section (a stub in its own
   section is how packers hand control to the unpacked payload)
-- virtual vs raw size mismatches and file overlays (appended data)
+- virtual vs raw size mismatches and file overlays (appended data; on PE the
+  Authenticode certificate table is subtracted first and the residue is
+  classified — see ``blint.lib.pe_overlay`` — so a signature alone is never
+  overlay evidence)
 - executable sections carrying no symbols at all
 
 ``packed_likelihood`` summarizes the evidence as ``high``/``medium``/``low``.
@@ -246,6 +249,7 @@ def analyze_packing(
     file_size: int | None = None,
     is_macho: bool = False,
     section_entropies: dict[str, float] | None = None,
+    pe_overlay: dict | None = None,
 ) -> dict:
     """Derive packing likelihood and section anomalies from section facts.
 
@@ -253,6 +257,13 @@ def analyze_packing(
     heuristics without constructing a parsed binary. ``section_entropies``
     accepts precomputed values (name → bits/byte) from
     :func:`analyze_section_entropy`; when absent they are computed here.
+    ``pe_overlay`` carries the PE overlay residue block from
+    :func:`blint.lib.pe_overlay.classify_pe_overlay` — residue after the
+    Authenticode certificate table, with a magic-based classification. When
+    given it replaces the raw file-size math below: a classified overlay
+    (installer payload, appended archive, bundle) is reported but is not
+    packing evidence, and even an ``unknown_high_entropy`` residue only
+    supports the likelihood alongside another independent signal (A.2).
     """
     findings: list[str] = []
     packers = set()
@@ -306,7 +317,15 @@ def analyze_packing(
             findings.append(f"virtual_size_mismatch:{section['name']}")
 
     overlay_size = 0
-    if file_size is not None and sections and not is_macho:
+    overlay_classification = None
+    if pe_overlay is not None:
+        # PE path: the residue already excludes the certificate table
+        # (V3), so a signed stock binary contributes no overlay evidence.
+        overlay_size = int(pe_overlay.get("size") or 0)
+        overlay_classification = pe_overlay.get("classification")
+        if overlay_size > 0x1000:
+            findings.append("file_overlay")
+    elif file_size is not None and sections and not is_macho:
         # Overlay: bytes past the end of the last section's raw file content.
         # Sections without a file offset (bss-like) contribute nothing. Mach-O
         # is excluded: its file tail is the code-signature SuperBlob, which is
@@ -323,12 +342,28 @@ def analyze_packing(
             if overlay_size > 0x1000:
                 findings.append("file_overlay")
 
+    # An overlay is packing evidence only when the residue resisted
+    # classification with high entropy AND an independent signal agrees
+    # (A.2). A lone file_overlay — the installer tail, the bundle payload,
+    # the once-miscounted certificate table — is a fact to report, not
+    # packing evidence.
+    non_overlay_findings = [f for f in findings if f != "file_overlay"]
+    overlay_evidence = (
+        "file_overlay" in findings
+        and overlay_classification == "unknown_high_entropy"
+        and bool(non_overlay_findings)
+    )
+
     if (
         packers
         or "high_entropy_exec_with_few_imports" in findings
         or (writable_executable and max_exec_entropy >= HIGH_ENTROPY_THRESHOLD)
     ):
         likelihood = "high"
+    elif pe_overlay is not None:
+        # Classified PE path: a lone overlay finding — however large — is
+        # reported without raising the likelihood.
+        likelihood = "medium" if (non_overlay_findings or overlay_evidence) else "low"
     elif findings:
         likelihood = "medium"
     else:
@@ -341,11 +376,14 @@ def analyze_packing(
         "executable_section_entropy": dict(sorted(exec_entropy_by_name.items())),
         "max_executable_section_entropy": round(max_exec_entropy, 4),
         "overlay_size": overlay_size,
+        "overlay_classification": overlay_classification,
         "findings": sorted(findings),
     }
 
 
-def analyze_binary_entropy(parsed_obj, file_size: int | None = None) -> dict:
+def analyze_binary_entropy(
+    parsed_obj, file_size: int | None = None, pe_overlay: dict | None = None
+) -> dict:
     """LIEF adapter: run entropy + packing analysis on a parsed binary."""
     sections = collect_sections(parsed_obj)
     entropy_entries, entropies = analyze_section_entropy(sections)
@@ -362,6 +400,7 @@ def analyze_binary_entropy(parsed_obj, file_size: int | None = None) -> dict:
         file_size,
         is_macho=isinstance(parsed_obj, lief.MachO.Binary),
         section_entropies=entropies,
+        pe_overlay=pe_overlay,
     )
     return {
         "sections": entropy_entries,

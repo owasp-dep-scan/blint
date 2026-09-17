@@ -289,11 +289,22 @@ def check_undeclared_dependencies(
 
 
 def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
-    properties = metadata.get("security_properties", {})
+    """Fire only on a property that was computed and found False.
+
+    The tristate discipline at the rule layer: a property key absent from
+    ``security_properties`` means the source it is computed from was absent
+    (P2.4), so there is nothing to claim and the rule stays silent. Reading
+    an omitted key as a failure is what made CHECK_ENCLAVE/CHECK_XFG/
+    CHECK_CET fire on every file blint could not even parse as a PE (V4).
+    """
+    properties = metadata.get("security_properties") or {}
     key = rule_obj.get("property_key")
     if not key:
         return True
-    return properties.get(key) is True
+    value = properties.get(key)
+    if value is None:
+        return True
+    return value is True
 
 
 def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:

@@ -408,8 +408,12 @@ def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     exe_type = metadata.get("exe_type")
     for cid, rule_obj in rules_dict.items():
         rule_exe_types = rule_obj.get("exe_types")
-        # Skip rules that are not valid for this exe type
-        if exe_type and rule_exe_types and exe_type not in rule_exe_types:
+        # Skip rules whose declared exe_types scope does not cover this file.
+        # An unresolvable exe_type never fires a scoped rule — the same
+        # principle as the machine_types gate: a scope claim with no type
+        # behind it is how CHECK_ENCLAVE/XFG/CET ended up firing on .cat and
+        # .zip files blint could not parse at all (V4).
+        if rule_exe_types and exe_type not in rule_exe_types:
             continue
         # Skip rules whose machine_types gate excludes this binary's machine
         if not _rule_machine_type_allows(metadata, rule_obj):

@@ -47,11 +47,17 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 
 Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
 YAML carries the fields a check function evaluates: `mandatory_values`
-(substring-matched against `dll_characteristics`), `allowed_values` (manifest
-comparison), `property_key` (a `security_properties` key that must be `true`),
-`limit` / `baseline_version` (thresholds), and `exe_types`. Custom rules files
-can extend these; ids must not collide with built-ins.
+(matched against the structured `dll_characteristics` flags), `allowed_values`
+(manifest comparison), `property_key` (a `security_properties` key — the rule
+fires only when the key was **computed** and is not `true`; an omitted key
+means the source was absent, which is never a failure), `limit` /
+`baseline_version` (thresholds), and `exe_types`. Custom rules files can extend
+these; ids must not collide with built-ins.
 
+- `exe_types` is a scope declaration: a rule only runs on files whose resolved
+  `exe_type` is in the list. A file whose type could not be resolved (an
+  unparseable input, a `.cat` or `.zip` archive) is outside every declared
+  scope and fires none of them.
 - `machine_types` (Optional): A list of PE machine-type names (`ARM64`,
   `ARM64EC`, `ARM64X`, `AMD64`, `I386`, …) the rule applies to. **Absent means
   "all machine types"**, so existing rules behave unchanged. The binary's
@@ -59,8 +65,17 @@ can extend these; ids must not collide with built-ins.
   from the numeric `machine_type_value` in the metadata — never through a
   dependency's enum rendering — and a binary whose machine cannot be resolved
   never fires a machine-gated rule. Use this for architecture-specific
-  hardware features (e.g. `CHECK_PAC` is gated to the ARM64 family because
-  Pointer Authentication is an ARMv8.3 feature, not an x86-64 one).
+  hardware features (an ARMv8.3-only control must not fire on x86-64).
+
+Removed in W0.3 (PE-lane A.3): `CHECK_PAC`, `CHECK_PAC_STRICT`, `CHECK_XFG`,
+`CHECK_CET` and `CHECK_ENCLAVE`. Each fired "missing <feature>" findings on
+nearly every PE — including every stock Microsoft-signed binary — because the
+underlying properties were opt-in features whose absence was read as a
+failure. The properties live on in `security_properties`, computed from their
+named sources (`GuardFlags` bit decode, the EX_DLLCHARACTERISTICS debug entry,
+the enclave configuration pointer); PAC has no PE source at all, so the PE
+`security_properties` block deliberately omits it. Better-scoped rules can
+return with the driver/HVCI work.
 
 ## Sample Rules
 
