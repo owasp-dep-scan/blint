@@ -111,8 +111,10 @@ def decode_flag_bits(value: int, table: dict[int, str]) -> list[str]:
     for bit in sorted(table):
         if value & bit:
             flags.append(table[bit])
-    # Bits outside the table: surface them individually, lowest first.
-    for pos in range(16):
+    # Bits outside the table: surface them individually, lowest first. The
+    # width comes from the value, not from the widest table entry, so a set
+    # bit above the table's range stays visible instead of being dropped.
+    for pos in range(value.bit_length()):
         bit = 1 << pos
         if value & bit and bit not in table:
             flags.append(f"UNKNOWN({bit})")

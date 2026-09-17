@@ -1266,6 +1266,30 @@ def test_check_dll_characteristics_prefers_structured_flags():
     assert check_dll_characteristics("t.exe", complete_metadata, rule_obj=rule) is True
 
 
+def test_check_dll_characteristics_reports_everything_on_a_zero_bitfield():
+    """The least hardened PE of all must report every mandatory value.
+
+    Its joined compat string is empty, so a truthiness test on that string
+    skips the comparison entirely and the image passes — the false negative
+    mirroring the false positive V1 describes.
+    """
+    from blint.lib.checks import check_dll_characteristics
+
+    rule = {"mandatory_values": ["NX_COMPAT", "DYNAMIC_BASE", "GUARD_CF"]}
+    metadata = {
+        "dll_characteristics_structured": {
+            "value": 0,
+            "flags": [],
+            "source": "optional_header",
+        },
+        "dll_characteristics": "",
+    }
+    assert (
+        check_dll_characteristics("t.exe", metadata, rule_obj=rule)
+        == "NX_COMPAT, DYNAMIC_BASE, GUARD_CF"
+    )
+
+
 def test_machine_types_gate_keeps_pac_rules_off_x86_64():
     """V4: CHECK_PAC/CHECK_PAC_STRICT are ARM64-family rules; a fully
     hardened x86-64 PE must not fire them."""
