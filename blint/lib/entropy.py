@@ -348,11 +348,6 @@ def analyze_packing(
     # the once-miscounted certificate table — is a fact to report, not
     # packing evidence.
     non_overlay_findings = [f for f in findings if f != "file_overlay"]
-    overlay_evidence = (
-        "file_overlay" in findings
-        and overlay_classification == "unknown_high_entropy"
-        and bool(non_overlay_findings)
-    )
 
     if (
         packers
@@ -361,9 +356,12 @@ def analyze_packing(
     ):
         likelihood = "high"
     elif pe_overlay is not None:
-        # Classified PE path: a lone overlay finding — however large — is
-        # reported without raising the likelihood.
-        likelihood = "medium" if (non_overlay_findings or overlay_evidence) else "low"
+        # Classified PE path: a lone overlay finding — however large, and
+        # whatever its classification — is reported without raising the
+        # likelihood. An unknown_high_entropy residue therefore counts only
+        # alongside an independent signal, which is exactly the condition
+        # that puts something in non_overlay_findings.
+        likelihood = "medium" if non_overlay_findings else "low"
     elif findings:
         likelihood = "medium"
     else:
