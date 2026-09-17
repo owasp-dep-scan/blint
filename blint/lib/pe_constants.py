@@ -76,6 +76,80 @@ MACHINE_TYPES: dict[int, str] = {
     0xAA64: "ARM64",
 }
 
+# IMAGE_GUARD (load configuration GuardFlags), "Load Configuration" section of
+# the PE specification. Every bit is named; the table is pinned against the
+# Windows SDK 10.0.26100 winnt.h IMAGE_GUARD_* defines and against
+# `dumpbin /nologo /loadconfig` on real files (python313.dll GuardFlags
+# 0x00000100 → "CF instrumented"; vcruntime140.dll 0x10417500 → CF instrumented
+# / FID table present / Protect delayload IAT / Delayload IAT in its own
+# section / Export suppression info present / Long jump target table present /
+# EH Continuation table present). Note the top nibble 0xF0000000 is not a flag
+# but the GuardCFFunctionTable entry-stride field, decoded separately.
+GUARD_FLAGS: dict[int, str] = {
+    0x00000100: "CF_INSTRUMENTED",
+    0x00000200: "CFW_INSTRUMENTED",
+    0x00000400: "CF_FUNCTION_TABLE_PRESENT",
+    0x00000800: "SECURITY_COOKIE_UNUSED",
+    0x00001000: "PROTECT_DELAYLOAD_IAT",
+    0x00002000: "DELAYLOAD_IAT_IN_ITS_OWN_SECTION",
+    0x00004000: "CF_EXPORT_SUPPRESSION_INFO_PRESENT",
+    0x00008000: "CF_ENABLE_EXPORT_SUPPRESSION",
+    0x00010000: "CF_LONGJUMP_TABLE_PRESENT",
+    0x00020000: "RF_INSTRUMENTED",
+    0x00040000: "RF_ENABLE",
+    0x00080000: "RF_STRICT",
+    0x00100000: "RETPOLINE_PRESENT",
+    0x00400000: "EH_CONTINUATION_TABLE_PRESENT",
+    0x00800000: "XFG_ENABLED",
+    0x01000000: "CASTGUARD_PRESENT",
+    0x02000000: "MEMCPY_PRESENT",
+}
+
+# Stride of GuardCFFunctionTable entries, encoded in the GuardFlags top nibble
+# as (entry size / 4); 0 means the 8-byte default entry.
+GUARD_FLAGS_FUNCTION_TABLE_SIZE_MASK = 0xF0000000
+GUARD_FLAGS_FUNCTION_TABLE_SIZE_SHIFT = 28
+
+
+def decode_guard_flags(value: int) -> list[str]:
+    """Decode the load configuration GuardFlags bitfield into SDK flag names.
+
+    The top nibble is the GuardCFFunctionTable entry-stride field, not a
+    flag, so it is masked off here; read it through
+    :func:`guard_cf_function_table_stride`.
+    """
+    return decode_flag_bits(value & ~GUARD_FLAGS_FUNCTION_TABLE_SIZE_MASK, GUARD_FLAGS)
+
+
+def guard_cf_function_table_stride(value: int) -> int:
+    """Entry stride (in 4-byte units) encoded in the GuardFlags top nibble."""
+    return (value & GUARD_FLAGS_FUNCTION_TABLE_SIZE_MASK) >> GUARD_FLAGS_FUNCTION_TABLE_SIZE_SHIFT
+
+
+# IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS payload bits (winnt.h
+# IMAGE_DLLCHARACTERISTICS_EX_*). This is where a Windows image declares
+# user-mode CET shadow-stack compatibility — a debug-directory claim, not a
+# load configuration GuardFlags bit, so the entry must be read from the debug
+# directory (type 20) rather than decoded from GuardFlags.
+IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS = 20
+
+EX_DLL_CHARACTERISTICS: dict[int, str] = {
+    0x01: "CET_COMPAT",
+    0x02: "CET_COMPAT_STRICT_MODE",
+    0x04: "CET_SET_CONTEXT_IP_VALIDATION_RELAXED_MODE",
+    0x08: "CET_DYNAMIC_APIS_ALLOW_IN_PROC",
+    0x10: "CET_RESERVED_1",
+    0x20: "CET_RESERVED_2",
+    0x40: "FORWARD_CFI_COMPAT",
+    0x80: "HOTPATCH_COMPATIBLE",
+}
+
+
+def decode_ex_dll_characteristics(value: int) -> list[str]:
+    """Decode the EX_DLLCHARACTERISTICS debug-entry payload into SDK names."""
+    return decode_flag_bits(value, EX_DLL_CHARACTERISTICS)
+
+
 # IMAGE_SUBSYSTEM_*, PE spec "Subsystem Values". Value 1 (NATIVE) is what
 # kernel-mode drivers carry; 8 (NATIVE_WINDOWS) is the historic Win9x driver
 # subsystem, kept separate because the PE spec does.

@@ -6,8 +6,13 @@ lief = pytest.importorskip("lief")
 
 from blint.lib.pe_constants import (
     DLL_CHARACTERISTICS,
+    EX_DLL_CHARACTERISTICS,
+    GUARD_FLAGS,
     decode_dll_characteristics,
+    decode_ex_dll_characteristics,
     decode_flag_bits,
+    decode_guard_flags,
+    guard_cf_function_table_stride,
     machine_type_name,
     subsystem_name,
 )
@@ -87,6 +92,70 @@ def test_decode_flag_bits_surfaces_bits_above_the_tables_range():
         "DYNAMIC_BASE",
         "UNKNOWN(2147483648)",
     ]
+
+
+def test_guard_flags_decode_matches_dumpbin_ground_truth():
+    """Every GuardFlags bit is named, pinned against the Windows VM oracle
+    (ground rule 29): `dumpbin /nologo /loadconfig` on tier-0 files decoded
+    python313.dll's 0x100 to "CF instrumented" and vcruntime140.dll's
+    0x10417500 to CF instrumented / FID table present / Protect delayload
+    IAT / Delayload IAT in its own section / Export suppression info present
+    / Long jump target table present / EH Continuation table present."""
+    assert decode_guard_flags(0x00000100) == ["CF_INSTRUMENTED"]
+    assert decode_guard_flags(0x10417500) == [
+        "CF_INSTRUMENTED",
+        "CF_FUNCTION_TABLE_PRESENT",
+        "PROTECT_DELAYLOAD_IAT",
+        "DELAYLOAD_IAT_IN_ITS_OWN_SECTION",
+        "CF_EXPORT_SUPPRESSION_INFO_PRESENT",
+        "CF_LONGJUMP_TABLE_PRESENT",
+        "EH_CONTINUATION_TABLE_PRESENT",
+    ]
+    # The top nibble is the FID-table stride field, not a flag: excluded from
+    # the flag decode (no UNKNOWN noise) and readable through its accessor.
+    # In 0x10417500 that nibble is the leading 0x1 — the same value dumpbin
+    # decoded to exactly the seven flag names above, nothing else.
+    assert guard_cf_function_table_stride(0x10417500) == 1
+    assert guard_cf_function_table_stride(0x00000100) == 0
+    # The RF triple, XFG and an untabled middle bit all decode by name; the
+    # unknown bit renders after the named flags (decode_flag_bits order).
+    assert decode_guard_flags(0x00EF0000) == [
+        "CF_LONGJUMP_TABLE_PRESENT",
+        "RF_INSTRUMENTED",
+        "RF_ENABLE",
+        "RF_STRICT",
+        "EH_CONTINUATION_TABLE_PRESENT",
+        "XFG_ENABLED",
+        "UNKNOWN(2097152)",
+    ]
+    # Unknown bits stay visible (ground rule 28): an untabled GuardFlags bit
+    # renders UNKNOWN(<bit>) rather than silently disappearing.
+    assert decode_guard_flags(0x00000001) == ["UNKNOWN(1)"]
+
+
+def test_guard_flags_table_covers_every_sdk_bit():
+    """The table is the whole winnt.h IMAGE_GUARD flag set (SDK 10.0.26100)
+    minus the stride mask, which is a field, not a flag."""
+    assert len(GUARD_FLAGS) == 17
+    assert GUARD_FLAGS[0x02000000] == "MEMCPY_PRESENT"
+    names = list(GUARD_FLAGS.values())
+    assert len(names) == len(set(names))
+
+
+def test_ex_dll_characteristics_decode():
+    """User-mode CET compatibility is declared in the debug directory's
+    EX_DLLCHARACTERISTICS entry (winnt.h IMAGE_DEBUG_TYPE 20), not in
+    GuardFlags — the CET story's real source."""
+    assert decode_ex_dll_characteristics(0x01) == ["CET_COMPAT"]
+    assert decode_ex_dll_characteristics(0x03) == [
+        "CET_COMPAT",
+        "CET_COMPAT_STRICT_MODE",
+    ]
+    assert decode_ex_dll_characteristics(0xC0) == [
+        "FORWARD_CFI_COMPAT",
+        "HOTPATCH_COMPATIBLE",
+    ]
+    assert len(EX_DLL_CHARACTERISTICS) == 8
 
 
 def test_lief_dll_characteristics_rendering_is_pinned():

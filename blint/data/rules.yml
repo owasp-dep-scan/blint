@@ -266,65 +266,20 @@
     - PE32
     - PE64
     - dotnetbinary
-- id: CHECK_PAC
-  title: Missing ARM64 Pointer Authentication (PAC)
-  description: |
-    Pointer Authentication Code (PAC) is a security feature in ARMv8.3+ architectures that signs pointers (specifically return addresses) to protect against Return-Oriented Programming (ROP) attacks.
-    This binary does not appear to have PAC enabled. Ensure the binary is compiled with `/guard:signret` (MSVC) or `-mbranch-protection=pac-ret` (Clang/GCC).
-  severity: info
-  property_key: pac
-  exe_types:
-    - PE32
-    - PE64
-  # PAC is an ARMv8.3 feature; the load-config RF_INSTRUMENTED bit means
-  # something else entirely on x86-64, so this rule is gated to the ARM64
-  # machine family instead of firing on every PE (V4).
-  machine_types:
-    - ARM64
-    - ARM64EC
-    - ARM64X
-- id: CHECK_PAC_STRICT
-  title: Missing Strict Pointer Authentication Enforcement
-  description: |
-    The binary has PAC enabled but lacks "Strict" enforcement. Strict enforcement (`/guard:signret` + compatibility mode disabled) ensures the OS loader refuses to run the binary on hardware that does not support PAC, providing a "fail-closed" security guarantee.
-  severity: info
-  property_key: pac_strict
-  exe_types:
-    - PE32
-    - PE64
-  machine_types:
-    - ARM64
-    - ARM64EC
-    - ARM64X
-- id: CHECK_XFG
-  title: Missing Extended Flow Guard (XFG)
-  description: |
-    Extended Flow Guard (XFG) provides stricter Forward-Edge Control Flow Integrity than standard CFG. It validates not just the target address but also the function signature hash, reducing the gadget space for attackers.
-    Enable with `/guard:xfg`.
-  severity: info
-  property_key: xfg
-  exe_types:
-    - PE32
-    - PE64
-- id: CHECK_CET
-  title: Missing Shadow Stack (Intel CET)
-  description: |
-    Intel Control-flow Enforcement Technology (CET) Shadow Stack protects return addresses from being overwritten on the stack (classic buffer overflows).
-    Enable with `/cetcompat`.
-  severity: info
-  property_key: cet_shadow_stack
-  exe_types:
-    - PE32
-    - PE64
-- id: CHECK_ENCLAVE
-  title: Binary not configured for Enclave
-  description: |
-    The binary is not marked as an Enclave application (SGX/VBS). If this application handles high-value secrets (keys, identity tokens), consider moving sensitive logic to a Trusted Execution Environment.
-  severity: info
-  property_key: enclave
-  exe_types:
-    - PE32
-    - PE64
+# CHECK_PAC, CHECK_PAC_STRICT, CHECK_XFG, CHECK_CET and CHECK_ENCLAVE were
+# removed in the W0.3 rewrite (PE-lane A.3, verification finding V4). All five
+# fired "missing <feature>" findings on nearly every PE — including every
+# stock Microsoft-signed binary in the benign corpus and files blint could not
+# even parse as PE — because their properties were read as False whenever
+# omitted. The underlying properties are now computed from their named sources
+# in security_properties (GuardFlags bit decode for cfg/xfg/rfg, the
+# EX_DLLCHARACTERISTICS debug entry for cet_shadow_stack, the load
+# configuration's enclave pointer for enclave presence), and no PE source
+# exists at all for PAC — the GuardFlags RF bits are Return Flow Guard, not
+# pointer authentication, and no Windows toolchain flag records PAC in a PE.
+# An always-firing advisory on an opt-in feature is noise (ground rule 27);
+# posture questions are answered by the metadata, and better-scoped rules can
+# return with the driver/HVCI work (W5.2).
 - id: CHECK_LIBC_PORTABILITY
   title: Depends on C Library Implementation Internals
   description: |
@@ -419,7 +374,7 @@
 - id: CHECK_PACKED
   title: Binary Shows Packing Evidence
   description: |
-    The binary carries evidence consistent with packing or self-encryption: a packer-specific section signature (UPX, Themida, VMProtect and friends), high-entropy executable sections combined with a minimal import table, or a file overlay past the last section.
+    The binary carries evidence consistent with packing or self-encryption: a packer-specific section signature (UPX, Themida, VMProtect and friends), high-entropy executable sections combined with a minimal import table, or an unclassifiable high-entropy file overlay past the last section that another packing signal corroborates.
     Packers exist for legitimate reasons - software protection, game anti-cheat - but they are also the single most common way malware hides its real code from static analysis. A packed binary defeats string-based reviews, symbol matching and most of the disassembly pipeline, so every finding in this report should be read as incomplete until the binary is unpacked.
     Review the packing evidence in the `entropy` block of the metadata, confirm the binary's provenance, and unpack it (for example with `upx -d` when UPX is identified) before drawing security conclusions from the analysis.
   severity: warning

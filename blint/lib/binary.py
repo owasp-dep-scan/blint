@@ -169,6 +169,7 @@ from blint.lib.binary_pe import (  # noqa: F401
     add_pe_metadata,
     add_pe_optional_headers,
     add_rdata_symbols,
+    construct_pe_security_properties,
     parse_pe_authenticode,
     parse_pe_data,
     parse_pe_exceptions,
@@ -549,6 +550,15 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
     """Constructs a summary of security mitigations."""
     if isinstance(parsed_obj, lief.MachO.Binary):
         properties = _macho_security_properties(metadata, parsed_obj)
+    elif isinstance(parsed_obj, lief.PE.Binary):
+        # PE: each property from its named source, omitted rather than
+        # guessed when the source is absent (A.3/V4); the PE-specific body
+        # lives with the rest of the PE parsing.
+        properties, gaps = construct_pe_security_properties(
+            metadata, parsed_obj, metadata["file_path"]
+        )
+        if gaps:
+            metadata["security_properties_gaps"] = gaps
     else:
         properties = {
             "nx": metadata.get("has_nx", False),
@@ -561,55 +571,6 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
             "stripped": not metadata.get("static", False),
             "is_signed": bool(metadata.get("signatures")),
         }
-    if isinstance(parsed_obj, lief.PE.Binary):
-        # aslr answers through blint's own decode of the DLL characteristics
-        # bitfield (V1). The joined-string fallback covers metadata exported
-        # before the structured block existed (parse cache, older reports).
-        structured = metadata.get("dll_characteristics_structured")
-        if isinstance(structured, dict) and "flags" in structured:
-            properties["aslr"] = "DYNAMIC_BASE" in (structured.get("flags") or [])
-        elif dll_chars := metadata.get("dll_characteristics", ""):
-            properties["aslr"] = "DYNAMIC_BASE" in dll_chars
-        if parsed_obj.has_configuration:
-            try:
-                lc = parsed_obj.load_configuration
-                flags = lief.PE.LoadConfiguration.IMAGE_GUARD
-                if lc.has(flags.CF_INSTRUMENTED):
-                    properties["control_flow_guard"] = True
-                    properties["forward_edge_cfi"] = True
-                    if lc.has(flags.CF_ENABLE_EXPORT_SUPPRESSION):
-                        properties["cfg_export_suppression"] = True
-                if lc.has(flags.XFG_ENABLED):
-                    properties["xfg"] = True
-                    properties["forward_edge_cfi"] = True
-                machine_type = parsed_obj.header.machine
-                is_arm64 = machine_type in [
-                    lief.PE.Header.MACHINE_TYPES.ARM64,
-                    lief.PE.Header.MACHINE_TYPES.ARM64EC,
-                    lief.PE.Header.MACHINE_TYPES.ARM64X,
-                ]
-                if is_arm64 and lc.has(flags.RF_INSTRUMENTED):
-                    properties["pac"] = True
-                    properties["backward_edge_cfi"] = True
-                    if lc.has(flags.RF_STRICT):
-                        properties["pac_strict"] = True
-                if lc.has(flags.EH_CONTINUATION_TABLE_PRESENT):
-                    properties["cet_shadow_stack"] = True
-                    properties["backward_edge_cfi"] = True
-                if lc.has(flags.RETPOLINE_PRESENT):
-                    properties["retpoline"] = True
-                if lc.has(flags.CASTGUARD_PRESENT):
-                    properties["cast_guard"] = True
-                if lc.has(flags.PROTECT_DELAYLOAD_IAT):
-                    properties["safe_delay_load"] = True
-                if lc.se_handler_count is not None and lc.se_handler_count > 0:
-                    properties["safe_seh"] = True
-                if not lc.has(flags.SECURITY_COOKIE_UNUSED):
-                    properties["canary"] = True
-                if lc.enclave_configuration_ptr and lc.enclave_configuration_ptr != 0:
-                    properties["enclave"] = True
-            except (AttributeError, Exception) as e:
-                LOG.debug(f"Error analyzing security properties from LoadConfig: {e}")
     return properties
 
 
@@ -1308,7 +1269,13 @@ def parse(
             _file_size = None
             with contextlib.suppress(OSError):
                 _file_size = os.path.getsize(exe_file)
-            metadata["entropy"] = analyze_binary_entropy(parsed_obj, _file_size)
+            # For PE the overlay numbers come from the classified residue
+            # (certificate table subtracted, pe_overlay), so the packing
+            # analysis never counts a signature as overlay evidence (V3).
+            pe_overlay = metadata.get("overlay_info") if isinstance(parsed_obj, lief.PE.Binary) else None
+            metadata["entropy"] = analyze_binary_entropy(
+                parsed_obj, _file_size, pe_overlay=pe_overlay
+            )
             if packing := metadata["entropy"].get("packing"):
                 metadata["security_properties"]["packed"] = packing.get("packed_likelihood") in (
                     "high",

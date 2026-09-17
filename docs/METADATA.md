@@ -677,14 +677,26 @@ Per-section Shannon entropy plus packing evidence, collected for every ELF, PE a
 
 - **`sections`**: one entry per non-empty section with `name`, `size`, `entropy` (bits per byte, 0-8), `executable`, `writable`, and `sampled` (true when entropy was computed over the first 8 MB of a larger section — the sample is always the section head, so results stay deterministic).
 - **`packing`**: the derived signals:
-  - `packed_likelihood`: `high` / `medium` / `low` summary of the evidence below.
+  - `packed_likelihood`: `high` / `medium` / `low` summary of the evidence below. On PE, an overlay counts as evidence only when its residue is `unknown_high_entropy` and an independent packing signal agrees; a lone overlay — installer payload, appended archive, bundle — is reported without raising the likelihood.
   - `packers`: packer section-name signatures found (UPX, Themida, VMProtect, ASPack, MPRESS and others).
   - `writable_executable_sections`: section-level W+X evidence; the loadable-segment view lives in [`wx_segments`](#wx_segments).
   - `executable_section_entropy` / `max_executable_section_entropy`: per-executable-section entropy values.
-  - `overlay_size`: bytes past the last section's file content (ELF/PE only; the Mach-O file tail is the code-signature SuperBlob and is excluded).
+  - `overlay_size`: bytes past the last section's file content (ELF/PE only; the Mach-O file tail is the code-signature SuperBlob and is excluded). On PE this is the overlay **residue** — the Authenticode certificate table (`IMAGE_DIRECTORY_ENTRY_SECURITY`) is subtracted first, so a signed stock binary reports `overlay_size: 0` rather than counting its signature as packing evidence.
+  - `overlay_classification`: PE only — the magic-based label of the overlay residue (`zip`, `cab`, `msi`, `nsis`, `inno`, `installshield`, `sfx_7z`, `dotnet_single_file_bundle`, `go_buildinfo`, `unknown_high_entropy`, `unknown_low_entropy`; see [`overlay_info`](#overlay_info)).
   - `findings`: the individual evidence strings (`packer_section:`, `writable_executable_section:`, `high_entropy_exec_with_few_imports`, `entrypoint_outside_executable_sections`, `virtual_size_mismatch:`, `file_overlay`).
 
 The `CHECK_PACKED` security check turns `high`/`medium` likelihood into a finding naming the evidence.
+
+### `overlay_info`
+
+PE only. The classified overlay: the region past the last section's raw bytes, minus the Authenticode certificate table.
+
+| Attribute           | Description                                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `offset`, `size`    | File offset and size of the residue — the overlay that is left once the certificate table is subtracted. `size` is 0 for a stock signed binary, whose entire overlay was the signature. |
+| `security_directory`| `{offset, size}` of the `IMAGE_DIRECTORY_ENTRY_SECURITY` region (the PE specification defines the certificate table's "RVA" as a file offset), or `null` when absent. |
+| `entropy`           | Shannon entropy of the residue, sampled from its head/tail windows.                                                                                             |
+| `classification`    | Magic-based label: `zip`, `cab`, `msi`, `nsis`, `inno`, `installshield`, `sfx_7z`, `dotnet_single_file_bundle`, `go_buildinfo`, `unknown_high_entropy`, `unknown_low_entropy`. The classifier (`blint/lib/pe_overlay.py`) is shared with the installer/container work. |
 
 ### `toolchain`
 
@@ -721,7 +733,7 @@ Accounting for what was analyzed versus what was discovered, so a run that disas
 - **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
 - **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).
-- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet (currently Mach-O's granular `has_nx_stack` / `has_nx_heap`). Their absence from `security_properties` means "not implemented", never "checked and clean".
+- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet, or whose source could not be read. Their absence from `security_properties` means "not implemented" or "source unreadable", never "checked and clean". Mach-O records its granular `has_nx_stack` / `has_nx_heap` and unreadable signature blobs here; PE records an unreadable load configuration, an absent debug directory, an unresolved Authenticode scope (catalog signing, W2.3) and unparsed page hashes.
 
 #### Run-level `analysis-coverage.json`
 
@@ -758,12 +770,28 @@ Properties are format-aware: a property the format has no concept of is _omitted
 | `control_flow_guard`     | **CFG (Forward-Edge).** Validates indirect call targets.                                                                | Mitigates function pointer corruption (e.g., vtable hijacking).                                            |
 | `xfg`                    | **Extended Flow Guard.** A stricter version of CFG that validates function signatures (types) at indirect call sites.   | significantly reduces the number of valid targets for an attacker compared to standard CFG.                |
 | `cfg_export_suppression` | **CFG Export Suppression.** Prevents valid exported functions from being called indirectly unless explicitly permitted. | Reduces the attack surface by limiting available gadgets in exported APIs.                                 |
-| `pac`                    | **Pointer Authentication (ARM64).** Signs return addresses.                                                             | Hardware-enforced protection against ROP.                                                                  |
-| `pac_strict`             | **Strict PAC.** Fails to load if hardware support is missing.                                                           | Enforces a fail-closed security policy for PAC.                                                            |
-| `cet_shadow_stack`       | **Intel CET / Shadow Stack.** Indicated by EH Continuation Tables.                                                      | Hardware-enforced protection against ROP by maintaining a secondary, immutable stack for return addresses. |
+| `cet_shadow_stack`       | **Intel CET / Shadow Stack.** PE: the `CET_COMPAT` bit of the debug directory's EX_DLLCHARACTERISTICS entry.            | Hardware-enforced protection against ROP by maintaining a secondary, immutable stack for return addresses. |
 | `retpoline`              | **Retpoline.** Use of return trampolines.                                                                               | Mitigates Spectre Variant 2 (Branch Target Injection) side-channel attacks.                                |
 | `cast_guard`             | **CastGuard.** Validates virtual function calls.                                                                        | Mitigates C++ type confusion and vtable hijacking attacks.                                                 |
 | `safe_seh`               | **Safe SEH.** (x86) Registers exception handlers at compile time.                                                       | Prevents attackers from overwriting SEH chains on the stack to gain execution.                             |
 | `safe_delay_load`        | **Protected Delay-Load IAT.** Marks delay-load tables read-only after initialization.                                   | Prevents hooking of APIs that are loaded lazily during execution.                                          |
 | `enclave`                | **Enclave Support.** Binary contains configuration for SGX/VBS.                                                         | Indicates the application uses TEE (Trusted Execution Environment) features for high-security operations.  |
 | `packed`                 | **Packing evidence present.** Derived from the [`entropy`](#entropy) block.                                             | Strings, symbols and disassembly-derived findings may be incomplete until the binary is unpacked.          |
+
+For PE, the block is computed from named sources (PE-lane packet W0.3): every property answers from the specific header field that defines it, and is **omitted rather than guessed** when that source is absent — the omission is recorded in [`security_properties_gaps`](#analysis_coverage), never reported as a thin `false`. A load configuration that failed to read is a gap; a load configuration that read and lacks a bit is a computed `false`.
+
+PE-specific properties and their sources:
+
+| Property          | Source | Notes |
+| ----------------- | ------ | ----- |
+| `aslr` / `high_entropy_va` / `dep` / `force_integrity` | optional header `DLLCharacteristics` bitfield, decoded through blint's PE-spec table (`pe_constants`) | `seh` on x86 from the same field's `NO_SEH` bit. |
+| `cfg` / `control_flow_guard` / `xfg` / `rfg` / `retpoline` / `cast_guard` / `safe_delay_load` / `cfg_export_suppression` | load configuration `GuardFlags`, decoded bit by bit through the winnt.h-derived table | `cfg`/`control_flow_guard` are the `CF_INSTRUMENTED` bit. The `EH_CONTINUATION_TABLE_PRESENT` bit is `/guard:ehcont` metadata in [`load_configuration`](#load_configuration), deliberately **not** read as CET. |
+| `gs_canary` / `canary` | load configuration `SecurityCookie` != 0 and not `SECURITY_COOKIE_UNUSED` | one value under the PE name and the cross-format name. |
+| `safe_seh` | load configuration `SEHandlerCount` (x86 machines) | |
+| `cet_shadow_stack` / `cet_shadow_stack_strict` | debug directory `IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS` entry (winnt.h type 20), `CET_COMPAT` bits | user-mode CET is a debug-directory claim, not a GuardFlags one. |
+| `debug_info` | debug directory: `full` when a CodeView entry carries a PDB path, `codeview_only` when entries exist without one, `none` for an empty directory | replaces the COFF-symbol-table `stripped` guess, which modern MSVC images made meaningless; `debug_info_pdb_path` carries the path when present. |
+| `arm64ec` / `arm64x` | PE header machine type | |
+| `authenticode_scope` | `embedded` when a signature table exists | catalog signing is not resolved yet (W2.3), so a non-embedded scope is recorded as a gap rather than guessed as `none`. |
+| `enclave` | load configuration `EnclaveConfigurationPointer` | presence-only: `true` when an enclave configuration exists, omitted otherwise — absence is the Windows norm, not a computed negative. |
+
+`pac`/`pac_strict` are deliberately absent for PE: no PE field records ARM64 pointer authentication (the GuardFlags `RF_*` bits are Return Flow Guard per the Windows SDK headers), so there is no honest source to compute from.

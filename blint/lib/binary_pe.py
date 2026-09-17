@@ -38,9 +38,15 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.driver_ioctl import (
     IOCTL_TABLE_SECTIONS,
 )
-from blint.lib.pe_constants import decode_dll_characteristics
+from blint.lib.pe_constants import (
+    IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS,
+    decode_dll_characteristics,
+    decode_ex_dll_characteristics,
+    decode_guard_flags,
+    guard_cf_function_table_stride,
+)
+from blint.lib.pe_overlay import classify_pe_overlay
 from blint.lib.utils import (
-    calculate_entropy,
     camel_to_snake,
     demangle_symbolic_name,
     enum_to_str,
@@ -525,6 +531,219 @@ def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
         return None
 
 
+def parse_pe_ex_dllcharacteristics(parsed_obj: lief.PE.Binary, exe_file: str) -> list[str] | None:
+    """Read the EX_DLLCHARACTERISTICS debug entry's flag names, when present.
+
+    The extended DLL characteristics are the only place a Windows image
+    declares user-mode CET shadow-stack compatibility (winnt.h:
+    ``IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS`` = 20), carried as one
+    little-endian DWORD in the debug directory — not as a load configuration
+    GuardFlags bit. Returns None when the entry is absent, which is the
+    ordinary image: the absence is metadata-worthy only through the
+    ``security_properties`` tristate, not as an empty list.
+    """
+    try:
+        for entry in parsed_obj.debug:
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                if int(entry.type.value) != IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS:
+                    continue
+                payload = b""
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    payload = bytes(entry.payload)
+                if len(payload) < 4:
+                    with contextlib.suppress(
+                        OSError, AttributeError, TypeError, ValueError
+                    ), open(exe_file, "rb") as handle:
+                        handle.seek(int(entry.pointerto_rawdata))
+                        payload = handle.read(4)
+                if len(payload) >= 4:
+                    value = int.from_bytes(payload[:4], "little")
+                    return decode_ex_dll_characteristics(value)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return None
+
+
+def pe_debug_directory_facts(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
+    """The debug-directory facts the security properties need (W0.3 minimum).
+
+    ``has_debug_directory`` distinguishes "no debug directory at all" from
+    "a directory without the entry in question" — the difference between a
+    property that cannot be computed (omit, record the gap) and one that was
+    computed as False. ``codeview_pdb_path`` drives ``debug_info``, the
+    replacement for the COFF-symbol-table ``stripped`` guess on modern PEs.
+    """
+    facts = {
+        "has_debug_directory": False,
+        "has_entries": False,
+        "codeview_pdb_path": None,
+        "ex_dllcharacteristics": None,
+    }
+    try:
+        if not parsed_obj.has_debug:
+            return facts
+        entries = list(parsed_obj.debug)
+    except (AttributeError, TypeError, ValueError):
+        return facts
+    facts["has_debug_directory"] = True
+    facts["has_entries"] = bool(entries)
+    ex_payload = b""
+    for entry in entries:
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            entry_type = int(entry.type.value)
+            if entry_type == 2 and not facts["codeview_pdb_path"]:  # CODEVIEW
+                filename = getattr(entry, "filename", None)
+                if isinstance(filename, str) and filename.strip():
+                    facts["codeview_pdb_path"] = filename.strip()
+            elif entry_type == IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS and not ex_payload:
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    ex_payload = bytes(entry.payload)
+                if len(ex_payload) < 4:
+                    with contextlib.suppress(
+                        OSError, AttributeError, TypeError, ValueError
+                    ), open(exe_file, "rb") as handle:
+                        handle.seek(int(entry.pointerto_rawdata))
+                        ex_payload = handle.read(4)
+    if len(ex_payload) >= 4:
+        facts["ex_dllcharacteristics"] = int.from_bytes(ex_payload[:4], "little")
+    return facts
+
+
+def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary, exe_file: str):
+    """Security properties for a PE, each from its named source (A.3, V4).
+
+    The tristate discipline governs every key: computed from the named
+    source and reported whatever the value when the source is present,
+    omitted when the source is absent — never defaulted. Sources, in order:
+
+    - optional header ``DLLCharacteristics`` (always present in a parsed
+      image): ``aslr``, ``high_entropy_va``, ``dep``, ``force_integrity``
+      through the structured block's flags, and ``seh`` on x86 from
+      ``NO_SEH``.
+    - load configuration: ``cfg`` (``CF_INSTRUMENTED``), ``xfg``,
+      ``rfg``, ``retpoline``, ``cast_guard``, ``safe_delay_load``,
+      ``cfg_export_suppression`` from the GuardFlags bit decode;
+      ``gs_canary`` from ``SecurityCookie`` != 0 and the
+      ``SECURITY_COOKIE_UNUSED`` flag; ``safe_seh`` on x86 from
+      ``SEHandlerCount``. The load config's EH-continuation bit is
+      ``/guard:ehcont`` metadata, deliberately *not* read as CET.
+    - debug directory: ``cet_shadow_stack`` from the EX_DLLCHARACTERISTICS
+      entry's ``CET_COMPAT`` bit — user-mode CET is a debug-directory claim,
+      not a GuardFlags one; ``debug_info`` from the CodeView PDB path,
+      replacing the COFF ``stripped`` guess.
+    - PE header machine type: ``arm64ec``/``arm64x``.
+    - signature table: ``authenticode_scope`` = ``embedded``; catalog
+      signing (W2.3) is not yet resolved, so a non-embedded scope is
+      recorded as a gap rather than guessed as ``none``.
+
+    Returns the properties plus the ``security_properties_gaps`` list in the
+    Mach-O style: an unreadable load configuration or an unresolvable
+    Authenticode scope is a declared blind spot, never a thin ``false``.
+    """
+    properties = {
+        "nx": metadata.get("has_nx", False),
+        # True when no loadable section maps the same bytes writable and
+        # executable, which trivially holds for formats without sections.
+        "w_xor_x": not metadata.get("wx_segments"),
+        "pie": metadata.get("is_pie", False),
+        "is_signed": bool(metadata.get("signatures")),
+    }
+    gaps: list[str] = []
+    structured = metadata.get("dll_characteristics_structured")
+    flags = set(structured.get("flags") or []) if isinstance(structured, dict) else None
+    machine_value = metadata.get("machine_type_value")
+    is_x86 = machine_value == 0x014C  # IMAGE_FILE_MACHINE_I386
+    if flags is None:
+        # Optional-header DLL characteristics are a fixed field of every PE;
+        # reaching this means the metadata predates the structured block
+        # (parse cache) and none of the bitfield answers can be given.
+        gaps.append("dll_characteristics")
+    else:
+        properties["aslr"] = "DYNAMIC_BASE" in flags
+        properties["high_entropy_va"] = "HIGH_ENTROPY_VA" in flags
+        properties["dep"] = "NX_COMPAT" in flags
+        properties["force_integrity"] = "FORCE_INTEGRITY" in flags
+        if is_x86:
+            properties["seh"] = "NO_SEH" not in flags
+
+    load_config = parsed_obj.load_configuration if parsed_obj.has_configuration else None
+    if load_config is None:
+        gaps.append("load_configuration")
+    else:
+        # Collected separately and merged only on a full decode, so a
+        # mid-parse failure can never leave partial load-config answers
+        # beside a gap claiming the source was unreadable.
+        lc_properties: dict = {}
+        try:
+            guard_flags = int(load_config.guard_flags)
+            lc_properties["cfg"] = bool(guard_flags & 0x00000100)  # CF_INSTRUMENTED
+            # Cross-format key kept for diff/Mach-O/ELF consumers; one source.
+            lc_properties["control_flow_guard"] = lc_properties["cfg"]
+            lc_properties["xfg"] = bool(guard_flags & 0x00800000)
+            lc_properties["forward_edge_cfi"] = lc_properties["cfg"] or lc_properties["xfg"]
+            lc_properties["rfg"] = bool(guard_flags & 0x00020000)  # RF_INSTRUMENTED
+            lc_properties["retpoline"] = bool(guard_flags & 0x00100000)
+            lc_properties["cast_guard"] = bool(guard_flags & 0x01000000)
+            lc_properties["safe_delay_load"] = bool(guard_flags & 0x00001000)
+            lc_properties["cfg_export_suppression"] = bool(guard_flags & 0x00008000)
+            cookie_unused = bool(guard_flags & 0x00000800)
+            try:
+                cookie = int(load_config.security_cookie or 0)
+            except (AttributeError, TypeError, ValueError):
+                cookie = 0
+            lc_properties["gs_canary"] = bool(cookie) and not cookie_unused
+            # Cross-format key: same computed value as gs_canary.
+            lc_properties["canary"] = lc_properties["gs_canary"]
+            if is_x86:
+                try:
+                    lc_properties["safe_seh"] = int(load_config.se_handler_count or 0) > 0
+                except (AttributeError, TypeError, ValueError):
+                    lc_properties["safe_seh"] = False
+            if int(load_config.enclave_configuration_ptr or 0):
+                # Presence-only: the enclave configuration either exists or
+                # the property is omitted; absence is the Windows norm, not a
+                # computed False.
+                lc_properties["enclave"] = True
+            properties.update(lc_properties)
+        except (AttributeError, TypeError, ValueError) as e:
+            LOG.debug(f"Error decoding load configuration for security properties: {e}")
+            gaps.append("load_configuration")
+
+    debug_facts = pe_debug_directory_facts(parsed_obj, exe_file)
+    if not debug_facts["has_debug_directory"]:
+        gaps.append("debug_info")
+        gaps.append("cet_shadow_stack")
+    else:
+        if ex_value := debug_facts["ex_dllcharacteristics"]:
+            properties["cet_shadow_stack"] = bool(ex_value & 0x01)  # CET_COMPAT
+            if properties["cet_shadow_stack"]:
+                properties["cet_shadow_stack_strict"] = bool(ex_value & 0x02)
+        else:
+            # A directory without the entry: the image makes no CET claim,
+            # which is a computed False, not a gap.
+            properties["cet_shadow_stack"] = False
+        if pdb_path := debug_facts["codeview_pdb_path"]:
+            properties["debug_info"] = "full"
+            properties["debug_info_pdb_path"] = pdb_path
+        elif debug_facts["has_entries"]:
+            properties["debug_info"] = "codeview_only"
+        else:
+            properties["debug_info"] = "none"
+
+    properties["arm64ec"] = bool(metadata.get("is_arm64ec"))
+    properties["arm64x"] = bool(metadata.get("is_arm64x"))
+
+    if metadata.get("signatures"):
+        properties["authenticode_scope"] = "embedded"
+    else:
+        # Catalog signing (W2.3) is not resolved yet, so neither "catalog"
+        # nor "none" is knowable; an unsigned-embedded image stays a gap.
+        gaps.append("authenticode_scope")
+    # Authenticode SpcPeImageData page hashes (02/A) are not parsed yet.
+    gaps.append("signed_page_hashes")
+    return properties, gaps
+
+
 def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     """
     Parses the Load Configuration to extract Guard flags, Code Integrity,
@@ -536,9 +755,21 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     try:
         load_config = parsed_obj.load_configuration
         lc_info["guard_flags"] = load_config.guard_flags
+        # Ground rule 28: the flag names come from blint's winnt.h-derived
+        # table (pe_constants) keyed by the numeric value, never from a
+        # dependency's rendered enum. The legacy guard_cf_flags rendering is
+        # kept alongside for one release.
+        lc_info["guard_flags_flags"] = decode_guard_flags(int(load_config.guard_flags))
+        lc_info["guard_cf_function_table_stride"] = guard_cf_function_table_stride(
+            int(load_config.guard_flags)
+        )
         lc_info["guard_cf_flags"] = [
             str(flag).split(".")[-1] for flag in load_config.guard_cf_flags_list
         ]
+        for field in ("security_cookie", "se_handler_table", "se_handler_count"):
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                if (value := getattr(load_config, field, None)) is not None:
+                    lc_info[field] = int(value)
         if hasattr(load_config, "code_integrity"):
             ci = load_config.code_integrity
             if ci:
@@ -691,6 +922,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
+        if (ex_dllcharacteristics := parse_pe_ex_dllcharacteristics(parsed_obj, exe_file)) is not None:
+            metadata["ex_dllcharacteristics"] = ex_dllcharacteristics
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["sections"] = []
         ep = parsed_obj.optional_header.addressof_entrypoint
@@ -799,16 +1032,12 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         raise
     try:
         if hasattr(parsed_obj, "overlay") and parsed_obj.overlay:
-            if hasattr(parsed_obj.overlay, "tobytes"):
-                overlay_bytes = parsed_obj.overlay.tobytes()
-            else:
-                overlay_bytes = bytes(parsed_obj.overlay)
-            if len(overlay_bytes) > 0:
-                metadata["overlay_info"] = {
-                    "offset": getattr(parsed_obj, "overlay_offset", 0),
-                    "size": len(overlay_bytes),
-                    "entropy": calculate_entropy(overlay_bytes),
-                }
+            # V3/W0.2: the classified overlay residue, not the raw
+            # past-the-sections region — the Authenticode certificate table is
+            # subtracted and what remains is classified by magic in
+            # pe_overlay, so a signed stock binary reports no overlay at all.
+            if overlay_info := classify_pe_overlay(parsed_obj, exe_file):
+                metadata["overlay_info"] = overlay_info
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Failed to parse PE overlay for {exe_file}: {e}")
     return metadata
