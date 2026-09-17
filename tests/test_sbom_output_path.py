@@ -65,3 +65,21 @@ def test_create_sbom_writes_absolute_output_path(tmp_path):
     create_sbom([], [], output_file, _new_sbom(), False, {})
 
     assert Path(output_file).is_file()
+
+
+def test_create_sbom_logs_when_the_write_fails(tmp_path, monkeypatch, caplog):
+    """A destination blint cannot write to must not look like a clean run.
+
+    ``custom_json_diff.lib.utils.file_write`` catches ``OSError`` and logs it at
+    debug level, so the failure is otherwise invisible without
+    ``SCAN_DEBUG_MODE=debug``.
+    """
+    monkeypatch.chdir(tmp_path)
+    # A directory standing where the output file should go makes the write fail
+    # while leaving the makedirs above it happy.
+    os.makedirs(os.path.join("out", "sbom.cdx.json"))
+
+    with caplog.at_level("ERROR"):
+        create_sbom([], [], os.path.join("out", "sbom.cdx.json"), _new_sbom(), False, {})
+
+    assert any("Unable to write the SBOM" in record.message for record in caplog.records)

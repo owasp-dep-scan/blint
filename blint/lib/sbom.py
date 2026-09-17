@@ -350,6 +350,10 @@ def create_sbom(
             ),
             log=LOG,
         )
+        # file_write logs OSError at debug level and returns, so without this
+        # check an unwritable destination looks like a successful run.
+        if not os.path.isfile(output_file_str):
+            LOG.error("Unable to write the SBOM to %s", output_file_str)
     return sbom
 
 
