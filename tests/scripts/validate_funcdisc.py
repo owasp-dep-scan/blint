@@ -28,7 +28,7 @@ def _known_function_addresses(metadata: dict) -> set[int]:
     """Addresses claimed by the symbol-driven function buckets.
 
     Mach-O metadata is normalized to the virtual address space where the
-    function lists are built (P5.1), so every address here is rebased down
+    function lists are built, so every address here is rebased down
     to the image-relative space. The comparison runs in that space, and both
     sides of it are rebased the same way.
     """
@@ -174,7 +174,7 @@ def assert_parses(
             # The old universal-parses case passed against the slice-0-only
             # behavior because it only looked at top-level blocks; these
             # checks fail unless every slice of a universal binary was
-            # actually summarized (P1.2).
+            # actually summarized.
             slices = metadata.get("slices") or []
             min_count = int(slice_spec.get("min_count", 1))
             distinct_cpu = int(slice_spec.get("distinct_cpu_types", 1))

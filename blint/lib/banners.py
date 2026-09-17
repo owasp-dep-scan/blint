@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Vendored-source banner detection (P4.3 static-linkage recovery).
+"""Vendored-source banner detection for static-linkage recovery.
 
 A statically linked binary embeds whole libraries, and many vendored C
 libraries leave a version banner in ``.rodata``. A banner is a strong claim

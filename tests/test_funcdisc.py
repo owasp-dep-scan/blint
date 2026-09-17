@@ -84,7 +84,7 @@ def test_macho_compressed_page_discovery():
     entries = discover_macho_unwind_functions(fake)
     # Compact-unwind offsets are __TEXT-relative; entries are emitted as
     # virtual addresses (text_vmaddr + offset), the space the Mach-O
-    # function lists are normalized into (P5.1).
+    # function lists are normalized into.
     assert [(e["address"], e["size"]) for e in entries] == [
         (0x100000460, 0xD4),
         (0x100000534, 0x94),

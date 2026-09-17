@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure pointer materialisation (P4.9) on real binaries.
+"""Measure pointer materialisation on real binaries.
 
 For each binary this parses with disassembly enabled and reports the
 ``call_site_arguments`` block's numbers plus the capability findings the

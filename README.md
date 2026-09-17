@@ -15,7 +15,7 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 - ELF (for GNU and musl libc)
 - PE (Windows executables and DLLs)
 - Mach-O (macOS and iOS, x64 and arm64), including Objective-C and Swift metadata
-- iOS/macOS apps (`.ipa`): the main executable, embedded frameworks, dylibs, and app extensions are all analyzed
+- iOS/macOS apps (`.ipa`, and on macOS also `.app`, `.framework`, and `.dSYM` bundles): the main executable, embedded frameworks, dylibs, and app extensions are all analyzed, and embedded provisioning profiles are decoded for the entitlements they grant
 - WASM (WebAssembly modules)
 - Android (APK, APKM, AAB, including DEX files in deep mode)
 - Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips (native), and Dalvik (DEX).
@@ -30,7 +30,7 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
 - **Android Deep Analysis:** In deep mode blint parses the dex classes, detects bundled service and tracker SDKs, and runs a Dalvik behavioural review that decodes the bytecode and flags risky behaviours such as dynamic code loading, reflection, native command execution, weak cryptography, and cleartext networking. The findings are attached to the BOM as custom properties. When disassembly is enabled, blint also writes a Dalvik callgraph sidecar next to the BOM.
-- **iOS/macOS App Analysis:** Point blint at an `.ipa` and it unpacks the app bundle, reads the `Info.plist` context (bundle id, version, minimum OS, FairPlay encryption status), and analyzes the main executable along with every embedded framework, dylib, and app extension. For Mach-O binaries, blint recovers Objective-C metadata (classes, superclasses, methods, protocols, and referenced selectors) and demangles Swift symbols, then surfaces iOS privacy capabilities such as location, camera, microphone, contacts, photos, telephony, motion, biometrics, and device fingerprinting. It also reports privacy and fingerprinting behaviours — passive device fingerprinting, installed-app probing, local-network scanning, cross-app tracking, and the app's `PrivacyInfo.xcprivacy` posture including undeclared "required reason" API usage.
+- **iOS/macOS App Analysis:** Point blint at an `.ipa` and it unpacks the app bundle, reads the `Info.plist` context (bundle id, version, minimum OS, FairPlay encryption status), and analyzes the main executable along with every embedded framework, dylib, and app extension. For Mach-O binaries, blint recovers Objective-C metadata (classes, superclasses, methods, protocols, and referenced selectors) and demangles Swift symbols, then surfaces iOS privacy capabilities such as location, camera, microphone, contacts, photos, telephony, motion, biometrics, and device fingerprinting. It also reports privacy and fingerprinting behaviours: passive device fingerprinting, installed-app probing, local-network scanning, cross-app tracking, and the app's `PrivacyInfo.xcprivacy` posture including undeclared "required reason" API usage.
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
   - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
@@ -96,13 +96,13 @@ blint sbom -i /path/to/app.apk -o sbom.cdx.json
 docker run --rm -it -v /path/to:/app -w /app ghcr.io/owasp-dep-scan/blint:latest sbom -i /app/app.apk -o sbom.cdx.json
 ```
 
-For Android deep analysis, enable deep mode so the dex classes are parsed. This is what makes service and tracker detection and the Dalvik behavioural review possible. Add `--disassembly` to also write the Dalvik callgraph sidecar next to the BOM. Both `.apk` single files and `.apkm` split bundles are supported.
+For Android deep analysis, enable deep mode so the dex classes are parsed. This is what makes service and tracker detection and the Dalvik behavioural review possible. Deep mode also enables disassembly, which writes the Dalvik callgraph sidecar next to the BOM. Both `.apk` single files and `.apkm` split bundles are supported.
 
 ```shell
-blint sbom -i /path/to/app.apkm -o sbom.cdx.json --deep --disassembly
+blint sbom -i /path/to/app.apkm -o sbom.cdx.json --deep
 ```
 
-Attribute Mach-O imports against an Xcode SDK's `.tbd` stubs, so each imported symbol is confirmed against — and attributed to — the system library that actually exports it (see [`.tbd` SDK index](./docs/METADATA.md#the-tbd-sdk-index---sdk-path) in the metadata guide):
+Attribute Mach-O imports against an Xcode SDK's `.tbd` stubs, so each imported symbol is confirmed against, and attributed to, the system library that actually exports it (see [`.tbd` SDK index](./docs/METADATA.md#the-tbd-sdk-index---sdk-path) in the metadata guide):
 
 ```shell
 blint -i /path/to/macho-binary -o /tmp/blint --sdk-path "$(xcrun --show-sdk-path)"
@@ -134,6 +134,7 @@ For C and C++ binaries, identifying components from symbols alone can be impreci
 - binary-name hints
 - optional disassembly hash matching when deep mode is enabled
 - similarity-hash matching (function fuzzy hashes, and the binary import-set digest) when the database carries those columns, so a compiler-drifted recompile degrades to fuzzy matching instead of missing
+- vendored-source banner detection: version strings a statically-linked vendored copy leaves in the binary, which attribute members of a static archive to the project they were compiled from
 
 Databases with schema version 2 and version 3 are both supported; the similarity-hash columns are detected per database, so a v2 database (or one whose hash columns are unpopulated) keeps working with exact matching only. Matched components record this as an `internal:blintdb_fuzzy_layer` property (`active`, or a named `unavailable_*`/`inactive_*` state such as `unavailable_hash_columns_absent` or `inactive_no_disassembly`) so "the fuzzy layer found nothing" is never confused with "the fuzzy layer could not run".
 
@@ -180,6 +181,8 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 ## Environment Variables
 
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`: Control blintdb download location, source image, and refresh behavior.
+- `BLINT_CACHE_DIR`: Where the content-addressed parse cache (enabled with `--cache`) stores its database. Defaults to the per-user cache directory.
+- `BLINT_CACHE_MAX_BYTES`: Size bound for the parse cache. Default is 1 GiB; `0` disables eviction.
 - `BLINT_MAX_HEX_BYTES`: Maximum number of raw bytes converted to hex when metadata contains undecodable byte sequences. Default is `4096`.
   - `0` disables truncation.
   - When truncation happens, blint appends `...<truncated:N_bytes>` to preserve context without producing huge JSON fields.
@@ -344,8 +347,8 @@ stripped. Give it a source side (<code>--source</code> JSON or <code>--source-di
 analyzed for you when it is a Rust crate) and a binary side (<code>--binary</code>, or
 <code>--binary-metadata</code> from a previous blint run). The primary quality knob is
 <code>--profile</code>; the <code>--min-votes</code>/<code>--margin</code>/<code>--khop</code>/<code>--fp-*</code>
-flags are expert overrides of that preset. The full guide — layers, defaults, honest
-accuracy results — is [Callgraph matching](./docs/CALLGRAPH_MATCH.md).
+flags are expert overrides of that preset. The full guide covers layers, defaults, and
+honest accuracy results: [Callgraph matching](./docs/CALLGRAPH_MATCH.md).
 
 ```shell
 usage: blint callgraph-match [-h] [--source SOURCE_CALLGRAPH]
@@ -465,12 +468,12 @@ options:
 <details>
 <summary><strong>Diff Sub-command Help</strong></summary>
 
-Compare two versions of one binary — inputs may be binaries or exported
+Compare two versions of one binary. Inputs may be binaries or exported
 <code>*-metadata.json</code> files. The report covers metadata deltas
 (imports, exports, dependencies, entitlements, sections, identity),
 hardening regressions with an explicit per-property polarity, finding and
-capability-review deltas paired across rebuilds, and — with
-<code>--disassemble</code> — a function-level delta keyed on content hashes,
+capability-review deltas paired across rebuilds, and, with
+<code>--disassemble</code>, a function-level delta keyed on content hashes,
 so a recompile is not reported as rewritten code.
 
 ```shell
@@ -553,12 +556,13 @@ result.fuzzables  # fuzzable targets (suggest_fuzzable=True)
 result.coverage  # run-level analysis_coverage block (units, failures, skips)
 ```
 
-`analyze()` writes no report files. A missing path raises `FileNotFoundError`, a file blint cannot parse raises `NotABinaryError`, and a failed analysis raises `AnalysisFailedError` with the structured failure record attached — so a clean result can never be mistaken for a blind one. Calls are serialized by an internal lock (the engine's rule state is module-global); sequential calls with different options each see their own rules.
+`analyze()` writes no report files. A missing path raises `FileNotFoundError`, a file blint cannot parse raises `NotABinaryError`, and a failed analysis raises `AnalysisFailedError` with the structured failure record attached, so a clean result can never be mistaken for a blind one. Calls are serialized by an internal lock (the engine's rule state is module-global); sequential calls with different options each see their own rules.
 
-Every finding carries a `finding_id`: a content hash over `(rule id, binary sha256, evidence locator)` — deliberately not over titles, descriptions, paths or the blint version — so findings can be tracked, suppressed and diffed across runs on the same bytes.
+Every finding carries a `finding_id`: a content hash over `(rule id, binary sha256, evidence locator)`, deliberately not over titles, descriptions, paths or the blint version, so findings can be tracked, suppressed and diffed across runs on the same bytes.
 
 ## References
 
+- [Lessons from building blint v4](./docs/LESSONS.md)
 - [lief examples](https://github.com/lief-project/LIEF/tree/master/examples)
 - [checksec.py](https://github.com/slimm609/checksec.py)
 

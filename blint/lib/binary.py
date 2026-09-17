@@ -476,7 +476,7 @@ def _record_slice_variance(metadata: dict, properties: dict) -> None:
     at-a-glance summary silently speaking for one architecture. /usr/bin/git
     is the case in point: PAC lives on its arm64e slice, so the top level
     carries no ``pac`` key and reads exactly like a binary that was checked
-    and found to lack it. That was the original P1.2 harm, and analyzing the
+    and found to lack it. That was the original harm this block exists for, and analyzing the
     other slices does not fix it for anyone reading the summary.
 
     So the summary says so in band: ``security_properties_scope`` marks the
@@ -1243,7 +1243,7 @@ def parse(
             parsed_obj = lief.PE.parse(exe_file, parser_config)
         elif lief.is_macho(exe_file):
             # lief.parse auto-selects one slice of a universal binary; go
-            # through the FatBinary so every slice is seen (P1.2).
+            # through the FatBinary so every slice is seen.
             parsed_obj = _parse_macho(exe_file, metadata)
         else:
             parsed_obj = lief.parse(exe_file)
@@ -1359,7 +1359,7 @@ def parse(
             metadata["stack_strings_coverage"] = stack_strings_coverage
             if stack_strings:
                 metadata["stack_strings"] = stack_strings
-            # Call-site constant arguments (P4.7): the recovered constants an
+            # Call-site constant arguments: the recovered constants an
             # image passes to resolved callees, aggregated into one bounded
             # block. This is the only format-aware spot the recovery needs:
             # pointing a constant at the string section it names is a question
@@ -1440,7 +1440,7 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
         degradations.append("dependency_attribution_unresolved")
-    # Pointer-materialisation blind spots (P4.9), mirrored from the
+    # Pointer-materialisation blind spots, mirrored from the
     # call-site block's coverage so a consumer reading only this block
     # still sees them: a pc-relative materialisation that stayed symbolic
     # because the listing could not be located, and why.
@@ -1452,7 +1452,7 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     if callsite_coverage.get("functions_unmodelled_pc_relative"):
         degradations.append("callsite_unmodelled_pc_relative")
     # Mach-O function addresses the segment ranges could not place in one
-    # space (P5.1): these entries are left in their raw space rather than
+    # space: these entries are left in their raw space rather than
     # guessed at, which a consumer of the function lists must know about.
     macho_space = metadata.get("macho_function_address_space") or {}
     if macho_space.get("ambiguous_entries"):
@@ -1494,7 +1494,7 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
         degradations.append("code_signature_parse_failed")
         coverage["degradations"] = sorted(degradations)
-    # Per-slice accounting for universal binaries (P1.2). A slice whose
+    # Per-slice accounting for universal binaries. A slice whose
     # summary failed is a unit like any other: isolated, counted, and named —
     # never silently dropped and never fatal for the file.
     slice_summaries = metadata.get("slices") or []

@@ -860,7 +860,7 @@ def merge_macho_function_starts(
     Every load-command entry and symtab address is classified against the
     image's segment ranges by :func:`_macho_address_to_virtual` and expressed
     as a virtual address before it is used, so the appended entries are in
-    one space regardless of which space a source table used (P5.1: lief's
+    one space regardless of which space a source table used (lief's
     aggregate mixes symtab virtual addresses with file-relative
     function-starts offsets without normalising). Entries lief left nameless
     adopt a surviving symbol's name for their address. The caller runs
@@ -1026,7 +1026,7 @@ def add_mach0_functions(metadata: dict, parsed_obj: lief.MachO.Binary) -> dict:
         metadata["functions"], metadata["symtab_symbols"], parsed_obj
     )
 
-    # One address space for the function lists (P5.1). lief's aggregate mixes
+    # One address space for the function lists. lief's aggregate mixes
     # symtab virtual addresses with file-relative function-starts offsets, and
     # the merge above appends virtual ones; normalize every function-bearing
     # list into the virtual space here — at the point the lists are built —

@@ -1,4 +1,4 @@
-"""Tests for provisioning profile parsing (P2.5).
+"""Tests for provisioning profile parsing.
 
 Ground truth for the CMS decode comes from outside blint: the fixtures are
 signed by ``openssl smime`` (an independent producer) and, where openssl is
@@ -296,7 +296,7 @@ def test_macos_spellings_reach_the_development_checks():
 
 def test_aps_environment_consumer_keeps_working(tmp_path):
     """checks.py reads entitlements["aps-environment"]; none of the real
-    profiles at hand carries that key, so this test is the bound (rule 17):
+    profiles at hand carries that key, so this test is the bound:
     an iOS development profile with a development APNs environment must
     still surface it through the whole decode -> summarize -> check path."""
     from blint.lib.checks import check_profile_development
@@ -345,7 +345,7 @@ def test_signed_data_without_encapsulated_content_does_not_raise():
 
 def test_plist_failure_is_recorded_on_its_own_block(tmp_path):
     """A CMS that parses but wraps a non-plist payload is 'parsed' with the
-    failure recorded on the plist block, never silent (rule 14)."""
+    failure recorded on the plist block, never silent."""
     if not OPENSSL:
         pytest.skip("needs openssl")
     subprocess.run(

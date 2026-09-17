@@ -1,6 +1,6 @@
 """Shared test isolation for the whole suite.
 
-The parse cache (P2.2) is enabled by default in default-mode runs; without
+The parse cache is enabled by default in default-mode runs; without
 this fixture every analysis test would read and write the developer's real
 user cache directory and second runs would silently replay cached metadata
 instead of exercising the parse path. Each test gets a throwaway cache

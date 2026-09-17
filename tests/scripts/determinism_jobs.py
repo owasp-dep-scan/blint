@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Determinism gate for ``--jobs N`` (P3.2).
+"""Determinism gate for ``--jobs N``.
 
 Runs the real blint CLI over a corpus at ``--jobs 1/2/4/8`` under two
 ``PYTHONHASHSEED`` values and asserts the outputs are byte-identical

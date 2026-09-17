@@ -510,7 +510,7 @@ def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
                         or is_review_relevant_string(s)
                         # Vendored-source version banners are short plain text
                         # that both entropy and length gates reject; the
-                        # banner layer (P4.3) reads this list, so strings
+                        # banner detection reads this list, so strings
                         # matching its library-anchored signatures are kept.
                         or is_probable_banner_string(s)
                     ):
@@ -743,7 +743,7 @@ def _codesign_security_flags(flags: dict | None) -> dict:
 
     Computed only from a parsed CodeDirectory; an absent or unparseable
     signature yields {} so the keys stay out of security_properties instead
-    of reporting confident negatives for an unknown (rule 14).
+    of reporting confident negatives for an unknown.
     """
     if not isinstance(flags, dict):
         return {}

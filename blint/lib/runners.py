@@ -209,10 +209,10 @@ class AnalysisRunner:
         # rate over just the binaries.
         self.units_attempted_by_role: dict[str, int] = {}
         self.units_succeeded_by_role: dict[str, int] = {}
-        # Parse cache (P2.2). The cache instance exists for the run only; a
+        # Parse cache. The cache instance exists for the run only; a
         # disabled cache is None so the miss path costs nothing. Hit/miss
-        # counters are kept per role for the same reason as units_by_role
-        # (rule 19): a consumer must be able to decompose the totals.
+        # counters are kept per role for the same reason as units_by_role:
+        # a consumer must be able to decompose the totals.
         # In parallel mode (--jobs N) the parent owns no connection at all:
         # every worker opens its own (SQLite connections cannot be shared
         # across processes), and cache_enabled below is what the coverage
@@ -319,11 +319,11 @@ class AnalysisRunner:
                 "failed": failed_by_role.get(role, 0),
                 "skipped": skipped_by_role.get(role, 0),
             }
-        # Parse cache accounting (P2.2). ``enabled`` is what lets a consumer
+        # Parse cache accounting. ``enabled`` is what lets a consumer
         # tell a fast run from a cached one. Failures are never cached, so
         # every record in ``failures`` above is a fresh failure by
         # construction; ``caches_failures`` states that invariant in the
-        # output itself. Per rule 19 the totals are broken down by role,
+        # output itself. The totals are broken down by role,
         # since only some roles (native/wasm parses) can hit the cache at
         # all — android app units never go through parse().
         by_role = {

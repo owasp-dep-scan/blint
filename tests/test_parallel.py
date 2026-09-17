@@ -1,7 +1,7 @@
-"""Parallel analysis tests (P3.2, ``--jobs N``).
+"""Parallel analysis tests for ``--jobs N``.
 
 Every gate here maps to a failure mode that cannot fire on a healthy
-sequential run, so each one is forced explicitly (workplan rule 23):
+sequential run, so each one is forced explicitly:
 
 - **Merge order**: results complete out of order; the caller merges by
   submission index. The end-to-end tests hold the parallel run to the
@@ -364,7 +364,7 @@ def _run_analysis(exe_files, jobs, reports_dir, use_cache=False):
 
 
 def test_parallel_default_mode_matches_sequential_bytes(parallel_fixtures, tmp_path):
-    """The packet's central claim at unit scale: jobs=4 output == jobs=1.
+    """The central claim at unit scale: jobs=4 output == jobs=1.
 
     Reviews are ON (the default) so this also proves the workers load the
     rule state themselves: a worker without rules would produce a different

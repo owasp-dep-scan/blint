@@ -21,7 +21,7 @@ notarization state is consulted, and the output says so with an explicit
 
 Everything returned is plain JSON types (str/int/bool/None/dict/list): the
 values flow into metadata that the parse cache serializes, and the cache
-refuses entries it cannot represent rather than guessing (rule 20). No bytes
+refuses entries it cannot represent rather than guessing. No bytes
 or memoryviews ever escape this module.
 """
 
@@ -661,7 +661,7 @@ def _parse_entitlements_payload(payload: bytes, kind: str) -> dict:
 
     Returns either the parsed dict or ``{"decode_error": "<reason>"}`` so a
     consumer looking at the entitlements slot can tell "no entitlements"
-    from "entitlements blint could not decode" (rule 14).
+    from "entitlements blint could not decode".
     """
     if len(payload) > MAX_PLIST_BYTES:
         return {"decode_error": f"{kind}_too_large:{len(payload)}"}
@@ -703,8 +703,8 @@ def _provenance(primary_flags_raw: int | None, cms: dict | None) -> str:
 def signature_summary(detail: dict) -> dict | None:
     """Lean per-slice view of a parsed signature for ``slices[]`` entries.
 
-    Carries everything that can differ between slices and that rule 21 says
-    must never be silently merged across them — identifier, team, cdhash,
+    Carries everything that can differ between slices and must never be
+    silently merged across them — identifier, team, cdhash,
     flags, entitlements, provenance — and drops blob-layout internals (the
     blob index, offsets, the CMS certificate chain) so universal-binary
     entries stay lean.

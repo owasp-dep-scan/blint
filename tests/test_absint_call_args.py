@@ -447,7 +447,7 @@ def _pe64_client_jmp_edge() -> bytes:
     real intra-function ``jmp`` (E9 rel32). The control code is loaded before
     the branch, so it reaches the call site only if the dataflow carries
     state along that edge — clobbering the volatiles at the branch, the
-    pre-P4.8 x86 behavior, loses it. The decoy block sitting between the
+    earlier x86 behavior, loses it. The decoy block sitting between the
     ``jmp`` and its target has no incoming edge, so its plausible code must
     stay excluded as unreachable."""
     image_base, text_rva = 0x140000000, 0x1000
@@ -634,7 +634,7 @@ def test_pe64_client_jmp_edge_ground_truth(tmp_path):
     Machine-code ground truth for the branch semantics: the code is loaded
     before an unconditional jump and used at the call site after it, so the
     recovery works only while state flows along the CFG edge the jump
-    carries. Clobbering the volatiles at the branch (the pre-P4.8 x86
+    carries. Clobbering the volatiles at the branch (the earlier x86
     behavior) reports the second code alone; the CFG edge is real, resolved
     by blint's own CFG builder out of the E9 encoding, and the decoy between
     the jump and its target is unreachable text that must stay excluded.
@@ -723,13 +723,13 @@ def _pe64_wide_client() -> bytes:
 def test_pe64_wide_client_resolves_the_path_argument(tmp_path):
     """A wide literal reaching CreateFileW's lpFileName, end to end.
 
-    Machine-code ground truth for the pointer-string lane's Windows half:
+    Machine-code ground truth for the pointer-string resolver's Windows half:
     the constant the dataflow recovers at argument 0 is the absolute VA of
     a UTF-16LE literal (PE sections report RVAs, so the resolver must add
     the image base to even see it), and the block's ``string`` field carries
     the decoded text — which the ASCII-only decoder this test replaced could
     never produce, leaving every CreateFileW/CreateFile2/BCryptOpenAlgorithm-
-    Provider entry in the P4.7 tables permanently silent.
+    Provider entry in the path-argument tables permanently silent.
     """
     from blint.lib.binary import parse
     from blint.lib.binary_reviews import _evaluate_callsite_constant_arguments

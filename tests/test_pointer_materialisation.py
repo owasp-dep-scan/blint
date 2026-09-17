@@ -1,4 +1,4 @@
-"""Tests for pointer materialisation (P4.9).
+"""Tests for pointer materialisation.
 
 Every address in these fixtures is ground truth taken from llvm-objdump on
 /opt/homebrew/bin/x264 (arm64) — the instruction address, the rendered
@@ -154,7 +154,7 @@ def test_arm64_bare_adrp_page_is_reported_and_counted():
 
 
 def test_arm64_without_line_addresses_keeps_legacy_symbolic():
-    # Blocks without start/end VAs (the shape every pre-P4.9 fixture has):
+    # Blocks without start/end VAs (the shape every older fixture has):
     # no address, no materialisation, and the reason named in coverage.
     assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl _printf"
     func = _arm64_func(

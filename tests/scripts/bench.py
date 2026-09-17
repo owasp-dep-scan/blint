@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-phase timing bench for blint's analysis pipeline (P0.2).
+"""Per-phase timing bench for blint's analysis pipeline.
 
 Answers the question that went unanswered when an unbounded per-function
 hash accounted for 36% of /usr/bin/ssh's parse time: *which phase did my

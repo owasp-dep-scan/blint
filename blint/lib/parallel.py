@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Process-pool support for ``--jobs N`` (P3.2).
+"""Process-pool support for ``--jobs N``.
 
 Runs one blint unit of work (one binary) per pool task across a fixed set of
 worker processes. The unit of work stays the binary: there is deliberately no

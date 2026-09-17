@@ -2103,7 +2103,7 @@ def disassemble_functions(
     all_func_addrs_sorted = sorted(set(all_func_addrs))
     # Call targets render as absolute virtual addresses, while stored function
     # addresses are image-relative for PE. Mach-O function metadata is
-    # normalized to the virtual space where the list is built (P5.1), so its
+    # normalized to the virtual space where the list is built, so its
     # stored space *is* the virtual space and the rebase delta is zero. All
     # discovery work below happens in stored space, so executable ranges are
     # rebased once here.
@@ -2482,7 +2482,7 @@ def disassemble_functions(
     if promoted_count:
         # Surface call-site discoveries in the metadata record so downstream
         # consumers can tell symbol-derived functions from promoted ones.
-        # For Mach-O the stored space is the virtual space (P5.1), so the
+        # For Mach-O the stored space is the virtual space, so the
         # unwind and callsite discovery records share one address space; PE
         # keeps its image-relative stored space.
         promoted_entries = [

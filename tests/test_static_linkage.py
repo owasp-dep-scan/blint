@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""P4.3 static-linkage recovery: member-level matching and banner detection.
+"""Static-linkage recovery: member-level matching and banner detection.
 
 The member layer matches a binary's function hashes against blintdb
 static-archive members (Binaries rows with archive_name set). The fixtures
@@ -410,7 +410,7 @@ def test_scattered_fuzzy_matches_never_qualify(tmp_path):
 def test_member_layer_does_not_open_the_whole_binary_gates(tmp_path):
     """Member evidence must not waive the symbol-only filter for other projects.
 
-    The d6237a5 lesson, restated for the new layer: a per-candidate judgement
+    The recurring lesson, restated for this layer: a per-candidate judgement
     must not travel through a lookup-wide flag. The member layer is a separate
     lookup, and the whole-binary result for unrelated projects is unchanged by
     it.

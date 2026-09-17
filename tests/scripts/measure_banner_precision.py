@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Measure vendored-banner detection precision (P4.3 gate 6).
+"""Measure vendored-banner detection precision.
 
 Banner precision is measured separately from hash matching because a banner
 is a strong claim about a version and easy to misread from an unrelated

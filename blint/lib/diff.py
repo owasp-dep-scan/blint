@@ -1,4 +1,4 @@
-"""``blint diff`` — compare two versions of one binary (D1 / P4.4).
+"""``blint diff`` — compare two versions of one binary.
 
 Each side is a binary or an exported ``*-metadata.json``. The report is a
 structured delta over four layers:
@@ -645,8 +645,8 @@ def _reviews_delta(
 ) -> dict[str, Any]:
     """Capability-review delta, paired by rule id.
 
-    Reviews carry no ``finding_id`` (P4.5 left review IDs out; adding them
-    here would change the engine's review output, which stays byte-identical).
+    Reviews carry no ``finding_id`` (adding them here would change the
+    engine's review output, which stays byte-identical).
     One review entry exists per rule per binary — ``process_review`` merges
     each rule's matches into a single entry whose evidence list is an
     aggregate, not a locator — so the rule id pairs a review across versions,
