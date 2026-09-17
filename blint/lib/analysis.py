@@ -21,6 +21,7 @@ from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_fro
 # id to its implementation with ``getattr(sys.modules[__name__], cid.lower())``,
 # so a name missing from this module means that rule silently never runs.
 # pylint: disable-next=unused-import
+from blint.lib import pe_constants
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
     check_authenticode,  # noqa: F401
@@ -359,6 +360,34 @@ def initialize_rules(blint_options: BlintOptions) -> None:
     )
 
 
+def _rule_machine_type_allows(metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+    """Whether the rule's ``machine_types`` gate covers this binary's machine.
+
+    Absent from a rule means "all machine types", so existing rules behave
+    exactly as before. When a rule declares machine types, the binary's
+    machine resolves through blint's own PE-spec table (pe_constants) from the
+    numeric ``machine_type_value`` — never through a dependency's enum
+    rendering (ground rule 28) — falling back to the recorded machine-type
+    string for metadata that predates the numeric field. A binary whose
+    machine cannot be resolved never fires a machine-gated rule: an
+    architecture claim with no architecture behind it is exactly the
+    CHECK_PAC-on-x86-64 false positive this gate exists to prevent.
+    """
+    rule_machine_types = rule_obj.get("machine_types")
+    if not rule_machine_types:
+        return True
+    allowed = {str(m).upper() for m in rule_machine_types}
+    names: set[str] = set()
+    machine_value = metadata.get("machine_type_value")
+    if isinstance(machine_value, int) and not isinstance(machine_value, bool):
+        names.add(pe_constants.machine_type_name(machine_value).upper())
+    if not names:
+        rendered = metadata.get("machine_type")
+        if rendered:
+            names.add(str(rendered).upper())
+    return bool(names) and bool(names & allowed)
+
+
 def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     """Runs the checks on the provided metadata using the loaded rules.
 
@@ -381,6 +410,9 @@ def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
         rule_exe_types = rule_obj.get("exe_types")
         # Skip rules that are not valid for this exe type
         if exe_type and rule_exe_types and exe_type not in rule_exe_types:
+            continue
+        # Skip rules whose machine_types gate excludes this binary's machine
+        if not _rule_machine_type_allows(metadata, rule_obj):
             continue
         if result := run_rule(f, metadata, rule_obj, exe_type, cid):
             results.append(result)

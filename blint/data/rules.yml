@@ -276,6 +276,13 @@
   exe_types:
     - PE32
     - PE64
+  # PAC is an ARMv8.3 feature; the load-config RF_INSTRUMENTED bit means
+  # something else entirely on x86-64, so this rule is gated to the ARM64
+  # machine family instead of firing on every PE (V4).
+  machine_types:
+    - ARM64
+    - ARM64EC
+    - ARM64X
 - id: CHECK_PAC_STRICT
   title: Missing Strict Pointer Authentication Enforcement
   description: |
@@ -285,6 +292,10 @@
   exe_types:
     - PE32
     - PE64
+  machine_types:
+    - ARM64
+    - ARM64EC
+    - ARM64X
 - id: CHECK_XFG
   title: Missing Extended Flow Guard (XFG)
   description: |

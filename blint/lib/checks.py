@@ -85,11 +85,24 @@ def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
+    """Reports mandatory DLL characteristics the image does not carry.
+
+    Membership is tested against the structured ``flags`` list decoded from
+    the numeric bitfield (pe_constants), never against rendered enum text:
+    LIEF 1.0 renders DLL_CHARACTERISTICS members as integers (V1), which made
+    every value read as missing. The joined-string fallback keeps metadata
+    exported before the structured block existed (parse cache) working.
+    """
     missing: list[str] = []
+    structured = metadata.get("dll_characteristics_structured")
+    flag_names = {str(v).upper() for v in (structured or {}).get("flags") or []}
     if dll_characteristics := metadata.get("dll_characteristics"):
-        missing += [
-            c for c in rule_obj.get("mandatory_values", []) if c not in dll_characteristics
-        ]
+        for c in rule_obj.get("mandatory_values", []):
+            if flag_names:
+                if str(c).upper() not in flag_names:
+                    missing.append(c)
+            elif c not in dll_characteristics:
+                missing.append(c)
     if missing:
         return ", ".join(missing)
     return True
