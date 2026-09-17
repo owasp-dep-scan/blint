@@ -16,12 +16,12 @@ import yaml
 from rich.terminal_theme import MONOKAI
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_from_env
+from blint.lib import pe_constants
 
 # These are the rule registry, not spare imports: ``run_rule`` resolves a rule
 # id to its implementation with ``getattr(sys.modules[__name__], cid.lower())``,
 # so a name missing from this module means that rule silently never runs.
 # pylint: disable-next=unused-import
-from blint.lib import pe_constants
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
     check_authenticode,  # noqa: F401

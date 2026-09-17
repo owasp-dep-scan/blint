@@ -79,6 +79,16 @@ def test_machine_type_and_subsystem_names():
     assert subsystem_name(42) == "UNKNOWN(42)"
 
 
+def test_decode_flag_bits_surfaces_bits_above_the_tables_range():
+    # decode_flag_bits is generic over any bit table, so an unknown bit wider
+    # than the widest named flag must still be visible rather than dropped.
+    assert decode_flag_bits(1 << 20, DLL_CHARACTERISTICS) == ["UNKNOWN(1048576)"]
+    assert decode_flag_bits(0x40 | (1 << 31), DLL_CHARACTERISTICS) == [
+        "DYNAMIC_BASE",
+        "UNKNOWN(2147483648)",
+    ]
+
+
 def test_lief_dll_characteristics_rendering_is_pinned():
     """Tripwire (ground rule 28, verification-log finding V1).
 

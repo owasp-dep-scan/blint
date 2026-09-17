@@ -92,17 +92,19 @@ def check_dll_characteristics(
     LIEF 1.0 renders DLL_CHARACTERISTICS members as integers (V1), which made
     every value read as missing. The joined-string fallback keeps metadata
     exported before the structured block existed (parse cache) working.
+
+    An image whose bitfield is zero carries none of the mandatory values, so
+    it reports all of them. Keying the decision off the joined string instead
+    would let the least hardened PE of all pass silently.
     """
     missing: list[str] = []
     structured = metadata.get("dll_characteristics_structured")
-    flag_names = {str(v).upper() for v in (structured or {}).get("flags") or []}
-    if dll_characteristics := metadata.get("dll_characteristics"):
-        for c in rule_obj.get("mandatory_values", []):
-            if flag_names:
-                if str(c).upper() not in flag_names:
-                    missing.append(c)
-            elif c not in dll_characteristics:
-                missing.append(c)
+    mandatory_values = rule_obj.get("mandatory_values", [])
+    if isinstance(structured, dict) and "flags" in structured:
+        flag_names = {str(v).upper() for v in structured.get("flags") or []}
+        missing += [c for c in mandatory_values if str(c).upper() not in flag_names]
+    elif dll_characteristics := metadata.get("dll_characteristics"):
+        missing += [c for c in mandatory_values if c not in dll_characteristics]
     if missing:
         return ", ".join(missing)
     return True
