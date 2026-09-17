@@ -72,9 +72,12 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
 PE (Portable Executable) files are the standard for Windows.
 
 - **Headers (`dos_header`, `header`, `optional_header`):**
-  - `machine_type`: The target architecture (e.g., `AMD64`, `I386`).
-  - `subsystem`: Indicates whether the application is `WINDOWS_GUI` or `WINDOWS_CUI` (console).
-  - `dll_characteristics`: A set of flags indicating security features like `DYNAMIC_BASE` (ASLR) and `CONTROL_FLOW_GUARD`.
+  - `machine_type`: The target architecture (e.g., `AMD64`, `I386`), rendered from the COFF `Machine` field.
+  - `machine_type_value`: The raw numeric `IMAGE_FILE_MACHINE_*` value (e.g., `0x8664`). Rule `machine_types:` gates and the arch mapping resolve names through blint's own PE-spec table (`blint/lib/pe_constants.py`), never through a dependency's enum rendering.
+  - `subsystem`: The subsystem (e.g., `WINDOWS_GUI`, `WINDOWS_CUI`).
+  - `subsystem_value`: The raw numeric `IMAGE_SUBSYSTEM_*` value (e.g., `2`).
+  - `dll_characteristics_structured`: The DLL characteristics bitfield decoded by blint, not by the parsing library: `{"value": 352, "flags": ["HIGH_ENTROPY_VA", "DYNAMIC_BASE", "NX_COMPAT"], "source": "optional_header"}`. Unknown bits surface as `UNKNOWN(<bit>)`; names follow the PE specification.
+  - `dll_characteristics`: Compat alias for one release — the joined form of `dll_characteristics_structured.flags` (`"HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT"`). Consumers should move to the structured block; the string is scheduled for removal.
 
 - **Load Configuration (`load_configuration`):** This structure is the bridge between the static binary and the OS Loader/Hypervisor security features.
   - `guard_flags`: The raw integer flags indicating various security settings processed by the OS loader.

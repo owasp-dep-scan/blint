@@ -38,6 +38,7 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.driver_ioctl import (
     IOCTL_TABLE_SECTIONS,
 )
+from blint.lib.pe_constants import decode_dll_characteristics
 from blint.lib.utils import (
     calculate_entropy,
     camel_to_snake,
@@ -829,6 +830,11 @@ def add_pe_header_data(metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
             metadata["magic"] = str(dos_header.magic)
             header = parsed_obj.header
             metadata["machine_type"] = enum_to_str(header.machine)
+            machine_raw = getattr(header.machine, "value", header.machine)
+            # Numeric IMAGE_FILE_MACHINE value. The machine_types rule gate
+            # resolves the machine name through blint's own table in
+            # pe_constants from this field, never from a rendered enum.
+            metadata["machine_type_value"] = int(machine_raw)
             metadata["used_bytes_in_the_last_page"] = dos_header.used_bytes_in_last_page
             metadata["file_size_in_pages"] = dos_header.file_size_in_pages
             metadata["num_relocation"] = dos_header.numberof_relocation
@@ -876,13 +882,30 @@ def add_pe_optional_headers(metadata: dict, optional_header: lief.PE.OptionalHea
         The updated metadata dictionary.
     """
     with contextlib.suppress(IndexError, TypeError):
-        metadata["dll_characteristics"] = ", ".join(
-            [enum_to_str(chara) for chara in optional_header.dll_characteristics_lists]
-        )
+        # Ground rule 28: decode the DLL characteristics bitfield through
+        # blint's own PE-spec table (pe_constants) instead of matching on
+        # whatever LIEF's enum rendering produces this release. V1: LIEF 1.0
+        # renders DLL_CHARACTERISTICS members as bare integers, which turned
+        # the joined string into "UNKNOWN(32), UNKNOWN(64), ..." and made
+        # every PE hardening check read the flags as absent.
+        dll_characteristics_value = int(optional_header.dll_characteristics)
+        dll_characteristics_flags = decode_dll_characteristics(dll_characteristics_value)
+        metadata["dll_characteristics_structured"] = {
+            "value": dll_characteristics_value,
+            "flags": dll_characteristics_flags,
+            "source": "optional_header",
+        }
+        # Compat alias, one release: the joined form of `flags` under the
+        # long-standing key so checks.py's substring match and downstream
+        # consumers keep working. Scheduled for removal once the structured
+        # block above is the only consumed form.
+        metadata["dll_characteristics"] = ", ".join(dll_characteristics_flags)
         # Detect if this binary is a driver
-        if "WDM_DRIVER" in metadata["dll_characteristics"]:
+        if "WDM_DRIVER" in dll_characteristics_flags:
             metadata["is_driver"] = True
         metadata["subsystem"] = enum_to_str(optional_header.subsystem)
+        subsystem_raw = getattr(optional_header.subsystem, "value", optional_header.subsystem)
+        metadata["subsystem_value"] = int(subsystem_raw)
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
         metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
         metadata["major_linker_version"] = optional_header.major_linker_version

@@ -562,7 +562,13 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
             "is_signed": bool(metadata.get("signatures")),
         }
     if isinstance(parsed_obj, lief.PE.Binary):
-        if dll_chars := metadata.get("dll_characteristics", ""):
+        # aslr answers through blint's own decode of the DLL characteristics
+        # bitfield (V1). The joined-string fallback covers metadata exported
+        # before the structured block existed (parse cache, older reports).
+        structured = metadata.get("dll_characteristics_structured")
+        if isinstance(structured, dict) and "flags" in structured:
+            properties["aslr"] = "DYNAMIC_BASE" in (structured.get("flags") or [])
+        elif dll_chars := metadata.get("dll_characteristics", ""):
             properties["aslr"] = "DYNAMIC_BASE" in dll_chars
         if parsed_obj.has_configuration:
             try:

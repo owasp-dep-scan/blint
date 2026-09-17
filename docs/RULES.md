@@ -43,6 +43,25 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`, `info`). This might influence reporting or filtering.
 - `category` (Optional): A free-form grouping label carried through to the finding (e.g., `privacy-fingerprint`, `privacy-tracking`, `privacy-sidechannel`, `privacy-access`, `privacy-posture`). When any review in a run carries a category, blint adds a `Category` column to the capability table so related findings (such as the iOS privacy rules) group together; the value is also emitted in the JSON report.
 
+## Security Check Rules (built-in `rules.yml`)
+
+Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
+YAML carries the fields a check function evaluates: `mandatory_values`
+(substring-matched against `dll_characteristics`), `allowed_values` (manifest
+comparison), `property_key` (a `security_properties` key that must be `true`),
+`limit` / `baseline_version` (thresholds), and `exe_types`. Custom rules files
+can extend these; ids must not collide with built-ins.
+
+- `machine_types` (Optional): A list of PE machine-type names (`ARM64`,
+  `ARM64EC`, `ARM64X`, `AMD64`, `I386`, …) the rule applies to. **Absent means
+  "all machine types"**, so existing rules behave unchanged. The binary's
+  machine resolves through blint's own PE-spec table (`blint/lib/pe_constants.py`)
+  from the numeric `machine_type_value` in the metadata — never through a
+  dependency's enum rendering — and a binary whose machine cannot be resolved
+  never fires a machine-gated rule. Use this for architecture-specific
+  hardware features (e.g. `CHECK_PAC` is gated to the ARM64 family because
+  Pointer Authentication is an ARMv8.3 feature, not an x86-64 one).
+
 ## Sample Rules
 
 Here are examples demonstrating different rule types:

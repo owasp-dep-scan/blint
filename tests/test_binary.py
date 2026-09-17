@@ -3526,3 +3526,77 @@ def test_add_derived_attributes_omits_unrecoverable_go_version():
     assert "go_version" not in add_derived_attributes(metadata, None)["build_info"]
     metadata["go_formulation"]["go_version"] = "go1.27.1"
     assert add_derived_attributes(metadata, None)["build_info"]["go_version"] == "go1.27.1"
+
+
+def _pe64_image(machine: int = 0x8664, dll_characteristics: int = 0, subsystem: int = 3) -> bytes:
+    """A minimal PE32+ image with parameterized COFF machine, subsystem and
+    DLL characteristics, for assertions against blint's own decoders."""
+    dos = bytearray(0x80)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x80)
+    coff = struct.pack("<HHIIIHH", machine, 2, 0, 0, 0, 0xF0, 0x0022)
+    optional = bytearray(0xF0)
+    struct.pack_into("<H", optional, 0, 0x20B)  # PE32+ magic
+    struct.pack_into("<I", optional, 32, 4)
+    struct.pack_into("<III", optional, 36, 0x200000, 0x100000, 0x200000)
+    struct.pack_into("<H", optional, 68, subsystem)
+    struct.pack_into("<H", optional, 70, dll_characteristics)
+    struct.pack_into("<I", optional, 92, 16)  # numberOfRvaAndSizes
+    return b"".join([bytes(dos), b"PE\x00\x00", coff, bytes(optional)]).ljust(0x400, b"\x00")
+
+
+def test_parse_pe_dll_characteristics_structured_block(tmp_path):
+    # V1: the bitfield decodes through blint's PE-spec table; the value 352
+    # is the tier-0 python313.dll bitfield LIEF 1.0 rendered as integers.
+    exe_file = tmp_path / "hardened.exe"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=352))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"] == {
+        "value": 352,
+        "flags": ["HIGH_ENTROPY_VA", "DYNAMIC_BASE", "NX_COMPAT"],
+        "source": "optional_header",
+    }
+    # Compat alias: joined form of flags under the long-standing key.
+    assert metadata["dll_characteristics"] == "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT"
+    assert metadata["machine_type"] == "AMD64"
+    assert metadata["machine_type_value"] == 0x8664
+    assert metadata["subsystem"] == "WINDOWS_CUI"
+    assert metadata["subsystem_value"] == 3
+    # aslr no longer contradicts is_pie on a DYNAMIC_BASE image (V1).
+    assert metadata["security_properties"]["aslr"] is True
+    assert metadata["security_properties"]["pie"] is True
+
+
+def test_parse_pe_dll_characteristics_absent_flags(tmp_path):
+    exe_file = tmp_path / "nosec.exe"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=0))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"] == {
+        "value": 0,
+        "flags": [],
+        "source": "optional_header",
+    }
+    assert metadata["dll_characteristics"] == ""
+    assert metadata["security_properties"]["aslr"] is False
+
+
+def test_parse_pe_dll_characteristics_wdm_driver(tmp_path):
+    exe_file = tmp_path / "wdm.sys"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=0x2000, subsystem=1))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"]["flags"] == ["WDM_DRIVER"]
+    assert metadata["is_driver"] is True
+    assert metadata["subsystem"] == "NATIVE"
+    assert metadata["subsystem_value"] == 1
+
+
+def test_parse_pe_machine_type_arm64(tmp_path):
+    exe_file = tmp_path / "arm64.exe"
+    exe_file.write_bytes(_pe64_image(machine=0xAA64))
+    metadata = parse(str(exe_file))
+
+    assert metadata["machine_type"] == "ARM64"
+    assert metadata["machine_type_value"] == 0xAA64

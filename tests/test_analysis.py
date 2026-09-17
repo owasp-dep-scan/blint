@@ -1212,3 +1212,105 @@ def test_check_wx_segments_passes_without_offending_segments():
         for r in run_checks("module.wasm", other_exe_type_metadata)
         if r["id"] == "CHECK_WX_SEGMENTS"
     ]
+
+
+def test_check_dll_characteristics_prefers_structured_flags():
+    """V1: mandatory-value membership is exact against the decoded flag list.
+
+    The substring path exists only for metadata exported before the
+    structured block (parse cache); both must answer identically.
+    """
+    from blint.lib.checks import check_dll_characteristics
+
+    rule = {
+        "mandatory_values": [
+            "HIGH_ENTROPY_VA",
+            "NX_COMPAT",
+            "GUARD_CF",
+            "FORCE_INTEGRITY",
+            "DYNAMIC_BASE",
+        ]
+    }
+    structured_metadata = {
+        "dll_characteristics_structured": {
+            "value": 352,
+            "flags": ["HIGH_ENTROPY_VA", "DYNAMIC_BASE", "NX_COMPAT"],
+            "source": "optional_header",
+        },
+        "dll_characteristics": "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT",
+    }
+    assert (
+        check_dll_characteristics("t.exe", structured_metadata, rule_obj=rule)
+        == "GUARD_CF, FORCE_INTEGRITY"
+    )
+    legacy_metadata = {
+        "dll_characteristics": "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT",
+    }
+    assert (
+        check_dll_characteristics("t.exe", legacy_metadata, rule_obj=rule)
+        == "GUARD_CF, FORCE_INTEGRITY"
+    )
+    complete_metadata = {
+        "dll_characteristics_structured": {
+            "value": 0x42F4,
+            "flags": [
+                "HIGH_ENTROPY_VA",
+                "DYNAMIC_BASE",
+                "FORCE_INTEGRITY",
+                "NX_COMPAT",
+                "GUARD_CF",
+            ],
+            "source": "optional_header",
+        },
+    }
+    assert check_dll_characteristics("t.exe", complete_metadata, rule_obj=rule) is True
+
+
+def test_machine_types_gate_keeps_pac_rules_off_x86_64():
+    """V4: CHECK_PAC/CHECK_PAC_STRICT are ARM64-family rules; a fully
+    hardened x86-64 PE must not fire them."""
+    x64_metadata = {
+        "exe_type": "PE64",
+        "machine_type": "AMD64",
+        "machine_type_value": 0x8664,
+        "security_properties": {},
+    }
+    results = run_checks("python.exe", x64_metadata)
+    ids = {r["id"] for r in results}
+    assert "CHECK_PAC" not in ids
+    assert "CHECK_PAC_STRICT" not in ids
+
+
+def test_machine_types_gate_still_fires_pac_rules_on_arm64():
+    arm64_metadata = {
+        "exe_type": "PE64",
+        "machine_type": "ARM64",
+        "machine_type_value": 0xAA64,
+        "security_properties": {},
+    }
+    results = run_checks("python-arm64.exe", arm64_metadata)
+    ids = {r["id"] for r in results}
+    assert "CHECK_PAC" in ids
+    assert "CHECK_PAC_STRICT" in ids
+
+
+def test_rule_machine_type_gate_resolution_rules():
+    from blint.lib.analysis import _rule_machine_type_allows
+
+    arm64_rule = {"machine_types": ["ARM64", "ARM64EC", "ARM64X"]}
+    # The numeric value resolves through blint's table, so a stale or renamed
+    # rendered string cannot widen or shrink the gate.
+    assert _rule_machine_type_allows(
+        {"machine_type": "AARCH64", "machine_type_value": 0xAA64}, arm64_rule
+    )
+    assert not _rule_machine_type_allows(
+        {"machine_type": "ARM64", "machine_type_value": 0x8664}, arm64_rule
+    )
+    # Rendered-string fallback for metadata without the numeric field.
+    assert _rule_machine_type_allows({"machine_type": "arm64"}, arm64_rule)
+    assert not _rule_machine_type_allows({"machine_type": "AMD64"}, arm64_rule)
+    # An unresolvable machine never fires a machine-gated rule...
+    assert not _rule_machine_type_allows({}, arm64_rule)
+    # ...but an absent gate means "all", preserving existing rule behavior.
+    assert _rule_machine_type_allows({}, {})
+    assert _rule_machine_type_allows({"machine_type": "AMD64"}, {"machine_types": []})
