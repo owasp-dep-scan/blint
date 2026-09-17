@@ -1,0 +1,19 @@
+tests/test_pe_constants.py
+  s_25b306b5a7494b::t_b1369e534c84d4 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7a2c563eb01dc1bba569c0ce38f936f6af22e3f4",
+  "prompts": {},
+  "sessions": {
+    "s_25b306b5a7494b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c59208-db7f-4c58-a278-1ea3a23b67dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
