@@ -4,7 +4,7 @@ import pytest
 
 lief = pytest.importorskip("lief")
 
-from blint.lib.pe_constants import (  # noqa: E402
+from blint.lib.pe_constants import (
     DLL_CHARACTERISTICS,
     decode_dll_characteristics,
     decode_flag_bits,
