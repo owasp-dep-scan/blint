@@ -1,0 +1,28 @@
+tests/test_pe_overlay.py
+  s_25b306b5a7494b::t_b356623340e5de 160-181
+  s_25b306b5a7494b::t_a3de2c5dfbbb6c 19
+blint/lib/pe_overlay.py
+  s_25b306b5a7494b::t_b9439f2468171a 232-233
+  s_25b306b5a7494b::t_3dabbb69559643 118,129-136,138
+  s_25b306b5a7494b::t_c4021d46323cc2 207-208,210-214,216-223
+  s_25b306b5a7494b::t_26e965b3f67710 155-157,167
+  s_25b306b5a7494b::t_73ff471c221e41 158-163
+blint/lib/entropy.py
+  s_25b306b5a7494b::t_803d09e890dacc 359-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "658394819248272302d0a60f7312098e1b4def90",
+  "prompts": {},
+  "sessions": {
+    "s_25b306b5a7494b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c59208-db7f-4c58-a278-1ea3a23b67dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
