@@ -145,6 +145,21 @@ def test_parse_codeview_payload_unknown_signature():
     assert info["guid"] is None and info["pdb_path"] is None
 
 
+def test_parse_codeview_payload_truncated_entry_does_not_raise():
+    """A CodeView entry whose SizeOfData falls short of its own layout.
+
+    The debug directory is attacker-controlled (ground rule 30) and the
+    caller's per-entry suppression covers AttributeError/TypeError/ValueError
+    only — an UnboundLocalError from a half-decoded payload would abort the
+    whole PE parse, not just the entry. The two lengths below straddle the
+    RSDS (28) and NB10 (20) minimums; a valid-length payload is covered above.
+    """
+    for payload in (b"RSDS" + b"\x00" * 16, b"NB10" + b"\x00" * 8):
+        info = parse_codeview_payload(payload)
+        assert info["signature"] in ("RSDS", "NB10")
+        assert info["pdb_path"] is None
+
+
 def test_format_pdb_guid_short_payload():
     assert format_pdb_guid(b"RSDS") is None
 

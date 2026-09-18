@@ -232,6 +232,14 @@ def _version_resource(
     return bytes(body)
 
 
+def _fixed_block(major: int, minor: int, build: int, revision: int) -> bytes:
+    """A VS_FIXEDFILEINFO carrying one version quad in both version fields."""
+    ms, ls = (major << 16) | minor, (build << 16) | revision
+    return struct.pack(
+        "<13I", 0xFEEF04BD, 0x00010000, ms, ls, ms, ls, 0x3F, 0, 4, 2, 0, 0, 0
+    )
+
+
 _FIXED_BLOCK = struct.pack(
     "<13I",
     0xFEEF04BD,  # signature
@@ -313,6 +321,74 @@ def test_version_info_semantic_agreement(tmp_path):
     exe_file.write_bytes(_pe_image_with_resources(section))
     version_info = parse(str(exe_file))["version_info"]
     assert "mismatches" not in version_info
+
+
+def test_version_info_marketing_string_is_not_a_mismatch(tmp_path):
+    """Sysinternals ships "1.83" against a fixed 1.8.3.0, and "14.3" against
+    14.30.0.0, on Microsoft-signed unmodified binaries.
+
+    Only the major component is comparable between the two: the rest of the
+    string table is marketing text a vendor writes however it likes. A
+    component-wise comparison called 34 of the 177 tier-0/1 files tampered,
+    which is the false-positive class this lane exists to remove — and it
+    escaped the gate because ``mismatches`` is a metadata field with no rule
+    behind it, so fp_gate never counted it.
+    """
+    # (fixed quad, the string the vendor actually ships) — real pairs read
+    # off Sysinternals binaries in ~/sandbox/pe-corpus/tier1.
+    for quad, marketing in (
+        ((1, 8, 3, 0), "1.83"),
+        ((14, 30, 0, 0), "14.3"),
+        ((2, 0, 2, 0), "2.02"),
+        ((1, 80, 0, 0), "1.8"),
+    ):
+        strings = {"040904b0": {"FileVersion": marketing}}
+        section = _resource_section(
+            {RT_VERSION: [(1, 1033, _version_resource(_fixed_block(*quad), strings))]}
+        )
+        exe_file = tmp_path / f"stock-{marketing.replace('.', '_')}.exe"
+        exe_file.write_bytes(_pe_image_with_resources(section))
+        version_info = parse(str(exe_file))["version_info"]
+        assert "mismatches" not in version_info, (quad, marketing)
+
+
+def test_version_info_major_disagreement_is_still_the_tamper_signal(tmp_path):
+    """The signal the field exists for survives: a rewritten 5.x string
+    beside a 3.13 fixed block still reports."""
+    strings = {"040904b0": {"FileVersion": "5.0.1.2"}}
+    section = _resource_section(
+        {RT_VERSION: [(1, 1033, _version_resource(_FIXED_BLOCK, strings))]}
+    )
+    exe_file = tmp_path / "tampered2.exe"
+    exe_file.write_bytes(_pe_image_with_resources(section))
+    assert parse(str(exe_file))["version_info"]["mismatches"] == ["FileVersion"]
+
+
+def test_version_resource_survives_a_node_budget_spent_on_icons(tmp_path):
+    """VERSION is resource type 16 and the tree enumerates types in ascending
+    id, so an image with more icons (type 3) than the node budget would walk
+    past the budget before reaching its VERSIONINFO.
+
+    A fixture below the budget cannot see this (ground rule 33 in its
+    node-count form): the whole tree fits, so every node is reached whatever
+    order the walk takes.
+    """
+    icons = [(i + 1, 1033, b"\xff" * 16) for i in range(MAX_RESOURCE_DATA_NODES + 256)]
+    strings = {"040904b0": {"FileVersion": "3.13.7"}}
+    section = _resource_section(
+        {
+            RT_ICON: icons,
+            RT_VERSION: [(1, 1033, _version_resource(_FIXED_BLOCK, strings))],
+        }
+    )
+    exe_file = tmp_path / "manyicons.exe"
+    exe_file.write_bytes(_pe_image_with_resources(section))
+    metadata = parse(str(exe_file))
+    # The node cap still fires and is still reported as a degradation...
+    assert any("data nodes past" in d for d in metadata["resources"]["degradations"])
+    # ...but the targeted VERSION lookup is not starved by it.
+    assert metadata["version_info"]["present"] is True
+    assert metadata["version_info"]["strings"]["040904b0"]["FileVersion"] == "3.13.7"
 
 
 def test_version_info_strings_without_fixed_block(tmp_path):
