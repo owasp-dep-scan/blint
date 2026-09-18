@@ -27,6 +27,7 @@ from blint.lib.checks import (
 from blint.lib.pe_signature import (
     MAX_BER_DEPTH,
     MAX_CHAIN_CERTIFICATES,
+    MAX_SIGNATURES_WALKED,
     _win_certificate_entries,
     parse_pe_code_signature,
 )
@@ -461,6 +462,42 @@ def test_signature_count_exact_past_the_walk_window():
     assert levels == list(range(1, depth + 1))
 
 
+def test_walk_past_the_window_declines_the_weak_digest_verdict():
+    """Ground rule 33 for the signature window itself: a fixture with more
+    nested signatures than ``MAX_SIGNATURES_WALKED``.
+
+    The test above stops at ten, which is well inside the window, so nothing
+    exercised what the walk does at it. Past the window the count is a floor
+    (``signature_walk_truncated`` says so) and ``weak_digest_only`` must not
+    be decided from the signatures that happened to fit: here every walked
+    signature is SHA-1 and the innermost one — the one the walk never
+    reaches — is SHA-256, so a sampled verdict would report a dual-signed
+    binary as SHA-1-signed at high severity.
+    """
+    depth = MAX_SIGNATURES_WALKED + 6
+    inner = _content_info(
+        [_cert_tlv(1, "Leaf", "Leaf")], _signer_info(1, "Leaf", "2.16.840.1.101.3.4.2.1")
+    )
+    content_info = inner
+    for _ in range(depth):
+        content_info = _content_info(
+            [_cert_tlv(1, "Leaf", "Leaf")],
+            _signer_info(1, "Leaf", "1.3.14.3.2.26", unauth=[_nested_attr(content_info)]),
+        )
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, content_info)
+    assert block["parse_status"] == "parsed"
+    assert block["signature_count"] == MAX_SIGNATURES_WALKED
+    assert len(block["signatures"]) == MAX_SIGNATURES_WALKED
+    assert block["signature_walk_truncated"] is True
+    assert block["weak_digest_only"] is None
+    assert (
+        check_weak_signature_digest("f", {"code_signature": block}, {}) is True
+    ), "an undecided verdict must not be reported as a finding"
+
+
 def test_chain_length_exact_past_the_listing_cap():
     """A 20-certificate chain: ``chain_length`` is exact (20) while the
     listing stops at the cap with ``chain_truncated``."""
@@ -484,6 +521,31 @@ def test_chain_length_exact_past_the_listing_cap():
     assert len(signature["chain"]) == MAX_CHAIN_CERTIFICATES
     assert signature["chain_truncated"] is True
     assert signature["chain_complete"] is False
+
+
+def test_chain_past_the_certificate_parse_window_withholds_its_end():
+    """A chain longer than the certificate *parse* window, not just the
+    listing window.
+
+    The test above uses 20 certificates, which is inside the 32 the
+    CertificateSet parse keeps, so it measured the listing cap only. With 40,
+    the walk runs out of parsed certificates before it runs out of chain: the
+    length is then a floor, and naming ``chain_terminates_at`` from the last
+    link that happened to fit would assert an end the blob does not have.
+    """
+    depth = 40
+    certs = [_cert_tlv(7, "CA0", "Leaf")]
+    certs += [_cert_tlv(100 + index, f"CA{index + 1}", f"CA{index}") for index in range(depth)]
+    content_info = _content_info(certs, _signer_info(7, "CA0", "2.16.840.1.101.3.4.2.1"))
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, content_info)
+    signature = block["signatures"][0]
+    assert signature["chain_length"] < depth, "the walk cannot see past the parse window"
+    assert signature["chain_length_exact"] is False
+    assert signature["chain_terminates_at"] is None
+    assert signature["chain_complete"] is None
 
 
 def test_nested_inheritance_and_untimestamped_nested(tmp_path):

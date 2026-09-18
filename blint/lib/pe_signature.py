@@ -846,13 +846,20 @@ def _match_certificate(certificates: list[dict], info: dict) -> dict | None:
 
 
 def _build_chain(
-    certificates: list[dict], signer: dict
-) -> tuple[list[dict], int, str | None, bool]:
+    certificates: list[dict], signer: dict, certificates_truncated: bool = False
+) -> tuple[list[dict], int, str | None, bool | None, bool]:
     """The chain the blob ships above the signer: intermediates then root.
 
     Structural only — the next link is the certificate whose subject DER
-    equals the current link's issuer DER. Returns (listed chain, exact
-    length, terminating CN, whether it terminates at a self-signed root).
+    equals the current link's issuer DER. Returns (listed chain, length,
+    terminating CN, whether it terminates at a self-signed root, whether the
+    length is exact).
+
+    ``certificates_truncated`` says the blob carried more certificates than
+    the parse window kept. A walk that then runs out of links has not found
+    the end of the chain, it has found the end of what was parsed — so the
+    length is a floor and both the terminating CN and ``chain_complete`` are
+    withheld rather than named from the last link that happened to fit.
     """
     chain: list[dict] = []
     chain_length = 0
@@ -861,8 +868,9 @@ def _build_chain(
     if current["raw_subject"] == current["raw_issuer"]:
         # A self-signed signer is its own root: the chain terminates at the
         # leaf itself, which is what signing_class will call self_signed.
-        return chain, 0, current["subject_cn"], True
+        return chain, 0, current["subject_cn"], True, True
     seen = {signer["serial_hex"]}
+    ran_out = False
     while True:
         nxt = None
         for cert in certificates:
@@ -872,6 +880,7 @@ def _build_chain(
                 nxt = cert
                 break
         if nxt is None:
+            ran_out = True
             break
         chain_length += 1
         seen.add(nxt["serial_hex"])
@@ -889,8 +898,10 @@ def _build_chain(
         if current["raw_subject"] == current["raw_issuer"]:
             complete = True
             break
+    if certificates_truncated and ran_out:
+        return chain, chain_length, None, None, False
     terminates_at = current["subject_cn"] if chain_length else None
-    return chain, chain_length, terminates_at, complete
+    return chain, chain_length, terminates_at, complete, True
 
 
 def _timestamp_entry(countersignature: dict, cert: dict | None) -> dict:
@@ -940,6 +951,7 @@ def _parse_signature(
         return None, []
     info = _parse_signer_info(signed["signer_infos"][0])
     cert = _match_certificate(signed["certificates"], info)
+    certificates_truncated = signed["certificate_count"] > len(signed["certificates"])
 
     entry: dict = {
         "digest_algorithm": info["digest_algorithm"],
@@ -957,11 +969,19 @@ def _parse_signature(
             "issuer_cn": cert["issuer_cn"],
             "eku": cert["eku"],
         }
-        chain, chain_length, terminates_at, complete = _build_chain(signed["certificates"], cert)
+        chain, chain_length, terminates_at, complete, length_exact = _build_chain(
+            signed["certificates"], cert, certificates_truncated
+        )
         entry["chain"] = chain
         entry["chain_length"] = chain_length
         if chain_length > MAX_CHAIN_CERTIFICATES:
             entry["chain_truncated"] = True
+        if not length_exact:
+            # The chain ran past the certificate parse window, so the length
+            # is a floor: say so rather than letting it read as the whole
+            # chain (``chain_terminates_at`` and ``chain_complete`` are the
+            # facts that window cost us, and they are withheld above).
+            entry["chain_length_exact"] = False
         entry["chain_terminates_at"] = terminates_at
         entry["chain_complete"] = complete
     else:
@@ -970,6 +990,11 @@ def _parse_signature(
         entry["chain_length"] = 0
         entry["chain_terminates_at"] = None
         entry["chain_complete"] = False
+        if certificates_truncated:
+            # The signer's own certificate may be one of the ones past the
+            # parse window: "not found here" is not "not carried" (rule 14).
+            entry["signer_certificate_not_parsed"] = True
+            entry["chain_complete"] = None
 
     # Content: the file digest and the SpcPeImageData (page hashes).
     if signed["content_type"] == OID_SPC_INDIRECT_DATA and signed["content"] is not None:
@@ -1185,16 +1210,25 @@ def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
         signature_count += 1
         if entry.get("digest_algorithm") in MODERN_DIGESTS:
             modern_seen = True
-        if signature_count <= MAX_SIGNATURES_WALKED:
-            block["signatures"].append(entry)
+        # One window bounds both the walk and the listing, so there is one
+        # flag to read rather than two that can never disagree (rule 21).
+        block["signatures"].append(entry)
         for nested_der in nested_ders:
             pending.append((nested_der, level + 1, entry.get("timestamp")))
 
-    # weak_digest_only is computed over every signature walked (nested
-    # included, cap included): reporting only the outer SHA-1 of a
-    # dual-signed binary would make a modern binary look SHA-1-signed.
+    # weak_digest_only is computed over every signature walked, nested
+    # included: reporting only the outer SHA-1 of a dual-signed binary would
+    # make a modern binary look SHA-1-signed. A truncated walk has not seen
+    # every signature, so a "no modern digest anywhere" verdict it could not
+    # have reached is None (undecided) rather than a true the rule would fire
+    # on -- the one modern signature may be the one past the window.
     block["signature_count"] = signature_count
-    block["weak_digest_only"] = signature_count > 0 and not modern_seen
+    if modern_seen or signature_count == 0:
+        block["weak_digest_only"] = False
+    elif block.get("signature_walk_truncated"):
+        block["weak_digest_only"] = None
+    else:
+        block["weak_digest_only"] = True
     if signature_errors:
         block["signature_errors"] = signature_errors
 
