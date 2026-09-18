@@ -194,6 +194,32 @@
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
+- id: CHECK_SIGNATURE_NOT_TIMESTAMPED
+  title: Signature Not Timestamped
+  description: |
+    An Authenticode signature without a countersignature timestamp stops being verifiable the moment the signing certificate expires: without a timestamp there is no proof the signature existed while the certificate was valid, so the signature is only as durable as the certificate behind it. Short-lived certificates (some CAs issue certificates valid for days) make this a durability question rather than an exceptional one.
+    The check reports signatures that carry neither an RFC 3161 countersignature nor a legacy PKCS#9 countersignature. Nested signatures inherit the outer signature's timestamp, so a dual-signed binary is not double-counted. Validity relative to the timestamp is reported in the code_signature metadata; this rule is only about its absence.
+  severity: medium
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_WEAK_SIGNATURE_DIGEST
+  title: Weak Signature Digest
+  description: |
+    None of the Authenticode signatures embedded in this binary - including nested dual signatures - uses a modern digest (SHA-256 or stronger). SHA-1 and MD5 signature digests are susceptible to collision-based attacks that let an attacker substitute malicious content under a valid-looking signature.
+    Dual signing (a SHA-1 outer signature with a SHA-256 signature nested inside it) is the normal shape for software that must run on older Windows, and is deliberately not reported: the nested signature carries the modern digest. Only a binary with no modern digest anywhere in its signature list is flagged.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |

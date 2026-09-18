@@ -98,6 +98,21 @@ PE (Portable Executable) files are the standard for Windows.
 - **Authenticode (`authenticode`, `signatures`):** Detailed information about the binary's digital signature.
   - Provides hashes (`authentihash_*`) of the signed content.
   - Extracts information about the signer, including the issuer (`cert_signer`) and serial number. This is vital for trust verification and threat intelligence.
+  - Kept for one release after the structured `code_signature` block below landed (additive rule); `verification_flags` is LIEF's *structural* verdict, not trust.
+
+- **Code signature (`code_signature`):** the structured Authenticode block, parsed by `blint/lib/pe_signature.py` from the certificate table's DER (`WIN_CERTIFICATE` entries of type `PKCS_SIGNED_DATA`), mirroring the Mach-O `code_signature` block so both formats answer the same questions (W2.1/W2.2). `trust_validation` is `not_performed` in band — blint names chains, it never validates trust (no root-store anchoring, no revocation), so "signed" is never readable as "trusted".
+  - `parse_status`: `parsed`, `malformed`, or `absent`. A present-but-unwalkable table or signature is `malformed` with a `parse_error` reason and per-signature `signature_errors` — never folded into a confident "unsigned".
+  - `scope`: `embedded` when a certificate table exists, `none` otherwise. Catalog signing (W2.3) is not resolved yet, so `scope` is never `catalog`; when `scope` is `none`, `catalog_lookup: "not_performed"` states that a catalog-signed file cannot be distinguished from an unsigned one until a catalog directory is supplied.
+  - `certificate_entries` (exact), `certificate_revision`, and `unparsed_certificate_entries` for non-PKCS#7 table entries.
+  - `signatures`: a **list** — dual signing is the normal case, not an exception. `signature_count` is exact; `signatures_truncated`/`signature_walk_truncated` say when the listing or the hostile-input walk window (64) stops short of it. Each entry:
+    - `digest_algorithm` — the SignerInfo digest (`SHA256`, `SHA1`, dotted OID when unmapped).
+    - `signer`: `cn`, `o`, `serial` (hex), `not_before`/`not_after` (ISO 8601 Z), `issuer_cn`, `eku` (named: `codeSigning`, `whql`, `kernelModeCodeSigning`, …; dotted OIDs when unmapped).
+    - `chain`: the certificates the blob ships above the signer (leaf's issuer upward) — `cn`, `o`, `serial`, `is_ca`, `issuer_cn`. `chain_length` is exact; `chain_truncated` marks a listing past the 16-entry window. `chain_terminates_at` names the last link's CN and `chain_complete` says whether that link is self-signed (a root) — a chain the blob leaves incomplete says so rather than implying a root it never carried.
+    - `timestamp`: `{"present": true, "kind": "rfc3161"|"pkcs9", "time": "<ISO>", "tsa_cn": "<CN>", "signature_valid_at_timestamp": true|false}` — both countersignature forms are extracted (`countersignatures` lists every one) and validity is stated **relative to the timestamp**, because short-lived certificates make "is the cert expired?" the wrong question. Nested signatures state `inherited: true` when they reuse the outer signature's timestamp. With no timestamp at all: `{"present": false}` and `expires_hard: true` — such a signature really does stop being verifiable at certificate expiry (`CHECK_SIGNATURE_NOT_TIMESTAMPED`).
+    - `page_hashes`: `{"present": true, "count": <exact>, "algorithm": "SHA256"}` from the `SpcPeImageData` moniker. Presence is a hardening property; blint does not recompute them and claims no verification.
+    - `opus_info` (`program_name`, `url` when present), `statements` (individual/commercial code signing), and `digest` — the per-signature `structural_integrity`: `algorithm`, `embedded`, `computed` (the authentihash blint recomputed) and `digest_match`. When blint does not recompute (unsupported algorithm), the block says `recompute: "not_performed"` instead of echoing the embedded value.
+  - `structural_integrity`: the same facts for the first signature whose digest blint recomputed.
+  - `weak_digest_only`: true only when **no** signature (nested included, past the listing cap included) uses a modern digest — the outer SHA-1 of a dual-signed binary is not a SHA-1-signed binary (`CHECK_WEAK_SIGNATURE_DIGEST`).
 
 - **Resources (`resources`):** Metadata extracted from the `.rsrc` section.
   - `version_metadata`: Contains key-value pairs like `ProductName`, `CompanyName`, and `FileVersion`. Useful for identifying the software and its origin.
@@ -776,7 +791,7 @@ Accounting for what was analyzed versus what was discovered, so a run that disas
 - **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
 - **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).
-- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet, or whose source could not be read. Their absence from `security_properties` means "not implemented" or "source unreadable", never "checked and clean". Mach-O records its granular `has_nx_stack` / `has_nx_heap` and unreadable signature blobs here; PE records an unreadable load configuration, an absent debug directory, an unresolved Authenticode scope (catalog signing, W2.3) and unparsed page hashes.
+- **`security_properties_gaps`**: properties the format could carry but blint does not compute yet, or whose source could not be read. Their absence from `security_properties` means "not implemented" or "source unreadable", never "checked and clean". Mach-O records its granular `has_nx_stack` / `has_nx_heap` and unreadable signature blobs here; PE records an unreadable load configuration, an absent debug directory, an unresolved Authenticode scope (catalog signing, W2.3) and unparsed page hashes (no `code_signature` block was parsed).
 
 #### Run-level `analysis-coverage.json`
 
@@ -835,6 +850,7 @@ PE-specific properties and their sources:
 | `debug_info` | debug directory: `full` when a CodeView entry carries a PDB path, `codeview_only` when entries exist without one, `none` for an empty directory | replaces the COFF-symbol-table `stripped` guess, which modern MSVC images made meaningless; `debug_info_pdb_path` carries the path when present. |
 | `arm64ec` / `arm64x` | PE header machine type | |
 | `authenticode_scope` | `embedded` when a signature table exists | catalog signing is not resolved yet (W2.3), so a non-embedded scope is recorded as a gap rather than guessed as `none`. |
+| `signed_page_hashes` | `code_signature.signatures[].page_hashes` | stated either way when a signature was parsed (`true` when any signature carries `SpcPeImageData` page hashes); the gaps list carries it when no block was parsed. |
 | `enclave` | load configuration `EnclaveConfigurationPointer` | presence-only: `true` when an enclave configuration exists, omitted otherwise — absence is the Windows norm, not a computed negative. |
 
 `pac`/`pac_strict` are deliberately absent for PE: no PE field records ARM64 pointer authentication (the GuardFlags `RF_*` bits are Return Flow Guard per the Windows SDK headers), so there is no honest source to compute from.

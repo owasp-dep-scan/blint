@@ -43,11 +43,13 @@ from blint.lib.checks import (
     check_runtime_loading,  # noqa: F401
     check_search_path,  # noqa: F401
     check_security_property,
+    check_signature_not_timestamped,  # noqa: F401
     check_tls_callbacks,  # noqa: F401
     check_trust_info,  # noqa: F401
     check_undeclared_dependencies,  # noqa: F401
     check_unused_dependencies,  # noqa: F401
     check_virtual_size,  # noqa: F401
+    check_weak_signature_digest,  # noqa: F401
     check_wx_segments,  # noqa: F401
 )
 from blint.lib.utils import (

@@ -61,6 +61,7 @@ from blint.lib.pe_imports import parse_pe_imports as pe_imports_parse
 from blint.lib.pe_layout import parse_pe_layout, parse_pre_main_execution
 from blint.lib.pe_overlay import classify_pe_overlay
 from blint.lib.pe_resources import parse_pe_resources
+from blint.lib.pe_signature import parse_pe_code_signature
 from blint.lib.utils import (
     camel_to_snake,
     demangle_symbolic_name,
@@ -723,8 +724,18 @@ def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary,
         # Catalog signing (W2.3) is not resolved yet, so neither "catalog"
         # nor "none" is knowable; an unsigned-embedded image stays a gap.
         gaps.append("authenticode_scope")
-    # Authenticode SpcPeImageData page hashes (02/A) are not parsed yet.
-    gaps.append("signed_page_hashes")
+    # W2.2: page hashes come from the code_signature block's per-signature
+    # facts. Stated either way when a signature was parsed; a malformed or
+    # absent block stays a gap because the tristate has no source to read.
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict) and code_signature.get("parse_status") == "parsed":
+        page_hashed = any(
+            (sig.get("page_hashes") or {}).get("present")
+            for sig in code_signature.get("signatures", [])
+        )
+        properties["signed_page_hashes"] = page_hashed
+    else:
+        gaps.append("signed_page_hashes")
     return properties, gaps
 
 
@@ -947,6 +958,11 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["rich_header"] = rich_decoded
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
+        # W2.1/W2.2: the structured code_signature block (signer, chain,
+        # timestamps, nested signatures, page hashes) mirrors the Mach-O
+        # block of the same name. The legacy ``authenticode`` key above
+        # stays populated for one release (additive rule 15).
+        metadata["code_signature"] = parse_pe_code_signature(parsed_obj, exe_file)
         metadata["resources"] = process_pe_resources(parsed_obj)
         if resources_extra := parse_pe_resources(parsed_obj, metadata["resources"]):
             # The parsed VERSIONINFO goes to the top level only; the legacy
