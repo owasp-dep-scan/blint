@@ -34,6 +34,24 @@
   exe_types:
     - MachO
     - genericbinary
+- id: CHECK_TLS_CALLBACKS
+  title: TLS Callbacks Run Before Main
+  description: |
+    The binary registers TLS callbacks, which the Windows loader executes
+    during process and thread setup — before the application's `main` and
+    with no caller in the code. This is the PE sibling of the Objective-C
+    `+load` check: a legitimate hook (C runtimes, crash reporters and
+    anti-tamper schemes use it), but also the earliest code that runs in the
+    process, invisible to entry-point-based review, and a classic
+    persistence, anti-debug or environment-tamper point. The
+    `pre_main_execution` block in the metadata names the callbacks, states
+    whether the TLS directory and callback array are writable, and lists the
+    static initializers that also run before `main`. Review what these
+    callbacks initialize.
+  severity: info
+  exe_types:
+    - PE32
+    - PE64
 - id: CHECK_WX_SEGMENTS
   title: Writable and Executable Memory Segment
   description: |
