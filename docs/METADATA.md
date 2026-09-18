@@ -146,9 +146,9 @@ PE (Portable Executable) files are the standard for Windows.
   - `timestamp` (header `TimeDateStamp`), `timestamp_epoch_zero` (the `/Brepro` shape), `timestamp_in_future`. A future stamp on a `/Brepro` build is expected — correlate with `debug.repro.present`.
 - **Pre-main execution (`pre_main_execution`):** the one summary of what runs before `main` (B.1); the legacy top-level `tls_callbacks` address list keeps its shape.
   - `tls_callbacks`: one row per callback — `address`, and `function`/`resolved: true` when the address matched a discovered function.
-  - `tls_directory_writable` and `tls_callback_array_writable` (with `tls_callback_array_section`): the writability of the TLS directory struct and of the callback array the loader walks — a writable array is the runtime-patchable shape.
+  - `tls_directory_writable` and `tls_callback_array_writable` (with `tls_callback_array_section`): the writability of the TLS directory struct and of the callback array the loader walks — a writable array is the runtime-patchable shape. Both are stated either way; the array pair is omitted only when no section covers the array.
   - `ctor_functions` (static initializers) or, when LIEF's PE initializers are exactly the TLS callbacks (it derives them from the callback array), `initializers_are_tls_callbacks: true` — one fact, not a duplicate list.
-  - `callback_count`, `initializer_count`; `tls_callbacks_truncated` beyond the cap.
+  - `callback_count`, `initializer_count`: exact counts, never the size of the capped listing; `tls_callbacks_truncated` and `initializers_truncated` say when the listings stop short of them.
   - `anti_debug_reachable_functions`: only when disassembly ran and a resolved callback's call targets reach one of a fixed set of debugger-awareness imports (`IsDebuggerPresent`, `CheckRemoteDebuggerPresent`, `NtSetInformationThread`, `NtQueryInformationProcess`).
 - **Thread Local Storage (TLS) Callbacks:**
   - `tls_callbacks`: List of the callbacks associated with the current TLS. These functions are called before any other functions.

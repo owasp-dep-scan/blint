@@ -14,7 +14,11 @@ import time
 
 from blint.lib.binary import parse
 from blint.lib.checks import check_tls_callbacks
-from blint.lib.pe_layout import parse_pre_main_execution
+from blint.lib.pe_layout import (
+    MAX_LISTED_CALLBACKS,
+    MAX_LISTED_CTORS,
+    parse_pre_main_execution,
+)
 
 SECTION_RVA = 0x1000
 HEADERS_END = 0x400
@@ -222,27 +226,32 @@ def test_truncated_last_section(tmp_path):
     assert md["layout"]["truncated_last_section"] is False
 
 
-def _tls_image(callback_rvas: list[int]) -> bytes:
+def _tls_image(callback_rvas: list[int], array_read_only: bool = False) -> bytes:
     """A PE with a TLS directory. The directory struct lives in .rdata
-    (read-only); the callback array lives in .data (writable). The callbacks
-    point at ``callback_rvas`` RVAs."""
+    (read-only); the callback array lives in .data (writable), or in .rdata
+    when ``array_read_only``. The callbacks point at ``callback_rvas`` RVAs."""
     imagebase = 0x140000000
     body = bytearray(0x1000)
+    array = b"".join(
+        struct.pack("<Q", imagebase + SECTION_RVA + rva) for rva in callback_rvas
+    )
+    array += struct.pack("<Q", 0)
+    # .rdata is RVA 0x1000, .data is RVA 0x2000.
+    array_va = imagebase + (0x1000 + 0x600 if array_read_only else 0x2000 + 0x200)
     body[0x280 : 0x280 + 40] = struct.pack(
         "<QQQQII",
         imagebase + 0x3000,  # StartAddressOfRawData
         imagebase + 0x3080,  # EndAddressOfRawData
         imagebase + 0x3100,  # AddressOfIndex
-        imagebase + 0x2000 + 0x200,  # AddressOfCallBacks: .data RVA 0x200
+        array_va,  # AddressOfCallBacks
         0,  # SizeOfZeroFill
         0,  # Characteristics
     )
     data_body = bytearray(0x1000)
-    array = b"".join(
-        struct.pack("<Q", imagebase + SECTION_RVA + rva) for rva in callback_rvas
-    )
-    array += struct.pack("<Q", 0)
-    data_body[0x200 : 0x200 + len(array)] = array
+    if array_read_only:
+        body[0x600 : 0x600 + len(array)] = array
+    else:
+        data_body[0x200 : 0x200 + len(array)] = array
     dos = bytearray(0x80)
     dos[0:2] = b"MZ"
     struct.pack_into("<I", dos, 0x3C, 0x80)
@@ -290,6 +299,54 @@ def test_pre_main_execution_resolves_and_writability(tmp_path):
     assert block["tls_callback_array_writable"] is True
     assert block["tls_callback_array_section"] == ".data"
     assert block["callback_count"] == 1
+
+
+def test_pre_main_execution_states_a_read_only_callback_array(tmp_path):
+    """A callback array in a read-only section says so.
+
+    ``tls_directory_writable`` is stated either way, so an omitted
+    ``tls_callback_array_writable`` reads as "could not be computed" — and on
+    tiers 0-1 only 1 of the 14 files with callbacks has a writable array, so
+    the silence would cover the other 13. The field is left out only when no
+    section covers the array at all.
+    """
+    image = _tls_image([0x1230], array_read_only=True)
+    path = tmp_path / "tls_ro.exe"
+    path.write_bytes(image)
+    block = parse_pre_main_execution(__import__("lief").PE.parse(str(path)), {})
+    assert block["tls_callback_array_writable"] is False
+    assert block["tls_callback_array_section"] == ".rdata"
+
+
+def test_pre_main_counts_are_exact_past_the_listing_caps(tmp_path):
+    """Ground rule 33 for this module's own windows: a fixture larger than
+    MAX_LISTED_CALLBACKS and MAX_LISTED_CTORS.
+
+    The listings are capped, but ``callback_count``/``initializer_count`` are
+    the counts a reader acts on — an image registering 200 TLS callbacks must
+    not report 64 — and the initializer/callback dedup must be decided over
+    the whole array, not over the capped sample of it.
+    """
+    count = MAX_LISTED_CALLBACKS + 136
+    image = _tls_image([0x1000 + 0x10 * i for i in range(count)])
+    path = tmp_path / "many_tls.exe"
+    path.write_bytes(image)
+    parsed = __import__("lief").PE.parse(str(path))
+    md = {
+        "ctor_functions": [
+            {"name": f"c{i}", "address": hex(0x140009000 + i)} for i in range(count)
+        ]
+    }
+    block = parse_pre_main_execution(parsed, md)
+    assert block["callback_count"] == count
+    assert len(block["tls_callbacks"]) == MAX_LISTED_CALLBACKS
+    assert block["tls_callbacks_truncated"] is True
+    assert block["initializer_count"] == count
+    assert len(block["ctor_functions"]) == MAX_LISTED_CTORS
+    assert block["initializers_truncated"] is True
+    # The ctors here are not the callbacks, and the dedup sees that even
+    # though neither list is fully enumerated.
+    assert "initializers_are_tls_callbacks" not in block
 
 
 def test_pre_main_execution_deduplicates_lief_ctors(tmp_path):

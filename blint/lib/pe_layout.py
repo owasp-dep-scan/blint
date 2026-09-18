@@ -324,16 +324,19 @@ def parse_pe_layout(parsed_obj: lief.PE.Binary, exe_file: str, metadata: dict) -
     return block
 
 
-def _writable_section_for_rva(parsed_obj: lief.PE.Binary, rva: int) -> str | None:
-    """The name of the writable section covering an RVA, else None."""
+def _section_for_rva(parsed_obj: lief.PE.Binary, rva: int):
+    """The section covering an RVA, or None when no section does.
+
+    Returning the section rather than only a writable one keeps "covered but
+    read-only" distinguishable from "not covered at all": the first is a fact
+    worth stating, the second is the only honest silence.
+    """
     try:
         for section in parsed_obj.sections:
             start = int(section.virtual_address or 0)
             span = max(int(getattr(section, "virtual_size", 0) or 0), 1)
-            characteristics = getattr(section, "characteristics_lists", []) or []
-            writable = SECTION_MEM_WRITE in _characteristic_values(characteristics)
-            if writable and start <= rva < start + span:
-                return _section_name(section)
+            if start <= rva < start + span:
+                return section
     except (AttributeError, TypeError, ValueError):
         return None
     return None
@@ -377,6 +380,11 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
     except (AttributeError, TypeError, ValueError):
         tls = None
     callback_rows: list[dict] = []
+    # Counts are exact even where the listings are capped: a reader acts on
+    # "this image registers 4,000 TLS callbacks", and a count that silently
+    # saturates at the listing cap says 64 instead.
+    callback_total = 0
+    callback_addresses: set[str] = set()
     if tls:
         try:
             raw_callbacks = list(tls.callbacks or [])
@@ -385,9 +393,16 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
         imagebase = 0
         with contextlib.suppress(AttributeError, TypeError, ValueError):
             imagebase = int(parsed_obj.optional_header.imagebase or 0)
-        for callback in raw_callbacks[:MAX_LISTED_CALLBACKS]:
+        callback_total = len(raw_callbacks)
+        for index, callback in enumerate(raw_callbacks):
             with contextlib.suppress(AttributeError, TypeError, ValueError):
                 address = ADDRESS_FMT.format(callback).strip()
+                # Every callback's address feeds the initializer dedup, so
+                # that comparison is made against the whole array rather
+                # than the capped sample of it.
+                callback_addresses.add(address)
+                if index >= MAX_LISTED_CALLBACKS:
+                    continue
                 row: dict = {"address": address}
                 func = functions_by_address.get(address)
                 if func is None and imagebase:
@@ -400,7 +415,7 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
                 else:
                     row["resolved"] = False
                 callback_rows.append(row)
-        if len(raw_callbacks) > MAX_LISTED_CALLBACKS:
+        if callback_total > MAX_LISTED_CALLBACKS:
             block["tls_callbacks_truncated"] = True
         if callback_rows:
             block["tls_callbacks"] = callback_rows
@@ -416,10 +431,16 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
         with contextlib.suppress(AttributeError, TypeError, ValueError):
             array_rva = int(tls.addressof_callbacks) - imagebase
         if array_rva is not None and array_rva > 0:
-            writable_section = _writable_section_for_rva(parsed_obj, array_rva)
-            if writable_section:
-                block["tls_callback_array_writable"] = True
-                block["tls_callback_array_section"] = writable_section
+            array_section = _section_for_rva(parsed_obj, array_rva)
+            writable = (
+                None if array_section is None else _section_writability(parsed_obj, array_section)
+            )
+            if writable is not None:
+                # Stated either way, like ``tls_directory_writable``: a
+                # read-only array is a fact the reviewer wants, and only an
+                # array no section covers leaves the field out.
+                block["tls_callback_array_writable"] = writable
+                block["tls_callback_array_section"] = _section_name(array_section)
 
     anti_debug_reachable: list[str] = []
     disassembled_functions = metadata.get("disassembled_functions") or {}
@@ -444,20 +465,21 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
     if anti_debug_reachable:
         block["anti_debug_reachable_functions"] = sorted(set(anti_debug_reachable))[:16]
 
-    ctors: list[dict] = []
-    for func in metadata.get("ctor_functions") or []:
-        if isinstance(func, dict) and (func.get("name") or func.get("address")):
-            ctors.append(func)
-            if len(ctors) >= MAX_LISTED_CTORS:
-                break
+    all_ctors = [
+        func
+        for func in metadata.get("ctor_functions") or []
+        if isinstance(func, dict) and (func.get("name") or func.get("address"))
+    ]
+    ctors = all_ctors[:MAX_LISTED_CTORS]
+    if len(all_ctors) > MAX_LISTED_CTORS:
+        block["initializers_truncated"] = True
     if ctors:
         # LIEF derives a PE image's ctor_functions from the TLS callback
         # array, so when the initializers are exactly the callbacks they
         # are one fact, not two: state the relationship instead of listing
         # the same functions twice (ground rule 21).
-        callback_addresses = {row.get("address") for row in callback_rows}
-        ctors_are_callbacks = bool(callback_rows) and all(
-            func.get("address") in callback_addresses for func in ctors
+        ctors_are_callbacks = bool(callback_addresses) and all(
+            func.get("address") in callback_addresses for func in all_ctors
         )
         if ctors_are_callbacks:
             block["initializers_are_tls_callbacks"] = True
@@ -467,6 +489,6 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
             ]
 
     if callback_rows or ctors:
-        block["callback_count"] = len(callback_rows)
-        block["initializer_count"] = len(ctors)
+        block["callback_count"] = callback_total
+        block["initializer_count"] = len(all_ctors)
     return block
