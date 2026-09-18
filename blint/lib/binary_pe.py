@@ -733,7 +733,12 @@ def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary,
             (sig.get("page_hashes") or {}).get("present")
             for sig in code_signature.get("signatures", [])
         )
-        properties["signed_page_hashes"] = page_hashed
+        if page_hashed or not code_signature.get("signature_walk_truncated"):
+            properties["signed_page_hashes"] = page_hashed
+        else:
+            # A truncated walk has not seen every signature, so "none of them
+            # carries page hashes" is a claim it cannot make.
+            gaps.append("signed_page_hashes")
     else:
         gaps.append("signed_page_hashes")
     return properties, gaps

@@ -143,7 +143,8 @@ def check_weak_signature_digest(
     The block's ``weak_digest_only`` is computed over every signature
     including nested ones, so only a binary with no modern digest anywhere
     is reported — the outer SHA-1 alone would flag ordinary modern
-    binaries.
+    binaries. It is ``None`` when a truncated walk could not see every
+    signature, and an undecided verdict is not a finding.
     """
     code_signature = metadata.get("code_signature")
     if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
