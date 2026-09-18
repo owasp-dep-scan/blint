@@ -112,13 +112,21 @@ def manifest_facts(manifest_xml: str | bytes | None) -> dict:
     return facts
 
 
-def _data_nodes(root, degradations: list[str]) -> list[tuple[str, str, int, object]]:
+def _data_nodes(
+    root, degradations: list[str], want_type: str | None = None
+) -> list[tuple[str, str, int, object]]:
     """Walk the resource tree to its data nodes, bounded.
 
     Returns (type_name, resource_id, language, node) tuples. The type name
     comes from blint's RT_* table for numeric types and from the tree itself
     for string-named custom types. Depth and node-count limits feed the
     caller's degradations.
+
+    ``want_type`` restricts the walk to one resource type, so a targeted
+    lookup spends the node budget on the type it came for: the tree is
+    enumerated in ascending type id and VERSION is 16, so an image with 1024
+    icons (3) or strings (6) would otherwise exhaust the budget before its
+    VERSIONINFO — the one resource every consumer of this block needs.
     """
     rows: list[tuple[str, str, int, object]] = []
     overflow = 0
@@ -147,6 +155,8 @@ def _data_nodes(root, degradations: list[str]) -> list[tuple[str, str, int, obje
                     if child.has_name
                     else resource_type_name(int(child.id))
                 )
+                if want_type is not None and child_type != want_type:
+                    continue
                 visit(child, child_type, "", 1)
             else:
                 # Second level: the resource id or name; anything deeper
@@ -327,31 +337,31 @@ def _format_version(ms: int, ls: int) -> str:
     return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
 
 
-def _version_components(value: str) -> list[int] | None:
-    """Numeric components of a version string, or None when non-numeric."""
-    numbers: list[int] = []
-    for part in value.split(".")[:2]:
-        if part.strip().isdigit():
-            numbers.append(int(part.strip()))
-        else:
-            return None
-    return numbers
+def _version_major(value: str) -> int | None:
+    """The leading numeric component of a version string, when it has one."""
+    head = value.strip().split(".", maxsplit=1)[0].strip()
+    return int(head) if head.isdigit() else None
 
 
 def _is_mismatch(fixed_version: str, string_version: str) -> bool:
-    """Fixed vs string versions disagree on the first two components.
+    """Fixed vs string versions disagree on the major component.
 
     The string table is what Explorer shows, the fixed block is what
     installers compare, and a rebuilt or tampered image often updates only
-    one. The comparison is semantic — a fixed 3.13.7150.1013 beside a
-    marketing string 3.13.7 is not a finding, while a rewritten 5.0 string
-    beside a 3.13 fixed block is. Non-numeric pairs compare literally.
+    one. Only the major component is comparable: everything after it is
+    marketing text that vendors write however they like, and the reference
+    corpus proves it — Sysinternals ships ``1.83`` against a fixed 1.8.3.0
+    and ``14.3`` against 14.30.0.0 on Microsoft-signed, unmodified binaries,
+    so a component-wise comparison calls 34 of 177 tier-0/1 files tampered.
+    A rewritten ``5.0`` beside a 3.13 fixed block still reports, which is the
+    signal this field exists for. Versions with no leading number compare
+    literally.
     """
-    fixed_parts = _version_components(fixed_version)
-    string_parts = _version_components(string_version)
-    if fixed_parts is None or string_parts is None:
+    fixed_major = _version_major(fixed_version)
+    string_major = _version_major(string_version)
+    if fixed_major is None or string_major is None:
         return fixed_version != string_version
-    return fixed_parts != string_parts
+    return fixed_major != string_major
 
 
 def _find_fixed_file_info(content: bytes) -> dict | None:
@@ -400,11 +410,10 @@ def _version_resource_content(parsed_obj: lief.PE.Binary) -> bytes | None:
         root = parsed_obj.resources
     except (AttributeError, TypeError, ValueError):
         return None
-    for type_name, _resource_id, _lang, node in _data_nodes(root, []):
-        if type_name == "VERSION":
-            content = _node_content(node)
-            if content:
-                return content
+    for _type_name, _resource_id, _lang, node in _data_nodes(root, [], want_type="VERSION"):
+        content = _node_content(node)
+        if content:
+            return content
     return None
 
 

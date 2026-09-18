@@ -128,6 +128,10 @@ def parse_codeview_payload(payload: bytes) -> dict:
     info: dict = {"signature": None, "guid": None, "age": None, "pdb_path": None}
     if len(payload) < 8:
         return info
+    # A truncated payload decodes to whatever it carries and stops: the debug
+    # directory is attacker-controlled, and an entry whose SizeOfData is short
+    # of its own layout must not raise through the caller's parse.
+    path_bytes = b""
     signature = payload[:4]
     info["signature"] = signature.decode("ascii", errors="replace")
     if signature == b"RSDS":
@@ -143,6 +147,10 @@ def parse_codeview_payload(payload: bytes) -> dict:
     else:
         return info
     path = path_bytes.split(b"\x00", 1)[0]
+    if not path:
+        # Either a truncated payload or a genuinely empty path: both say
+        # nothing, and ``pdb_path`` stays None so the caller's fallback runs.
+        return info
     try:
         info["pdb_path"] = path.decode("utf-8")
     except UnicodeDecodeError:
