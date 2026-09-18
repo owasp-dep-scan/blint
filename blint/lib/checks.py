@@ -198,6 +198,27 @@ def check_trust_info(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any])
     return True
 
 
+def check_build_path_leak(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a CodeView PDB reference that leaks a build-machine path.
+
+    The PDB path is embedded so the linker can find symbols; it names the
+    build agent's directory tree, and CI runs leak usernames and internal
+    hostnames with it (``D:\\a\\1\\b\\...`` is Azure DevOps' work tree). A
+    bare filename or a relative path leaks no structure and passes; an
+    absolute path (drive letter or UNC) is the finding, carried as the
+    evidence.
+    """
+    codeview = (metadata.get("debug") or {}).get("codeview") or {}
+    pdb_path = str(codeview.get("pdb_path") or "")
+    if not pdb_path:
+        return True
+    if (len(pdb_path) >= 2 and pdb_path[1] == ":") or pdb_path.startswith("\\\\"):
+        return pdb_path
+    return True
+
+
 def check_libc_portability(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:

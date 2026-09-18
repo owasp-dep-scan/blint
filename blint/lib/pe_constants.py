@@ -131,8 +131,6 @@ def guard_cf_function_table_stride(value: int) -> int:
 # user-mode CET shadow-stack compatibility — a debug-directory claim, not a
 # load configuration GuardFlags bit, so the entry must be read from the debug
 # directory (type 20) rather than decoded from GuardFlags.
-IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS = 20
-
 EX_DLL_CHARACTERISTICS: dict[int, str] = {
     0x01: "CET_COMPAT",
     0x02: "CET_COMPAT_STRICT_MODE",
@@ -170,6 +168,112 @@ SUBSYSTEMS: dict[int, str] = {
     16: "WINDOWS_BOOT_APPLICATION",
     17: "XBOX_CODE_CATALOG",
 }
+
+
+# IMAGE_DEBUG_TYPE_* (winnt.h), keyed by the numeric value stored in the
+# debug directory's IMAGE_DEBUG_DIRECTORY.Type field. Only the values the
+# Windows SDK names are tabled; anything else renders UNKNOWN(<value>)
+# through :func:`debug_type_name`. IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS
+# (20) is pinned by dumpbin on real files: the SDK headers do not name it.
+IMAGE_DEBUG_TYPES: dict[int, str] = {
+    0x00: "UNKNOWN",
+    0x01: "COFF",
+    0x02: "CODEVIEW",
+    0x03: "FPO",
+    0x04: "MISC",
+    0x05: "EXCEPTION",
+    0x06: "FIXUP",
+    0x07: "OMAP_TO_SRC",
+    0x08: "OMAP_FROM_SRC",
+    0x09: "BORLAND",
+    0x0A: "RESERVED10",
+    0x0B: "CLSID",
+    0x0C: "VC_FEATURE",
+    0x0D: "POGO",
+    0x0E: "ILTCG",
+    0x0F: "MPX",
+    0x10: "REPRO",
+    0x14: "EX_DLLCHARACTERISTICS",
+}
+
+IMAGE_DEBUG_TYPE_CODEVIEW = 0x02
+IMAGE_DEBUG_TYPE_VC_FEATURE = 0x0C
+IMAGE_DEBUG_TYPE_POGO = 0x0D
+# /Brepro builds record a 16-byte image hash here; presence is the honest
+# answer to "is this a reproducible build" (plan 01/A.5).
+IMAGE_DEBUG_TYPE_REPRO = 0x10
+IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS = 0x14
+
+
+def debug_type_name(value: int) -> str:
+    """Return the winnt.h name for an IMAGE_DEBUG_TYPE value."""
+    return IMAGE_DEBUG_TYPES.get(value, f"UNKNOWN({value})")
+
+
+# RESOURCE_TYPE ids (winuser.h RT_*), the first level of the resource tree.
+# Custom types declared by string name never hit this table.
+RESOURCE_TYPES: dict[int, str] = {
+    0x01: "CURSOR",
+    0x02: "BITMAP",
+    0x03: "ICON",
+    0x04: "MENU",
+    0x05: "DIALOG",
+    0x06: "STRING",
+    0x07: "FONTDIR",
+    0x08: "FONT",
+    0x09: "ACCELERATOR",
+    0x0A: "RCDATA",
+    0x0B: "MESSAGETABLE",
+    0x0C: "GROUP_CURSOR",
+    0x0E: "GROUP_ICON",
+    0x10: "VERSION",
+    0x11: "DLGINCLUDE",
+    0x13: "PLUGPLAY",
+    0x14: "VXD",
+    0x15: "ANICURSOR",
+    0x16: "ANIICON",
+    0x17: "HTML",
+    0x18: "MANIFEST",
+}
+
+
+def resource_type_name(value: int) -> str:
+    """Return the winuser.h name for a resource type id."""
+    return RESOURCE_TYPES.get(value, f"UNKNOWN({value})")
+
+
+# VS_FIXEDFILEINFO dwFileFlags (winver.h). A flag is only meaningful when
+# the corresponding dwFileFlagsMask bit is set; the decode checks the mask.
+VS_FILE_FLAGS_MASK = 0x0000003F
+VS_FILE_FLAGS: dict[int, str] = {
+    0x00000001: "DEBUG",
+    0x00000002: "PRERELEASE",
+    0x00000004: "PATCHED",
+    0x00000008: "PRIVATEBUILD",
+    0x00000010: "INFOINFERRED",
+    0x00000020: "SPECIALBUILD",
+}
+
+# File OS constants that VERSIONINFO's fixed block actually uses (winver.h
+# VOS_*), named for the metadata instead of a raw integer dump. The low word
+# carries the Windows variant (1 = 16-bit, 4 = 32-bit); python313.dll
+# declares the bare 0x00000004.
+VS_FILE_OS: dict[int, str] = {
+    0x00000000: "UNKNOWN",
+    0x00000001: "WINDOWS_16BIT",
+    0x00000004: "WINDOWS32",
+    0x00010001: "DOS_WINDOWS16",
+    0x00010004: "DOS_WINDOWS32",
+    0x00020002: "OS2_PM16",
+    0x00030003: "OS2_PM32",
+    0x00040004: "NT_WINDOWS32",
+}
+
+
+def decode_file_flags(value: int, mask: int | None = None) -> list[str]:
+    """Decode VS_FIXEDFILEINFO.dwFileFlags through its mask."""
+    effective = value if mask is None else (value & mask)
+    return decode_flag_bits(effective, VS_FILE_FLAGS)
 
 
 def decode_flag_bits(value: int, table: dict[int, str]) -> list[str]:

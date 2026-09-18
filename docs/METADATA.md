@@ -102,8 +102,31 @@ PE (Portable Executable) files are the standard for Windows.
 - **Resources (`resources`):** Metadata extracted from the `.rsrc` section.
   - `version_metadata`: Contains key-value pairs like `ProductName`, `CompanyName`, and `FileVersion`. Useful for identifying the software and its origin.
   - `manifest`: The embedded XML application manifest, which controls privileges, dependencies, and UI settings.
-- **data_directories, sections, and rich_header**
-  - See the official LIEF documentation to learn about these [attributes](https://lief.re/doc/latest/formats/pe/python.html#data-directory).
+- **Debug directory (`debug`):** one block per image, decoded in `blint/lib/pe_debug.py`. Added with the W1.1 packet (plan 01/A.4-A.5); an image with no debug directory reports nothing, and the security-properties gaps carry the absence.
+  - `entries`: one row per `IMAGE_DEBUG_DIRECTORY` entry — `type` (named from blint's winnt.h table in `pe_constants`, `UNKNOWN(<value>)` for untabled values), `type_value`, `timestamp`, `size`, plus the raw addresses. More than 64 entries are counted under `entries_truncated` rather than decoded.
+  - `codeview`: the PDB lookup key — `signature` (`RSDS` or the legacy `NB10`), `guid` (canonical dumpbin form for RSDS), `age`, `pdb_path` and `pdb_filename` (split on both `\` and `/`). This block is the single source feeding `security_properties.debug_info` / `debug_info_pdb_path`.
+  - `repro`: `{"present": true, "hash": "<hex>"}` (the length-prefixed image hash, 32 bytes on current `/Brepro` builds) when the image carries an `IMAGE_DEBUG_TYPE_REPRO` entry, `{"present": false}` when a directory exists without one. This is the authoritative reproducibility answer; `is_reproducible_build` (LIEF, timestamp-based) stays alongside as the legacy heuristic — when they disagree, `repro` wins.
+  - `vc_feature`: the `IMAGE_DEBUG_TYPE_VC_FEATURE` counters (`c_cpp`, `gs`, `guards`, `sdl`, `pre_vcpp`).
+  - `pogo`: the PGO section list (`sections`, capped at 256 with `sections_truncated`/`sections_total`) and the `signature` (`PGO`/`PGU`).
+  - `ex_dllcharacteristics`: the `IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS` payload decoded through blint's `EX_DLL_CHARACTERISTICS` bit table (`CET_COMPAT`, ...).
+- **Rich header (`rich_header`):** decoded and validated at the byte level in `pe_debug.py`; replaces the raw LIEF entry dump when the header can be read (the LIEF shape stays as the fallback). Entries are in file order.
+  - `key`: the XOR key, rendered as `0x...`.
+  - `checksum_valid`: the stored key is the checksum of the DOS region plus the header itself (algorithm per the RichHeaderResearch RichPE tooling, validated on real MSVC images); a `false` here is a repacking/tampering signal, never a parse error.
+  - `entries`: the raw records, `{id, build_id, count}` in file order.
+  - `decoded`: each record named through the generated comp.id tables in `blint/data/pe_rich_compids.yml` (provenance in the file header; regenerate with `tests/scripts/generate_pe_rich_compids.py`): `{product_id, tool, label, build_id, count}` — the label names the exact Visual Studio drop, e.g. python313.dll's `LNK VS2022 v17.14.9 build 35213`. Unknown pairs still name the tool from the 16-bit product id; wholly unknown products render `UNKNOWN(<id>)`.
+  - `toolchain`: `linker_build_id` and `linker_label` from the linker record, `comp_id_builds`, and `mixed_toolchain` (objects built by more than one drop — vendored static libraries are the benign case, a rewritten header the interesting one). This also feeds the `toolchain` block's `msvc` compiler entry.
+- **VERSIONINFO (`version_info`, top level):** the full VERSIONINFO decode, added with W1.3 (plan 01/A.7); the string tables are parsed from the raw resource by blint because LIEF 1.0 drops valid tables and merges adjacent language tables. This block is the input for the Windows SBOM identity work (03/D) and the tier 0-1 presence gate.
+  - `present`, `languages`: sorted language keys (`040904b0`, ...).
+  - `strings`: `{language: {KeyName: value}}` — every key of every language table.
+  - `fixed`: the `VS_FIXEDFILEINFO` block decoded from the raw resource (LIEF 1.0 does not expose it): `file_version`/`product_version` in `MS.LS` dotted form, `file_flags` through the mask (`DEBUG`, `PRERELEASE`, `PATCHED`, `PRIVATEBUILD`, `INFOINFERRED`, `SPECIALBUILD`), `file_os`, `file_type`, `file_subtype`. Absent when the resource carries strings only.
+  - `mismatches`: which of `FileVersion`/`ProductVersion` disagree between the fixed block and the string table — the classic tampering tell. The comparison is semantic (first two numeric components), so a fixed `3.13.7150.1013` beside a marketing string `3.13.7` is agreement, not a finding.
+- **Resources depth (`resources` extensions):** the legacy `has_*` booleans, the raw `manifest` XML and the flattened `version_metadata` are unchanged; W1.3 adds:
+  - `manifest_parsed`: the manifest decoded — `requestedExecutionLevel`, `uiAccess`, `dpiAware`/`dpiAwareness`, `longPathAware`, `activeCodePage`, `supportedOS` GUIDs mapped to Windows names, and `assembly_identities` (side-by-side dependencies). A present-but-unparseable manifest records `parse_status: failed` rather than reading as "no elevation requested".
+  - `tree_summary`: resource type → `{count, bytes, entropy}`. Type names come from blint's RT_* table; entropy samples two 64 KiB windows (start and end) per resource so a multi-MB blob is summarized without being read in full.
+  - `hashes`: per-resource SHA-256 (`type`, `id`, `lang`, `size`, `sha256`), truncated at 1 MiB per resource with `hash_truncated` and a recorded degradation beyond a 32 MiB total budget.
+  - `icon_hash`: deterministic SHA-256 over the sorted per-icon digests — the cluster key for "same icon" identity.
+  - `embedded_pe`: resources whose data starts with a structurally valid PE image (MZ, e_lfanew inside the data, `PE\0\0` there), each with its `type`, `id`, `file_offset` and `size` — a dropper indicator reported as a fact, not a finding.
+  - `degradations`: every limit the tree hit (node count, depth, hash budgets, embedded-PE report cap) is recorded here, never silently skipped (ground rule 30: the resource tree is attacker-controlled input).
 - **Imports and Exports (`imports`, `exports`):**
   - `imports`: A list of all functions imported from external DLLs, grouped by library. Forms the basis of the `imphash`.
   - `exports`: A list of all functions this binary provides to other executables.
