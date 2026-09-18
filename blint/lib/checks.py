@@ -107,6 +107,52 @@ def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     return True
 
 
+def check_signature_not_timestamped(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports signatures that carry no countersignature timestamp (02/A.1).
+
+    A signature without an RFC 3161 or PKCS#9 timestamp stops being
+    verifiable the moment the signing certificate expires — with the
+    short-lived certificates some CAs issue, that is days, not years. The
+    verdict is per signature, nested ones included: they inherit the outer
+    signature's timestamp and say so, so a dual-signed binary is not
+    double-counted as untimestamped.
+    """
+    code_signature = metadata.get("code_signature")
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return True
+    signatures = code_signature.get("signatures") or []
+    untimestamped = [
+        index + 1
+        for index, signature in enumerate(signatures)
+        if (signature.get("timestamp") or {}).get("present") is not True
+    ]
+    if not untimestamped:
+        return True
+    return f"signature(s) {untimestamped} of {code_signature.get('signature_count')} carry no timestamp"
+
+
+def check_weak_signature_digest(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports files where no signature uses a modern digest (02/A.3).
+
+    Dual signing is the normal shape for anything that must run on older
+    Windows: a SHA-1 outer signature with a SHA-256 one nested inside it.
+    The block's ``weak_digest_only`` is computed over every signature
+    including nested ones, so only a binary with no modern digest anywhere
+    is reported — the outer SHA-1 alone would flag ordinary modern
+    binaries.
+    """
+    code_signature = metadata.get("code_signature")
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return True
+    if code_signature.get("weak_digest_only") is not True:
+        return True
+    return "no signature uses SHA-256 or stronger"
+
+
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
