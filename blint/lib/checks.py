@@ -47,6 +47,31 @@ def check_objc_load_methods(
     return ", ".join(sorted(names)[:10])
 
 
+def check_tls_callbacks(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports TLS callbacks, which the loader runs before ``main``.
+
+    The PE sibling of ``check_objc_load_methods``: TLS callbacks execute
+    during process and thread setup with no caller in the code, which makes
+    them a legitimate hook (CRT use, crash reporting) and the earliest code
+    that runs in the process — a persistence and environment-tamper review
+    surface. Evidence comes from the ``pre_main_execution`` summary; the
+    resolved function names when the callback address matched a discovered
+    function, the raw addresses otherwise.
+    """
+    pre_main = metadata.get("pre_main_execution") or {}
+    callbacks = pre_main.get("tls_callbacks") or []
+    names = [
+        entry.get("function") or entry.get("address")
+        for entry in callbacks
+        if isinstance(entry, dict) and (entry.get("function") or entry.get("address"))
+    ]
+    if not names:
+        return True
+    return ", ".join(str(name) for name in names[:10])
+
+
 def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("is_pie") is not False
 

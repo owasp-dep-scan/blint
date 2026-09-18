@@ -48,6 +48,17 @@ from blint.lib.pe_debug import (
     decode_rich_header,
     parse_pe_debug,
 )
+from blint.lib.pe_imports import (
+    TAG_FORWARDER,
+    apiset_host,
+    delay_import_hash,
+    forwarder_target,
+    normalize_forwarder_library,
+    parse_pe_delay_imports,
+    summarize_resolution,
+)
+from blint.lib.pe_imports import parse_pe_imports as pe_imports_parse
+from blint.lib.pe_layout import parse_pe_layout, parse_pre_main_execution
 from blint.lib.pe_overlay import classify_pe_overlay
 from blint.lib.pe_resources import parse_pe_resources
 from blint.lib.utils import (
@@ -336,50 +347,21 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
     """
     Parses the imports and returns lists of imported symbols and DLLs.
 
+    Thin delegation to the W1.2 module, which resolves ordinal imports
+    through the generated ordinal map and apiset names through the generated
+    snapshot (``pe_imports`` holds the semantics). Exported under this name
+    so existing imports keep working.
+
     Args:
         imports (it_imports): A list of import objects to parse.
+        imagebase (int): The image base, added to entry IAT addresses.
 
     Returns:
         tuple: A tuple containing two elements:
             - imports_list (list[dict])
             - dll_list (list[dict])
     """
-    imports_list: list[dict] = []
-    # Insertion-ordered rather than a set: this list is exported as
-    # ``dynamic_entries`` and seeds the SBOM's dependency refs, so set
-    # iteration order made both vary with PYTHONHASHSEED. First-seen order is
-    # the import directory's own order, which is what ELF's DT_NEEDED list
-    # already reports.
-    dlls: dict[str, None] = {}
-    if not imports or isinstance(imports, lief.lief_errors):
-        return imports_list, []
-    for import_ in imports:
-        try:
-            entries = import_.entries
-        except AttributeError:
-            break
-        if isinstance(entries, lief.lief_errors):
-            break
-        for entry in entries:
-            try:
-                if entry.name:
-                    dlls[import_.name] = None
-                    imports_list.append(
-                        {
-                            "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
-                            "short_name": demangle_symbolic_name(entry.name),
-                            "address": ADDRESS_FMT.format(entry.data).strip(),
-                            "iat_value": entry.iat_value,
-                            "hint": entry.hint,
-                            "iat_address": (entry.iat_address + imagebase)
-                            if hasattr(entry, "iat_address")
-                            else None,
-                        }
-                    )
-            except AttributeError:
-                continue
-    dll_list = [{"name": d, "tag": "NEEDED"} for d in dlls]
-    return imports_list, dll_list
+    return pe_imports_parse(imports, imagebase)
 
 
 def parse_pe_exports(exports) -> list[dict]:
@@ -413,6 +395,10 @@ def parse_pe_exports(exports) -> list[dict]:
         if fwd:
             metadata["fwd_library"] = fwd.library
             metadata["fwd_function"] = fwd.function
+            # W1.2: the target in the dumpbin form ("NTDLL.RtlAllocHeap") —
+            # the target DLL is a real load-time dependency of the exporting
+            # image even though no import-table entry names it.
+            metadata["forwarded_to"] = forwarder_target(fwd.library, fwd.function)
         if metadata:
             exports_list.append(metadata)
     return exports_list
@@ -977,10 +963,46 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["symtab_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
+        # W1.2: imports go through pe_imports, which resolves ordinal
+        # imports through the generated ordinal map and apiset names
+        # (api-ms-win-*) through the generated snapshot, so the dependency
+        # list and every consumer of it names real DLLs. The PE32 ordinal
+        # flag is the 32-bit one; exe_type was set by the header pass above.
+        pe_imagebase = parsed_obj.optional_header.imagebase
+        is_pe32 = metadata.get("exe_type") == "PE32"
         (
             metadata["imports"],
             metadata["dynamic_entries"],
-        ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
+        ) = pe_imports_parse(parsed_obj.imports, pe_imagebase, pe32=is_pe32)
+        # Delay-load imports: parsed into their own list, never merged into
+        # ``imports`` — the distinction between the tables is the signal
+        # (01/A.6). Their DLLs join the dependency list under a DELAYLOAD
+        # tag so the SBOM sees the dependency without conflating the tables.
+        metadata["delay_imports"] = []
+        delay_dll_entries: list[dict] = []
+        if hasattr(parsed_obj, "delay_imports"):
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                (
+                    metadata["delay_imports"],
+                    delay_dll_entries,
+                ) = parse_pe_delay_imports(parsed_obj.delay_imports, pe_imagebase, pe32=is_pe32)
+        if metadata["delay_imports"]:
+            metadata["delay_import_hash"] = delay_import_hash(metadata["delay_imports"])
+            needed_names = {entry["name"].lower() for entry in metadata["dynamic_entries"]}
+            for entry in delay_dll_entries:
+                if entry["name"].lower() in needed_names:
+                    # The same DLL is both directly imported and
+                    # delay-loaded: the NEEDED entry speaks for the
+                    # dependency, the tables stay distinct in imports vs
+                    # delay_imports.
+                    continue
+                metadata["dynamic_entries"].append(entry)
+        if metadata["imports"] or metadata["delay_imports"]:
+            metadata["import_resolution"] = summarize_resolution(
+                metadata["imports"],
+                metadata["delay_imports"],
+                [metadata["dynamic_entries"]],
+            )
         # Stack-protector evidence, same as the ELF and Mach-O paths: an
         # explicit verdict (or none) rather than a silently absent key that
         # CHECK_CANARY collapses into "protected".
@@ -1005,6 +1027,29 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         if rdata_section or text_section:
             add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
         metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
+        # W1.2: forwarder targets are load-time dependencies the import
+        # table never names — resolving an export that is a forwarder makes
+        # the loader map the target DLL. They join the dependency list under
+        # a FORWARDER tag, and the sorted target list feeds the dependency
+        # graph in binary.analyze_import_deps.
+        forwarder_targets: set[str] = set()
+        for export_entry in metadata["exports"]:
+            if not export_entry.get("forwarded_to"):
+                continue
+            library, _, _ = str(export_entry["forwarded_to"]).partition(".")
+            target_lib = normalize_forwarder_library(library)
+            if not target_lib:
+                continue
+            if apiset_host(target_lib):
+                target_lib = apiset_host(target_lib)
+            forwarder_targets.add(target_lib)
+        known_names = {entry["name"].lower() for entry in metadata["dynamic_entries"]}
+        for target_lib in sorted(forwarder_targets):
+            if target_lib in known_names:
+                continue
+            metadata["dynamic_entries"].append({"name": target_lib, "tag": TAG_FORWARDER})
+        if forwarder_targets:
+            metadata["forwarder_targets"] = sorted(forwarder_targets)
         metadata["exceptions"] = parse_pe_exceptions(parsed_obj.exceptions)
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
@@ -1034,6 +1079,16 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                     metadata["tls_section_name"] = tls.section.name
                 if tls.has_data_directory:
                     metadata["tls_directory_type"] = str(tls.directory.type)
+        # W1.4: layout forensics facts (B.5) and the one pre-main summary
+        # (B.1). The layout block needs the rich-header toolchain facts and
+        # the go/dotnet markers set above; the pre-main block reads the
+        # functions and ctor_functions parsed earlier. binary.parse refreshes
+        # the pre-main block after disassembly so the anti-debug
+        # reachability fact can see call targets.
+        metadata["layout"] = parse_pe_layout(parsed_obj, exe_file, metadata)
+        pre_main = parse_pre_main_execution(parsed_obj, metadata)
+        if pre_main:
+            metadata["pre_main_execution"] = pre_main
         nested_binary = parsed_obj.nested_pe_binary
         if nested_binary:
             LOG.debug("Binary has ARM64EC representation!")

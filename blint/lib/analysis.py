@@ -43,6 +43,7 @@ from blint.lib.checks import (
     check_runtime_loading,  # noqa: F401
     check_search_path,  # noqa: F401
     check_security_property,
+    check_tls_callbacks,  # noqa: F401
     check_trust_info,  # noqa: F401
     check_undeclared_dependencies,  # noqa: F401
     check_unused_dependencies,  # noqa: F401

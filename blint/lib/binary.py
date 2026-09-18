@@ -222,6 +222,18 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.pe_imports import (  # noqa: F401
+    apiset_host,
+    delay_import_hash,
+    forwarder_target,
+    ordinal_name,
+    parse_pe_delay_imports,
+    summarize_resolution,
+)
+from blint.lib.pe_layout import (  # noqa: F401
+    parse_pe_layout,
+    parse_pre_main_execution,
+)
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
 from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
@@ -1321,6 +1333,13 @@ def parse(
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             attach_function_hashes(metadata.get("disassembled_functions"))
+            if isinstance(parsed_obj, lief.PE.Binary) and metadata.get("pre_main_execution"):
+                # W1.4: with disassembly available, the pre-main summary
+                # refreshes so the anti-debug reachability fact can read the
+                # callbacks' call targets.
+                metadata["pre_main_execution"] = parse_pre_main_execution(
+                    parsed_obj, metadata
+                )
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             # String literals a binary assembles on its stack are invisible to
@@ -1555,6 +1574,22 @@ def analyze_import_deps(metadata: dict) -> dict:
 
             if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
                 dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+        # W1.2: export forwarders name DLLs the loader must map even though
+        # no import-table entry does. They are dependencies of a distinct
+        # kind — recorded so the graph is complete, and typed apart from
+        # "imported" so link hygiene never reads them as symbol suppliers.
+        for target in metadata.get("forwarder_targets") or []:
+            if target == main_binary_name:
+                continue
+            if target not in dep_graph["libraries"]:
+                dep_graph["libraries"][target] = {
+                    "type": "forwarder_target",
+                    "imported_symbols": [],
+                    "imported_from": [],
+                }
+            dep_graph["dependencies"].append(
+                {"from": main_binary_name, "to": target, "symbols": []}
+            )
     else:
         all_potential_imports = metadata.get("symtab_symbols", []) + metadata.get(
             "dynamic_symbols", []
