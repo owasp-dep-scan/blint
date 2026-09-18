@@ -41,11 +41,15 @@ from blint.lib.driver_ioctl import (
 from blint.lib.pe_constants import (
     IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS,
     decode_dll_characteristics,
-    decode_ex_dll_characteristics,
     decode_guard_flags,
     guard_cf_function_table_stride,
 )
+from blint.lib.pe_debug import (
+    decode_rich_header,
+    parse_pe_debug,
+)
 from blint.lib.pe_overlay import classify_pe_overlay
+from blint.lib.pe_resources import parse_pe_resources
 from blint.lib.utils import (
     camel_to_snake,
     demangle_symbolic_name,
@@ -531,47 +535,17 @@ def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
         return None
 
 
-def parse_pe_ex_dllcharacteristics(parsed_obj: lief.PE.Binary, exe_file: str) -> list[str] | None:
-    """Read the EX_DLLCHARACTERISTICS debug entry's flag names, when present.
+def pe_debug_directory_facts(
+    parsed_obj: lief.PE.Binary, exe_file: str, debug_block: dict | None = None
+) -> dict:
+    """The debug-directory facts the security properties need.
 
-    The extended DLL characteristics are the only place a Windows image
-    declares user-mode CET shadow-stack compatibility (winnt.h:
-    ``IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS`` = 20), carried as one
-    little-endian DWORD in the debug directory — not as a load configuration
-    GuardFlags bit. Returns None when the entry is absent, which is the
-    ordinary image: the absence is metadata-worthy only through the
-    ``security_properties`` tristate, not as an empty list.
-    """
-    try:
-        for entry in parsed_obj.debug:
-            with contextlib.suppress(AttributeError, TypeError, ValueError):
-                if int(entry.type.value) != IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS:
-                    continue
-                payload = b""
-                with contextlib.suppress(AttributeError, TypeError, ValueError):
-                    payload = bytes(entry.payload)
-                if len(payload) < 4:
-                    with contextlib.suppress(
-                        OSError, AttributeError, TypeError, ValueError
-                    ), open(exe_file, "rb") as handle:
-                        handle.seek(int(entry.pointerto_rawdata))
-                        payload = handle.read(4)
-                if len(payload) >= 4:
-                    value = int.from_bytes(payload[:4], "little")
-                    return decode_ex_dll_characteristics(value)
-    except (AttributeError, TypeError, ValueError):
-        return None
-    return None
-
-
-def pe_debug_directory_facts(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
-    """The debug-directory facts the security properties need (W0.3 minimum).
-
-    ``has_debug_directory`` distinguishes "no debug directory at all" from
-    "a directory without the entry in question" — the difference between a
-    property that cannot be computed (omit, record the gap) and one that was
-    computed as False. ``codeview_pdb_path`` drives ``debug_info``, the
-    replacement for the COFF-symbol-table ``stripped`` guess on modern PEs.
+    Sources the W1.1 ``debug`` block when the caller has one (one parse, one
+    source), falling back to the narrow W0.3 read for metadata that predates
+    the block (parse cache). ``has_debug_directory`` distinguishes "no debug
+    directory at all" from "a directory without the entry in question" — the
+    difference between a property that cannot be computed (omit, record the
+    gap) and one that was computed as False.
     """
     facts = {
         "has_debug_directory": False,
@@ -579,6 +553,20 @@ def pe_debug_directory_facts(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
         "codeview_pdb_path": None,
         "ex_dllcharacteristics": None,
     }
+    if isinstance(debug_block, dict) and debug_block:
+        facts["has_debug_directory"] = True
+        facts["has_entries"] = bool(debug_block.get("entries"))
+        codeview = debug_block.get("codeview") or {}
+        pdb_path = codeview.get("pdb_path")
+        if isinstance(pdb_path, str) and pdb_path.strip():
+            facts["codeview_pdb_path"] = pdb_path.strip()
+        if debug_block.get("ex_dllcharacteristics"):
+            # The block carries flag names; recover the raw value's meaning
+            # by decoding from the names — CET bits are what matters here.
+            names = debug_block["ex_dllcharacteristics"]
+            facts["ex_names"] = names
+            return facts
+        return facts
     try:
         if not parsed_obj.has_debug:
             return facts
@@ -709,12 +697,22 @@ def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary,
             LOG.debug(f"Error decoding load configuration for security properties: {e}")
             gaps.append("load_configuration")
 
-    debug_facts = pe_debug_directory_facts(parsed_obj, exe_file)
+    debug_facts = pe_debug_directory_facts(
+        parsed_obj, exe_file, metadata.get("debug")
+    )
     if not debug_facts["has_debug_directory"]:
         gaps.append("debug_info")
         gaps.append("cet_shadow_stack")
     else:
-        if ex_value := debug_facts["ex_dllcharacteristics"]:
+        if "ex_names" in debug_facts:
+            # W1.1 block source: the names are already decoded.
+            ex_names = debug_facts["ex_names"]
+            properties["cet_shadow_stack"] = "CET_COMPAT" in ex_names
+            if properties["cet_shadow_stack"]:
+                properties["cet_shadow_stack_strict"] = (
+                    "CET_COMPAT_STRICT_MODE" in ex_names
+                )
+        elif ex_value := debug_facts["ex_dllcharacteristics"]:
             properties["cet_shadow_stack"] = bool(ex_value & 0x01)  # CET_COMPAT
             if properties["cet_shadow_stack"]:
                 properties["cet_shadow_stack_strict"] = bool(ex_value & 0x02)
@@ -922,8 +920,15 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
-        if (ex_dllcharacteristics := parse_pe_ex_dllcharacteristics(parsed_obj, exe_file)) is not None:
-            metadata["ex_dllcharacteristics"] = ex_dllcharacteristics
+        # W1.1: the debug directory block is parsed before the security
+        # properties run, so debug_info/PDB and the CET tristate read one
+        # source. The W0.3 facts fallback inside pe_debug_directory_facts
+        # covers metadata exported before this block existed.
+        metadata["debug"] = parse_pe_debug(parsed_obj, exe_file)
+        # Legacy flat key (kept additive from W0.3) now sources the block:
+        # one parse of the EX_DLLCHARACTERISTICS entry, not two.
+        if (ex_names := metadata["debug"].get("ex_dllcharacteristics")) is not None:
+            metadata["ex_dllcharacteristics"] = ex_names
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["sections"] = []
         ep = parsed_obj.optional_header.addressof_entrypoint
@@ -948,9 +953,25 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                     {"id": e.id, "build_id": e.build_id, "count": e.count} for e in rich.entries
                 ],
             }
+        # W1.1: the decoded rich header (checksum, comp.id products, the
+        # toolchain facts) replaces the raw LIEF entry dump above when the
+        # header can be read at the byte level; the LIEF shape stays the
+        # fallback so a parse failure degrades instead of vanishing.
+        if rich_decoded := decode_rich_header(exe_file):
+            metadata["rich_header"] = rich_decoded
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
         metadata["resources"] = process_pe_resources(parsed_obj)
+        if resources_extra := parse_pe_resources(parsed_obj, metadata["resources"]):
+            # The parsed VERSIONINFO goes to the top level only; the legacy
+            # rendered `resources.version_info` dict keeps its old shape.
+            version_info_block = resources_extra.pop("version_info", None)
+            metadata["resources"].update(resources_extra)
+            if version_info_block and version_info_block.get("present"):
+                # Top-level block for the SBOM identity work (03/D) and the
+                # tier 0-1 presence gate; resources.version_metadata keeps
+                # the flattened view it has always had.
+                metadata["version_info"] = version_info_block
         metadata["is_arm64ec"] = parsed_obj.is_arm64ec
         metadata["is_arm64x"] = parsed_obj.is_arm64x
         metadata["symtab_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)

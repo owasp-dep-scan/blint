@@ -25,6 +25,7 @@ from blint.lib import pe_constants
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
     check_authenticode,  # noqa: F401
+    check_build_path_leak,  # noqa: F401
     check_canary,  # noqa: F401
     check_codesign,  # noqa: F401
     check_dll_characteristics,  # noqa: F401

@@ -266,6 +266,26 @@
     - PE32
     - PE64
     - dotnetbinary
+- id: CHECK_BUILD_PATH_LEAK
+  title: Build Path Leaked in PDB Reference
+  description: |
+    The binary's debug directory references a PDB through an absolute
+    build-machine path, publishing the build agent's directory tree with the
+    shipped artifact. CI runs leak usernames, hostnames and internal layout
+    this way (`D:\a\1\b\...` is Azure DevOps' work tree,
+    `C:\Users\<name>\...` names the developer), which is provenance an
+    attacker can use for reconnaissance or social engineering, and a
+    reliable clustering key for tracking a vendor's builds.
+
+    Fix the leak at the source: link with `/PDBALTPATH:%_PDB%` so the image
+    stores a bare filename, or strip the debug directory from release
+    builds. A relative path or a bare filename leaks no directory structure
+    and is not reported.
+  severity: low
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
 # CHECK_PAC, CHECK_PAC_STRICT, CHECK_XFG, CHECK_CET and CHECK_ENCLAVE were
 # removed in the W0.3 rewrite (PE-lane A.3, verification finding V4). All five
 # fired "missing <feature>" findings on nearly every PE — including every
