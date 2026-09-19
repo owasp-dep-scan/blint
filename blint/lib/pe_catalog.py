@@ -59,7 +59,7 @@ from blint.lib.pe_signature import (
     _parse_content_info,
     _parse_signed_data,
     _SignatureFormatError,
-    derive_signing_class,
+    apply_signing_class,
     walk_signature_list,
 )
 from blint.logger import LOG
@@ -662,13 +662,7 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
         # The signing class derives from the catalog's own signer the same
         # way it derives from an embedded signature — same walk, same
         # caps, same truncation withholding.
-        determined = derive_signing_class(
-            block["signatures"], facts["signature_walk_truncated"]
-        )
-        if determined:
-            block["signing_class"], class_index = determined
-            if class_index:
-                block["signing_class_signature"] = class_index
+        apply_signing_class(block, facts["signature_walk_truncated"])
         block["structural_integrity"] = {
             "digest_match": True,
             "algorithm": match["member_hash_algorithm"],
