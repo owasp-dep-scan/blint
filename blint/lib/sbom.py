@@ -1148,6 +1148,19 @@ def process_exe_file(
             metadata.get("dotnet_dependencies"), dependencies_dict
         )
         lib_components += pe_components
+    # W3.1: managed assemblies declare their dependencies in the CLI
+    # metadata AssemblyRef table; each becomes a pkg:nuget component. The
+    # block is absent for native files and for assemblies whose metadata
+    # could not be read — never an empty list that reads as "no deps".
+    if metadata.get("dotnet", {}).get("assembly_refs"):
+        existing_purls = {
+            getattr(comp, "purl", None) for comp in lib_components
+        }
+        for comp in process_dotnet_assembly_refs(metadata["dotnet"]["assembly_refs"]):
+            if comp.purl in existing_purls:
+                continue
+            existing_purls.add(comp.purl)
+            lib_components.append(comp)
     # Convert go dependencies
     if metadata.get("go_dependencies"):
         go_components = process_go_dependencies(metadata.get("go_dependencies") or {})
@@ -1772,6 +1785,47 @@ def write_ios_callgraphs(app_file: str, sbom_output: str) -> None:
                 LOG.debug(f"Unable to write the callgraph to {out_file}: {e}")
     finally:
         shutil.rmtree(app["temp_dir"], ignore_errors=True)
+
+
+def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
+    """Managed assemblies' AssemblyRef rows as pkg:nuget components (W3.1).
+
+    The version is the four-part assembly version the metadata carries (the
+    NuGet package version may differ; the assembly version is what the
+    loading runtime binds against). The public key token rides as a
+    property — the identity qualifier every NuGet consumer knows.
+    """
+    components = []
+    seen: set[str] = set()
+    for ref in assembly_refs:
+        name = ref.get("name")
+        version = ref.get("version")
+        if not name or not version:
+            continue
+        purl = f"pkg:nuget/{name}@{version}"
+        if purl in seen:
+            continue
+        seen.add(purl)
+        properties = []
+        if token := ref.get("public_key_token"):
+            properties.append(
+                Property(name="internal:public_key_token", value=token)
+            )
+        if ref.get("culture") and ref.get("culture") != "neutral":
+            properties.append(
+                Property(name="internal:culture", value=ref["culture"])
+            )
+        comp = Component(
+            type=Type.library,
+            name=name,
+            version=version,
+            purl=purl,
+            scope=Scope.required,
+            properties=properties,
+        )
+        comp.bom_ref = RefType(purl)
+        components.append(comp)
+    return components
 
 
 def process_dotnet_dependencies(
