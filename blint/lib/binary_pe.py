@@ -48,6 +48,7 @@ from blint.lib.pe_debug import (
     decode_rich_header,
     parse_pe_debug,
 )
+from blint.lib.pe_dotnet import parse_pe_dotnet
 from blint.lib.pe_imports import (
     TAG_FORWARDER,
     apiset_host,
@@ -988,9 +989,13 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         # imports through the generated ordinal map and apiset names
         # (api-ms-win-*) through the generated snapshot, so the dependency
         # list and every consumer of it names real DLLs. The PE32 ordinal
-        # flag is the 32-bit one; exe_type was set by the header pass above.
+        # flag is the 32-bit one; derived from the optional-header magic
+        # directly — exe_type may now say dotnetbinary for the same image
+        # (W3.1), which says nothing about the PE format width.
         pe_imagebase = parsed_obj.optional_header.imagebase
-        is_pe32 = metadata.get("exe_type") == "PE32"
+        is_pe32 = (
+            parsed_obj.optional_header.magic == lief.PE.PE_TYPE.PE32
+        )
         (
             metadata["imports"],
             metadata["dynamic_entries"],
@@ -1075,14 +1080,16 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
-        # Detect if this PE might be dotnet
-        for i, dd in enumerate(parsed_obj.data_directories):
-            if (
-                i == 14
-                and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
-                and dd.size > 0
-            ):
-                metadata["is_dotnet"] = True
+        # W3.1: a CLI header (data directory 14) makes this a managed
+        # binary. ``exe_type`` records that decoupled from bitness — the
+        # rule-15 exception argued in the packet — and the ECMA-335
+        # metadata reader fills the ``dotnet`` block. ``is_dotnet`` keeps
+        # its old meaning for the existing consumers.
+        dotnet_block = parse_pe_dotnet(parsed_obj, exe_file)
+        if dotnet_block is not None:
+            metadata["is_dotnet"] = True
+            metadata["dotnet"] = dotnet_block
+            metadata["exe_type"] = "dotnetbinary"
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)

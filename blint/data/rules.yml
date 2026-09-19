@@ -52,6 +52,10 @@
   exe_types:
     - PE32
     - PE64
+    # W3.1 (rule-15 exception): managed images used to hide from this rule
+    # under PE32/PE64; a TLS callback on a pure-IL image would be exactly
+    # the anomaly an info finding exists for, so the scope follows the type.
+    - dotnetbinary
 - id: CHECK_WX_SEGMENTS
   title: Writable and Executable Memory Segment
   description: |
@@ -133,8 +137,14 @@
     - genericbinary
     - x86_64-executable
     - x86_64-exec
-    - dotnetbinary
     - mips-executable
+    # W3.1 (rule-15 exception): dotnetbinary left the scope. has_canary on
+    # PE comes from native CRT marker symbols or the load-config guard
+    # flag; a pure-IL assembly carries neither by construction, so the
+    # rule's only possible verdict there was the false "not protected" —
+    # it fired on every benign managed DLL once exe_type moved. Mixed-mode
+    # native code inside managed images was never checked either (their
+    # exe_type was PE32/PE64), so no file that existed before loses a check.
 - id: CHECK_RPATH
   title: Avoid rpath and runpath
   description: |
@@ -158,7 +168,11 @@
   severity: medium
   exe_types:
     - genericbinary
-    - dotnetbinary
+    # W3.1 (rule-15 exception): dotnetbinary left the scope. RPATH/RUNPATH
+    # are ELF loader concepts; has_rpath is only ever set by the ELF path,
+    # so the check's only possible verdict on a managed PE was the false
+    # "no rpath" — it would have fired on every managed DLL once exe_type
+    # moved.
 - id: CHECK_VIRTUAL_SIZE
   title: Optimize binary virtual size
   description: |

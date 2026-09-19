@@ -383,10 +383,20 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         str: A string representing the LLVM target tuple.
     """
     if metadata.get("is_dotnet"):
-        if metadata.get("exe_type") == "PE32":
-            arch = "i686"
-        else:
-            arch = "x86_64"
+        # The architecture comes from the machine type, not from exe_type:
+        # a managed image is dotnetbinary whatever its PE format width or
+        # ISA is (W3.1 moved managed files out of PE32/PE64, which used to
+        # decide this aggregate — the same tuple, now computed from the
+        # fact that actually names the machine).
+        machine_type = (metadata.get("machine_type") or "").upper()
+        arch = {
+            "I386": "i686",
+            "AMD64": "x86_64",
+            "ARM": "arm",
+            "ARMNT": "arm",
+            "AARCH64": "aarch64",
+            "ARM64": "aarch64",
+        }.get(machine_type, "x86_64")
         return f"{arch}-pc-windows-msvc"
     vendor = "unknown"
     os_str = "unknown"
@@ -1485,6 +1495,16 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     # as a degradation so a thin result can never read as "no entitlements".
     if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
         degradations.append("code_signature_parse_failed")
+        coverage["degradations"] = sorted(degradations)
+    # Same rule-32 reason for managed metadata (W3.1): a CLI header blint
+    # found but could not fully read must not read as a clean native file,
+    # and a partially-read table stream must not read as "no AssemblyRefs".
+    dotnet_parse_status = (metadata.get("dotnet") or {}).get("parse_status")
+    if dotnet_parse_status == "partial":
+        degradations.append("dotnet_metadata_partial")
+        coverage["degradations"] = sorted(degradations)
+    elif dotnet_parse_status == "malformed":
+        degradations.append("dotnet_metadata_malformed")
         coverage["degradations"] = sorted(degradations)
     # Per-slice accounting for universal binaries. A slice whose
     # summary failed is a unit like any other: isolated, counted, and named —
