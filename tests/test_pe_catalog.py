@@ -259,6 +259,17 @@ def test_real_slice_driver_resolves_through_corpus_catalog():
     from blint.lib.binary import parse
 
     index = build_catalog_index(CATROOT)
+    # A CatRoot copy carries whichever catalogs were staged into it, and only
+    # some of them cover these four files. Asserting against a tree that does
+    # not cover them would fail on a legitimately smaller copy, and — worse —
+    # a test that then "passed" by matching nothing would assert nothing.
+    covering = (
+        "Microsoft-Windows-Embedded-AssignedAccessCsp-Package",
+        "Microsoft-OneCore-SD-Package",
+    )
+    catalogs = " ".join(entry["catalog"] for entry in index["entries"].values())
+    if not all(name in catalogs for name in covering):
+        pytest.skip("the local CatRoot copy does not carry the catalogs covering these members")
     members = [
         ("system32/AssignedAccessCsp.dll", os.path.join(SLICE_ROOT, "system32/AssignedAccessCsp.dll")),
         ("system32/AssignedAccessManager.dll", os.path.join(SLICE_ROOT, "system32/AssignedAccessManager.dll")),
