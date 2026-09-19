@@ -1,0 +1,207 @@
+# blint's shipped root-anchor fingerprints (PE lane W2.4, plan 02/C).
+#
+# What was hashed: the DER of every certificate in the machine trusted
+# root stores of the Windows ARM64 VM (10.0.26200.0),
+# exported on 2026-09-19. The stores:
+# LocalMachine\AuthRoot, LocalMachine\Root.
+# Regenerate with tests/scripts/generate_pe_roots.py against a newer store
+# export; roots added after the export date are outside this snapshot.
+#
+# blint matches the SHA-256 of the self-signed certificate a signature
+# chain terminates at against these fingerprints, and reads the microsoft
+# flag to separate first-party Microsoft roots from public ones. This is
+# a statement about the file's shipped chain, not about the world: blint
+# performs no trust validation, consults no live store and fetches no
+# revocation data (plan 02/D), so a root outside this snapshot reads as
+# "outside the shipped snapshot", never as "untrusted" in the CryptoAPI
+# sense.
+
+source_build: "10.0.26200.0"
+source_stores:
+  - 'LocalMachine\AuthRoot'
+  - 'LocalMachine\Root'
+hashed_on: "2026-09-19"
+hash: sha256
+roots:
+  31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0:
+    cn: "DigiCert Global Root G3"
+    o: "DigiCert Inc"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  3e9099b5015e8f486c00bcea9d111ee721faba355a89bcf1df69561e3dc6325c:
+    cn: "DigiCert Assured ID Root CA"
+    o: "DigiCert Inc"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  3fd4be8baad2f26e1bde06c7584bb720dd1a972d111f5a4999bc44b08fb4960d:
+    cn: "Microsoft ECC TS Root Certificate Authority 2018"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - Root
+  4898b1749717a594a2030f47c83c272bd14bae3dceb2eae382174ef2ec1c75c9:
+    cn: "Microsoft Authenticode(tm) Root Authority"
+    o: "MSFT"
+    microsoft: true
+    stores:
+      - Root
+  4ff460d54b9c86dabfbcfc5712e0400d2bed3fbc4d4fbdaa86e06adcd2a9ad7a:
+    cn: "USERTrust ECC Certification Authority"
+    o: "The USERTRUST Network"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  5367f20c7ade0e2bca790915056d086b720c33c1fa2a2661acf787e3292e1270:
+    cn: "Microsoft Identity Verification Root Certificate Authority 2020"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - AuthRoot
+      - Root
+  552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988:
+    cn: "DigiCert Trusted Root G4"
+    o: "DigiCert Inc"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  5b789987f3c4055b8700941b33783a5f16e0cff937ea32011fe04779f7635308:
+    cn: "OU=\"NO LIABILITY ACCEPTED, (c)97 VeriSign, Inc.\", OU=VeriSign Time Stamping Service Root, OU=\"VeriSign, Inc.\", O=VeriSign Trust Network"
+    o: "VeriSign Trust Network"
+    microsoft: false
+    stores:
+      - Root
+  5c58468d55f58e497e743982d2b50010b6d165374acf83a7d4a32db768c4408e:
+    cn: "Certum Trusted Network CA"
+    o: "Unizeto Technologies S.A."
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  65af95f4be86847344634282f941b2e605063ef0c8542f014ca088d182109e4f:
+    cn: "Microsoft Time Stamp Root Certificate Authority 2014"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - Root
+  6b6c1e01f590f5afc5fcf85cd0b9396884048659fc2c6d1170d68b045216c3fd:
+    cn: "Thawte Timestamping CA"
+    o: "Thawte"
+    microsoft: false
+    stores:
+      - Root
+  6ef914723f089d2adaff98d470a3651ccf1768e559fbdcc0faaa640aa12e5753:
+    cn: "OU=Copyright (c) 1997 Microsoft Corp., OU=Microsoft Time Stamping Service Root, OU=Microsoft Corporation, O=Microsoft Trust Network"
+    o: "Microsoft Trust Network"
+    microsoft: true
+    stores:
+      - Root
+  7353b6d6c2d6da4247773f3f07d075decb5134212bead0928ef1f46115260941:
+    cn: "DigiCert CS RSA4096 Root G5"
+    o: "\"DigiCert"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  7431e5f4c3c1ce4690774f0b61e05440883ba9a01ed00ba6abd7806ed3b118cf:
+    cn: "DigiCert High Assurance EV Root CA"
+    o: "DigiCert Inc"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  847df6a78497943f27fc72eb93f9a637320a02b561d0a91b09e87a7807ed7c61:
+    cn: "Microsoft Root Certificate Authority 2011"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - Root
+  885de64c340e3ea70658f01e1145f957fcda27aabeea1ab9faa9fdb0102d4077:
+    cn: "Microsoft Root Certificate Authority"
+    microsoft: true
+    stores:
+      - Root
+  8a5e4881d42f7475e8ec3726fcd5e51884aa04daa9fa7adac8cd26452cf885d4:
+    cn: "Symantec Enterprise Mobile Root for Microsoft"
+    o: "Symantec Corporation"
+    microsoft: true
+    stores:
+      - Root
+  96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6:
+    cn: "ISRG Root X1"
+    o: "Internet Security Research Group"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  b676f2eddae8775cd36cb0f63cd1d4603961f49e6265ba013a2f0307b6d0b804:
+    cn: "Certum Trusted Network CA 2"
+    o: "Unizeto Technologies S.A."
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  caca93b9d23d2b6fa76e8b8471931e0df3ec6f63af3cdbb936c41954a1872326:
+    cn: "Microsoft ECC Product Root Certificate Authority 2018"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - Root
+  cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f:
+    cn: "DigiCert Global Root G2"
+    o: "DigiCert Inc"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  cbb522d7b7f127ad6a0113865bdf1cd4102e7d0759af635a7cf4720dc963c53b:
+    cn: "GlobalSign"
+    o: "GlobalSign"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  d7a7a0fb5d7e2731d771e9484ebcdef71d5f0c3e0a2948782bc83ee0ea699ef4:
+    cn: "AAA Certificate Services"
+    o: "Comodo CA Limited"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  df545bf919a2439c36983b54cdfc903dfa4f37d3996d8d84b4c31eec6f3c163e:
+    cn: "Microsoft Root Certificate Authority 2010"
+    o: "Microsoft Corporation"
+    microsoft: true
+    stores:
+      - Root
+  e7685634efacf69ace939a6b255b7b4fabef42935b50a265acb5cb6027e44e70:
+    cn: "OU=Class 3 Public Primary Certification Authority, O=\"VeriSign, Inc.\", C=US"
+    o: "\"VeriSign"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  e793c9b02fd8aa13e21c31228accb08119643b749c898964b1746d46c3d4cbd2:
+    cn: "USERTrust RSA Certification Authority"
+    o: "The USERTRUST Network"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  ebd41040e4bb3ec742c9e381d31ef2a41a48b6685c96e7cef3c1df6cd4331c99:
+    cn: "GlobalSign Root CA"
+    o: "GlobalSign nv-sa"
+    microsoft: false
+    stores:
+      - AuthRoot
+      - Root
+  f38406e540d7a9d90cb4a9479299640ffb6df9e224ecc7a01c0d9558d8dad77d:
+    cn: "Microsoft Root Authority"
+    microsoft: true
+    stores:
+      - Root

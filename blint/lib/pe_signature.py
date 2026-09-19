@@ -36,6 +36,29 @@ W2.2 facts carried by the same walk:
   Presence is reported; this packet does not recompute them, and nothing
   here claims verification.
 
+W2.4 facts carried by the same walk:
+
+- ``signing_class`` on the block (02/C): ``unsigned`` (only from a
+  performed catalog lookup that came back negative — set by
+  ``pe_catalog.apply_catalog_signature``, never here), ``self_signed``,
+  ``unknown_root``, ``commercial_ov`` / ``commercial_ev``,
+  ``microsoft_1st_party``, ``whql``, ``kernel_mode`` and
+  ``attestation_signed``, derived from facts the walk already carries:
+  the signer's EKU and certificate policies, whether the chain terminates
+  at its own leaf, and whether the terminating root's SHA-256 fingerprint
+  is in the shipped snapshot (``pe_roots.yml`` — data with provenance:
+  what was hashed, from which store, on which date, at which build). When
+  the inputs do not determine a class the key is *absent*: its absence
+  means undetermined, never ``unsigned``. A truncated signature walk
+  never yields a class — a verdict is not decided from a sample.
+- The terminating root's fingerprint facts per signature
+  (``root_fingerprint``, ``root_known``, ``root_microsoft``), stated only
+  when the shipped chain actually reaches a self-signed certificate.
+  Where the blob ships leaf and intermediates but no root — the normal
+  Authenticode shape — nothing is claimed about the root; the anchor name
+  the top shipped link states is still available to consumers through the
+  chain entries' ``issuer_cn``.
+
 Counts beside capped listings are exact and carry a truncation flag —
 ``signature_count`` is a floor only while ``signature_walk_truncated`` is
 present, and ``chain_length``/``chain_truncated`` — and page-hash counts
@@ -49,9 +72,12 @@ oversized DER — degrades to ``parse_status: "malformed"`` with a
 
 import contextlib
 import datetime
+import hashlib
+import importlib.resources
 import re
 
 import lief
+import yaml
 
 from blint.lib.pe_overlay import security_directory_range
 from blint.logger import LOG
@@ -70,6 +96,7 @@ OID_COMMON_NAME = "2.5.4.3"
 OID_ORGANIZATION = "2.5.4.10"
 OID_BASIC_CONSTRAINTS = "2.5.29.19"
 OID_EXT_KEY_USAGE = "2.5.29.37"
+OID_CERTIFICATE_POLICIES = "2.5.29.32"
 
 DIGEST_ALGORITHM_NAMES = {
     "1.2.840.113549.2.5": "MD5",
@@ -98,11 +125,33 @@ EKU_NAMES = {
     "1.3.6.1.5.5.7.3.8": "timeStamping",
     "1.3.6.1.4.1.311.10.3.1": "microsoftTrustListSigning",
     "1.3.6.1.4.1.311.10.3.5": "whql",
-    "1.3.6.1.4.1.311.10.3.5.1": "whqlDriverPublishing",
+    # szOID_ATTEST_WHQL_CRYPTO: the attestation variant of the WHQL EKU —
+    # the same "Microsoft Windows Hardware Compatibility Publisher" signer
+    # issues both, and only this OID says the submission was attested
+    # rather than HLK-tested (wincrypt.h, SDK 10.0.26100).
+    "1.3.6.1.4.1.311.10.3.5.1": "whqlAttestation",
+    "1.3.6.1.4.1.311.10.3.6": "windowsSystemComponent",
+    "1.3.6.1.4.1.311.10.3.20": "windowsKitsComponent",
+    "1.3.6.1.4.1.311.10.3.24": "protectedProcess",
+    "1.3.6.1.4.1.311.10.3.25": "windowsThirdPartyApplication",
     "1.3.6.1.4.1.311.61.1.1": "kernelModeCodeSigning",
+    "1.3.6.1.4.1.311.61.4.1": "earlyLaunchAntimalware",
     "1.3.6.1.4.1.311.2.1.21": "individualCodeSigning",
     "1.3.6.1.4.1.311.2.1.22": "commercialCodeSigning",
 }
+# Certificate policy OIDs (certificatePolicies, not EKU): the CA/Browser
+# Forum code-signing policies separate EV from OV certificates.
+POLICY_NAMES = {
+    "2.23.140.1.3": "evCodeSigning",
+    "2.23.140.1.2.1": "ovCodeSigning",
+    "2.23.140.1.2.2": "individualCodeSigning",
+}
+# The exact subject organization names identifying a Microsoft-issued leaf
+# (pe_publisher_identities.yml carries them beside the publisher's other
+# identity facts). The signature's own O string is the only Microsoft-leaf
+# fact used for the class: CNs are product names here ("Microsoft Windows",
+# ".NET DAC") and substrings would match identities that merely mention
+# Microsoft.
 STATEMENT_TYPE_NAMES = {
     "1.3.6.1.4.1.311.2.1.21": "individual_code_signing",
     "1.3.6.1.4.1.311.2.1.22": "commercial_code_signing",
@@ -283,14 +332,16 @@ def _name_values(name: bytes) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 # X.509 certificates
 # ---------------------------------------------------------------------------
-def _parse_certificate(content: bytes) -> dict:
+def _parse_certificate(content: bytes, raw_cert: bytes = b"") -> dict:
     """One certificate's facts from the Certificate SEQUENCE *content*.
 
     Inside TBSCertificate the field order after the optional [0] version is
     serialNumber, signature (AlgorithmIdentifier), issuer, validity, subject,
     subjectPublicKeyInfo — then optional extension blocks. The raw issuer and
     subject Name TLVs are kept for chain matching, which is a byte
-    comparison, never a rendered-string comparison.
+    comparison, never a rendered-string comparison. ``raw_cert`` is the
+    complete DER certificate, kept so the chain's terminating root can be
+    fingerprinted against the shipped anchor list.
     """
     out: dict = {
         "subject_cn": None,
@@ -303,8 +354,10 @@ def _parse_certificate(content: bytes) -> dict:
         "not_after_dt": None,
         "is_ca": None,
         "eku": [],
+        "policies": [],
         "raw_subject": b"",
         "raw_issuer": b"",
+        "raw_cert": raw_cert,
     }
     tbs_tag, tbs, _ = _ber_read(content, 0, len(content))
     if tbs_tag != 0x30:
@@ -384,6 +437,30 @@ def _certificate_extensions(exts_field: bytes, out: dict) -> None:
                     oid = _oid_decode(eku_value)
                     ekus.append(EKU_NAMES.get(oid, oid))
             out["eku"] = ekus
+        elif ext_oid == OID_CERTIFICATE_POLICIES and ext_value is not None:
+            # certificatePolicies ::= SEQUENCE OF PolicyInformation, each
+            # { policyIdentifier OID, policyQualifiers? } — only the OID is
+            # read; the CA/Browser Forum code-signing policies (EV/OV) are
+            # what the signing class keys on. The outer SEQUENCE is
+            # descended into first, exactly as the EKU branch does.
+            policies = []
+            outer_tag, outer, _ = _ber_read(ext_value, 0, len(ext_value))
+            pol_content = outer if outer_tag == 0x30 else ext_value
+            pol_pos = 0
+            pol_end = len(pol_content)
+            while pol_pos < pol_end:
+                pol_tag, pol_value, pol_pos = _ber_read(pol_content, pol_pos, pol_end)
+                if pol_tag != 0x30:
+                    continue
+                info_pos = 0
+                info_end = len(pol_value)
+                while info_pos < info_end:
+                    info_tag, info_value, info_pos = _ber_read(pol_value, info_pos, info_end)
+                    if info_tag == 0x06:
+                        oid = _oid_decode(info_value)
+                        policies.append(POLICY_NAMES.get(oid, oid))
+                    break
+            out["policies"] = policies
 
 
 def _parse_certificate_set(set_content: bytes, limit: int) -> tuple[list[dict], int]:
@@ -397,12 +474,13 @@ def _parse_certificate_set(set_content: bytes, limit: int) -> tuple[list[dict], 
     end = len(set_content)
     total = 0
     while pos < end:
+        start = pos
         tag, certificate, pos = _ber_read(set_content, pos, end)
         if tag != 0x30:
             continue
         total += 1
         if len(parsed) < limit:
-            parsed.append(_parse_certificate(certificate))
+            parsed.append(_parse_certificate(certificate, set_content[start:pos]))
     return parsed, total
 
 
@@ -847,13 +925,18 @@ def _match_certificate(certificates: list[dict], info: dict) -> dict | None:
 
 def _build_chain(
     certificates: list[dict], signer: dict, certificates_truncated: bool = False
-) -> tuple[list[dict], int, str | None, bool | None, bool]:
+) -> tuple[list[dict], int, str | None, bool | None, bool, str | None]:
     """The chain the blob ships above the signer: intermediates then root.
 
     Structural only — the next link is the certificate whose subject DER
     equals the current link's issuer DER. Returns (listed chain, length,
     terminating CN, whether it terminates at a self-signed root, whether the
-    length is exact).
+    length is exact, and the SHA-256 fingerprint of that self-signed root).
+    The fingerprint is stated only when the walk actually reached a
+    self-signed certificate — the root the chain terminates at is then in
+    hand and can be matched against the shipped anchor list; where the blob
+    stops below the root (the normal Authenticode shape) there is nothing
+    to fingerprint and no anchor is claimed.
 
     ``certificates_truncated`` says the blob carried more certificates than
     the parse window kept. A walk that then runs out of links has not found
@@ -868,7 +951,7 @@ def _build_chain(
     if current["raw_subject"] == current["raw_issuer"]:
         # A self-signed signer is its own root: the chain terminates at the
         # leaf itself, which is what signing_class will call self_signed.
-        return chain, 0, current["subject_cn"], True, True
+        return chain, 0, current["subject_cn"], True, True, _cert_fingerprint(current)
     seen = {signer["serial_hex"]}
     ran_out = False
     while True:
@@ -899,9 +982,16 @@ def _build_chain(
             complete = True
             break
     if certificates_truncated and ran_out:
-        return chain, chain_length, None, None, False
+        return chain, chain_length, None, None, False, None
     terminates_at = current["subject_cn"] if chain_length else None
-    return chain, chain_length, terminates_at, complete, True
+    root_fingerprint = _cert_fingerprint(current) if complete else None
+    return chain, chain_length, terminates_at, complete, True, root_fingerprint
+
+
+def _cert_fingerprint(cert: dict) -> str | None:
+    """SHA-256 of the certificate's full DER, when the raw bytes were kept."""
+    raw = cert.get("raw_cert")
+    return hashlib.sha256(raw).hexdigest() if raw else None
 
 
 def _timestamp_entry(countersignature: dict, cert: dict | None) -> dict:
@@ -926,6 +1016,137 @@ def _timestamp_entry(countersignature: dict, cert: dict | None) -> dict:
 def _strip_counter(value: dict) -> dict:
     """Countersignature dict without the non-JSON datetime helper."""
     return {k: v for k, v in value.items() if not k.startswith("_")}
+
+
+# ---------------------------------------------------------------------------
+# Shipped anchor data and the signing class (02/C)
+# ---------------------------------------------------------------------------
+_ROOT_ANCHOR_CACHE: dict | None = None
+_PUBLISHER_CACHE: dict | None = None
+
+
+def _load_data_table(filename: str) -> dict:
+    """Load one generated data table from ``blint/data``."""
+    try:
+        with importlib.resources.files("blint.data").joinpath(filename).open(
+            "r", encoding="utf-8"
+        ) as handle:
+            return yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        LOG.debug(f"Unable to load {filename}: {exc}")
+        return {}
+
+
+def _root_anchor_table() -> dict:
+    """The shipped root-anchor fingerprints (pe_roots.yml), keyed by the
+    SHA-256 of the root's DER. Generated data with provenance — what was
+    hashed, from which stores, on which date, at which Windows build —
+    never a hard-coded list. Empty (a load failure) means every complete
+    chain reports ``root_known: False``, which is the honest reading of a
+    missing snapshot."""
+    global _ROOT_ANCHOR_CACHE
+    if _ROOT_ANCHOR_CACHE is None:
+        _ROOT_ANCHOR_CACHE = _load_data_table("pe_roots.yml").get("roots") or {}
+    return _ROOT_ANCHOR_CACHE
+
+
+def _microsoft_leaf_names() -> set[str]:
+    """The exact subject organization names identifying a Microsoft-issued
+    leaf certificate, from the publisher-identity data table."""
+    global _PUBLISHER_CACHE
+    if _PUBLISHER_CACHE is None:
+        _PUBLISHER_CACHE = _load_data_table("pe_publisher_identities.yml")
+    publishers = _PUBLISHER_CACHE.get("publishers") or {}
+    return set(publishers.get("microsoft", {}).get("leaf_org_names") or [])
+
+
+def _microsoft_anchor(entry: dict) -> bool:
+    """Whether the signature's chain anchors at a Microsoft root.
+
+    Two shapes, both structural: the blob ships the root (chain complete)
+    and its fingerprint is flagged Microsoft in the anchor list; or the
+    blob stops below the root — the normal Authenticode shape — and the
+    top shipped link names a Microsoft root as its issuer. The name match
+    is the issuer statement inside the shipped chain, checked against the
+    anchor list's names; it is weaker than the fingerprint match and both
+    are recorded facts, never trust verdicts. A chain whose listing hit
+    its cap has its top link past the sample, so no anchor is claimed from
+    it.
+    """
+    if entry.get("chain_complete") is True:
+        return entry.get("root_microsoft") is True
+    if entry.get("chain_truncated"):
+        return False
+    chain = entry.get("chain") or []
+    signer = entry.get("signer") or {}
+    anchor_cn = chain[-1].get("issuer_cn") if chain else signer.get("issuer_cn")
+    if not anchor_cn:
+        return False
+    anchors = _root_anchor_table()
+    microsoft_cns = {
+        facts.get("cn") for facts in anchors.values() if facts.get("microsoft")
+    }
+    return anchor_cn in microsoft_cns
+
+
+def signing_class_for_signature(entry: dict) -> str | None:
+    """The 02/C class one signature's facts determine, or None.
+
+    The order is the strength of the facts: a self-signed signer is the
+    strongest structural statement (nothing vouches for the signer), the
+    driver EKUs name a specific Microsoft signing program, the
+    Microsoft-first-party determination needs both a Microsoft leaf (exact
+    organization name from the publisher data) and a chain that anchors at
+    a Microsoft root — more specific than the CA/Browser Forum policy OIDs
+    that separate EV from OV code signing, so it is decided first.
+    ``unknown_root`` is the last resort: a complete chain whose root is
+    outside the shipped snapshot. Every None here means undetermined — the
+    block stays without ``signing_class`` rather than defaulting (rule 11).
+    """
+    signer = entry.get("signer") or {}
+    if not signer:
+        return None
+    ekus = set(signer.get("eku") or [])
+    policies = set(signer.get("policies") or [])
+    if entry.get("chain_complete") is True and entry.get("chain_length") == 0:
+        return "self_signed"
+    if "kernelModeCodeSigning" in ekus:
+        return "kernel_mode"
+    if "whqlAttestation" in ekus:
+        return "attestation_signed"
+    if "whql" in ekus:
+        return "whql"
+    if signer.get("o") in _microsoft_leaf_names() and _microsoft_anchor(entry):
+        return "microsoft_1st_party"
+    if "codeSigning" in ekus:
+        if "evCodeSigning" in policies:
+            return "commercial_ev"
+        if signer.get("o") or "ovCodeSigning" in policies:
+            return "commercial_ov"
+    if entry.get("chain_complete") is True and entry.get("root_known") is False:
+        return "unknown_root"
+    return None
+
+
+def derive_signing_class(signatures: list[dict], walk_truncated: bool) -> tuple[str, int] | None:
+    """The block's ``signing_class``: the first signature whose facts
+    determine one, in walk order — the outer (primary) signature first,
+    exactly the order Windows evaluates them — with the deciding
+    signature's index so the derivation is auditable.
+
+    A truncated walk determines nothing: the signature that would decide
+    the class may be one of the ones past the window, so a verdict from
+    the walked sample would be a sample verdict (ground rule 33 — the
+    same discipline ``weak_digest_only`` already follows). Returns
+    ``(class, index)`` or None.
+    """
+    if walk_truncated:
+        return None
+    for index, entry in enumerate(signatures):
+        determined = signing_class_for_signature(entry)
+        if determined:
+            return determined, index
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +1190,9 @@ def _parse_signature(
             "issuer_cn": cert["issuer_cn"],
             "eku": cert["eku"],
         }
-        chain, chain_length, terminates_at, complete, length_exact = _build_chain(
+        if cert["policies"]:
+            entry["signer"]["policies"] = cert["policies"]
+        chain, chain_length, terminates_at, complete, length_exact, root_fingerprint = _build_chain(
             signed["certificates"], cert, certificates_truncated
         )
         entry["chain"] = chain
@@ -984,6 +1207,16 @@ def _parse_signature(
             entry["chain_length_exact"] = False
         entry["chain_terminates_at"] = terminates_at
         entry["chain_complete"] = complete
+        if root_fingerprint:
+            # The walk reached a self-signed certificate, so the root is in
+            # hand: state its fingerprint against the shipped anchor list.
+            # An unknown fingerprint reads as "outside the shipped snapshot",
+            # never as untrusted (no trust validation is performed).
+            entry["root_fingerprint"] = root_fingerprint
+            anchors = _root_anchor_table()
+            entry["root_known"] = root_fingerprint in anchors
+            if entry["root_known"] and anchors[root_fingerprint].get("microsoft"):
+                entry["root_microsoft"] = True
     else:
         entry["signer"] = None
         entry["chain"] = []
@@ -1262,6 +1495,14 @@ def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
 
     if signature_count:
         block["parse_status"] = "parsed"
+        # The signing class (02/C) rides on the parsed signature facts. It
+        # is absent — not "unsigned" — whenever nothing determines it: no
+        # deciding signature, or a walk that stopped at its window.
+        determined = derive_signing_class(block["signatures"], walk["signature_walk_truncated"])
+        if determined:
+            block["signing_class"], class_index = determined
+            if class_index:
+                block["signing_class_signature"] = class_index
         for entry in block["signatures"]:
             digest = entry.get("digest") or {}
             if digest.get("digest_match") is not None:

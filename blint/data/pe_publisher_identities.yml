@@ -1,0 +1,35 @@
+# blint's claimable-publisher identities (PE lane W2.4, plan 02/C).
+#
+# CHECK_SIGNER_MISMATCH arbitrates one narrow question: when VERSIONINFO
+# CompanyName *claims* a publisher from this table, does the signature's
+# signer identity carry that publisher? A mismatch between two names that
+# are not in this table is never a finding, because a name difference is
+# not a tampering signal by itself — measured on corpus tiers 0-1, 152 of
+# 178 files with both facts have different signer and CompanyName strings,
+# and every one is benign: Microsoft signs the Sysinternals suite whose
+# CompanyName still says "Sysinternals" (an acquisition, not a tamper),
+# the Python Software Foundation signs the OpenSSL/SQLite DLLs it
+# redistributes (Company still says the upstream project), and OpenJS
+# signs node.exe (Company says "Node.js"). The one direction that is a
+# real signal is the impersonation one: the file claims a publisher whose
+# identity the signature does not carry — the shape of a signed-but-
+# repurposed binary. Tokens are matched case-insensitively as substrings
+# of the company or signer string; the signer's organization (O) is the
+# identity tested, its common name (CN) only when the organization is
+# absent. Extend this table only with publishers blint can arbitrate:
+# the claim must be distinctive and the satisfying signer identity
+# unambiguous.
+
+publishers:
+  microsoft:
+    claim_tokens:
+      - microsoft
+    signer_tokens:
+      - microsoft
+    # The exact subject organization (O) names identifying a
+    # Microsoft-issued leaf certificate. The signing-class derivation
+    # requires one of these exact strings for "a Microsoft leaf" — CNs are
+    # product names there ("Microsoft Windows", ".NET DAC"), and substring
+    # matching would accept an identity that merely mentions Microsoft.
+    leaf_org_names:
+      - Microsoft Corporation

@@ -190,6 +190,176 @@ def check_weak_signature_digest(
     return "no signature uses SHA-256 or stronger"
 
 
+def _parsed_signature_block(metadata: dict[str, Any]) -> dict | None:
+    """The ``code_signature`` block when its facts were actually parsed."""
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict) and code_signature.get("parse_status") == "parsed":
+        return code_signature
+    return None
+
+
+def check_self_signed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Reports a signature whose signer certificate is its own root (02/C).
+
+    A self-signed signer vouches for itself: no certificate authority
+    stands behind the identity the signature states, so nothing anchors it
+    to a publisher. Common for internal test signing — and for malware
+    that wants a "signed" look — which is why the finding names the
+    signer instead of pretending to know which. The verdict follows the
+    block's ``signing_class``: withheld when the walk was truncated, so a
+    sample can never decide it.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or block.get("signing_class") != "self_signed":
+        return True
+    signer = next(
+        (
+            sig.get("signer") or {}
+            for sig in block.get("signatures") or []
+            if (sig.get("signer") or {}).get("cn")
+        ),
+        {},
+    )
+    return f"self-signed signer ({signer.get('cn')}): no certificate authority vouches for the identity"
+
+
+def check_signature_unknown_root(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a complete chain terminating outside the shipped root
+    snapshot (02/C).
+
+    The signature blob carried its whole chain up to a self-signed root,
+    and that root's SHA-256 fingerprint is not in blint's shipped anchor
+    snapshot (``pe_roots.yml`` — the trusted roots hashed from a Windows
+    store, with provenance, at a stated date). This is a statement about
+    the file, not a trust verdict: blint performs no trust validation and
+    consults no live store, so a root added to Windows after the snapshot,
+    or absent from it, reads the same way. A chain that stops below the
+    root — the normal Authenticode shape — reports nothing here, because
+    absence of a root in the blob is not evidence about the root (rule
+    11). The verdict follows ``signing_class`` and is withheld when the
+    walk was truncated.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or block.get("signing_class") != "unknown_root":
+        return True
+    signature = block["signatures"][block.get("signing_class_signature", 0)]
+    return (
+        "chain terminates at self-signed root "
+        f"{signature.get('chain_terminates_at')} whose fingerprint is outside "
+        "the shipped root snapshot"
+    )
+
+
+def check_kernel_signing_class(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the kernel-mode code-signing class (02/C), informational.
+
+    The signer carries the kernel-mode code signing EKU
+    (``1.3.6.1.4.1.311.61.1.1``), meaning the binary is signed for (or
+    claims to be signed for) execution as a kernel component. This is a
+    posture fact for the analyst — kernel code runs with the operating
+    system's privileges — not a defect claim, and the driver lane consumes
+    it directly. The verdict follows ``signing_class``: withheld when the
+    walk was truncated.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or block.get("signing_class") != "kernel_mode":
+        return True
+    signer = block["signatures"][block.get("signing_class_signature", 0)].get("signer") or {}
+    return f"kernel-mode code signing ({signer.get('cn')})"
+
+
+_PUBLISHER_CACHE: dict | None = None
+
+
+def _publisher_table() -> dict:
+    """The claimable-publisher identity table (pe_publisher_identities.yml).
+
+    Generated/judged data with provenance, never hard-coded names: the
+    signer-mismatch rule arbitrates only publishers listed here, because a
+    name difference between two unknown identities is not a tampering
+    signal (the Sysinternals measurement that decided the comparison is
+    recorded in the table header)."""
+    global _PUBLISHER_CACHE
+    if _PUBLISHER_CACHE is None:
+        _PUBLISHER_CACHE = _load_yaml_data("pe_publisher_identities.yml")
+    return _PUBLISHER_CACHE
+
+
+def _load_yaml_data(filename: str) -> dict:
+    import importlib.resources
+
+    import yaml
+
+    try:
+        with importlib.resources.files("blint.data").joinpath(filename).open(
+            "r", encoding="utf-8"
+        ) as handle:
+            return yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def check_signer_mismatch(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a VERSIONINFO company claim the signature does not back (02/C).
+
+    Fires only in the impersonation direction: ``CompanyName`` claims a
+    publisher from the identity table, and the signature's signer carries
+    none of that publisher's identity tokens. That is how a signed-but-
+    repurposed binary looks — re-signed by someone else with the victim's
+    version strings left in place. The reverse direction is deliberately
+    not a finding: Microsoft signs the Sysinternals suite whose
+    CompanyName still says "Sysinternals", and the Python Software
+    Foundation signs the OpenSSL DLLs it redistributes — measured 152 of
+    178 tier-0/1 files with both facts differ benignly, so a symmetric
+    comparison would be wrong, not the corpus. Companies absent from the
+    table are never arbitrated, and a missing signer or CompanyName
+    determines nothing (rule 11).
+    """
+    block = _parsed_signature_block(metadata)
+    if not block:
+        return True
+    signer = next(
+        (
+            sig.get("signer") or {}
+            for sig in block.get("signatures") or []
+            if (sig.get("signer") or {}).get("cn")
+        ),
+        {},
+    )
+    signer_identity = signer.get("o") or signer.get("cn") or ""
+    if not signer_identity:
+        return True
+    version_info = metadata.get("version_info") or {}
+    tables = version_info.get("strings") or {}
+    companies = sorted(
+        {table.get("CompanyName") for table in tables.values() if table.get("CompanyName")}
+    )
+    if not companies:
+        return True
+    publishers = _publisher_table().get("publishers") or {}
+    for company in companies:
+        lowered = company.lower()
+        for publisher, facts in publishers.items():
+            claim_tokens = facts.get("claim_tokens") or []
+            if not any(token in lowered for token in claim_tokens):
+                continue
+            # The claim is present; the signer must carry the publisher.
+            signer_tokens = facts.get("signer_tokens") or []
+            if any(token in signer_identity.lower() for token in signer_tokens):
+                continue
+            return (
+                f"CompanyName {company!r} claims the {publisher} publisher, but the "
+                f"signature signer is {signer_identity!r}"
+            )
+    return True
+
+
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
