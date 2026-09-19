@@ -1227,6 +1227,44 @@ def test_real_managed_exetype_change_does_not_break_ordinal_width():
     assert meta["imports"]
 
 
+def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
+    """Moving managed PEs to `dotnetbinary` must not drop a check quietly.
+
+    W3.1 changed `exe_type` for every managed binary, so every rule scoped
+    to PE32/PE64 and not to dotnetbinary stopped reaching them. Two of
+    those were argued in rules.yml and are the point of the change
+    (CHECK_CANARY and CHECK_RPATH could only ever return their false
+    negative verdict on a pure-IL image). CHECK_PACKED was not argued and
+    was not intended: it reads section entropy, packer section signatures
+    and the overlay, none of which are native-only, and a packed or
+    obfuscator-protected assembly is one of the commonest hostile managed
+    shapes. The packet's own before/after showed no firing move, because
+    all 62 managed corpus files score packed_likelihood low — a rule
+    silently leaving scope does not announce itself by changing a count on
+    a benign corpus, which is why this is a scope assertion and not a
+    findings assertion.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    rules = yaml.safe_load(
+        (Path(pe_dotnet.__file__).parent.parent / "data" / "rules.yml").read_text()
+    )
+    rules = rules if isinstance(rules, list) else rules.get("rules", rules)
+    native = {
+        r["id"] for r in rules
+        if {"PE32", "PE64"} & set(r.get("exe_types") or [])
+    }
+    managed = {
+        r["id"] for r in rules if "dotnetbinary" in (r.get("exe_types") or [])
+    }
+    # Every removal must be argued in rules.yml beside the scope itself.
+    argued_removals = {"CHECK_CANARY", "CHECK_RPATH"}
+    assert native - managed == set()
+    assert argued_removals & native == set()
+
+
 def test_unhandled_heapsizes_bit_is_named():
     """A HeapSizes bit blint does not read is named, not assumed away.
 

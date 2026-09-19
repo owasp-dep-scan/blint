@@ -189,6 +189,11 @@
   exe_types:
     - genericbinary
     - gobinary
+    # W3.1 review: this scope predates the packet and did not move, but
+    # the files reaching it did — managed PEs were PE32/PE64 and out of
+    # scope before W3.1 and are in scope now. Kept: virtual size is a
+    # format-independent fact and the check reads nothing native. Zero
+    # findings added across the managed corpus (no assembly near 30 MB).
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
@@ -518,3 +523,11 @@
     - MachO
     - PE32
     - PE64
+    # W3.1 review: managed images must stay in scope. The evidence is
+    # section entropy, packer section signatures and the overlay — all
+    # computed for any PE, none of them native-only — and a packed or
+    # obfuscator-protected .NET assembly is one of the commonest hostile
+    # managed shapes there is. Moving managed files to dotnetbinary took
+    # this check away from them silently; restoring the scope costs
+    # nothing, as all 62 managed corpus files score packed_likelihood low.
+    - dotnetbinary
