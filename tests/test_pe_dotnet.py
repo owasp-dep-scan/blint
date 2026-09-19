@@ -14,6 +14,7 @@ Fixture strategy follows the plan's rules:
   netmodule, MethodSpec entry point — has a fixture (ground rule 10).
 """
 
+import base64
 import hashlib
 import struct
 
@@ -1056,6 +1057,55 @@ def test_sbom_components_from_assembly_refs():
     assert props["internal:public_key_token"] == "b03f5f7f11d50a3a"
     props2 = {p.name: p.value for p in by_purl["pkg:nuget/Foo.Resources@1.0.0.0"].properties}
     assert props2["internal:culture"] == "zh-Hans"
+    # The version slot says which kind of version it holds: an AssemblyRef
+    # carries the four-part assembly version, not the NuGet package
+    # version, and the two differ for the same library.
+    assert props["internal:version_source"] == "assembly_version"
+
+
+def test_assembly_refs_do_not_duplicate_a_deps_json_package():
+    """One package, one component — the overlay's version wins.
+
+    `.deps.json` names the NuGet package version (Newtonsoft.Json 13.0.3)
+    and the AssemblyRef names the assembly version (13.0.0.0). Keyed on the
+    purl the two are different strings, so both would land in the SBOM and
+    the same package would appear twice at two versions, one of which is
+    not a NuGet version. No corpus file exercises both paths today — the
+    managed tier ships no `.deps.json` overlay — so this is the fixture
+    that holds the property.
+    """
+    from blint.lib.sbom import (
+        merge_dotnet_assembly_ref_components,
+        process_dotnet_dependencies,
+    )
+
+    from_overlay = process_dotnet_dependencies(
+        {
+            "libraries": {
+                "Newtonsoft.Json/13.0.3": {
+                    "type": "package",
+                    "sha512": "sha512-" + base64.b64encode(b"\x00" * 64).decode(),
+                    "path": "n/13.0.3",
+                }
+            }
+        },
+        {},
+    )
+    assert [c.purl for c in from_overlay] == ["pkg:nuget/Newtonsoft.Json@13.0.3"]
+    merged = merge_dotnet_assembly_ref_components(
+        from_overlay,
+        [
+            {"name": "Newtonsoft.Json", "version": "13.0.0.0", "culture": "neutral"},
+            {"name": "Serilog", "version": "4.0.0.0", "culture": "neutral"},
+        ],
+    )
+    nuget = sorted(
+        c.purl for c in merged
+        if str(getattr(c, "purl", "")).startswith("pkg:nuget/")
+    )
+    assert "pkg:nuget/Newtonsoft.Json@13.0.3" in nuget
+    assert "pkg:nuget/Newtonsoft.Json@13.0.0.0" not in nuget
+    assert "pkg:nuget/Serilog@4.0.0.0" in nuget
 
 
 def test_analysis_coverage_carries_dotnet_degradations():

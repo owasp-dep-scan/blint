@@ -1157,14 +1157,9 @@ def process_exe_file(
     # block is absent for native files and for assemblies whose metadata
     # could not be read — never an empty list that reads as "no deps".
     if metadata.get("dotnet", {}).get("assembly_refs"):
-        existing_purls = {
-            getattr(comp, "purl", None) for comp in lib_components
-        }
-        for comp in process_dotnet_assembly_refs(metadata["dotnet"]["assembly_refs"]):
-            if comp.purl in existing_purls:
-                continue
-            existing_purls.add(comp.purl)
-            lib_components.append(comp)
+        lib_components = merge_dotnet_assembly_ref_components(
+            lib_components, metadata["dotnet"]["assembly_refs"]
+        )
     # Convert go dependencies
     if metadata.get("go_dependencies"):
         go_components = process_go_dependencies(metadata.get("go_dependencies") or {})
@@ -1791,6 +1786,32 @@ def write_ios_callgraphs(app_file: str, sbom_output: str) -> None:
         shutil.rmtree(app["temp_dir"], ignore_errors=True)
 
 
+def merge_dotnet_assembly_ref_components(
+    lib_components: list[Component], assembly_refs: list[dict]
+) -> list[Component]:
+    """Add AssemblyRef components, one per package name (W3.1 review).
+
+    Deduplicated by package *name*, not by purl. The two managed paths
+    carry different kinds of version: a `.deps.json` overlay names the
+    NuGet package version (13.0.3) while an AssemblyRef names the
+    four-part assembly version (13.0.0.0), and they routinely differ for
+    the same library. Keying on the purl would let both through and put
+    one package in the SBOM twice at two versions, only one of which is a
+    NuGet version. Where the overlay spoke, it wins.
+    """
+    existing_names = {
+        str(getattr(comp, "purl", "") or "").split("@")[0]
+        for comp in lib_components
+    }
+    for comp in process_dotnet_assembly_refs(assembly_refs):
+        name = comp.purl.split("@")[0]
+        if name in existing_names:
+            continue
+        existing_names.add(name)
+        lib_components.append(comp)
+    return lib_components
+
+
 def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
     """Managed assemblies' AssemblyRef rows as pkg:nuget components (W3.1).
 
@@ -1798,6 +1819,13 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
     NuGet package version may differ; the assembly version is what the
     loading runtime binds against). The public key token rides as a
     property — the identity qualifier every NuGet consumer knows.
+
+    Because the two versions differ — Newtonsoft.Json 13.0.3 ships
+    assembly version 13.0.0.0 — every component says which one it carries
+    in ``internal:version_source``. A consumer matching these purls against
+    NuGet advisories would otherwise silently miss, and a version slot that
+    does not say what kind of version it holds is a claim blint cannot back
+    (ground rule 11).
     """
     components = []
     seen: set[str] = set()
@@ -1810,7 +1838,9 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
         if purl in seen:
             continue
         seen.add(purl)
-        properties = []
+        properties = [
+            Property(name="internal:version_source", value="assembly_version")
+        ]
         if token := ref.get("public_key_token"):
             properties.append(
                 Property(name="internal:public_key_token", value=token)
