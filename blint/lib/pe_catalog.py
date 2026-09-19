@@ -545,10 +545,6 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
     if not isinstance(block, dict) or block.get("scope") != "none":
         return
     block["catalog_directory"] = index["catalog_dir"]
-    if not index["complete"]:
-        # "Not found in the part of the index we built" is not "not signed".
-        block["catalog_lookup"] = "index_incomplete"
-        return
     authenticode = metadata.get("authenticode") or {}
     sha256 = (authenticode.get("sha256_hash") or "").replace(":", "").lower() or None
     sha1 = (authenticode.get("sha1_hash") or "").replace(":", "").lower() or None
@@ -558,8 +554,16 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
         return
     match = lookup_member(index, sha256, sha1)
     if match is None:
-        block["catalog_lookup"] = "negative"
+        # Only the *negative* needs a complete index. "Not found in the part
+        # of the index we built" is not "not signed"; finding the member is
+        # proof either way, so the lookup runs first and an incomplete index
+        # still answers positively for every file it did index.
+        block["catalog_lookup"] = "negative" if index["complete"] else "index_incomplete"
         return
+    if not index["complete"]:
+        # Stated on the positive too: the match stands, and the reader knows
+        # the index behind it was not whole.
+        block["catalog_index_incomplete"] = True
     catalog_path = match["catalog"]
     facts = _catalog_signature_facts(index, catalog_path)
     block["scope"] = "catalog"
