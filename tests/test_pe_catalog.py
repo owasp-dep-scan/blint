@@ -2,10 +2,12 @@
 """Tests for catalog signing (W2.3): ``.cat`` parsing, the hash → catalog
 index and the three-state ``catalog_lookup``.
 
-Real-artifact assertions (ground rules 22/29) run against committed
-fixtures in ``tests/data/pe/catroot/`` — two real Windows 11 package
-catalogs copied from the same install as the tier-5 System32 slice;
-between them they cover four slice files that carry no embedded signature
+Real-artifact assertions (ground rules 22/29) run against the tier-5
+CatRoot copy in the corpus and are skipped where it is absent — Microsoft's
+own catalogs are tier-5 artifacts, so they stay on the corpus machines and
+are never committed here. The corpus carries the CatRoot from the same
+install as the tier-5 System32 slice; between them they cover four slice
+files that carry no embedded signature
 (``AssignedAccessCsp.dll``, ``AssignedAccessManager.dll``,
 ``assignedaccessmanagersvc.dll``, ``dumpsdport.sys``), whose authentihash
 blint computes and matches against the member hash Windows' own signing
@@ -41,8 +43,8 @@ from blint.lib.pe_catalog import (
 )
 from tests.test_pe_signature import _cert_tlv, _oid, _signer_info, _tlv
 
-CATROOT = os.path.join("tests", "data", "pe", "catroot")
 SLICE_ROOT = os.path.expanduser("~/sandbox/pe-corpus/tier5-system")
+CATROOT = os.path.join(SLICE_ROOT, "catroot")
 
 SHA1_HASH = "a" * 40
 SHA1_HASH2 = "b" * 40
@@ -199,9 +201,11 @@ def _member_metadata(sha1_hex: str, sha256_hex: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts (rules 22/29): committed Windows 11 package catalogs.
+# Real artifacts (rules 22/29): the corpus CatRoot, never committed here.
 # ---------------------------------------------------------------------------
-def _committed_catalogs() -> list[str]:
+def _corpus_catalogs() -> list[str]:
+    if not os.path.isdir(CATROOT):
+        pytest.skip("tier-5 CatRoot not present")
     return sorted(
         os.path.join(CATROOT, name)
         for name in os.listdir(CATROOT)
@@ -210,7 +214,7 @@ def _committed_catalogs() -> list[str]:
 
 
 def test_real_catalog_parse_and_index():
-    catalogs = _committed_catalogs()
+    catalogs = _corpus_catalogs()
     assert len(catalogs) >= 2
     for path in catalogs:
         catalog = parse_catalog_file(path)
@@ -244,13 +248,13 @@ def test_real_catalog_parse_and_index():
     assert hit and hit["catalog"] == catalogs[0]
 
 
-def test_real_slice_driver_resolves_through_committed_catalog():
+def test_real_slice_driver_resolves_through_corpus_catalog():
     """The packet's rule-29 assertion: blint computes a slice file's
     authentihash, finds no embedded blob (scope "none"), and matches it as
-    a member hash Windows' own tooling stored in the committed real
-    catalog — the same match ``Get-AuthenticodeSignature`` reports as
+    a member hash Windows' own tooling stored in the real corpus
+    CatRoot catalog — the same match ``Get-AuthenticodeSignature`` reports as
     SignatureType "Catalog"."""
-    if not os.path.isdir(SLICE_ROOT):
+    if not os.path.isdir(SLICE_ROOT) or not os.path.isdir(CATROOT):
         pytest.skip("tier-5 slice not present")
     from blint.lib.binary import parse
 
@@ -420,6 +424,34 @@ def test_hostile_truncated_ctl_keeps_real_hashes_and_marks_incomplete(tmp_path):
     metadata = _member_metadata("e" * 40, "f" * 64)
     apply_catalog_signature(metadata, index)
     assert metadata["code_signature"]["catalog_lookup"] == "index_incomplete"
+
+
+def test_incomplete_index_still_answers_the_members_it_did_index(tmp_path):
+    """An incomplete index still resolves a positive match.
+
+    Only the negative needs the whole index: finding the member is proof, and
+    a hash the index *did* store is proof whether or not some other catalog
+    in the tree was refused. Deciding ``index_incomplete`` before looking
+    turned one corrupt .cat anywhere in a CatRoot tree into "unknown" for
+    every catalog-signed file in the scan — the feature switching itself off
+    on the first bad file, which is the one outcome W2.3 exists to prevent.
+    """
+    ctl = _modern_ctl([_modern_member_entry(SHA1_HASH), _modern_member_entry(SHA256_HASH)])
+    _write_cat(tmp_path, "good.cat", _cat_content_info(ctl))
+    # A second catalog the index must refuse, so the tree is incomplete.
+    _write_cat(tmp_path, "broken.cat", b"\x30\x80not-a-catalog")
+    index = build_catalog_index(str(tmp_path))
+    assert index["complete"] is False
+    assert index["catalogs_refused"] == 1
+    metadata = _member_metadata(SHA1_HASH, SHA256_HASH)
+    apply_catalog_signature(metadata, index)
+    block = metadata["code_signature"]
+    assert block["scope"] == "catalog"
+    assert block["catalog_lookup"] == "positive"
+    assert block["catalog"]["member_hash_algorithm"] == "SHA256"
+    # The match stands and the reader is told what it stands on.
+    assert block["catalog_index_incomplete"] is True
+    assert check_authenticode("member.dll", metadata, {}) is True
 
 
 def test_hostile_oversized_file_past_the_default_cap(tmp_path):
