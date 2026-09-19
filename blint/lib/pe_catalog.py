@@ -247,6 +247,7 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
     pos = 0
     end = len(ctl_content)
     member_count = 0
+    undecodable = 0
     while pos < end:
         try:
             tag, value, pos = _ber_read(ctl_content, pos, end)
@@ -341,10 +342,21 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
                     member_hash = _attribute_digest(set_value)
                     if member_hash:
                         break
-            if member_hash and len(stored) < limit:
+            if member_hash is None:
+                # A member entry by shape whose digest none of the three
+                # layouts yielded. It is not in the index, so files it
+                # covers cannot be found there — a different outcome from
+                # the storage cap, and recorded as one (rule 14): both
+                # mark the index incomplete, and conflating them would
+                # report a cap that was never reached.
+                undecodable += 1
+                continue
+            if len(stored) < limit:
                 stored.append(list(member_hash))
     catalog["member_count"] = member_count
-    if member_count > len(stored):
+    if undecodable:
+        catalog["members_undecodable"] = undecodable
+    if member_count - undecodable > len(stored):
         catalog["members_stored_capped"] = True
     return stored
 
@@ -539,6 +551,8 @@ def build_catalog_index(catalog_dir: str, limits: CatalogLimits | None = None) -
             degrade(path, catalog["parse_error"] or "malformed")
         if catalog.get("members_stored_capped") or catalog.get("members_truncated"):
             degrade(path, "member_cap_exceeded")
+        if catalog.get("members_undecodable"):
+            degrade(path, f"members_undecodable:{catalog['members_undecodable']}")
         if index["catalogs_indexed"] >= limits.max_catalogs_indexed:
             degrade(path, "catalog_cap_exceeded")
             continue
