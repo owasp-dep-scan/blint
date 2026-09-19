@@ -11,7 +11,20 @@ fields the packet commits to: assembly identity, public key token, the
 full AssemblyRef list, ModuleRefs, the P/Invoke surface, entry-point
 token, CLI flags and counts. Every skipped file (corpus absent) is named.
 
-Usage: python tests/scripts/verify_dotnet_ground_truth.py
+Usage: python tests/scripts/verify_dotnet_ground_truth.py [records.jsonl]
+
+The default record set is the 63 corpus files, and W3.1's review showed
+that set is too narrow to be a gate on its own: every one of its
+assemblies happened to sit on the same side of a coded-index column-width
+threshold, so it agreed 63/63 while two real framework assemblies parsed
+to a fabricated identity. Pass a jsonl produced by pointing the oracle at
+a larger tree to widen it — records may name their subject as
+``corpus_path`` (relative to the corpus root) or as ``file`` (absolute),
+which is what the oracle emits when run over an arbitrary directory:
+
+    dotnet run -c Release --project tests/data/pe/dotnet-gt/gt.csproj \\
+        -- /usr/local/share/dotnet/shared > /tmp/gt-framework.jsonl
+    python tests/scripts/verify_dotnet_ground_truth.py /tmp/gt-framework.jsonl
 """
 
 import json
@@ -30,13 +43,21 @@ INDEPENDENT = {"helloexe.dll"}
 
 
 def main() -> int:
-    records = [json.loads(line) for line in GT_FILE.read_text().splitlines()]
+    source = Path(sys.argv[1]) if len(sys.argv) > 1 else GT_FILE
+    records = [json.loads(line) for line in source.read_text().splitlines()]
     agree = differ = skipped = 0
     for rec in records:
-        rel = rec["corpus_path"]
-        path = CORPUS / rel
+        if "corpus_path" in rec:
+            rel = rec["corpus_path"]
+            path = CORPUS / rel
+        else:
+            rel = rec["file"]
+            path = Path(rel)
         if not path.exists():
-            print(f"SKIP {rel}: corpus file absent")
+            print(f"SKIP {rel}: file absent")
+            skipped += 1
+            continue
+        if rec.get("status") not in (None, "managed"):
             skipped += 1
             continue
         block = parse_pe_dotnet(lief.PE.parse(str(path)), str(path))

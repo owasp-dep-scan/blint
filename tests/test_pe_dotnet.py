@@ -963,6 +963,74 @@ def test_unknown_table_stops_layout():
     assert block["assembly"]["name"] == "TestLib"
 
 
+def test_coded_index_slots_match_the_spec():
+    """The slot lists, transcribed from ECMA-335 II.24.2.6 independently.
+
+    Every other fixture in this file encodes its rows *through*
+    ``pe_dotnet.CODED_INDEXES``, so a wrong slot list is invisible to all of
+    them — the fixture and the parser agree with each other and disagree
+    with the world. The shipped W3.1 list had MemberRef, TypeRef, TypeSpec,
+    ExportedType and six others missing from ``HasCustomAttribute`` and
+    MethodSpec standing in for MemberRef in ``MethodDefOrRef``; because the
+    widest constituent table sets the column width, that narrowed the
+    CustomAttribute row on assemblies whose MemberRef or ExportedType table
+    passes 2047 rows and shifted every table laid out after it. Two of 375
+    real assemblies measured (netstandard.dll and
+    Microsoft.AspNetCore.Identity.dll) reported a fabricated assembly name,
+    version and public key token as a result. This test is the one place
+    the constant is checked against the document rather than against the
+    code that consumes it.
+    """
+    spec = {
+        "TypeDefOrRef": ((0x02, 0x01, 0x1B), 2),
+        "HasConstant": ((0x04, 0x08, 0x17), 2),
+        "HasCustomAttribute": (
+            (
+                0x06, 0x04, 0x01, 0x02, 0x08, 0x09, 0x0A, 0x00, 0x0E, 0x17,
+                0x14, 0x11, 0x1A, 0x1B, 0x20, 0x23, 0x26, 0x27, 0x28, 0x2A,
+                0x2C, 0x2B,
+            ),
+            5,
+        ),
+        "HasFieldMarshal": ((0x04, 0x08), 1),
+        "HasDeclSecurity": ((0x02, 0x06, 0x20), 2),
+        "MemberRefParent": ((0x02, 0x01, 0x1A, 0x06, 0x1B), 3),
+        "HasSemantics": ((0x14, 0x17), 1),
+        "MethodDefOrRef": ((0x06, 0x0A), 1),
+        "MemberForwarded": ((0x04, 0x06), 1),
+        "Implementation": ((0x26, 0x23, 0x27), 2),
+        "CustomAttributeType": ((None, None, 0x06, 0x0A, None), 3),
+        "ResolutionScope": ((0x00, 0x1A, 0x23, 0x01), 2),
+        "TypeOrMethodDef": ((0x02, 0x06), 1),
+    }
+    assert pe_dotnet.CODED_INDEXES == spec
+
+
+def test_layout_that_does_not_account_for_the_stream_withholds_rows():
+    """A row layout short of the stream yields no values, only a name.
+
+    The writer sizes the table stream to exactly its rows plus an alignment
+    tail; measured over 375 real assemblies the leftover is 0, 2 or 4 bytes
+    and nothing else. More than that means blint's computed row widths are
+    not the writer's, so every row it reads is some other table's bytes.
+    Reporting what those bytes decode to is how the coded-index defect
+    produced a plausible assembly name and a plausible public key token for
+    netstandard.dll — so the derived facts are withheld (ground rule 11)
+    while ``counts``, which comes from the header rather than the layout,
+    stays.
+    """
+    region = bytearray(make_assembly())
+    header_pos, _offset, size = find_stream(region, "#~")
+    struct.pack_into("<I", region, header_pos + 4, size + 64)
+    block = parse_region(bytes(region))
+    assert "tables_layout_short:64" in block["degradations"]
+    assert block["parse_status"] == "partial"
+    assert "assembly" not in block
+    assert "assembly_refs" not in block
+    # The row counts are header data, unaffected by the column widths.
+    assert block["counts"]["assembly"] == 1
+
+
 # --------------------------------------------------------------------------
 # Wire-up, SBOM, coverage, tuple (rule 21 recomputes)
 # --------------------------------------------------------------------------
@@ -1157,6 +1225,41 @@ def test_real_managed_exetype_change_does_not_break_ordinal_width():
     assert block["assembly"]["name"] == "MFCM140U"
     # The dependency list still resolves on the PE64 width.
     assert meta["imports"]
+
+
+def test_real_assemblies_leave_only_an_alignment_tail():
+    """Every corpus assembly's rows account for its whole table stream.
+
+    ``MAX_TABLE_STREAM_LEFTOVER`` is only as good as its threshold, and the
+    threshold is a measurement: re-run it here against whatever the corpus
+    actually holds rather than trusting the number in a packet report. A
+    file that trips the guard is either a layout blint computes wrongly or
+    a real shape the threshold is too tight for — both are review material,
+    and both are invisible to the inline fixtures, which encode their rows
+    through the parser's own constants.
+    """
+    import os
+
+    root = _corpus_path("tier2-managed")
+    checked = 0
+    for dirpath, _dirs, files in os.walk(root):
+        for name in sorted(files):
+            if not name.lower().endswith((".dll", ".exe")):
+                continue
+            path = os.path.join(dirpath, name)
+            parsed_obj = _lief_parse(path)
+            if parsed_obj is None:
+                continue
+            block = parse_pe_dotnet(parsed_obj, path)
+            if block is None:
+                continue
+            checked += 1
+            short = [
+                d for d in block.get("degradations", [])
+                if d.startswith("tables_layout_short")
+            ]
+            assert not short, f"{path}: {short}"
+    assert checked > 0
 
 
 def _lief_parse(path):

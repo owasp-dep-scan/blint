@@ -72,15 +72,22 @@ MAX_KNOWN_TABLE = 0x2C
 # Coded indexes (ECMA-335 II.24.2.6): the full tag slot list, including the
 # None slots the spec reserves, and the tag-bit count. Tag values index the
 # slot list positionally, so a None slot never silently shifts a tag.
+#
+# These lists are not only a tag mapping: the widest constituent table sets
+# the column's byte width, so a table missing from a list can narrow a
+# column and shift every byte after it — including the rows of every table
+# laid out later. ``test_coded_index_slots_match_the_spec`` pins each list
+# against II.24.2.6 transcribed independently, and ``_table_layout``'s
+# leftover check catches a width that is wrong for any other reason.
 CODED_INDEXES = {
     "TypeDefOrRef": ((TYPE_DEF, TYPE_REF, 0x1B), 2),
     "HasConstant": ((FIELD, PARAM, 0x17), 2),
     "HasCustomAttribute": (
         (
-            METHOD_DEF, FIELD, PARAM, TYPE_DEF, 0x0E, 0x14, 0x17, MODULE,
-            PARAM, TYPE_DEF, ASSEMBLY, ASSEMBLY_REF, FILE_TABLE, PARAM,
-            TYPE_DEF, ASSEMBLY_REF, MODULE_REF, TYPE_DEF, 0x17, TYPE_DEF,
-            METHOD_DEF, PARAM,
+            METHOD_DEF, FIELD, TYPE_REF, TYPE_DEF, PARAM, 0x09, MEMBER_REF,
+            MODULE, 0x0E, 0x17, 0x14, 0x11, MODULE_REF, 0x1B, ASSEMBLY,
+            ASSEMBLY_REF, FILE_TABLE, EXPORTED_TYPE, 0x28, GENERIC_PARAM,
+            0x2C, METHOD_SPEC,
         ),
         5,
     ),
@@ -88,7 +95,7 @@ CODED_INDEXES = {
     "HasDeclSecurity": ((TYPE_DEF, METHOD_DEF, ASSEMBLY), 2),
     "MemberRefParent": ((TYPE_DEF, TYPE_REF, MODULE_REF, METHOD_DEF, 0x1B), 3),
     "HasSemantics": ((0x14, 0x17), 1),
-    "MethodDefOrRef": ((METHOD_DEF, METHOD_SPEC), 1),
+    "MethodDefOrRef": ((METHOD_DEF, MEMBER_REF), 1),
     "MemberForwarded": ((FIELD, METHOD_DEF), 1),
     "Implementation": ((FILE_TABLE, ASSEMBLY_REF, EXPORTED_TYPE), 2),
     "CustomAttributeType": ((None, None, METHOD_DEF, MEMBER_REF, None), 3),
@@ -179,6 +186,12 @@ MAX_LISTED_MODULE_REFS = 256
 MAX_LISTED_PINVOKE = 512
 MAX_TARGET_FRAMEWORK_VALUES = 8
 MAX_TABLES = 64  # The Valid mask is an 8-byte bitmask.
+# A correct layout accounts for the whole table stream bar an alignment
+# tail: measured over 375 real assemblies (the .NET 10 shared framework
+# plus corpus tiers 0/1/2/5), the leftover is 0, 2 or 4 bytes and nothing
+# else. More than that means the computed row widths are wrong, and the
+# rows read under them are some other table's bytes.
+MAX_TABLE_STREAM_LEFTOVER = 4
 
 
 def public_key_token(blob: bytes | None) -> str | None:
@@ -787,6 +800,17 @@ def parse_metadata_stream(
                 layout = {t: v for t, v in layout.items() if t not in tables_dropped}
             degr.add("tables_partial")
             tables_partial = True
+        elif tables_end - extent > MAX_TABLE_STREAM_LEFTOVER:
+            # The rows stop well short of the stream the writer sized for
+            # them, so the widths blint computed are not the widths the
+            # writer used and every row read under them is some other
+            # table's bytes. The row counts stay (they come from the
+            # header, not the layout); everything derived from a row is
+            # withheld rather than reported as a value blint determined
+            # (ground rule 11) — a fabricated assembly name is worse than
+            # an absent one, and the SBOM would carry it.
+            degr.add(f"tables_layout_short:{tables_end - extent}")
+            layout = {}
 
     # Row content starts after the table-stream header and row-count array.
     reader = _TableReader(
