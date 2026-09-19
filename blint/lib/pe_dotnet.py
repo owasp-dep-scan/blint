@@ -186,6 +186,8 @@ MAX_LISTED_MODULE_REFS = 256
 MAX_LISTED_PINVOKE = 512
 MAX_TARGET_FRAMEWORK_VALUES = 8
 MAX_TABLES = 64  # The Valid mask is an 8-byte bitmask.
+# HeapSizes bits blint reads: #Strings, #GUID, #Blob index widths.
+HEAPSIZE_INDEX_BITS = 0x07
 # A correct layout accounts for the whole table stream bar an alignment
 # tail: measured over 375 real assemblies (the .NET 10 shared framework
 # plus corpus tiers 0/1/2/5), the leftover is 0, 2 or 4 bytes and nothing
@@ -747,6 +749,15 @@ def parse_metadata_stream(
         block["degradations"] = degr.sorted()
         return block
     heapsizes = data[tables_offset + 6]
+    if heapsizes & ~HEAPSIZE_INDEX_BITS:
+        # Only the three index-width bits are read here. The other bits a
+        # writer can set (delta-only and extra-data metadata, the `#-`
+        # shapes) change where the rows begin, and no assembly measured —
+        # 375, all `#~`, HeapSizes 0x00/0x01/0x05 — sets one, so blint has
+        # never seen the shape it would have to lay out. Name it rather
+        # than lay the rows out on an assumption (ground rule 11); the
+        # leftover check below is the backstop if one is ever wrong.
+        degr.add(f"table_stream_heapsizes_unhandled:0x{heapsizes:02x}")
     valid_mask = int.from_bytes(data[tables_offset + 8:tables_offset + 16],
                                 "little")
     pos = tables_offset + 24

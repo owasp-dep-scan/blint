@@ -1227,6 +1227,23 @@ def test_real_managed_exetype_change_does_not_break_ordinal_width():
     assert meta["imports"]
 
 
+def test_unhandled_heapsizes_bit_is_named():
+    """A HeapSizes bit blint does not read is named, not assumed away.
+
+    The bits beyond the three index widths mark delta-only and extra-data
+    metadata, which move where the rows begin. No assembly measured sets
+    one (375 files, all `#~`, HeapSizes 0x00/0x01/0x05), so blint has never
+    laid out that shape and says so instead of guessing.
+    """
+    region = bytearray(make_assembly())
+    _header_pos, offset, _size = find_stream(region, "#~")
+    sig = region.find(b"BSJB")
+    region[sig + offset + 6] |= 0x40
+    block = parse_region(bytes(region))
+    assert "table_stream_heapsizes_unhandled:0x40" in block["degradations"]
+    assert block["parse_status"] == "partial"
+
+
 def test_real_assemblies_leave_only_an_alignment_tail():
     """Every corpus assembly's rows account for its whole table stream.
 
