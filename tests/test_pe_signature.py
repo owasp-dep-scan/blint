@@ -140,9 +140,11 @@ def test_real_unsigned_scope_none_with_catalog_lookup_not_performed():
     # The tristate has no source to read: the gaps say so.
     assert "signed_page_hashes" in metadata["security_properties_gaps"]
     assert "authenticode_scope" in metadata["security_properties_gaps"]
-    # The absence case is a finding for CHECK_AUTHENTICODE, never for the
-    # timestamp/digest rules (ground rule 32: each rule owns its absence).
-    assert check_authenticode(UNSIGNED, metadata, {}) is False
+    # The absence case is a finding only once a catalog lookup was performed
+    # and came back negative: with catalog_lookup "not_performed" (no
+    # --catalog-dir) a catalog-signed file cannot be distinguished from an
+    # unsigned one, so an unsigned claim would be manufactured (rule 11).
+    assert check_authenticode(UNSIGNED, metadata, {}) is True
     assert check_signature_not_timestamped(UNSIGNED, metadata, {}) is True
     assert check_weak_signature_digest(UNSIGNED, metadata, {}) is True
 

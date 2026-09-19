@@ -100,7 +100,43 @@ def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     return True
 
 
-def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Reports files whose authenticity blint could not establish (02/B).
+
+    The verdict follows the ``code_signature`` scope, and the finding states
+    which of the three states it fired on:
+
+    - ``scope: "catalog"`` — the file is signed through a catalog directory
+      (--catalog-dir); the signer comes from the catalog. Never a finding.
+    - ``scope: "none"`` with ``catalog_lookup: "negative"`` — the lookup
+      was performed against a complete index and the file is in none of
+      its catalogs: the only state from which "unsigned" may actually be
+      claimed, so the finding names the directory the negative came from.
+    - ``scope: "none"`` with ``catalog_lookup: "not_performed"`` (no
+      directory supplied) or ``"index_incomplete"`` (the index refused or
+      truncated catalogs) — "unsigned" was not determined, so the rule
+      stays silent rather than manufacture the verdict (rule 11).
+    - ``scope: "embedded"`` — the legacy verification below: a signature
+      blob LIEF cannot verify (or a missing signer on it) is a finding.
+
+    A block from metadata exported before the structured block existed
+    takes the legacy path unchanged.
+    """
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict):
+        scope = code_signature.get("scope")
+        if scope == "catalog":
+            return True
+        if scope == "none":
+            lookup = code_signature.get("catalog_lookup")
+            if lookup == "negative":
+                return (
+                    "no embedded signature and no matching member in the "
+                    f"catalog directory {code_signature.get('catalog_directory')}"
+                )
+            # "not_performed" and "index_incomplete": an unsigned verdict
+            # was not determined, so it is not reported.
+            return True
     if authenticode_obj := metadata.get("authenticode"):
         vf = authenticode_obj.get("verification_flags", "").lower()
         return False if vf != "ok" else bool(authenticode_obj.get("cert_signer"))

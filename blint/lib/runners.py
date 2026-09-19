@@ -36,6 +36,7 @@ from blint.lib.parallel import (
     run_pool,
     take_worker_logs,
 )
+from blint.lib.pe_catalog import apply_catalog_signature, build_catalog_index
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
 from blint.lib.tbd_index import TbdSdkError, load_or_build_index
@@ -73,6 +74,44 @@ def _validate_sdk_path(blint_options: BlintOptions) -> None:
         len(index.libraries),
         index.file_count,
     )
+
+
+def _load_catalog_index(blint_options: BlintOptions) -> dict | None:
+    """Build the hash → catalog index once per run when --catalog-dir was
+    given.
+
+    Same discipline as ``_validate_sdk_path``: a path that is not a
+    readable directory is a configuration error seen exactly once, before
+    any analysis. The built index is cached in the runner (workers build
+    their own in their setup hook) and its shape is logged at run level —
+    the counts and the completeness flag are what a consumer needs to
+    judge every ``catalog_lookup`` value this run reports.
+    """
+    catalog_dir = getattr(blint_options, "catalog_dir", None)
+    if not catalog_dir:
+        return None
+    if not os.path.isdir(catalog_dir):
+        LOG.error(f"Catalog directory does not exist or is not a directory: {catalog_dir}")
+        raise SystemExit(2)
+    index = build_catalog_index(catalog_dir)
+    LOG.info(
+        "Catalog index ready: %d catalogs, %d member hashes (%d distinct), "
+        "complete=%s from %s",
+        index["catalog_count"],
+        index["entry_count"],
+        index["indexed_entry_count"],
+        index["complete"],
+        catalog_dir,
+    )
+    if not index["complete"]:
+        LOG.warning(
+            "Catalog index is incomplete (%d degradation(s), first: %s); "
+            "negative lookups will report catalog_lookup 'index_incomplete' "
+            "instead of 'negative'",
+            index["degradation_count"],
+            (index["degradations"] or [{"reason": "n/a"}])[0]["reason"],
+        )
+    return index
 
 
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
@@ -195,6 +234,10 @@ class AnalysisRunner:
         )
         self.task: TaskID | None = None
         self.reviewer: ReviewRunner | None = None
+        # Catalog index (--catalog-dir), built once per run/worker before
+        # any unit; None means no directory was supplied and lookups stay
+        # catalog_lookup "not_performed".
+        self._catalog_index: dict[str, Any] | None = None
         # Per-unit isolation bookkeeping. A "unit" is one analyzable input:
         # a top-level file, or one binary contained in an archive (.ipa).
         # Failures and skips are recorded structurally so callers can tell a
@@ -373,6 +416,7 @@ class AnalysisRunner:
             tuple: A tuple of the findings, reviews, files, and fuzzables.
         """
         _validate_sdk_path(blint_options)
+        self._catalog_index = _load_catalog_index(blint_options)
         initialize_rules(blint_options)
         jobs = max(1, int(getattr(blint_options, "jobs", 1) or 1))
         if jobs > 1 and len(exe_files) > 1:
@@ -753,6 +797,12 @@ class AnalysisRunner:
         assert self.task is not None
         exe_name = metadata.get("name", f)
         wasm_report = metadata.get("wasm_report")
+        # Catalog signing resolution (W2.3): after parse (so the parse cache
+        # carries only parse facts and stays valid for any catalog dir) and
+        # before export/checks (so the exported metadata and the findings
+        # read one resolved scope). No index: a no-op, and the block keeps
+        # catalog_lookup "not_performed".
+        apply_catalog_signature(metadata, self._catalog_index)
         # wasm needs no disassembly of its own: the wasm_tools call graph
         # converts directly into blint's callgraph payload. It is still gated on
         # --disassemble so the "no artifacts without --disassemble" message
@@ -860,10 +910,16 @@ def _worker_setup_default(payload: dict[str, Any]) -> dict[str, Any]:
     blint_options: BlintOptions = payload["blint_options"]
     initialize_rules(blint_options)
     cache = ParseCache() if payload["cache_enabled"] else None
+    # One catalog index per worker: parsing the tree three times for three
+    # workers would triple the index cost, so each worker builds exactly
+    # once in its setup hook (the parent's copy is never shared; workers are
+    # spawn-started on macOS and Windows).
+    catalog_index = _load_catalog_index(blint_options)
     return {
         "blint_options": blint_options,
         "cache": cache,
         "options_digest": payload["options_digest"],
+        "catalog_index": catalog_index,
     }
 
 
@@ -888,6 +944,7 @@ def analyze_unit_default(file_path: str, state: dict[str, Any]) -> dict[str, Any
     runner.task = runner.progress.add_task("unit", total=1, start=False)
     runner.parse_cache = state.get("cache")
     runner._parse_options_digest = state.get("options_digest")
+    runner._catalog_index = state.get("catalog_index")
     runner._mark_attempted("top-level")
     try:
         runner._process_files(file_path, state["blint_options"])
