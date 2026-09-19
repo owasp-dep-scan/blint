@@ -729,18 +729,44 @@ def test_class_kernel_mode():
             "Microsoft Windows Third Party Component CA 2013",
             is_ca=True,
         ),
-        _cert_tlv(7, "Microsoft Root Certificate Authority 2011", "Microsoft Root Certificate Authority 2011", is_ca=True),
     ]
     signer = _signer_info(5, "Microsoft Windows Third Party Component CA 2013", "1.3.14.3.2.26")
     block = _class_block(certs, signer)
     assert block["signing_class"] == "kernel_mode"
     assert check_kernel_signing_class("f", {"code_signature": block}, {}) is not True
-    # A complete chain past a CA-issued leaf: not self_signed, and the root
-    # is shipped and matched against the snapshot.
+    # The normal Authenticode shape: leaf and PCA shipped, root named only.
+    # Not self_signed, and no root fact is claimed from a root not in hand.
     signature = block["signatures"][0]
-    assert signature["chain_complete"] is True
-    assert signature["root_known"] is False, "hand-built root is outside the real snapshot"
-    assert signature["chain_length"] == 2
+    assert signature["chain_complete"] is False
+    assert "root_known" not in signature
+    assert signature["chain_length"] == 1
+
+
+def test_kernel_driver_shipping_its_own_root_classes_unknown_root():
+    """The malicious-driver shape, and the reason the chain outranks the leaf.
+
+    A self-issued chain shipped whole still carries the kernel-mode EKU and
+    an organization name — that is what makes it load — so while the leaf's
+    claims decided the class, this blob read as an ordinary kernel_mode (or,
+    without the driver EKU, commercial_ov) signature and
+    CHECK_SIGNATURE_UNKNOWN_ROOT could only ever fire on certificates that
+    are not code-signing certificates at all. The class now follows the
+    chain, and the kernel fact the driver lane consumes survives it because
+    the kernel rule reads the EKU rather than the class string.
+    """
+    certs = [
+        _cert_tlv(5, "Totally Legit CA", "Contoso Driver Signing",
+                  subject_org="Contoso Ltd", ekus=[KERNEL_EKU, "1.3.6.1.5.5.7.3.3"]),
+        _cert_tlv(6, "Totally Legit Root", "Totally Legit CA", is_ca=True),
+        _cert_tlv(7, "Totally Legit Root", "Totally Legit Root", is_ca=True),
+    ]
+    block = _class_block(certs, _signer_info(5, "Totally Legit CA", "2.16.840.1.101.3.4.2.1"))
+    assert block["signatures"][0]["chain_complete"] is True
+    assert block["signatures"][0]["root_known"] is False
+    assert block["signing_class"] == "unknown_root"
+    metadata = {"code_signature": block}
+    assert check_signature_unknown_root("f", metadata, {}) is not True
+    assert check_kernel_signing_class("f", metadata, {}) is not True
 
 
 def test_class_attestation_and_whql():
@@ -751,7 +777,6 @@ def test_class_attestation_and_whql():
         certs = [
             _cert_tlv(5, "MS PCA", "HW Publisher", ekus=leaf_ekus),
             _cert_tlv(6, "MS Root", "MS PCA", is_ca=True),
-            _cert_tlv(7, "MS Root", "MS Root", is_ca=True),
         ]
         return certs, _signer_info(5, "MS PCA", "2.16.840.1.101.3.4.2.1")
 
@@ -782,14 +807,15 @@ def test_class_commercial_ev_and_ov():
         _cert_tlv(5, "DigiCert EV CA", "Acme Corp", subject_org="Acme Corp",
                   ekus=["1.3.6.1.5.5.7.3.3"], policies=[EV_POLICY, OV_POLICY]),
         _cert_tlv(6, "DigiCert Root", "DigiCert EV CA", is_ca=True),
-        _cert_tlv(7, "DigiCert Root", "DigiCert Root", is_ca=True),
     ]
     signer = _signer_info(5, "DigiCert EV CA", "2.16.840.1.101.3.4.2.1")
     with tempfile.TemporaryDirectory() as tmp:
         block = _stub_table(tmp, _content_info(certs, signer))
     assert block["signing_class"] == "commercial_ev"
     assert block["signatures"][0]["signer"]["policies"] == ["evCodeSigning", "ovCodeSigning"]
-    assert block["signatures"][0]["root_known"] is False
+    # The blob stops below the root, so no root fact is claimed and the
+    # leaf's policy is what the class has to go on.
+    assert "root_known" not in block["signatures"][0]
 
     # OV policy without the EV one — and an organization with no policy at
     # all (older OV certs) is still commercial_ov.
@@ -812,7 +838,8 @@ def test_class_unknown_root_fires_the_rule():
     root. A Microsoft-organization leaf over that chain does NOT become
     microsoft_1st_party — the anchor fingerprint, not the name, decides."""
     certs = [
-        _cert_tlv(5, "Not A Real CA", "Acme Corp", subject_org="Microsoft Corporation"),
+        _cert_tlv(5, "Not A Real CA", "Acme Corp", subject_org="Microsoft Corporation",
+                  ekus=["1.3.6.1.5.5.7.3.3"]),
         _cert_tlv(6, "Not A Real Root", "Not A Real CA", is_ca=True),
         _cert_tlv(7, "Not A Real Root", "Not A Real Root", is_ca=True),
     ]
@@ -849,6 +876,32 @@ def test_class_microsoft_first_party_by_anchor_name():
     assert signature["chain_complete"] is False
     assert "root_fingerprint" not in signature
     assert signature["chain"][-1]["issuer_cn"] == "Microsoft Root Certificate Authority 2011"
+    # The class rests on a string the signer wrote, not on a root blint
+    # hashed, and the block has to say so: 223 of the 224 first-party
+    # classes measured across tiers 0/1/5 take this path, so a consumer
+    # that cannot tell the two apart is reading the weak one as the strong
+    # one almost every time.
+    assert block["signing_class_anchor"] == "issuer_name"
+
+
+def test_first_party_anchor_basis_distinguishes_hash_from_name():
+    """A forged chain reaches the same class as a real one by name alone.
+
+    Nothing here is a trust verdict — blint validates no chain (02/D) — but
+    the subject organization and the issuer CN are both strings the signer
+    chose, so the first-party class they produce must not read the same as
+    one anchored to a root fingerprint blint actually matched.
+    """
+    certs = [
+        _cert_tlv(5, "Microsoft Root Certificate Authority 2011", "Totally Microsoft",
+                  subject_org="Microsoft Corporation", ekus=["1.3.6.1.5.5.7.3.3"]),
+    ]
+    block = _class_block(
+        certs, _signer_info(5, "Microsoft Root Certificate Authority 2011", "2.16.840.1.101.3.4.2.1")
+    )
+    assert block["signing_class"] == "microsoft_1st_party"
+    assert block["signing_class_anchor"] == "issuer_name"
+    assert "root_fingerprint" not in block["signatures"][0]
 
 
 def test_class_withheld_when_leaf_is_microsoft_named_but_anchor_unknown():
@@ -920,7 +973,7 @@ def test_class_withheld_when_the_walk_was_truncated():
 def test_class_past_the_chain_listing_cap_still_exact():
     """A 20-link chain: the listing stops at the cap but the walk finished,
     so the root fingerprint is in hand and the class derives from it —
-    while chain_length stays the exact 20, not the 16 listed."""
+    while chain_length stays the exact 21, not the 16 listed."""
     depth = MAX_CHAIN_CERTIFICATES + 4
     certs = [_cert_tlv(7, "CA0", "Acme Corp", subject_org="Microsoft Corporation",
                        ekus=[KERNEL_EKU])]
@@ -937,9 +990,12 @@ def test_class_past_the_chain_listing_cap_still_exact():
     assert signature["chain_truncated"] is True
     assert signature["chain_complete"] is True
     assert signature["root_fingerprint"]
-    # The class comes from the EKU the parsed signer carries — decided
-    # before any anchor question, and from the whole walk, not the listing.
-    assert block["signing_class"] == "kernel_mode"
+    # The walk finished, so the chain's own fact decides: this root is
+    # outside the shipped snapshot. The class is taken from the completed
+    # walk, not from the 16 links that fit the listing — and the kernel
+    # EKU the signer carries is still reported beside it.
+    assert block["signing_class"] == "unknown_root"
+    assert check_kernel_signing_class("f", {"code_signature": block}, {}) is not True
 
 
 def test_class_withheld_when_the_anchor_is_past_the_parse_window():

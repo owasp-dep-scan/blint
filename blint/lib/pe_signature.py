@@ -146,12 +146,6 @@ POLICY_NAMES = {
     "2.23.140.1.2.1": "ovCodeSigning",
     "2.23.140.1.2.2": "individualCodeSigning",
 }
-# The exact subject organization names identifying a Microsoft-issued leaf
-# (pe_publisher_identities.yml carries them beside the publisher's other
-# identity facts). The signature's own O string is the only Microsoft-leaf
-# fact used for the class: CNs are product names here ("Microsoft Windows",
-# ".NET DAC") and substrings would match identities that merely mention
-# Microsoft.
 STATEMENT_TYPE_NAMES = {
     "1.3.6.1.4.1.311.2.1.21": "individual_code_signing",
     "1.3.6.1.4.1.311.2.1.22": "commercial_code_signing",
@@ -1052,7 +1046,13 @@ def _root_anchor_table() -> dict:
 
 def _microsoft_leaf_names() -> set[str]:
     """The exact subject organization names identifying a Microsoft-issued
-    leaf certificate, from the publisher-identity data table."""
+    leaf certificate, from the publisher-identity data table.
+
+    The leaf's O string is the only Microsoft-leaf fact the class uses:
+    the CNs are product names here ("Microsoft Windows", ".NET DAC"), and
+    a substring test on them would match identities that merely mention
+    Microsoft.
+    """
     global _PUBLISHER_CACHE
     if _PUBLISHER_CACHE is None:
         _PUBLISHER_CACHE = _load_data_table("pe_publisher_identities.yml")
@@ -1060,8 +1060,16 @@ def _microsoft_leaf_names() -> set[str]:
     return set(publishers.get("microsoft", {}).get("leaf_org_names") or [])
 
 
-def _microsoft_anchor(entry: dict) -> bool:
-    """Whether the signature's chain anchors at a Microsoft root.
+def _microsoft_anchor(entry: dict) -> str | None:
+    """How the signature's chain anchors at a Microsoft root, or None.
+
+    Returns ``"root_fingerprint"`` when the root itself was in hand and
+    matched by hash, and ``"issuer_name"`` when it was not and only the
+    top shipped link's issuer *statement* names one. The caller records
+    which, because the two are not the same evidence and nearly every real
+    Authenticode blob takes the weaker path: 223 of the 224 first-party
+    classes measured across tiers 0/1/5 are name-anchored, and an issuer
+    CN is a string the signer writes, not something blint verified.
 
     Two shapes, both structural: the blob ships the root (chain complete)
     and its fingerprint is flagged Microsoft in the anchor list; or the
@@ -1074,34 +1082,45 @@ def _microsoft_anchor(entry: dict) -> bool:
     it.
     """
     if entry.get("chain_complete") is True:
-        return entry.get("root_microsoft") is True
+        return "root_fingerprint" if entry.get("root_microsoft") is True else None
     if entry.get("chain_truncated"):
-        return False
+        return None
     chain = entry.get("chain") or []
     signer = entry.get("signer") or {}
     anchor_cn = chain[-1].get("issuer_cn") if chain else signer.get("issuer_cn")
     if not anchor_cn:
-        return False
+        return None
     anchors = _root_anchor_table()
     microsoft_cns = {
         facts.get("cn") for facts in anchors.values() if facts.get("microsoft")
     }
-    return anchor_cn in microsoft_cns
+    return "issuer_name" if anchor_cn in microsoft_cns else None
 
 
 def signing_class_for_signature(entry: dict) -> str | None:
     """The 02/C class one signature's facts determine, or None.
 
-    The order is the strength of the facts: a self-signed signer is the
-    strongest structural statement (nothing vouches for the signer), the
-    driver EKUs name a specific Microsoft signing program, the
-    Microsoft-first-party determination needs both a Microsoft leaf (exact
-    organization name from the publisher data) and a chain that anchors at
-    a Microsoft root — more specific than the CA/Browser Forum policy OIDs
-    that separate EV from OV code signing, so it is decided first.
-    ``unknown_root`` is the last resort: a complete chain whose root is
-    outside the shipped snapshot. Every None here means undetermined — the
-    block stays without ``signing_class`` rather than defaulting (rule 11).
+    The order is what the *chain* establishes before what the leaf claims
+    about itself, because the leaf's own fields are the forgeable ones: a
+    self-signed signer first (nothing vouches for the signer), then a
+    complete chain whose root is outside the shipped snapshot. Only then
+    the leaf-stated classes — the driver EKUs naming a Microsoft signing
+    program, the Microsoft-first-party determination (which needs both a
+    Microsoft leaf organization and a Microsoft anchor), and last the
+    CA/Browser Forum policies separating EV from OV code signing.
+
+    ``unknown_root`` is deliberately not the last resort. A self-issued
+    chain shipped whole is exactly the shape the rule exists to catch, and
+    such a blob still carries the codeSigning EKU and an organization name
+    — that is what makes it load — so ranking the commercial classes above
+    it handed every self-issued chain the class of a CA-issued one and
+    left CHECK_SIGNATURE_UNKNOWN_ROOT reachable only by certificates that
+    are not code-signing certificates at all. No benign corpus file is
+    affected: across tiers 0/1/5 no file ships a complete chain whose root
+    is outside the snapshot.
+
+    Every None here means undetermined — the block stays without
+    ``signing_class`` rather than defaulting (rule 11).
     """
     signer = entry.get("signer") or {}
     if not signer:
@@ -1110,6 +1129,8 @@ def signing_class_for_signature(entry: dict) -> str | None:
     policies = set(signer.get("policies") or [])
     if entry.get("chain_complete") is True and entry.get("chain_length") == 0:
         return "self_signed"
+    if entry.get("chain_complete") is True and entry.get("root_known") is False:
+        return "unknown_root"
     if "kernelModeCodeSigning" in ekus:
         return "kernel_mode"
     if "whqlAttestation" in ekus:
@@ -1123,8 +1144,6 @@ def signing_class_for_signature(entry: dict) -> str | None:
             return "commercial_ev"
         if signer.get("o") or "ovCodeSigning" in policies:
             return "commercial_ov"
-    if entry.get("chain_complete") is True and entry.get("root_known") is False:
-        return "unknown_root"
     return None
 
 
@@ -1147,6 +1166,24 @@ def derive_signing_class(signatures: list[dict], walk_truncated: bool) -> tuple[
         if determined:
             return determined, index
     return None
+
+
+def apply_signing_class(block: dict, walk_truncated: bool) -> None:
+    """Write the class facts onto *block*, in place, or leave it without them.
+
+    One place writes the class for both scopes — embedded blobs and the
+    catalog's own signer go through the same derivation (rule 21) — and
+    ``signing_class_anchor`` travels with ``microsoft_1st_party`` so the
+    class never states more than the evidence behind it.
+    """
+    determined = derive_signing_class(block.get("signatures") or [], walk_truncated)
+    if not determined:
+        return
+    block["signing_class"], class_index = determined
+    if class_index:
+        block["signing_class_signature"] = class_index
+    if block["signing_class"] == "microsoft_1st_party":
+        block["signing_class_anchor"] = _microsoft_anchor(block["signatures"][class_index])
 
 
 # ---------------------------------------------------------------------------
@@ -1498,11 +1535,7 @@ def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
         # The signing class (02/C) rides on the parsed signature facts. It
         # is absent — not "unsigned" — whenever nothing determines it: no
         # deciding signature, or a walk that stopped at its window.
-        determined = derive_signing_class(block["signatures"], walk["signature_walk_truncated"])
-        if determined:
-            block["signing_class"], class_index = determined
-            if class_index:
-                block["signing_class_signature"] = class_index
+        apply_signing_class(block, walk["signature_walk_truncated"])
         for entry in block["signatures"]:
             digest = entry.get("digest") or {}
             if digest.get("digest_match") is not None:

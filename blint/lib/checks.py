@@ -198,6 +198,20 @@ def _parsed_signature_block(metadata: dict[str, Any]) -> dict | None:
     return None
 
 
+def _deciding_signer(block: dict) -> dict:
+    """The signer of the signature the block's ``signing_class`` came from.
+
+    Every class rule names the same signature the class was derived from —
+    ``signing_class_signature`` says which, and naming some other signer in
+    the finding would describe a signature the verdict is not about.
+    """
+    signatures = block.get("signatures") or []
+    index = block.get("signing_class_signature", 0)
+    if index >= len(signatures):
+        return {}
+    return signatures[index].get("signer") or {}
+
+
 def check_self_signed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     """Reports a signature whose signer certificate is its own root (02/C).
 
@@ -212,14 +226,7 @@ def check_self_signed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
     block = _parsed_signature_block(metadata)
     if not block or block.get("signing_class") != "self_signed":
         return True
-    signer = next(
-        (
-            sig.get("signer") or {}
-            for sig in block.get("signatures") or []
-            if (sig.get("signer") or {}).get("cn")
-        ),
-        {},
-    )
+    signer = _deciding_signer(block)
     return f"self-signed signer ({signer.get('cn')}): no certificate authority vouches for the identity"
 
 
@@ -262,14 +269,22 @@ def check_kernel_signing_class(
     claims to be signed for) execution as a kernel component. This is a
     posture fact for the analyst — kernel code runs with the operating
     system's privileges — not a defect claim, and the driver lane consumes
-    it directly. The verdict follows ``signing_class``: withheld when the
-    walk was truncated.
+    it directly.
+
+    It reads the EKU rather than ``signing_class == "kernel_mode"``: a
+    chain fact outranks the leaf's claims in the class, so a kernel-EKU
+    driver whose chain terminates outside the shipped snapshot classes as
+    ``unknown_root`` — and that is precisely the file whose kernel signing
+    the driver lane must still see. The class must have been *determined*
+    for this to speak, which keeps the truncation discipline: a walk that
+    hit its window yields no class and no finding here.
     """
     block = _parsed_signature_block(metadata)
-    if not block or block.get("signing_class") != "kernel_mode":
+    if not block or not block.get("signing_class"):
         return True
-    signer = block["signatures"][block.get("signing_class_signature", 0)].get("signer") or {}
-    return f"kernel-mode code signing ({signer.get('cn')})"
+    if "kernelModeCodeSigning" not in (_deciding_signer(block).get("eku") or []):
+        return True
+    return f"kernel-mode code signing ({_deciding_signer(block).get('cn')})"
 
 
 _PUBLISHER_CACHE: dict | None = None
