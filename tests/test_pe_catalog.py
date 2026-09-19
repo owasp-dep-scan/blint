@@ -869,3 +869,29 @@ def test_real_full_store_has_no_empty_catalogs():
         if catalog["parse_status"] == "parsed" and catalog["member_count"] == 0:
             empty.append(os.path.basename(path))
     assert empty == []
+
+
+def test_member_whose_digest_no_layout_yields_is_not_a_cap(tmp_path):
+    """A member entry by shape whose digest none of the three layouts
+    decodes is counted apart from the storage cap.
+
+    Both outcomes leave the index short of the catalog's members and both
+    must make a negative lookup read as ``index_incomplete`` — but they are
+    different facts, and reporting an undecodable member as
+    ``member_cap_exceeded`` names a limit that was never reached (rule 14).
+    The full 3,630-catalog Windows store decodes every member, so this
+    shape is reachable only from a fixture.
+    """
+    # Four bytes: too narrow to be a digest, and not a UTF-16 hex tag
+    # either, with no SpcIndirectData attribute to fall back to.
+    entry = _tlv(0x30, _tlv(0x04, b"\x00\x01\x02\x03") + _tlv(0x31, _catalog_name_value_hash()))
+    ctl = _modern_ctl([entry])
+    _write_cat(tmp_path, "odd.cat", _cat_content_info(ctl))
+    catalog = parse_catalog_file(str(tmp_path / "odd.cat"))
+    assert catalog["parse_status"] == "parsed"
+    assert catalog["member_count"] == 1
+    assert catalog["members_undecodable"] == 1
+    assert "members_stored_capped" not in catalog
+    index = build_catalog_index(str(tmp_path))
+    assert index["complete"] is False
+    assert index["degradations"][0]["reason"] == "members_undecodable:1"
