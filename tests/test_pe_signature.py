@@ -21,7 +21,11 @@ import pytest
 from blint.lib.binary import parse
 from blint.lib.checks import (
     check_authenticode,
+    check_kernel_signing_class,
+    check_self_signed,
     check_signature_not_timestamped,
+    check_signature_unknown_root,
+    check_signer_mismatch,
     check_weak_signature_digest,
 )
 from blint.lib.pe_signature import (
@@ -271,17 +275,58 @@ def _name(cn: str) -> bytes:
     return _tlv(0x30, _tlv(0x31, _tlv(0x30, _oid("2.5.4.3") + _tlv(0x0C, cn.encode()))))
 
 
-def _cert_tlv(serial: int, issuer_cn: str, subject_cn: str) -> bytes:
+def _org_name(cn: str, org: str) -> bytes:
+    """A Name carrying both an O and a CN RDN, in the order real certs use."""
+    rdns = _tlv(0x31, _tlv(0x30, _oid("2.5.4.10") + _tlv(0x0C, org.encode())))
+    return _tlv(0x30, rdns + _tlv(0x31, _tlv(0x30, _oid("2.5.4.3") + _tlv(0x0C, cn.encode()))))
+
+
+def _extensions(
+    ekus: list[str] | None = None,
+    policies: list[str] | None = None,
+    is_ca: bool | None = None,
+) -> bytes:
+    """An extensions block ([3]) with the given EKU OIDs, policy OIDs and
+    BasicConstraints — the facts the signing class keys on."""
+    encoded = b""
+    if ekus is not None:
+        encoded += _tlv(
+            0x30, _oid("2.5.29.37") + _tlv(0x04, _tlv(0x30, b"".join(_oid(e) for e in ekus)))
+        )
+    if policies is not None:
+        infos = b"".join(_tlv(0x30, _oid(p)) for p in policies)
+        encoded += _tlv(0x30, _oid("2.5.29.32") + _tlv(0x04, _tlv(0x30, infos)))
+    if is_ca is not None:
+        inner = _tlv(0x01, b"\xff") if is_ca else b""
+        encoded += _tlv(0x30, _oid("2.5.29.19") + _tlv(0x04, _tlv(0x30, inner)))
+    if not encoded:
+        return b""
+    return _tlv(0xA3, _tlv(0x30, encoded))
+
+
+def _cert_tlv(
+    serial: int,
+    issuer_cn: str,
+    subject_cn: str,
+    subject_org: str | None = None,
+    ekus: list[str] | None = None,
+    policies: list[str] | None = None,
+    is_ca: bool | None = None,
+    issuer_org: str | None = None,
+) -> bytes:
     """A minimal but structurally real certificate: TBS with serial, alg,
-    issuer, validity, subject — no key, no extensions."""
+    issuer, validity, subject — plus optional extensions."""
+    issuer_name = _org_name(issuer_cn, issuer_org) if issuer_org else _name(issuer_cn)
+    subject_name = _org_name(subject_cn, subject_org) if subject_org else _name(subject_cn)
     tbs = _tlv(
         0x30,
         _tlv(0xA0, _tlv(0x02, b"\x02"))
         + _tlv(0x02, serial.to_bytes(8, "big"))
         + _tlv(0x30, _oid("2.16.840.1.101.3.4.2.1"))
-        + _name(issuer_cn)
+        + issuer_name
         + _tlv(0x30, _tlv(0x17, b"250101000000Z") + _tlv(0x17, b"350101000000Z"))
-        + _name(subject_cn),
+        + subject_name
+        + _extensions(ekus=ekus, policies=policies, is_ca=is_ca),
     )
     return _tlv(0x30, tbs + _tlv(0x30, _oid("2.16.840.1.101.3.4.2.1")) + _tlv(0x03, b"\x00"))
 
@@ -619,3 +664,427 @@ def test_win_certificate_entry_truncation_recorded():
     entries = _win_certificate_entries(table, block)
     assert entries["count"] == 0
     assert block["parse_error"] == "entry_0_truncated"
+
+
+# ---------------------------------------------------------------------------
+# Signing class (W2.4, 02/C)
+# ---------------------------------------------------------------------------
+KERNEL_EKU = "1.3.6.1.4.1.311.61.1.1"
+WHQL_EKU = "1.3.6.1.4.1.311.10.3.5"
+ATTESTATION_EKU = "1.3.6.1.4.1.311.10.3.5.1"
+EV_POLICY = "2.23.140.1.3"
+OV_POLICY = "2.23.140.1.2.1"
+
+
+def _class_block(certs, signer) -> dict:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        return _stub_table(tmp, _content_info(certs, signer))
+
+
+def test_real_self_signed_fixture_class_and_rule():
+    """The signtool test certificates are self-signed: the class says so and
+    CHECK_SELF_SIGNED fires, while the unknown-root rule stays silent — the
+    self-signed fact is the same fact, reported once."""
+    block = parse(RFC3161)["code_signature"]
+    assert block["signing_class"] == "self_signed"
+    signature = block["signatures"][0]
+    # The self-signed signer is its own root: the fingerprint is computed
+    # and matched against the shipped anchor snapshot — a test certificate
+    # is outside it, and that is a fact, not a trust verdict.
+    assert signature["root_fingerprint"]
+    assert signature["root_known"] is False
+    assert "root_microsoft" not in signature
+    metadata = parse(RFC3161)
+    assert check_self_signed(RFC3161, metadata, {}) is not True
+    assert "self-signed" in check_self_signed(RFC3161, metadata, {})
+    assert check_signature_unknown_root(RFC3161, metadata, {}) is True
+
+
+def test_real_unsigned_carries_no_class():
+    """Without a performed catalog lookup an unsigned claim is manufactured,
+    so the key is absent — its absence means undetermined (rule 11)."""
+    block = parse(UNSIGNED)["code_signature"]
+    assert "signing_class" not in block
+    for rule in (check_self_signed, check_signature_unknown_root, check_kernel_signing_class):
+        assert rule(UNSIGNED, parse(UNSIGNED), {}) is True
+
+
+def test_class_kernel_mode():
+    """EKU 1.3.6.1.4.1.311.61.1.1 (wincrypt.h szOID_KP_KERNEL_MODE_CODE_SIGNING)
+    is kernel_mode, and CHECK_KERNEL_SIGNING_CLASS reports it."""
+    # The signer's EKU lives on its certificate's extensions, not the
+    # SignerInfo — put the kernel EKU on the leaf.
+    certs = [
+        _cert_tlv(
+            5,
+            "Microsoft Windows Third Party Component CA 2013",
+            "Contoso Driver Signing",
+            ekus=[KERNEL_EKU],
+        ),
+        _cert_tlv(
+            6,
+            "Microsoft Root Certificate Authority 2011",
+            "Microsoft Windows Third Party Component CA 2013",
+            is_ca=True,
+        ),
+        _cert_tlv(7, "Microsoft Root Certificate Authority 2011", "Microsoft Root Certificate Authority 2011", is_ca=True),
+    ]
+    signer = _signer_info(5, "Microsoft Windows Third Party Component CA 2013", "1.3.14.3.2.26")
+    block = _class_block(certs, signer)
+    assert block["signing_class"] == "kernel_mode"
+    assert check_kernel_signing_class("f", {"code_signature": block}, {}) is not True
+    # A complete chain past a CA-issued leaf: not self_signed, and the root
+    # is shipped and matched against the snapshot.
+    signature = block["signatures"][0]
+    assert signature["chain_complete"] is True
+    assert signature["root_known"] is False, "hand-built root is outside the real snapshot"
+    assert signature["chain_length"] == 2
+
+
+def test_class_attestation_and_whql():
+    """szOID_ATTEST_WHQL_CRYPTO (10.3.5.1) is attestation_signed; the plain
+    WHQL EKU (10.3.5) is whql; a certificate carrying both kernel and
+    attestation EKUs decides as kernel_mode (first in the order)."""
+    def blob(leaf_ekus):
+        certs = [
+            _cert_tlv(5, "MS PCA", "HW Publisher", ekus=leaf_ekus),
+            _cert_tlv(6, "MS Root", "MS PCA", is_ca=True),
+            _cert_tlv(7, "MS Root", "MS Root", is_ca=True),
+        ]
+        return certs, _signer_info(5, "MS PCA", "2.16.840.1.101.3.4.2.1")
+
+    import tempfile
+
+    certs, signer = blob([ATTESTATION_EKU])
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "attestation_signed"
+
+    certs, signer = blob([WHQL_EKU])
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "whql"
+
+    certs, signer = blob([KERNEL_EKU, ATTESTATION_EKU])
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "kernel_mode"
+
+
+def test_class_commercial_ev_and_ov():
+    """The CA/Browser Forum policy OIDs separate EV from OV; an OV policy or
+    an organization alone is commercial_ov."""
+    import tempfile
+
+    certs = [
+        _cert_tlv(5, "DigiCert EV CA", "Acme Corp", subject_org="Acme Corp",
+                  ekus=["1.3.6.1.5.5.7.3.3"], policies=[EV_POLICY, OV_POLICY]),
+        _cert_tlv(6, "DigiCert Root", "DigiCert EV CA", is_ca=True),
+        _cert_tlv(7, "DigiCert Root", "DigiCert Root", is_ca=True),
+    ]
+    signer = _signer_info(5, "DigiCert EV CA", "2.16.840.1.101.3.4.2.1")
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "commercial_ev"
+    assert block["signatures"][0]["signer"]["policies"] == ["evCodeSigning", "ovCodeSigning"]
+    assert block["signatures"][0]["root_known"] is False
+
+    # OV policy without the EV one — and an organization with no policy at
+    # all (older OV certs) is still commercial_ov.
+    certs[0] = _cert_tlv(5, "DigiCert OV CA", "Acme Corp", subject_org="Acme Corp",
+                         ekus=["1.3.6.1.5.5.7.3.3"], policies=[OV_POLICY])
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "commercial_ov"
+
+    certs[0] = _cert_tlv(5, "Some CA", "Acme Corp", subject_org="Acme Corp",
+                         ekus=["1.3.6.1.5.5.7.3.3"])
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "commercial_ov"
+
+
+def test_class_unknown_root_fires_the_rule():
+    """A complete chain whose self-signed root is outside the shipped
+    snapshot is unknown_root, and CHECK_SIGNATURE_UNKNOWN_ROOT names the
+    root. A Microsoft-organization leaf over that chain does NOT become
+    microsoft_1st_party — the anchor fingerprint, not the name, decides."""
+    certs = [
+        _cert_tlv(5, "Not A Real CA", "Acme Corp", subject_org="Microsoft Corporation"),
+        _cert_tlv(6, "Not A Real Root", "Not A Real CA", is_ca=True),
+        _cert_tlv(7, "Not A Real Root", "Not A Real Root", is_ca=True),
+    ]
+    import tempfile
+
+    signer = _signer_info(5, "Not A Real CA", "2.16.840.1.101.3.4.2.1")
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "unknown_root"
+    assert block["signatures"][0]["root_known"] is False
+    result = check_signature_unknown_root("f", {"code_signature": block}, {})
+    assert result is not True
+    assert "Not A Real Root" in result
+
+
+def test_class_microsoft_first_party_by_anchor_name():
+    """The normal Authenticode shape: leaf + PCA shipped, root named but not
+    carried. The class follows the top shipped link's issuer statement to
+    the Microsoft root in the snapshot — and, because the root is not in
+    hand, no root fingerprint is claimed."""
+    certs = [
+        _cert_tlv(5, "Microsoft Windows Production PCA 2011", "Microsoft Windows",
+                  subject_org="Microsoft Corporation"),
+        _cert_tlv(6, "Microsoft Root Certificate Authority 2011",
+                  "Microsoft Windows Production PCA 2011", is_ca=True),
+    ]
+    import tempfile
+
+    signer = _signer_info(5, "Microsoft Windows Production PCA 2011", "2.16.840.1.101.3.4.2.1")
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    assert block["signing_class"] == "microsoft_1st_party"
+    signature = block["signatures"][0]
+    assert signature["chain_complete"] is False
+    assert "root_fingerprint" not in signature
+    assert signature["chain"][-1]["issuer_cn"] == "Microsoft Root Certificate Authority 2011"
+
+
+def test_class_withheld_when_leaf_is_microsoft_named_but_anchor_unknown():
+    """A Microsoft-named organization whose chain anchors outside the
+    snapshot is not first-party Microsoft: the anchor decides, and the
+    class is withheld rather than guessed (rule 11)."""
+    certs = [
+        _cert_tlv(5, "Some Commercial CA", "Microsoft Windows", subject_org="Microsoft Corporation"),
+        _cert_tlv(6, "Some Commercial Root", "Some Commercial CA", is_ca=True),
+        _cert_tlv(7, "Some Commercial Root", "Some Commercial Root", is_ca=True),
+    ]
+    import tempfile
+
+    signer = _signer_info(5, "Some Commercial CA", "2.16.840.1.101.3.4.2.1")
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    # The chain is complete and the root is outside the snapshot, so the
+    # strongest honest statement is unknown_root.
+    assert block["signing_class"] == "unknown_root"
+
+
+def test_class_absent_without_deciding_facts():
+    """An organization-less, policy-less code-signing leaf (individual code
+    signing) anchored below a named public root determines no class in the
+    02/C table — the key must be absent, not defaulted. The chain ships
+    leaf and intermediate only (the normal shape), the intermediate names
+    the real DigiCert Trusted Root G4, and nothing else in the blob is a
+    class fact."""
+    certs = [
+        _cert_tlv(5, "DigiCert OV CA", "Jane Doe", ekus=["1.3.6.1.5.5.7.3.3"]),
+        _cert_tlv(6, "DigiCert Trusted Root G4", "DigiCert OV CA", is_ca=True),
+    ]
+    import tempfile
+
+    signer = _signer_info(5, "DigiCert OV CA", "2.16.840.1.101.3.4.2.1")
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    signature = block["signatures"][0]
+    assert signature["chain_complete"] is False
+    assert signature["chain"][-1]["issuer_cn"] == "DigiCert Trusted Root G4"
+    assert "signing_class" not in block
+
+
+def test_class_withheld_when_the_walk_was_truncated():
+    """Ground rule 33 against the verdict itself: more nested signatures
+    than the walk window, the innermost one kernel-signed. A class decided
+    from the walked prefix would be a sample verdict; the key must be
+    absent and the kernel rule must stay silent."""
+    inner = _content_info(
+        [_cert_tlv(1, "Leaf", "Leaf", ekus=[KERNEL_EKU])],
+        _signer_info(1, "Leaf", "2.16.840.1.101.3.4.2.1"),
+    )
+    content_info = inner
+    for _ in range(MAX_SIGNATURES_WALKED + 4):
+        content_info = _content_info(
+            [_cert_tlv(1, "Leaf", "Leaf")],
+            _signer_info(1, "Leaf", "2.16.840.1.101.3.4.2.1", unauth=[_nested_attr(content_info)]),
+        )
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, content_info)
+    assert block["signature_walk_truncated"] is True
+    assert "signing_class" not in block
+    assert check_kernel_signing_class("f", {"code_signature": block}, {}) is True
+    assert check_self_signed("f", {"code_signature": block}, {}) is True
+
+
+def test_class_past_the_chain_listing_cap_still_exact():
+    """A 20-link chain: the listing stops at the cap but the walk finished,
+    so the root fingerprint is in hand and the class derives from it —
+    while chain_length stays the exact 20, not the 16 listed."""
+    depth = MAX_CHAIN_CERTIFICATES + 4
+    certs = [_cert_tlv(7, "CA0", "Acme Corp", subject_org="Microsoft Corporation",
+                       ekus=[KERNEL_EKU])]
+    certs += [_cert_tlv(100 + index, f"CA{index + 1}", f"CA{index}", is_ca=True) for index in range(depth)]
+    certs.append(_cert_tlv(999, "CA20", "CA20", is_ca=True))
+    signer = _signer_info(7, "CA0", "2.16.840.1.101.3.4.2.1")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    signature = block["signatures"][0]
+    assert signature["chain_length"] == depth + 1
+    assert len(signature["chain"]) == MAX_CHAIN_CERTIFICATES
+    assert signature["chain_truncated"] is True
+    assert signature["chain_complete"] is True
+    assert signature["root_fingerprint"]
+    # The class comes from the EKU the parsed signer carries — decided
+    # before any anchor question, and from the whole walk, not the listing.
+    assert block["signing_class"] == "kernel_mode"
+
+
+def test_class_withheld_when_the_anchor_is_past_the_parse_window():
+    """40 certificates: the walk runs out of parsed links before the root.
+    The signer's own EKU is still in hand, so kernel_mode derives — but no
+    root fact is claimed and unknown_root is not manufactured from the
+    chain that could not be finished."""
+    depth = 40
+    certs = [_cert_tlv(7, "CA0", "Acme Corp", subject_org="Microsoft Corporation")]
+    certs += [_cert_tlv(100 + index, f"CA{index + 1}", f"CA{index}", is_ca=True) for index in range(depth)]
+    signer = _signer_info(7, "CA0", "2.16.840.1.101.3.4.2.1")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        block = _stub_table(tmp, _content_info(certs, signer))
+    signature = block["signatures"][0]
+    assert signature["chain_length_exact"] is False
+    assert signature["chain_complete"] is None
+    assert "root_fingerprint" not in signature
+    assert "signing_class" not in block, (
+        "the leaf names Microsoft but the anchor is unknowable here"
+    )
+
+
+def test_signer_mismatch_rule():
+    """The one-directional comparison: fires on the impersonation shape,
+    never on the benign publisher-signs-subsidiary shapes measured on the
+    corpus (Microsoft/Sysinternals, OpenJS/Node.js, PSF/OpenSSL)."""
+    def metadata_for(company: str, signer_o: str, signer_cn: str | None = None):
+        return {
+            "code_signature": {
+                "parse_status": "parsed",
+                "signatures": [{"signer": {"o": signer_o, "cn": signer_cn or signer_o}}],
+            },
+            "version_info": {"strings": {"0409": {"CompanyName": company}}},
+        }
+
+    fired = check_signer_mismatch(
+        "f", metadata_for("Microsoft Corporation", "Evil Signer Ltd"), {}
+    )
+    assert fired is not True
+    assert "Microsoft Corporation" in fired and "Evil Signer Ltd" in fired
+
+    # The signer carrying the publisher's token satisfies the claim.
+    assert check_signer_mismatch(
+        "f", metadata_for("Microsoft Corporation", "Microsoft Corporation"), {}
+    ) is True
+    # Containment both ways: "Microsoft" vs "Microsoft Corporation".
+    assert check_signer_mismatch(
+        "f", metadata_for("Microsoft", "Microsoft Corporation"), {}
+    ) is True
+    # The benign shapes from the tiers 0-1 measurement — never findings.
+    assert check_signer_mismatch(
+        "f",
+        metadata_for("Sysinternals - www.sysinternals.com", "Microsoft Corporation"),
+        {},
+    ) is True
+    assert check_signer_mismatch(
+        "f", metadata_for("Node.js", "OpenJS Foundation"), {}
+    ) is True
+    assert check_signer_mismatch(
+        "f",
+        metadata_for("The OpenSSL Project, https://www.openssl.org/",
+                     "Python Software Foundation"),
+        {},
+    ) is True
+    # A company outside the table is not arbitrated at all.
+    assert check_signer_mismatch(
+        "f", metadata_for("Contoso Ltd", "Fabrikam Inc"), {}
+    ) is True
+    # Missing facts determine nothing (rule 11).
+    assert check_signer_mismatch(
+        "f",
+        {"code_signature": {"parse_status": "parsed", "signatures": []},
+         "version_info": {"strings": {"0409": {"CompanyName": "Microsoft"}}}},
+        {},
+    ) is True
+    assert check_signer_mismatch(
+        "f",
+        {"code_signature": {"parse_status": "parsed",
+                            "signatures": [{"signer": {"cn": "X", "o": "X"}}]},
+         "version_info": {"strings": {}}},
+        {},
+    ) is True
+
+
+def test_signer_mismatch_silent_on_real_fixtures():
+    """The real signed fixtures carry no Microsoft claim (or no version
+    strings), so the rule is silent on every one of them."""
+    for path in (RFC3161, PAGEHASH, NOTIMESTAMP, SHA1):
+        metadata = parse(path)
+        assert check_signer_mismatch(path, metadata, {}) is True, path
+
+
+def test_root_anchor_snapshot_shape():
+    """The shipped anchor list is data with provenance: every key a SHA-256
+    fingerprint, every entry named, and the snapshot dated and built — the
+    facts a reader needs to know what the match was made against."""
+    from blint.lib.pe_signature import _load_data_table, _root_anchor_table
+
+    table = _load_data_table("pe_roots.yml")
+    assert table.get("source_build")
+    assert table.get("hashed_on")
+    assert "LocalMachine\\Root" in (table.get("source_stores") or [])
+    assert table.get("hash") == "sha256"
+    roots = _root_anchor_table()
+    assert len(roots) >= 28, "the snapshot carries the full VM store export"
+    import re
+
+    fingerprint_re = re.compile(r"^[0-9a-f]{64}$")
+    microsoft = 0
+    for fingerprint, facts in roots.items():
+        assert fingerprint_re.match(fingerprint), fingerprint
+        assert facts.get("cn")
+        microsoft += 1 if facts.get("microsoft") else 0
+    assert microsoft >= 10, "the Microsoft roots are flagged as such"
+
+
+def test_class_on_real_corpus_files():
+    """Ground-truth classes on corpus files (rule 29): the PSF-signed
+    python.exe is commercial_ov over a complete chain anchored at the
+    Microsoft-operated Identity Verification root (in the snapshot, not a
+    Microsoft leaf); the Sysinternals Testlimit is Microsoft's own code
+    signing cert (microsoft_1st_party). Skipped when the corpus is
+    absent."""
+    import os
+
+    python_exe = os.path.expanduser("~/sandbox/pe-corpus/tier0-reference/python-amd64/python.exe")
+    if not os.path.exists(python_exe):
+        pytest.skip("tier-0 corpus not present")
+    block = parse(python_exe)["code_signature"]
+    assert block["signing_class"] == "commercial_ov"
+    signature = block["signatures"][0]
+    assert signature["root_known"] is True
+    assert signature["root_microsoft"] is True
+    assert signature["root_fingerprint"] == (
+        "5367f20c7ade0e2bca790915056d086b720c33c1fa2a2661acf787e3292e1270"
+    ), "Microsoft Identity Verification Root Certificate Authority 2020"
+
+    testlimit = os.path.expanduser("~/sandbox/pe-corpus/tier1-ecosystem/sysinternals/Testlimit.exe")
+    if not os.path.exists(testlimit):
+        pytest.skip("tier-1 corpus not present")
+    block = parse(testlimit)["code_signature"]
+    assert block["signing_class"] == "microsoft_1st_party"
+    # Decided by the primary (outer) signature — the audit key is absent.
+    assert "signing_class_signature" not in block
+    # The SHA-1 outer signature decides; the nested SHA-256 one agrees.
+    assert block["signatures"][1]["signer"]["o"] == "Microsoft Corporation"

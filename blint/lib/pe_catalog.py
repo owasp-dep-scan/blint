@@ -28,7 +28,10 @@ Three states, and the honesty each requires (rules 11/14):
   unsigned. It is only reachable on a *complete* index: an index that
   refused or truncated any catalog cannot prove absence, and reports
   ``catalog_lookup: "index_incomplete"`` instead. "Not found in the part
-  of the index we built" is not "not signed".
+  of the index we built" is not "not signed". A negative is likewise the
+  only state from which ``signing_class: "unsigned"`` is claimed (02/C);
+  a positive match derives the class from the catalog's own signer
+  through the same walk, and every other state leaves the class absent.
 
 The member hash the lookup probes is the file's authentihash — the same
 exclusions (PE checksum, security directory) both Authenticode and
@@ -56,12 +59,14 @@ from blint.lib.pe_signature import (
     _parse_content_info,
     _parse_signed_data,
     _SignatureFormatError,
+    derive_signing_class,
     walk_signature_list,
 )
 from blint.logger import LOG
 
 # --- OIDs this module keys on. Numbers, never a dependency's enum names. --
 OID_CTL = "1.3.6.1.4.1.311.10.1"
+OID_SPC_INDIRECT_DATA = "1.3.6.1.4.1.311.2.1.4"
 # Catalog attribute OIDs (mscat.h), named where the attribute is understood;
 # unknown ones pass through as dotted strings. Observed on real Windows 11
 # package catalogs: 12.2.1 (OSAttr) at the CTL level and 12.2.3 on every
@@ -136,6 +141,53 @@ def _attribute_name(oid: str) -> str:
     return CTL_ATTRIBUTE_NAMES.get(oid, oid)
 
 
+def _member_tag_hash(raw: bytes) -> tuple[str, str] | None:
+    """A member hash from the classic entry's leading OCTET STRING.
+
+    makecat-era catalogs (the full Windows store carries them beside the
+    modern package catalogs) tag each member with the hash rendered as a
+    NUL-terminated UTF-16 ASCII-hex string — the digest itself rides the
+    entry's SpcIndirectData attribute. Returns (hex, algorithm) when the
+    tag decodes to a hex digest of a known width, else None.
+    """
+    try:
+        text = raw.decode("utf-16-le").rstrip("\x00")
+    except UnicodeDecodeError:
+        return None
+    lowered = text.lower()
+    if len(lowered) % 2 or not all(c in "0123456789abcdef" for c in lowered):
+        return None
+    algorithm = HASH_ALGORITHM_BY_WIDTH.get(len(lowered) // 2)
+    if not algorithm:
+        return None
+    return lowered, algorithm
+
+
+def _attribute_digest(value: bytes, depth: int = 0) -> tuple[str, str] | None:
+    """The member digest inside an SpcIndirectData attribute value.
+
+    The value is { data, messageDigest { alg, OCTET STRING } }; the digest
+    is the last width-valid OCTET STRING in the tree. Widths beyond the
+    known ones are recorded by width, never guessed into an algorithm."""
+    if depth > 8:
+        return None
+    found: tuple[str, str] | None = None
+    pos = 0
+    end = len(value)
+    while pos < end:
+        try:
+            tag, inner, pos = _ber_read(value, pos, end)
+        except _SignatureFormatError:
+            break
+        if tag == 0x04 and 8 <= len(inner) <= 64:
+            found = (inner.hex(), HASH_ALGORITHM_BY_WIDTH.get(len(inner), f"unknown_{len(inner)}B"))
+        elif tag & 0x20:
+            nested = _attribute_digest(inner, depth + 1)
+            if nested:
+                found = nested
+    return found
+
+
 def _attribute_strings(value: bytes, depth: int = 0) -> list[str]:
     """Strings found inside an attribute value, best effort.
 
@@ -172,15 +224,19 @@ def _attribute_strings(value: bytes, depth: int = 0) -> list[str]:
 
 
 def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
-    """CTL member entries, both layouts, by shape — not by position.
+    """CTL member entries, all three layouts, by shape — not by position.
 
     Real Windows 11 package catalogs use a simplified CTL (entries in a
-    plain SEQUENCE; every member appears twice, once per hash width); the
-    classic RFC 5283-style CTL (version INTEGER first, entries under [1]
-    IMPLICIT) is what makecat-era and driver catalogs use. Both put each
-    member in a SEQUENCE whose first child is the hash OCTET STRING and
-    whose second is the attribute SET, so entries are recognised by that
-    shape wherever they sit.
+    plain SEQUENCE; every member appears twice, once per hash width) and
+    the classic RFC 5283-style CTL (version INTEGER first, entries under
+    [1] IMPLICIT) — both put each member in a SEQUENCE whose first child
+    is the hash OCTET STRING and whose second is the attribute SET. The
+    makecat-era printer/driver catalogs in the full store use a third
+    shape: the leading OCTET STRING is the member's digest rendered as a
+    NUL-terminated UTF-16 hex tag, and the digest bytes ride the entry's
+    ``SpcIndirectData`` attribute — recognized by the same (OCTET STRING,
+    SET) outline and resolved through ``_member_tag_hash`` /
+    ``_attribute_digest``.
 
     The member count stays exact past the storage cap — the walk always
     finishes — while the returned hash list carries at most what
@@ -226,13 +282,21 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
                 continue
             if hash_tag != 0x04 or attrs_tag != 0x31:
                 continue
-            width = len(hash_value)
-            if not 8 <= width <= 64:
-                continue
+            # A recognized member entry whatever carries the digest: the
+            # modern shape hashes in the leading OCTET STRING, the classic
+            # makecat shape tags the member with a hex-text digest there
+            # and carries the bytes in the SpcIndirectData attribute.
             member_count += 1
 
             named = False
             indirect = False
+            member_hash: tuple[str, str] | None = None
+            attr_values: list[bytes] = []
+            width = len(hash_value)
+            if 8 <= width <= 64:
+                member_hash = (hash_value.hex(), HASH_ALGORITHM_BY_WIDTH.get(width, f"unknown_{width}B"))
+            else:
+                member_hash = _member_tag_hash(hash_value)
             attr_pos = 0
             attr_end = len(attrs_value)
             while attr_pos < attr_end:
@@ -250,6 +314,7 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
                             values.append(v_value)
                     if oid is None:
                         continue
+                    attr_values.extend(values)
                     name = _attribute_name(oid)
                     catalog["attribute_counts"][name] = (
                         catalog["attribute_counts"].get(name, 0) + 1
@@ -269,8 +334,15 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
                 catalog["member_named_count"] += 1
             if indirect:
                 catalog["indirect_member_count"] += 1
-            if len(stored) < limit:
-                stored.append([hash_value.hex(), HASH_ALGORITHM_BY_WIDTH.get(width, f"unknown_{width}B")])
+            if member_hash is None:
+                # Classic shape: the digest is the messageDigest inside the
+                # entry's SpcIndirectData attribute.
+                for set_value in attr_values:
+                    member_hash = _attribute_digest(set_value)
+                    if member_hash:
+                        break
+            if member_hash and len(stored) < limit:
+                stored.append(list(member_hash))
     catalog["member_count"] = member_count
     if member_count > len(stored):
         catalog["members_stored_capped"] = True
@@ -559,6 +631,12 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
         # proof either way, so the lookup runs first and an incomplete index
         # still answers positively for every file it did index.
         block["catalog_lookup"] = "negative" if index["complete"] else "index_incomplete"
+        if block["catalog_lookup"] == "negative":
+            # The one state from which "unsigned" may be claimed (02/C): the
+            # lookup was performed against a complete index and the file is
+            # in none of its catalogs. Every other state leaves the class
+            # absent, and absence means undetermined — never "unsigned".
+            block["signing_class"] = "unsigned"
         return
     if not index["complete"]:
         # Stated on the positive too: the match stands, and the reader knows
@@ -581,6 +659,16 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
         # The block now carries parsed signature facts (from the catalog —
         # scope says where from), so the timestamp/digest rules read it.
         block["parse_status"] = "parsed"
+        # The signing class derives from the catalog's own signer the same
+        # way it derives from an embedded signature — same walk, same
+        # caps, same truncation withholding.
+        determined = derive_signing_class(
+            block["signatures"], facts["signature_walk_truncated"]
+        )
+        if determined:
+            block["signing_class"], class_index = determined
+            if class_index:
+                block["signing_class_signature"] = class_index
         block["structural_integrity"] = {
             "digest_match": True,
             "algorithm": match["member_hash_algorithm"],

@@ -30,6 +30,8 @@ import pytest
 
 from blint.lib.checks import (
     check_authenticode,
+    check_kernel_signing_class,
+    check_self_signed,
     check_signature_not_timestamped,
     check_weak_signature_digest,
 )
@@ -223,12 +225,27 @@ def test_real_catalog_parse_and_index():
         # Real package catalogs: a Microsoft signer with a timestamp, and
         # both hash widths for every member.
         signer = catalog["signatures"][0]["signer"]
-        assert signer["cn"] in ("Microsoft Windows", "Microsoft Windows Publisher"), path
+        assert signer["cn"] in (
+            "Microsoft Windows",
+            "Microsoft Windows Publisher",
+            "Microsoft Windows Hardware Compatibility Publisher",
+        ), path
         assert catalog["signatures"][0]["timestamp"]["present"] is True
         assert catalog["signatures"][0]["timestamp"]["kind"] == "rfc3161"
-        assert catalog["attribute_counts"].get("catalogNameValueHash", 0) > 0
-        algorithms = {algorithm for _, algorithm in catalog["hashes"]}
-        assert algorithms == {"SHA1", "SHA256"}, path
+        # Modern package catalogs carry the member digest as a plain OCTET
+        # STRING with a CatalogNameValueHash attribute per entry and index
+        # both widths; classic makecat-era catalogs tag members with a
+        # hex-text digest and carry the bytes in SpcIndirectData (SHA-1
+        # only). Either way the entries are digests blint indexed.
+        counts = catalog["attribute_counts"]
+        classic = counts.get("spcIndirectData", 0) > 0 and counts.get("catalogNameValueHash", 0) == 0
+        if classic:
+            algorithms = {algorithm for _, algorithm in catalog["hashes"]}
+            assert algorithms == {"SHA1"}, path
+        else:
+            assert counts.get("catalogNameValueHash", 0) > 0, path
+            algorithms = {algorithm for _, algorithm in catalog["hashes"]}
+            assert algorithms == {"SHA1", "SHA256"}, path
         assert catalog["member_count"] == catalog["member_hashes_stored"]
 
     index = build_catalog_index(CATROOT)
@@ -686,3 +703,169 @@ def test_non_pe_metadata_is_ignored():
     metadata["binary_type"] = "ELF"
     apply_catalog_signature(metadata, {"complete": True, "catalog_dir": "/", "entries": {}})
     assert metadata["code_signature"]["catalog_lookup"] == "not_performed"
+
+
+# ---------------------------------------------------------------------------
+# Signing class on the catalog path (W2.4, 02/C)
+# ---------------------------------------------------------------------------
+def test_negative_lookup_claims_unsigned_incomplete_claims_nothing(tmp_path):
+    """``signing_class: "unsigned"`` follows only from a performed lookup
+    against a complete index. The same miss against an incomplete index
+    determines nothing, so the key stays absent — absence means
+    undetermined, never "unsigned" (rule 11)."""
+    _write_cat(
+        tmp_path,
+        "other.cat",
+        _cat_content_info(_modern_ctl([_modern_member_entry(SHA1_HASH)])),
+    )
+    complete_index = build_catalog_index(str(tmp_path))
+    assert complete_index["complete"] is True
+    metadata = _member_metadata("e" * 40, "f" * 64)
+    apply_catalog_signature(metadata, complete_index)
+    block = metadata["code_signature"]
+    assert block["catalog_lookup"] == "negative"
+    assert block["signing_class"] == "unsigned"
+    assert check_self_signed("member.dll", metadata, {}) is True
+
+    # The same miss, one refused catalog in the tree: no class at all.
+    _write_cat(str(tmp_path), "broken.cat", b"\x30\x80junk")
+    incomplete_index = build_catalog_index(str(tmp_path))
+    assert incomplete_index["complete"] is False
+    metadata = _member_metadata("e" * 40, "f" * 64)
+    apply_catalog_signature(metadata, incomplete_index)
+    block = metadata["code_signature"]
+    assert block["catalog_lookup"] == "index_incomplete"
+    assert "signing_class" not in block
+
+
+def test_positive_match_derives_class_from_the_catalog_signer(tmp_path):
+    """A member match adopts the catalog's own signer, so the signing class
+    derives from it the same way an embedded signature's class derives.
+    The hand-built catalog signer is a self-signed leaf, so the class is
+    self_signed and CHECK_SELF_SIGNED fires through the catalog scope."""
+    _write_cat(
+        tmp_path,
+        "selfsigned.cat",
+        _cat_content_info(_modern_ctl([_modern_member_entry(SHA256_HASH, with_digest=True)]),
+                          signer_cn="Cat Signer"),
+    )
+    index = build_catalog_index(str(tmp_path))
+    metadata = _member_metadata(SHA1_HASH, SHA256_HASH)
+    apply_catalog_signature(metadata, index)
+    block = metadata["code_signature"]
+    assert block["scope"] == "catalog"
+    assert block["signing_class"] == "self_signed"
+    result = check_self_signed("member.dll", metadata, {})
+    assert result is not True
+    assert "Cat Signer" in result
+
+
+def test_real_catalog_members_are_microsoft_first_party():
+    """The four rule-29 slice members are catalog-signed by Microsoft
+    Windows through a chain whose top shipped link names a Microsoft root;
+    the class says microsoft_1st_party. Skipped when the corpus CatRoot
+    copy does not cover them (the same keying as the member test)."""
+    if not os.path.isdir(SLICE_ROOT) or not os.path.isdir(CATROOT):
+        pytest.skip("tier-5 slice not present")
+    from blint.lib.binary import parse
+
+    index = build_catalog_index(CATROOT)
+    covering = (
+        "Microsoft-Windows-Embedded-AssignedAccessCsp-Package",
+        "Microsoft-OneCore-SD-Package",
+    )
+    catalogs = " ".join(entry["catalog"] for entry in index["entries"].values())
+    if not all(name in catalogs for name in covering):
+        pytest.skip("the local CatRoot copy does not carry the catalogs covering these members")
+    members = [
+        ("system32/AssignedAccessCsp.dll", os.path.join(SLICE_ROOT, "system32/AssignedAccessCsp.dll")),
+        ("system32/AssignedAccessManager.dll", os.path.join(SLICE_ROOT, "system32/AssignedAccessManager.dll")),
+        ("system32/assignedaccessmanagersvc.dll", os.path.join(SLICE_ROOT, "system32/assignedaccessmanagersvc.dll")),
+        ("drivers/dumpsdport.sys", os.path.join(SLICE_ROOT, "drivers/dumpsdport.sys")),
+    ]
+    for label, path in members:
+        if not os.path.exists(path):
+            pytest.skip(f"{label} not in the local slice")
+        metadata = parse(path)
+        apply_catalog_signature(metadata, index)
+        block = metadata["code_signature"]
+        assert block["signing_class"] == "microsoft_1st_party", label
+        signature = block["signatures"][0]
+        # The root is not in the catalog's own blob: the anchor is the top
+        # shipped link's issuer statement, not a fingerprint match.
+        assert signature["chain_complete"] is False
+        assert "root_fingerprint" not in signature
+        assert check_kernel_signing_class(path, metadata, {}) is True
+
+
+def test_classic_tag_layout_members_indexed(tmp_path):
+    """The makecat-era shape in the full Windows store (found on
+    ntprint.cat and friends): the entry's leading OCTET STRING is the
+    member's digest rendered as a NUL-terminated UTF-16 hex tag, and the
+    digest bytes ride the entry's SpcIndirectData attribute. Both routes
+    must index the member — W2.3's parser read these catalogs as parsed
+    and empty, which silently dropped every classic member from the
+    index."""
+    tag_sha1 = ("a" * 40).encode("ascii").decode()
+    tag_octet = _tlv(0x04, tag_sha1.encode("utf-16-le") + b"\x00\x00")
+    digest_attr = _tlv(
+        0x30,
+        _oid("1.3.6.1.4.1.311.2.1.4")
+        + _tlv(
+            0x04,
+            _tlv(
+                0x30,
+                _tlv(0x30, _oid("1.3.6.1.4.1.311.2.1.25") + _tlv(0xA2, _tlv(0xA0, b"")))
+                + _tlv(0x30, _tlv(0x30, _oid("1.3.14.3.2.26")) + _tlv(0x04, bytes.fromhex(SHA1_HASH))),
+            ),
+        ),
+    )
+    name_attr = _tlv(
+        0x30,
+        _oid("1.3.6.1.4.1.311.12.2.2") + _tlv(0x31, _tlv(0xA2, _tlv(0xA0, _tlv(0x80, b"driver.dll\x00".decode().encode("utf-16-le"))))),
+    )
+    entry = _tlv(0x30, tag_octet + _tlv(0x31, digest_attr + name_attr))
+    ctl = _tlv(
+        0x30,
+        _tlv(0x30, _oid("1.3.6.1.4.1.311.12.1.1"))
+        + _tlv(0x04, b"\x11" * 16)
+        + _tlv(0x17, b"240401075722Z")
+        + _tlv(0x30, b"")
+        + _tlv(0x30, entry),
+    )
+    path = _write_cat(tmp_path, "classic-tag.cat", _cat_content_info(ctl, signer_cn="Cat Signer"))
+    catalog = parse_catalog_file(path)
+    assert catalog["parse_status"] == "parsed", catalog["parse_error"]
+    assert catalog["member_count"] == 1
+    assert catalog["member_hashes_stored"] == 1
+    assert catalog["member_named_count"] == 1
+    hashes = {h: a for h, a in catalog["hashes"]}
+    # Both the UTF-16 tag and the SpcIndirectData messageDigest resolve to
+    # the same SHA-1 member hash.
+    assert SHA1_HASH in hashes
+    assert hashes[SHA1_HASH] == "SHA1"
+    assert catalog["attribute_counts"].get("catalogNameValueFile") == 1
+    index = build_catalog_index(str(tmp_path))
+    assert index["complete"] is True
+    hit = lookup_member(index, None, SHA1_HASH)
+    assert hit and hit["member_hash"] == SHA1_HASH
+
+
+def test_real_full_store_has_no_empty_catalogs():
+    """Every catalog in the corpus's full CatRoot copy parses with members:
+    the classic tag layout is handled, so a parsed-but-empty real catalog
+    would be a parse gap, not an empty CTL. Skipped where the corpus is
+    absent."""
+    import glob as globlib
+
+    if not os.path.isdir(CATROOT):
+        pytest.skip("tier-5 CatRoot not present")
+    catalogs = globlib.glob(os.path.join(CATROOT, "*.cat"))
+    if len(catalogs) < 100:
+        pytest.skip("this CatRoot copy is a sample, not the full store")
+    empty = []
+    for path in catalogs:
+        catalog = parse_catalog_file(path)
+        if catalog["parse_status"] == "parsed" and catalog["member_count"] == 0:
+            empty.append(os.path.basename(path))
+    assert empty == []

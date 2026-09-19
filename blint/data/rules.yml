@@ -221,6 +221,60 @@
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
+- id: CHECK_SELF_SIGNED
+  title: Self-Signed Signature
+  description: |
+    This binary's Authenticode signature was made by a certificate that is its own root: no certificate authority stands behind the identity it states. Anyone can create such a certificate in minutes and name it however they like - "Microsoft Corporation" included - so a self-signed signature authenticates the file to itself and to nothing else.
+    Self-signing is common and legitimate for internal tools, test builds and installers signing their own components, which is why this is not a verdict on intent; it means the identity on the signature was never vouched for by anyone. Treat every identity claim on this binary (signer name, CompanyName, opus info) as self-asserted.
+    This check follows the code_signature signing_class verdict and stays silent when the signature walk was truncated, so a sample of the signature list never decides it.
+  severity: medium
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_SIGNATURE_UNKNOWN_ROOT
+  title: Signature Chain Outside Shipped Root Snapshot
+  description: |
+    This binary's signature chain ships all the way to a self-signed root certificate, and that root's SHA-256 fingerprint is not in blint's shipped root snapshot - the trusted root certificates hashed from a Windows machine's Root and AuthRoot stores at a recorded date and build (blint/data/pe_roots.yml). The chain anchors nowhere blint can name.
+    This is a statement about the file, not a trust verdict: blint performs no trust validation, consults no live certificate store and fetches no revocation data, so "outside the shipped snapshot" also covers roots created after the snapshot was taken. A signature whose chain stops below the root - the normal shape for Authenticode - is never reported here, because the blob not carrying a root says nothing about the root.
+    Combined with a self-signed signer or a certificate from a private CA, this is the shape of a signature that only pretends to a publisher identity.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_KERNEL_SIGNING_CLASS
+  title: Kernel-Mode Code Signing
+  description: |
+    The signature's certificate carries the kernel-mode code signing EKU (1.3.6.1.4.1.311.61.1.1): the binary is signed for execution as a kernel component (or claims to be). This is an informational posture finding, not a defect: kernel code runs with the operating system's privileges, so a kernel-signed binary is a high-value artifact for both legitimate drivers and abuse (the BYOVD pattern loads a legitimately signed but vulnerable driver).
+    blint derives the class from the certificate's EKU and shipped chain facts; it does not verify the signature's trust. See code_signature.signing_class.
+  severity: low
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_SIGNER_MISMATCH
+  title: Signature Signer Does Not Match Company Claim
+  description: |
+    The VERSIONINFO CompanyName claims a well-known publisher, but the Authenticode signature was made by a different identity - the shape of a signed-but-repurposed binary: someone re-signed the file with their own certificate and left the original version strings in place.
+    The comparison is deliberately one-directional and narrow. It fires only when the CompanyName claims a publisher from blint's identity table (blint/data/pe_publisher_identities.yml) whose tokens the signer does not carry. The reverse - a large publisher signing software whose CompanyName names an acquired brand or an upstream project (Microsoft signs the Sysinternals suite, the Python Software Foundation signs the OpenSSL DLLs it ships) - is normal and is never a finding: measured on a benign corpus, 152 of 178 files with both facts have differing names, and every one of them is legitimate. A signer/CompanyName pair outside the table is not arbitrated at all, because a name difference between two unknown identities is not evidence.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |
