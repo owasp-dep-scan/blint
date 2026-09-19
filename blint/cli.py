@@ -170,6 +170,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a directory containing custom YAML rule files (.yml or .yaml). These will be loaded in addition to default rules.",
     )
     parser.add_argument(
+        "--catalog-dir",
+        dest="catalog_dir",
+        type=str,
+        default=None,
+        help="Path to a directory of .cat catalog files (a copied CatRoot "
+        "tree) used to resolve catalog-signed PEs that carry no embedded "
+        "signature. Off by default: without it code_signature.scope stays "
+        "'none' with catalog_lookup 'not_performed' and no unsigned claim "
+        "is made.",
+    )
+    parser.add_argument(
         "--sdk-path",
         dest="sdk_path",
         default=None,
@@ -639,6 +650,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         use_cache=args.use_cache,
         jobs=jobs,
         sdk_path=getattr(args, "sdk_path", None),
+        catalog_dir=getattr(args, "catalog_dir", None),
     )
     return blint_options
 

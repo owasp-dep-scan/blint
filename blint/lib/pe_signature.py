@@ -37,9 +37,9 @@ W2.2 facts carried by the same walk:
   here claims verification.
 
 Counts beside capped listings are exact and carry a truncation flag —
-``signature_count``/``signatures_truncated``, ``chain_length``/
-``chain_truncated`` — and page-hash counts are exact by division, with no
-listing at all.
+``signature_count`` is a floor only while ``signature_walk_truncated`` is
+present, and ``chain_length``/``chain_truncated`` — and page-hash counts
+are exact by division, with no listing at all.
 
 Everything returned is plain JSON types (str/int/bool/None/dict/list) so
 the parse cache can serialize it. Hostile input — truncated, cyclic or
@@ -1134,6 +1134,63 @@ def _authentihash_factory(parsed_obj: lief.PE.Binary):
     return compute
 
 
+def walk_signature_list(root_ders: list[bytes], authentihash_fn=None) -> dict:
+    """Walk one blob's signature list, nested signatures included (02/A.3).
+
+    Shared by the PE certificate table (``parse_pe_code_signature``) and the
+    catalog signer (``pe_catalog``) so both answer with the same
+    ``signatures[]`` shape and the same walk/list cap discipline — a second
+    CMS walk in a second module is the thing not to build.
+
+    The one ``MAX_SIGNATURES_WALKED`` window bounds both the walk and the
+    listing; ``signature_count`` is exact up to the window and a floor past
+    it (``signature_walk_truncated``). ``weak_digest_only`` is a verdict
+    over *every* signature, so a truncated walk that never saw a modern
+    digest returns ``None`` (undecided) rather than a true a rule would
+    fire on — the one modern signature may be the one past the window.
+    """
+    signatures: list[dict] = []
+    signature_errors: list[str] = []
+    signature_count = 0
+    modern_seen = False
+    truncated = False
+    pending: list[tuple[bytes, int, dict | None]] = [(der, 0, None) for der in root_ders]
+    while pending:
+        der, level, inherited = pending.pop(0)
+        if signature_count >= MAX_SIGNATURES_WALKED:
+            truncated = True
+            break
+        try:
+            entry, nested_ders = _parse_signature(der, authentihash_fn, level, inherited)
+        except _SignatureFormatError as e:
+            signature_errors.append(f"level_{level}:{e}")
+            continue
+        except (IndexError, KeyError, TypeError, ValueError) as e:
+            signature_errors.append(f"level_{level}:{type(e).__name__}:{e}")
+            continue
+        if entry is None:
+            continue
+        signature_count += 1
+        if entry.get("digest_algorithm") in MODERN_DIGESTS:
+            modern_seen = True
+        signatures.append(entry)
+        for nested_der in nested_ders:
+            pending.append((nested_der, level + 1, entry.get("timestamp")))
+    if modern_seen or signature_count == 0:
+        weak_digest_only: bool | None = False
+    elif truncated:
+        weak_digest_only = None
+    else:
+        weak_digest_only = True
+    return {
+        "signatures": signatures,
+        "signature_count": signature_count,
+        "signature_walk_truncated": truncated,
+        "signature_errors": signature_errors,
+        "weak_digest_only": weak_digest_only,
+    }
+
+
 def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
     """The structured ``code_signature`` block for one PE file (02/A).
 
@@ -1186,49 +1243,20 @@ def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
         block["unparsed_certificate_entries"] = entries["other_type_count"]
 
     authentihash_fn = _authentihash_factory(parsed_obj)
-    signature_count = 0
-    modern_seen = False
-    signature_errors: list[str] = []
-    pending: list[tuple[bytes, int, dict | None]] = [
-        (der, 0, None) for der in entries["signed_data_blobs"]
-    ]
-    while pending:
-        der, level, inherited = pending.pop(0)
-        if signature_count >= MAX_SIGNATURES_WALKED:
-            block["signature_walk_truncated"] = True
-            break
-        try:
-            entry, nested_ders = _parse_signature(der, authentihash_fn, level, inherited)
-        except _SignatureFormatError as e:
-            signature_errors.append(f"level_{level}:{e}")
-            continue
-        except (IndexError, KeyError, TypeError, ValueError) as e:
-            signature_errors.append(f"level_{level}:{type(e).__name__}:{e}")
-            continue
-        if entry is None:
-            continue
-        signature_count += 1
-        if entry.get("digest_algorithm") in MODERN_DIGESTS:
-            modern_seen = True
-        # One window bounds both the walk and the listing, so there is one
-        # flag to read rather than two that can never disagree (rule 21).
-        block["signatures"].append(entry)
-        for nested_der in nested_ders:
-            pending.append((nested_der, level + 1, entry.get("timestamp")))
-
+    walk = walk_signature_list(entries["signed_data_blobs"], authentihash_fn)
+    block["signatures"] = walk["signatures"]
     # weak_digest_only is computed over every signature walked, nested
     # included: reporting only the outer SHA-1 of a dual-signed binary would
     # make a modern binary look SHA-1-signed. A truncated walk has not seen
-    # every signature, so a "no modern digest anywhere" verdict it could not
-    # have reached is None (undecided) rather than a true the rule would fire
-    # on -- the one modern signature may be the one past the window.
+    # every signature, so the verdict it could not have reached is None
+    # (undecided) rather than a true the rule would fire on -- decided in
+    # walk_signature_list, the one place that owns the window.
+    signature_count = walk["signature_count"]
     block["signature_count"] = signature_count
-    if modern_seen or signature_count == 0:
-        block["weak_digest_only"] = False
-    elif block.get("signature_walk_truncated"):
-        block["weak_digest_only"] = None
-    else:
-        block["weak_digest_only"] = True
+    block["weak_digest_only"] = walk["weak_digest_only"]
+    if walk["signature_walk_truncated"]:
+        block["signature_walk_truncated"] = True
+    signature_errors = walk["signature_errors"]
     if signature_errors:
         block["signature_errors"] = signature_errors
 

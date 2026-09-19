@@ -186,6 +186,7 @@
     * Authenticity
     * Integrity
     * Timeliness
+    This check is catalog-aware (code_signature.scope) and its finding states which of three states it fired on: (1) an embedded signature blob that failed verification; (2) no embedded signature with a catalog lookup performed and negative against the supplied --catalog-dir directory — the only state from which "unsigned" is actually claimed; (3) an embedded signature whose signer could not be read. It does not fire when no catalog directory was supplied (catalog_lookup "not_performed") or when the catalog index was incomplete ("index_incomplete"): a catalog-signed file cannot be distinguished from an unsigned one without a directory, and "not found in the part of the index we built" is not "not signed".
   severity: high
   exe_types:
     - PE32
