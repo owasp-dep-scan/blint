@@ -15,6 +15,7 @@ gap, because it silently reassigns a dependency edge that downstream tools treat
 as fact.
 """
 
+from blint.lib.pe_imports import TAG_PINVOKE
 from blint.logger import LOG
 
 # Symbols that no evidence can tie to a library are collected here rather than
@@ -79,6 +80,20 @@ def build_symbol_provider_map(metadata: dict) -> tuple[dict[str, str], list[str]
                 pe_pairs += 1
     if pe_pairs:
         sources.append("import_table")
+
+    # Managed P/Invoke names both halves of the edge directly: the entry
+    # point is the native export, the ModuleRef scope the DLL that exports
+    # it (W3.2). The import table wins where both speak (mixed-mode
+    # images), which setdefault gives for free.
+    pinvoke_pairs = 0
+    for entry in (metadata.get("dotnet") or {}).get("pinvoke") or []:
+        library = entry.get("module") or ""
+        symbol = entry.get("entry_point") or ""
+        if library and symbol:
+            providers.setdefault(symbol, library)
+            pinvoke_pairs += 1
+    if pinvoke_pairs:
+        sources.append("pinvoke")
 
     # Mach-O binds each symbol to a dylib path, which the symbol parser records
     # in the same `library::symbol` form. This is only read for Mach-O: in every
@@ -220,7 +235,15 @@ def declared_libraries(metadata: dict) -> list[str]:
                 add(entry.get("name", ""))
         return declared
     for entry in metadata.get("dynamic_entries") or []:
-        if isinstance(entry, dict) and entry.get("tag") == "NEEDED":
+        if not isinstance(entry, dict):
+            continue
+        tag = entry.get("tag")
+        if tag == "NEEDED" or tag == TAG_PINVOKE:
+            # A P/Invoke scope is a declaration on a managed image: the
+            # DllImport names both the DLL and the export it must provide
+            # (W3.2). It is not a loader-level NEEDED entry — the DLL maps
+            # at first call — but as a declaration of dependency it is
+            # exactly as explicit.
             add(entry.get("name", ""))
     if declared:
         return declared

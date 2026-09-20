@@ -51,6 +51,7 @@ from blint.lib.pe_debug import (
 from blint.lib.pe_dotnet import parse_pe_dotnet
 from blint.lib.pe_imports import (
     TAG_FORWARDER,
+    TAG_PINVOKE,
     apiset_host,
     delay_import_hash,
     forwarder_target,
@@ -1090,6 +1091,25 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["is_dotnet"] = True
             metadata["dotnet"] = dotnet_block
             metadata["exe_type"] = "dotnetbinary"
+        # W3.2: a managed assembly's P/Invoke scopes are native
+        # dependencies the import table never names — a DllImport maps at
+        # first call, not at image load, which is exactly why the loader
+        # does not list it. Each scope joins the dependency list under the
+        # PINVOKE tag so the declaration set, the dependency graph and
+        # CHECK_UNDECLARED_DEPENDENCIES see it without reading as a
+        # loader-level NEEDED entry.
+        if (metadata.get("dotnet") or {}).get("pinvoke"):
+            known_names = {
+                entry["name"].lower() for entry in metadata["dynamic_entries"]
+            }
+            for pinvoke_entry in metadata["dotnet"]["pinvoke"]:
+                module_name = pinvoke_entry.get("module") or ""
+                if not module_name or module_name.lower() in known_names:
+                    continue
+                known_names.add(module_name.lower())
+                metadata["dynamic_entries"].append(
+                    {"name": module_name, "tag": TAG_PINVOKE}
+                )
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)

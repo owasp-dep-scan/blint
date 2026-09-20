@@ -2,9 +2,13 @@
 
 Reads the `#~` (compressed) or `#-` (uncompressed) table stream plus the
 `#Strings`, `#Blob`, `#GUID` and `#US` heaps of a managed assembly and
-reports the identity-and-references block (plan 03/A.1): assembly identity,
-AssemblyRefs, ModuleRefs, the P/Invoke surface, table counts, the entry
-point, the CLI header flags and the target framework attribute.
+reports the identity-and-references block (plan 03/A.1) and the capability
+surface (plan 03/A.2): assembly identity, AssemblyRefs, ModuleRefs, the
+P/Invoke surface, referenced types (TypeRef, resolved through its
+ResolutionScope to the providing assembly), referenced members (MemberRef,
+resolved through its MemberRefParent), the #US string literals, table
+counts, the entry point, the CLI header flags and the target framework
+attribute.
 
 Everything here is attacker-controlled input with cross-references: a row's
 string is an index into `#Strings`, a type is a coded index into another
@@ -14,14 +18,17 @@ and every refusal is recorded as a named degradation in the block rather
 than read as clean (ground rule 30). Counts and listings are separate facts
 (ground rule 14): ``counts`` carries the row counts the stream header
 declared for tables whose rows were verifiably within the stream, while the
-listed blocks (``assembly_refs``, ``module_refs``, ``pinvoke``) are capped
-listings and stay absent entirely when their table could not be read —
-absent is never written as an empty list, so "no AssemblyRefs" and "the
-AssemblyRef table was unreadable" are different outputs.
+listed blocks (``assembly_refs``, ``module_refs``, ``pinvoke``,
+``typerefs``, ``memberrefs``, ``strings``) are capped listings and stay
+absent entirely when their table could not be read — absent is never
+written as an empty list, so "no AssemblyRefs" and "the AssemblyRef table
+was unreadable" are different outputs.
 """
 
 import hashlib
 import struct
+
+from blint.lib.utils import calculate_entropy, check_secret
 
 # Metadata root signature "BSJB" (ECMA-335 II.24.2.1).
 METADATA_SIGNATURE = 0x424A5342
@@ -184,7 +191,22 @@ MAX_BLOB_READ = 65536  # Public-key blobs top out near 2 KB.
 MAX_LISTED_ASSEMBLY_REFS = 1024  # Real counts: low hundreds at most.
 MAX_LISTED_MODULE_REFS = 256
 MAX_LISTED_PINVOKE = 512
+# W3.2: the TypeRef/MemberRef listings and the #US walk. Real maxima over
+# 790 assemblies (corpus tiers 0/1/2/5 plus the .NET 10 shared framework):
+# typeref 626, memberref 8,126, #US entries 3,519 — the listing caps bite
+# only on the two largest framework assemblies, and the walk caps bite on
+# none of them.
+MAX_LISTED_TYPEREFS = 1024
+MAX_LISTED_MEMBERREFS = 2048
+MAX_USER_STRINGS_WALKED = 262144
+MAX_USER_STRINGS_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_US_ENTRY_BYTES = 1024 * 1024  # Longer entries are skipped, not fatal.
+MAX_LISTED_US_STRINGS = 4096
+MAX_US_STRING_CHARS = 4096
 MAX_TARGET_FRAMEWORK_VALUES = 8
+# A TypeRef's ResolutionScope may name an enclosing TypeRef (nested types);
+# the chain has to end somewhere.
+MAX_SCOPE_DEPTH = 8
 MAX_TABLES = 64  # The Valid mask is an 8-byte bitmask.
 # HeapSizes bits blint reads: #Strings, #GUID, #Blob index widths.
 HEAPSIZE_INDEX_BITS = 0x07
@@ -653,6 +675,238 @@ def _declaring_typedef(reader: _TableReader, row_counts, method_rid: int):
     return None
 
 
+def _walk_user_strings(
+    data: bytes, start: int, end: int, degr: _Degradations
+) -> tuple[list[str], int, str]:
+    """Walk the #US heap in entry order (ECMA-335 II.24.2.4).
+
+    Each entry is a compressed byte count — which includes one trailing
+    flag byte blint drops — followed by UTF-16LE bytes. Byte 0 of the heap
+    is the empty string's entry and is not an entry boundary, so the walk
+    starts at ``start + 1``. Returns (values, count, sha256): every decoded
+    value in heap order (deduplicated, first occurrence kept), the exact
+    number of entries walked, and a SHA-256 over each value's UTF-8 bytes
+    plus a 0x00 separator — the same digest the ground-truth oracle
+    computes, so the two walks can be compared byte for byte.
+
+    Walk-level caps bound the work (ground rule 30): entry count, total
+    decoded bytes and a per-entry size past which an entry is skipped and
+    named rather than decoded. A walk that stops early — truncated heap,
+    any cap — still reports the prefix's count and digest, and the refusal
+    is a named degradation, never silence (ground rule 14).
+    """
+    values: list[str] = []
+    seen: set[str] = set()
+    count = 0
+    total_bytes = 0
+    digest = hashlib.sha256()
+    truncated = False
+    p = start + 1
+    while p < end and count < MAX_USER_STRINGS_WALKED:
+        first = data[p]
+        if first & 0x80 == 0:
+            length, header = first, 1
+        elif first & 0xC0 == 0x80:
+            if p + 2 > end:
+                truncated = True
+                break
+            length = ((first & 0x3F) << 8) | data[p + 1]
+            header = 2
+        elif first & 0xE0 == 0xC0:
+            if p + 4 > end:
+                truncated = True
+                break
+            length = (
+                ((first & 0x1F) << 24)
+                | (data[p + 1] << 16)
+                | (data[p + 2] << 8)
+                | data[p + 3]
+            )
+            header = 4
+        else:
+            # 0xF8-0xFF are not a valid compressed-uint prefix (II.23.2).
+            truncated = True
+            break
+        if length == 0:
+            # A zero count byte is the heap's end-of-data terminator, not
+            # a truncated entry — stopping here is the clean exit.
+            break
+        if p + header + length > end:
+            truncated = True
+            break
+        payload_len = length - 1
+        if payload_len > MAX_US_ENTRY_BYTES:
+            # Skip, don't decode: the entry is structured but oversized.
+            degr.add("user_strings_oversize_entry_skipped")
+            p += header + length
+            continue
+        # The flag byte is part of the count, and UTF-16LE decodes in
+        # two-byte units; a dangling odd byte is dropped before decoding.
+        if payload_len % 2 == 1:
+            payload_len -= 1
+        value = data[p + header:p + header + payload_len].decode(
+            "utf-16-le", errors="replace"
+        )
+        utf8 = value.encode("utf-8")
+        digest.update(utf8)
+        digest.update(b"\x00")
+        count += 1
+        total_bytes += len(utf8)
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+        if total_bytes > MAX_USER_STRINGS_TOTAL_BYTES:
+            truncated = True
+            break
+        p += header + length
+    if truncated:
+        degr.add("user_strings_heap_truncated")
+    if count >= MAX_USER_STRINGS_WALKED:
+        degr.add("user_strings_walk_capped")
+    if total_bytes > MAX_USER_STRINGS_TOTAL_BYTES:
+        degr.add("user_strings_total_bytes_capped")
+    return values, count, digest.hexdigest()
+
+
+def _typeref_scope(
+    reader: _TableReader, row_counts, strings, coded: tuple
+) -> tuple[str, str] | None:
+    """Resolve one TypeRef row's ResolutionScope to (kind, name).
+
+    The rendering is the ground-truth contract shared with the oracle
+    (``gtdotnet.cs``): an AssemblyRef scope renders as the assembly's bare
+    name, a ModuleRef or the Module row as ``module:<name>`` — a type
+    provided by a module of this assembly is a different fact from one
+    provided by another assembly, and the two never collapse. A scope that
+    names an enclosing TypeRef (a nested type) is followed to the row that
+    carries a resolvable scope, up to MAX_SCOPE_DEPTH; a scope that cannot
+    be resolved returns None and the row is omitted rather than read as
+    provided by this module (ground rule 14).
+    """
+    tag_table, rid = coded
+    for _ in range(MAX_SCOPE_DEPTH):
+        if not rid:
+            # The nil encoding is tag slot 0 with rid 0: no scope at all
+            # (legal in netmodules). The type is not attributable to any
+            # provider and is omitted rather than read as a module type.
+            return None
+        if tag_table == ASSEMBLY_REF:
+            row = reader.row(ASSEMBLY_REF, rid) if rid else None
+            if row is None:
+                return None
+            name = strings.string(row[6]) if strings else None
+            if not name:
+                return None
+            return "assembly_ref", name
+        if tag_table == MODULE_REF:
+            row = reader.row(MODULE_REF, rid) if rid else None
+            if row is None:
+                return None
+            name = strings.string(row[0]) if strings else None
+            if not name:
+                return None
+            return "module_ref", f"module:{name}"
+        if tag_table == MODULE:
+            # The Module row: this module itself provides the type
+            # (a type forwarded within a netmodule or multi-module
+            # assembly). Row 1 is the only module row; the rid was
+            # already checked non-zero above.
+            if MODULE not in row_counts:
+                return None
+            row = reader.row(MODULE, 1)
+            if row is None:
+                return None
+            name = strings.string(row[1]) if strings else None
+            if not name:
+                return None
+            return "module", f"module:{name}"
+        if tag_table == TYPE_REF and rid:
+            row = reader.row(TYPE_REF, rid)
+            if row is None:
+                return None
+            tag_table, rid = row[0]
+            continue
+        # Nil scope, an out-of-range rid, or a tag the spec does not
+        # define for ResolutionScope: unresolvable, and saying so is the
+        # honest output.
+        return None
+    return None
+
+
+def _typeref_full_name(
+    reader: _TableReader, strings, cache: dict[int, str | None], rid: int
+) -> str | None:
+    """Namespace-qualified name of one TypeRef row, cached by rid."""
+    if rid in cache:
+        return cache[rid]
+    row = reader.row(TYPE_REF, rid)
+    name = None
+    if row is not None and strings:
+        type_name = strings.string(row[1])
+        type_ns = strings.string(row[2])
+        if type_name is not None:
+            name = f"{type_ns}.{type_name}" if type_ns else type_name
+    cache[rid] = name
+    return name
+
+
+def _typedef_full_name(
+    reader: _TableReader, strings, cache: dict[int, str | None], rid: int
+) -> str | None:
+    """Namespace-qualified name of one TypeDef row, cached by rid."""
+    if rid in cache:
+        return cache[rid]
+    row = reader.row(TYPE_DEF, rid)
+    name = None
+    if row is not None and strings:
+        type_name = strings.string(row[1])
+        type_ns = strings.string(row[2])
+        if type_name is not None:
+            name = f"{type_ns}.{type_name}" if type_ns else type_name
+    cache[rid] = name
+    return name
+
+
+def _memberref_parent(
+    reader: _TableReader, row_counts, strings,
+    typeref_cache: dict[int, str | None],
+    typedef_cache: dict[int, str | None],
+    coded: tuple,
+) -> tuple[str, str] | None:
+    """Resolve one MemberRef row's MemberRefParent to (kind, rendering).
+
+    Rendering contract shared with the oracle: type parents render as the
+    full type name, a ModuleRef as ``module:<name>``, a MethodDef as
+    ``method:<name>``. A TypeSpec parent is a signature blob, not a name —
+    generic instantiations resolve their members through it — and blint
+    does not render signatures, so those rows are omitted and named rather
+    than attributed to some guessed parent (ground rule 14).
+    """
+    tag_table, rid = coded
+    if tag_table == TYPE_DEF:
+        name = _typedef_full_name(reader, strings, typedef_cache, rid) if rid else None
+        return ("type_def", name) if name else None
+    if tag_table == TYPE_REF:
+        name = _typeref_full_name(reader, strings, typeref_cache, rid) if rid else None
+        return ("type_ref", name) if name else None
+    if tag_table == MODULE_REF:
+        row = reader.row(MODULE_REF, rid) if rid else None
+        if row is not None and strings:
+            name = strings.string(row[0])
+            if name:
+                return "module_ref", f"module:{name}"
+        return None
+    if tag_table == METHOD_DEF:
+        row = reader.row(METHOD_DEF, rid) if rid else None
+        if row is not None and strings:
+            name = strings.string(row[3])
+            if name:
+                return "method_def", f"method:{name}"
+        return None
+    # 0x1B (TypeSpec), nil, or anything else: no name to render.
+    return None
+
+
 def _resolve_entry_point_method(reader, row_counts, strings, method_rid: int):
     """(type_name, method_name) for a MethodDef rid, or (None, name/None).
 
@@ -992,6 +1246,119 @@ def parse_metadata_stream(
                 entries.append(entry)
         if entries:
             block["pinvoke"] = entries
+
+    # --- typerefs ------------------------------------------------------------------
+    # Referenced types with the assembly (or module of this assembly) each
+    # comes from — the managed analogue of an import table grouped by DLL.
+    # Rows whose scope cannot be resolved are omitted and named: an
+    # unresolvable scope must not read as a type provided by the current
+    # module (ground rule 14).
+    typeref_cache: dict[int, str | None] = {}
+    typedef_cache: dict[int, str | None] = {}
+    if TYPE_REF in row_counts and row_counts[TYPE_REF] > 0:
+        total = row_counts[TYPE_REF]
+        listed = min(total, MAX_LISTED_TYPEREFS)
+        if listed < total:
+            degr.add("typerefs_listed_capped")
+        trows = []
+        for rid in range(1, listed + 1):
+            row = reader.row(TYPE_REF, rid)
+            if row is None:
+                continue
+            name = _typeref_full_name(reader, strings, typeref_cache, rid)
+            if name is None:
+                degr.add("typeref_name_unreadable")
+                continue
+            scope = _typeref_scope(reader, row_counts, strings, row[0])
+            if scope is None:
+                degr.add("typeref_scope_unresolved")
+                continue
+            trows.append({"name": name, "scope": scope[1]})
+        if trows:
+            block["typerefs"] = trows
+
+    # --- memberrefs ----------------------------------------------------------------
+    # Referenced members (methods and fields) with the type, module or
+    # method that defines them. TypeSpec parents are generic instantiations
+    # — signature blobs, not names — and are counted and named rather than
+    # attributed to a guessed parent.
+    if MEMBER_REF in row_counts and row_counts[MEMBER_REF] > 0:
+        total = row_counts[MEMBER_REF]
+        listed = min(total, MAX_LISTED_MEMBERREFS)
+        if listed < total:
+            degr.add("memberrefs_listed_capped")
+        mrows = []
+        typespec_count = 0
+        for rid in range(1, listed + 1):
+            row = reader.row(MEMBER_REF, rid)
+            if row is None:
+                continue
+            name = string_at(row[1])
+            if name is None:
+                degr.add("memberref_name_unreadable")
+                continue
+            parent = _memberref_parent(
+                reader, row_counts, strings, typeref_cache, typedef_cache, row[0],
+            )
+            if parent is None:
+                if row[0][0] == 0x1B:  # TypeSpec: a signature, not a name
+                    typespec_count += 1
+                    continue
+                degr.add("memberref_parent_unresolved")
+                continue
+            mrows.append({"name": name, "parent": parent[1]})
+        # A TypeSpec parent is a generic instantiation — blint read the row
+        # fine and chose not to render signatures, so this is a fact about
+        # the listing, not a read refusal: it must not read as
+        # parse_status partial.
+        if mrows or typespec_count:
+            block["memberrefs_typespec_parents"] = typespec_count
+        if mrows:
+            block["memberrefs"] = mrows
+
+    # --- #US heap: the managed string literals --------------------------------------
+    # Every string literal the assembly's IL loads, walked in heap order.
+    # ``user_strings_count``/``user_strings_sha256`` are facts about the
+    # whole walk (the digest is the oracle's, so ground truth compares the
+    # bytes); ``strings`` is the bounded export the review engine reads —
+    # the managed analogue of the native byte scan, but exact: these are
+    # the literals the compiler stored, not a scan's best guess. They are
+    # promoted to the top-level ``strings`` key by binary.parse; a heap
+    # blint could not walk leaves the block without the key and the native
+    # scan stays the fallback (ground rule 14).
+    if us_heap:
+        # heap_reader() hands back an *absolute* offset (it already added
+        # root_offset), so the walk bounds are absolute from here.
+        us_offset, us_size = us_heap
+        us_values, us_count, us_sha = _walk_user_strings(
+            data,
+            us_offset,
+            min(us_offset + us_size, len(data)),
+            degr,
+        )
+        block["user_strings_count"] = us_count
+        block["user_strings_sha256"] = us_sha
+        us_rows = []
+        for value in us_values:
+            if len(us_rows) >= MAX_LISTED_US_STRINGS:
+                degr.add("user_strings_listed_capped")
+                break
+            # The native scan needs an entropy gate because a byte scan
+            # cannot tell a literal from encoding noise; a #US entry *is*
+            # the literal, so length is the only admission gate (the dex
+            # path ships raw strings the same way). Four characters keeps
+            # the IL's one-letter identifiers out.
+            if not 4 <= len(value) <= MAX_US_STRING_CHARS:
+                continue
+            us_rows.append(
+                {
+                    "value": value,
+                    "entropy": calculate_entropy(value),
+                    "secret_type": check_secret(value),
+                }
+            )
+        if us_rows:
+            block["strings"] = us_rows
 
     # --- target framework attribute ----------------------------------------------
     if CUSTOM_ATTRIBUTE in row_counts and row_counts[CUSTOM_ATTRIBUTE] > 0:

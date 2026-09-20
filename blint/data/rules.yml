@@ -509,6 +509,14 @@
     - x86_64-exec
     - MachO
     - mips-executable
+    # W3.2: a managed binary's used/declared sets are its P/Invoke surface
+    # and its ImplMap scopes — inputs W3.1 first read and this packet wires
+    # into the dependency graph, so the check now evaluates managed images
+    # on evidence instead of being out of scope for them. A DllImport scope
+    # is itself the declaration, so a pure-IL assembly computes clean; the
+    # shape that can fire is a used native library the managed metadata
+    # never declared (mixed-mode images with an import table).
+    - dotnetbinary
 - id: CHECK_PACKED
   title: Binary Shows Packing Evidence
   description: |

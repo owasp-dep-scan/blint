@@ -58,6 +58,11 @@ ORDINAL_FLAG_PE32 = 0x80000000
 # keep the evidence source explicit beside the plain ``NEEDED`` entry.
 TAG_DELAYLOAD = "DELAYLOAD"
 TAG_FORWARDER = "FORWARDER"
+# W3.2: a managed assembly's P/Invoke scopes (DllImport / ImplMap). Unlike a
+# delay-load entry a P/Invoke module is mapped at first call, not at image
+# load — which is exactly why it never appears in the import table — so it
+# is a declared dependency of its own kind, not a loader-level NEEDED one.
+TAG_PINVOKE = "PINVOKE"
 
 # Resolution vocabulary for an entry's function name (plan 01/A.6: resolved
 # ordinal-table entries and unresolved ordinals are distinct outcomes).

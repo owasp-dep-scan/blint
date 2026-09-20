@@ -1270,6 +1270,29 @@ def parse(
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
         # for those formats.
+        # W3.2: a managed assembly's real string literals live in its #US
+        # heap and are moved out of the dotnet block when it read them —
+        # the byte-level scan finds only noise on a pure-IL image (two
+        # strings in a 700 KB assembly). The scan is unioned in behind the
+        # heap literals rather than dropped: on a mixed-mode C++/CLI image
+        # the native code carries strings the heap knows nothing about,
+        # and replacing would silently discard them. A heap blint could
+        # not walk leaves the block without the key and the scan below
+        # stays the fallback, so an unwalkable heap never reads as "this
+        # assembly has no strings" (ground rule 14).
+        dotnet_block = metadata.get("dotnet") or {}
+        if "strings" in dotnet_block:
+            heap_strings = dotnet_block.pop("strings")
+            scanned = parse_strings(parsed_obj)
+            if scanned:
+                seen_values = {s["value"] for s in heap_strings}
+                metadata["strings"] = heap_strings + [
+                    s for s in scanned if s["value"] not in seen_values
+                ]
+                metadata["strings_source"] = "user_strings_heap+binary_scan"
+            else:
+                metadata["strings"] = heap_strings
+                metadata["strings_source"] = "user_strings_heap"
         if "strings" not in metadata:
             metadata["strings"] = parse_strings(parsed_obj)
         if informative_strings := parse_informative_strings(parsed_obj):
@@ -1565,19 +1588,14 @@ def analyze_import_deps(metadata: dict) -> dict:
     }
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        for imp_entry in metadata.get("imports", []):
-            full_name = imp_entry.get("name", "")
-            if "::" in full_name:
-                lib_name, func_name = full_name.split("::", 1)
-            else:
-                continue
+        def _add_pe_dependency(lib_name: str, func_name: str) -> None:
+            """Record one import-table-shaped dependency edge."""
             if lib_name not in dep_graph["libraries"]:
                 dep_graph["libraries"][lib_name] = {
                     "type": "imported",
                     "imported_symbols": [],
                     "imported_from": [],
                 }
-
             if func_name not in dep_graph["libraries"][lib_name]["imported_symbols"]:
                 dep_graph["libraries"][lib_name]["imported_symbols"].append(func_name)
             dep_exists = False
@@ -1594,6 +1612,23 @@ def analyze_import_deps(metadata: dict) -> dict:
 
             if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
                 dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+
+        for imp_entry in metadata.get("imports", []):
+            full_name = imp_entry.get("name", "")
+            if "::" in full_name:
+                lib_name, func_name = full_name.split("::", 1)
+            else:
+                continue
+            _add_pe_dependency(lib_name, func_name)
+        # W3.2: a managed assembly's P/Invoke surface is a dependency edge
+        # the import table never carries. The ModuleRef scope is the DLL,
+        # the entry point the native export it must provide.
+        for pinvoke_entry in (metadata.get("dotnet") or {}).get("pinvoke") or []:
+            lib_name = pinvoke_entry.get("module") or ""
+            func_name = pinvoke_entry.get("entry_point") or ""
+            if not lib_name or not func_name:
+                continue
+            _add_pe_dependency(lib_name, func_name)
         # W1.2: export forwarders name DLLs the loader must map even though
         # no import-table entry does. They are dependencies of a distinct
         # kind — recorded so the graph is complete, and typed apart from

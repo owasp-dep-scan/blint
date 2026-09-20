@@ -417,11 +417,11 @@ def make_assembly(
         # TypeRef for System.Runtime.Versioning.TargetFrameworkAttribute,
         # a MemberRef for its ctor, and the CustomAttribute row.
         type_ref_rows.append([
-            (pe_dotnet.TYPE_REF, 0),  # ResolutionScope: AssemblyRef rid 1
+            (pe_dotnet.ASSEMBLY_REF, 1),  # ResolutionScope: AssemblyRef rid 1
             "TargetFrameworkAttribute",
             "System.Runtime.Versioning",
         ])
-    tables[TYPE_REF] = type_ref_rows or [[(pe_dotnet.TYPE_REF, 0), "System", "System"]]
+    tables[TYPE_REF] = type_ref_rows or [[(pe_dotnet.ASSEMBLY_REF, 1), "System", "System"]]
     tables[TYPE_DEF] = [[
         0, "Program", "", (None, 0), 1, 1,
     ]]
@@ -573,7 +573,7 @@ def test_netmodule_has_no_assembly_identity():
 def pe_dotnet_test_tables_without_assembly():
     region_tables: dict[int, list[list]] = {}
     region_tables[MODULE] = [[0, "mod.netmodule", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]]
-    region_tables[TYPE_REF] = [[(pe_dotnet.TYPE_REF, 0), "System", "System"]]
+    region_tables[TYPE_REF] = [[(pe_dotnet.ASSEMBLY_REF, 1), "System", "System"]]
     region_tables[ASSEMBLY_REF] = [[
         1, 0, 0, 0, 0, b"\x00" * 8, "System.Runtime", "neutral", b"",
     ]]
@@ -1159,12 +1159,19 @@ def _corpus_path(relative: str):
 def test_real_newtonsoft_net45_identity_and_refs():
     # Ground truth: spec-based System.Reflection.Metadata dumper on the
     # Windows 11 ARM64 VM (pasted in the packet commit). Agreement fields:
-    # assembly identity, public key token, AssemblyRef list, counts.
+    # assembly identity, public key token, AssemblyRef list, counts — and,
+    # since W3.2, the resolved TypeRef/MemberRef listings and the #US walk
+    # (count and content digest), which the shared oracle emits too.
     path = _corpus_path(
         "tier2-managed/newtonsoft.json-13.0.3/lib/net45/Newtonsoft.Json.dll"
     )
     block = parse_pe_dotnet(_lief_parse(path), path)
-    assert block["parse_status"] == "parsed"
+    # W3.2: the MemberRef listing is capped at 2,048 of this assembly's
+    # 2,125 rows, and a capped listing is a named refusal: parse_status is
+    # partial because blint did not list everything it read, not because a
+    # row failed to decode.
+    assert block["parse_status"] == "partial"
+    assert "memberrefs_listed_capped" in block["degradations"]
     assert block["runtime_version"] == "v4.0.30319"
     assert block["cli_flags"] == ["ILONLY", "STRONGNAMESIGNED"]
     asm = block["assembly"]
@@ -1190,6 +1197,34 @@ def test_real_newtonsoft_net45_identity_and_refs():
     assert counts["assembly_ref"] == 8
     assert counts["implmap"] == 0
     assert "pinvoke" not in block  # genuine zero, not a cap or failure
+    # W3.2 ground truth, oracle-record values (the oracle dumps whole
+    # tables; blint lists a capped prefix, so the typeref listing happens
+    # to be complete and the memberref listing is the capped window).
+    typerefs = block["typerefs"]
+    assert len(typerefs) == counts["typeref"]
+    assert {"name": "System.Runtime.CompilerServices.ExtensionAttribute",
+            "scope": "mscorlib"} in typerefs
+    memberrefs = block["memberrefs"]
+    # 2,048 listed rows; 1,054 of them have TypeSpec (generic instantiation)
+    # parents, which blint reads but does not render — 994 named rows.
+    assert len(memberrefs) == 994
+    assert {"name": ".ctor",
+            "parent": "System.Runtime.CompilerServices.ExtensionAttribute"} \
+        in memberrefs
+    assert block["memberrefs_typespec_parents"] == 1054
+    assert block["user_strings_count"] == 782
+    assert block["user_strings_sha256"] == (
+        "6684457efd4bf6a7bc841695fe8948007b8c6787"
+        "e85779d5514887b9387e7a58"
+    )
+    us_strings = block["strings"]
+    values = {s["value"] for s in us_strings}
+    assert "Delimiter must be a single or double quote." in values
+    assert "key" not in values  # below the four-character admission floor
+    assert all(
+        isinstance(s.get("entropy"), (int, float)) and "secret_type" in s
+        for s in us_strings
+    )
 
 
 def test_real_serilog_netstandard2():
@@ -1254,7 +1289,41 @@ def test_real_parse_exetype_and_block_shape():
     block = metadata["dotnet"]
     # JSON-serializable, no bytes anywhere (rule 20).
     json.dumps(block)
-    assert block["parse_status"] == "parsed"
+    # W3.2: partial, from the capped MemberRef listing (see the identity
+    # test above) — and the #US strings are promoted to the top level with
+    # their provenance named, with the byte scan unioned in behind them.
+    assert block["parse_status"] == "partial"
+    assert metadata["strings_source"] == "user_strings_heap+binary_scan"
+    assert len(metadata["strings"]) > 100
+    assert all("value" in s for s in metadata["strings"])
+
+
+def test_real_mixed_mode_keeps_the_native_scan_strings():
+    """A mixed-mode C++/CLI image keeps both string channels.
+
+    mfcm140u carries a handful of #US literals and megabytes of native
+    code whose strings only the byte scan finds. Replacing the scan with
+    the heap's ten literals would have silently dropped the native
+    evidence, so the promotion unions: heap first, scan behind.
+    """
+    from blint.lib.binary import parse
+
+    path = _corpus_path("tier5-system/system32/mfcm140u.dll")
+    metadata = parse(path)
+    assert metadata["dotnet"]["user_strings_count"] == 10
+    assert metadata["strings_source"] == "user_strings_heap+binary_scan"
+    # The heap's exact literals lead, and the scan's native strings stay:
+    # the promoted list opens with the admitted heap values (the promotion
+    # pops them off the block, so re-read the block for the comparison).
+    heap_values = {
+        s["value"] for s in parse_pe_dotnet(_lief_parse(path), path)["strings"]
+    }
+    values = [s["value"] for s in metadata["strings"]]
+    assert len(values) > 50
+    assert values[: len(heap_values)] == [
+        s["value"] for s in parse_pe_dotnet(_lief_parse(path), path)["strings"]
+    ]
+    assert set(heap_values) <= set(values)
 
 
 def test_real_managed_exetype_change_does_not_break_ordinal_width():
@@ -1371,3 +1440,528 @@ def _lief_parse(path):
     import lief
 
     return lief.PE.parse(path)
+
+
+# --------------------------------------------------------------------------
+# W3.2: TypeRef/MemberRef resolution and the #US heap
+# --------------------------------------------------------------------------
+
+def _us_heap(values: list[str]) -> bytes:
+    """A #US heap whose entries are ``values`` in order (II.24.2.4).
+
+    Each entry is a compressed byte count — which includes the trailing
+    flag byte — then the UTF-16LE payload, then one flag byte. Heap byte 0
+    is the empty string's entry, as every real heap has.
+    """
+    heap = bytearray(b"\x00")
+    for value in values:
+        payload = value.encode("utf-16-le")
+        heap += _compress_uint(len(payload) + 1) + payload + b"\x00"
+    return bytes(heap)
+
+
+EMPTY_SHA256 = hashlib.sha256().hexdigest()
+
+
+def test_user_strings_walk_reports_count_digest_and_strings():
+    """The #US walk: exact entry count, oracle digest, deduplicated export.
+
+    The count covers every decoded entry (even the ones below the
+    four-character admission floor of the ``strings`` export); the digest
+    is over the values the oracle hashes, so the two walks compare byte
+    for byte; ``strings`` carries each distinct literal once.
+    """
+    region = make_assembly(
+        extra_streams={
+            "#US": _us_heap(
+                ["Hello World", "password=letmein123", "Hello World", "A"]
+            )
+        },
+    )
+    block = parse_region(region)
+    assert block["user_strings_count"] == 4
+    assert block["user_strings_sha256"] == hashlib.sha256(
+        b"Hello World\x00password=letmein123\x00Hello World\x00A\x00"
+    ).hexdigest()
+    values = [s["value"] for s in block["strings"]]
+    assert values == ["Hello World", "password=letmein123"]
+    assert block["parse_status"] == "parsed"
+
+
+def test_user_strings_empty_heap_is_zero_not_absent():
+    """An empty #US heap reports a walk of zero entries (ground rule 32).
+
+    A heap blint could not walk leaves these fields absent and names
+    ``us_heap_missing``; a heap that walked cleanly and held nothing is a
+    different fact and reports a zero count plus the empty-input digest,
+    not silence.
+    """
+    region = make_assembly()
+    block = parse_region(region)
+    assert block["user_strings_count"] == 0
+    assert block["user_strings_sha256"] == EMPTY_SHA256
+    assert "strings" not in block
+    assert "us_heap_missing" not in block.get("degradations", [])
+
+
+def test_user_strings_heap_missing_leaves_no_count_behind():
+    """No #US stream at all: the fields stay absent and the gap is named.
+
+    Facade assemblies ship without a #US heap legitimately; blint must
+    not read that as "zero strings walked" but as "no heap".
+    """
+    region = make_assembly(include_streams=("#Strings", "#GUID", "#Blob"))
+    block = parse_region(region)
+    assert "user_strings_count" not in block
+    assert "user_strings_sha256" not in block
+    assert "strings" not in block
+    assert "us_heap_missing" in block["degradations"]
+
+
+def test_user_strings_truncated_heap_names_the_refusal():
+    """An entry whose length runs past the heap ends the walk by name.
+
+    The prefix entries still report their count and digest — the facts
+    blint did determine stay facts — and the shortfall is a named
+    degradation, never silence (ground rule 14).
+    """
+    heap = bytearray(_us_heap(["First entry", "Second entry"]))
+    # Claim six bytes more than the final entry has.
+    heap[-len("Second entry".encode("utf-16-le")) - 2] = 0x7F
+    region = make_assembly(extra_streams={"#US": bytes(heap)})
+    block = parse_region(region)
+    assert "user_strings_heap_truncated" in block["degradations"]
+    assert block["parse_status"] == "partial"
+    assert block["user_strings_count"] == 1
+    assert [s["value"] for s in block["strings"]] == ["First entry"]
+
+
+def test_user_strings_oversize_entry_is_skipped_and_named():
+    """An entry past the per-entry size cap is skipped, not fatal.
+
+    The walk continues with the entries after it — a single oversized
+    entry must not cost the rest of the heap — and the skip is named.
+    """
+    big = "A" * (pe_dotnet.MAX_US_ENTRY_BYTES + 4)
+    region = make_assembly(
+        extra_streams={"#US": _us_heap([big, "After the whale"])},
+    )
+    block = parse_region(region)
+    assert "user_strings_oversize_entry_skipped" in block["degradations"]
+    assert block["user_strings_count"] == 1
+    assert [s["value"] for s in block["strings"]] == ["After the whale"]
+
+
+def test_user_strings_walk_entry_cap_is_exceeded_not_approached():
+    """The entry-count cap: the fixture walks one entry past it."""
+    total = pe_dotnet.MAX_USER_STRINGS_WALKED + 1
+    heap = bytearray(b"\x00")
+    heap += (_compress_uint(3) + "A".encode("utf-16-le") + b"\x00") * total
+    region = make_assembly(extra_streams={"#US": bytes(heap)})
+    block = parse_region(region)
+    assert block["user_strings_count"] == pe_dotnet.MAX_USER_STRINGS_WALKED
+    assert "user_strings_walk_capped" in block["degradations"]
+    assert block["parse_status"] == "partial"
+
+
+def test_user_strings_walk_bytes_cap_is_exceeded_not_approached():
+    """The total-bytes cap: the fixture walks past 64 MiB of decoded text."""
+    # BMP CJK characters carry 3 UTF-8 bytes per 2 UTF-16 bytes. Entries
+    # sit just under the per-entry cap (so the per-entry skip never fires)
+    # and 43 of them decode past the 64 MiB total — a fixture that
+    # exceeds the window, not approaches it.
+    entry = "\u4e2d" * (pe_dotnet.MAX_US_ENTRY_BYTES // 2)
+    heap = bytearray(b"\x00")
+    for _ in range(43):
+        payload = entry.encode("utf-16-le")
+        heap += _compress_uint(len(payload) + 1) + payload + b"\x00"
+    data = bytes(heap)
+    degr = pe_dotnet._Degradations()
+    values_out, count, sha = pe_dotnet._walk_user_strings(
+        data, 0, len(data), degr,
+    )
+    assert "user_strings_total_bytes_capped" in degr.sorted()
+    assert "user_strings_oversize_entry_skipped" not in degr.sorted()
+    per_entry_utf8 = (pe_dotnet.MAX_US_ENTRY_BYTES // 2) * len(
+        "\u4e2d".encode("utf-8")
+    )
+    assert count * per_entry_utf8 > pe_dotnet.MAX_USER_STRINGS_TOTAL_BYTES
+    assert sha != EMPTY_SHA256
+
+
+def test_typerefs_resolve_to_the_provider_they_name():
+    """ResolutionScope renders the providing assembly or module.
+
+    An AssemblyRef scope renders as the assembly's bare name, a ModuleRef
+    or the Module row as ``module:<name>`` — a type provided by a module
+    of this assembly is a different fact from one provided by another
+    assembly, and the renderings never collapse. A nested TypeRef follows
+    its enclosing row to the scope that names a provider.
+    """
+    tables = {
+        MODULE: [[0, "Inner.Module.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
+        TYPE_REF: [
+            [(ASSEMBLY_REF, 1), "Contract", "Vendor.Sdk"],       # rid 1
+            [(MODULE_REF, 1), "NativeTypes", ""],                # rid 2
+            [(MODULE, 1), "Local", "Vendor.Internal"],           # rid 3
+            [(TYPE_REF, 1), "Nested", "Vendor.Sdk.Contract"],    # rid 4: in rid 1
+        ],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+        MODULE_REF: [["nativehelper.dll"]],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    scopes = {t["name"]: t["scope"] for t in block["typerefs"]}
+    assert scopes["Vendor.Sdk.Contract"] == "Vendor.Sdk"
+    assert scopes["NativeTypes"] == "module:nativehelper.dll"
+    assert scopes["Vendor.Internal.Local"] == "module:Inner.Module.dll"
+    # The nested type inherits its enclosing type's scope, not its own name.
+    assert scopes["Vendor.Sdk.Contract.Nested"] == "Vendor.Sdk"
+    assert block["parse_status"] == "parsed"
+
+
+def test_typeref_nil_scope_is_omitted_and_named():
+    """A nil ResolutionScope omits the row and names the refusal.
+
+    Netmodules legitimately carry scopeless TypeRefs. The row must not
+    read as a type provided by the current module — absent, with a named
+    degradation, is the honest output (ground rule 14).
+    """
+    tables = {
+        MODULE: [[0, "mod.netmodule", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
+        TYPE_REF: [
+            [(ASSEMBLY_REF, 1), "Scoped", "Vendor"],
+            [(None, 0), "Scopeless", ""],
+        ],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    names = [t["name"] for t in block["typerefs"]]
+    assert names == ["Vendor.Scoped"]
+    assert "typeref_scope_unresolved" in block["degradations"]
+    assert block["parse_status"] == "partial"
+
+
+def test_typerefs_listing_cap_is_exceeded():
+    """The TypeRef listing window: the fixture has one row past the cap."""
+    extra_rows = [
+        [(ASSEMBLY_REF, 1), f"Type{n}", "Vendor"]
+        for n in range(pe_dotnet.MAX_LISTED_TYPEREFS + 1)
+    ]
+    tables = {
+        TYPE_REF: extra_rows,
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    assert len(block["typerefs"]) == pe_dotnet.MAX_LISTED_TYPEREFS
+    assert "typerefs_listed_capped" in block["degradations"]
+    # The exact count survives the cap: it is header data.
+    assert block["counts"]["typeref"] == pe_dotnet.MAX_LISTED_TYPEREFS + 1
+
+
+def test_memberrefs_render_every_parent_kind():
+    """MemberRefParent renderings: types by name, modules and methods
+    prefixed, TypeSpecs counted as a fact rather than rendered."""
+    tables = {
+        TYPE_REF: [[(ASSEMBLY_REF, 1), "Ref", "Vendor"]],
+        TYPE_DEF: [[0, "Owned", "", (None, 0), 1, 1]],
+        METHOD_DEF: [[0, 0, 0, "ImplMethod", b"", 1]],
+        MEMBER_REF: [
+            [(TYPE_DEF, 1), "FromTypeDef", b""],
+            [(TYPE_REF, 1), "FromTypeRef", b""],
+            [(MODULE_REF, 1), "FromModuleRef", b""],
+            [(METHOD_DEF, 1), "FromMethodDef", b""],
+            [(0x1B, 1), "FromTypeSpec", b""],
+        ],
+        MODULE_REF: [["nativehelper.dll"]],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    rendered = {(m["parent"], m["name"]) for m in block["memberrefs"]}
+    assert ("Owned", "FromTypeDef") in rendered
+    assert ("Vendor.Ref", "FromTypeRef") in rendered
+    assert ("module:nativehelper.dll", "FromModuleRef") in rendered
+    assert ("method:ImplMethod", "FromMethodDef") in rendered
+    assert not any(name == "FromTypeSpec" for _, name in rendered)
+    assert block["memberrefs_typespec_parents"] == 1
+    assert "memberref_parent_unresolved" not in block.get("degradations", [])
+
+
+def test_memberrefs_listing_cap_is_exceeded():
+    """The MemberRef listing window: the fixture has one row past the cap,
+    which also forces the wide coded-index width (2,049 rows > 2,047)."""
+    rows = [
+        [(TYPE_REF, 1), f"Member{n}", b""]
+        for n in range(pe_dotnet.MAX_LISTED_MEMBERREFS + 1)
+    ]
+    tables = {
+        MEMBER_REF: rows,
+        TYPE_REF: [[(ASSEMBLY_REF, 1), "Ref", "Vendor"]],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    assert len(block["memberrefs"]) == pe_dotnet.MAX_LISTED_MEMBERREFS
+    assert "memberrefs_listed_capped" in block["degradations"]
+    assert block["counts"]["memberref"] == pe_dotnet.MAX_LISTED_MEMBERREFS + 1
+
+
+def test_managed_binary_without_these_tables_stays_quiet():
+    """Zero TypeRefs and an empty #US heap: no rows is not a refusal.
+
+    System.Private.CoreLib ships zero TypeRefs; facades ship no #US heap.
+    Neither may read as a parse refusal, and neither may produce an empty
+    list that pretends blint listed something (ground rule 32).
+    """
+    tables = {
+        MODULE: [[0, "core.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
+        TYPE_DEF: [[0, "Object", "System", (None, 0), 1, 1]],
+        METHOD_DEF: [[0, 0, 0, "ToString", b"", 1]],
+        ASSEMBLY: [[0x8004, 7, 0, 10, 0, 0, b"", "core", "neutral"]],
+    }
+    region = build_metadata_stream(tables)
+    block = parse_region(region)
+    assert "typerefs" not in block
+    assert "memberrefs" not in block
+    assert block["counts"]["typeref"] == 0
+    assert block["user_strings_count"] == 0
+    assert block["parse_status"] == "parsed"
+    assert block["degradations"] == []
+
+
+# --------------------------------------------------------------------------
+# W3.2: the P/Invoke dependency graph and the managed review surface
+# --------------------------------------------------------------------------
+
+def _managed_metadata() -> dict:
+    """A minimal managed-binary metadata dict for the graph consumers."""
+    return {
+        "name": "app.dll",
+        "binary_type": "PE",
+        "exe_type": "dotnetbinary",
+        # A pure-IL image still imports its runtime bootstrap through the
+        # import table; mscoree is used, the P/Invoke scopes are not.
+        "imports": [{"name": "mscoree.dll::_CorExeMain"}],
+        "dynamic_entries": [
+            {"name": "mscoree.dll", "tag": "NEEDED"},
+            {"name": "kernel32.dll", "tag": "PINVOKE"},
+            {"name": "advapi32.dll", "tag": "PINVOKE"},
+        ],
+        "dotnet": {
+            "pinvoke": [
+                {"module": "kernel32.dll", "entry_point": "GetProcAddress",
+                 "method": "Resolve"},
+                {"module": "advapi32.dll", "entry_point": "RegOpenKeyExW",
+                 "method": "OpenKey"},
+            ],
+        },
+    }
+
+
+def test_pinvoke_scopes_are_declarations():
+    """A DllImport scope declares its DLL like an import table entry does.
+
+    The scope maps at first call rather than at image load, so it is not a
+    loader-level NEEDED entry — but as a declaration of dependency it is
+    exactly as explicit, and the hygiene checks must treat it as one.
+    """
+    from blint.lib.import_attribution import declared_libraries
+
+    declared = declared_libraries(_managed_metadata())
+    assert declared == ["mscoree.dll", "kernel32.dll", "advapi32.dll"]
+
+
+def test_pinvoke_attribution_and_dependency_graph():
+    """The managed P/Invoke surface populates the native dependency graph.
+
+    The provider map attributes each entry point to its ModuleRef scope
+    (a distinct attribution source), and the dependency graph carries an
+    edge with the entry point as its symbol — the inputs
+    CHECK_UNDECLARED_DEPENDENCIES reads on a managed binary for the first
+    time.
+    """
+    from blint.lib.binary import analyze_import_deps
+    from blint.lib.import_attribution import (
+        analyze_link_hygiene,
+        build_symbol_provider_map,
+    )
+
+    metadata = _managed_metadata()
+    providers, sources = build_symbol_provider_map(metadata)
+    assert sources == ["import_table", "pinvoke"]
+    assert providers["GetProcAddress"] == "kernel32.dll"
+
+    dep_graph = analyze_import_deps(metadata)
+    edge_targets = {d["to"] for d in dep_graph["dependencies"]}
+    assert {"kernel32.dll", "advapi32.dll"} <= edge_targets
+
+    # Used == declared for a pure-IL assembly: the check computes clean on
+    # evidence rather than standing out of scope.
+    hygiene = analyze_link_hygiene(metadata, dep_graph)
+    assert hygiene["attribution_sources"] == ["import_table", "pinvoke"]
+    assert hygiene["undeclared_dependencies"] == []
+    assert hygiene["unused_dependencies"] == []
+
+
+def test_pinvoke_undeclared_dependency_fires():
+    """A used native library the managed metadata never declared fires.
+
+    The declaration set drives the verdict: strip the PINVOKE-tagged
+    entries and the same P/Invoke surface reads as used-but-undeclared —
+    the firing shape the scope extension exists for.
+    """
+    from blint.lib.binary import analyze_import_deps
+    from blint.lib.import_attribution import analyze_link_hygiene
+
+    metadata = _managed_metadata()
+    metadata["dynamic_entries"] = [
+        e for e in metadata["dynamic_entries"] if e["tag"] != "PINVOKE"
+    ]
+    dep_graph = analyze_import_deps(metadata)
+    hygiene = analyze_link_hygiene(metadata, dep_graph)
+    undeclared = [e["name"] for e in hygiene["undeclared_dependencies"]]
+    assert sorted(undeclared) == ["advapi32.dll", "kernel32.dll"]
+
+
+def test_check_undeclared_dependencies_covers_managed_binaries():
+    """CHECK_UNDECLARED_DEPENDENCIES evaluates managed images now.
+
+    A pure-IL assembly computes clean (used == declared); the rule was
+    previously out of scope for dotnetbinary, which read as clean without
+    looking.
+    """
+    from blint.lib.analysis import run_checks
+
+    metadata = _managed_metadata()
+    findings = [
+        f for f in run_checks("app.dll", metadata)
+        if f["id"] == "CHECK_UNDECLARED_DEPENDENCIES"
+    ]
+    assert findings == []
+
+
+def test_real_pinvoke_modules_join_the_dependency_list():
+    """Real artifact: ImplMap scopes land in dynamic_entries as PINVOKE."""
+    path = _corpus_path("tier5-system/system32/mfcm140u.dll")
+    from blint.lib.binary import parse
+
+    metadata = parse(path)
+    pinvoke = metadata.get("dotnet", {}).get("pinvoke") or []
+    assert pinvoke, "fixture file is expected to carry P/Invoke entries"
+    tags = {
+        e["name"]: e["tag"] for e in metadata["dynamic_entries"]
+    }
+    for entry in pinvoke:
+        assert tags.get(entry["module"]) in ("PINVOKE", "NEEDED")
+
+
+def test_managed_rules_load_for_dotnetbinary():
+    """The managed capability rules register under dotnetbinary."""
+    from blint.config import BlintOptions
+    from blint.lib import analysis
+
+    analysis.initialize_rules(BlintOptions())
+    rules = analysis.review_imports_dict.get("dotnetbinary") or []
+    rule_ids = {
+        rid for mapping in rules for rid in mapping
+    }
+    assert {
+        "DOTNET_IN_MEMORY_ASSEMBLY_LOAD",
+        "DOTNET_UNMANAGED_MEMORY_ACCESS",
+        "DOTNET_RUNTIME_CODEGEN",
+        "DOTNET_PROCESS_START",
+        "DOTNET_HTTP_DOWNLOAD",
+        "DOTNET_WMI_QUERY",
+        "DOTNET_CRYPTO_KEY_STORAGE",
+        "DOTNET_REGISTRY_ACCESS",
+    } <= rule_ids
+
+
+def test_review_runner_reviews_the_dotnet_surface():
+    """The review engine sees a managed assembly's references and literals.
+
+    The candidate values are the resolved typerefs, the rendered
+    memberrefs, the P/Invoke entries and the promoted string literals; a
+    capability rule matches them the same way import rules match a native
+    import table.
+    """
+    from blint.lib.review_runner import ReviewRunner
+
+    metadata = {
+        "exe_type": "dotnetbinary",
+        "binary_type": "PE",
+        "dotnet": {
+            "typerefs": [{"name": "Microsoft.Win32.RegistryKey", "scope": "mscorlib"}],
+            "memberrefs": [
+                {"name": "Start", "parent": "System.Diagnostics.Process"},
+                {"name": "Load", "parent": "System.Reflection.Assembly"},
+            ],
+            "pinvoke": [
+                {"module": "advapi32.dll", "entry_point": "RegOpenKeyExW"}
+            ],
+        },
+        "strings": [{"value": "SELECT * FROM Win32_Process"}],
+    }
+    reviewer = ReviewRunner()
+    results = reviewer.run_review(metadata)
+    by_rule = {}
+    for rid, evidence in results.items():
+        by_rule.setdefault(rid, []).extend(evidence)
+    assert any(
+        e["function"] == "System.Diagnostics.Process::Start"
+        for e in by_rule.get("DOTNET_PROCESS_START", [])
+    )
+    assert any(
+        e["function"] == "System.Reflection.Assembly::Load"
+        for e in by_rule.get("DOTNET_IN_MEMORY_ASSEMBLY_LOAD", [])
+    )
+    assert any(
+        e["function"] == "advapi32.dll::RegOpenKeyExW"
+        for e in by_rule.get("DOTNET_REGISTRY_ACCESS", [])
+    )
+    assert any(
+        "Win32_Process" in e["function"]
+        for e in by_rule.get("DOTNET_WMI_QUERY", [])
+    )
+
+
+def test_native_binaries_do_not_gain_the_dotnet_surface():
+    """The managed candidate values appear only for managed metadata."""
+    from blint.lib.review_runner import ReviewRunner
+
+    assert ReviewRunner._dotnet_import_surface({"imports": []}) == []
+    assert ReviewRunner._dotnet_import_surface({"dotnet": {}}) == []
+
+
+def test_user_strings_walk_survives_a_nonzero_root_offset():
+    """The #US walk honors the documented root_offset contract.
+
+    heap_reader() returns absolute offsets — it has already added
+    root_offset — so the walk must not add it a second time. Every real
+    caller passes root_offset=0, where the double-add is invisible; this
+    fixture parses a region whose root sits at 64 bytes and demands the
+    same walk a root-at-zero parse of the same stream produces.
+    """
+    values = ["Visible literal", "Second literal"]
+    prefix = b"\xab" * 64
+    region = make_assembly(extra_streams={"#US": _us_heap(values)})
+    shifted = prefix + bytes(region)
+    from_root = parse_metadata_stream(shifted, root_offset=len(prefix))
+    assert from_root["user_strings_count"] == 2
+    assert from_root["user_strings_sha256"] == hashlib.sha256(
+        b"Visible literal\x00Second literal\x00"
+    ).hexdigest()
+    assert [s["value"] for s in from_root["strings"]] == values
