@@ -111,6 +111,19 @@ def _coded_index(name: str, tag_table, rid: int, row_counts) -> int:
     return (rid << tag_bits) | tag
 
 
+def _narrow(index: int) -> int:
+    """Index for the builder's narrow first pass, clamped so it can finish.
+
+    Pass one encodes every heap index as two bytes to discover whether any
+    of them needs four; an index past 0xFFFF made ``struct.pack`` raise
+    before that discovery could be acted on, so the builder could not
+    construct a fixture with a heap larger than 64 KB — the wide-index path
+    it claims to support. The clamped byte is never read: ``wide_used`` is
+    set by the same branch, and pass two re-encodes the whole stream.
+    """
+    return min(index, 0xFFFF)
+
+
 def build_metadata_stream(
     tables: dict[int, list[list]],
     *,
@@ -169,6 +182,10 @@ def build_metadata_stream(
     # Encode rows.
     encoded: dict[int, bytearray] = {t: bytearray() for t in tables}
     wide_used = {"str": False, "blob": False, "guid": False}
+    # Heap indexes resolved during pass one, in encode order, so pass two
+    # can re-emit them four bytes wide without interning again — #GUID in
+    # particular appends on every add and would grow a second time.
+    heap_indexes: dict[int, list[int]] = {t: [] for t in tables}
     for table in sorted(tables):
         columns = SCHEMAS[table]
         for row in tables[table]:
@@ -186,17 +203,20 @@ def build_metadata_stream(
                     idx = heaps.intern_string(value)
                     if idx > 0xFFFF:
                         wide_used["str"] = True
-                    encoded[table] += struct.pack("<H", idx)
+                    heap_indexes[table].append(idx)
+                    encoded[table] += struct.pack("<H", _narrow(idx))
                 elif kind == "blob":
                     idx = heaps.intern_blob(value)
                     if idx > 0xFFFF:
                         wide_used["blob"] = True
-                    encoded[table] += struct.pack("<H", idx)
+                    heap_indexes[table].append(idx)
+                    encoded[table] += struct.pack("<H", _narrow(idx))
                 elif kind == "guid":
                     idx = heaps.add_guid(value)
                     if idx > 0xFFFF:
                         wide_used["guid"] = True
-                    encoded[table] += struct.pack("<H", idx)
+                    heap_indexes[table].append(idx)
+                    encoded[table] += struct.pack("<H", _narrow(idx))
                 elif kind == "tbl":
                     encoded[table] += struct.pack(
                         "<H" if row_counts.get(column[1], 0) <= 0xFFFF else "<I",
@@ -266,6 +286,7 @@ def build_metadata_stream(
             offsets2[t] = row_pos2
             row_pos2 += row_size * row_counts[t]
         encoded = {t: bytearray() for t in tables}
+        pending = {t: iter(heap_indexes[t]) for t in tables}
         for t in sorted(tables):
             for row in heapsizes_tables[t]:
                 for column, value in zip(SCHEMAS[t], row):
@@ -278,8 +299,18 @@ def build_metadata_stream(
                         encoded[t] += struct.pack("<I", value)
                     elif kind == "pad":
                         encoded[t] += b"\x00"
-                    elif kind == "str" or kind == "blob" or kind == "guid":
-                        encoded[t] += struct.pack("<I", value)
+                    elif kind in ("str", "blob", "guid"):
+                        # The index pass one resolved, re-emitted at the
+                        # width *this* heap's HeapSizes bit declares.
+                        # Packing ``value`` here emitted the row's raw
+                        # Python object and raised on the first wide
+                        # fixture ever built; widening every heap column
+                        # whenever any one overflowed then made the rows
+                        # wider than the header said they were.
+                        bit = {"str": 0x01, "guid": 0x02, "blob": 0x04}[kind]
+                        encoded[t] += struct.pack(
+                            "<I" if heapsizes & bit else "<H", next(pending[t])
+                        )
                     elif kind == "tbl":
                         encoded[t] += struct.pack(
                             "<H" if row_counts.get(column[1], 0) <= 0xFFFF else "<I",
@@ -1166,12 +1197,16 @@ def test_real_newtonsoft_net45_identity_and_refs():
         "tier2-managed/newtonsoft.json-13.0.3/lib/net45/Newtonsoft.Json.dll"
     )
     block = parse_pe_dotnet(_lief_parse(path), path)
-    # W3.2: the MemberRef listing is capped at 2,048 of this assembly's
-    # 2,125 rows, and a capped listing is a named refusal: parse_status is
-    # partial because blint did not list everything it read, not because a
-    # row failed to decode.
-    assert block["parse_status"] == "partial"
-    assert "memberrefs_listed_capped" in block["degradations"]
+    # W3.2 review: the most-downloaded package on NuGet parses clean. At
+    # the packet's 2,048-row MemberRef cap this assembly's 2,149 rows were
+    # capped and it reported `partial` — and since the capped list is what
+    # the capability rules match on, the last hundred rows were also
+    # invisible to them. The cap now clears every assembly measured.
+    assert block["parse_status"] == "parsed"
+    assert "memberrefs_listed_capped" not in block["degradations"]
+    assert len(block["memberrefs"]) + block["memberrefs_typespec_parents"] == (
+        block["counts"]["memberref"]
+    )
     assert block["runtime_version"] == "v4.0.30319"
     assert block["cli_flags"] == ["ILONLY", "STRONGNAMESIGNED"]
     asm = block["assembly"]
@@ -1205,13 +1240,16 @@ def test_real_newtonsoft_net45_identity_and_refs():
     assert {"name": "System.Runtime.CompilerServices.ExtensionAttribute",
             "scope": "mscorlib"} in typerefs
     memberrefs = block["memberrefs"]
-    # 2,048 listed rows; 1,054 of them have TypeSpec (generic instantiation)
-    # parents, which blint reads but does not render — 994 named rows.
-    assert len(memberrefs) == 994
+    # All 2,125 rows are listed now that the cap clears real assemblies;
+    # 1,128 of them have TypeSpec (generic instantiation) parents, which
+    # blint reads but does not render — 997 named rows. At the packet's
+    # 2,048 cap this read 994, and the 77 rows past the cap were invisible
+    # to the capability rules as well as to the listing.
+    assert len(memberrefs) == 997
     assert {"name": ".ctor",
             "parent": "System.Runtime.CompilerServices.ExtensionAttribute"} \
         in memberrefs
-    assert block["memberrefs_typespec_parents"] == 1054
+    assert block["memberrefs_typespec_parents"] == 1128
     assert block["user_strings_count"] == 782
     assert block["user_strings_sha256"] == (
         "6684457efd4bf6a7bc841695fe8948007b8c6787"
@@ -1289,10 +1327,9 @@ def test_real_parse_exetype_and_block_shape():
     block = metadata["dotnet"]
     # JSON-serializable, no bytes anywhere (rule 20).
     json.dumps(block)
-    # W3.2: partial, from the capped MemberRef listing (see the identity
-    # test above) — and the #US strings are promoted to the top level with
-    # their provenance named, with the byte scan unioned in behind them.
-    assert block["parse_status"] == "partial"
+    # W3.2: the #US strings are promoted to the top level with their
+    # provenance named, and the byte scan is unioned in behind them.
+    assert block["parse_status"] == "parsed"
     assert metadata["strings_source"] == "user_strings_heap+binary_scan"
     assert len(metadata["strings"]) > 100
     assert all("value" in s for s in metadata["strings"])
@@ -1582,6 +1619,11 @@ def test_user_strings_walk_bytes_cap_is_exceeded_not_approached():
     )
     assert "user_strings_total_bytes_capped" in degr.sorted()
     assert "user_strings_oversize_entry_skipped" not in degr.sorted()
+    # blint's own budget is not a defect in the file. Reporting the heap as
+    # truncated here would accuse a well-formed assembly of being malformed
+    # because blint stopped reading it — the two outcomes are different
+    # facts and must not share a name (ground rule 14).
+    assert "user_strings_heap_truncated" not in degr.sorted()
     per_entry_utf8 = (pe_dotnet.MAX_US_ENTRY_BYTES // 2) * len(
         "\u4e2d".encode("utf-8")
     )
@@ -1717,6 +1759,50 @@ def test_memberrefs_listing_cap_is_exceeded():
     assert len(block["memberrefs"]) == pe_dotnet.MAX_LISTED_MEMBERREFS
     assert "memberrefs_listed_capped" in block["degradations"]
     assert block["counts"]["memberref"] == pe_dotnet.MAX_LISTED_MEMBERREFS + 1
+
+
+def test_memberref_cap_clears_every_assembly_measured():
+    """The cap is a detection boundary, so it must clear real assemblies.
+
+    ``review_managed_dotnet`` matches on ``dotnet.memberrefs``, so a row
+    past the cap is not merely unlisted — it is a capability blint never
+    looks for. At the shipped 2,048 the cap hid
+    ``System.Reflection.Assembly::Load`` from the rules in both
+    ``System.Private.Xml`` and ``Microsoft.AspNetCore.Mvc.Core``, and left
+    ``System.Private.CoreLib`` with an empty rendered surface because its
+    first 2,048 rows are all TypeSpec parents. The largest MemberRef table
+    measured across 790 assemblies is 8,126 rows; this pins the headroom so
+    a future tightening has to argue against the measurement.
+    """
+    assert pe_dotnet.MAX_LISTED_MEMBERREFS >= 2 * 8126
+
+
+def test_memberrefs_past_the_old_cap_still_reach_the_review_surface():
+    """A watched member at row 2,049 is visible to the capability rules.
+
+    The regression this pins is silent: the listing is capped, the block
+    still parses, the degradation is recorded, and the rule simply never
+    matches. Nothing in the findings says a capability went unexamined.
+    """
+    from blint.lib.review_runner import ReviewRunner
+
+    rows = [
+        [(TYPE_REF, 1), f"Member{n}", b""] for n in range(2048)
+    ]
+    rows.append([(TYPE_REF, 2), "Load", b""])
+    tables = {
+        MEMBER_REF: rows,
+        TYPE_REF: [
+            [(ASSEMBLY_REF, 1), "Ref", "Vendor"],
+            [(ASSEMBLY_REF, 1), "Assembly", "System.Reflection"],
+        ],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "Vendor.Sdk", "neutral", b""],
+        ],
+    }
+    block = parse_region(build_metadata_stream(tables))
+    surface = ReviewRunner._dotnet_import_surface({"dotnet": block})
+    assert "System.Reflection.Assembly::Load" in surface
 
 
 def test_managed_binary_without_these_tables_stays_quiet():

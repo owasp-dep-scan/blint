@@ -45,19 +45,23 @@ from pathlib import Path
 
 import lief
 
-from blint.lib.pe_dotnet import parse_pe_dotnet
+from blint.lib.pe_dotnet import (
+    MAX_LISTED_MEMBERREFS,
+    MAX_LISTED_PINVOKE,
+    MAX_LISTED_TYPEREFS,
+    parse_pe_dotnet,
+)
 
 GT_FILE = Path(__file__).parent.parent / "data" / "pe" / "dotnet-gt" / "gt-output.jsonl"
 CORPUS = Path("~/sandbox/pe-corpus").expanduser()
 # helloexe.dll was built on the VM, not in the corpus; the packet commit
 # pastes its blint block verbatim.
 INDEPENDENT = {"helloexe.dll"}
-# Listing caps shared with blint/lib/pe_dotnet.py: the oracle dumps whole
-# tables, blint lists a capped prefix, so the comparison slices the oracle's
-# rows through the same window.
-MAX_LISTED_TYPEREFS = 1024
-MAX_LISTED_MEMBERREFS = 2048
-MAX_LISTED_PINVOKE = 512
+# Listing caps: the oracle dumps whole tables, blint lists a capped prefix,
+# so the comparison slices the oracle's rows through the same window. These
+# are imported rather than restated — they were literals here, and a cap
+# changed in the parser left the oracle comparing against the old window
+# while still reporting agreement (ground rule 21).
 
 
 def main() -> int:

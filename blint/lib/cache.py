@@ -84,8 +84,15 @@ from blint.logger import LOG
 # fields change value for unchanged PE inputs. 6: managed PE binaries gain
 # the `dotnet` block and move to `exe_type: dotnetbinary` (W3.1), so
 # entries written before the CLR metadata reader must not be served to a
-# consumer reading either key.
-CACHE_SCHEMA_VERSION = 6
+# consumer reading either key. 7: the managed capability surface (W3.2) —
+# the `dotnet` block gains `typerefs`, `memberrefs`, `user_strings_count`
+# and `user_strings_sha256`, `strings` becomes the #US literals with a
+# `strings_source` beside it, and P/Invoke scopes join `dynamic_entries`
+# under the PINVOKE tag. A schema-6 entry carries none of it, so serving
+# one leaves every managed capability rule with nothing to match and
+# `strings` holding the byte scan's noise — the exact state the packet
+# exists to end.
+CACHE_SCHEMA_VERSION = 7
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

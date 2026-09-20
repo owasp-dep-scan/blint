@@ -193,11 +193,21 @@ MAX_LISTED_MODULE_REFS = 256
 MAX_LISTED_PINVOKE = 512
 # W3.2: the TypeRef/MemberRef listings and the #US walk. Real maxima over
 # 790 assemblies (corpus tiers 0/1/2/5 plus the .NET 10 shared framework):
-# typeref 626, memberref 8,126, #US entries 3,519 — the listing caps bite
-# only on the two largest framework assemblies, and the walk caps bite on
-# none of them.
+# typeref 626, memberref 8,126, #US entries 3,519.
+#
+# The MemberRef cap is not only a listing bound: ``review_managed_dotnet``
+# matches on this list, so a row past the cap is a capability blint does
+# not look for. At 2,048 it bit five of the sixty-two managed corpus
+# assemblies and hid real evidence — ``System.Reflection.Assembly::Load``
+# past the cap in both ``System.Private.Xml`` and
+# ``Microsoft.AspNetCore.Mvc.Core``, and the whole rendered surface of
+# ``System.Private.CoreLib``, whose first 2,048 rows are all TypeSpec
+# parents. The cap now clears the largest assembly measured with room to
+# spare; the metadata it costs is small (the worst corpus case grew 293 KB
+# to 319 KB when the cap was lifted entirely) and the degradation stays as
+# the backstop for anything larger still.
 MAX_LISTED_TYPEREFS = 1024
-MAX_LISTED_MEMBERREFS = 2048
+MAX_LISTED_MEMBERREFS = 16384
 MAX_USER_STRINGS_WALKED = 262144
 MAX_USER_STRINGS_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_US_ENTRY_BYTES = 1024 * 1024  # Longer entries are skipped, not fatal.
@@ -701,6 +711,7 @@ def _walk_user_strings(
     total_bytes = 0
     digest = hashlib.sha256()
     truncated = False
+    bytes_capped = False
     p = start + 1
     while p < end and count < MAX_USER_STRINGS_WALKED:
         first = data[p]
@@ -756,14 +767,18 @@ def _walk_user_strings(
             seen.add(value)
             values.append(value)
         if total_bytes > MAX_USER_STRINGS_TOTAL_BYTES:
-            truncated = True
+            # blint's own budget, not a defect in the file: recorded as the
+            # cap it is and nothing else (ground rule 14). Reporting the
+            # heap as truncated here would accuse a well-formed assembly
+            # of being malformed because blint stopped reading it.
+            bytes_capped = True
             break
         p += header + length
     if truncated:
         degr.add("user_strings_heap_truncated")
     if count >= MAX_USER_STRINGS_WALKED:
         degr.add("user_strings_walk_capped")
-    if total_bytes > MAX_USER_STRINGS_TOTAL_BYTES:
+    if bytes_capped:
         degr.add("user_strings_total_bytes_capped")
     return values, count, digest.hexdigest()
 
