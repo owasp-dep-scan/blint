@@ -7,6 +7,7 @@ orchestrator that imports it.
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
+import json
 import re
 import warnings
 from collections.abc import Callable, Iterable
@@ -49,6 +50,7 @@ from blint.lib.pe_debug import (
     parse_pe_debug,
 )
 from blint.lib.pe_dotnet import parse_pe_dotnet
+from blint.lib.pe_dotnet_shape import classify_dotnet_shape, read_bundle_deps_json
 from blint.lib.pe_imports import (
     TAG_FORWARDER,
     TAG_PINVOKE,
@@ -1114,6 +1116,24 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["is_dotnet"] = True
             metadata["dotnet"] = dotnet_block
             metadata["exe_type"] = "dotnetbinary"
+        # W3.3: the publish shape (03/A.3). Runs for native PEs too,
+        # because the two shapes that matter most there have no CLI header
+        # at all: a single-file bundle, whose managed payload sits after
+        # the sections, and a NativeAOT image, which must never be reported
+        # as "not .NET" (ground rule 32). A file with no evidence of any
+        # shape gets no block - silence, not a native verdict.
+        shape_block = classify_dotnet_shape(
+            parsed_obj, exe_file, metadata, dotnet_block
+        )
+        if shape_block is not None:
+            metadata.setdefault("dotnet", {})["shape"] = shape_block
+            if shape_block["kind"] in ("single_file_bundle", "native_aot"):
+                # The managed origin is evidenced, but there is no CLI
+                # metadata: ``is_dotnet`` stays false (it means "has CLI
+                # metadata" to every existing consumer) and ``exe_type``
+                # is left alone, because the file really is a native image
+                # and the managed rules have nothing to read on it.
+                metadata["dotnet"].setdefault("parse_status", "no_cli_metadata")
         # W3.2: a managed assembly's P/Invoke scopes are native
         # dependencies the import table never names — a DllImport maps at
         # first call, not at image load, which is exactly why the loader
@@ -1134,6 +1154,24 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                     {"name": module_name, "tag": TAG_PINVOKE}
                 )
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
+        # W3.3: a single-file publish is the one shape that carries its whole
+        # dependency set inside the executable, and it was the one shape
+        # ``parse_overlay`` came back empty on — measured, {} on the 88 MB
+        # single-file publish, because it searches the overlay for the
+        # deps.json prefix and the bundler stores the file by offset with no
+        # marker of its own. The manifest says where it is, so it is read
+        # there instead of searched for, and the SBOM stops being empty for
+        # exactly the applications that ship everything in one file.
+        if not metadata["dotnet_dependencies"] and shape_block is not None:
+            bundle_manifest = shape_block.get("bundle") or {}
+            if raw_deps := read_bundle_deps_json(exe_file, bundle_manifest):
+                with contextlib.suppress(Exception):
+                    decoded = json.loads(raw_deps.decode("utf-8", "replace"))
+                    if isinstance(decoded, dict) and decoded.get("libraries"):
+                        metadata["dotnet_dependencies"] = decoded
+                        metadata["dotnet"]["shape"]["deps_json_source"] = (
+                            "single_file_bundle_manifest"
+                        )
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls

@@ -163,9 +163,17 @@ def test_classify_pe_overlay_finds_the_bundle_marker_past_the_head_window(tmp_pa
 
     The small in-memory fixtures above cannot see this: their whole residue
     fits in one window, so a classifier that reads only the head still labels
-    them correctly while labelling every real bundle unknown_high_entropy —
-    the one label that counts towards packing evidence, which is the false
-    positive this packet exists to remove.
+    them correctly while labelling a residue that ends in the marker
+    unknown_high_entropy — the one label that counts towards packing
+    evidence.
+
+    W3.3 correction: this fixture's layout is not the one a real .NET 11
+    single-file publish has. There the signature sits inside the sections
+    (offset 9,718,712, sections ending at 11,757,568), so it never reaches
+    this function at all and a real bundle's residue classifies
+    unknown_low_entropy. The case below is still worth keeping — it is the
+    two-window read this function exists for — but it is a synthetic layout,
+    not evidence about real bundles, and dotnet.shape is what identifies one.
     """
     section_end = 0x400
     payload = (bytes(range(256)) * (HEAD_WINDOW // 128)) + DOTNET_BUNDLE_MARKER + b"\x00" * 16

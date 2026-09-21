@@ -129,11 +129,21 @@ def classify_overlay(
 
     ``tail`` carries the last bytes of the residue when the caller read the
     two ends of a large overlay separately. It must be given whenever ``data``
-    is a window rather than the whole residue: the .NET bundle marker sits at
-    the *end* of the file, so a real single-file app — tens of megabytes of
-    embedded assemblies — has nothing recognisable in its first window and
-    would otherwise be labelled ``unknown_high_entropy``, the one label that
-    counts towards packing evidence.
+    is a window rather than the whole residue, because anything recognisable
+    can sit at either end of a multi-megabyte residue.
+
+    **Measured correction (W3.3).** This function used to say the .NET bundle
+    marker sits at the end of the file. It does not. On a single-file publish
+    built with the .NET 11 SDK the 32-byte signature is at offset 9,718,712,
+    inside the *sections* (which end at 11,757,568) — the host template
+    embeds it, and the bundler writes only the manifest offset into the eight
+    bytes before it. So ``dotnet_single_file_bundle`` is not reachable for a
+    real .NET 11 bundle here, and the residue of the measured one classifies
+    ``unknown_low_entropy``: it is uncompressed assemblies, so it does not
+    trip the packing heuristic either. The label is kept for the layouts that
+    do put the marker in the residue, and the authoritative single-file
+    signal is now ``dotnet.shape`` (``blint/lib/pe_dotnet_shape.py``), which
+    reads the manifest rather than guessing from a residue.
     """
     if not data and not tail:
         return UNKNOWN_LOW_ENTROPY

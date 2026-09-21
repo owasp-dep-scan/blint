@@ -307,7 +307,19 @@ def read_cli_header(window: bytes) -> dict | None:
     metadata_rva, metadata_size = struct.unpack_from("<II", window, 8)
     flags = struct.unpack_from("<I", window, 16)[0]
     entry_point_token = struct.unpack_from("<I", window, 20)[0]
+    # W3.3: ManagedNativeHeader (II.25.3.3, the last of the header's eight
+    # fields). It is what separates a ReadyToRun image from a plain IL
+    # assembly, so it is read whenever the header declares itself long
+    # enough to contain it - a shorter cb is an older header that simply
+    # has no such field, not a malformed one.
+    managed_native_header_rva = managed_native_header_size = 0
+    if cb >= 72 and len(window) >= 72:
+        managed_native_header_rva, managed_native_header_size = struct.unpack_from(
+            "<II", window, 64
+        )
     return {
+        "managed_native_header_rva": int(managed_native_header_rva),
+        "managed_native_header_size": int(managed_native_header_size),
         "cb": cb,
         "runtime_major": major_runtime,
         "runtime_minor": minor_runtime,
@@ -1531,10 +1543,17 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
             "parse_status": "malformed",
             "degradations": ["file_unreadable"],
         }
-    return parse_metadata_stream(
+    block = parse_metadata_stream(
         metadata,
         root_offset=0,
         region_size=len(metadata),
         cli_flags_value=header["flags"],
         entry_point_token=header["entry_point_token"],
     )
+    # W3.3 reads these to tell a ReadyToRun image from a plain IL assembly.
+    # They are carried on the block rather than re-read from the file there,
+    # so the CLI header is decoded in exactly one place (ground rule 21).
+    if isinstance(block, dict):
+        block["managed_native_header_rva"] = header["managed_native_header_rva"]
+        block["managed_native_header_size"] = header["managed_native_header_size"]
+    return block

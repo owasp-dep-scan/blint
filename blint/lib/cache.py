@@ -98,8 +98,13 @@ from blint.logger import LOG
 # absent, which reads as "no plugin contract evidenced" — the three W5.6
 # rules then match nothing on a warm cache exactly the way the managed
 # rules did on a schema-6 cache (the W3.2 review lesson: every stored-shape
-# change bumps this).
-CACHE_SCHEMA_VERSION = 8
+# change bumps this). 9: the publish shape (W3.3) — PE metadata gains
+# `dotnet.shape` with its evidence list and, for a single-file publish, the
+# decoded `dotnet.shape.bundle` manifest and its member listing. A schema-8
+# entry has none of it, so a warm cache would serve a NativeAOT image and a
+# single-file bundle as ordinary native PEs — the exact "absence reads as
+# not .NET" the packet exists to end.
+CACHE_SCHEMA_VERSION = 9
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that
