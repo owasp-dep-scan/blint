@@ -402,6 +402,7 @@ class RegionBytes(bytes):
 
     cli_flags: int = 0
     entry_point_token: int | None = None
+    strong_name_signature: tuple | None = None
 
 
 def parse_region(region: bytes, **kwargs) -> dict:
@@ -411,6 +412,10 @@ def parse_region(region: bytes, **kwargs) -> dict:
         kwargs["cli_flags_value"] = getattr(region, "cli_flags", 0)
     if "entry_point_token" not in kwargs:
         kwargs["entry_point_token"] = getattr(region, "entry_point_token", None)
+    if "strong_name_signature" not in kwargs:
+        kwargs["strong_name_signature"] = getattr(
+            region, "strong_name_signature", None
+        )
     return parse_metadata_stream(region, **kwargs)
 
 
@@ -437,9 +442,18 @@ def make_assembly(
     entry_point_token=None,
     stream_name="#~",
     extra_tables=None,
+    ivt=None,
+    delay_sign=None,
+    strong_name_signature=None,
     **builder_kwargs,
 ):
-    """A complete, well-formed synthetic assembly metadata region."""
+    """A complete, well-formed synthetic assembly metadata region.
+
+    ``ivt`` adds InternalsVisibleToAttribute rows (the raw constructor
+    strings), ``delay_sign`` an AssemblyDelaySignAttribute row (None: no
+    row, the shape every Roslyn build ships), and ``strong_name_signature``
+    the CLI header's directory facts the real caller reads from the file.
+    """
     key_blob = key_blob if key_blob is not None else bytes(range(8))
     tables: dict[int, list[list]] = {}
     tables[MODULE] = [[0, "TestLib.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]]
@@ -451,6 +465,22 @@ def make_assembly(
             (pe_dotnet.ASSEMBLY_REF, 1),  # ResolutionScope: AssemblyRef rid 1
             "TargetFrameworkAttribute",
             "System.Runtime.Versioning",
+        ])
+    ivt_typeref_rids: list[int] = []
+    for _spec in ivt or []:
+        ivt_typeref_rids.append(len(type_ref_rows) + 1)
+        type_ref_rows.append([
+            (pe_dotnet.ASSEMBLY_REF, 1),
+            "InternalsVisibleToAttribute",
+            "System.Runtime.CompilerServices",
+        ])
+    delay_typeref_rid = None
+    if delay_sign is not None:
+        delay_typeref_rid = len(type_ref_rows) + 1
+        type_ref_rows.append([
+            (pe_dotnet.ASSEMBLY_REF, 1),
+            "AssemblyDelaySignAttribute",
+            "System.Reflection",
         ])
     tables[TYPE_REF] = type_ref_rows or [[(pe_dotnet.ASSEMBLY_REF, 1), "System", "System"]]
     tables[TYPE_DEF] = [[
@@ -483,14 +513,40 @@ def make_assembly(
             module_rid,
         ])
     tables[IMPL_MAP] = impl_rows
+    attribute_rows = []
     if target_framework:
         blob_value = attr_blob
-        tables[CUSTOM_ATTRIBUTE] = [[
+        attribute_rows.append([
             (pe_dotnet.TYPE_DEF, 1),
             (MEMBER_REF, 1),
             blob_value,
-        ]]
+        ])
         tables[MEMBER_REF] = [[(TYPE_REF, 1), ".ctor", b""]]
+    memberref_rows = []
+    if ivt:
+        for rid_offset, spec in enumerate(ivt):
+            payload = struct.pack("<H", 1) + _compress_uint(len(spec)) + spec.encode()
+            # Each IVT ctor sits on its own TypeRef row (one MemberRef per
+            # row keeps rids 1:1 with type_ref_rows, matching how the
+            # builder numbered ivt_typeref_rids above).
+            memberref_rows.append([(TYPE_REF, ivt_typeref_rids[rid_offset]), ".ctor", b""])
+            attribute_rows.append([
+                (ASSEMBLY, 1),
+                (MEMBER_REF, 1 + rid_offset + (1 if target_framework else 0)),
+                payload,
+            ])
+    if delay_sign is not None:
+        memberref_rows.append([(TYPE_REF, delay_typeref_rid), ".ctor", b""])
+        attribute_rows.append([
+            (ASSEMBLY, 1),
+            (MEMBER_REF, 1 + len(ivt or []) + (1 if target_framework else 0)),
+            b"\x01\x00" + (b"\x01" if delay_sign else b"\x00"),
+        ])
+    if memberref_rows:
+        base = tables.get(MEMBER_REF, [])
+        tables[MEMBER_REF] = base + memberref_rows
+    if attribute_rows:
+        tables[CUSTOM_ATTRIBUTE] = attribute_rows
     else:
         tables[CUSTOM_ATTRIBUTE] = []
     for t, rows in (extra_tables or {}).items():
@@ -501,6 +557,7 @@ def make_assembly(
         cli_flags=cli_flags,
         **builder_kwargs,
     )
+    region.strong_name_signature = strong_name_signature
     return region
 
 
@@ -2051,3 +2108,529 @@ def test_user_strings_walk_survives_a_nonzero_root_offset():
         b"Visible literal\x00Second literal\x00"
     ).hexdigest()
     assert [s["value"] for s in from_root["strings"]] == values
+
+
+# --------------------------------------------------------------------------
+# W3.4: strong names — presence facts, never one verdict
+# --------------------------------------------------------------------------
+
+VARIANTS_DIR = "tests/data/pe/dotnet-strongname"
+
+
+def _variant(name: str):
+    """One of the VM-built variants (built with the .NET SDK on the Windows
+    VM, script tests/scripts/build_strong_name_variants.ps1; tokens below
+    pinned from [Reflection.AssemblyName]::GetAssemblyName there)."""
+    import os
+
+    path = os.path.join(VARIANTS_DIR, name)
+    if not os.path.exists(path):
+        pytest.skip(f"{name} fixture absent")
+    return path
+
+
+def test_strong_name_facts_on_a_fully_signed_shape():
+    region = make_assembly(strong_name_signature=(b"\x11" * 128, 128, None))
+    block = parse_region(region)
+    sn = block["strong_name"]
+    assert sn == {
+        "strongnamesigned_flag": True,
+        "signature_present": True,
+        "signature_size": 128,
+        "signature_all_zero": False,
+        "declares_public_key": True,
+        "public_key_size": 8,
+        # The 8-byte blob is the token itself; computed, never copied.
+        "public_key_token": bytes(range(8)).hex(),
+        "delay_sign": False,
+    }
+    assert block["parse_status"] == "parsed"
+    # The block's token and the identity block's token flow from the same
+    # computation over the same blob.
+    assert sn["public_key_token"] == block["assembly"]["public_key_token"]
+
+
+def test_strong_name_delay_signed_shape_is_four_facts_not_one():
+    """Flag clear, key declared, signature region present and null.
+
+    The delay-signed shape a real build ships (verified against the VM's
+    delaysigned.dll): the CLI header's STRONGNAMESIGNED bit is *clear*, the
+    Assembly row still declares the full public key, and the signature
+    region is all zero bytes. A block that said ``signed: false`` here, or
+    ``signed: true`` over the key alone, would collapse four facts into a
+    verdict blint never computed.
+    """
+    region = make_assembly(
+        cli_flags=0x1,  # ILONLY only: STRONGNAMESIGNED clear
+        strong_name_signature=(b"\x00" * 128, 128, None),
+    )
+    sn = parse_region(region)["strong_name"]
+    assert sn["strongnamesigned_flag"] is False
+    assert sn["declares_public_key"] is True
+    assert sn["public_key_token"] == bytes(range(8)).hex()
+    assert sn["signature_present"] is True
+    assert sn["signature_all_zero"] is True
+    # No AssemblyDelaySignAttribute row: Roslyn consumes it (measured - no
+    # row is emitted with or without /delaysign, attribute in source or
+    # not), so the null signature IS the observable fact and delay_sign
+    # reads False beside it. The two never merge into one field.
+    assert sn["delay_sign"] is False
+
+
+def test_strong_name_public_signed_shape_keeps_the_flag_and_null_apart():
+    """Flag SET over a null signature - the OSS-public-signed shape.
+
+    Measured on 215 of 1,186 .NET 10 shared-framework assemblies and
+    reproduced by the VM's publicsigned.dll: ``/publicsign`` writes the
+    STRONGNAMESIGNED flag and leaves the signature region null. The flag
+    and the null signature are stated independently because neither implies
+    the other - and no combination of them implies the signature verifies.
+    """
+    region = make_assembly(
+        cli_flags=0x9,
+        strong_name_signature=(b"\x00" * 128, 128, None),
+    )
+    sn = parse_region(region)["strong_name"]
+    assert sn["strongnamesigned_flag"] is True
+    assert sn["signature_all_zero"] is True
+    assert sn["declares_public_key"] is True
+
+
+def test_strong_name_absent_directory_reports_absent_not_false():
+    """No signature directory: present false, size zero, all-zero ABSENT.
+
+    The emptiest artifact is the one a signing check most needs to state
+    honestly (ground rule 32): ``signature_all_zero`` is withheld rather
+    than written false, because an absent region vacuously satisfies "all
+    zero" and that reading would turn unsigned into null-signed.
+    """
+    region = make_assembly()
+    sn = parse_region(region)["strong_name"]
+    assert sn["signature_present"] is False
+    assert sn["signature_size"] == 0
+    assert "signature_all_zero" not in sn
+    assert parse_region(region)["parse_status"] == "parsed"
+
+
+def test_strong_name_unreadable_signature_withholds_the_verdict():
+    # Unmapped RVA: the gap is named, all_zero stays absent (rule 14).
+    region = make_assembly(
+        strong_name_signature=(None, 128, "strong_name_signature_unmapped"),
+    )
+    block = parse_region(region)
+    sn = block["strong_name"]
+    assert sn["signature_present"] is True
+    assert sn["signature_size"] == 128
+    assert "signature_all_zero" not in sn
+    assert "strong_name_signature_unmapped" in block["degradations"]
+    assert block["parse_status"] == "partial"
+
+
+def test_strong_name_short_read_withholds_the_verdict():
+    # Bytes shorter than the declared size: named, not read as zero.
+    region = make_assembly(strong_name_signature=(b"\x00" * 64, 128, None))
+    block = parse_region(region)
+    assert "signature_all_zero" not in block["strong_name"]
+    assert "strong_name_signature_short_read" in block["degradations"]
+
+
+def test_strong_name_read_cap_exceeded_on_a_real_pe():
+    """The signature read cap, exceeded by a real file's patched header.
+
+    Ground rule 33: the fixture must exceed the window, so this patches a
+    real assembly's CLI header (the committed delaysigned.dll) to declare a
+    StrongNameSignature size past MAX_STRONG_NAME_SIGNATURE_READ and runs
+    the full file-level path - the cap is refused by name and the
+    all-zero verdict is withheld.
+    """
+    import shutil
+    import struct as _struct
+    import tempfile
+
+    src = _variant("delaysigned.dll")
+    with tempfile.NamedTemporaryFile(suffix=".dll", delete=False) as fh:
+        shutil.copyfile(src, fh.name)
+        path = fh.name
+    with open(path, "r+b") as fh:
+        pe = fh.read()
+        e_lfanew = _struct.unpack_from("<I", pe, 0x3C)[0]
+        opt = e_lfanew + 24
+        magic = _struct.unpack_from("<H", pe, opt)[0]
+        dd = opt + (112 if magic == 0x20B else 96)
+        cli_rva = _struct.unpack_from("<I", pe, dd + 14 * 8)[0]
+        # Map the CLI RVA through the section table.
+        num_sections = _struct.unpack_from("<H", pe, e_lfanew + 6)[0]
+        sec_table = dd + _struct.unpack_from("<I", pe, opt + (108 if magic == 0x20B else 92))[0] * 8
+        cli_off = -1
+        for i in range(num_sections):
+            s = sec_table + i * 40
+            va = _struct.unpack_from("<I", pe, s + 12)[0]
+            raw_size = _struct.unpack_from("<I", pe, s + 16)[0]
+            raw_ptr = _struct.unpack_from("<I", pe, s + 20)[0]
+            if raw_size and va <= cli_rva < va + raw_size:
+                cli_off = raw_ptr + (cli_rva - va)
+                break
+        assert cli_off >= 0
+        fh.seek(cli_off + 36)  # StrongNameSignature size (offset 32 + 4)
+        fh.write(_struct.pack("<I", pe_dotnet.MAX_STRONG_NAME_SIGNATURE_READ + 8192))
+    try:
+        block = parse_pe_dotnet(_lief_parse(path), path)
+        sn = block["strong_name"]
+        assert sn["signature_present"] is True
+        assert sn["signature_size"] == pe_dotnet.MAX_STRONG_NAME_SIGNATURE_READ + 8192
+        assert "strong_name_signature_exceeds_cap" in block["degradations"]
+        assert "signature_all_zero" not in sn
+    finally:
+        import os
+
+        os.unlink(path)
+
+
+def test_strong_name_unmapped_rva_on_a_real_pe():
+    # The same file-level path with the directory pointed at an RVA no
+    # section covers: refused by name, verdict withheld.
+    import shutil
+    import struct as _struct
+    import tempfile
+
+    src = _variant("signed.dll")
+    with tempfile.NamedTemporaryFile(suffix=".dll", delete=False) as fh:
+        shutil.copyfile(src, fh.name)
+        path = fh.name
+    with open(path, "r+b") as fh:
+        pe = fh.read()
+        e_lfanew = _struct.unpack_from("<I", pe, 0x3C)[0]
+        opt = e_lfanew + 24
+        magic = _struct.unpack_from("<H", pe, opt)[0]
+        dd = opt + (112 if magic == 0x20B else 96)
+        cli_rva = _struct.unpack_from("<I", pe, dd + 14 * 8)[0]
+        num_sections = _struct.unpack_from("<H", pe, e_lfanew + 6)[0]
+        sec_table = dd + _struct.unpack_from("<I", pe, opt + (108 if magic == 0x20B else 92))[0] * 8
+        cli_off = -1
+        for i in range(num_sections):
+            s = sec_table + i * 40
+            va = _struct.unpack_from("<I", pe, s + 12)[0]
+            raw_size = _struct.unpack_from("<I", pe, s + 16)[0]
+            raw_ptr = _struct.unpack_from("<I", pe, s + 20)[0]
+            if raw_size and va <= cli_rva < va + raw_size:
+                cli_off = raw_ptr + (cli_rva - va)
+                break
+        fh.seek(cli_off + 32)
+        fh.write(_struct.pack("<I", 0x70000000))
+    try:
+        block = parse_pe_dotnet(_lief_parse(path), path)
+        assert "strong_name_signature_unmapped" in block["degradations"]
+        assert "signature_all_zero" not in block["strong_name"]
+        assert block["strong_name"]["signature_present"] is True
+    finally:
+        import os
+
+        os.unlink(path)
+
+
+def test_delay_sign_attribute_row_is_read_where_it_lives():
+    # An AssemblyDelaySignAttribute row with value true -> delay_sign True;
+    # with value false -> False; absent -> False. Measured: the row is not
+    # emitted by Roslyn in any configuration, but the MSVC-managed MFC
+    # pair in tier 5 carries one over a fully-written signature - which is
+    # exactly why this is a separate fact and not a verdict.
+    region = make_assembly(delay_sign=True)
+    assert parse_region(region)["strong_name"]["delay_sign"] is True
+    region = make_assembly(delay_sign=False)
+    assert parse_region(region)["strong_name"]["delay_sign"] is False
+    region = make_assembly()
+    assert parse_region(region)["strong_name"]["delay_sign"] is False
+
+
+def test_delay_sign_row_and_null_signature_coexist_independently():
+    # The MFC pair's shape: the attribute row says delay-sign was *asked
+    # for* while the signature region is fully written. Four facts, all
+    # stated, none collapsed.
+    region = make_assembly(
+        delay_sign=True,
+        cli_flags=0x9,
+        strong_name_signature=(b"\x22" * 128, 128, None),
+    )
+    sn = parse_region(region)["strong_name"]
+    assert sn["delay_sign"] is True
+    assert sn["signature_all_zero"] is False
+    assert sn["strongnamesigned_flag"] is True
+
+
+def test_internals_visible_to_decodes_names_and_keys():
+    key = bytes(range(160))
+    key_hex = key.hex()
+    token = hashlib.sha1(key).digest()[-8:][::-1].hex()
+    region = make_assembly(ivt=[
+        "Friend.Plain",
+        f"FRIEND.Keyed, PublicKey={key_hex}",
+        f"Friend.Spaced, PublicKey={key_hex[:80]} ",
+    ])
+    sn = parse_region(region)["strong_name"]
+    entries = sn["internals_visible_to"]
+    assert sn["internals_visible_to_count"] == 3
+    assert entries[0] == {"name": "Friend.Plain"}
+    # Case preserved byte-exactly; the token computed from the named key.
+    assert entries[1]["name"] == "FRIEND.Keyed"
+    assert entries[1]["public_key"] == key_hex
+    assert entries[1]["public_key_token"] == token
+    # Trailing space inside the component is stripped before hex parse.
+    assert entries[2]["public_key_token"] == public_key_token(
+        bytes.fromhex(key_hex[:80])
+    )
+    assert parse_region(region)["parse_status"] == "parsed"
+
+
+def test_internals_visible_to_invalid_hex_key_is_named():
+    region = make_assembly(ivt=["Bad.Key, PublicKey=zznotahexkey"])
+    block = parse_region(region)
+    entry = block["strong_name"]["internals_visible_to"][0]
+    assert entry["name"] == "Bad.Key"
+    assert entry["public_key"] == "zznotahexkey"
+    assert "public_key_token" not in entry
+    assert "internals_visible_to_public_key_invalid" in block["degradations"]
+
+
+def test_internals_visible_to_nil_string_names_nothing():
+    # A nil SerString (length 0) names no assembly: no entry, and no
+    # accusation against the file for it.
+    region = make_assembly(ivt=[""])
+    block = parse_region(region)
+    assert "internals_visible_to" not in block["strong_name"]
+    assert "internals_visible_to_count" not in block["strong_name"]
+    assert "internals_visible_to_value_invalid" not in block["degradations"]
+
+
+def test_internals_visible_to_cap_is_exceeded_not_approached():
+    """The IVT listing window: one row past the cap (ground rule 33).
+
+    The cap is a listing bound only - no rule reads this list (the
+    distribution measurement decided against any rule this packet), so a
+    row past it is unlisted, not unexamined. The true count survives.
+    """
+    specs = [f"Friend.{i:04d}" for i in range(pe_dotnet.MAX_LISTED_IVT + 29)]
+    region = make_assembly(ivt=specs)
+    block = parse_region(region)
+    sn = block["strong_name"]
+    assert len(sn["internals_visible_to"]) == pe_dotnet.MAX_LISTED_IVT
+    assert sn["internals_visible_to_count"] == len(specs)
+    assert "internals_visible_to_listed_capped" in block["degradations"]
+    assert block["parse_status"] == "partial"
+    # The listing keeps row order - the first N friends, not a sample.
+    assert sn["internals_visible_to"][0]["name"] == "Friend.0000"
+
+
+def test_ivt_row_on_a_non_assembly_parent_is_not_a_target():
+    """An InternalsVisibleTo row hung on a type grants nothing.
+
+    The runtime honours assembly-scoped attributes and the ground-truth
+    oracle walks GetAssemblyDefinition().GetCustomAttributes(); a hostile
+    row parented on a TypeDef is listed by neither (ground rule 11: the
+    negative fixture for the parent filter).
+    """
+    tables = {
+        MODULE: [[0, "a.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
+        TYPE_DEF: [[0, "Program", "", (None, 0), 1, 1]],
+        METHOD_DEF: [[0, 0, 0, "Main", b"", 1]],
+        ASSEMBLY: [[0x8004, 1, 0, 0, 0, 0, bytes(range(8)), "a", "neutral"]],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "System.Runtime", "neutral", b""],
+        ],
+        TYPE_REF: [
+            [(ASSEMBLY_REF, 1), "InternalsVisibleToAttribute",
+             "System.Runtime.CompilerServices"],
+        ],
+        MEMBER_REF: [[(TYPE_REF, 1), ".ctor", b""]],
+        CUSTOM_ATTRIBUTE: [
+            # Parented on the TypeDef, not the Assembly row.
+            [(TYPE_DEF, 1), (MEMBER_REF, 1),
+             struct.pack("<H", 1) + _compress_uint(9) + b"Intruder"],
+        ],
+    }
+    block = parse_region(build_metadata_stream(tables))
+    sn = block["strong_name"]
+    assert "internals_visible_to" not in sn
+    assert "internals_visible_to_count" not in sn
+
+
+def test_target_framework_cap_no_longer_stops_the_sweep():
+    """W3.4 merged the attribute sweeps; the TF value cap must bound the
+    value list, not leave the loop - InternalsVisibleTo rows after the
+    cap would never be reached otherwise."""
+    tables = {
+        MODULE: [[0, "a.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
+        TYPE_DEF: [[0, "Program", "", (None, 0), 1, 1]],
+        METHOD_DEF: [[0, 0, 0, "Main", b"", 1]],
+        ASSEMBLY: [[0x8004, 1, 0, 0, 0, 0, bytes(range(8)), "a", "neutral"]],
+        ASSEMBLY_REF: [
+            [1, 0, 0, 0, 0, b"\x00" * 8, "System.Runtime", "neutral", b""],
+        ],
+        TYPE_REF: [
+            [(ASSEMBLY_REF, 1), "TargetFrameworkAttribute",
+             "System.Runtime.Versioning"],
+            [(ASSEMBLY_REF, 1), "InternalsVisibleToAttribute",
+             "System.Runtime.CompilerServices"],
+        ],
+        MEMBER_REF: [
+            [(TYPE_REF, 1), ".ctor", b""],
+            [(TYPE_REF, 2), ".ctor", b""],
+        ],
+    }
+    tf_blob = struct.pack("<H", 1) + _compress_uint(6) + b".NETX,1"
+    ivt_blob = struct.pack("<H", 1) + _compress_uint(10) + b"LateFriend"
+    ca_rows = [
+        [(ASSEMBLY, 1), (MEMBER_REF, 1), tf_blob]
+        for _ in range(pe_dotnet.MAX_TARGET_FRAMEWORK_VALUES + 2)
+    ]
+    ca_rows.append([(ASSEMBLY, 1), (MEMBER_REF, 2), ivt_blob])
+    tables[CUSTOM_ATTRIBUTE] = ca_rows
+    block = parse_region(build_metadata_stream(tables))
+    sn = block["strong_name"]
+    assert "target_framework_values_capped" in block["degradations"]
+    assert sn["internals_visible_to_count"] == 1
+    assert sn["internals_visible_to"][0]["name"] == "LateFriend"
+
+
+def test_read_cli_header_decodes_the_strong_name_directory():
+    # cb long enough: RVA/size at offset 32 (beside ManagedNativeHeader
+    # at 64). cb too short: the fields read zero - an older header that
+    # has no such field, not a malformed one.
+    window = bytearray(72)
+    struct.pack_into("<I", window, 0, 72)
+    struct.pack_into("<II", window, 32, 0x1234, 128)
+    header = pe_dotnet.read_cli_header(bytes(window))
+    assert header["strong_name_rva"] == 0x1234
+    assert header["strong_name_size"] == 128
+    short = bytearray(24)
+    struct.pack_into("<I", short, 0, 24)
+    header = pe_dotnet.read_cli_header(bytes(short))
+    assert header["strong_name_rva"] == 0
+    assert header["strong_name_size"] == 0
+
+
+# The VM-built variants (real artifacts, committed): every fact below was
+# measured on the VM before the parser was written. Tokens pinned from
+# [Reflection.AssemblyName]::GetAssemblyName on the Windows 11 ARM64 VM:
+# every key-bearing variant reports pkt=f761e003da14acbe; the two
+# keyless ones report the empty token.
+VARIANT_TOKEN = "f761e003da14acbe"
+
+
+def test_variant_signed_dll():
+    block = parse_pe_dotnet(_lief_parse(_variant("signed.dll")),
+                            _variant("signed.dll"))
+    sn = block["strong_name"]
+    assert block["parse_status"] == "parsed"
+    assert sn == {
+        "strongnamesigned_flag": True,
+        "signature_present": True,
+        "signature_size": 128,
+        "signature_all_zero": False,
+        "declares_public_key": True,
+        "public_key_size": 160,
+        "public_key_token": VARIANT_TOKEN,
+        "delay_sign": False,
+    }
+
+
+def test_variant_delaysigned_dll():
+    block = parse_pe_dotnet(_lief_parse(_variant("delaysigned.dll")),
+                            _variant("delaysigned.dll"))
+    sn = block["strong_name"]
+    assert sn["strongnamesigned_flag"] is False
+    assert sn["signature_all_zero"] is True
+    assert sn["declares_public_key"] is True
+    assert sn["public_key_token"] == VARIANT_TOKEN
+    assert sn["delay_sign"] is False
+
+
+def test_variant_publicsigned_dll():
+    block = parse_pe_dotnet(_lief_parse(_variant("publicsigned.dll")),
+                            _variant("publicsigned.dll"))
+    sn = block["strong_name"]
+    assert sn["strongnamesigned_flag"] is True
+    assert sn["signature_all_zero"] is True
+
+
+def test_variant_unsigned_dll():
+    block = parse_pe_dotnet(_lief_parse(_variant("unsigned.dll")),
+                            _variant("unsigned.dll"))
+    sn = block["strong_name"]
+    assert sn["strongnamesigned_flag"] is False
+    assert sn["declares_public_key"] is False
+    assert sn["signature_present"] is False
+    assert "signature_all_zero" not in sn
+
+
+def test_variant_ivt_entries():
+    block = parse_pe_dotnet(_lief_parse(_variant("ivt-signed.dll")),
+                            _variant("ivt-signed.dll"))
+    sn = block["strong_name"]
+    entries = sn["internals_visible_to"]
+    assert sn["internals_visible_to_count"] == 2
+    assert [e["name"] for e in entries] == ["FRIEND.Keyed", "Friend.Second"]
+    for entry in entries:
+        # A keyed friend names the signer's own key here, so the computed
+        # token equals the assembly's own token.
+        assert entry["public_key_token"] == VARIANT_TOKEN
+        assert len(entry["public_key"]) == 320
+    # The keyless friend is legal only under an unsigned parent.
+    plain = parse_pe_dotnet(_lief_parse(_variant("ivt-plain.dll")),
+                            _variant("ivt-plain.dll"))["strong_name"]
+    assert plain["declares_public_key"] is False
+    assert plain["internals_visible_to"][0] == {"name": "Friend.Plain"}
+
+
+def test_variant_ivt_delay_combines_the_facts():
+    block = parse_pe_dotnet(_lief_parse(_variant("ivt-delay.dll")),
+                            _variant("ivt-delay.dll"))
+    sn = block["strong_name"]
+    assert sn["strongnamesigned_flag"] is False
+    assert sn["signature_all_zero"] is True
+    assert sn["internals_visible_to_count"] == 2
+
+
+def test_real_mfcm140_carries_a_delay_sign_row_over_a_full_signature():
+    # The only real-world AssemblyDelaySignAttribute rows measured (the
+    # MSVC-managed MFC pair, tier 5): delay_sign True with a fully written
+    # signature and the flag set - the four-facts separation in the wild.
+    path = _corpus_path("tier5-system/system32/mfcm140.dll")
+    block = parse_pe_dotnet(_lief_parse(path), path)
+    sn = block["strong_name"]
+    assert sn["delay_sign"] is True
+    assert sn["signature_all_zero"] is False
+    assert sn["strongnamesigned_flag"] is True
+    assert sn["public_key_token"] == "b03f5f7f11d50a3a"
+
+
+def test_real_newtonsoft_strong_name_facts():
+    path = _corpus_path(
+        "tier2-managed/newtonsoft.json-13.0.3/lib/net45/Newtonsoft.Json.dll"
+    )
+    block = parse_pe_dotnet(_lief_parse(path), path)
+    sn = block["strong_name"]
+    assert sn["declares_public_key"] is True
+    assert sn["public_key_size"] == 160
+    assert sn["public_key_token"] == "30ad4fe6b2a6aeed"
+    assert sn["signature_present"] is True
+    assert sn["signature_all_zero"] is False
+    assert sn["delay_sign"] is False
+    # Three real targets, pinned from the ground-truth oracle: two under
+    # the assembly's own key and one (the legacy Dynamic proxy) under a
+    # different key - the computed tokens say which is which.
+    targets = {
+        e["name"]: e["public_key_token"]
+        for e in sn["internals_visible_to"]
+    }
+    assert sn["internals_visible_to_count"] == 3
+    assert targets["Newtonsoft.Json.Schema"] == "30ad4fe6b2a6aeed"
+    assert targets["Newtonsoft.Json.Tests"] == "30ad4fe6b2a6aeed"
+    assert targets["Newtonsoft.Json.Dynamic"] == "b9a188c8922137c6"
+
+
+def test_real_managed_block_serializes_with_strong_name():
+    import json
+
+    path = _variant("signed.dll")
+    block = parse_pe_dotnet(_lief_parse(path), path)
+    json.dumps(block)

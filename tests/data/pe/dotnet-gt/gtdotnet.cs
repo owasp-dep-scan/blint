@@ -49,7 +49,7 @@ static int RvaToOffset(byte[] pe, int rva)
     return -1;
 }
 
-static (int flags, uint entryToken) ReadCliHeader(byte[] pe)
+static (int flags, uint entryToken, int snRva, int snSize) ReadCliHeader(byte[] pe)
 {
     int e_lfanew = BitConverter.ToInt32(pe, 0x3C);
     int coff = e_lfanew + 4;
@@ -57,14 +57,22 @@ static (int flags, uint entryToken) ReadCliHeader(byte[] pe)
     ushort magic = BitConverter.ToUInt16(pe, opt);
     int ddBase = opt + (magic == 0x20B ? 112 : 96);
     int numDirs = BitConverter.ToInt32(pe, ddBase > 0 ? opt + (magic == 0x20B ? 108 : 92) : 0);
-    if (numDirs <= 14) return (-1, 0);
+    if (numDirs <= 14) return (-1, 0, 0, 0);
     int rva = BitConverter.ToInt32(pe, ddBase + 14 * 8);
     int size = BitConverter.ToInt32(pe, ddBase + 14 * 8 + 4);
-    if (rva <= 0 || size < 24) return (-1, 0);
+    if (rva <= 0 || size < 24) return (-1, 0, 0, 0);
     int off = RvaToOffset(pe, rva);
-    if (off < 0 || off + 24 > pe.Length) return (-1, 0);
-    if (BitConverter.ToInt32(pe, off) < 24) return (-1, 0); // cb
-    return (BitConverter.ToInt32(pe, off + 16), BitConverter.ToUInt32(pe, off + 20));
+    if (off < 0 || off + 24 > pe.Length) return (-1, 0, 0, 0);
+    if (BitConverter.ToInt32(pe, off) < 24) return (-1, 0, 0, 0); // cb
+    // StrongNameSignature directory (II.25.3.3, offset 32): only when the
+    // header declares itself long enough to carry it.
+    int snRva = 0, snSize = 0;
+    if (BitConverter.ToInt32(pe, off) >= 40 && off + 40 <= pe.Length)
+    {
+        snRva = BitConverter.ToInt32(pe, off + 32);
+        snSize = BitConverter.ToInt32(pe, off + 36);
+    }
+    return (BitConverter.ToInt32(pe, off + 16), BitConverter.ToUInt32(pe, off + 20), snRva, snSize);
 }
 
 static string TokenFromBlob(byte[] blob)
@@ -85,6 +93,23 @@ static string TokenFromBlob(byte[] blob)
 // The #US-walk caps, identical to blint/lib/pe_dotnet.py's constants so a
 // capped walk hashes the same prefix on both sides (a hostile heap can only
 // shorten both sides' result the same way).
+//
+// W3.4 additions (03/A.4), strong names — distinct from Authenticode, never
+// merged with it:
+//   - strong_name: the StrongNameSignature directory read from the CLI
+//     header (RVA/size at offset 32, beside the ManagedNativeHeader at 64),
+//     whether the bytes it names are all zero (the null signature a
+//     delay-signed assembly ships), and whether the Assembly table declares
+//     a public key. No verification: the oracle does not hash the assembly
+//     and reports presence facts only.
+//   - assembly_attributes: every assembly-level custom attribute's type full
+//     name, sorted. This is the instrument that shows where DelaySign does
+//     and does not live in real metadata (Roslyn consumes the
+//     AssemblyDelaySignAttribute pseudo-attribute; any surviving row appears
+//     here by name).
+//   - ivt: InternalsVisibleToAttribute targets decoded from their blobs -
+//     the friend assembly name and any PublicKey= the string names, plus
+//     that key's token computed the same way blint computes it.
 const int MAX_USER_STRINGS_WALKED = 262144;
 const long MAX_USER_STRINGS_TOTAL_BYTES = 64L * 1024 * 1024;
 const int MAX_US_ENTRY_BYTES = 1024 * 1024;
@@ -242,7 +267,7 @@ static Dictionary<string, object> DumpOne(string path)
     try
     {
         byte[] raw = File.ReadAllBytes(path);
-        var (flags, entryToken) = ReadCliHeader(raw);
+        var (flags, entryToken, snRva, snSize) = ReadCliHeader(raw);
         if (flags < 0)
         {
             rec["status"] = "no_cor20";
@@ -265,6 +290,7 @@ static Dictionary<string, object> DumpOne(string path)
         rec["cli_flags_value"] = flags;
         rec["entry_point_token"] = $"0x{entryToken:x8}";
         rec["metadata_version"] = md.MetadataVersion;
+        byte[] asmPublicKey = Array.Empty<byte>();
         var mod = md.GetModuleDefinition();
         rec["mvid"] = md.GetGuid(mod.Mvid).ToString().ToUpperInvariant();
         rec["module_name"] = md.GetString(mod.Name);
@@ -279,6 +305,7 @@ static Dictionary<string, object> DumpOne(string path)
             rec["hash_algorithm_value"] = (int)asm.HashAlgorithm;
             rec["public_key_token"] = TokenFromBlob(md.GetBlobBytes(asm.PublicKey));
             rec["assembly_flags"] = (int)asm.Flags;
+            asmPublicKey = md.GetBlobBytes(asm.PublicKey);
             var tf = new List<string>();
             foreach (var h in asm.GetCustomAttributes())
             {
@@ -300,6 +327,91 @@ static Dictionary<string, object> DumpOne(string path)
         {
             rec["name"] = null; // netmodule: no Assembly table
         }
+        // W3.4: the strong-name block. CLI-header facts independent of the
+        // Assembly table, so they dump for netmodules too. Presence facts
+        // only — no hash, no verification.
+        var sn = new Dictionary<string, object>
+        {
+            ["signature_rva"] = snRva,
+            ["signature_size"] = snSize,
+            ["signature_present"] = snRva > 0 && snSize > 0,
+        };
+        if (snRva > 0 && snSize > 0)
+        {
+            int snOff = RvaToOffset(raw, snRva);
+            if (snOff < 0 || snOff + snSize > raw.Length)
+            {
+                sn["signature_all_zero"] = null; // unreadable: absent, not false
+                sn["signature_readable"] = false;
+            }
+            else
+            {
+                sn["signature_readable"] = true;
+                bool allZero = true;
+                for (int i = 0; i < snSize; i++) if (raw[snOff + i] != 0) { allZero = false; break; }
+                sn["signature_all_zero"] = allZero;
+            }
+        }
+        // Assembly-level custom attributes: the full name of every one, plus
+        // the decoded InternalsVisibleTo targets and the DelaySign row if it
+        // survives compilation.
+        var attrNames = new List<string>();
+        var ivt = new List<Dictionary<string, object>>();
+        bool? delaySignAttr = null;
+        if (rec["status"].Equals("managed"))
+        {
+            try
+            {
+                var asmDef = md.GetAssemblyDefinition();
+                foreach (var h in asmDef.GetCustomAttributes())
+                {
+                    var ca = md.GetCustomAttribute(h);
+                    if (ca.Constructor.Kind != HandleKind.MemberReference) continue;
+                    var mr = md.GetMemberReference((MemberReferenceHandle)ca.Constructor);
+                    if (mr.Parent.Kind != HandleKind.TypeReference) continue;
+                    var tr = md.GetTypeReference((TypeReferenceHandle)mr.Parent);
+                    string attrName = FullName(md.GetString(tr.Namespace), md.GetString(tr.Name));
+                    attrNames.Add(attrName);
+                    if (attrName == "System.Runtime.CompilerServices.InternalsVisibleToAttribute")
+                    {
+                        var reader = md.GetBlobReader(ca.Value);
+                        reader.ReadInt16(); // prolog
+                        var s = reader.ReadSerializedString();
+                        var entry = new Dictionary<string, object> { ["raw"] = s ?? "" };
+                        // "Friend.Name" or "Friend.Name, PublicKey=<hex>"
+                        var parts = (s ?? "").Split(',');
+                        entry["name"] = parts[0].Trim();
+                        foreach (var part in parts.Skip(1))
+                        {
+                            var kv = part.Trim();
+                            if (kv.StartsWith("PublicKey=", StringComparison.OrdinalIgnoreCase))
+                            {
+                                string hex = kv.Substring(10).Replace(" ", "");
+                                entry["public_key"] = hex.ToLowerInvariant();
+                                byte[] keyBytes;
+                                try { keyBytes = Convert.FromHexString(hex); }
+                                catch { keyBytes = Array.Empty<byte>(); }
+                                entry["public_key_token"] = keyBytes.Length >= 8 ? TokenFromBlob(keyBytes) : "";
+                            }
+                        }
+                        ivt.Add(entry);
+                    }
+                    else if (attrName == "System.Reflection.AssemblyDelaySignAttribute")
+                    {
+                        var reader = md.GetBlobReader(ca.Value);
+                        reader.ReadInt16(); // prolog
+                        delaySignAttr = reader.ReadBoolean();
+                    }
+                }
+            }
+            catch (Exception) { /* netmodule-shaped or hostile: attribute facts absent */ }
+        }
+        sn["delay_sign_attribute"] = delaySignAttr;
+        sn["declares_public_key"] = asmPublicKey.Length > 0;
+        sn["public_key_size"] = asmPublicKey.Length;
+        rec["strong_name"] = sn;
+        rec["assembly_attributes"] = attrNames.OrderBy(s => s).ToArray();
+        rec["ivt"] = ivt.ToArray();
         var refs = new List<Dictionary<string, object>>();
         foreach (var h in md.AssemblyReferences)
         {

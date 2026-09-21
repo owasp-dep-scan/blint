@@ -103,8 +103,13 @@ from blint.logger import LOG
 # decoded `dotnet.shape.bundle` manifest and its member listing. A schema-8
 # entry has none of it, so a warm cache would serve a NativeAOT image and a
 # single-file bundle as ordinary native PEs — the exact "absence reads as
-# not .NET" the packet exists to end.
-CACHE_SCHEMA_VERSION = 9
+# not .NET" the packet exists to end. 10: the strong-name block (W3.4) —
+# `dotnet.strong_name` with the declared-key/signature/null-signature
+# triple, `delay_sign` and the InternalsVisibleTo listing. A schema-9 entry
+# carries none of it, and a null signature would read as absent — on a
+# delay-signed assembly, exactly the verdict-shaped gap the packet exists
+# to close.
+CACHE_SCHEMA_VERSION = 10
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

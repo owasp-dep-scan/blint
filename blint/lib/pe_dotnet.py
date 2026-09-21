@@ -2,13 +2,32 @@
 
 Reads the `#~` (compressed) or `#-` (uncompressed) table stream plus the
 `#Strings`, `#Blob`, `#GUID` and `#US` heaps of a managed assembly and
-reports the identity-and-references block (plan 03/A.1) and the capability
-surface (plan 03/A.2): assembly identity, AssemblyRefs, ModuleRefs, the
-P/Invoke surface, referenced types (TypeRef, resolved through its
-ResolutionScope to the providing assembly), referenced members (MemberRef,
-resolved through its MemberRefParent), the #US string literals, table
-counts, the entry point, the CLI header flags and the target framework
-attribute.
+reports the identity-and-references block (plan 03/A.1), the capability
+surface (plan 03/A.2) and the strong-name facts (plan 03/A.4): assembly
+identity, AssemblyRefs, ModuleRefs, the P/Invoke surface, referenced types
+(TypeRef, resolved through its ResolutionScope to the providing assembly),
+referenced members (MemberRef, resolved through its MemberRefParent), the
+#US string literals, table counts, the entry point, the CLI header flags,
+the target framework attribute, and the ``strong_name`` block.
+
+The strong-name block states presence facts as separate facts and carries
+no verification result anywhere. ``declares_public_key`` (the Assembly
+row's PublicKey blob, with the token computed from the key),
+``strongnamesigned_flag`` (the CLI header bit),
+``signature_present``/``signature_size`` (the CLI header's
+StrongNameSignature directory), ``signature_all_zero`` (whether the bytes
+the directory names are all zero - what a delay-signed assembly ships, and
+a public-signed one too, so neither may be concluded from it alone),
+``delay_sign`` (an AssemblyDelaySignAttribute row; Roslyn consumes the
+attribute and emits no row, so this reads a real but rare location - the
+MSVC-managed MFC pair carries one over a fully-written signature) and
+``internals_visible_to`` (the friend assembly names an
+InternalsVisibleToAttribute names, with any public keys they carry and the
+tokens computed from those keys). Strong names are distinct from
+Authenticode and are never merged with the ``code_signature`` block: a
+strong name says the assembly's identity is bound to a key, Authenticode
+says a publisher vouched for the file, and an assembly can have either,
+both or neither.
 
 Everything here is attacker-controlled input with cross-references: a row's
 string is an index into `#Strings`, a type is a coded index into another
@@ -19,7 +38,8 @@ than read as clean (ground rule 30). Counts and listings are separate facts
 (ground rule 14): ``counts`` carries the row counts the stream header
 declared for tables whose rows were verifiably within the stream, while the
 listed blocks (``assembly_refs``, ``module_refs``, ``pinvoke``,
-``typerefs``, ``memberrefs``, ``strings``) are capped listings and stay
+``typerefs``, ``memberrefs``, ``strings``, and the strong-name block's
+``internals_visible_to``) are capped listings and stay
 absent entirely when their table could not be read — absent is never
 written as an empty list, so "no AssemblyRefs" and "the AssemblyRef table
 was unreadable" are different outputs.
@@ -208,6 +228,20 @@ MAX_LISTED_PINVOKE = 512
 # the backstop for anything larger still.
 MAX_LISTED_TYPEREFS = 1024
 MAX_LISTED_MEMBERREFS = 16384
+# W3.4: the strong-name facts (03/A.4). The StrongNameSignature read bound:
+# real strong-name signatures are the RSA signature size — 128 bytes across
+# every assembly measured (1,248: the corpus managed set, the .NET 10 shared
+# framework, and the VM-built variants); 4,096 clears anything a sane key
+# produces while bounding a forged header's claim.
+#
+# The InternalsVisibleTo listing cap is a listing bound only: no rule reads
+# this list (the distribution measurement decided against any rule this
+# packet), so a row past the cap is unlisted, not unexamined. The largest
+# count measured across the same 1,248 assemblies is 55
+# (System.Private.Windows.Core.dll); 128 clears it with the same headroom
+# ratio MAX_LISTED_MEMBERREFS carries over its own measured maximum.
+MAX_STRONG_NAME_SIGNATURE_READ = 4096
+MAX_LISTED_IVT = 128
 MAX_USER_STRINGS_WALKED = 262144
 MAX_USER_STRINGS_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_US_ENTRY_BYTES = 1024 * 1024  # Longer entries are skipped, not fatal.
@@ -242,6 +276,43 @@ def public_key_token(blob: bytes | None) -> str | None:
         return blob.hex()
     # The token is the low eight bytes of the SHA-1, reversed.
     return bytes(hashlib.sha1(blob).digest()[-8:][::-1]).hex()
+
+
+def parse_ivt_target(spec: str) -> tuple[dict | None, bool]:
+    """Split one InternalsVisibleTo attribute string into its named facts.
+
+    The attribute's single constructor argument is the friend assembly name,
+    optionally followed by ``", PublicKey=<hex>"`` when the friend must be
+    strong-named under a specific key (the form every friend of a
+    strong-named parent must use - a strong-named assembly naming a keyless
+    friend does not compile, CS1726). The name is reported byte-exactly as
+    the metadata string stores it; the key is reported as the hex the string
+    names, with its token computed through ``public_key_token`` so it is
+    comparable with every other token in the block. Returns (entry, invalid)
+    where entry is None when the string names no assembly at all, and
+    invalid is True when a PublicKey= component is not parseable hex - the
+    name stays real even then, but the key is a claim blint could not read.
+    """
+    parts = spec.split(",")
+    name = parts[0].strip()
+    if not name:
+        return None, False
+    entry: dict = {"name": name}
+    invalid = False
+    for part in parts[1:]:
+        kv = part.strip()
+        if len(kv) > 10 and kv[:10].lower() == "publickey=":
+            hex_key = kv[10:].replace(" ", "").lower()
+            entry["public_key"] = hex_key
+            try:
+                key_bytes = bytes.fromhex(hex_key)
+            except ValueError:
+                invalid = True
+                key_bytes = b""
+            token = public_key_token(key_bytes) if key_bytes else None
+            if token:
+                entry["public_key_token"] = token
+    return entry, invalid
 
 
 def format_guid(raw: bytes) -> str | None:
@@ -317,9 +388,19 @@ def read_cli_header(window: bytes) -> dict | None:
         managed_native_header_rva, managed_native_header_size = struct.unpack_from(
             "<II", window, 64
         )
+    # W3.4: StrongNameSignature (II.25.3.3, offset 32) - the directory W3.3
+    # did not read, sitting two fields before the one it did. Whether the
+    # region it names exists and whether it is all zero bytes are the two
+    # facts that separate a signed, a delay-signed and a public-signed
+    # assembly, so the directory is read under the same cb rule.
+    strong_name_rva = strong_name_size = 0
+    if cb >= 40 and len(window) >= 40:
+        strong_name_rva, strong_name_size = struct.unpack_from("<II", window, 32)
     return {
         "managed_native_header_rva": int(managed_native_header_rva),
         "managed_native_header_size": int(managed_native_header_size),
+        "strong_name_rva": int(strong_name_rva),
+        "strong_name_size": int(strong_name_size),
         "cb": cb,
         "runtime_major": major_runtime,
         "runtime_minor": minor_runtime,
@@ -370,6 +451,39 @@ class _Degradations:
 
     def sorted(self) -> list[str]:
         return sorted(self._items)
+
+
+def _blob_fixed_string(
+    blob: bytes | None, degr: _Degradations, refusal: str
+) -> str | None:
+    """The first fixed SerString argument of a custom attribute blob.
+
+    Prolog ``0x0001`` then a SerString - compressed length + UTF-8 bytes
+    (II.23.3). Returns None when the blob is too short, the prolog is
+    wrong, or the length runs past the blob, adding ``refusal`` to the
+    degradations for each; a nil string (length 0) also returns None but
+    adds nothing, because naming no value is not a malformed claim. The
+    target-framework walk keeps its own, older tolerance for these shapes
+    and is deliberately not routed through here.
+    """
+    if blob is None or len(blob) < 3:
+        degr.add(refusal)
+        return None
+    if blob[0] != 0x01 or blob[1] != 0x00:
+        degr.add(refusal)
+        return None
+    decoded = read_compressed_uint(blob, 2)
+    if decoded is None:
+        degr.add(refusal)
+        return None
+    length, consumed = decoded
+    pos = 2 + consumed
+    if pos + length > len(blob):
+        degr.add(refusal)
+        return None
+    if length == 0:
+        return None
+    return blob[pos:pos + length].decode("utf-8", errors="replace")
 
 
 class _HeapReader:
@@ -959,6 +1073,7 @@ def parse_metadata_stream(
     region_size: int | None = None,
     cli_flags_value: int = 0,
     entry_point_token: int | None = None,
+    strong_name_signature: tuple[bytes | None, int, str | None] | None = None,
 ) -> dict:
     """Parse one metadata root region into the 03/A.1 block (pure bytes).
 
@@ -966,8 +1081,11 @@ def parse_metadata_stream(
     window read at the CLI header's metadata RVA); ``root_offset`` is where
     the BSJB root starts inside it; ``region_size`` is the size the CLI
     header declared for the region (default: data from root_offset to the
-    end). All bounds are checked against ``len(data)``; every refusal lands
-    in ``degradations`` by name.
+    end). ``strong_name_signature`` carries the CLI header's
+    StrongNameSignature directory when it declares one: ``(bytes read,
+    declared size, gap name)`` with ``gap`` naming why the bytes are missing
+    when they are (unmapped, over the read cap). All bounds are checked
+    against ``len(data)``; every refusal lands in ``degradations`` by name.
     """
     degr = _Degradations()
     block: dict = {"parse_status": "parsed"}
@@ -983,6 +1101,39 @@ def parse_metadata_stream(
         name for bit, name in CLI_FLAG_NAMES if cli_flags_value & bit
     ]
     block["cli_flags_value"] = cli_flags_value
+
+    # --- strong name: header facts ------------------------------------------------
+    # The block states presence facts as separate facts and carries no
+    # verification result anywhere: "declares a public key", "carries a
+    # signature region", "the region is all zero bytes" and "the
+    # signature verifies" are four different things, and blint determines
+    # the first three only. The null signature is what a delay-signed
+    # assembly ships - and what a public-signed one ships too (measured:
+    # 215 of 1,186 .NET 10 shared-framework assemblies carry a null
+    # signature with the STRONGNAMESIGNED flag set), so no combination of
+    # these fields may be read as "verified" or as "delay-signed" alone.
+    strong_name: dict = {
+        "strongnamesigned_flag": bool(cli_flags_value & 0x00000008),
+    }
+    if strong_name_signature is not None:
+        sig_bytes, declared_size, gap = strong_name_signature
+        strong_name["signature_present"] = True
+        strong_name["signature_size"] = declared_size
+        if gap is not None:
+            degr.add(gap)
+        elif sig_bytes is None or len(sig_bytes) < declared_size:
+            # No gap named and still not enough bytes: the region runs past
+            # the end of the file (the caller clipped the read).
+            degr.add("strong_name_signature_short_read")
+        else:
+            strong_name["signature_all_zero"] = not any(sig_bytes[:declared_size])
+    else:
+        # No directory claimed: present is false and the size is the zero
+        # the absent region makes it (the ground-truth oracle's convention
+        # - a size of 0 with present false, never a size with no verdict).
+        strong_name["signature_present"] = False
+        strong_name["signature_size"] = 0
+    block["strong_name"] = strong_name
 
     def heap_reader(name: str) -> tuple | None:
         if name in streams:
@@ -1153,7 +1304,18 @@ def parse_metadata_stream(
             # PublicKey blob, Name str, Culture str (II.22.2).
             name = string_at(asm_row[7])
             culture = string_at(asm_row[8])
-            token = public_key_token(blob_at(asm_row[6]))
+            key_blob = blob_at(asm_row[6])
+            token = public_key_token(key_blob)
+            # The declared-key half of the strong-name block: the fact the
+            # Assembly row itself carries. The token is computed from the
+            # key blob through public_key_token - the same function
+            # assembly.public_key_token above flows from, so the two can
+            # never disagree - and never copied from the AssemblyRef habit
+            # of shipping a bare token, which this column may also hold.
+            strong_name["declares_public_key"] = bool(key_blob)
+            strong_name["public_key_size"] = len(key_blob) if key_blob else 0
+            if token:
+                strong_name["public_key_token"] = token
             assembly: dict = {}
             if name is not None:
                 assembly["name"] = name
@@ -1173,8 +1335,15 @@ def parse_metadata_stream(
             if mvid:
                 assembly["mvid"] = mvid
             block["assembly"] = assembly
-    # An Assembly table with zero rows is a netmodule; the identity block
-    # stays absent because there is no assembly (rule 14).
+    elif ASSEMBLY in row_counts and row_counts[ASSEMBLY] == 0:
+        # A netmodule: there is no assembly, hence no declared key - a
+        # determined negative, not a withheld one. An Assembly table absent
+        # from row_counts entirely leaves the key facts absent instead: that
+        # is also the netmodule shape, but it is equally the shape of a
+        # row-count array truncated before the table's count was read, and
+        # the two must not share an output (ground rule 14).
+        strong_name["declares_public_key"] = False
+        strong_name["public_key_size"] = 0
 
     # --- assembly refs ----------------------------------------------------------
     if ASSEMBLY_REF in row_counts and row_counts[ASSEMBLY_REF] > 0:
@@ -1387,9 +1556,20 @@ def parse_metadata_stream(
         if us_rows:
             block["strings"] = us_rows
 
-    # --- target framework attribute ----------------------------------------------
-    if CUSTOM_ATTRIBUTE in row_counts and row_counts[CUSTOM_ATTRIBUTE] > 0:
+    # --- target framework attribute, InternalsVisibleTo, DelaySign -------------
+    # One sweep over the CustomAttribute table collects every
+    # assembly-scoped fact the block reports from it. The three attribute
+    # types are matched by full name; InternalsVisibleTo and DelaySign rows
+    # additionally require the Assembly row as their parent, which is the
+    # scope the runtime honours and the scope the ground-truth oracle walks
+    # (GetAssemblyDefinition().GetCustomAttributes()) - a hostile row hung
+    # on a type is listed by neither.
+    if (CUSTOM_ATTRIBUTE in row_counts and row_counts[CUSTOM_ATTRIBUTE] > 0
+            and CUSTOM_ATTRIBUTE in layout):
         target_frameworks = []
+        ivt_total = 0
+        ivt_rows: list[dict] = []
+        delay_sign = False
         for rid in range(1, row_counts[CUSTOM_ATTRIBUTE] + 1):
             row = reader.row(CUSTOM_ATTRIBUTE, rid)
             if row is None:
@@ -1409,9 +1589,50 @@ def parse_metadata_stream(
                 continue
             type_name = string_at(type_row[1])
             type_ns = string_at(type_row[2])
-            if type_name != "TargetFrameworkAttribute":
+            if type_ns == "System.Runtime.Versioning" and \
+                    type_name == "TargetFrameworkAttribute":
+                pass  # decoded below
+            elif type_ns == "System.Runtime.CompilerServices" and \
+                    type_name == "InternalsVisibleToAttribute":
+                parent_tag, parent_rid = row[0]
+                if parent_tag != ASSEMBLY or parent_rid != 1:
+                    continue
+                value_blob = blob_at(row[2])
+                spec = _blob_fixed_string(value_blob, degr,
+                                          "internals_visible_to_value_invalid")
+                if spec is None:
+                    continue
+                entry, key_invalid = parse_ivt_target(spec)
+                if key_invalid:
+                    degr.add("internals_visible_to_public_key_invalid")
+                if entry is None:
+                    continue
+                ivt_total += 1
+                if len(ivt_rows) < MAX_LISTED_IVT:
+                    ivt_rows.append(entry)
                 continue
-            if type_ns != "System.Runtime.Versioning":
+            elif type_ns == "System.Reflection" and \
+                    type_name == "AssemblyDelaySignAttribute":
+                # The one metadata location that names DelaySign. Roslyn
+                # consumes the attribute and emits no row (measured: built
+                # with and without /delaysign, with the attribute in
+                # source - no row either way), so a Roslyn delay-signed
+                # assembly reports delay_sign False and shows its shape in
+                # signature_all_zero instead; the row survives from
+                # toolchains that write it out (the MSVC-managed MFC pair
+                # in tier 5 carries one - over a fully-written signature,
+                # which is why this is a fact and not a verdict).
+                parent_tag, parent_rid = row[0]
+                if parent_tag != ASSEMBLY or parent_rid != 1:
+                    continue
+                value_blob = blob_at(row[2])
+                if value_blob is None or len(value_blob) < 3 or \
+                        value_blob[0] != 0x01 or value_blob[1] != 0x00:
+                    degr.add("delay_sign_value_invalid")
+                    continue
+                delay_sign = bool(value_blob[2])
+                continue
+            else:
                 continue
             value_blob = blob_at(row[2])
             if value_blob is None or len(value_blob) < 4:
@@ -1431,17 +1652,35 @@ def parse_metadata_stream(
             if pos + length > len(value_blob):
                 degr.add("target_framework_value_invalid")
                 continue
-            target_frameworks.append(
-                value_blob[pos:pos + length].decode("utf-8", errors="replace")
-            )
+            # The value window is capped by refusing further appends, not
+            # by leaving the loop: InternalsVisibleTo rows anywhere in the
+            # table must still be reached (W3.4 merged the sweeps).
             if len(target_frameworks) >= MAX_TARGET_FRAMEWORK_VALUES:
                 degr.add("target_framework_values_capped")
-                break
+            else:
+                target_frameworks.append(
+                    value_blob[pos:pos + length].decode(
+                        "utf-8", errors="replace"
+                    )
+                )
+        if ivt_total > MAX_LISTED_IVT:
+            degr.add("internals_visible_to_listed_capped")
+        if ivt_total:
+            strong_name["internals_visible_to_count"] = ivt_total
+            if ivt_rows:
+                strong_name["internals_visible_to"] = ivt_rows
+        strong_name["delay_sign"] = delay_sign
         distinct = sorted(set(target_frameworks))
         if len(distinct) > 1:
             degr.add("multiple_target_framework_values")
         if distinct:
             block["target_framework"] = distinct[0]
+    elif CUSTOM_ATTRIBUTE in row_counts and row_counts[CUSTOM_ATTRIBUTE] == 0:
+        # An empty CustomAttribute table is a determination: no DelaySign
+        # row exists. A table missing from row_counts entirely may have
+        # been dropped or truncated before its count was read, so the fact
+        # is withheld there instead (ground rule 14).
+        strong_name["delay_sign"] = False
 
     # --- entry point ----------------------------------------------------------------
     if entry_point_token is not None and entry_point_token:
@@ -1518,6 +1757,30 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
                     "parse_status": "malformed",
                     "degradations": ["cli_header_unreadable"],
                 }
+            # The StrongNameSignature region (W3.4): mapped through the
+            # section table like every other directory, read bounded, and
+            # handed to the metadata parser as (bytes, declared size, gap).
+            # The gap names why the bytes are missing - unmapped RVA, or a
+            # declared size past the read cap - so a null-signature verdict
+            # is only ever emitted over bytes blint actually read in full.
+            strong_name_signature = None
+            sn_rva = header["strong_name_rva"]
+            sn_size = header["strong_name_size"]
+            if sn_rva > 0 and sn_size > 0:
+                if sn_size > MAX_STRONG_NAME_SIGNATURE_READ:
+                    strong_name_signature = (
+                        None, sn_size, "strong_name_signature_exceeds_cap",
+                    )
+                else:
+                    sn_offset = rva_to_offset(parsed_obj.sections, sn_rva)
+                    if sn_offset < 0:
+                        strong_name_signature = (
+                            None, sn_size, "strong_name_signature_unmapped",
+                        )
+                    else:
+                        handle.seek(sn_offset)
+                        sig_bytes = handle.read(sn_size)
+                        strong_name_signature = (sig_bytes, sn_size, None)
             md_offset = rva_to_offset(parsed_obj.sections, header["metadata_rva"])
             if md_offset < 0:
                 return {
@@ -1549,6 +1812,7 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
         region_size=len(metadata),
         cli_flags_value=header["flags"],
         entry_point_token=header["entry_point_token"],
+        strong_name_signature=strong_name_signature,
     )
     # W3.3 reads these to tell a ReadyToRun image from a plain IL assembly.
     # They are carried on the block rather than re-read from the file there,
