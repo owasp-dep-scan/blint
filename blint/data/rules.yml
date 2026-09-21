@@ -299,11 +299,14 @@
   description: |
     This binary's export set satisfies the contract of a Windows extension point: a host process that loads the DLL automatically - once it is registered, which takes administrator rights exactly once - and keeps it loaded with no per-load prompt and no consent surface after the install. Each finding names the contract and the host: LSA security packages and password filters load into lsass.exe (SYSTEM, protected), print monitors and providers into spoolsv.exe (SYSTEM), time providers into the W32Time svchost (LocalService), network providers into winlogon (SYSTEM), Winsock service and namespace providers into every socket-using or name-resolving process, AppCert DLLs into every CreateProcess caller, credential providers into LogonUI.exe and Audio Processing Objects into audiodg.exe.
     This is context for a reviewer, not an accusation: legitimate audio, print and authentication software looks exactly like this, which is why the severity is informational. The contract table (blint/data/pe_host_plugin_contracts.yml) is pinned against Microsoft's documentation with its hit counts measured over a full System32 before this rule shipped: bare COM in-proc exports are on 45% of System32 (1,443 DLLs) and never fire this rule alone; the two COM contracts (credential provider, APO) additionally require an in-binary reference to their registration path and report that evidence. An absent host_plugin block reads as "no plugin contract evidenced", never as "verified not a plugin": a binary whose export table blint could not read gets an export_table_unreadable degradation in analysis_coverage instead.
+    The scope covers gobinary and genericbinary alongside PE32/PE64/dotnetbinary, because exe_type is a language/toolchain label that overwrites the PE one: measured across tier-0 and tier-1, 3 of 177 Windows PE files land outside PE32/PE64 - node.exe on both architectures is labelled gobinary by the .rdata Go heuristic, and the MinGW build of ripgrep is genericbinary. A Go c-shared DLL exports named entry points like any other, so a scope of PE32/PE64 alone would silently exclude exactly the binaries an implant is most likely to be built as. CHECK_SIGNER_MISMATCH (W2.4) already carries gobinary for the same reason.
   severity: info
   exe_types:
     - PE32
     - PE64
     - dotnetbinary
+    - gobinary
+    - genericbinary
 - id: CHECK_UNSIGNED_HOST_PLUGIN
   title: Unsigned Privileged-Host Plugin
   description: |
@@ -314,6 +317,8 @@
     - PE32
     - PE64
     - dotnetbinary
+    - gobinary
+    - genericbinary
 - id: CHECK_LSA_PLUGIN
   title: LSA Password Filter Plugin
   description: |
@@ -324,6 +329,8 @@
     - PE32
     - PE64
     - dotnetbinary
+    - gobinary
+    - genericbinary
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |

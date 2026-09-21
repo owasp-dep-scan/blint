@@ -644,3 +644,102 @@ def test_slice_histogram_no_lsa_or_unsigned_findings():
         if check_unsigned_host_plugin(name, metadata, {}) is not True:
             unsigned += 1
     assert (lsa, unsigned) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# What the review of W5.6 found: the coverage mirroring, the dead table key,
+# and the rule scope.
+# ---------------------------------------------------------------------------
+
+
+def test_slice_variance_reaches_analysis_coverage(write_pe, monkeypatch):
+    """The scope and variance keys live inside the host_plugin block, so the
+    coverage mirroring must read them from there.
+
+    It read them from the top level of metadata instead, where nothing ever
+    wrote them, so analysis_coverage never carried either key and the rule-21
+    promise METADATA.md makes was unmet on every ARM64X image. No test looked
+    at analysis_coverage, which is why the block-level assertions passed.
+    """
+    from blint.lib import binary as binary_mod
+
+    metadata = {
+        "exports": [{"name": "SpLsaModeInitialize", "ordinal": 1}],
+        "nested_binary": {"exports": [{"name": "TimeProvOpen", "ordinal": 1}]},
+    }
+    block = classify_host_plugins(metadata, None)
+    assert block["host_plugin_slice_variance"] == [
+        "lsa_security_package",
+        "time_provider",
+    ]
+    metadata["host_plugin"] = block
+    coverage = binary_mod._build_analysis_coverage(metadata, disassemble=False)
+    assert coverage["host_plugin_slice_variance"] == [
+        "lsa_security_package",
+        "time_provider",
+    ]
+
+
+def test_nested_scope_reaches_analysis_coverage():
+    from blint.lib import binary as binary_mod
+
+    metadata = {
+        "exports_read_status": "failed",
+        "exports": [],
+        "nested_binary": {"exports": [{"name": "TimeProvOpen", "ordinal": 1}]},
+    }
+    metadata["host_plugin"] = classify_host_plugins(metadata, None)
+    coverage = binary_mod._build_analysis_coverage(metadata, disassemble=False)
+    assert coverage["host_plugin_scope"] == "nested_binary"
+    assert "export_table_unreadable" in coverage["degradations"]
+
+
+def test_contract_table_carries_no_key_the_loader_ignores():
+    """Every key in a contract entry is one the loader reads.
+
+    The table shipped ``match: any`` on all ten export contracts and nothing
+    in pe_host_plugins.py has a concept of ``match`` - a semantic knob that
+    looks authoritative in the data file and silently does nothing, so a
+    later ``match: all`` would behave as ``any`` without failing anything.
+    """
+    from blint.lib.pe_host_plugins import _contracts_table
+
+    known = {
+        "title",
+        "kind",
+        "export_names",
+        "com_export",
+        "registration_pattern",
+        "host_process",
+        "host_privilege",
+        "protected_process",
+        "credential_exposure",
+        "registration_hint",
+        "documentation",
+        "notes",
+    }
+    for contract_id, spec in _contracts_table()["contracts"].items():
+        unknown = set(spec) - known
+        assert not unknown, f"{contract_id} carries keys no loader reads: {unknown}"
+
+
+def test_rule_scope_covers_the_toolchain_exe_types():
+    """exe_type is a toolchain label that overwrites PE32/PE64.
+
+    Measured across tier-0 and tier-1, 3 of 177 Windows PE files land outside
+    PE32/PE64: node.exe on both architectures is labelled ``gobinary`` by the
+    .rdata Go heuristic and the MinGW ripgrep build is ``genericbinary``. A
+    Go c-shared DLL exports named entry points like any other, so a scope of
+    PE32/PE64 alone silently excludes the binaries an implant is most likely
+    to be built as - the CHECK_PACKED defect of W3.1, repeated on two
+    high-severity rules.
+    """
+    from blint.lib import analysis as analysis_mod
+
+    for rule_id in (
+        "CHECK_PRIVILEGED_HOST_PLUGIN",
+        "CHECK_UNSIGNED_HOST_PLUGIN",
+        "CHECK_LSA_PLUGIN",
+    ):
+        exe_types = set(analysis_mod.rules_dict[rule_id].get("exe_types") or [])
+        assert {"PE32", "PE64", "dotnetbinary", "gobinary", "genericbinary"} <= exe_types, rule_id

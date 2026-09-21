@@ -1532,10 +1532,14 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         coverage["code_signature_slice_variance"] = list(variance)
     # Same rule-21 reason for the host-plugin surface (W5.6): the block
     # speaks for one export listing whenever the ARM64X slices disagree,
-    # and a consumer of the coverage block alone must see that.
-    if host_plugin_scope := metadata.get("host_plugin_scope"):
+    # and a consumer of the coverage block alone must see that. Unlike the
+    # signature keys above, these two live inside the host_plugin block
+    # rather than at the top level — one place to look for the fact — so
+    # they are read from there.
+    host_plugin = metadata.get("host_plugin") or {}
+    if host_plugin_scope := host_plugin.get("host_plugin_scope"):
         coverage["host_plugin_scope"] = host_plugin_scope
-    if host_plugin_variance := metadata.get("host_plugin_slice_variance"):
+    if host_plugin_variance := host_plugin.get("host_plugin_slice_variance"):
         coverage["host_plugin_slice_variance"] = list(host_plugin_variance)
     # A signature blob blint could not parse is a blind spot like any other:
     # declared in the gaps (stamped by _macho_security_properties), and here
