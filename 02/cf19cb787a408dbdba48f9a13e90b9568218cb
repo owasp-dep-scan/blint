@@ -1,0 +1,27 @@
+blint/lib/pe_constants.py
+  s_25b306b5a7494b::t_8f7bc74a31c123 114-117
+blint/lib/analysis.py
+  s_25b306b5a7494b::t_9db81f47bffe74 19
+tests/test_analysis.py
+  s_25b306b5a7494b::t_3c89578cd3737b 1269-1292
+tests/test_pe_constants.py
+  s_25b306b5a7494b::t_61f99c6a30088e 82-91
+blint/lib/checks.py
+  s_25b306b5a7494b::t_79ebebed59e514 95-98,102-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "02cf19cb787a408dbdba48f9a13e90b9568218cb",
+  "prompts": {},
+  "sessions": {
+    "s_25b306b5a7494b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c59208-db7f-4c58-a278-1ea3a23b67dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

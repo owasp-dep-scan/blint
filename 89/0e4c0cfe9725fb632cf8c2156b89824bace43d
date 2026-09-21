@@ -1,0 +1,25 @@
+blint/data/pe_host_plugin_contracts.yml
+  s_be4a6ad278f92a::t_9247691096694f 33-41
+blint/lib/binary.py
+  s_be4a6ad278f92a::t_9247691096694f 1535-1540,1542
+tests/test_pe_host_plugins.py
+  s_be4a6ad278f92a::t_07e7ce489bc079 647-745
+blint/data/rules.yml
+  s_be4a6ad278f92a::t_9247691096694f 302,308-309,320-321,332-333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "890e4c0cfe9725fb632cf8c2156b89824bace43d",
+  "prompts": {},
+  "sessions": {
+    "s_be4a6ad278f92a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ff64c36-3822-4501-a594-f3ce8590a96c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

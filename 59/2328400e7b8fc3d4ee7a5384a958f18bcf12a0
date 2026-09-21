@@ -1,0 +1,38 @@
+blint/lib/pe_dotnet.py
+  s_25b306b5a7494b::t_2eff3c20a3ea8f 770-774,781
+  s_25b306b5a7494b::t_19bb26ff093a69 196-208,210
+  s_25b306b5a7494b::t_10e9112711ab9f 714
+docs/METADATA.md
+  s_25b306b5a7494b::t_c546c49eb129f5 135
+blint/lib/cache.py
+  s_25b306b5a7494b::t_0e66b36e5ab62e 87-95
+tests/scripts/verify_dotnet_ground_truth.py
+  s_25b306b5a7494b::t_add47c1e5f08ca 48-53
+  s_25b306b5a7494b::t_da4825b6ac3edb 60-64
+tests/test_pe_dotnet.py
+  s_25b306b5a7494b::t_e9c5333380b57a 1243-1244,1246-1247,1252
+  s_25b306b5a7494b::t_79ca936526b101 1622-1626
+  s_25b306b5a7494b::t_727294db868d4a 1764-1807
+  s_25b306b5a7494b::t_2576e5f31faa84 185-188,206,212,218,289,302,305-306
+  s_25b306b5a7494b::t_9e3eb9217dd6ea 1245,1248
+  s_25b306b5a7494b::t_6d922745e14ccc 1200-1209
+  s_25b306b5a7494b::t_282d648abd12bc 1330-1332
+  s_25b306b5a7494b::t_ffdd4272008d39 303-304,307-313
+  s_25b306b5a7494b::t_b34820013b97dd 114-126,207,213,219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "592328400e7b8fc3d4ee7a5384a958f18bcf12a0",
+  "prompts": {},
+  "sessions": {
+    "s_25b306b5a7494b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c59208-db7f-4c58-a278-1ea3a23b67dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

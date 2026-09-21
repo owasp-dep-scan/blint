@@ -1,0 +1,33 @@
+docs/METADATA.md
+  s_25b306b5a7494b::t_333308691c4edd 149
+  s_25b306b5a7494b::t_34b374f86c15c4 151
+blint/lib/pe_layout.py
+  s_25b306b5a7494b::t_11ab6e2317d000 492-493
+  s_25b306b5a7494b::t_4544985bee5ed3 481-482
+  s_25b306b5a7494b::t_208ee3995bafcd 383-387
+  s_25b306b5a7494b::t_33fd8503012918 396-397,400-405
+  s_25b306b5a7494b::t_946e04c25268a0 468-475
+  s_25b306b5a7494b::t_fb3c3e5f19e56f 434-443
+  s_25b306b5a7494b::t_7c2106dfe0fc6f 327-333,338-339
+  s_25b306b5a7494b::t_1c6d81207d2ab9 418
+tests/test_pe_layout.py
+  s_25b306b5a7494b::t_94cfe546758e5e 17-21
+  s_25b306b5a7494b::t_03ba73e79cb239 229,231-232,235-240,246,251-254
+  s_25b306b5a7494b::t_bf4aef7c3e12d3 304-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd18c6e19daf6760a18f6f9aca834ed4d60ca0e6",
+  "prompts": {},
+  "sessions": {
+    "s_25b306b5a7494b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69c59208-db7f-4c58-a278-1ea3a23b67dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
