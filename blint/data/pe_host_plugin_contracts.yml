@@ -27,26 +27,34 @@
 #   network_provider           (NPGetCaps):                       5 DLLs
 #   time_provider              (TimeProvOpen):                    3 DLLs
 #   appcert                    (CreateProcessNotify):             0 DLLs
-#   credential_provider        (COM + registration string):      17 DLLs
+#   credential_provider        (COM + registration string):      16 DLLs
 #   audio_processing_object    (COM + registration string):       2 DLLs
 #
 # Two consequences of that measurement are load-bearing. First, bare COM
 # in-proc exports are on 45% of system32, so no rule keys on them alone:
 # the two COM contracts additionally require an in-binary reference to
 # their registration path ("Authentication\Credential Providers",
-# "AudioEngine\AudioProcessingObjects"), which 17 and 2 DLLs carry. Of the
-# 17, ten are credential providers confirmed in this machine's registry
-# (credprovs.dll, credprovslegacy.dll, SmartcardCredentialProvider.dll,
-# BioCredProv.dll, devicengccredprov.dll, FaceCredentialProvider.dll,
-# fidocredprov.dll, ngccredprov.dll, wlidcredprov.dll plus Parallels'
-# third-party TouchIDCredProv.dll), one is the credential-provider host
-# (credprovhost.dll), and six are logon-subsystem DLLs that reference the
-# registration namespace without being registered providers themselves
+# "AudioEngine\AudioProcessingObjects"), which 16 and 2 system32 DLLs
+# carry (path-shaped: the count above). Of the 16, eight are credential
+# providers confirmed in this machine's registry (credprovs.dll,
+# SmartcardCredentialProvider.dll, BioCredProv.dll, devicengccredprov.dll,
+# FaceCredentialProvider.dll, fidocredprov.dll, ngccredprov.dll,
+# wlidcredprov.dll), one is the credential-provider host (credprovhost.dll),
+# and seven are logon-subsystem DLLs that reference the registration
+# namespace without being registered providers themselves
 # (IoTAssignedAccessLockFramework, LockController, ngctasks, ngcutils,
 # SharedPCCSP, Windows.UI.Logon, wlansvc) - which is why the COM contracts
 # speak at informational severity and the finding text qualifies with
 # "when registered". Only the registry knows which CLSID is actually
-# registered; blint reads the binary.
+# registered; blint reads the binary. Recall, stated rather than
+# discovered: the 23 registered credential-provider CLSIDs on this machine
+# resolve to 15 distinct DLLs, of which the 8 above carry the registration
+# path in-binary - the other 7 have no such string (credprovslegacy.dll's
+# only mention of the phrase is its VERSIONINFO FileDescription, which is
+# a description, not a registration reference, and correctly yields no
+# contract). A third-party provider installed outside system32 is found
+# the same way when it self-registers: Parallels' TouchIDCredProv.dll
+# carries its full registration path and is detected with that evidence.
 #
 # Second, SpLsaModeInitialize is on every core logon protocol (msv1_0,
 # kerberos, schannel, wdigest, tspkg/TSpkg, pku2u, negoexts, cloudap,
@@ -244,11 +252,13 @@ contracts:
       distinguish them (1,443 of system32 export the COM pair), so this
       contract additionally requires an in-binary reference to the
       credential-provider registration path. DLLs built from the SDK
-      samples carry it in their self-registration scripts; the registered
-      system providers mostly do too (10 of 23 CLSIDs on the measurement
-      machine resolve to DLLs that do). Detection is therefore
-      evidence-gated and recall is partial by construction: an
-      unregistered-looking credential provider is invisible to this
+      samples carry it in their self-registration scripts; of the 15
+      distinct DLLs serving this machine's 23 registered credential-
+      provider CLSIDs, 8 carry the path in-binary (and Parallels'
+      third-party TouchIDCredProv.dll outside system32 does, detected
+      with that evidence). Detection is therefore evidence-gated and
+      recall is partial by construction: a credential provider that
+      carries no registration string in-binary is invisible to this
       contract, which is why the recall limit is stated here rather than
       left to be discovered.
 
