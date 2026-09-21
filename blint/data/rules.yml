@@ -34,6 +34,28 @@
   exe_types:
     - MachO
     - genericbinary
+- id: CHECK_TLS_CALLBACKS
+  title: TLS Callbacks Run Before Main
+  description: |
+    The binary registers TLS callbacks, which the Windows loader executes
+    during process and thread setup — before the application's `main` and
+    with no caller in the code. This is the PE sibling of the Objective-C
+    `+load` check: a legitimate hook (C runtimes, crash reporters and
+    anti-tamper schemes use it), but also the earliest code that runs in the
+    process, invisible to entry-point-based review, and a classic
+    persistence, anti-debug or environment-tamper point. The
+    `pre_main_execution` block in the metadata names the callbacks, states
+    whether the TLS directory and callback array are writable, and lists the
+    static initializers that also run before `main`. Review what these
+    callbacks initialize.
+  severity: info
+  exe_types:
+    - PE32
+    - PE64
+    # W3.1 (rule-15 exception): managed images used to hide from this rule
+    # under PE32/PE64; a TLS callback on a pure-IL image would be exactly
+    # the anomaly an info finding exists for, so the scope follows the type.
+    - dotnetbinary
 - id: CHECK_WX_SEGMENTS
   title: Writable and Executable Memory Segment
   description: |
@@ -115,8 +137,14 @@
     - genericbinary
     - x86_64-executable
     - x86_64-exec
-    - dotnetbinary
     - mips-executable
+    # W3.1 (rule-15 exception): dotnetbinary left the scope. has_canary on
+    # PE comes from native CRT marker symbols or the load-config guard
+    # flag; a pure-IL assembly carries neither by construction, so the
+    # rule's only possible verdict there was the false "not protected" —
+    # it fired on every benign managed DLL once exe_type moved. Mixed-mode
+    # native code inside managed images was never checked either (their
+    # exe_type was PE32/PE64), so no file that existed before loses a check.
 - id: CHECK_RPATH
   title: Avoid rpath and runpath
   description: |
@@ -140,7 +168,11 @@
   severity: medium
   exe_types:
     - genericbinary
-    - dotnetbinary
+    # W3.1 (rule-15 exception): dotnetbinary left the scope. RPATH/RUNPATH
+    # are ELF loader concepts; has_rpath is only ever set by the ELF path,
+    # so the check's only possible verdict on a managed PE was the false
+    # "no rpath" — it would have fired on every managed DLL once exe_type
+    # moved.
 - id: CHECK_VIRTUAL_SIZE
   title: Optimize binary virtual size
   description: |
@@ -157,6 +189,11 @@
   exe_types:
     - genericbinary
     - gobinary
+    # W3.1 review: this scope predates the packet and did not move, but
+    # the files reaching it did — managed PEs were PE32/PE64 and out of
+    # scope before W3.1 and are in scope now. Kept: virtual size is a
+    # format-independent fact and the check reads nothing native. Zero
+    # findings added across the managed corpus (no assembly near 30 MB).
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
@@ -168,6 +205,7 @@
     * Authenticity
     * Integrity
     * Timeliness
+    This check is catalog-aware (code_signature.scope) and its finding states which of three states it fired on: (1) an embedded signature blob that failed verification; (2) no embedded signature with a catalog lookup performed and negative against the supplied --catalog-dir directory — the only state from which "unsigned" is actually claimed; (3) an embedded signature whose signer could not be read. It does not fire when no catalog directory was supplied (catalog_lookup "not_performed") or when the catalog index was incomplete ("index_incomplete"): a catalog-signed file cannot be distinguished from an unsigned one without a directory, and "not found in the part of the index we built" is not "not signed".
   severity: high
   exe_types:
     - PE32
@@ -176,6 +214,123 @@
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
+- id: CHECK_SIGNATURE_NOT_TIMESTAMPED
+  title: Signature Not Timestamped
+  description: |
+    An Authenticode signature without a countersignature timestamp stops being verifiable the moment the signing certificate expires: without a timestamp there is no proof the signature existed while the certificate was valid, so the signature is only as durable as the certificate behind it. Short-lived certificates (some CAs issue certificates valid for days) make this a durability question rather than an exceptional one.
+    The check reports signatures that carry neither an RFC 3161 countersignature nor a legacy PKCS#9 countersignature. Nested signatures inherit the outer signature's timestamp, so a dual-signed binary is not double-counted. Validity relative to the timestamp is reported in the code_signature metadata; this rule is only about its absence.
+  severity: medium
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_WEAK_SIGNATURE_DIGEST
+  title: Weak Signature Digest
+  description: |
+    None of the Authenticode signatures embedded in this binary - including nested dual signatures - uses a modern digest (SHA-256 or stronger). SHA-1 and MD5 signature digests are susceptible to collision-based attacks that let an attacker substitute malicious content under a valid-looking signature.
+    Dual signing (a SHA-1 outer signature with a SHA-256 signature nested inside it) is the normal shape for software that must run on older Windows, and is deliberately not reported: the nested signature carries the modern digest. Only a binary with no modern digest anywhere in its signature list is flagged.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_SELF_SIGNED
+  title: Self-Signed Signature
+  description: |
+    This binary's Authenticode signature was made by a certificate that is its own root: no certificate authority stands behind the identity it states. Anyone can create such a certificate in minutes and name it however they like - "Microsoft Corporation" included - so a self-signed signature authenticates the file to itself and to nothing else.
+    Self-signing is common and legitimate for internal tools, test builds and installers signing their own components, which is why this is not a verdict on intent; it means the identity on the signature was never vouched for by anyone. Treat every identity claim on this binary (signer name, CompanyName, opus info) as self-asserted.
+    This check follows the code_signature signing_class verdict and stays silent when the signature walk was truncated, so a sample of the signature list never decides it.
+  severity: medium
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_SIGNATURE_UNKNOWN_ROOT
+  title: Signature Chain Outside Shipped Root Snapshot
+  description: |
+    This binary's signature chain ships all the way to a self-signed root certificate, and that root's SHA-256 fingerprint is not in blint's shipped root snapshot - the trusted root certificates hashed from a Windows machine's Root and AuthRoot stores at a recorded date and build (blint/data/pe_roots.yml). The chain anchors nowhere blint can name.
+    This is a statement about the file, not a trust verdict: blint performs no trust validation, consults no live certificate store and fetches no revocation data, so "outside the shipped snapshot" also covers roots created after the snapshot was taken. A signature whose chain stops below the root - the normal shape for Authenticode - is never reported here, because the blob not carrying a root says nothing about the root.
+    Combined with a self-signed signer or a certificate from a private CA, this is the shape of a signature that only pretends to a publisher identity.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_KERNEL_SIGNING_CLASS
+  title: Kernel-Mode Code Signing
+  description: |
+    The signature's certificate carries the kernel-mode code signing EKU (1.3.6.1.4.1.311.61.1.1): the binary is signed for execution as a kernel component (or claims to be). This is an informational posture finding, not a defect: kernel code runs with the operating system's privileges, so a kernel-signed binary is a high-value artifact for both legitimate drivers and abuse (the BYOVD pattern loads a legitimately signed but vulnerable driver).
+    blint derives the class from the certificate's EKU and shipped chain facts; it does not verify the signature's trust. See code_signature.signing_class.
+  severity: low
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_SIGNER_MISMATCH
+  title: Signature Signer Does Not Match Company Claim
+  description: |
+    The VERSIONINFO CompanyName claims a well-known publisher, but the Authenticode signature was made by a different identity - the shape of a signed-but-repurposed binary: someone re-signed the file with their own certificate and left the original version strings in place.
+    The comparison is deliberately one-directional and narrow. It fires only when the CompanyName claims a publisher from blint's identity table (blint/data/pe_publisher_identities.yml) whose tokens the signer does not carry. The reverse - a large publisher signing software whose CompanyName names an acquired brand or an upstream project (Microsoft signs the Sysinternals suite, the Python Software Foundation signs the OpenSSL DLLs it ships) - is normal and is never a finding: measured on a benign corpus, 152 of 178 files with both facts have differing names, and every one of them is legitimate. A signer/CompanyName pair outside the table is not arbitrated at all, because a name difference between two unknown identities is not evidence.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - dotnetbinary
+    - x86_64-executable
+    - x86_64-exec
+- id: CHECK_PRIVILEGED_HOST_PLUGIN
+  title: Privileged-Host Plugin Contract
+  description: |
+    This binary's export set satisfies the contract of a Windows extension point: a host process that loads the DLL automatically - once it is registered, which takes administrator rights exactly once - and keeps it loaded with no per-load prompt and no consent surface after the install. Each finding names the contract and the host: LSA security packages and password filters load into lsass.exe (SYSTEM, protected), print monitors and providers into spoolsv.exe (SYSTEM), time providers into the W32Time svchost (LocalService), network providers into winlogon (SYSTEM), Winsock service and namespace providers into every socket-using or name-resolving process, AppCert DLLs into every CreateProcess caller, credential providers into LogonUI.exe and Audio Processing Objects into audiodg.exe.
+    This is context for a reviewer, not an accusation: legitimate audio, print and authentication software looks exactly like this, which is why the severity is informational. The contract table (blint/data/pe_host_plugin_contracts.yml) is pinned against Microsoft's documentation with its hit counts measured over a full System32 before this rule shipped: bare COM in-proc exports are on 45% of System32 (1,443 DLLs) and never fire this rule alone; the two COM contracts (credential provider, APO) additionally require an in-binary reference to their registration path and report that evidence. An absent host_plugin block reads as "no plugin contract evidenced", never as "verified not a plugin": a binary whose export table blint could not read gets an export_table_unreadable degradation in analysis_coverage instead.
+    The scope covers gobinary and genericbinary alongside PE32/PE64/dotnetbinary, because exe_type is a language/toolchain label that overwrites the PE one: measured across tier-0 and tier-1, 3 of 177 Windows PE files land outside PE32/PE64 - node.exe on both architectures is labelled gobinary by the .rdata Go heuristic, and the MinGW build of ripgrep is genericbinary. A Go c-shared DLL exports named entry points like any other, so a scope of PE32/PE64 alone would silently exclude exactly the binaries an implant is most likely to be built as. CHECK_SIGNER_MISMATCH (W2.4) already carries gobinary for the same reason.
+  severity: info
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+    - gobinary
+    - genericbinary
+- id: CHECK_UNSIGNED_HOST_PLUGIN
+  title: Unsigned Privileged-Host Plugin
+  description: |
+    This binary satisfies a privileged-host plugin contract (see CHECK_PRIVILEGED_HOST_PLUGIN) and nothing vouches for it: the W2.4 signing class is unsigned (a performed, complete catalog lookup found no signature), self_signed (the signer vouches for itself) or unknown_root (the chain terminates outside the shipped root snapshot). Auto-loaded into a SYSTEM or protected host on every boot, installed once with admin rights, vouched for by nobody - this is the finding that matters in the plugin surface, because it is how an attacker's DLL becomes a permanent, invisible tenant of lsass.exe or spoolsv.exe.
+    The verdict follows signing_class exactly and stays silent when the class is undetermined (absent): blint's default invocation performs no catalog lookup, and absence of a determination is neither signed nor unsigned. Every plugin DLL on a stock System32 is Microsoft-signed, so this fires zero times on the benign system population.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+    - gobinary
+    - genericbinary
+- id: CHECK_LSA_PLUGIN
+  title: LSA Password Filter Plugin
+  description: |
+    This binary exports the LSA password filter / notification package contract (InitializeChangeNotify, PasswordChangeNotify or PasswordFilter): registered under HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Notification Packages, the LSA loads it into lsass.exe - SYSTEM and protected - and calls it with the account's plaintext password on every password change. This is the classic credential-capture implant surface: a password filter sees every password, in the clear, forever.
+    Only the password-filter exports fire this at high severity. SpLsaModeInitialize (the SSP/AP contract) deliberately does not: measured over a full System32 it is exported by every core logon protocol - msv1_0, kerberos, schannel, wdigest, TSpkg, pku2u, negoexts, cloudap and SFAPM, nine DLLs - and a high-severity finding on the operating system's own authentication stack would be the false-positive shape this lane has already paid for twice (W1.3, W2.4). That contract is reported by CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN. The narrowing and its measurement are recorded in blint/data/pe_host_plugin_contracts.yml.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+    - gobinary
+    - genericbinary
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |
@@ -266,54 +421,40 @@
     - PE32
     - PE64
     - dotnetbinary
-- id: CHECK_PAC
-  title: Missing ARM64 Pointer Authentication (PAC)
+- id: CHECK_BUILD_PATH_LEAK
+  title: Build Path Leaked in PDB Reference
   description: |
-    Pointer Authentication Code (PAC) is a security feature in ARMv8.3+ architectures that signs pointers (specifically return addresses) to protect against Return-Oriented Programming (ROP) attacks.
-    This binary does not appear to have PAC enabled. Ensure the binary is compiled with `/guard:signret` (MSVC) or `-mbranch-protection=pac-ret` (Clang/GCC).
-  severity: info
-  property_key: pac
+    The binary's debug directory references a PDB through an absolute
+    build-machine path, publishing the build agent's directory tree with the
+    shipped artifact. CI runs leak usernames, hostnames and internal layout
+    this way (`D:\a\1\b\...` is Azure DevOps' work tree,
+    `C:\Users\<name>\...` names the developer), which is provenance an
+    attacker can use for reconnaissance or social engineering, and a
+    reliable clustering key for tracking a vendor's builds.
+
+    Fix the leak at the source: link with `/PDBALTPATH:%_PDB%` so the image
+    stores a bare filename, or strip the debug directory from release
+    builds. A relative path or a bare filename leaks no directory structure
+    and is not reported.
+  severity: low
   exe_types:
     - PE32
     - PE64
-- id: CHECK_PAC_STRICT
-  title: Missing Strict Pointer Authentication Enforcement
-  description: |
-    The binary has PAC enabled but lacks "Strict" enforcement. Strict enforcement (`/guard:signret` + compatibility mode disabled) ensures the OS loader refuses to run the binary on hardware that does not support PAC, providing a "fail-closed" security guarantee.
-  severity: info
-  property_key: pac_strict
-  exe_types:
-    - PE32
-    - PE64
-- id: CHECK_XFG
-  title: Missing Extended Flow Guard (XFG)
-  description: |
-    Extended Flow Guard (XFG) provides stricter Forward-Edge Control Flow Integrity than standard CFG. It validates not just the target address but also the function signature hash, reducing the gadget space for attackers.
-    Enable with `/guard:xfg`.
-  severity: info
-  property_key: xfg
-  exe_types:
-    - PE32
-    - PE64
-- id: CHECK_CET
-  title: Missing Shadow Stack (Intel CET)
-  description: |
-    Intel Control-flow Enforcement Technology (CET) Shadow Stack protects return addresses from being overwritten on the stack (classic buffer overflows).
-    Enable with `/cetcompat`.
-  severity: info
-  property_key: cet_shadow_stack
-  exe_types:
-    - PE32
-    - PE64
-- id: CHECK_ENCLAVE
-  title: Binary not configured for Enclave
-  description: |
-    The binary is not marked as an Enclave application (SGX/VBS). If this application handles high-value secrets (keys, identity tokens), consider moving sensitive logic to a Trusted Execution Environment.
-  severity: info
-  property_key: enclave
-  exe_types:
-    - PE32
-    - PE64
+    - dotnetbinary
+# CHECK_PAC, CHECK_PAC_STRICT, CHECK_XFG, CHECK_CET and CHECK_ENCLAVE were
+# removed in the W0.3 rewrite (PE-lane A.3, verification finding V4). All five
+# fired "missing <feature>" findings on nearly every PE — including every
+# stock Microsoft-signed binary in the benign corpus and files blint could not
+# even parse as PE — because their properties were read as False whenever
+# omitted. The underlying properties are now computed from their named sources
+# in security_properties (GuardFlags bit decode for cfg/xfg/rfg, the
+# EX_DLLCHARACTERISTICS debug entry for cet_shadow_stack, the load
+# configuration's enclave pointer for enclave presence), and no PE source
+# exists at all for PAC — the GuardFlags RF bits are Return Flow Guard, not
+# pointer authentication, and no Windows toolchain flag records PAC in a PE.
+# An always-firing advisory on an opt-in feature is noise (ground rule 27);
+# posture questions are answered by the metadata, and better-scoped rules can
+# return with the driver/HVCI work (W5.2).
 - id: CHECK_LIBC_PORTABILITY
   title: Depends on C Library Implementation Internals
   description: |
@@ -405,10 +546,18 @@
     - x86_64-exec
     - MachO
     - mips-executable
+    # W3.2: a managed binary's used/declared sets are its P/Invoke surface
+    # and its ImplMap scopes — inputs W3.1 first read and this packet wires
+    # into the dependency graph, so the check now evaluates managed images
+    # on evidence instead of being out of scope for them. A DllImport scope
+    # is itself the declaration, so a pure-IL assembly computes clean; the
+    # shape that can fire is a used native library the managed metadata
+    # never declared (mixed-mode images with an import table).
+    - dotnetbinary
 - id: CHECK_PACKED
   title: Binary Shows Packing Evidence
   description: |
-    The binary carries evidence consistent with packing or self-encryption: a packer-specific section signature (UPX, Themida, VMProtect and friends), high-entropy executable sections combined with a minimal import table, or a file overlay past the last section.
+    The binary carries evidence consistent with packing or self-encryption: a packer-specific section signature (UPX, Themida, VMProtect and friends), high-entropy executable sections combined with a minimal import table, or an unclassifiable high-entropy file overlay past the last section that another packing signal corroborates.
     Packers exist for legitimate reasons - software protection, game anti-cheat - but they are also the single most common way malware hides its real code from static analysis. A packed binary defeats string-based reviews, symbol matching and most of the disassembly pipeline, so every finding in this report should be read as incomplete until the binary is unpacked.
     Review the packing evidence in the `entropy` block of the metadata, confirm the binary's provenance, and unpack it (for example with `upx -d` when UPX is identified) before drawing security conclusions from the analysis.
   severity: warning
@@ -419,3 +568,11 @@
     - MachO
     - PE32
     - PE64
+    # W3.1 review: managed images must stay in scope. The evidence is
+    # section entropy, packer section signatures and the overlay — all
+    # computed for any PE, none of them native-only — and a packed or
+    # obfuscator-protected .NET assembly is one of the commonest hostile
+    # managed shapes there is. Moving managed files to dotnetbinary took
+    # this check away from them silently; restoring the scope costs
+    # nothing, as all 62 managed corpus files score packed_likelihood low.
+    - dotnetbinary

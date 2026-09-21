@@ -1,0 +1,163 @@
+---
+text: Review for the managed (.NET) capability surface
+group: IMPORT_REVIEWS
+url:
+  documentation: https://learn.microsoft.com/en-us/dotnet/standard/security/
+exe_type:
+  - dotnetbinary
+binary_type: PE
+rules:
+  - id: DOTNET_IN_MEMORY_ASSEMBLY_LOAD
+    title: Managed assembly loaded from raw bytes
+    summary: Can load and execute an assembly that never exists on disk
+    description: |
+      The assembly references System.Reflection.Assembly.Load (or AppDomain.Load /
+      MetadataLoadContext), which turns a byte array into executable code at
+      runtime. Nothing in the image, the dependency list or the SBOM ever names
+      what was loaded, which is why in-memory loading is the standard delivery
+      step for fileless .NET malware and a common way to hide a second-stage
+      from a scan of the install directory. Legitimate uses exist - plugin
+      systems, resource-embedded assemblies, test harnesses - so read this
+      beside the string literals: an assembly image base64-blob or a
+      byte-array-decrypt pattern next to it is worth escalating.
+    severity: low
+    # Measured on the benign managed tier (W2.4 discipline): 2 of 60
+    # tier-2 assemblies reference it, both serializer/plugin
+    # infrastructure. High severity here would be an FP generator.
+    patterns:
+      - assembly::load
+      - appdomain::load
+      - metadataloadcontext
+  - id: DOTNET_UNMANAGED_MEMORY_ACCESS
+    title: Unmanaged memory access through Marshal
+    summary: Reads and writes process memory directly, bypassing managed safety
+    description: |
+      The assembly references System.Runtime.InteropServices.Marshal members that
+      hand out raw pointers or move bytes through unmanaged memory
+      (AllocHGlobal, Read/Write*, PtrToStructure, GetFunctionPointerForDelegate).
+      This is the managed path to the same primitives an exploit uses: corrupt a
+      vtable, forge a delegate over shellcode, patch a method's compiled entry.
+      Interop libraries do this legitimately, which is why the rule exists as a
+      capability signal rather than a verdict - a utility library that also
+      loads assemblies from memory or resolves P/Invoke entry points by
+      pattern is a different animal from a line-of-business app.
+    severity: low
+    # Measured: 1 of 60 tier-2 assemblies (System.Text.Json, via
+    # MemoryMarshal::Read) and 2 of 2 tier-5 managed C++/CLI interop
+    # libraries (Marshal::AllocHGlobal is what an interop library does).
+    patterns:
+      - marshal::allochglobal
+      - marshal::alloccotaskmem
+      - marshal::getfunctionpointerfordelegate
+      - marshal::getdelegateforfunctionpointer
+      - marshal::ptrtostructure
+      - marshal::structuretoptr
+      - marshal::read
+      - marshal::write
+      - marshal::copy
+  - id: DOTNET_RUNTIME_CODEGEN
+    title: Runtime code generation through reflection emit
+    summary: Can generate IL and new types while running
+    description: |
+      The assembly references System.Reflection.Emit (DynamicMethod, ILGenerator,
+      AssemblyBuilder) and can compile new IL at runtime. Codegen defeats
+      static review of the emitted behavior by construction - the IL that
+      runs is not the IL that shipped - and it is half of every .NET
+      packer/protector and of delegates-over-shellcode loaders. Serializers,
+      mocking libraries and ORMs emit IL legitimately; the signal to weigh is
+      what else the assembly can do.
+    severity: low
+    # Measured: 3 of 60 tier-2 assemblies, and all three (Newtonsoft.Json,
+    # Serilog, System.Text.Json) are the canonical legitimate IL emitters.
+    patterns:
+      - dynamicmethod
+      - ilgenerator
+      - assemblybuilder
+      - methodbuilder
+      - system.reflection.emit
+  - id: DOTNET_PROCESS_START
+    title: Process execution through System.Diagnostics.Process
+    summary: Can start another process with arguments it controls
+    description: |
+      The assembly references Process.Start (or builds ProcessStartInfo), the
+      managed shell-exec primitive. Dropped as a capability this is routine;
+      the risk is the argument source - a process started with a URL, a
+      document path or a decoded string literal is command injection waiting
+      for the input. Correlate with the assembly's string literals.
+    severity: medium
+    # Measured: 0 of 60 tier-2, 0 of 2 tier-5 managed files.
+    patterns:
+      - process::start
+      - processstartinfo
+  - id: DOTNET_HTTP_DOWNLOAD
+    title: HTTP client capability
+    summary: Can make outbound HTTP(S) connections
+    description: |
+      The assembly references WebClient, HttpClient or HttpWebRequest. Every
+      loader needs this and so does every line-of-business app, so on its own
+      it is a capability fact: the image can reach the network. Combined with
+      in-memory assembly loading it is a download-and-execute chain; combined
+      with hardcoded destinations in the string literals it names its own
+      command-and-control.
+    severity: medium
+    # Measured: 0 of 60 tier-2, 0 of 2 tier-5 managed files.
+    patterns:
+      - webclient
+      - httpclient
+      - httpwebrequest
+      - ftpwebrequest
+  - id: DOTNET_WMI_QUERY
+    title: WMI query capability
+    summary: Can query or subscribe to Windows Management Instrumentation
+    description: |
+      The assembly references System.Management (ManagementObjectSearcher,
+      ManagementEventWatcher) or carries WQL in its string literals. WMI is the
+      quietest way for a Windows implant to enumerate hosts, persist through
+      the event subsystem and move laterally, and it leaves no import-table
+      trace a native-only scanner would see. Inventory scripts use it too;
+      the queries in the string literals tell which.
+    patterns:
+      - managementobjectsearcher
+      - managementeventwatcher
+      - managementclass
+      - system.management
+      - from win32_
+  - id: DOTNET_CRYPTO_KEY_STORAGE
+    title: DPAPI and crypto key storage
+    summary: Protects or unlocks data with DPAPI or CSP key containers
+    description: |
+      The assembly references ProtectedData or CspParameters (or resolves
+      CryptProtectData through P/Invoke): the Windows data-protection and
+      machine/user key-container surfaces. Ransomware and credential thieves
+      use the same APIs as password managers and licensed software - DPAPI
+      both locks victims' files and unlocks browser-stored credentials, so
+      the direction of use matters and the string literals usually say which.
+    severity: medium
+    # Measured: 0 of 60 tier-2, 0 of 2 tier-5 managed files.
+    patterns:
+      - cspparameters
+      - protecteddata
+      - cryptprotectdata
+      - cryptunprotectdata
+  - id: DOTNET_REGISTRY_ACCESS
+    title: Windows registry access
+    summary: Can read or write the Windows registry
+    description: |
+      The assembly references Microsoft.Win32.Registry (or resolves advapi32
+      registry APIs through P/Invoke). Registry writes are how managed
+      malware persists (Run keys, COM hijacks, service registration) and how
+      ordinary software stores settings, so the rule is a capability fact to
+      weigh beside the key paths that appear in the string literals - an
+      assembly that can write the registry and names a Run key is a
+      persistence stage.
+    severity: low
+    # Measured: 0 of 60 tier-2, 0 of 2 tier-5 managed files — but registry
+    # access is ubiquitous in real desktop applications, so this stays a
+    # capability fact, not a warning.
+    patterns:
+      - microsoft.win32.registry
+      - registrykey
+      - regopenkeyex
+      - regqueryvalueex
+      - regcreatekeyex
+      - regsetvalueex

@@ -43,6 +43,40 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `severity` (Optional): Can be used to categorize the rule's output (e.g., `critical`, `high`, `medium`, `low`, `info`). This might influence reporting or filtering.
 - `category` (Optional): A free-form grouping label carried through to the finding (e.g., `privacy-fingerprint`, `privacy-tracking`, `privacy-sidechannel`, `privacy-access`, `privacy-posture`). When any review in a run carries a category, blint adds a `Category` column to the capability table so related findings (such as the iOS privacy rules) group together; the value is also emitted in the JSON report.
 
+## Security Check Rules (built-in `rules.yml`)
+
+Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
+YAML carries the fields a check function evaluates: `mandatory_values`
+(matched against the structured `dll_characteristics` flags), `allowed_values`
+(manifest comparison), `property_key` (a `security_properties` key — the rule
+fires only when the key was **computed** and is not `true`; an omitted key
+means the source was absent, which is never a failure), `limit` /
+`baseline_version` (thresholds), and `exe_types`. Custom rules files can extend
+these; ids must not collide with built-ins.
+
+- `exe_types` is a scope declaration: a rule only runs on files whose resolved
+  `exe_type` is in the list. A file whose type could not be resolved (an
+  unparseable input, a `.cat` or `.zip` archive) is outside every declared
+  scope and fires none of them.
+- `machine_types` (Optional): A list of PE machine-type names (`ARM64`,
+  `ARM64EC`, `ARM64X`, `AMD64`, `I386`, …) the rule applies to. **Absent means
+  "all machine types"**, so existing rules behave unchanged. The binary's
+  machine resolves through blint's own PE-spec table (`blint/lib/pe_constants.py`)
+  from the numeric `machine_type_value` in the metadata — never through a
+  dependency's enum rendering — and a binary whose machine cannot be resolved
+  never fires a machine-gated rule. Use this for architecture-specific
+  hardware features (an ARMv8.3-only control must not fire on x86-64).
+
+Removed in W0.3 (PE-lane A.3): `CHECK_PAC`, `CHECK_PAC_STRICT`, `CHECK_XFG`,
+`CHECK_CET` and `CHECK_ENCLAVE`. Each fired "missing <feature>" findings on
+nearly every PE — including every stock Microsoft-signed binary — because the
+underlying properties were opt-in features whose absence was read as a
+failure. The properties live on in `security_properties`, computed from their
+named sources (`GuardFlags` bit decode, the EX_DLLCHARACTERISTICS debug entry,
+the enclave configuration pointer); PAC has no PE source at all, so the PE
+`security_properties` block deliberately omits it. Better-scoped rules can
+return with the driver/HVCI work.
+
 ## Sample Rules
 
 Here are examples demonstrating different rule types:

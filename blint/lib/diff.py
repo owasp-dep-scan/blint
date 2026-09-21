@@ -82,6 +82,36 @@ HARDENING_POLARITY: dict[str, str] = {
     "get_task_allow": "risk",
     "packed": "risk",
     "stripped": "observe",
+    # PE-lane A.3 properties: every hardening control the PE rewrite computes
+    # from a named source, plus the architecture facts and the debug-info
+    # posture, which inform but do not protect.
+    "aslr": "hardening",
+    "high_entropy_va": "hardening",
+    "dep": "hardening",
+    "seh": "hardening",
+    "safe_seh": "hardening",
+    "gs_canary": "hardening",
+    "cfg": "hardening",
+    "control_flow_guard": "hardening",
+    "forward_edge_cfi": "hardening",
+    "xfg": "hardening",
+    "cast_guard": "hardening",
+    "safe_delay_load": "hardening",
+    "cfg_export_suppression": "hardening",
+    "cet_shadow_stack": "hardening",
+    "cet_shadow_stack_strict": "hardening",
+    "rfg": "hardening",
+    "retpoline": "hardening",
+    "force_integrity": "hardening",
+    "enclave": "hardening",
+    "arm64ec": "observe",
+    "arm64x": "observe",
+    "debug_info": "observe",
+    "debug_info_pdb_path": "observe",
+    # A scope change (embedded → catalog, once W2.3 resolves it) is worth
+    # reporting but is not itself a loss of protection; ``is_signed`` carries
+    # the hardening polarity.
+    "authenticode_scope": "observe",
 }
 
 # ``relro`` is the one ordered security value: any step down the rank is a

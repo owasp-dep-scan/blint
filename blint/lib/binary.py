@@ -169,6 +169,7 @@ from blint.lib.binary_pe import (  # noqa: F401
     add_pe_metadata,
     add_pe_optional_headers,
     add_rdata_symbols,
+    construct_pe_security_properties,
     parse_pe_authenticode,
     parse_pe_data,
     parse_pe_exceptions,
@@ -221,6 +222,19 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.pe_host_plugins import classify_host_plugins
+from blint.lib.pe_imports import (  # noqa: F401
+    apiset_host,
+    delay_import_hash,
+    forwarder_target,
+    ordinal_name,
+    parse_pe_delay_imports,
+    summarize_resolution,
+)
+from blint.lib.pe_layout import (  # noqa: F401
+    parse_pe_layout,
+    parse_pre_main_execution,
+)
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
 from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
@@ -370,10 +384,20 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
         str: A string representing the LLVM target tuple.
     """
     if metadata.get("is_dotnet"):
-        if metadata.get("exe_type") == "PE32":
-            arch = "i686"
-        else:
-            arch = "x86_64"
+        # The architecture comes from the machine type, not from exe_type:
+        # a managed image is dotnetbinary whatever its PE format width or
+        # ISA is (W3.1 moved managed files out of PE32/PE64, which used to
+        # decide this aggregate — the same tuple, now computed from the
+        # fact that actually names the machine).
+        machine_type = (metadata.get("machine_type") or "").upper()
+        arch = {
+            "I386": "i686",
+            "AMD64": "x86_64",
+            "ARM": "arm",
+            "ARMNT": "arm",
+            "AARCH64": "aarch64",
+            "ARM64": "aarch64",
+        }.get(machine_type, "x86_64")
         return f"{arch}-pc-windows-msvc"
     vendor = "unknown"
     os_str = "unknown"
@@ -549,6 +573,15 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
     """Constructs a summary of security mitigations."""
     if isinstance(parsed_obj, lief.MachO.Binary):
         properties = _macho_security_properties(metadata, parsed_obj)
+    elif isinstance(parsed_obj, lief.PE.Binary):
+        # PE: each property from its named source, omitted rather than
+        # guessed when the source is absent (A.3/V4); the PE-specific body
+        # lives with the rest of the PE parsing.
+        properties, gaps = construct_pe_security_properties(
+            metadata, parsed_obj, metadata["file_path"]
+        )
+        if gaps:
+            metadata["security_properties_gaps"] = gaps
     else:
         properties = {
             "nx": metadata.get("has_nx", False),
@@ -561,49 +594,6 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
             "stripped": not metadata.get("static", False),
             "is_signed": bool(metadata.get("signatures")),
         }
-    if isinstance(parsed_obj, lief.PE.Binary):
-        if dll_chars := metadata.get("dll_characteristics", ""):
-            properties["aslr"] = "DYNAMIC_BASE" in dll_chars
-        if parsed_obj.has_configuration:
-            try:
-                lc = parsed_obj.load_configuration
-                flags = lief.PE.LoadConfiguration.IMAGE_GUARD
-                if lc.has(flags.CF_INSTRUMENTED):
-                    properties["control_flow_guard"] = True
-                    properties["forward_edge_cfi"] = True
-                    if lc.has(flags.CF_ENABLE_EXPORT_SUPPRESSION):
-                        properties["cfg_export_suppression"] = True
-                if lc.has(flags.XFG_ENABLED):
-                    properties["xfg"] = True
-                    properties["forward_edge_cfi"] = True
-                machine_type = parsed_obj.header.machine
-                is_arm64 = machine_type in [
-                    lief.PE.Header.MACHINE_TYPES.ARM64,
-                    lief.PE.Header.MACHINE_TYPES.ARM64EC,
-                    lief.PE.Header.MACHINE_TYPES.ARM64X,
-                ]
-                if is_arm64 and lc.has(flags.RF_INSTRUMENTED):
-                    properties["pac"] = True
-                    properties["backward_edge_cfi"] = True
-                    if lc.has(flags.RF_STRICT):
-                        properties["pac_strict"] = True
-                if lc.has(flags.EH_CONTINUATION_TABLE_PRESENT):
-                    properties["cet_shadow_stack"] = True
-                    properties["backward_edge_cfi"] = True
-                if lc.has(flags.RETPOLINE_PRESENT):
-                    properties["retpoline"] = True
-                if lc.has(flags.CASTGUARD_PRESENT):
-                    properties["cast_guard"] = True
-                if lc.has(flags.PROTECT_DELAYLOAD_IAT):
-                    properties["safe_delay_load"] = True
-                if lc.se_handler_count is not None and lc.se_handler_count > 0:
-                    properties["safe_seh"] = True
-                if not lc.has(flags.SECURITY_COOKIE_UNUSED):
-                    properties["canary"] = True
-                if lc.enclave_configuration_ptr and lc.enclave_configuration_ptr != 0:
-                    properties["enclave"] = True
-            except (AttributeError, Exception) as e:
-                LOG.debug(f"Error analyzing security properties from LoadConfig: {e}")
     return properties
 
 
@@ -1281,8 +1271,42 @@ def parse(
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
         # for those formats.
+        # W3.2: a managed assembly's real string literals live in its #US
+        # heap and are moved out of the dotnet block when it read them —
+        # the byte-level scan finds only noise on a pure-IL image (two
+        # strings in a 700 KB assembly). The scan is unioned in behind the
+        # heap literals rather than dropped: on a mixed-mode C++/CLI image
+        # the native code carries strings the heap knows nothing about,
+        # and replacing would silently discard them. A heap blint could
+        # not walk leaves the block without the key and the scan below
+        # stays the fallback, so an unwalkable heap never reads as "this
+        # assembly has no strings" (ground rule 14).
+        dotnet_block = metadata.get("dotnet") or {}
+        if "strings" in dotnet_block:
+            heap_strings = dotnet_block.pop("strings")
+            scanned = parse_strings(parsed_obj)
+            if scanned:
+                seen_values = {s["value"] for s in heap_strings}
+                metadata["strings"] = heap_strings + [
+                    s for s in scanned if s["value"] not in seen_values
+                ]
+                metadata["strings_source"] = "user_strings_heap+binary_scan"
+            else:
+                metadata["strings"] = heap_strings
+                metadata["strings_source"] = "user_strings_heap"
         if "strings" not in metadata:
             metadata["strings"] = parse_strings(parsed_obj)
+        # W5.6: the privileged-host plugin surface (04/F) - which plugin
+        # contracts the export set satisfies and the host each loads into.
+        # An interpretation of already-parsed facts (the export listings and
+        # the section bytes for registration references), computed here
+        # because the block reads the finalized metadata as a whole. Absent
+        # when no contract matched - never an empty block that would read
+        # as "not a plugin"; an unreadable export table is named through
+        # exports_read_status in analysis_coverage instead.
+        if isinstance(parsed_obj, lief.PE.Binary):
+            if host_plugin_block := classify_host_plugins(metadata, parsed_obj):
+                metadata["host_plugin"] = host_plugin_block
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
         metadata["import_dependencies"] = analyze_import_deps(metadata)
@@ -1302,7 +1326,13 @@ def parse(
             _file_size = None
             with contextlib.suppress(OSError):
                 _file_size = os.path.getsize(exe_file)
-            metadata["entropy"] = analyze_binary_entropy(parsed_obj, _file_size)
+            # For PE the overlay numbers come from the classified residue
+            # (certificate table subtracted, pe_overlay), so the packing
+            # analysis never counts a signature as overlay evidence (V3).
+            pe_overlay = metadata.get("overlay_info") if isinstance(parsed_obj, lief.PE.Binary) else None
+            metadata["entropy"] = analyze_binary_entropy(
+                parsed_obj, _file_size, pe_overlay=pe_overlay
+            )
             if packing := metadata["entropy"].get("packing"):
                 metadata["security_properties"]["packed"] = packing.get("packed_likelihood") in (
                     "high",
@@ -1348,6 +1378,13 @@ def parse(
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             attach_function_hashes(metadata.get("disassembled_functions"))
+            if isinstance(parsed_obj, lief.PE.Binary) and metadata.get("pre_main_execution"):
+                # W1.4: with disassembly available, the pre-main summary
+                # refreshes so the anti-debug reachability fact can read the
+                # callbacks' call targets.
+                metadata["pre_main_execution"] = parse_pre_main_execution(
+                    parsed_obj, metadata
+                )
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             # String literals a binary assembles on its stack are invisible to
@@ -1436,6 +1473,11 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         degradations.append("disassembly_unavailable")
     if metadata.get("is_encrypted"):
         degradations.append("fairplay_encrypted")
+    # W5.6: an export directory lief could not read is a named blind spot -
+    # the host-plugin contracts are export-keyed, so the gap must reach the
+    # coverage block rather than reading as "not a plugin" (rules 14/32).
+    if metadata.get("exports_read_status") == "failed":
+        degradations.append("export_table_unreadable")
     if (metadata.get("link_hygiene") or {}).get("attribution_status") == "unresolved":
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
@@ -1488,11 +1530,32 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         coverage["code_signature_scope"] = scope
     if variance := metadata.get("code_signature_slice_variance"):
         coverage["code_signature_slice_variance"] = list(variance)
+    # Same rule-21 reason for the host-plugin surface (W5.6): the block
+    # speaks for one export listing whenever the ARM64X slices disagree,
+    # and a consumer of the coverage block alone must see that. Unlike the
+    # signature keys above, these two live inside the host_plugin block
+    # rather than at the top level — one place to look for the fact — so
+    # they are read from there.
+    host_plugin = metadata.get("host_plugin") or {}
+    if host_plugin_scope := host_plugin.get("host_plugin_scope"):
+        coverage["host_plugin_scope"] = host_plugin_scope
+    if host_plugin_variance := host_plugin.get("host_plugin_slice_variance"):
+        coverage["host_plugin_slice_variance"] = list(host_plugin_variance)
     # A signature blob blint could not parse is a blind spot like any other:
     # declared in the gaps (stamped by _macho_security_properties), and here
     # as a degradation so a thin result can never read as "no entitlements".
     if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
         degradations.append("code_signature_parse_failed")
+        coverage["degradations"] = sorted(degradations)
+    # Same rule-32 reason for managed metadata (W3.1): a CLI header blint
+    # found but could not fully read must not read as a clean native file,
+    # and a partially-read table stream must not read as "no AssemblyRefs".
+    dotnet_parse_status = (metadata.get("dotnet") or {}).get("parse_status")
+    if dotnet_parse_status == "partial":
+        degradations.append("dotnet_metadata_partial")
+        coverage["degradations"] = sorted(degradations)
+    elif dotnet_parse_status == "malformed":
+        degradations.append("dotnet_metadata_malformed")
         coverage["degradations"] = sorted(degradations)
     # Per-slice accounting for universal binaries. A slice whose
     # summary failed is a unit like any other: isolated, counted, and named —
@@ -1553,19 +1616,14 @@ def analyze_import_deps(metadata: dict) -> dict:
     }
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
-        for imp_entry in metadata.get("imports", []):
-            full_name = imp_entry.get("name", "")
-            if "::" in full_name:
-                lib_name, func_name = full_name.split("::", 1)
-            else:
-                continue
+        def _add_pe_dependency(lib_name: str, func_name: str) -> None:
+            """Record one import-table-shaped dependency edge."""
             if lib_name not in dep_graph["libraries"]:
                 dep_graph["libraries"][lib_name] = {
                     "type": "imported",
                     "imported_symbols": [],
                     "imported_from": [],
                 }
-
             if func_name not in dep_graph["libraries"][lib_name]["imported_symbols"]:
                 dep_graph["libraries"][lib_name]["imported_symbols"].append(func_name)
             dep_exists = False
@@ -1582,6 +1640,39 @@ def analyze_import_deps(metadata: dict) -> dict:
 
             if lib_name not in dep_graph["libraries"][main_binary_name]["imported_from"]:
                 dep_graph["libraries"][main_binary_name]["imported_from"].append(lib_name)
+
+        for imp_entry in metadata.get("imports", []):
+            full_name = imp_entry.get("name", "")
+            if "::" in full_name:
+                lib_name, func_name = full_name.split("::", 1)
+            else:
+                continue
+            _add_pe_dependency(lib_name, func_name)
+        # W3.2: a managed assembly's P/Invoke surface is a dependency edge
+        # the import table never carries. The ModuleRef scope is the DLL,
+        # the entry point the native export it must provide.
+        for pinvoke_entry in (metadata.get("dotnet") or {}).get("pinvoke") or []:
+            lib_name = pinvoke_entry.get("module") or ""
+            func_name = pinvoke_entry.get("entry_point") or ""
+            if not lib_name or not func_name:
+                continue
+            _add_pe_dependency(lib_name, func_name)
+        # W1.2: export forwarders name DLLs the loader must map even though
+        # no import-table entry does. They are dependencies of a distinct
+        # kind — recorded so the graph is complete, and typed apart from
+        # "imported" so link hygiene never reads them as symbol suppliers.
+        for target in metadata.get("forwarder_targets") or []:
+            if target == main_binary_name:
+                continue
+            if target not in dep_graph["libraries"]:
+                dep_graph["libraries"][target] = {
+                    "type": "forwarder_target",
+                    "imported_symbols": [],
+                    "imported_from": [],
+                }
+            dep_graph["dependencies"].append(
+                {"from": main_binary_name, "to": target, "symbols": []}
+            )
     else:
         all_potential_imports = metadata.get("symtab_symbols", []) + metadata.get(
             "dynamic_symbols", []

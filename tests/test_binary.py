@@ -3526,3 +3526,332 @@ def test_add_derived_attributes_omits_unrecoverable_go_version():
     assert "go_version" not in add_derived_attributes(metadata, None)["build_info"]
     metadata["go_formulation"]["go_version"] = "go1.27.1"
     assert add_derived_attributes(metadata, None)["build_info"]["go_version"] == "go1.27.1"
+
+
+def _pe64_image(machine: int = 0x8664, dll_characteristics: int = 0, subsystem: int = 3) -> bytes:
+    """A minimal PE32+ image with parameterized COFF machine, subsystem and
+    DLL characteristics, for assertions against blint's own decoders."""
+    dos = bytearray(0x80)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x80)
+    coff = struct.pack("<HHIIIHH", machine, 2, 0, 0, 0, 0xF0, 0x0022)
+    optional = bytearray(0xF0)
+    struct.pack_into("<H", optional, 0, 0x20B)  # PE32+ magic
+    struct.pack_into("<I", optional, 32, 4)
+    struct.pack_into("<III", optional, 36, 0x200000, 0x100000, 0x200000)
+    struct.pack_into("<H", optional, 68, subsystem)
+    struct.pack_into("<H", optional, 70, dll_characteristics)
+    struct.pack_into("<I", optional, 92, 16)  # numberOfRvaAndSizes
+    return b"".join([bytes(dos), b"PE\x00\x00", coff, bytes(optional)]).ljust(0x400, b"\x00")
+
+
+def test_parse_pe_dll_characteristics_structured_block(tmp_path):
+    # V1: the bitfield decodes through blint's PE-spec table; the value 352
+    # is the tier-0 python313.dll bitfield LIEF 1.0 rendered as integers.
+    exe_file = tmp_path / "hardened.exe"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=352))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"] == {
+        "value": 352,
+        "flags": ["HIGH_ENTROPY_VA", "DYNAMIC_BASE", "NX_COMPAT"],
+        "source": "optional_header",
+    }
+    # Compat alias: joined form of flags under the long-standing key.
+    assert metadata["dll_characteristics"] == "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT"
+    assert metadata["machine_type"] == "AMD64"
+    assert metadata["machine_type_value"] == 0x8664
+    assert metadata["subsystem"] == "WINDOWS_CUI"
+    assert metadata["subsystem_value"] == 3
+    # aslr no longer contradicts is_pie on a DYNAMIC_BASE image (V1).
+    assert metadata["security_properties"]["aslr"] is True
+    assert metadata["security_properties"]["pie"] is True
+
+
+def test_parse_pe_dll_characteristics_absent_flags(tmp_path):
+    exe_file = tmp_path / "nosec.exe"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=0))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"] == {
+        "value": 0,
+        "flags": [],
+        "source": "optional_header",
+    }
+    assert metadata["dll_characteristics"] == ""
+    assert metadata["security_properties"]["aslr"] is False
+
+
+def test_parse_pe_dll_characteristics_wdm_driver(tmp_path):
+    exe_file = tmp_path / "wdm.sys"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=0x2000, subsystem=1))
+    metadata = parse(str(exe_file))
+
+    assert metadata["dll_characteristics_structured"]["flags"] == ["WDM_DRIVER"]
+    assert metadata["is_driver"] is True
+    assert metadata["subsystem"] == "NATIVE"
+    assert metadata["subsystem_value"] == 1
+
+
+def test_parse_pe_machine_type_arm64(tmp_path):
+    exe_file = tmp_path / "arm64.exe"
+    exe_file.write_bytes(_pe64_image(machine=0xAA64))
+    metadata = parse(str(exe_file))
+
+    assert metadata["machine_type"] == "ARM64"
+    assert metadata["machine_type_value"] == 0xAA64
+
+
+def _pe64_image_with_load_config(
+    guard_flags: int = 0x100,
+    security_cookie: int = 0x180001000,
+    ex_dllcharacteristics: int | None = None,
+    dll_characteristics: int = 0,
+    machine: int = 0x8664,
+) -> bytes:
+    """A PE32+ image carrying a real load configuration and, optionally, an
+    EX_DLLCHARACTERISTICS debug entry — laid out per the naturally-aligned
+    IMAGE_LOAD_CONFIG_DIRECTORY64 the Windows SDK headers declare and the
+    tier-0 python313.dll bytes confirm (SecurityCookie at +0x58, GuardFlags
+    at +0x90)."""
+    dos = bytearray(0x80)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x80)
+    coff = struct.pack("<HHIIIHH", machine, 1, 0, 0, 0, 0xF0, 0x0022)
+    optional = bytearray(0xF0)
+    struct.pack_into("<H", optional, 0, 0x20B)
+    struct.pack_into("<I", optional, 16, 0x1000)  # AddressOfEntryPoint: into .text
+    struct.pack_into("<I", optional, 32, 0x1000)  # SectionAlignment
+    struct.pack_into("<I", optional, 36, 0x200)  # FileAlignment
+    struct.pack_into("<H", optional, 68, 3)  # Subsystem: console
+    struct.pack_into("<H", optional, 70, dll_characteristics)
+    section_raw, section_rva = 0x400, 0x1000
+    struct.pack_into("<I", optional, 56, section_rva + section_raw)  # SizeOfImage
+    struct.pack_into("<I", optional, 60, section_raw)  # SizeOfHeaders
+    struct.pack_into("<Q", optional, 24, 0x180000000)  # ImageBase
+    struct.pack_into("<I", optional, 108, 16)  # NumberOfRvaAndSizes
+    # Data directories (each 8 bytes, RVA+size) start at optional+112:
+    # index 6 = debug, index 10 = load config.
+    struct.pack_into("<II", optional, 112 + 6 * 8, section_rva + 0x160, 28)
+    struct.pack_into("<II", optional, 112 + 10 * 8, section_rva, 0x140)
+    sec_header = struct.pack(
+        "<8sIIIIIIHHI", b".text\0\0\0", 0x400, section_rva, 0x400, section_raw, 0, 0, 0, 0,
+        0x60000020,
+    )
+    image = b"".join([bytes(dos), b"PE\x00\x00", coff, bytes(optional), sec_header])
+    image = image.ljust(section_raw, b"\x00")
+
+    body = bytearray(section_raw)
+    # IMAGE_LOAD_CONFIG_DIRECTORY64, naturally aligned; Size at +0x00.
+    struct.pack_into("<I", body, 0x00, 0x140)
+    struct.pack_into("<Q", body, 0x58, security_cookie)
+    struct.pack_into("<I", body, 0x90, guard_flags)
+    if ex_dllcharacteristics is not None:
+        # EX_DLLCHARACTERISTICS payload at RVA+0x140, then one
+        # IMAGE_DEBUG_DIRECTORY entry (type 20) at RVA+0x160.
+        struct.pack_into("<I", body, 0x140, ex_dllcharacteristics)
+        struct.pack_into(
+            "<IIHHIIII",
+            body,
+            0x160,
+            0, 0, 0, 0,  # Characteristics, TimeDateStamp, versions
+            20,  # IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS
+            4,  # SizeOfData
+            section_rva + 0x140,  # AddressOfRawData
+            section_raw + 0x140,  # PointerToRawData
+        )
+    return image + bytes(body)
+
+
+def test_parse_pe_security_properties_empty_image_records_gaps(tmp_path):
+    """Ground rule 32, empty case: an image with no load configuration, no
+    debug directory and no signature reports honestly — bitfield answers as
+    False, sourced answers omitted, and the blind spots named in
+    security_properties_gaps rather than defaulted."""
+    exe_file = tmp_path / "empty.exe"
+    exe_file.write_bytes(_pe64_image(dll_characteristics=0))
+    metadata = parse(str(exe_file))
+    properties = metadata["security_properties"]
+
+    # Optional-header answers are computed (False, not omitted).
+    assert properties["aslr"] is False
+    assert properties["high_entropy_va"] is False
+    assert properties["dep"] is False
+    assert properties["force_integrity"] is False
+    # Load-config, debug-directory and signature answers are omitted.
+    for absent in ("cfg", "xfg", "rfg", "gs_canary", "cet_shadow_stack", "debug_info",
+                   "enclave", "authenticode_scope"):
+        assert absent not in properties, absent
+    assert "relro" not in properties
+    assert "stripped" not in properties
+    gaps = metadata["security_properties_gaps"]
+    for gap in ("load_configuration", "debug_info", "cet_shadow_stack",
+                "authenticode_scope", "signed_page_hashes"):
+        assert gap in gaps, gap
+
+    # And the finding, not just the metadata: the least hardened PE reports
+    # every mandatory DLL characteristic.
+    from blint.lib.analysis import run_checks
+
+    metadata["exe_type"] = "PE64"
+    ids = {r["id"] for r in run_checks(str(exe_file), metadata)}
+    assert "CHECK_DLL_CHARACTERISTICS" in ids
+
+
+def test_parse_pe_security_properties_load_config_guard_flags(tmp_path):
+    exe_file = tmp_path / "guarded.exe"
+    exe_file.write_bytes(
+        _pe64_image_with_load_config(
+            guard_flags=0x100 | 0x400 | 0x800000, security_cookie=0x180001000
+        )
+    )
+    properties = parse(str(exe_file))["security_properties"]
+
+    assert properties["cfg"] is True
+    assert properties["control_flow_guard"] is True
+    assert properties["xfg"] is True
+    assert properties["forward_edge_cfi"] is True
+    assert properties["rfg"] is False
+    assert properties["gs_canary"] is True
+    assert properties["canary"] is True
+    assert "load_configuration" not in metadata_gaps(parse(str(exe_file)))
+
+
+def test_parse_pe_security_properties_all_have_a_diff_polarity(tmp_path):
+    """Every property the PE path emits must be classified in diff.py.
+
+    A key missing from HARDENING_POLARITY is reported as an unclassified
+    change, so losing CastGuard or delay-load IAT protection between two
+    builds would read as noise rather than as a hardening regression. The
+    fully featured image is the fixture precisely because it emits the widest
+    key set; the sparse fixtures above cannot catch an unclassified key.
+    """
+    from blint.lib.diff import HARDENING_POLARITY
+
+    exe_file = tmp_path / "wide.exe"
+    exe_file.write_bytes(
+        _pe64_image_with_load_config(
+            guard_flags=0x100 | 0x400 | 0x800 | 0x1000 | 0x8000 | 0x800000 | 0x1000000,
+            security_cookie=0x180001000,
+            ex_dllcharacteristics=0x03,
+        )
+    )
+    properties = parse(str(exe_file))["security_properties"]
+    assert len(properties) > 15
+    unclassified = sorted(set(properties) - set(HARDENING_POLARITY))
+    assert not unclassified
+
+
+def test_parse_pe_security_properties_gs_canary_cookie_unused(tmp_path):
+    """A non-zero cookie with SECURITY_COOKIE_UNUSED set is a computed False,
+    not a gap: the source was read and said no."""
+    exe_file = tmp_path / "cookie-unused.exe"
+    exe_file.write_bytes(
+        _pe64_image_with_load_config(guard_flags=0x800, security_cookie=0x1234)
+    )
+    properties = parse(str(exe_file))["security_properties"]
+    assert properties["gs_canary"] is False
+
+
+def test_parse_pe_security_properties_cet_from_debug_directory(tmp_path):
+    """User-mode CET shadow stacks are declared in the EX_DLLCHARACTERISTICS
+    debug entry (winnt.h IMAGE_DEBUG_TYPE 20), never in GuardFlags — the
+    /guard:ehcont bit blint used to read as CET is a different feature."""
+    exe_file = tmp_path / "cet.exe"
+    exe_file.write_bytes(_pe64_image_with_load_config(ex_dllcharacteristics=0x03))
+    metadata = parse(str(exe_file))
+    properties = metadata["security_properties"]
+
+    assert metadata["ex_dllcharacteristics"] == ["CET_COMPAT", "CET_COMPAT_STRICT_MODE"]
+    assert properties["cet_shadow_stack"] is True
+    assert properties["cet_shadow_stack_strict"] is True
+
+    # A directory without the entry is a computed False: the image makes no
+    # CET claim.
+    exe_file = tmp_path / "no-cet.exe"
+    exe_file.write_bytes(_pe64_image_with_load_config())
+    assert parse(str(exe_file))["security_properties"]["cet_shadow_stack"] is False
+
+
+def test_parse_pe_security_properties_seh_is_x86_only(tmp_path):
+    exe_file = tmp_path / "x86.exe"
+    exe_file.write_bytes(_pe64_image(machine=0x014C, dll_characteristics=0))
+    properties = parse(str(exe_file))["security_properties"]
+    assert properties["seh"] is True  # NO_SEH clear: the image uses SEH
+
+    exe_file = tmp_path / "x86-noseh.exe"
+    exe_file.write_bytes(_pe64_image(machine=0x014C, dll_characteristics=0x0400))
+    properties = parse(str(exe_file))["security_properties"]
+    assert properties["seh"] is False
+
+    # ARM64 carries no SafeSEH question at all.
+    exe_file = tmp_path / "arm64.exe"
+    exe_file.write_bytes(_pe64_image(machine=0xAA64, dll_characteristics=0))
+    assert "seh" not in parse(str(exe_file))["security_properties"]
+
+
+def test_parse_pe_overlay_signature_only_overlay_is_not_evidence(tmp_path):
+    """V3 end to end: a signed-shaped image whose overlay is entirely a
+    certificate table reports no overlay, low packing likelihood and no
+    file_overlay finding; an appended zip classifies and still does not
+    raise the likelihood on its own."""
+    exe_file = tmp_path / "signed.exe"
+    image = _pe64_image_with_load_config()
+    # The certificate table at the overlay start: pad the image, then append.
+    cert = b"---AUTHENTICODE-PADDING---" * 400
+    exe_file.write_bytes(image + cert)
+    metadata = parse(str(exe_file))
+
+    overlay_info = metadata["overlay_info"]
+    assert overlay_info["security_directory"] is None  # no security directory
+    assert overlay_info["size"] == len(cert)
+    assert overlay_info["classification"] == "unknown_low_entropy"
+    packing = metadata["entropy"]["packing"]
+    assert packing["packed_likelihood"] == "low"
+    assert "file_overlay" in packing["findings"]
+    assert metadata["security_properties"]["packed"] is False
+
+    # A real installer payload (7z SFX magic) classifies and stays
+    # non-evidence: the file_overlay finding is reported, the likelihood
+    # does not move.
+    exe_file = tmp_path / "sfx.exe"
+    exe_file.write_bytes(image + b"7z\xbc\xaf'\x1c" + b"\x00" * 8192)
+    metadata = parse(str(exe_file))
+    packing = metadata["entropy"]["packing"]
+    assert packing["overlay_classification"] == "sfx_7z"
+    assert packing["packed_likelihood"] == "low"
+    assert metadata["security_properties"]["packed"] is False
+
+
+def metadata_gaps(metadata: dict) -> list:
+    return metadata.get("security_properties_gaps") or []
+
+
+def test_check_packed_fires_on_upx_evidence_and_not_on_classified_overlay():
+    """The W0.2 gate, at the check layer: UPX packing evidence still fires
+    CHECK_PACKED; a classified overlay alone leaves the check silent."""
+    from blint.lib.checks import check_packed
+
+    upx_metadata = {
+        "entropy": {
+            "packing": {
+                "packed_likelihood": "high",
+                "packers": ["UPX"],
+                "findings": ["packer_section:UPX0", "high_entropy_exec_with_few_imports"],
+            }
+        }
+    }
+    result = check_packed("packed.exe", upx_metadata, rule_obj={})
+    assert isinstance(result, str) and "UPX" in result
+
+    overlay_only = {
+        "entropy": {
+            "packing": {
+                "packed_likelihood": "low",
+                "packers": [],
+                "overlay_classification": "zip",
+                "findings": ["file_overlay"],
+            }
+        }
+    }
+    assert check_packed("installer.exe", overlay_only, rule_obj={}) is True

@@ -7,6 +7,7 @@ orchestrator that imports it.
 # pylint: disable=too-many-lines,consider-using-f-string
 import codecs
 import contextlib
+import json
 import re
 import warnings
 from collections.abc import Callable, Iterable
@@ -38,8 +39,34 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.driver_ioctl import (
     IOCTL_TABLE_SECTIONS,
 )
+from blint.lib.pe_constants import (
+    IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS,
+    decode_dll_characteristics,
+    decode_guard_flags,
+    guard_cf_function_table_stride,
+)
+from blint.lib.pe_debug import (
+    decode_rich_header,
+    parse_pe_debug,
+)
+from blint.lib.pe_dotnet import parse_pe_dotnet
+from blint.lib.pe_dotnet_shape import classify_dotnet_shape, read_bundle_deps_json
+from blint.lib.pe_imports import (
+    TAG_FORWARDER,
+    TAG_PINVOKE,
+    apiset_host,
+    delay_import_hash,
+    forwarder_target,
+    normalize_forwarder_library,
+    parse_pe_delay_imports,
+    summarize_resolution,
+)
+from blint.lib.pe_imports import parse_pe_imports as pe_imports_parse
+from blint.lib.pe_layout import parse_pe_layout, parse_pre_main_execution
+from blint.lib.pe_overlay import classify_pe_overlay
+from blint.lib.pe_resources import parse_pe_resources
+from blint.lib.pe_signature import parse_pe_code_signature
 from blint.lib.utils import (
-    calculate_entropy,
     camel_to_snake,
     demangle_symbolic_name,
     enum_to_str,
@@ -325,50 +352,21 @@ def parse_pe_imports(imports, imagebase: int) -> tuple[list[dict], list[dict]]:
     """
     Parses the imports and returns lists of imported symbols and DLLs.
 
+    Thin delegation to the W1.2 module, which resolves ordinal imports
+    through the generated ordinal map and apiset names through the generated
+    snapshot (``pe_imports`` holds the semantics). Exported under this name
+    so existing imports keep working.
+
     Args:
         imports (it_imports): A list of import objects to parse.
+        imagebase (int): The image base, added to entry IAT addresses.
 
     Returns:
         tuple: A tuple containing two elements:
             - imports_list (list[dict])
             - dll_list (list[dict])
     """
-    imports_list: list[dict] = []
-    # Insertion-ordered rather than a set: this list is exported as
-    # ``dynamic_entries`` and seeds the SBOM's dependency refs, so set
-    # iteration order made both vary with PYTHONHASHSEED. First-seen order is
-    # the import directory's own order, which is what ELF's DT_NEEDED list
-    # already reports.
-    dlls: dict[str, None] = {}
-    if not imports or isinstance(imports, lief.lief_errors):
-        return imports_list, []
-    for import_ in imports:
-        try:
-            entries = import_.entries
-        except AttributeError:
-            break
-        if isinstance(entries, lief.lief_errors):
-            break
-        for entry in entries:
-            try:
-                if entry.name:
-                    dlls[import_.name] = None
-                    imports_list.append(
-                        {
-                            "name": f"{import_.name}::{demangle_symbolic_name(entry.name)}",
-                            "short_name": demangle_symbolic_name(entry.name),
-                            "address": ADDRESS_FMT.format(entry.data).strip(),
-                            "iat_value": entry.iat_value,
-                            "hint": entry.hint,
-                            "iat_address": (entry.iat_address + imagebase)
-                            if hasattr(entry, "iat_address")
-                            else None,
-                        }
-                    )
-            except AttributeError:
-                continue
-    dll_list = [{"name": d, "tag": "NEEDED"} for d in dlls]
-    return imports_list, dll_list
+    return pe_imports_parse(imports, imagebase)
 
 
 def parse_pe_exports(exports) -> list[dict]:
@@ -402,6 +400,10 @@ def parse_pe_exports(exports) -> list[dict]:
         if fwd:
             metadata["fwd_library"] = fwd.library
             metadata["fwd_function"] = fwd.function
+            # W1.2: the target in the dumpbin form ("NTDLL.RtlAllocHeap") —
+            # the target DLL is a real load-time dependency of the exporting
+            # image even though no import-table entry names it.
+            metadata["forwarded_to"] = forwarder_target(fwd.library, fwd.function)
         if metadata:
             exports_list.append(metadata)
     return exports_list
@@ -524,6 +526,228 @@ def _pe_has_canary(parsed_obj: lief.PE.Binary, metadata: dict) -> bool | None:
         return None
 
 
+def pe_debug_directory_facts(
+    parsed_obj: lief.PE.Binary, exe_file: str, debug_block: dict | None = None
+) -> dict:
+    """The debug-directory facts the security properties need.
+
+    Sources the W1.1 ``debug`` block when the caller has one (one parse, one
+    source), falling back to the narrow W0.3 read for metadata that predates
+    the block (parse cache). ``has_debug_directory`` distinguishes "no debug
+    directory at all" from "a directory without the entry in question" — the
+    difference between a property that cannot be computed (omit, record the
+    gap) and one that was computed as False.
+    """
+    facts = {
+        "has_debug_directory": False,
+        "has_entries": False,
+        "codeview_pdb_path": None,
+        "ex_dllcharacteristics": None,
+    }
+    if isinstance(debug_block, dict) and debug_block:
+        facts["has_debug_directory"] = True
+        facts["has_entries"] = bool(debug_block.get("entries"))
+        codeview = debug_block.get("codeview") or {}
+        pdb_path = codeview.get("pdb_path")
+        if isinstance(pdb_path, str) and pdb_path.strip():
+            facts["codeview_pdb_path"] = pdb_path.strip()
+        if debug_block.get("ex_dllcharacteristics"):
+            # The block carries flag names; recover the raw value's meaning
+            # by decoding from the names — CET bits are what matters here.
+            names = debug_block["ex_dllcharacteristics"]
+            facts["ex_names"] = names
+            return facts
+        return facts
+    try:
+        if not parsed_obj.has_debug:
+            return facts
+        entries = list(parsed_obj.debug)
+    except (AttributeError, TypeError, ValueError):
+        return facts
+    facts["has_debug_directory"] = True
+    facts["has_entries"] = bool(entries)
+    ex_payload = b""
+    for entry in entries:
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            entry_type = int(entry.type.value)
+            if entry_type == 2 and not facts["codeview_pdb_path"]:  # CODEVIEW
+                filename = getattr(entry, "filename", None)
+                if isinstance(filename, str) and filename.strip():
+                    facts["codeview_pdb_path"] = filename.strip()
+            elif entry_type == IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS and not ex_payload:
+                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                    ex_payload = bytes(entry.payload)
+                if len(ex_payload) < 4:
+                    with contextlib.suppress(
+                        OSError, AttributeError, TypeError, ValueError
+                    ), open(exe_file, "rb") as handle:
+                        handle.seek(int(entry.pointerto_rawdata))
+                        ex_payload = handle.read(4)
+    if len(ex_payload) >= 4:
+        facts["ex_dllcharacteristics"] = int.from_bytes(ex_payload[:4], "little")
+    return facts
+
+
+def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary, exe_file: str):
+    """Security properties for a PE, each from its named source (A.3, V4).
+
+    The tristate discipline governs every key: computed from the named
+    source and reported whatever the value when the source is present,
+    omitted when the source is absent — never defaulted. Sources, in order:
+
+    - optional header ``DLLCharacteristics`` (always present in a parsed
+      image): ``aslr``, ``high_entropy_va``, ``dep``, ``force_integrity``
+      through the structured block's flags, and ``seh`` on x86 from
+      ``NO_SEH``.
+    - load configuration: ``cfg`` (``CF_INSTRUMENTED``), ``xfg``,
+      ``rfg``, ``retpoline``, ``cast_guard``, ``safe_delay_load``,
+      ``cfg_export_suppression`` from the GuardFlags bit decode;
+      ``gs_canary`` from ``SecurityCookie`` != 0 and the
+      ``SECURITY_COOKIE_UNUSED`` flag; ``safe_seh`` on x86 from
+      ``SEHandlerCount``. The load config's EH-continuation bit is
+      ``/guard:ehcont`` metadata, deliberately *not* read as CET.
+    - debug directory: ``cet_shadow_stack`` from the EX_DLLCHARACTERISTICS
+      entry's ``CET_COMPAT`` bit — user-mode CET is a debug-directory claim,
+      not a GuardFlags one; ``debug_info`` from the CodeView PDB path,
+      replacing the COFF ``stripped`` guess.
+    - PE header machine type: ``arm64ec``/``arm64x``.
+    - signature table: ``authenticode_scope`` = ``embedded``; catalog
+      signing (W2.3) is not yet resolved, so a non-embedded scope is
+      recorded as a gap rather than guessed as ``none``.
+
+    Returns the properties plus the ``security_properties_gaps`` list in the
+    Mach-O style: an unreadable load configuration or an unresolvable
+    Authenticode scope is a declared blind spot, never a thin ``false``.
+    """
+    properties = {
+        "nx": metadata.get("has_nx", False),
+        # True when no loadable section maps the same bytes writable and
+        # executable, which trivially holds for formats without sections.
+        "w_xor_x": not metadata.get("wx_segments"),
+        "pie": metadata.get("is_pie", False),
+        "is_signed": bool(metadata.get("signatures")),
+    }
+    gaps: list[str] = []
+    structured = metadata.get("dll_characteristics_structured")
+    flags = set(structured.get("flags") or []) if isinstance(structured, dict) else None
+    machine_value = metadata.get("machine_type_value")
+    is_x86 = machine_value == 0x014C  # IMAGE_FILE_MACHINE_I386
+    if flags is None:
+        # Optional-header DLL characteristics are a fixed field of every PE;
+        # reaching this means the metadata predates the structured block
+        # (parse cache) and none of the bitfield answers can be given.
+        gaps.append("dll_characteristics")
+    else:
+        properties["aslr"] = "DYNAMIC_BASE" in flags
+        properties["high_entropy_va"] = "HIGH_ENTROPY_VA" in flags
+        properties["dep"] = "NX_COMPAT" in flags
+        properties["force_integrity"] = "FORCE_INTEGRITY" in flags
+        if is_x86:
+            properties["seh"] = "NO_SEH" not in flags
+
+    load_config = parsed_obj.load_configuration if parsed_obj.has_configuration else None
+    if load_config is None:
+        gaps.append("load_configuration")
+    else:
+        # Collected separately and merged only on a full decode, so a
+        # mid-parse failure can never leave partial load-config answers
+        # beside a gap claiming the source was unreadable.
+        lc_properties: dict = {}
+        try:
+            guard_flags = int(load_config.guard_flags)
+            lc_properties["cfg"] = bool(guard_flags & 0x00000100)  # CF_INSTRUMENTED
+            # Cross-format key kept for diff/Mach-O/ELF consumers; one source.
+            lc_properties["control_flow_guard"] = lc_properties["cfg"]
+            lc_properties["xfg"] = bool(guard_flags & 0x00800000)
+            lc_properties["forward_edge_cfi"] = lc_properties["cfg"] or lc_properties["xfg"]
+            lc_properties["rfg"] = bool(guard_flags & 0x00020000)  # RF_INSTRUMENTED
+            lc_properties["retpoline"] = bool(guard_flags & 0x00100000)
+            lc_properties["cast_guard"] = bool(guard_flags & 0x01000000)
+            lc_properties["safe_delay_load"] = bool(guard_flags & 0x00001000)
+            lc_properties["cfg_export_suppression"] = bool(guard_flags & 0x00008000)
+            cookie_unused = bool(guard_flags & 0x00000800)
+            try:
+                cookie = int(load_config.security_cookie or 0)
+            except (AttributeError, TypeError, ValueError):
+                cookie = 0
+            lc_properties["gs_canary"] = bool(cookie) and not cookie_unused
+            # Cross-format key: same computed value as gs_canary.
+            lc_properties["canary"] = lc_properties["gs_canary"]
+            if is_x86:
+                try:
+                    lc_properties["safe_seh"] = int(load_config.se_handler_count or 0) > 0
+                except (AttributeError, TypeError, ValueError):
+                    lc_properties["safe_seh"] = False
+            if int(load_config.enclave_configuration_ptr or 0):
+                # Presence-only: the enclave configuration either exists or
+                # the property is omitted; absence is the Windows norm, not a
+                # computed False.
+                lc_properties["enclave"] = True
+            properties.update(lc_properties)
+        except (AttributeError, TypeError, ValueError) as e:
+            LOG.debug(f"Error decoding load configuration for security properties: {e}")
+            gaps.append("load_configuration")
+
+    debug_facts = pe_debug_directory_facts(
+        parsed_obj, exe_file, metadata.get("debug")
+    )
+    if not debug_facts["has_debug_directory"]:
+        gaps.append("debug_info")
+        gaps.append("cet_shadow_stack")
+    else:
+        if "ex_names" in debug_facts:
+            # W1.1 block source: the names are already decoded.
+            ex_names = debug_facts["ex_names"]
+            properties["cet_shadow_stack"] = "CET_COMPAT" in ex_names
+            if properties["cet_shadow_stack"]:
+                properties["cet_shadow_stack_strict"] = (
+                    "CET_COMPAT_STRICT_MODE" in ex_names
+                )
+        elif ex_value := debug_facts["ex_dllcharacteristics"]:
+            properties["cet_shadow_stack"] = bool(ex_value & 0x01)  # CET_COMPAT
+            if properties["cet_shadow_stack"]:
+                properties["cet_shadow_stack_strict"] = bool(ex_value & 0x02)
+        else:
+            # A directory without the entry: the image makes no CET claim,
+            # which is a computed False, not a gap.
+            properties["cet_shadow_stack"] = False
+        if pdb_path := debug_facts["codeview_pdb_path"]:
+            properties["debug_info"] = "full"
+            properties["debug_info_pdb_path"] = pdb_path
+        elif debug_facts["has_entries"]:
+            properties["debug_info"] = "codeview_only"
+        else:
+            properties["debug_info"] = "none"
+
+    properties["arm64ec"] = bool(metadata.get("is_arm64ec"))
+    properties["arm64x"] = bool(metadata.get("is_arm64x"))
+
+    if metadata.get("signatures"):
+        properties["authenticode_scope"] = "embedded"
+    else:
+        # Catalog signing (W2.3) is not resolved yet, so neither "catalog"
+        # nor "none" is knowable; an unsigned-embedded image stays a gap.
+        gaps.append("authenticode_scope")
+    # W2.2: page hashes come from the code_signature block's per-signature
+    # facts. Stated either way when a signature was parsed; a malformed or
+    # absent block stays a gap because the tristate has no source to read.
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict) and code_signature.get("parse_status") == "parsed":
+        page_hashed = any(
+            (sig.get("page_hashes") or {}).get("present")
+            for sig in code_signature.get("signatures", [])
+        )
+        if page_hashed or not code_signature.get("signature_walk_truncated"):
+            properties["signed_page_hashes"] = page_hashed
+        else:
+            # A truncated walk has not seen every signature, so "none of them
+            # carries page hashes" is a claim it cannot make.
+            gaps.append("signed_page_hashes")
+    else:
+        gaps.append("signed_page_hashes")
+    return properties, gaps
+
+
 def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     """
     Parses the Load Configuration to extract Guard flags, Code Integrity,
@@ -535,9 +759,21 @@ def parse_pe_load_config(parsed_obj: lief.PE.Binary) -> dict:
     try:
         load_config = parsed_obj.load_configuration
         lc_info["guard_flags"] = load_config.guard_flags
+        # Ground rule 28: the flag names come from blint's winnt.h-derived
+        # table (pe_constants) keyed by the numeric value, never from a
+        # dependency's rendered enum. The legacy guard_cf_flags rendering is
+        # kept alongside for one release.
+        lc_info["guard_flags_flags"] = decode_guard_flags(int(load_config.guard_flags))
+        lc_info["guard_cf_function_table_stride"] = guard_cf_function_table_stride(
+            int(load_config.guard_flags)
+        )
         lc_info["guard_cf_flags"] = [
             str(flag).split(".")[-1] for flag in load_config.guard_cf_flags_list
         ]
+        for field in ("security_cookie", "se_handler_table", "se_handler_count"):
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                if (value := getattr(load_config, field, None)) is not None:
+                    lc_info[field] = int(value)
         if hasattr(load_config, "code_integrity"):
             ci = load_config.code_integrity
             if ci:
@@ -690,6 +926,15 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         metadata["imphash_lief"] = lief.PE.get_imphash(parsed_obj, lief.PE.IMPHASH_MODE.LIEF)
         metadata = add_pe_header_data(metadata, parsed_obj)
         metadata["load_configuration"] = parse_pe_load_config(parsed_obj)
+        # W1.1: the debug directory block is parsed before the security
+        # properties run, so debug_info/PDB and the CET tristate read one
+        # source. The W0.3 facts fallback inside pe_debug_directory_facts
+        # covers metadata exported before this block existed.
+        metadata["debug"] = parse_pe_debug(parsed_obj, exe_file)
+        # Legacy flat key (kept additive from W0.3) now sources the block:
+        # one parse of the EX_DLLCHARACTERISTICS entry, not two.
+        if (ex_names := metadata["debug"].get("ex_dllcharacteristics")) is not None:
+            metadata["ex_dllcharacteristics"] = ex_names
         metadata["data_directories"] = parse_pe_data(parsed_obj)
         metadata["sections"] = []
         ep = parsed_obj.optional_header.addressof_entrypoint
@@ -714,18 +959,79 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                     {"id": e.id, "build_id": e.build_id, "count": e.count} for e in rich.entries
                 ],
             }
+        # W1.1: the decoded rich header (checksum, comp.id products, the
+        # toolchain facts) replaces the raw LIEF entry dump above when the
+        # header can be read at the byte level; the LIEF shape stays the
+        # fallback so a parse failure degrades instead of vanishing.
+        if rich_decoded := decode_rich_header(exe_file):
+            metadata["rich_header"] = rich_decoded
         metadata["authenticode"] = parse_pe_authenticode(parsed_obj)
         metadata["signatures"] = process_pe_signature(parsed_obj)
+        # W2.1/W2.2: the structured code_signature block (signer, chain,
+        # timestamps, nested signatures, page hashes) mirrors the Mach-O
+        # block of the same name. The legacy ``authenticode`` key above
+        # stays populated for one release (additive rule 15).
+        metadata["code_signature"] = parse_pe_code_signature(parsed_obj, exe_file)
         metadata["resources"] = process_pe_resources(parsed_obj)
+        if resources_extra := parse_pe_resources(parsed_obj, metadata["resources"]):
+            # The parsed VERSIONINFO goes to the top level only; the legacy
+            # rendered `resources.version_info` dict keeps its old shape.
+            version_info_block = resources_extra.pop("version_info", None)
+            metadata["resources"].update(resources_extra)
+            if version_info_block and version_info_block.get("present"):
+                # Top-level block for the SBOM identity work (03/D) and the
+                # tier 0-1 presence gate; resources.version_metadata keeps
+                # the flattened view it has always had.
+                metadata["version_info"] = version_info_block
         metadata["is_arm64ec"] = parsed_obj.is_arm64ec
         metadata["is_arm64x"] = parsed_obj.is_arm64x
         metadata["symtab_symbols"], exe_type = parse_pe_symbols(parsed_obj.symbols)
         if exe_type:
             metadata["exe_type"] = exe_type
+        # W1.2: imports go through pe_imports, which resolves ordinal
+        # imports through the generated ordinal map and apiset names
+        # (api-ms-win-*) through the generated snapshot, so the dependency
+        # list and every consumer of it names real DLLs. The PE32 ordinal
+        # flag is the 32-bit one; derived from the optional-header magic
+        # directly — exe_type may now say dotnetbinary for the same image
+        # (W3.1), which says nothing about the PE format width.
+        pe_imagebase = parsed_obj.optional_header.imagebase
+        is_pe32 = (
+            parsed_obj.optional_header.magic == lief.PE.PE_TYPE.PE32
+        )
         (
             metadata["imports"],
             metadata["dynamic_entries"],
-        ) = parse_pe_imports(parsed_obj.imports, parsed_obj.optional_header.imagebase)
+        ) = pe_imports_parse(parsed_obj.imports, pe_imagebase, pe32=is_pe32)
+        # Delay-load imports: parsed into their own list, never merged into
+        # ``imports`` — the distinction between the tables is the signal
+        # (01/A.6). Their DLLs join the dependency list under a DELAYLOAD
+        # tag so the SBOM sees the dependency without conflating the tables.
+        metadata["delay_imports"] = []
+        delay_dll_entries: list[dict] = []
+        if hasattr(parsed_obj, "delay_imports"):
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                (
+                    metadata["delay_imports"],
+                    delay_dll_entries,
+                ) = parse_pe_delay_imports(parsed_obj.delay_imports, pe_imagebase, pe32=is_pe32)
+        if metadata["delay_imports"]:
+            metadata["delay_import_hash"] = delay_import_hash(metadata["delay_imports"])
+            needed_names = {entry["name"].lower() for entry in metadata["dynamic_entries"]}
+            for entry in delay_dll_entries:
+                if entry["name"].lower() in needed_names:
+                    # The same DLL is both directly imported and
+                    # delay-loaded: the NEEDED entry speaks for the
+                    # dependency, the tables stay distinct in imports vs
+                    # delay_imports.
+                    continue
+                metadata["dynamic_entries"].append(entry)
+        if metadata["imports"] or metadata["delay_imports"]:
+            metadata["import_resolution"] = summarize_resolution(
+                metadata["imports"],
+                metadata["delay_imports"],
+                [metadata["dynamic_entries"]],
+            )
         # Stack-protector evidence, same as the ELF and Mach-O paths: an
         # explicit verdict (or none) rather than a silently absent key that
         # CHECK_CANARY collapses into "protected".
@@ -749,20 +1055,123 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                         text_section = section
         if rdata_section or text_section:
             add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
-        metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
+        pe_export_dir = parsed_obj.get_export()
+        metadata["exports"] = parse_pe_exports(pe_export_dir)
+        # W5.6: an export directory that is declared but yields no export
+        # object (a directory RVA no section backs, a file truncated inside
+        # the directory, a walk lief gave up on) must not read as "no
+        # exports" - the host-plugin contracts are export-keyed, so an
+        # unread directory is a detection gap, not an empty contract set
+        # (rules 14/32). lief 1.0 returns None both for a genuinely absent
+        # directory and for every unreadable one, so the declaration itself
+        # is what separates them: rva == 0 is the clean no-export case and
+        # stamps nothing.
+        if pe_export_dir is None and not isinstance(
+            pe_export_dir, lief.lief_errors
+        ):
+            export_directory_declared = False
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                declared = parsed_obj.data_directory(
+                    lief.PE.DataDirectory.TYPES.EXPORT_TABLE
+                )
+                export_directory_declared = bool(declared.rva)
+            if export_directory_declared:
+                metadata["exports_read_status"] = "failed"
+        elif isinstance(pe_export_dir, lief.lief_errors):
+            metadata["exports_read_status"] = "failed"
+        # W1.2: forwarder targets are load-time dependencies the import
+        # table never names — resolving an export that is a forwarder makes
+        # the loader map the target DLL. They join the dependency list under
+        # a FORWARDER tag, and the sorted target list feeds the dependency
+        # graph in binary.analyze_import_deps.
+        forwarder_targets: set[str] = set()
+        for export_entry in metadata["exports"]:
+            if not export_entry.get("forwarded_to"):
+                continue
+            library, _, _ = str(export_entry["forwarded_to"]).partition(".")
+            target_lib = normalize_forwarder_library(library)
+            if not target_lib:
+                continue
+            if apiset_host(target_lib):
+                target_lib = apiset_host(target_lib)
+            forwarder_targets.add(target_lib)
+        known_names = {entry["name"].lower() for entry in metadata["dynamic_entries"]}
+        for target_lib in sorted(forwarder_targets):
+            if target_lib in known_names:
+                continue
+            metadata["dynamic_entries"].append({"name": target_lib, "tag": TAG_FORWARDER})
+        if forwarder_targets:
+            metadata["forwarder_targets"] = sorted(forwarder_targets)
         metadata["exceptions"] = parse_pe_exceptions(parsed_obj.exceptions)
         metadata["functions"] = parse_functions(parsed_obj.functions)
         metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
         metadata["exception_functions"] = parse_functions(parsed_obj.exception_functions)
-        # Detect if this PE might be dotnet
-        for i, dd in enumerate(parsed_obj.data_directories):
-            if (
-                i == 14
-                and dd.type.value == lief.PE.DataDirectory.TYPES.CLR_RUNTIME_HEADER.value
-                and dd.size > 0
-            ):
-                metadata["is_dotnet"] = True
+        # W3.1: a CLI header (data directory 14) makes this a managed
+        # binary. ``exe_type`` records that decoupled from bitness — the
+        # rule-15 exception argued in the packet — and the ECMA-335
+        # metadata reader fills the ``dotnet`` block. ``is_dotnet`` keeps
+        # its old meaning for the existing consumers.
+        dotnet_block = parse_pe_dotnet(parsed_obj, exe_file)
+        if dotnet_block is not None:
+            metadata["is_dotnet"] = True
+            metadata["dotnet"] = dotnet_block
+            metadata["exe_type"] = "dotnetbinary"
+        # W3.3: the publish shape (03/A.3). Runs for native PEs too,
+        # because the two shapes that matter most there have no CLI header
+        # at all: a single-file bundle, whose managed payload sits after
+        # the sections, and a NativeAOT image, which must never be reported
+        # as "not .NET" (ground rule 32). A file with no evidence of any
+        # shape gets no block - silence, not a native verdict.
+        shape_block = classify_dotnet_shape(
+            parsed_obj, exe_file, metadata, dotnet_block
+        )
+        if shape_block is not None:
+            metadata.setdefault("dotnet", {})["shape"] = shape_block
+            if shape_block["kind"] in ("single_file_bundle", "native_aot"):
+                # The managed origin is evidenced, but there is no CLI
+                # metadata: ``is_dotnet`` stays false (it means "has CLI
+                # metadata" to every existing consumer) and ``exe_type``
+                # is left alone, because the file really is a native image
+                # and the managed rules have nothing to read on it.
+                metadata["dotnet"].setdefault("parse_status", "no_cli_metadata")
+        # W3.2: a managed assembly's P/Invoke scopes are native
+        # dependencies the import table never names — a DllImport maps at
+        # first call, not at image load, which is exactly why the loader
+        # does not list it. Each scope joins the dependency list under the
+        # PINVOKE tag so the declaration set, the dependency graph and
+        # CHECK_UNDECLARED_DEPENDENCIES see it without reading as a
+        # loader-level NEEDED entry.
+        if (metadata.get("dotnet") or {}).get("pinvoke"):
+            known_names = {
+                entry["name"].lower() for entry in metadata["dynamic_entries"]
+            }
+            for pinvoke_entry in metadata["dotnet"]["pinvoke"]:
+                module_name = pinvoke_entry.get("module") or ""
+                if not module_name or module_name.lower() in known_names:
+                    continue
+                known_names.add(module_name.lower())
+                metadata["dynamic_entries"].append(
+                    {"name": module_name, "tag": TAG_PINVOKE}
+                )
         metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
+        # W3.3: a single-file publish is the one shape that carries its whole
+        # dependency set inside the executable, and it was the one shape
+        # ``parse_overlay`` came back empty on — measured, {} on the 88 MB
+        # single-file publish, because it searches the overlay for the
+        # deps.json prefix and the bundler stores the file by offset with no
+        # marker of its own. The manifest says where it is, so it is read
+        # there instead of searched for, and the SBOM stops being empty for
+        # exactly the applications that ship everything in one file.
+        if not metadata["dotnet_dependencies"] and shape_block is not None:
+            bundle_manifest = shape_block.get("bundle") or {}
+            if raw_deps := read_bundle_deps_json(exe_file, bundle_manifest):
+                with contextlib.suppress(Exception):
+                    decoded = json.loads(raw_deps.decode("utf-8", "replace"))
+                    if isinstance(decoded, dict) and decoded.get("libraries"):
+                        metadata["dotnet_dependencies"] = decoded
+                        metadata["dotnet"]["shape"]["deps_json_source"] = (
+                            "single_file_bundle_manifest"
+                        )
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
         tls = parsed_obj.tls
@@ -779,6 +1188,16 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                     metadata["tls_section_name"] = tls.section.name
                 if tls.has_data_directory:
                     metadata["tls_directory_type"] = str(tls.directory.type)
+        # W1.4: layout forensics facts (B.5) and the one pre-main summary
+        # (B.1). The layout block needs the rich-header toolchain facts and
+        # the go/dotnet markers set above; the pre-main block reads the
+        # functions and ctor_functions parsed earlier. binary.parse refreshes
+        # the pre-main block after disassembly so the anti-debug
+        # reachability fact can see call targets.
+        metadata["layout"] = parse_pe_layout(parsed_obj, exe_file, metadata)
+        pre_main = parse_pre_main_execution(parsed_obj, metadata)
+        if pre_main:
+            metadata["pre_main_execution"] = pre_main
         nested_binary = parsed_obj.nested_pe_binary
         if nested_binary:
             LOG.debug("Binary has ARM64EC representation!")
@@ -798,16 +1217,12 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         raise
     try:
         if hasattr(parsed_obj, "overlay") and parsed_obj.overlay:
-            if hasattr(parsed_obj.overlay, "tobytes"):
-                overlay_bytes = parsed_obj.overlay.tobytes()
-            else:
-                overlay_bytes = bytes(parsed_obj.overlay)
-            if len(overlay_bytes) > 0:
-                metadata["overlay_info"] = {
-                    "offset": getattr(parsed_obj, "overlay_offset", 0),
-                    "size": len(overlay_bytes),
-                    "entropy": calculate_entropy(overlay_bytes),
-                }
+            # V3/W0.2: the classified overlay residue, not the raw
+            # past-the-sections region — the Authenticode certificate table is
+            # subtracted and what remains is classified by magic in
+            # pe_overlay, so a signed stock binary reports no overlay at all.
+            if overlay_info := classify_pe_overlay(parsed_obj, exe_file):
+                metadata["overlay_info"] = overlay_info
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Failed to parse PE overlay for {exe_file}: {e}")
     return metadata
@@ -829,6 +1244,11 @@ def add_pe_header_data(metadata: dict, parsed_obj: lief.PE.Binary) -> dict:
             metadata["magic"] = str(dos_header.magic)
             header = parsed_obj.header
             metadata["machine_type"] = enum_to_str(header.machine)
+            machine_raw = getattr(header.machine, "value", header.machine)
+            # Numeric IMAGE_FILE_MACHINE value. The machine_types rule gate
+            # resolves the machine name through blint's own table in
+            # pe_constants from this field, never from a rendered enum.
+            metadata["machine_type_value"] = int(machine_raw)
             metadata["used_bytes_in_the_last_page"] = dos_header.used_bytes_in_last_page
             metadata["file_size_in_pages"] = dos_header.file_size_in_pages
             metadata["num_relocation"] = dos_header.numberof_relocation
@@ -876,13 +1296,30 @@ def add_pe_optional_headers(metadata: dict, optional_header: lief.PE.OptionalHea
         The updated metadata dictionary.
     """
     with contextlib.suppress(IndexError, TypeError):
-        metadata["dll_characteristics"] = ", ".join(
-            [enum_to_str(chara) for chara in optional_header.dll_characteristics_lists]
-        )
+        # Ground rule 28: decode the DLL characteristics bitfield through
+        # blint's own PE-spec table (pe_constants) instead of matching on
+        # whatever LIEF's enum rendering produces this release. V1: LIEF 1.0
+        # renders DLL_CHARACTERISTICS members as bare integers, which turned
+        # the joined string into "UNKNOWN(32), UNKNOWN(64), ..." and made
+        # every PE hardening check read the flags as absent.
+        dll_characteristics_value = int(optional_header.dll_characteristics)
+        dll_characteristics_flags = decode_dll_characteristics(dll_characteristics_value)
+        metadata["dll_characteristics_structured"] = {
+            "value": dll_characteristics_value,
+            "flags": dll_characteristics_flags,
+            "source": "optional_header",
+        }
+        # Compat alias, one release: the joined form of `flags` under the
+        # long-standing key so checks.py's substring match and downstream
+        # consumers keep working. Scheduled for removal once the structured
+        # block above is the only consumed form.
+        metadata["dll_characteristics"] = ", ".join(dll_characteristics_flags)
         # Detect if this binary is a driver
-        if "WDM_DRIVER" in metadata["dll_characteristics"]:
+        if "WDM_DRIVER" in dll_characteristics_flags:
             metadata["is_driver"] = True
         metadata["subsystem"] = enum_to_str(optional_header.subsystem)
+        subsystem_raw = getattr(optional_header.subsystem, "value", optional_header.subsystem)
+        metadata["subsystem_value"] = int(subsystem_raw)
         metadata["is_gui"] = metadata["subsystem"] == "WINDOWS_GUI"
         metadata["exe_type"] = "PE32" if optional_header.magic == lief.PE.PE_TYPE.PE32 else "PE64"
         metadata["major_linker_version"] = optional_header.major_linker_version

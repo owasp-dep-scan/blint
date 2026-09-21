@@ -81,8 +81,30 @@ from blint.logger import LOG
 # names, disassembly keys and discovery records all change value for
 # unchanged inputs. 5: the pointer-string resolver reads PE strings at all
 # (image-base offset) and decodes UTF-16LE, so call_site_arguments `string`
-# fields change value for unchanged PE inputs.
-CACHE_SCHEMA_VERSION = 5
+# fields change value for unchanged PE inputs. 6: managed PE binaries gain
+# the `dotnet` block and move to `exe_type: dotnetbinary` (W3.1), so
+# entries written before the CLR metadata reader must not be served to a
+# consumer reading either key. 7: the managed capability surface (W3.2) —
+# the `dotnet` block gains `typerefs`, `memberrefs`, `user_strings_count`
+# and `user_strings_sha256`, `strings` becomes the #US literals with a
+# `strings_source` beside it, and P/Invoke scopes join `dynamic_entries`
+# under the PINVOKE tag. A schema-6 entry carries none of it, so serving
+# one leaves every managed capability rule with nothing to match and
+# `strings` holding the byte scan's noise — the exact state the packet
+# exists to end. 8: the privileged-host plugin surface (W5.6) — PE metadata
+# gains the `host_plugin` block, `exports_read_status` beside an unreadable
+# export table, and `host_plugin_scope`/`host_plugin_slice_variance` for
+# ARM64X images. A schema-7 entry carries none of it: the block is simply
+# absent, which reads as "no plugin contract evidenced" — the three W5.6
+# rules then match nothing on a warm cache exactly the way the managed
+# rules did on a schema-6 cache (the W3.2 review lesson: every stored-shape
+# change bumps this). 9: the publish shape (W3.3) — PE metadata gains
+# `dotnet.shape` with its evidence list and, for a single-file publish, the
+# decoded `dotnet.shape.bundle` manifest and its member listing. A schema-8
+# entry has none of it, so a warm cache would serve a NativeAOT image and a
+# single-file bundle as ordinary native PEs — the exact "absence reads as
+# not .NET" the packet exists to end.
+CACHE_SCHEMA_VERSION = 9
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

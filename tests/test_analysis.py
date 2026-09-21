@@ -1212,3 +1212,179 @@ def test_check_wx_segments_passes_without_offending_segments():
         for r in run_checks("module.wasm", other_exe_type_metadata)
         if r["id"] == "CHECK_WX_SEGMENTS"
     ]
+
+
+def test_check_dll_characteristics_prefers_structured_flags():
+    """V1: mandatory-value membership is exact against the decoded flag list.
+
+    The substring path exists only for metadata exported before the
+    structured block (parse cache); both must answer identically.
+    """
+    from blint.lib.checks import check_dll_characteristics
+
+    rule = {
+        "mandatory_values": [
+            "HIGH_ENTROPY_VA",
+            "NX_COMPAT",
+            "GUARD_CF",
+            "FORCE_INTEGRITY",
+            "DYNAMIC_BASE",
+        ]
+    }
+    structured_metadata = {
+        "dll_characteristics_structured": {
+            "value": 352,
+            "flags": ["HIGH_ENTROPY_VA", "DYNAMIC_BASE", "NX_COMPAT"],
+            "source": "optional_header",
+        },
+        "dll_characteristics": "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT",
+    }
+    assert (
+        check_dll_characteristics("t.exe", structured_metadata, rule_obj=rule)
+        == "GUARD_CF, FORCE_INTEGRITY"
+    )
+    legacy_metadata = {
+        "dll_characteristics": "HIGH_ENTROPY_VA, DYNAMIC_BASE, NX_COMPAT",
+    }
+    assert (
+        check_dll_characteristics("t.exe", legacy_metadata, rule_obj=rule)
+        == "GUARD_CF, FORCE_INTEGRITY"
+    )
+    complete_metadata = {
+        "dll_characteristics_structured": {
+            "value": 0x42F4,
+            "flags": [
+                "HIGH_ENTROPY_VA",
+                "DYNAMIC_BASE",
+                "FORCE_INTEGRITY",
+                "NX_COMPAT",
+                "GUARD_CF",
+            ],
+            "source": "optional_header",
+        },
+    }
+    assert check_dll_characteristics("t.exe", complete_metadata, rule_obj=rule) is True
+
+
+def test_check_dll_characteristics_reports_everything_on_a_zero_bitfield():
+    """The least hardened PE of all must report every mandatory value.
+
+    Its joined compat string is empty, so a truthiness test on that string
+    skips the comparison entirely and the image passes — the false negative
+    mirroring the false positive V1 describes.
+    """
+    from blint.lib.checks import check_dll_characteristics
+
+    rule = {"mandatory_values": ["NX_COMPAT", "DYNAMIC_BASE", "GUARD_CF"]}
+    metadata = {
+        "dll_characteristics_structured": {
+            "value": 0,
+            "flags": [],
+            "source": "optional_header",
+        },
+        "dll_characteristics": "",
+    }
+    assert (
+        check_dll_characteristics("t.exe", metadata, rule_obj=rule)
+        == "NX_COMPAT, DYNAMIC_BASE, GUARD_CF"
+    )
+
+
+def test_pac_rules_removed_with_their_false_recommendations():
+    """W0.3: CHECK_PAC/CHECK_PAC_STRICT no longer exist.
+
+    The findings they fired on every ARM64 PE were false recommendations:
+    no PE source records PAC at all. The GuardFlags bit blint read as PAC
+    (LIEF's RF_INSTRUMENTED) is Return Flow Guard per the Windows SDK's
+    winnt.h, and MSVC 19.44 offers no /guard:signret option to even produce
+    the advised artifact. A rule whose property can never truthfully be
+    True fires guaranteed noise.
+    """
+    from blint.lib import analysis as analysis_module
+
+    assert "CHECK_PAC" not in analysis_module.rules_dict
+    assert "CHECK_PAC_STRICT" not in analysis_module.rules_dict
+    arm64_metadata = {
+        "exe_type": "PE64",
+        "machine_type": "ARM64",
+        "machine_type_value": 0xAA64,
+        "security_properties": {},
+    }
+    ids = {r["id"] for r in run_checks("python-arm64.exe", arm64_metadata)}
+    assert "CHECK_PAC" not in ids
+    assert "CHECK_PAC_STRICT" not in ids
+
+
+def test_optin_feature_rules_removed_from_the_registry():
+    """W0.3: CHECK_XFG/CHECK_CET/CHECK_ENCLAVE no longer exist.
+
+    Each fired "missing <feature>" on essentially every PE: the features are
+    opt-in (66/66 stock Microsoft-signed tier-0 binaries lack an enclave
+    configuration), and with an omitted property read as a failure they even
+    fired on .cat and .zip files blint cannot parse as PE. The properties
+    stay in security_properties, computed from their named sources.
+    """
+    from blint.lib import analysis as analysis_module
+
+    for rule_id in ("CHECK_XFG", "CHECK_CET", "CHECK_ENCLAVE"):
+        assert rule_id not in analysis_module.rules_dict
+
+
+def test_check_security_property_omitted_key_is_not_a_failure():
+    """The tristate discipline at the rule layer: a property absent from
+    security_properties means its source was absent (P2.4), so there is
+    nothing to claim. Reading omission as a failure is what made the
+    property rules fire on unparseable files (V4)."""
+    from blint.lib.checks import check_security_property
+
+    rule = {"property_key": "cet_shadow_stack"}
+    # Omitted property: no claim, rule silent.
+    assert check_security_property("t.exe", {"security_properties": {}}, rule_obj=rule)
+    assert check_security_property("t.exe", {}, rule_obj=rule)
+    # Computed False: the finding fires — it is backed by a source.
+    assert not check_security_property(
+        "t.exe", {"security_properties": {"cet_shadow_stack": False}}, rule_obj=rule
+    )
+    # Computed True: clean.
+    assert check_security_property(
+        "t.exe", {"security_properties": {"cet_shadow_stack": True}}, rule_obj=rule
+    )
+
+
+def test_unknown_exe_type_never_fires_a_scoped_rule():
+    """A rule's exe_types list is a scope declaration: a file whose exe_type
+    could not be resolved is outside every declared scope. This is the
+    .cat/.zip defect — those files carried no exe_type and still fired the
+    PE-scoped property rules."""
+    metadata = {
+        "dll_characteristics_structured": {"value": 0, "flags": [], "source": "optional_header"},
+        "dll_characteristics": "",
+    }
+    ids = {r["id"] for r in run_checks("python.cat", metadata)}
+    assert "CHECK_DLL_CHARACTERISTICS" not in ids
+    # The same file parsed as a PE does fire it — the gate is about scope,
+    # not about softening the check.
+    ids = {r["id"] for r in run_checks("python.exe", {**metadata, "exe_type": "PE64"})}
+    assert "CHECK_DLL_CHARACTERISTICS" in ids
+
+
+def test_rule_machine_type_gate_resolution_rules():
+    from blint.lib.analysis import _rule_machine_type_allows
+
+    arm64_rule = {"machine_types": ["ARM64", "ARM64EC", "ARM64X"]}
+    # The numeric value resolves through blint's table, so a stale or renamed
+    # rendered string cannot widen or shrink the gate.
+    assert _rule_machine_type_allows(
+        {"machine_type": "AARCH64", "machine_type_value": 0xAA64}, arm64_rule
+    )
+    assert not _rule_machine_type_allows(
+        {"machine_type": "ARM64", "machine_type_value": 0x8664}, arm64_rule
+    )
+    # Rendered-string fallback for metadata without the numeric field.
+    assert _rule_machine_type_allows({"machine_type": "arm64"}, arm64_rule)
+    assert not _rule_machine_type_allows({"machine_type": "AMD64"}, arm64_rule)
+    # An unresolvable machine never fires a machine-gated rule...
+    assert not _rule_machine_type_allows({}, arm64_rule)
+    # ...but an absent gate means "all", preserving existing rule behavior.
+    assert _rule_machine_type_allows({}, {})
+    assert _rule_machine_type_allows({"machine_type": "AMD64"}, {"machine_types": []})

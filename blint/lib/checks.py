@@ -47,6 +47,31 @@ def check_objc_load_methods(
     return ", ".join(sorted(names)[:10])
 
 
+def check_tls_callbacks(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports TLS callbacks, which the loader runs before ``main``.
+
+    The PE sibling of ``check_objc_load_methods``: TLS callbacks execute
+    during process and thread setup with no caller in the code, which makes
+    them a legitimate hook (CRT use, crash reporting) and the earliest code
+    that runs in the process — a persistence and environment-tamper review
+    surface. Evidence comes from the ``pre_main_execution`` summary; the
+    resolved function names when the callback address matched a discovered
+    function, the raw addresses otherwise.
+    """
+    pre_main = metadata.get("pre_main_execution") or {}
+    callbacks = pre_main.get("tls_callbacks") or []
+    names = [
+        entry.get("function") or entry.get("address")
+        for entry in callbacks
+        if isinstance(entry, dict) and (entry.get("function") or entry.get("address"))
+    ]
+    if not names:
+        return True
+    return ", ".join(str(name) for name in names[:10])
+
+
 def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     return metadata.get("is_pie") is not False
 
@@ -75,21 +100,412 @@ def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     return True
 
 
-def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Reports files whose authenticity blint could not establish (02/B).
+
+    The verdict follows the ``code_signature`` scope, and the finding states
+    which of the three states it fired on:
+
+    - ``scope: "catalog"`` — the file is signed through a catalog directory
+      (--catalog-dir); the signer comes from the catalog. Never a finding.
+    - ``scope: "none"`` with ``catalog_lookup: "negative"`` — the lookup
+      was performed against a complete index and the file is in none of
+      its catalogs: the only state from which "unsigned" may actually be
+      claimed, so the finding names the directory the negative came from.
+    - ``scope: "none"`` with ``catalog_lookup: "not_performed"`` (no
+      directory supplied) or ``"index_incomplete"`` (the index refused or
+      truncated catalogs) — "unsigned" was not determined, so the rule
+      stays silent rather than manufacture the verdict (rule 11).
+    - ``scope: "embedded"`` — the legacy verification below: a signature
+      blob LIEF cannot verify (or a missing signer on it) is a finding.
+
+    A block from metadata exported before the structured block existed
+    takes the legacy path unchanged.
+    """
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict):
+        scope = code_signature.get("scope")
+        if scope == "catalog":
+            return True
+        if scope == "none":
+            lookup = code_signature.get("catalog_lookup")
+            if lookup == "negative":
+                return (
+                    "no embedded signature and no matching member in the "
+                    f"catalog directory {code_signature.get('catalog_directory')}"
+                )
+            # "not_performed" and "index_incomplete": an unsigned verdict
+            # was not determined, so it is not reported.
+            return True
     if authenticode_obj := metadata.get("authenticode"):
         vf = authenticode_obj.get("verification_flags", "").lower()
         return False if vf != "ok" else bool(authenticode_obj.get("cert_signer"))
     return True
 
 
+def check_signature_not_timestamped(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports signatures that carry no countersignature timestamp (02/A.1).
+
+    A signature without an RFC 3161 or PKCS#9 timestamp stops being
+    verifiable the moment the signing certificate expires — with the
+    short-lived certificates some CAs issue, that is days, not years. The
+    verdict is per signature, nested ones included: they inherit the outer
+    signature's timestamp and say so, so a dual-signed binary is not
+    double-counted as untimestamped.
+    """
+    code_signature = metadata.get("code_signature")
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return True
+    signatures = code_signature.get("signatures") or []
+    untimestamped = [
+        index + 1
+        for index, signature in enumerate(signatures)
+        if (signature.get("timestamp") or {}).get("present") is not True
+    ]
+    if not untimestamped:
+        return True
+    return f"signature(s) {untimestamped} of {code_signature.get('signature_count')} carry no timestamp"
+
+
+def check_weak_signature_digest(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports files where no signature uses a modern digest (02/A.3).
+
+    Dual signing is the normal shape for anything that must run on older
+    Windows: a SHA-1 outer signature with a SHA-256 one nested inside it.
+    The block's ``weak_digest_only`` is computed over every signature
+    including nested ones, so only a binary with no modern digest anywhere
+    is reported — the outer SHA-1 alone would flag ordinary modern
+    binaries. It is ``None`` when a truncated walk could not see every
+    signature, and an undecided verdict is not a finding.
+    """
+    code_signature = metadata.get("code_signature")
+    if not isinstance(code_signature, dict) or code_signature.get("parse_status") != "parsed":
+        return True
+    if code_signature.get("weak_digest_only") is not True:
+        return True
+    return "no signature uses SHA-256 or stronger"
+
+
+def _parsed_signature_block(metadata: dict[str, Any]) -> dict | None:
+    """The ``code_signature`` block when its facts were actually parsed."""
+    code_signature = metadata.get("code_signature")
+    if isinstance(code_signature, dict) and code_signature.get("parse_status") == "parsed":
+        return code_signature
+    return None
+
+
+def _deciding_signer(block: dict) -> dict:
+    """The signer of the signature the block's ``signing_class`` came from.
+
+    Every class rule names the same signature the class was derived from —
+    ``signing_class_signature`` says which, and naming some other signer in
+    the finding would describe a signature the verdict is not about.
+    """
+    signatures = block.get("signatures") or []
+    index = block.get("signing_class_signature", 0)
+    if index >= len(signatures):
+        return {}
+    return signatures[index].get("signer") or {}
+
+
+def check_self_signed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Reports a signature whose signer certificate is its own root (02/C).
+
+    A self-signed signer vouches for itself: no certificate authority
+    stands behind the identity the signature states, so nothing anchors it
+    to a publisher. Common for internal test signing — and for malware
+    that wants a "signed" look — which is why the finding names the
+    signer instead of pretending to know which. The verdict follows the
+    block's ``signing_class``: withheld when the walk was truncated, so a
+    sample can never decide it.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or block.get("signing_class") != "self_signed":
+        return True
+    signer = _deciding_signer(block)
+    return f"self-signed signer ({signer.get('cn')}): no certificate authority vouches for the identity"
+
+
+def check_signature_unknown_root(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a complete chain terminating outside the shipped root
+    snapshot (02/C).
+
+    The signature blob carried its whole chain up to a self-signed root,
+    and that root's SHA-256 fingerprint is not in blint's shipped anchor
+    snapshot (``pe_roots.yml`` — the trusted roots hashed from a Windows
+    store, with provenance, at a stated date). This is a statement about
+    the file, not a trust verdict: blint performs no trust validation and
+    consults no live store, so a root added to Windows after the snapshot,
+    or absent from it, reads the same way. A chain that stops below the
+    root — the normal Authenticode shape — reports nothing here, because
+    absence of a root in the blob is not evidence about the root (rule
+    11). The verdict follows ``signing_class`` and is withheld when the
+    walk was truncated.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or block.get("signing_class") != "unknown_root":
+        return True
+    signature = block["signatures"][block.get("signing_class_signature", 0)]
+    return (
+        "chain terminates at self-signed root "
+        f"{signature.get('chain_terminates_at')} whose fingerprint is outside "
+        "the shipped root snapshot"
+    )
+
+
+def check_kernel_signing_class(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the kernel-mode code-signing class (02/C), informational.
+
+    The signer carries the kernel-mode code signing EKU
+    (``1.3.6.1.4.1.311.61.1.1``), meaning the binary is signed for (or
+    claims to be signed for) execution as a kernel component. This is a
+    posture fact for the analyst — kernel code runs with the operating
+    system's privileges — not a defect claim, and the driver lane consumes
+    it directly.
+
+    It reads the EKU rather than ``signing_class == "kernel_mode"``: a
+    chain fact outranks the leaf's claims in the class, so a kernel-EKU
+    driver whose chain terminates outside the shipped snapshot classes as
+    ``unknown_root`` — and that is precisely the file whose kernel signing
+    the driver lane must still see. The class must have been *determined*
+    for this to speak, which keeps the truncation discipline: a walk that
+    hit its window yields no class and no finding here.
+    """
+    block = _parsed_signature_block(metadata)
+    if not block or not block.get("signing_class"):
+        return True
+    if "kernelModeCodeSigning" not in (_deciding_signer(block).get("eku") or []):
+        return True
+    return f"kernel-mode code signing ({_deciding_signer(block).get('cn')})"
+
+
+_PUBLISHER_CACHE: dict | None = None
+
+
+def _publisher_table() -> dict:
+    """The claimable-publisher identity table (pe_publisher_identities.yml).
+
+    Generated/judged data with provenance, never hard-coded names: the
+    signer-mismatch rule arbitrates only publishers listed here, because a
+    name difference between two unknown identities is not a tampering
+    signal (the Sysinternals measurement that decided the comparison is
+    recorded in the table header)."""
+    global _PUBLISHER_CACHE
+    if _PUBLISHER_CACHE is None:
+        _PUBLISHER_CACHE = _load_yaml_data("pe_publisher_identities.yml")
+    return _PUBLISHER_CACHE
+
+
+def _load_yaml_data(filename: str) -> dict:
+    import importlib.resources
+
+    import yaml
+
+    try:
+        with importlib.resources.files("blint.data").joinpath(filename).open(
+            "r", encoding="utf-8"
+        ) as handle:
+            return yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def check_signer_mismatch(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a VERSIONINFO company claim the signature does not back (02/C).
+
+    Fires only in the impersonation direction: ``CompanyName`` claims a
+    publisher from the identity table, and the signature's signer carries
+    none of that publisher's identity tokens. That is how a signed-but-
+    repurposed binary looks — re-signed by someone else with the victim's
+    version strings left in place. The reverse direction is deliberately
+    not a finding: Microsoft signs the Sysinternals suite whose
+    CompanyName still says "Sysinternals", and the Python Software
+    Foundation signs the OpenSSL DLLs it redistributes — measured 152 of
+    178 tier-0/1 files with both facts differ benignly, so a symmetric
+    comparison would be wrong, not the corpus. Companies absent from the
+    table are never arbitrated, and a missing signer or CompanyName
+    determines nothing (rule 11).
+    """
+    block = _parsed_signature_block(metadata)
+    if not block:
+        return True
+    signer = next(
+        (
+            sig.get("signer") or {}
+            for sig in block.get("signatures") or []
+            if (sig.get("signer") or {}).get("cn")
+        ),
+        {},
+    )
+    signer_identity = signer.get("o") or signer.get("cn") or ""
+    if not signer_identity:
+        return True
+    version_info = metadata.get("version_info") or {}
+    tables = version_info.get("strings") or {}
+    companies = sorted(
+        {table.get("CompanyName") for table in tables.values() if table.get("CompanyName")}
+    )
+    if not companies:
+        return True
+    publishers = _publisher_table().get("publishers") or {}
+    for company in companies:
+        lowered = company.lower()
+        for publisher, facts in publishers.items():
+            claim_tokens = facts.get("claim_tokens") or []
+            if not any(token in lowered for token in claim_tokens):
+                continue
+            # The claim is present; the signer must carry the publisher.
+            signer_tokens = facts.get("signer_tokens") or []
+            if any(token in signer_identity.lower() for token in signer_tokens):
+                continue
+            return (
+                f"CompanyName {company!r} claims the {publisher} publisher, but the "
+                f"signature signer is {signer_identity!r}"
+            )
+    return True
+
+
+def _host_plugin_contracts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """The matched host-plugin contracts, or [] when there is nothing to say.
+
+    The block exists only when a contract matched, so an absent block is
+    "no evidence of a plugin contract", never "verified not a plugin":
+    a binary whose export table blint could not read produces no block and
+    an ``export_table_unreadable`` degradation instead (rules 14/32).
+    """
+    block = metadata.get("host_plugin")
+    if isinstance(block, dict):
+        contracts = block.get("contracts")
+        if isinstance(contracts, list) and contracts:
+            return [c for c in contracts if isinstance(c, dict)]
+    return []
+
+
+def check_privileged_host_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the privileged-host plugin contracts the export set satisfies.
+
+    This is context, not an accusation: legitimate audio, print and
+    authentication software looks exactly like this, which is why the
+    severity is informational. What the finding names is the consequence -
+    a DLL satisfying one of these export contracts is one admin
+    registration away from being loaded into the named host on every boot
+    or logon, with no per-load prompt. The contract table and its
+    measurement live in blint/data/pe_host_plugin_contracts.yml; bare COM
+    in-proc exports never fire this (45% of a stock System32 exports the
+    pair), and the two COM contracts require an in-binary registration
+    reference and say so in their evidence.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    if not contracts:
+        return True
+    described = []
+    for contract in contracts:
+        hosts = contract.get("host_process") or "its host process"
+        described.append(f"{contract.get('id')} ({hosts})")
+    return "plugin contracts satisfied: " + "; ".join(described)
+
+
+def check_unsigned_host_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a host-plugin contract not vouched for by any signer (04/F).
+
+    The contracts load into SYSTEM and protected hosts automatically and
+    forever once registered - installed once with admin rights, no consent
+    surface after - so an unsigned or self-vouched plugin is the finding
+    that matters. The verdict follows the W2.4 ``signing_class`` exactly:
+    it fires on ``unsigned``, ``self_signed`` and ``unknown_root``, and
+    stays silent when the class is absent (undetermined - blint's default
+    invocation performs no catalog lookup, and absence of a class is
+    neither signed nor unsigned) or when the walk was truncated.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    if not contracts:
+        return True
+    block = _parsed_signature_block(metadata)
+    signing_class = (block or {}).get("signing_class")
+    if signing_class not in ("unsigned", "self_signed", "unknown_root"):
+        return True
+    contract_ids = ", ".join(sorted({str(c.get("id")) for c in contracts}))
+    if signing_class == "unsigned":
+        detail = "no signature: a performed, complete catalog lookup found nothing"
+    elif signing_class == "self_signed":
+        detail = "self-signed: the signer vouches for itself, no authority stands behind it"
+    else:
+        detail = "chain terminates outside the shipped root snapshot"
+    return (
+        f"auto-loaded plugin contract(s) {contract_ids} with signing class "
+        f"{signing_class} ({detail})"
+    )
+
+
+def check_lsa_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the lsass.exe contract that sees passwords in plaintext.
+
+    Only the password-filter / notification-package exports fire this:
+    those are the entry points the LSA calls with the account's plaintext
+    password on every change, which is what makes the contract the
+    classic credential-capture implant surface. ``SpLsaModeInitialize``
+    deliberately does not: measured over a full System32 it is on every
+    core logon protocol (msv1_0, kerberos, schannel, wdigest, pku2u,
+    negoexts, cloudap, TSpkg, SFAPM - nine DLLs), and a high-severity
+    finding on the OS's own authentication stack would be noise wearing a
+    rule's name; that contract is reported by
+    CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN.
+    The narrowing and its measurement are recorded in
+    blint/data/pe_host_plugin_contracts.yml.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    password_filter = next(
+        (c for c in contracts if c.get("id") == "lsa_password_filter"), None
+    )
+    if not password_filter:
+        return True
+    exports = ", ".join(password_filter.get("matched_exports") or [])
+    return (
+        f"password filter exports ({exports}) for lsass.exe (SYSTEM, protected): "
+        "loaded via Lsa Notification Packages it receives every account "
+        "password change in plaintext"
+    )
+
+
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
+    """Reports mandatory DLL characteristics the image does not carry.
+
+    Membership is tested against the structured ``flags`` list decoded from
+    the numeric bitfield (pe_constants), never against rendered enum text:
+    LIEF 1.0 renders DLL_CHARACTERISTICS members as integers (V1), which made
+    every value read as missing. The joined-string fallback keeps metadata
+    exported before the structured block existed (parse cache) working.
+
+    An image whose bitfield is zero carries none of the mandatory values, so
+    it reports all of them. Keying the decision off the joined string instead
+    would let the least hardened PE of all pass silently.
+    """
     missing: list[str] = []
-    if dll_characteristics := metadata.get("dll_characteristics"):
-        missing += [
-            c for c in rule_obj.get("mandatory_values", []) if c not in dll_characteristics
-        ]
+    structured = metadata.get("dll_characteristics_structured")
+    mandatory_values = rule_obj.get("mandatory_values", [])
+    if isinstance(structured, dict) and "flags" in structured:
+        flag_names = {str(v).upper() for v in structured.get("flags") or []}
+        missing += [c for c in mandatory_values if str(c).upper() not in flag_names]
+    elif dll_characteristics := metadata.get("dll_characteristics"):
+        missing += [c for c in mandatory_values if c not in dll_characteristics]
     if missing:
         return ", ".join(missing)
     return True
@@ -180,6 +596,27 @@ def check_trust_info(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any])
                 for vk, vv in v.items():
                     if str(manifest_k.get(vk)).lower() != str(vv).lower():
                         return f"{vk}:{manifest_k.get(vk)}"
+    return True
+
+
+def check_build_path_leak(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a CodeView PDB reference that leaks a build-machine path.
+
+    The PDB path is embedded so the linker can find symbols; it names the
+    build agent's directory tree, and CI runs leak usernames and internal
+    hostnames with it (``D:\\a\\1\\b\\...`` is Azure DevOps' work tree). A
+    bare filename or a relative path leaks no structure and passes; an
+    absolute path (drive letter or UNC) is the finding, carried as the
+    evidence.
+    """
+    codeview = (metadata.get("debug") or {}).get("codeview") or {}
+    pdb_path = str(codeview.get("pdb_path") or "")
+    if not pdb_path:
+        return True
+    if (len(pdb_path) >= 2 and pdb_path[1] == ":") or pdb_path.startswith("\\\\"):
+        return pdb_path
     return True
 
 
@@ -274,11 +711,22 @@ def check_undeclared_dependencies(
 
 
 def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
-    properties = metadata.get("security_properties", {})
+    """Fire only on a property that was computed and found False.
+
+    The tristate discipline at the rule layer: a property key absent from
+    ``security_properties`` means the source it is computed from was absent
+    (P2.4), so there is nothing to claim and the rule stays silent. Reading
+    an omitted key as a failure is what made CHECK_ENCLAVE/CHECK_XFG/
+    CHECK_CET fire on every file blint could not even parse as a PE (V4).
+    """
+    properties = metadata.get("security_properties") or {}
     key = rule_obj.get("property_key")
     if not key:
         return True
-    return properties.get(key) is True
+    value = properties.get(key)
+    if value is None:
+        return True
+    return value is True
 
 
 def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:

@@ -1292,6 +1292,13 @@ class BlintOptions:
     # and confirmed against the SDK's .tbd stubs under the `sdk_tbd`
     # attribution source; a path with no .tbd files is a hard error.
     sdk_path: str | None = None
+    # Opt into catalog-signature resolution (--catalog-dir). Off by default:
+    # the path names a catalog tree (a copied CatRoot) the analyst supplies,
+    # so using one is the caller's call. When set, PEs with no embedded
+    # signature are looked up by authentihash and a match reports
+    # code_signature.scope "catalog"; without it the block keeps
+    # catalog_lookup "not_performed" and never claims "unsigned".
+    catalog_dir: str | None = None
 
     def __post_init__(self) -> None:
         if not self.src_dir_image and not (self.sbom_mode and self.src_dir_boms):

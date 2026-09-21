@@ -99,8 +99,42 @@ class ReviewRunner:
     def _review_imports(self, metadata: dict[str, Any]) -> None:
         """Reviews imports in the metadata."""
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
+        # W3.2: a managed assembly's import surface is its metadata — the
+        # referenced types and members, the P/Invoke scopes, and the string
+        # literals the IL loads. They ride the same pattern-review
+        # machinery the native import table feeds.
+        imports_list += self._dotnet_import_surface(metadata)
         LOG.debug(f"Reviewing {len(imports_list)} imports")
         self.run_review_methods_symbols(self.review_imports_list, imports_list)
+
+    @staticmethod
+    def _dotnet_import_surface(metadata: dict[str, Any]) -> list[str]:
+        """Candidate values a managed assembly offers the import reviews.
+
+        Each rendering is the one the managed rules match on: a TypeRef is
+        its namespace-qualified name, a MemberRef its ``Type::member``, a
+        P/Invoke entry its ``module::entry_point``. Everything is already
+        a capped listing (pe_dotnet), so the candidate count is bounded.
+        """
+        dotnet = metadata.get("dotnet") or {}
+        if not dotnet:
+            return []
+        values: list[str] = []
+        for typeref in dotnet.get("typerefs") or []:
+            values.append(typeref.get("name", ""))
+        for memberref in dotnet.get("memberrefs") or []:
+            parent = memberref.get("parent") or ""
+            name = memberref.get("name") or ""
+            values.append(f"{parent}::{name}" if parent else name)
+        for entry in dotnet.get("pinvoke") or []:
+            values.append(
+                f"{entry.get('module', '')}::{entry.get('entry_point', '')}"
+            )
+        values.extend(dotnet.get("module_refs") or [])
+        for item in metadata.get("strings") or []:
+            value = item.get("value", "") if isinstance(item, dict) else str(item)
+            values.append(value)
+        return [v for v in values if v]
 
     def _review_entries(self, metadata: dict[str, Any]) -> None:
         """Reviews dynamic entries in the metadata."""

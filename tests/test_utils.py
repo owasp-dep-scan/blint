@@ -2,11 +2,13 @@ from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import orjson
+import pytest
 
 from blint.lib import utils
 from blint.lib.utils import (
     calculate_entropy,
     demangle_symbolic_name,
+    enum_to_str,
     export_metadata,
     get_hex_truncation_count,
     get_version,
@@ -109,3 +111,37 @@ def test_get_version_falls_back_when_metadata_missing(monkeypatch):
 
     monkeypatch.setattr(utils, "distribution", _raise)
     assert get_version() == "dev"
+
+
+def test_enum_to_str_returns_the_name_on_every_lief_enum_flavour():
+    """LIEF has two enum flavours and the interpreter renders them differently.
+
+    ``OptionalHeader.DLL_CHARACTERISTICS`` members are *arithmetic* - they
+    pass ``isinstance(x, int)`` - while ``MACHINE_TYPES`` members are not.
+    Testing for int first therefore reported every known member of every
+    flag enum as ``UNKNOWN(64)``. And ``str()`` on a LIEF enum is a property
+    of the interpreter rather than of LIEF: measured with one and the same
+    wheel (lief 1.0.0-d05b3499b), Python 3.10.17 renders
+    ``DLL_CHARACTERISTICS.DYNAMIC_BASE`` and 3.11.14 renders ``64``, the
+    enum ``__str__`` change that landed in 3.11 - so taking the last dotted
+    component yielded a name on one supported interpreter and a number
+    string on the other.
+
+    Reading ``name`` first answers both. Only a value LIEF really could not
+    place - one with no ``name`` at all - still renders ``UNKNOWN(<value>)``.
+    """
+    lief = pytest.importorskip("lief")
+
+    dll_characteristics = lief.PE.OptionalHeader.DLL_CHARACTERISTICS
+    assert isinstance(dll_characteristics.DYNAMIC_BASE, int)  # the arithmetic flavour
+    assert not isinstance(lief.PE.Header.MACHINE_TYPES.AMD64, int)
+
+    assert enum_to_str(dll_characteristics.DYNAMIC_BASE) == "DYNAMIC_BASE"
+    assert enum_to_str(dll_characteristics.NX_COMPAT) == "NX_COMPAT"
+    assert enum_to_str(lief.PE.Header.MACHINE_TYPES.AMD64) == "AMD64"
+    assert enum_to_str(lief.PE.OptionalHeader.SUBSYSTEM.WINDOWS_CUI) == "WINDOWS_CUI"
+
+    # A raw integer is what LIEF hands back for a value absent from the
+    # enum, and it stays distinguishable from a real name.
+    assert enum_to_str(999) == "UNKNOWN(999)"
+    assert enum_to_str(0) == "UNKNOWN(0)"

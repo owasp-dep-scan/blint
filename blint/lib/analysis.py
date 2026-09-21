@@ -16,6 +16,7 @@ import yaml
 from rich.terminal_theme import MONOKAI
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_from_env
+from blint.lib import pe_constants
 
 # These are the rule registry, not spare imports: ``run_rule`` resolves a rule
 # id to its implementation with ``getattr(sys.modules[__name__], cid.lower())``,
@@ -24,15 +25,19 @@ from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_fro
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
     check_authenticode,  # noqa: F401
+    check_build_path_leak,  # noqa: F401
     check_canary,  # noqa: F401
     check_codesign,  # noqa: F401
     check_dll_characteristics,  # noqa: F401
+    check_kernel_signing_class,  # noqa: F401
     check_libc_portability,  # noqa: F401
     check_link_closure,  # noqa: F401
+    check_lsa_plugin,  # noqa: F401
     check_nx,  # noqa: F401
     check_objc_load_methods,  # noqa: F401
     check_packed,  # noqa: F401
     check_pie,  # noqa: F401
+    check_privileged_host_plugin,  # noqa: F401
     check_profile_development,  # noqa: F401
     check_profile_expired,  # noqa: F401
     check_profile_wildcard,  # noqa: F401
@@ -41,10 +46,17 @@ from blint.lib.checks import (
     check_runtime_loading,  # noqa: F401
     check_search_path,  # noqa: F401
     check_security_property,
+    check_self_signed,  # noqa: F401
+    check_signature_not_timestamped,  # noqa: F401
+    check_signature_unknown_root,  # noqa: F401
+    check_signer_mismatch,  # noqa: F401
+    check_tls_callbacks,  # noqa: F401
     check_trust_info,  # noqa: F401
     check_undeclared_dependencies,  # noqa: F401
+    check_unsigned_host_plugin,  # noqa: F401
     check_unused_dependencies,  # noqa: F401
     check_virtual_size,  # noqa: F401
+    check_weak_signature_digest,  # noqa: F401
     check_wx_segments,  # noqa: F401
 )
 from blint.lib.utils import (
@@ -359,6 +371,34 @@ def initialize_rules(blint_options: BlintOptions) -> None:
     )
 
 
+def _rule_machine_type_allows(metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+    """Whether the rule's ``machine_types`` gate covers this binary's machine.
+
+    Absent from a rule means "all machine types", so existing rules behave
+    exactly as before. When a rule declares machine types, the binary's
+    machine resolves through blint's own PE-spec table (pe_constants) from the
+    numeric ``machine_type_value`` — never through a dependency's enum
+    rendering (ground rule 28) — falling back to the recorded machine-type
+    string for metadata that predates the numeric field. A binary whose
+    machine cannot be resolved never fires a machine-gated rule: an
+    architecture claim with no architecture behind it is exactly the
+    CHECK_PAC-on-x86-64 false positive this gate exists to prevent.
+    """
+    rule_machine_types = rule_obj.get("machine_types")
+    if not rule_machine_types:
+        return True
+    allowed = {str(m).upper() for m in rule_machine_types}
+    names: set[str] = set()
+    machine_value = metadata.get("machine_type_value")
+    if isinstance(machine_value, int) and not isinstance(machine_value, bool):
+        names.add(pe_constants.machine_type_name(machine_value).upper())
+    if not names:
+        rendered = metadata.get("machine_type")
+        if rendered:
+            names.add(str(rendered).upper())
+    return bool(names) and bool(names & allowed)
+
+
 def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     """Runs the checks on the provided metadata using the loaded rules.
 
@@ -379,8 +419,15 @@ def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
     exe_type = metadata.get("exe_type")
     for cid, rule_obj in rules_dict.items():
         rule_exe_types = rule_obj.get("exe_types")
-        # Skip rules that are not valid for this exe type
-        if exe_type and rule_exe_types and exe_type not in rule_exe_types:
+        # Skip rules whose declared exe_types scope does not cover this file.
+        # An unresolvable exe_type never fires a scoped rule — the same
+        # principle as the machine_types gate: a scope claim with no type
+        # behind it is how CHECK_ENCLAVE/XFG/CET ended up firing on .cat and
+        # .zip files blint could not parse at all (V4).
+        if rule_exe_types and exe_type not in rule_exe_types:
+            continue
+        # Skip rules whose machine_types gate excludes this binary's machine
+        if not _rule_machine_type_allows(metadata, rule_obj):
             continue
         if result := run_rule(f, metadata, rule_obj, exe_type, cid):
             results.append(result)
