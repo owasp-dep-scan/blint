@@ -35,6 +35,18 @@ Two of those measurements shaped the code and are worth stating here:
   mixed-mode test that runs first would claim C++/CLI for an ordinary R2R
   build.
 
+False positives, measured before this shipped: over a full
+``C:\\Windows\\System32`` on the VM - 3,984 PEs, 0 parse errors - the
+classifier emits a shape for 15 files and stays silent on 3,969. The 15 are
+7 ``il_only`` (genuine managed assemblies: AuthFWSnapin, srmlib, tzsync,
+Windows.Help.Runtime and three Microsoft.Windows.Storage ones) and 8
+``mixed_mode``, every one of them a real C++/CLI image - the MFC managed
+interop DLLs (mfcm140 and its variants), dnscmmc and NAPCRYPT. There is not
+one ``native_aot``, ``single_file_bundle`` or ``apphost`` among the 3,969
+native PEs. The mixed-mode population is the only one with no synthetic
+fixture behind it, because the SDK on the VM cannot produce a C++/CLI
+assembly for ARM64; those eight files are its ground truth instead.
+
 What this module deliberately does not claim: whether a publish was
 framework-dependent, self-contained or trimmed. Those differ only in what
 sits in the output *directory* (5, 200 and 27 files in the measurement),
