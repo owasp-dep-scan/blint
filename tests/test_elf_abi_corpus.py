@@ -24,6 +24,11 @@ wrong shape for a check gating every pull request, so these are opt-in: set
 ``BLINT_CORPUS_TESTS=1``. They also skip when Docker is absent or its daemon
 cannot run Linux containers.
 
+An image is analysed on first use rather than up front, and an image that
+cannot be prepared -- an unreachable registry, a mirror that drops a package --
+skips the tests that need it and names the failing command, instead of erroring
+every test in the file with an empty log.
+
 Run them with:
 
     BLINT_CORPUS_TESTS=1 pytest tests/test_elf_abi_corpus.py -v
@@ -87,7 +92,13 @@ DISTROS = [
     ),
     Distro(
         "opensuse",
-        "opensuse/tumbleweed:latest",
+        # Pinned by digest because Tumbleweed is a rolling release: `latest`
+        # renames its Python package on its own schedule, and the setup command
+        # below names `python313` explicitly. Bump this deliberately, together
+        # with that package name, so the newer glibc this image is here for
+        # arrives as a reviewed change rather than as a Monday cron failure.
+        "opensuse/tumbleweed@sha256:"
+        "1dafc5a642242268bcd8f7e4f7e7d2531b73fd724328497e5ec97492b1c31914",
         "zypper -n -q install python313 python313-pip binutils",
         python="python3.13",
     ),
@@ -134,21 +145,50 @@ pytestmark = [
 ]
 
 
+# Printed by the container when the image could not be prepared: the package
+# manager failed, or the interpreter or blint it was supposed to install is not
+# there. That is the registry or a mirror failing, not a result about blint, so
+# the tests say so rather than reporting a probe that never ran as a defect.
+PREP_FAILED = "BLINT_PREP_FAILED"
+
+# Both logs are kept in full inside the container and only their tails are
+# printed, because an apt or zypper transcript is thousands of lines of package
+# names and the failure is always at the end.
+LOG_TAIL_LINES = 100
+
+
+class ProbeUnavailable(Exception):
+    """The image could not be prepared, so no probe result exists to check."""
+
+
 def run_probe(distro: Distro, repo_root: str) -> dict:
-    """Install blint in the image and run the probe, returning its report."""
+    """Install blint in the image and run the probe, returning its report.
+
+    Raises ``ProbeUnavailable`` when the image could not be prepared at all.
+    """
+    # Preparation output is kept rather than discarded. It used to go to
+    # /dev/null, which made a failed package install and a broken probe produce
+    # the same empty output, and a Tumbleweed mirror failure then read as
+    # "probe produced no result" with nothing to act on.
     command = (
-        f"{distro.setup} >/dev/null 2>&1; "
+        f"{{ {distro.setup} ; }} >/tmp/prep.log 2>&1; "
         # The checkout is bind-mounted, and an editable install writes build
         # metadata back into it. With several images installing in sequence
         # against the same mount they corrupt each other's state, so each
         # container builds from its own copy.
-        "cp -r /blint /tmp/blint-src && "
+        "cp -r /blint /tmp/blint-src >>/tmp/prep.log 2>&1; "
         # --break-system-packages is needed on the images that mark their system
         # Python as externally managed, and is rejected by older pip, so the
         # plain form is the fallback.
         f"({distro.python} -m pip install --break-system-packages -q -e /tmp/blint-src "
-        f">/dev/null 2>&1 || {distro.python} -m pip install -q -e /tmp/blint-src >/dev/null 2>&1); "
-        f"{distro.python} /tmp/blint-src/tests/data/elf_corpus_probe.py 2>/dev/null"
+        f"|| {distro.python} -m pip install -q -e /tmp/blint-src) >>/tmp/prep.log 2>&1; "
+        # Asked of the interpreter rather than inferred from pip's exit status,
+        # so a pip that reports success without installing anything is caught
+        # here instead of surfacing as an empty probe.
+        f'if ! {distro.python} -c "import blint" >>/tmp/prep.log 2>&1; then '
+        f'echo "{PREP_FAILED}" >&2; tail -n {LOG_TAIL_LINES} /tmp/prep.log >&2; exit 0; fi; '
+        f"{distro.python} /tmp/blint-src/tests/data/elf_corpus_probe.py 2>/tmp/probe.log; "
+        f"tail -n {LOG_TAIL_LINES} /tmp/probe.log >&2"
     )
     completed = subprocess.run(
         [
@@ -171,27 +211,100 @@ def run_probe(distro: Distro, repo_root: str) -> dict:
         text=True,
         timeout=3600,
     )
+    detail = (
+        f"exit status {completed.returncode}\n"
+        f"stdout:\n{completed.stdout[-4000:]}\n"
+        f"stderr:\n{completed.stderr[-4000:]}"
+    )
+    if PREP_FAILED in completed.stderr:
+        raise ProbeUnavailable(f"[{distro.name}] could not prepare {distro.image}.\n{detail}")
+    if completed.returncode != 0 and "BLINT_RESULT_START" not in completed.stdout:
+        # docker itself failed -- the pull did not complete, or the daemon
+        # killed the container. The shell above exits 0 on every path it
+        # controls, so a non-zero status with no result did not come from blint.
+        raise ProbeUnavailable(f"[{distro.name}] could not run {distro.image}.\n{detail}")
     if "BLINT_RESULT_START" not in completed.stdout:
-        pytest.fail(
-            f"[{distro.name}] probe produced no result.\n"
-            f"stdout:\n{completed.stdout[-4000:]}\n"
-            f"stderr:\n{completed.stderr[-4000:]}"
-        )
+        pytest.fail(f"[{distro.name}] probe produced no result.\n{detail}")
     payload = completed.stdout.split("BLINT_RESULT_START", 1)[1].strip()
     return json.loads(payload.splitlines()[0])
 
 
+class CorpusReports:
+    """The probe reports, produced on first use and cached for the session.
+
+    Each image is analysed at most once, and lazily. The reports used to be
+    built eagerly in one comprehension, which meant one unreachable registry
+    turned every test in the file into an error about that image -- fifty-three
+    of them, none of them about the distribution they were named after.
+    """
+
+    def __init__(self, repo_root: str):
+        self._repo_root = repo_root
+        self._reports: dict[str, dict] = {}
+        self._unavailable: dict[str, str] = {}
+
+    def _fetch(self, distro: Distro) -> dict:
+        """Return this image's report, raising ``ProbeUnavailable`` if it has none."""
+        if distro.name in self._unavailable:
+            raise ProbeUnavailable(self._unavailable[distro.name])
+        if distro.name not in self._reports:
+            try:
+                self._reports[distro.name] = run_probe(distro, self._repo_root)
+            except ProbeUnavailable as exc:
+                self._unavailable[distro.name] = str(exc)
+                raise
+        return self._reports[distro.name]
+
+    def report(self, distro: Distro) -> dict:
+        """Return this image's report, skipping the test if it is unreachable."""
+        try:
+            return self._fetch(distro)
+        except ProbeUnavailable as exc:
+            pytest.skip(str(exc))
+
+    def reachable(self) -> dict[str, dict]:
+        """Return a report per image that could be prepared.
+
+        Used by the assertions made across the whole corpus rather than per
+        image. An unreachable registry narrows what they run against, so they
+        say which images are missing; losing them all leaves nothing to assert
+        and is a skip rather than a pass.
+        """
+        available, missing = {}, []
+        for distro in DISTROS:
+            if distro.name in self._unavailable:
+                missing.append(distro.name)
+                continue
+            try:
+                available[distro.name] = self._fetch(distro)
+            except ProbeUnavailable:
+                missing.append(distro.name)
+        if not available:
+            pytest.skip(f"no image could be prepared: {', '.join(missing)}")
+        if missing:
+            # Loud on purpose: the corpus-wide assertions below are weaker than
+            # they look when an image is missing, and a quiet pass would hide
+            # that.
+            print(f"corpus narrowed -- these images could not be prepared: {', '.join(missing)}")
+        return available
+
+
 @pytest.fixture(scope="session")
-def corpus_reports(request):
-    """Analyse every image once and cache the reports for the whole session."""
-    repo_root = str(request.config.rootpath)
-    return {distro.name: run_probe(distro, repo_root) for distro in DISTROS}
+def corpus(request) -> CorpusReports:
+    """Analyse each image once and cache the reports for the whole session."""
+    return CorpusReports(str(request.config.rootpath))
+
+
+@pytest.fixture
+def corpus_reports(corpus) -> dict[str, dict]:
+    """Every report the registry allowed us to collect, keyed by image name."""
+    return corpus.reachable()
 
 
 @pytest.fixture(params=DISTROS, ids=lambda distro: distro.name)
-def distro_report(request, corpus_reports):
+def distro_report(request, corpus):
     distro = request.param
-    return distro, corpus_reports[distro.name]
+    return distro, corpus.report(distro)
 
 
 def test_objects_were_found_and_parsed(distro_report):
