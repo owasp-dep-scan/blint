@@ -91,8 +91,15 @@ from blint.logger import LOG
 # under the PINVOKE tag. A schema-6 entry carries none of it, so serving
 # one leaves every managed capability rule with nothing to match and
 # `strings` holding the byte scan's noise — the exact state the packet
-# exists to end.
-CACHE_SCHEMA_VERSION = 7
+# exists to end. 8: the privileged-host plugin surface (W5.6) — PE metadata
+# gains the `host_plugin` block, `exports_read_status` beside an unreadable
+# export table, and `host_plugin_scope`/`host_plugin_slice_variance` for
+# ARM64X images. A schema-7 entry carries none of it: the block is simply
+# absent, which reads as "no plugin contract evidenced" — the three W5.6
+# rules then match nothing on a warm cache exactly the way the managed
+# rules did on a schema-6 cache (the W3.2 review lesson: every stored-shape
+# change bumps this).
+CACHE_SCHEMA_VERSION = 8
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

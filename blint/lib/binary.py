@@ -222,6 +222,7 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.pe_host_plugins import classify_host_plugins
 from blint.lib.pe_imports import (  # noqa: F401
     apiset_host,
     delay_import_hash,
@@ -1295,6 +1296,17 @@ def parse(
                 metadata["strings_source"] = "user_strings_heap"
         if "strings" not in metadata:
             metadata["strings"] = parse_strings(parsed_obj)
+        # W5.6: the privileged-host plugin surface (04/F) - which plugin
+        # contracts the export set satisfies and the host each loads into.
+        # An interpretation of already-parsed facts (the export listings and
+        # the section bytes for registration references), computed here
+        # because the block reads the finalized metadata as a whole. Absent
+        # when no contract matched - never an empty block that would read
+        # as "not a plugin"; an unreadable export table is named through
+        # exports_read_status in analysis_coverage instead.
+        if isinstance(parsed_obj, lief.PE.Binary):
+            if host_plugin_block := classify_host_plugins(metadata, parsed_obj):
+                metadata["host_plugin"] = host_plugin_block
         if informative_strings := parse_informative_strings(parsed_obj):
             metadata["informative_strings"] = informative_strings
         metadata["import_dependencies"] = analyze_import_deps(metadata)
@@ -1461,6 +1473,11 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         degradations.append("disassembly_unavailable")
     if metadata.get("is_encrypted"):
         degradations.append("fairplay_encrypted")
+    # W5.6: an export directory lief could not read is a named blind spot -
+    # the host-plugin contracts are export-keyed, so the gap must reach the
+    # coverage block rather than reading as "not a plugin" (rules 14/32).
+    if metadata.get("exports_read_status") == "failed":
+        degradations.append("export_table_unreadable")
     if (metadata.get("link_hygiene") or {}).get("attribution_status") == "unresolved":
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
@@ -1513,6 +1530,13 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         coverage["code_signature_scope"] = scope
     if variance := metadata.get("code_signature_slice_variance"):
         coverage["code_signature_slice_variance"] = list(variance)
+    # Same rule-21 reason for the host-plugin surface (W5.6): the block
+    # speaks for one export listing whenever the ARM64X slices disagree,
+    # and a consumer of the coverage block alone must see that.
+    if host_plugin_scope := metadata.get("host_plugin_scope"):
+        coverage["host_plugin_scope"] = host_plugin_scope
+    if host_plugin_variance := metadata.get("host_plugin_slice_variance"):
+        coverage["host_plugin_slice_variance"] = list(host_plugin_variance)
     # A signature blob blint could not parse is a blind spot like any other:
     # declared in the gaps (stamped by _macho_security_properties), and here
     # as a degradation so a thin result can never read as "no entitlements".

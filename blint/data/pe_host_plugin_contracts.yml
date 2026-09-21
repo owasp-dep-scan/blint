@@ -1,0 +1,271 @@
+# blint's privileged-host plugin contract table (PE lane W5.6, plan 04/F).
+#
+# A DLL reaches a privileged host by satisfying an *export contract*: the
+# host (or its loader) GetProcAddress-es a documented set of entry points,
+# and a DLL exporting them is one registration away from being loaded into
+# that host at boot or at logon, with no per-load prompt and no consent
+# surface after the one-time admin install. This table maps export names
+# to the host process each contract loads into and that host's privilege,
+# so the host_plugin block can say "this binary is a plugin for X" as a
+# fact about the export set rather than a guess from the filename.
+#
+# Every export name below is pinned against the cited Microsoft Learn page
+# (transcribed from the documentation, never from blint's own output - the
+# W3.1 lesson), and every contract's hit count was measured over a full
+# C:\Windows\System32 (3,380 DLLs, 3,191 with named exports, Windows 11
+# ARM64 10.0.26100, 2026-09-21) before any rule that reads this table was
+# given a severity. The measured counts:
+#
+#   bare COM in-proc pair (DllGetClassObject+DllCanUnloadNow): 1,443 DLLs
+#   lsa_security_package       (SpLsaModeInitialize):             9 DLLs
+#   lsa_password_filter        (InitializeChangeNotify et al.):   2 DLLs
+#   winsock_service_provider   (WSPStartup):                      2 DLLs
+#   winsock_namespace_provider (NSPStartup):                      7 DLLs
+#   print_monitor              (InitializePrintMonitor2):         7 DLLs
+#   print_monitor_ui           (InitializePrintMonitorUI):        3 DLLs
+#   print_provider             (InitializePrintProvidor):         2 DLLs
+#   network_provider           (NPGetCaps):                       5 DLLs
+#   time_provider              (TimeProvOpen):                    3 DLLs
+#   appcert                    (CreateProcessNotify):             0 DLLs
+#   credential_provider        (COM + registration string):      17 DLLs
+#   audio_processing_object    (COM + registration string):       2 DLLs
+#
+# Two consequences of that measurement are load-bearing. First, bare COM
+# in-proc exports are on 45% of system32, so no rule keys on them alone:
+# the two COM contracts additionally require an in-binary reference to
+# their registration path ("Authentication\Credential Providers",
+# "AudioEngine\AudioProcessingObjects"), which 17 and 2 DLLs carry. Of the
+# 17, ten are credential providers confirmed in this machine's registry
+# (credprovs.dll, credprovslegacy.dll, SmartcardCredentialProvider.dll,
+# BioCredProv.dll, devicengccredprov.dll, FaceCredentialProvider.dll,
+# fidocredprov.dll, ngccredprov.dll, wlidcredprov.dll plus Parallels'
+# third-party TouchIDCredProv.dll), one is the credential-provider host
+# (credprovhost.dll), and six are logon-subsystem DLLs that reference the
+# registration namespace without being registered providers themselves
+# (IoTAssignedAccessLockFramework, LockController, ngctasks, ngcutils,
+# SharedPCCSP, Windows.UI.Logon, wlansvc) - which is why the COM contracts
+# speak at informational severity and the finding text qualifies with
+# "when registered". Only the registry knows which CLSID is actually
+# registered; blint reads the binary.
+#
+# Second, SpLsaModeInitialize is on every core logon protocol (msv1_0,
+# kerberos, schannel, wdigest, tspkg/TSpkg, pku2u, negoexts, cloudap,
+# SFAPM), so a high-severity LSA rule keyed on it would fire on the OS's
+# own authentication stack nine times per scan. CHECK_LSA_PLUGIN therefore
+# fires only on lsa_password_filter - the exports that receive account
+# passwords in plaintext (2 DLLs on a stock system: scecli.dll, which is
+# the registered "Notification Packages" value on the measurement machine,
+# and kdcpw.dll). The lsa_security_package contract still lands in the
+# host_plugin block as context and feeds the unsigned-plugin rule.
+#
+# host_privilege vocabulary (verified on the measurement machine via
+# Win32_Process GetOwner, 2026-09-21): "system" (NT AUTHORITY\SYSTEM),
+# "local_service" (NT AUTHORITY\LocalService), "protected" (a protected
+# process - lsass under PPL, audiodg for protected content), "inherited"
+# (loaded into whichever process calls the trigger API). LogonUI.exe and
+# audiodg.exe were not running when accounts were sampled; their entries
+# follow Microsoft's documented behavior (LogonUI is spawned by winlogon
+# on the secure desktop; audiodg runs protected for DRM content).
+
+contracts:
+  lsa_security_package:
+    title: LSA security support provider / authentication package (SSP/AP)
+    kind: exports
+    export_names:
+      - SpLsaModeInitialize
+    match: any
+    host_process: lsass.exe
+    host_privilege: system
+    protected_process: true
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Security Packages
+    documentation: https://learn.microsoft.com/en-us/windows/win32/secauthn/lsa-mode-initialization
+    notes: >-
+      The LSA calls SpLsaModeInitialize in each registered SSP/AP at startup
+      to obtain the security package's dispatch table. Nine DLLs export it
+      on a stock system32 and they are the OS logon stack itself, so this
+      contract is context, never a high-severity finding on its own.
+
+  lsa_password_filter:
+    title: LSA password filter / notification package
+    kind: exports
+    export_names:
+      - InitializeChangeNotify
+      - PasswordChangeNotify
+      - PasswordFilter
+    match: any
+    host_process: lsass.exe
+    host_privilege: system
+    protected_process: true
+    credential_exposure: account passwords in plaintext on every password change
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Notification Packages
+    documentation: https://learn.microsoft.com/en-us/windows/win32/secmgmt/password-filter-programming-considerations
+    notes: >-
+      Password filter DLLs run in the security context of the local system
+      account and are called by the LSA with the plaintext password on every
+      change (the registered instance on the measurement machine is
+      scecli.dll). The classic credential-capture implant contract.
+
+  winsock_service_provider:
+    title: Winsock transport service provider / layered service provider
+    kind: exports
+    export_names:
+      - WSPStartup
+    match: any
+    host_process: every socket-using process (loaded by ws2_32.dll)
+    host_privilege: inherited
+    registration_hint: Winsock catalog (netsh winsock show catalog)
+    documentation: https://learn.microsoft.com/en-us/windows/win32/api/ws2spi/nf-ws2spi-wspstartup
+    notes: >-
+      Transport service providers are DLLs with the single exported entry
+      point WSPStartup; ws2_32.dll loads the provider into whichever process
+      first creates a socket bound to it, so the privilege is the calling
+      process's. On the measurement machine every catalog entry resolves to
+      mswsock.dll (plus msafd.dll exporting WSPStartup).
+
+  winsock_namespace_provider:
+    title: Winsock namespace service provider
+    kind: exports
+    export_names:
+      - NSPStartup
+    match: any
+    host_process: name-resolution callers (loaded by ws2_32.dll)
+    host_privilege: inherited
+    registration_hint: Winsock namespace catalog
+    documentation: https://learn.microsoft.com/en-us/windows/win32/api/ws2spi/nf-ws2spi-nspstartup
+    notes: >-
+      The namespace-provider analogue of WSPStartup: seven DLLs on a stock
+      system32 (NapiNSP, nlansp_c, rnr20, winrnr, wlidnsp, wshbth, mswsock).
+
+  print_monitor:
+    title: Print monitor (language or port monitor server DLL)
+    kind: exports
+    export_names:
+      - InitializePrintMonitor2
+      - InitializePrintMonitor
+    match: any
+    host_process: spoolsv.exe
+    host_privilege: system
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Print\Monitors
+    documentation: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/winsplp/nf-winsplp-initializeprintmonitor2
+    notes: >-
+      InitializePrintMonitor2 must be exported by language monitors and by
+      port monitor server DLLs and is called immediately after the monitor
+      is loaded into the print spooler (verified SYSTEM). The legacy
+      InitializePrintMonitor is the pre-XP spelling. All six monitors
+      registered on the measurement machine export the modern name.
+
+  print_monitor_ui:
+    title: Print monitor UI DLL
+    kind: exports
+    export_names:
+      - InitializePrintMonitorUI
+    match: any
+    host_process: the application opening the printer UI
+    host_privilege: inherited
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Print\Monitors
+    documentation: https://learn.microsoft.com/en-us/windows-hardware/drivers/print/initializing-a-print-monitor
+    notes: The client-side half of a port monitor pair (APMonUI, localui, tcpmonui).
+
+  print_provider:
+    title: Print provider
+    kind: exports
+    export_names:
+      - InitializePrintProvidor
+    match: any
+    host_process: spoolsv.exe
+    host_privilege: system
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Print\Providers
+    documentation: https://learn.microsoft.com/en-us/windows-hardware/drivers/print/introduction-to-print-providers
+    notes: localspl.dll (Local Print) and win32spl.dll (LanMan Print Services).
+
+  network_provider:
+    title: Network provider (Multiple Provider Router)
+    kind: exports
+    export_names:
+      - NPGetCaps
+    match: any
+    host_process: winlogon.exe and WNet-calling processes
+    host_privilege: system
+    credential_exposure: logon credentials via NPLogonNotify when loaded under winlogon
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\NetworkProvider\Order
+    documentation: https://learn.microsoft.com/en-us/windows/win32/secauthn/implementing-a-network-provider
+    notes: >-
+      NPGetCaps is the one required export of a network provider DLL; the
+      MPR loads providers into logon processes, where NPLogonNotify hands
+      them the plaintext credentials of interactive logons. All five
+      providers registered on the measurement machine (ntlanman, p9np,
+      prl_np, drprov/RDPNP, davclnt/webclient) export it.
+
+  time_provider:
+    title: Time provider (W32Time)
+    kind: exports
+    export_names:
+      - TimeProvOpen
+    match: any
+    host_process: svchost.exe (W32Time, LocalService)
+    host_privilege: local_service
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders
+    documentation: https://learn.microsoft.com/en-us/windows/win32/sysinfo/creating-a-time-provider
+    notes: >-
+      Time providers must implement TimeProvOpen/TimeProvCommand/
+      TimeProvClose; the time provider manager inside the W32Time service
+      (svchost -k LocalService, verified NT AUTHORITY\LocalService) calls
+      TimeProvOpen right after loading the DLL.
+
+  appcert:
+    title: AppCert DLL
+    kind: exports
+    export_names:
+      - CreateProcessNotify
+    match: any
+    host_process: every process that calls CreateProcess
+    host_privilege: inherited
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDlls
+    documentation: https://attack.mitre.org/techniques/T1546/009/
+    notes: >-
+      The export name is not documented by Microsoft - the AppCertDlls
+      mechanism and its CreateProcessNotify callback are documented by
+      MITRE ATT&CK (T1546.009) and reverse engineering, which is the
+      provenance recorded here. Zero system32 DLLs export it on the
+      measurement machine.
+
+  credential_provider:
+    title: Credential provider (COM in-proc with registration reference)
+    kind: com_inproc
+    com_export: DllGetClassObject
+    registration_pattern: 'Authentication\Credential Providers'
+    host_process: LogonUI.exe
+    host_privilege: system
+    registration_hint: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers
+    documentation: https://learn.microsoft.com/en-us/windows/win32/secauthn/credential-providers-in-windows
+    notes: >-
+      Credential providers are ICredentialProvider COM in-proc servers the
+      Logon UI instantiates on the secure desktop; the exports alone do not
+      distinguish them (1,443 of system32 export the COM pair), so this
+      contract additionally requires an in-binary reference to the
+      credential-provider registration path. DLLs built from the SDK
+      samples carry it in their self-registration scripts; the registered
+      system providers mostly do too (10 of 23 CLSIDs on the measurement
+      machine resolve to DLLs that do). Detection is therefore
+      evidence-gated and recall is partial by construction: an
+      unregistered-looking credential provider is invisible to this
+      contract, which is why the recall limit is stated here rather than
+      left to be discovered.
+
+  audio_processing_object:
+    title: Audio Processing Object (COM in-proc with registration reference)
+    kind: com_inproc
+    com_export: DllGetClassObject
+    registration_pattern: 'AudioEngine\AudioProcessingObjects'
+    host_process: audiodg.exe
+    host_privilege: protected
+    registration_hint: AudioEngine\AudioProcessingObjects (per-device INF HKR)
+    documentation: https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/implementing-audio-processing-objects
+    notes: >-
+      APOs are in-process COM components the audio engine loads into
+      audiodg.exe, which runs protected for DRM content. Same evidence gate
+      as credential_provider: two system32 DLLs carry the registration path
+      string (WMALFXGFXDSP.dll, an FX DSP module, and AudioEng.dll, which
+      is the engine host itself - the registration-reference qualifier in
+      the finding text is what keeps the second honest). No APO
+      registrations exist on the measurement VM to confirm against.

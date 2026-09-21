@@ -375,6 +375,114 @@ def check_signer_mismatch(
     return True
 
 
+def _host_plugin_contracts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """The matched host-plugin contracts, or [] when there is nothing to say.
+
+    The block exists only when a contract matched, so an absent block is
+    "no evidence of a plugin contract", never "verified not a plugin":
+    a binary whose export table blint could not read produces no block and
+    an ``export_table_unreadable`` degradation instead (rules 14/32).
+    """
+    block = metadata.get("host_plugin")
+    if isinstance(block, dict):
+        contracts = block.get("contracts")
+        if isinstance(contracts, list) and contracts:
+            return [c for c in contracts if isinstance(c, dict)]
+    return []
+
+
+def check_privileged_host_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the privileged-host plugin contracts the export set satisfies.
+
+    This is context, not an accusation: legitimate audio, print and
+    authentication software looks exactly like this, which is why the
+    severity is informational. What the finding names is the consequence -
+    a DLL satisfying one of these export contracts is one admin
+    registration away from being loaded into the named host on every boot
+    or logon, with no per-load prompt. The contract table and its
+    measurement live in blint/data/pe_host_plugin_contracts.yml; bare COM
+    in-proc exports never fire this (45% of a stock System32 exports the
+    pair), and the two COM contracts require an in-binary registration
+    reference and say so in their evidence.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    if not contracts:
+        return True
+    described = []
+    for contract in contracts:
+        hosts = contract.get("host_process") or "its host process"
+        described.append(f"{contract.get('id')} ({hosts})")
+    return "plugin contracts satisfied: " + "; ".join(described)
+
+
+def check_unsigned_host_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a host-plugin contract not vouched for by any signer (04/F).
+
+    The contracts load into SYSTEM and protected hosts automatically and
+    forever once registered - installed once with admin rights, no consent
+    surface after - so an unsigned or self-vouched plugin is the finding
+    that matters. The verdict follows the W2.4 ``signing_class`` exactly:
+    it fires on ``unsigned``, ``self_signed`` and ``unknown_root``, and
+    stays silent when the class is absent (undetermined - blint's default
+    invocation performs no catalog lookup, and absence of a class is
+    neither signed nor unsigned) or when the walk was truncated.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    if not contracts:
+        return True
+    block = _parsed_signature_block(metadata)
+    signing_class = (block or {}).get("signing_class")
+    if signing_class not in ("unsigned", "self_signed", "unknown_root"):
+        return True
+    contract_ids = ", ".join(sorted({str(c.get("id")) for c in contracts}))
+    if signing_class == "unsigned":
+        detail = "no signature: a performed, complete catalog lookup found nothing"
+    elif signing_class == "self_signed":
+        detail = "self-signed: the signer vouches for itself, no authority stands behind it"
+    else:
+        detail = "chain terminates outside the shipped root snapshot"
+    return (
+        f"auto-loaded plugin contract(s) {contract_ids} with signing class "
+        f"{signing_class} ({detail})"
+    )
+
+
+def check_lsa_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the lsass.exe contract that sees passwords in plaintext.
+
+    Only the password-filter / notification-package exports fire this:
+    those are the entry points the LSA calls with the account's plaintext
+    password on every change, which is what makes the contract the
+    classic credential-capture implant surface. ``SpLsaModeInitialize``
+    deliberately does not: measured over a full System32 it is on every
+    core logon protocol (msv1_0, kerberos, schannel, wdigest, pku2u,
+    negoexts, cloudap, TSpkg, SFAPM - nine DLLs), and a high-severity
+    finding on the OS's own authentication stack would be noise wearing a
+    rule's name; that contract is reported by
+    CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN.
+    The narrowing and its measurement are recorded in
+    blint/data/pe_host_plugin_contracts.yml.
+    """
+    contracts = _host_plugin_contracts(metadata)
+    password_filter = next(
+        (c for c in contracts if c.get("id") == "lsa_password_filter"), None
+    )
+    if not password_filter:
+        return True
+    exports = ", ".join(password_filter.get("matched_exports") or [])
+    return (
+        f"password filter exports ({exports}) for lsass.exe (SYSTEM, protected): "
+        "loaded via Lsa Notification Packages it receives every account "
+        "password change in plaintext"
+    )
+
+
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:

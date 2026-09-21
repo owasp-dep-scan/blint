@@ -1053,7 +1053,30 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                         text_section = section
         if rdata_section or text_section:
             add_rdata_symbols(metadata, rdata_section, text_section, parsed_obj.sections)
-        metadata["exports"] = parse_pe_exports(parsed_obj.get_export())
+        pe_export_dir = parsed_obj.get_export()
+        metadata["exports"] = parse_pe_exports(pe_export_dir)
+        # W5.6: an export directory that is declared but yields no export
+        # object (a directory RVA no section backs, a file truncated inside
+        # the directory, a walk lief gave up on) must not read as "no
+        # exports" - the host-plugin contracts are export-keyed, so an
+        # unread directory is a detection gap, not an empty contract set
+        # (rules 14/32). lief 1.0 returns None both for a genuinely absent
+        # directory and for every unreadable one, so the declaration itself
+        # is what separates them: rva == 0 is the clean no-export case and
+        # stamps nothing.
+        if pe_export_dir is None and not isinstance(
+            pe_export_dir, lief.lief_errors
+        ):
+            export_directory_declared = False
+            with contextlib.suppress(AttributeError, TypeError, ValueError):
+                declared = parsed_obj.data_directory(
+                    lief.PE.DataDirectory.TYPES.EXPORT_TABLE
+                )
+                export_directory_declared = bool(declared.rva)
+            if export_directory_declared:
+                metadata["exports_read_status"] = "failed"
+        elif isinstance(pe_export_dir, lief.lief_errors):
+            metadata["exports_read_status"] = "failed"
         # W1.2: forwarder targets are load-time dependencies the import
         # table never names — resolving an export that is a forwarder makes
         # the loader map the target DLL. They join the dependency list under

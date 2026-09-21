@@ -294,6 +294,36 @@
     - dotnetbinary
     - x86_64-executable
     - x86_64-exec
+- id: CHECK_PRIVILEGED_HOST_PLUGIN
+  title: Privileged-Host Plugin Contract
+  description: |
+    This binary's export set satisfies the contract of a Windows extension point: a host process that loads the DLL automatically - once it is registered, which takes administrator rights exactly once - and keeps it loaded with no per-load prompt and no consent surface after the install. Each finding names the contract and the host: LSA security packages and password filters load into lsass.exe (SYSTEM, protected), print monitors and providers into spoolsv.exe (SYSTEM), time providers into the W32Time svchost (LocalService), network providers into winlogon (SYSTEM), Winsock service and namespace providers into every socket-using or name-resolving process, AppCert DLLs into every CreateProcess caller, credential providers into LogonUI.exe and Audio Processing Objects into audiodg.exe.
+    This is context for a reviewer, not an accusation: legitimate audio, print and authentication software looks exactly like this, which is why the severity is informational. The contract table (blint/data/pe_host_plugin_contracts.yml) is pinned against Microsoft's documentation with its hit counts measured over a full System32 before this rule shipped: bare COM in-proc exports are on 45% of System32 (1,443 DLLs) and never fire this rule alone; the two COM contracts (credential provider, APO) additionally require an in-binary reference to their registration path and report that evidence. An absent host_plugin block reads as "no plugin contract evidenced", never as "verified not a plugin": a binary whose export table blint could not read gets an export_table_unreadable degradation in analysis_coverage instead.
+  severity: info
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+- id: CHECK_UNSIGNED_HOST_PLUGIN
+  title: Unsigned Privileged-Host Plugin
+  description: |
+    This binary satisfies a privileged-host plugin contract (see CHECK_PRIVILEGED_HOST_PLUGIN) and nothing vouches for it: the W2.4 signing class is unsigned (a performed, complete catalog lookup found no signature), self_signed (the signer vouches for itself) or unknown_root (the chain terminates outside the shipped root snapshot). Auto-loaded into a SYSTEM or protected host on every boot, installed once with admin rights, vouched for by nobody - this is the finding that matters in the plugin surface, because it is how an attacker's DLL becomes a permanent, invisible tenant of lsass.exe or spoolsv.exe.
+    The verdict follows signing_class exactly and stays silent when the class is undetermined (absent): blint's default invocation performs no catalog lookup, and absence of a determination is neither signed nor unsigned. Every plugin DLL on a stock System32 is Microsoft-signed, so this fires zero times on the benign system population.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+- id: CHECK_LSA_PLUGIN
+  title: LSA Password Filter Plugin
+  description: |
+    This binary exports the LSA password filter / notification package contract (InitializeChangeNotify, PasswordChangeNotify or PasswordFilter): registered under HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Notification Packages, the LSA loads it into lsass.exe - SYSTEM and protected - and calls it with the account's plaintext password on every password change. This is the classic credential-capture implant surface: a password filter sees every password, in the clear, forever.
+    Only the password-filter exports fire this at high severity. SpLsaModeInitialize (the SSP/AP contract) deliberately does not: measured over a full System32 it is exported by every core logon protocol - msv1_0, kerberos, schannel, wdigest, TSpkg, pku2u, negoexts, cloudap and SFAPM, nine DLLs - and a high-severity finding on the operating system's own authentication stack would be the false-positive shape this lane has already paid for twice (W1.3, W2.4). That contract is reported by CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN. The narrowing and its measurement are recorded in blint/data/pe_host_plugin_contracts.yml.
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |

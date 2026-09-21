@@ -32,10 +32,12 @@ from blint.lib.checks import (
     check_kernel_signing_class,  # noqa: F401
     check_libc_portability,  # noqa: F401
     check_link_closure,  # noqa: F401
+    check_lsa_plugin,  # noqa: F401
     check_nx,  # noqa: F401
     check_objc_load_methods,  # noqa: F401
     check_packed,  # noqa: F401
     check_pie,  # noqa: F401
+    check_privileged_host_plugin,  # noqa: F401
     check_profile_development,  # noqa: F401
     check_profile_expired,  # noqa: F401
     check_profile_wildcard,  # noqa: F401
@@ -51,6 +53,7 @@ from blint.lib.checks import (
     check_tls_callbacks,  # noqa: F401
     check_trust_info,  # noqa: F401
     check_undeclared_dependencies,  # noqa: F401
+    check_unsigned_host_plugin,  # noqa: F401
     check_unused_dependencies,  # noqa: F401
     check_virtual_size,  # noqa: F401
     check_weak_signature_digest,  # noqa: F401
