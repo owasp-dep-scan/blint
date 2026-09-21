@@ -1084,7 +1084,9 @@ def parse_metadata_stream(
     end). ``strong_name_signature`` carries the CLI header's
     StrongNameSignature directory when it declares one: ``(bytes read,
     declared size, gap name)`` with ``gap`` naming why the bytes are missing
-    when they are (unmapped, over the read cap). All bounds are checked
+    when they are (unmapped, over the read cap, or a directory whose two
+    halves contradict each other - that last one carries a declared size of
+    0, because it names no region to size). All bounds are checked
     against ``len(data)``; every refusal lands in ``degradations`` by name.
     """
     degr = _Degradations()
@@ -1117,16 +1119,29 @@ def parse_metadata_stream(
     }
     if strong_name_signature is not None:
         sig_bytes, declared_size, gap = strong_name_signature
-        strong_name["signature_present"] = True
-        strong_name["signature_size"] = declared_size
         if gap is not None:
             degr.add(gap)
-        elif sig_bytes is None or len(sig_bytes) < declared_size:
-            # No gap named and still not enough bytes: the region runs past
-            # the end of the file (the caller clipped the read).
-            degr.add("strong_name_signature_short_read")
+        if declared_size <= 0:
+            # A named gap over no region at all: the directory contradicts
+            # itself (one half zero, the other not). Presence is a
+            # determined false and the size stays the zero it is - the
+            # contradiction lives in the degradation, not in a number.
+            strong_name["signature_present"] = False
+            strong_name["signature_size"] = 0
         else:
-            strong_name["signature_all_zero"] = not any(sig_bytes[:declared_size])
+            strong_name["signature_present"] = True
+            strong_name["signature_size"] = declared_size
+            if gap is None:
+                # A gap means the bytes were never read, and no verdict is
+                # ever emitted over bytes blint does not hold.
+                if sig_bytes is None or len(sig_bytes) < declared_size:
+                    # The region runs past the end of the file (the caller
+                    # clipped the read).
+                    degr.add("strong_name_signature_short_read")
+                else:
+                    strong_name["signature_all_zero"] = not any(
+                        sig_bytes[:declared_size]
+                    )
     else:
         # No directory claimed: present is false and the size is the zero
         # the absent region makes it (the ground-truth oracle's convention
@@ -1781,6 +1796,15 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
                         handle.seek(sn_offset)
                         sig_bytes = handle.read(sn_size)
                         strong_name_signature = (sig_bytes, sn_size, None)
+            elif sn_rva or sn_size:
+                # One half of the directory is zero and the other is not, so
+                # the header contradicts itself and names no region. There is
+                # nothing to report a size for, but the contradiction is a
+                # fact about the file and is named rather than normalised
+                # away into a size of zero blint never read (rule 11).
+                strong_name_signature = (
+                    None, 0, "strong_name_signature_directory_half_declared",
+                )
             md_offset = rva_to_offset(parsed_obj.sections, header["metadata_rva"])
             if md_offset < 0:
                 return {

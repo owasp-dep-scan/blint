@@ -15,6 +15,7 @@ Fixture strategy follows the plan's rules:
 """
 
 import base64
+import contextlib
 import hashlib
 import struct
 
@@ -2234,20 +2235,24 @@ def test_strong_name_short_read_withholds_the_verdict():
     assert "strong_name_signature_short_read" in block["degradations"]
 
 
-def test_strong_name_read_cap_exceeded_on_a_real_pe():
-    """The signature read cap, exceeded by a real file's patched header.
+@contextlib.contextmanager
+def _patched_strong_name_directory(variant: str, *, rva=None, size=None):
+    """A copy of one committed variant with its StrongNameSignature
+    directory rewritten, yielded as a path.
 
-    Ground rule 33: the fixture must exceed the window, so this patches a
-    real assembly's CLI header (the committed delaysigned.dll) to declare a
-    StrongNameSignature size past MAX_STRONG_NAME_SIGNATURE_READ and runs
-    the full file-level path - the cap is refused by name and the
-    all-zero verdict is withheld.
+    The CLI header is located the way a PE reader locates it and not the
+    way blint locates it - through the optional header's directory 14 and
+    the section table, with pure ``struct`` - so a fixture built here
+    cannot inherit a mapping bug from the code under test. ``rva`` and
+    ``size`` are the two halves of the directory (II.25.3.3, offsets 32
+    and 36); each is left alone when None.
     """
+    import os
     import shutil
     import struct as _struct
     import tempfile
 
-    src = _variant("delaysigned.dll")
+    src = _variant(variant)
     with tempfile.NamedTemporaryFile(suffix=".dll", delete=False) as fh:
         shutil.copyfile(src, fh.name)
         path = fh.name
@@ -2258,9 +2263,9 @@ def test_strong_name_read_cap_exceeded_on_a_real_pe():
         magic = _struct.unpack_from("<H", pe, opt)[0]
         dd = opt + (112 if magic == 0x20B else 96)
         cli_rva = _struct.unpack_from("<I", pe, dd + 14 * 8)[0]
-        # Map the CLI RVA through the section table.
         num_sections = _struct.unpack_from("<H", pe, e_lfanew + 6)[0]
-        sec_table = dd + _struct.unpack_from("<I", pe, opt + (108 if magic == 0x20B else 92))[0] * 8
+        dir_count = _struct.unpack_from("<I", pe, opt + (108 if magic == 0x20B else 92))[0]
+        sec_table = dd + dir_count * 8
         cli_off = -1
         for i in range(num_sections):
             s = sec_table + i * 40
@@ -2271,61 +2276,75 @@ def test_strong_name_read_cap_exceeded_on_a_real_pe():
                 cli_off = raw_ptr + (cli_rva - va)
                 break
         assert cli_off >= 0
-        fh.seek(cli_off + 36)  # StrongNameSignature size (offset 32 + 4)
-        fh.write(_struct.pack("<I", pe_dotnet.MAX_STRONG_NAME_SIGNATURE_READ + 8192))
+        if rva is not None:
+            fh.seek(cli_off + 32)
+            fh.write(_struct.pack("<I", rva))
+        if size is not None:
+            fh.seek(cli_off + 36)
+            fh.write(_struct.pack("<I", size))
     try:
+        yield path
+    finally:
+        os.unlink(path)
+
+
+def test_strong_name_read_cap_exceeded_on_a_real_pe():
+    """The signature read cap, exceeded by a real file's patched header.
+
+    Ground rule 33: the fixture must exceed the window, so this patches a
+    real assembly's CLI header (the committed delaysigned.dll) to declare a
+    StrongNameSignature size past MAX_STRONG_NAME_SIGNATURE_READ and runs
+    the full file-level path - the cap is refused by name and the
+    all-zero verdict is withheld.
+    """
+    oversize = pe_dotnet.MAX_STRONG_NAME_SIGNATURE_READ + 8192
+    with _patched_strong_name_directory("delaysigned.dll", size=oversize) as path:
         block = parse_pe_dotnet(_lief_parse(path), path)
         sn = block["strong_name"]
         assert sn["signature_present"] is True
-        assert sn["signature_size"] == pe_dotnet.MAX_STRONG_NAME_SIGNATURE_READ + 8192
+        assert sn["signature_size"] == oversize
         assert "strong_name_signature_exceeds_cap" in block["degradations"]
         assert "signature_all_zero" not in sn
-    finally:
-        import os
-
-        os.unlink(path)
 
 
 def test_strong_name_unmapped_rva_on_a_real_pe():
     # The same file-level path with the directory pointed at an RVA no
     # section covers: refused by name, verdict withheld.
-    import shutil
-    import struct as _struct
-    import tempfile
-
-    src = _variant("signed.dll")
-    with tempfile.NamedTemporaryFile(suffix=".dll", delete=False) as fh:
-        shutil.copyfile(src, fh.name)
-        path = fh.name
-    with open(path, "r+b") as fh:
-        pe = fh.read()
-        e_lfanew = _struct.unpack_from("<I", pe, 0x3C)[0]
-        opt = e_lfanew + 24
-        magic = _struct.unpack_from("<H", pe, opt)[0]
-        dd = opt + (112 if magic == 0x20B else 96)
-        cli_rva = _struct.unpack_from("<I", pe, dd + 14 * 8)[0]
-        num_sections = _struct.unpack_from("<H", pe, e_lfanew + 6)[0]
-        sec_table = dd + _struct.unpack_from("<I", pe, opt + (108 if magic == 0x20B else 92))[0] * 8
-        cli_off = -1
-        for i in range(num_sections):
-            s = sec_table + i * 40
-            va = _struct.unpack_from("<I", pe, s + 12)[0]
-            raw_size = _struct.unpack_from("<I", pe, s + 16)[0]
-            raw_ptr = _struct.unpack_from("<I", pe, s + 20)[0]
-            if raw_size and va <= cli_rva < va + raw_size:
-                cli_off = raw_ptr + (cli_rva - va)
-                break
-        fh.seek(cli_off + 32)
-        fh.write(_struct.pack("<I", 0x70000000))
-    try:
+    with _patched_strong_name_directory("signed.dll", rva=0x70000000) as path:
         block = parse_pe_dotnet(_lief_parse(path), path)
         assert "strong_name_signature_unmapped" in block["degradations"]
         assert "signature_all_zero" not in block["strong_name"]
         assert block["strong_name"]["signature_present"] is True
-    finally:
-        import os
 
-        os.unlink(path)
+
+def test_strong_name_half_declared_directory_is_named_not_normalised():
+    """One half of the directory zero, the other not.
+
+    A size with no RVA names no region, so there is nothing to size and
+    nothing to read - but the header still contradicts itself, and that is
+    a fact about the file. Reporting ``signature_size: 0`` alone would put
+    a number blint never read where the header says something else and
+    leave the contradiction invisible, which is the shape ground rule 11
+    forbids. The size stays 0 because no region exists; the contradiction
+    lives in the named degradation.
+    """
+    with _patched_strong_name_directory("signed.dll", rva=0) as path:
+        block = parse_pe_dotnet(_lief_parse(path), path)
+        sn = block["strong_name"]
+        assert "strong_name_signature_directory_half_declared" in block["degradations"]
+        assert sn["signature_present"] is False
+        assert sn["signature_size"] == 0
+        assert "signature_all_zero" not in sn
+        # The flag is a header bit and survives untouched: the file still
+        # claims to be strong-name signed, which is exactly why the
+        # contradiction must be visible rather than read as "no signature".
+        assert sn["strongnamesigned_flag"] is True
+
+    # The mirror case - an RVA with a zero size - lands the same way.
+    with _patched_strong_name_directory("signed.dll", size=0) as path:
+        block = parse_pe_dotnet(_lief_parse(path), path)
+        assert "strong_name_signature_directory_half_declared" in block["degradations"]
+        assert block["strong_name"]["signature_present"] is False
 
 
 def test_delay_sign_attribute_row_is_read_where_it_lives():
