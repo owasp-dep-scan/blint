@@ -7,11 +7,22 @@ Fixture strategy follows the plan's rules:
   produced by a spec-based System.Reflection.Metadata dumper on the Windows
   11 ARM64 VM and pasted in the packet commit. Tests skip when the corpus is
   absent so the suite stays green on machines without it.
-- Hostile and variant fixtures are built byte-for-byte inline (no binary
-  blobs in git) so every cap and every malformed cross-reference has a
-  fixture that *exceeds* the cap, not one that approaches it (ground rule
-  33), and every format variant — `#~`/`#-`, wide/narrow heap indexes,
-  netmodule, MethodSpec entry point — has a fixture (ground rule 10).
+- Hostile and variant fixtures are built byte-for-byte inline so every cap
+  and every malformed cross-reference has a fixture that *exceeds* the cap,
+  not one that approaches it (ground rule 33), and every format variant —
+  `#~`/`#-`, wide/narrow heap indexes, netmodule, MethodSpec entry point —
+  has a fixture (ground rule 10).
+- The one exception is the strong-name variants under
+  `tests/data/pe/dotnet-strongname/` (W3.4), seven small SDK-built
+  assemblies committed as binaries. A real strong-name signature is an RSA
+  signature over the assembly with the signature region excluded, so the
+  signed/delay-signed/public-signed shapes cannot be synthesized inline
+  without reimplementing the signing itself — and a fixture blint's own
+  writer produced would be testing blint against blint. Their provenance
+  and the script that rebuilds them is
+  `tests/scripts/build_strong_name_variants.ps1`; the header-level variants
+  of *those* (unmapped RVA, over-cap size, half-declared directory) are
+  still patched in, through `_patched_strong_name_directory`.
 """
 
 import base64
