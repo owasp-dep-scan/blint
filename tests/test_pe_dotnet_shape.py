@@ -364,8 +364,18 @@ def test_every_publish_shape_classifies(publish, name, expected):
 
 @needs_shapes
 def test_the_bundle_members_are_the_self_contained_publish():
-    """Ground truth for the member list: what the bundler embedded must be
-    what the equivalent non-bundled self-contained publish wrote to disk."""
+    """Ground truth for the member list: the assemblies the bundler embedded
+    must be the assemblies the equivalent non-bundled self-contained publish
+    wrote to disk, at the same sizes.
+
+    The comparison is restricted to the carried files - assemblies and
+    native binaries - because the *generated* ones legitimately differ.
+    Measured: ShapeProbe.deps.json is 29,177 bytes beside the
+    self-contained publish and 27,856 inside the bundle, because the
+    single-file publish rewrites it for the bundled layout. Asserting over
+    those too would be asserting that two different files are the same
+    file.
+    """
     from blint.lib.binary import parse
 
     sf = _shape_path("single-file", "ShapeProbe.exe")
@@ -375,13 +385,22 @@ def test_the_bundle_members_are_the_self_contained_publish():
     shape = (parse(sf).get("dotnet") or {}).get("shape")
     members = {m["path"]: m for m in shape["bundle"]["members"]}
     assert len(members) == shape["bundle"]["member_count"]
-    matched = 0
+    carried = {"assembly", "native_binary"}
+    matched = generated = 0
     for name, member in members.items():
         disk = os.path.join(sc_dir, name)
-        if os.path.exists(disk):
-            assert os.path.getsize(disk) == member["size"], name
-            matched += 1
-    assert matched >= 100, f"only {matched} members matched the publish on disk"
+        if not os.path.exists(disk):
+            continue
+        if member["type"] not in carried:
+            generated += 1
+            continue
+        assert os.path.getsize(disk) == member["size"], name
+        matched += 1
+    assert matched >= 100, f"only {matched} carried members matched the publish"
+    # The generated files are present in both and are expected to differ;
+    # the count is asserted so their exclusion stays a stated fact rather
+    # than a silent hole in the comparison.
+    assert generated >= 1
 
 
 @needs_shapes
