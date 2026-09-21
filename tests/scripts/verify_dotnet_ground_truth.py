@@ -14,9 +14,17 @@ token, CLI flags and counts. Every skipped file (corpus absent) is named.
 
 W3.2 adds three more compared groups whenever the records carry them —
 resolved TypeRefs (``typerefs``), rendered MemberRefs (``memberrefs``) and
-the #US walk (``user_strings_count``/``user_strings_sha256``). The shipped
-63-record file predates those fields, so the extended comparison needs a
-fresh record set, which the oracle now also produces on this machine:
+the #US walk (``user_strings_count``/``user_strings_sha256``).
+
+W3.4 adds the strong-name comparison (``strong_name``/``ivt`` in the
+records, ``dotnet.strong_name`` in blint's block) and the records the
+shipped file now spans both sides of that boundary: the 62 corpus managed
+assemblies (all fully strong-named — not one delay-signed or unsigned
+member), seven VM-built variants (signed, delay-signed, public-signed,
+unsigned, and three carrying InternalsVisibleTo), and the old helloexe
+record whose file was never in the corpus. The variants carry ``repo_path``
+records resolved against the repository, so their comparison runs wherever
+the repo is — no corpus needed.
 
     dotnet run -c Release --project tests/data/pe/dotnet-gt/gt.csproj -- \\
         ~/sandbox/pe-corpus/tier0-reference ~/sandbox/pe-corpus/tier1-ecosystem \\
@@ -46,6 +54,7 @@ from pathlib import Path
 import lief
 
 from blint.lib.pe_dotnet import (
+    MAX_LISTED_IVT,
     MAX_LISTED_MEMBERREFS,
     MAX_LISTED_PINVOKE,
     MAX_LISTED_TYPEREFS,
@@ -54,6 +63,7 @@ from blint.lib.pe_dotnet import (
 
 GT_FILE = Path(__file__).parent.parent / "data" / "pe" / "dotnet-gt" / "gt-output.jsonl"
 CORPUS = Path("~/sandbox/pe-corpus").expanduser()
+REPO = Path(__file__).resolve().parents[2]
 # helloexe.dll was built on the VM, not in the corpus; the packet commit
 # pastes its blint block verbatim.
 INDEPENDENT = {"helloexe.dll"}
@@ -72,6 +82,9 @@ def main() -> int:
         if "corpus_path" in rec:
             rel = rec["corpus_path"]
             path = CORPUS / rel
+        elif "repo_path" in rec:
+            rel = rec["repo_path"]
+            path = REPO / rel
         else:
             rel = rec["file"]
             path = Path(rel)
@@ -212,6 +225,61 @@ def compare(rec: dict, block: dict) -> list[str]:
             )
         if block.get("user_strings_sha256") != oracle_sha:
             issues.append("user_strings_sha256")
+    # W3.4: the strong-name facts. Compared only when the record carries
+    # them. The oracle's nullable delay_sign_attribute normalizes to
+    # blint's boolean (no row and a false row read identically); a
+    # netmodule record (name None) skips the declared-key pair because the
+    # oracle reports a determined false where blint withholds.
+    if "strong_name" in rec:
+        theirs = rec["strong_name"]
+        mine = block.get("strong_name", {})
+        if rec.get("name") is not None:
+            if mine.get("declares_public_key") != theirs.get("declares_public_key"):
+                issues.append(
+                    f"declares_public_key {mine.get('declares_public_key')} "
+                    f"!= {theirs.get('declares_public_key')}"
+                )
+            if mine.get("public_key_size") != theirs.get("public_key_size"):
+                issues.append(
+                    f"public_key_size {mine.get('public_key_size')} "
+                    f"!= {theirs.get('public_key_size')}"
+                )
+        for key in ("signature_present", "signature_size", "signature_all_zero"):
+            if mine.get(key) != theirs.get(key):
+                issues.append(
+                    f"strong_name.{key} {mine.get(key)} != {theirs.get(key)}"
+                )
+        if mine.get("delay_sign") != bool(theirs.get("delay_sign_attribute")):
+            issues.append(
+                f"delay_sign {mine.get('delay_sign')} "
+                f"!= {theirs.get('delay_sign_attribute')}"
+            )
+    if "ivt" in rec:
+        mine_list = block.get("strong_name", {}).get("internals_visible_to", [])
+        if block.get("strong_name", {}).get("internals_visible_to_count", 0) != len(rec["ivt"]):
+            issues.append(
+                f"internals_visible_to_count "
+                f"{block.get('strong_name', {}).get('internals_visible_to_count', 0)} "
+                f"!= {len(rec['ivt'])}"
+            )
+        theirs_list = rec["ivt"][:MAX_LISTED_IVT]
+        if len(mine_list) != len(theirs_list):
+            issues.append(
+                f"internals_visible_to {len(mine_list)} rows "
+                f"vs {len(theirs_list)} expected"
+            )
+        else:
+            for mine_e, theirs_e in zip(mine_list, theirs_list):
+                if mine_e.get("name") != theirs_e.get("name"):
+                    issues.append(f"ivt name {mine_e.get('name')!r}")
+                if mine_e.get("public_key") != theirs_e.get("public_key"):
+                    issues.append(f"ivt public_key {mine_e.get('name')!r}")
+                # The oracle writes "" for a key too short to token; blint
+                # omits the token — the same fact in each convention.
+                if (mine_e.get("public_key_token") or "") != (
+                    theirs_e.get("public_key_token") or ""
+                ):
+                    issues.append(f"ivt public_key_token {mine_e.get('name')!r}")
     return issues
 
 
