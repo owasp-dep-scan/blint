@@ -1,0 +1,21 @@
+blint/lib/pe_dotnet_shape.py
+  s_be4a6ad278f92a::t_89fe0a788100b8 38-49
+docs/METADATA.md
+  s_be4a6ad278f92a::t_4f8f8db5e018ab 145-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f122e8910a007f42ff49a7e8ff991317f7e24b7f",
+  "prompts": {},
+  "sessions": {
+    "s_be4a6ad278f92a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ff64c36-3822-4501-a594-f3ce8590a96c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
