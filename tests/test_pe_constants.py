@@ -1,5 +1,7 @@
 """Tests for the blint-owned PE constant tables (ground rule 28)."""
 
+import sys
+
 import pytest
 
 lief = pytest.importorskip("lief")
@@ -161,13 +163,34 @@ def test_ex_dll_characteristics_decode():
 def test_lief_dll_characteristics_rendering_is_pinned():
     """Tripwire (ground rule 28, verification-log finding V1).
 
-    LIEF 1.0 renders DLL_CHARACTERISTICS members as bare integers —
-    ``str(DYNAMIC_BASE)`` is ``"64"``, not a name — which is what silently
-    broke every PE hardening check that substring-matched the joined string.
-    blint no longer consumes that rendering for dll_characteristics, so this
-    test does not protect behavior directly; it exists so that a future LIEF
-    release whose rendering changes is *noticed*: when this fails, re-run the
+    LIEF renders DLL_CHARACTERISTICS members as bare integers on Python
+    3.11 and newer — ``str(DYNAMIC_BASE)`` is ``"64"``, not a name — which
+    is what silently broke every PE hardening check that substring-matched
+    the joined string. blint no longer consumes that rendering for
+    dll_characteristics, so this test does not protect behavior directly; it
+    exists so that a rendering change is *noticed*: when it fails, re-run the
     V1 enum_to_str audit before trusting any rendered PE enum anywhere.
+
+    **The rendering is a property of the interpreter, not of LIEF.** Measured
+    with one and the same wheel (lief 1.0.0-d05b3499b): Python 3.10.17 gives
+    ``"DLL_CHARACTERISTICS.DYNAMIC_BASE"`` and Python 3.11.14 gives ``"64"``,
+    which is the enum ``__str__`` change that landed in 3.11. blint supports
+    ``>=3.10``, so both are live, and this test pins both rather than
+    asserting the one the author's interpreter happened to produce — the
+    original form passed locally on 3.11 and failed CI's ubuntu 3.10 job for
+    a reason that had nothing to do with LIEF.
+
+    The wider consequence is recorded rather than fixed here:
+    ``enum_to_str`` takes the last dotted component, so on 3.10 it yields
+    symbolic names (``DYNAMIC_BASE``) and on 3.11+ it yields number strings
+    (``64``). Every rendered lief enum in blint's metadata therefore differs
+    in kind between two supported interpreters.
     """
     dll_characteristics = lief.PE.OptionalHeader.DLL_CHARACTERISTICS
-    assert str(dll_characteristics.DYNAMIC_BASE) == "64"
+    rendered = str(dll_characteristics.DYNAMIC_BASE)
+    if sys.version_info >= (3, 11):
+        assert rendered == "64"
+    else:
+        assert rendered == "DLL_CHARACTERISTICS.DYNAMIC_BASE"
+    # Whatever the rendering, the value is the fact blint actually uses.
+    assert int(dll_characteristics.DYNAMIC_BASE) == 64
