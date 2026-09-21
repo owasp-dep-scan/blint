@@ -837,6 +837,28 @@ def enum_to_str(enum_obj) -> str:
     ``UNKNOWN(<value>)`` so a consumer can tell them apart from a real symbolic
     name; a bare number is indistinguishable from one that merely looks numeric.
     """
+    # The member's own ``name``, never its rendering. ``str()`` on a LIEF
+    # enum is a property of the interpreter, not of LIEF: measured with one
+    # and the same wheel (lief 1.0.0-d05b3499b), Python 3.10.17 renders
+    # ``DLL_CHARACTERISTICS.DYNAMIC_BASE`` and 3.11.14 renders ``64``, which
+    # is the enum ``__str__`` change that landed in 3.11. Taking the last
+    # dotted component therefore used to yield a symbolic name on 3.10 and
+    # the number string ``"64"`` on 3.11+, so every rendered enum in blint's
+    # metadata differed in kind between two supported interpreters
+    # (``>=3.10,<3.15``) — and on the newer half it was the numeric
+    # rendering that silently broke the PE hardening checks in the first
+    # place (verification-log finding V1).
+    #
+    # ``name`` is also consulted *before* the raw-integer branch, because
+    # some LIEF enums are arithmetic (int subclasses) and some are not:
+    # ``DLL_CHARACTERISTICS.DYNAMIC_BASE`` passes ``isinstance(x, int)`` and
+    # ``MACHINE_TYPES.AMD64`` does not. Testing for int first therefore
+    # reported perfectly known members of every flag enum as
+    # ``UNKNOWN(64)``. A value with no ``name`` is the one LIEF really could
+    # not place, and only that still renders as ``UNKNOWN(<value>)``.
+    name = getattr(enum_obj, "name", None)
+    if isinstance(name, str) and name:
+        return name
     if isinstance(enum_obj, int) and not isinstance(enum_obj, bool):
         return f"UNKNOWN({enum_obj})"
     return str(enum_obj).rsplit(".", maxsplit=1)[-1]
