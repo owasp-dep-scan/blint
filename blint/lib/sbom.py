@@ -42,9 +42,17 @@ from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_services import detect_services
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
+from blint.lib.cab import is_cab_file, parse_cab
+from blint.lib.clickonce import parse_clickonce
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
+from blint.lib.msi import parse_msi
+from blint.lib.msix import MSIX_EXTENSIONS, collect_msix_detailed
 from blint.lib.nuget_package import read_nupkg_nuspec
+from blint.lib.office import (
+    analyze_office_file,
+    office_exe_type,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -233,6 +241,86 @@ def generate(
                         advance=1,
                     )
                     components += process_nupkg_file(dependencies_dict, exe, sbom)
+                    continue
+                if office_exe_type(exe):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    refusals: list[str] = []
+                    degradations: list[str] = []
+                    office_block = analyze_office_file(exe, refusals, degradations)
+                    parent = default_parent([exe])
+                    parent.properties = [
+                        Property(name="internal:srcFile", value=exe),
+                        Property(name="internal:containerKind", value=office_exe_type(exe)),
+                    ]
+                    if office_block is None:
+                        parent.properties.append(
+                            Property(name="internal:office_refusal", value="office_parse_failed")
+                        )
+                    else:
+                        if office_block.get("external_relationship_count"):
+                            parent.properties.append(
+                                Property(
+                                    name="internal:officeExternalRelationships",
+                                    value=str(office_block["external_relationship_count"]),
+                                )
+                            )
+                        if office_block.get("vba_project_present"):
+                            parent.properties.append(
+                                Property(name="internal:officeVbaProject", value="present")
+                            )
+                        if (office_block.get("vba") or {}).get("vba_stomping_evidence"):
+                            parent.properties.append(
+                                Property(name="internal:officeVbaStompingEvidence", value="true")
+                            )
+                        if office_block.get("refusals"):
+                            parent.properties.append(
+                                Property(
+                                    name="internal:office_refusals",
+                                    value=", ".join(sorted(set(office_block["refusals"]))),
+                                )
+                            )
+                    if not sbom.metadata.component.components:
+                        sbom.metadata.component.components = []
+                    _add_to_parent_component(sbom.metadata.component.components, parent)
+                    continue
+                if exe.lower().endswith(".application"):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_clickonce_file(dependencies_dict, exe, sbom)
+                    continue
+                if exe.lower().endswith((".msi", ".msp")):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_msi_file(dependencies_dict, exe, sbom)
+                    continue
+                if is_cab_file(exe):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_cab_file(dependencies_dict, exe, sbom)
+                    continue
+                if exe.lower().endswith(MSIX_EXTENSIONS):
+                    # W4.1: an MSIX/Appx package or bundle is a container —
+                    # identity from its AppxManifest, members from the
+                    # archive, never parsed as a bare PE.
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_msix_file(dependencies_dict, exe, sbom)
                     continue
                 progress.update(
                     task,
@@ -824,6 +912,9 @@ def process_exe_file(
     dotnet_metadata = metadata.get("dotnet") or {}
     if (assembly := dotnet_metadata.get("assembly") or {}).get("name"):
         upgrade_parent_to_assembly_identity(parent_component, assembly, symbols_purl_map)
+    else:
+        upgrade_parent_to_original_filename(parent_component, metadata, symbols_purl_map)
+    add_signer_evidence(parent_component, metadata)
     if assemblyref_state := dotnet_assemblyref_state(dotnet_metadata):
         parent_component.properties.append(
             Property(name="internal:dotnet_assemblyref_state", value=assemblyref_state)
@@ -1926,6 +2017,99 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
     return components
 
 
+def upgrade_parent_to_original_filename(
+    parent: Component,
+    metadata: dict[str, Any],
+    symbols_purl_map: dict | None = None,
+) -> Component:
+    """Restate a native file's parent identity from its VERSIONINFO resource.
+
+    Section 03/D: renaming a file is free, the `OriginalFilename` resource is
+    not — so the component is named by the resource while the on-disk name
+    rides as evidence (`internal:filename_on_disk`, `internal:filename_
+    original`), making a mismatch visible instead of silently normalizing
+    it. The build-BOM overlay (`--src-dir-boms`) is consulted under BOTH
+    names — the W3.5 lesson: the lookup key and the computed purl are
+    coupled, and renaming the component without re-keying the lookup made
+    the overlay unreachable for every input last time. Nothing here invents
+    a `pkg:nuget` purl from a name: the overlay hit may yield one because a
+    BOM naming the package is evidence.
+    """
+    version_info = metadata.get("version_info") or {}
+    tables = version_info.get("strings") or {}
+    original_filename = None
+    for table in tables.values():
+        candidate = (table or {}).get("OriginalFilename")
+        if candidate:
+            original_filename = str(candidate)
+            break
+    if not original_filename:
+        return parent
+    on_disk = os.path.basename(metadata.get("file_path") or metadata.get("name") or "")
+    stem = original_filename
+    for suffix in (".exe", ".dll", ".sys"):
+        if stem.lower().endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    stem = stem.strip() or original_filename
+    properties = [
+        Property(name="internal:filename_original", value=original_filename),
+        Property(name="internal:version_source", value="version_info"),
+    ]
+    renamed = bool(on_disk and on_disk.lower() != original_filename.lower())
+    overlay_hit = False
+    if renamed:
+        properties.append(Property(name="internal:filename_on_disk", value=on_disk))
+        # Re-key the overlay lookup under the resource name; the on-disk
+        # name was already tried inside default_parent. The NuGet key is
+        # tried first: a package identity is the stronger evidence.
+        if symbols_purl_map:
+            for key in (f"pkg:nuget/{stem}", f"pkg:generic/{stem}"):
+                overlay = symbols_purl_map.get(key)
+                if overlay:
+                    parent.purl = overlay
+                    parent.bom_ref = RefType(overlay)
+                    parent.name = stem
+                    overlay_hit = True
+                    version = None
+                    if "@" in overlay:
+                        version = overlay.split("@")[-1].split("?")[0]
+                    parent.version = Version(version) if version else None
+                    break
+        if not overlay_hit:
+            # Renamed without an overlay identity: rebuild the generic purl
+            # from the resource stem so name and purl agree.
+            parent.purl = PackageURL(type="generic", name=stem).to_string()
+            parent.bom_ref = RefType(parent.purl)
+    parent.name = stem
+    parent.properties = (parent.properties or []) + properties
+    return parent
+
+
+def add_signer_evidence(parent: Component, metadata: dict[str, Any]) -> None:
+    """Authenticode signer CN and signing class as component evidence.
+
+    The Windows answer to "who actually shipped this": the signer the
+    signature chain names (when the structured block parsed) and the W2.4
+    signing class, carried as properties. Absent block, absent class —
+    the undetermined states — stay absent, never rendered as "unsigned".
+    """
+    block = metadata.get("code_signature")
+    if not isinstance(block, dict) or block.get("parse_status") != "parsed":
+        return
+    signer_cn = None
+    for signature in block.get("signatures") or []:
+        signer = signature.get("signer") or {}
+        if signer.get("cn"):
+            signer_cn = signer["cn"]
+            break
+    if signer_cn:
+        parent.properties.append(Property(name="internal:signer_cn", value=signer_cn))
+    signing_class = block.get("signing_class")
+    if signing_class:
+        parent.properties.append(Property(name="internal:signing_class", value=signing_class))
+
+
 def upgrade_parent_to_assembly_identity(
     parent: Component,
     assembly: dict,
@@ -2088,6 +2272,282 @@ def process_nupkg_file(
     if lib_components:
         track_dependency(dependencies_dict, parent, lib_components)
     return lib_components
+
+
+def process_msix_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process an MSIX/Appx package or bundle: identity from its manifest.
+
+    The container becomes the parent component (identity from
+    ``AppxManifest.xml`` / ``AppxBundleManifest.xml`` — never the filename)
+    and every member binary becomes a child component keyed by its place in
+    the package. Member binaries are identified by their package context and
+    content hash without a full parse, mirroring the ``.ipa`` SBOM path; the
+    parsed-member identity upgrade is the identity packet's (W4.5) business.
+
+    Container refusals reach the BOM, not only the metadata sidecar the CLI
+    does not ship (rule 32, per the W3.5 ``internal:dotnet_assemblyref_state``
+    precedent): a refused package or a bundle whose manifest was unreadable
+    states it beside the component.
+    """
+    collection, reason = collect_msix_detailed(f)
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    if collection is None:
+        parent = default_parent([f])
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(
+                name="internal:container_refusal", value=reason or "collect_failed"
+            ),
+        ]
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        return []
+    try:
+        # Both the package and the bundle manifest store their Identity
+        # under the facts dict's "identity" key — one shape for both.
+        identity = (collection.get("identity") or {}).get("identity") or {}
+        name = identity.get("name") or os.path.basename(f)
+        version = str(identity.get("version") or "")
+        purl = PackageURL(type="appx", name=name, version=version or None).to_string()
+        parent = Component(
+            type=Type.application,
+            name=name,
+            version=version,
+            purl=purl,
+            evidence=create_component_evidence(f, 1.0),
+        )
+        parent.bom_ref = RefType(purl)
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(name="internal:containerKind", value=collection.get("kind") or ""),
+            Property(name="internal:version_source", value="package_identity"),
+        ]
+        if identity.get("publisher"):
+            parent.properties.append(
+                Property(name="internal:appxPublisher", value=identity["publisher"])
+            )
+        refusals = collection.get("refusals") or []
+        if refusals:
+            parent.properties.append(
+                Property(name="internal:container_refusals", value=", ".join(sorted(set(refusals))))
+            )
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        member_components: list[Component] = []
+        for entry in collection.get("binaries") or []:
+            container_path = entry.get("container_path") or os.path.basename(entry["path"])
+            member_name = os.path.basename(container_path)
+            purl_path = container_path.replace("\\", "/")
+            comp_purl = PackageURL(
+                type="file", name=member_name, qualifiers={"path": purl_path}
+            ).to_string()
+            comp = Component(
+                type=Type.library,
+                name=member_name,
+                purl=comp_purl,
+                scope=Scope.required,
+                evidence=create_component_evidence(f, 0.8),
+                properties=[
+                    Property(name="internal:srcFile", value=f),
+                    Property(name="internal:containerPath", value=purl_path),
+                ],
+            )
+            comp.bom_ref = RefType(comp_purl)
+            hashes = calculate_hashes(entry["path"])
+            if hashes.get("sha256"):
+                comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hashes["sha256"])]
+            member_components.append(comp)
+        if member_components:
+            track_dependency(dependencies_dict, parent, member_components)
+        return member_components
+    finally:
+        if collection and collection.get("temp_dir"):
+            shutil.rmtree(collection["temp_dir"], ignore_errors=True)
+
+
+def process_clickonce_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one ClickOnce deployment manifest: identity from XML.
+
+    The deployment identity (name, version, public key token) is the
+    component; the update URL and requested trust ride as properties.
+    Refusals reach the BOM beside the component (rule 32).
+    """
+    block = parse_clickonce(f)
+    if block is None:
+        parent = default_parent([f])
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(name="internal:container_refusal", value="manifest_unparseable"),
+        ]
+        if not sbom.metadata.component.components:
+            sbom.metadata.component.components = []
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        return []
+    identity = block.get("identity") or {}
+    name = identity.get("name") or os.path.basename(f)
+    version = str(identity.get("version") or "")
+    token = identity.get("publicKeyToken")
+    purl = PackageURL(
+        type="generic", name=name, version=version or None,
+        qualifiers={"public_key_token": token} if token else None,
+    ).to_string()
+    parent = Component(
+        type=Type.application,
+        name=name,
+        version=version,
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value=f"clickonce-{block.get('kind')}"),
+        Property(name="internal:version_source", value="deployment_identity"),
+    ]
+    if block.get("update_url"):
+        parent.properties.append(
+            Property(name="internal:clickonceUpdateUrl", value=block["update_url"])
+        )
+    if block.get("publisher"):
+        parent.properties.append(
+            Property(name="internal:clickoncePublisher", value=block["publisher"])
+        )
+    if block.get("signature_present"):
+        parent.properties.append(
+            Property(name="internal:clickonceSigned", value="true")
+        )
+    if block.get("refusals"):
+        parent.properties.append(
+            Property(name="internal:clickonce_refusals", value=", ".join(sorted(set(block["refusals"]))))
+        )
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    return []
+
+
+def process_msi_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one ``.msi`` database: identity from its Property table.
+
+    The parent component carries the product identity and codes; refusals
+    and degradations reach the BOM as properties (rule 32). Embedded
+    cabinets and Binary-table streams are named as properties without being
+    emitted as components — the File table, not the CAB listing, is the
+    package's own statement of what it ships.
+    """
+    refusals: list[str] = []
+    degradations: list[str] = []
+    msi_block = parse_msi(f, refusals, degradations)
+    identity = msi_block.get("identity") or {}
+    name = identity.get("product_name") or os.path.basename(f)
+    version = str(identity.get("product_version") or "")
+    purl = PackageURL(type="generic", name=name, version=version or None).to_string()
+    parent = Component(
+        type=Type.application,
+        name=name,
+        version=version,
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value="msi"),
+    ]
+    scalar_props = {
+        "internal:msiProductCode": identity.get("product_code"),
+        "internal:msiUpgradeCode": identity.get("upgrade_code"),
+        "internal:msiPackageCode": identity.get("package_code"),
+        "internal:msiManufacturer": identity.get("manufacturer"),
+        "internal:fileCount": msi_block.get("file_count"),
+        "internal:componentCount": msi_block.get("component_count"),
+        "internal:customActionCount": msi_block.get("custom_action_count"),
+    }
+    for key, value in scalar_props.items():
+        if value:
+            parent.properties.append(Property(name=key, value=str(value)))
+    if msi_block.get("digital_signature_present"):
+        parent.properties.append(
+            Property(name="internal:msiDigitalSignature", value="present")
+        )
+    if refusals:
+        parent.properties.append(
+            Property(name="internal:msi_refusals", value=", ".join(sorted(set(refusals))))
+        )
+    if degradations:
+        parent.properties.append(
+            Property(name="internal:msi_degradations", value=", ".join(sorted(set(degradations))))
+        )
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    return []
+
+
+def process_cab_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one standalone cabinet: the member listing becomes components.
+
+    Members are listed, not extracted, here: the component carries the
+    member path and size. Refusals (unsupported folder compression, unsafe
+    paths) reach the BOM beside the parent (rule 32).
+    """
+    cab_block = parse_cab(f)
+    purl = PackageURL(type="generic", name=os.path.basename(f)).to_string()
+    parent = Component(
+        type=Type.library,
+        name=os.path.basename(f),
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value="cab"),
+        Property(name="internal:memberCount", value=str(cab_block.get("member_count") or 0)),
+    ]
+    refusals = cab_block.get("refusals") or []
+    if refusals:
+        parent.properties.append(
+            Property(name="internal:cab_refusals", value=", ".join(sorted(set(refusals))))
+        )
+    member_components: list[Component] = []
+    for member in (cab_block.get("members") or [])[:1024]:
+        member_purl = PackageURL(
+            type="file", name=os.path.basename(member["name"]), qualifiers={"path": member["name"]}
+        ).to_string()
+        comp = Component(
+            type=Type.library,
+            name=member["name"],
+            purl=member_purl,
+            evidence=create_component_evidence(f, 0.6),
+            properties=[
+                Property(name="internal:srcFile", value=f),
+                Property(name="internal:cabMember", value="true"),
+            ],
+        )
+        comp.bom_ref = RefType(member_purl)
+        member_components.append(comp)
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    if member_components:
+        track_dependency(dependencies_dict, parent, member_components)
+    return member_components
 
 
 def process_dotnet_dependencies(

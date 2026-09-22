@@ -34,6 +34,35 @@
   exe_types:
     - MachO
     - genericbinary
+- id: CHECK_MSIX_RESTRICTED_CAPABILITY
+  title: Package Declares Restricted Capabilities
+  description: |
+    The package's AppxManifest declares one or more restricted capabilities
+    (the `rescap` namespace): declarations that take a packaged application
+    out of the Windows app container. Each name names a different surface —
+    `runFullTrust` is full user-mode trust outside the container,
+    `broadFileSystemAccess` is unrestricted filesystem reach, `allowElevation`
+    is consented elevation, `packageManagement` lets the package manage other
+    packages. The finding names what the package declared; it is a
+    declaration fact for review, not a verdict about the package, and blint
+    performs no review of the package's store approval.
+
+    Measured population (ground rule 34, Windows 11 ARM64 VM,
+    C:\Program Files\WindowsApps, 2026-09-22): 17 of 56 ordinary installed
+    Store packages declare at least one restricted capability —
+    `runFullTrust` 11, `unvirtualizedResources` 8, `appLicensing` 6,
+    `webPlatformMediaExtension` 4, `packageQuery` 3, `packageManagement` 2,
+    and fourteen more at 1-2 each — so the rule is informational by
+    measurement: Microsoft's own Terminal, PowerShell and Notepad are in the
+    17. A capability an analyst would weigh differently
+    (`broadFileSystemAccess`, `allowElevation`) is named in the finding like
+    any other.
+  severity: info
+  exe_types:
+    - msix
+    - appx
+    - msixbundle
+    - appxbundle
 - id: CHECK_TLS_CALLBACKS
   title: TLS Callbacks Run Before Main
   description: |

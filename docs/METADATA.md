@@ -350,6 +350,23 @@ A macOS bundle is a directory (unlike an `.ipa`, there is nothing to unpack). bl
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `macos_bundle` | The same bundle-context shape as `ios_bundle` below (identity, role, `bundle_path`, ATS/URL-scheme/privacy keys) for binaries analyzed through a macOS bundle directory. |
 
+### Windows Containers: MSIX / Appx (`.msix` / `.appx` / `.msixbundle` / `.appxbundle`)
+
+An MSIX/Appx package is a zip whose `AppxManifest.xml` states identity and capabilities; a bundle is a zip of packages. blint walks the container (`blint/lib/msix.py` through the shared bounded framework in `blint/lib/container.py`), analyzes every `exe`/`dll` member through the normal PE path, and attributes each member to its place in the package (`container_path`, e.g. `CascadiaPackage_1.22.12111.0_ARM64.msix/wt.exe`). The container itself is an analyzed unit whose metadata carries:
+
+| Attribute                 | Description                                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `container.kind`          | `msix`, `appx`, `msixbundle` or `appxbundle` — also the metadata `exe_type`, so container-scoped rules gate on it.                                                                                     |
+| `container.identities`    | Bundle identity plus each package's `AppxManifest` facts: `identity` (`name`, `version`, `publisher`, `architecture`), `display_name`, `publisher_display_name`, `target_device_families`, `package_dependencies`, `applications` (entry executables). |
+| `container.capabilities`  | `{general, restricted, device}` capability names from the manifest. Restricted capabilities are recognised by their `rescap` namespace, not a name list, so capabilities Microsoft adds later still class correctly. Listed per class up to 128; `restricted_capability_count` is the counted total the rule reads, so a past-the-cap manifest still fires. |
+| `container.signature`     | Facts from `AppxSignature.p7x` (a `PKCX`-prefixed PKCS#7) parsed through the same signature walker the PE certificate table uses: `signer_cn`, `signer_o`, `digest_algorithm`, `signature_count`. No trust validation is performed. |
+| `container.blockmap`      | The `AppxBlockMap.xml` declaration: `hash_method` (SHA-256 only; anything else records `blockmap_hash_method_unsupported`), `file_count`, `total_size`.                                                |
+| `container.blockmap_verification` | Block hashes recomputed for every extracted member: `verified_files`, `verified_blocks`, and `mismatches` (member + mismatched-block count). Unextracted files are declared, not verified — the scope is stated by the counts, never implied. |
+| `container.package_count` / `member_binary_count` | How many nested packages were walked and how many member binaries were analyzed.                                                                                               |
+| `container.refusals`      | Every named refusal (ground rule 30): `member_path_unsafe`, `member_is_symlink`, `member_size_exceeds_cap`, `member_count_exceeds_cap`, `total_uncompressed_exceeds_cap`, `member_compression_ratio_exceeds_cap`, `appx_manifest_missing`, `manifest_xml_malformed`, `nested_package_unreadable`, `archive_unreadable` and friends. Sorted, deliberately not de-duplicated: a package with ten unsafe members reports ten. |
+
+Caps are measured (module docstring, `blint/lib/msix.py`): ≥2x the Windows Terminal 1.22 reference bundle — 2048 members, 512 MiB total, 64 MiB per member, depth 16, compression ratio 128, 64 nested packages. `CHECK_MSIX_RESTRICTED_CAPABILITY` (info, by measurement — 17 of 56 ordinary Store packages declare a restricted capability) names the declared surface. In SBOM output the package is the parent component (`pkg:appx/<name>@<version>` from the manifest identity) and each member a component keyed by container path with a SHA-256 hash; container refusals reach the BOM as `internal:container_refusals`.
+
 ### Provisioning Profiles (`provisioning_profile`)
 
 Bundles signed for direct distribution carry a provisioning profile — `embedded.mobileprovision` (iOS shape) or `embedded.provisionprofile` (macOS, under `Contents/`). The profile is a CMS envelope around a plist; blint decodes it (`blint/lib/provisioning.py`) into:
@@ -902,3 +919,28 @@ PE-specific properties and their sources:
 | `enclave` | load configuration `EnclaveConfigurationPointer` | presence-only: `true` when an enclave configuration exists, omitted otherwise — absence is the Windows norm, not a computed negative. |
 
 `pac`/`pac_strict` are deliberately absent for PE: no PE field records ARM64 pointer authentication (the GuardFlags `RF_*` bits are Return Flow Guard per the Windows SDK headers), so there is no honest source to compute from.
+
+### Windows Containers: MSI databases and CAB archives (`.msi` / `.msp` / `.cab`)
+
+An `.msi` is a CFBF storage whose streams are database tables; a `.cab` is the payload container MSI, drivers and update packages ship. Both parse with pure struct code (`blint/lib/msi.py`, `blint/lib/cab.py`) over the shared CFBF reader (`blint/lib/cfbf.py`) — no OLE library, no Windows API.
+
+| Attribute | Description |
+| --- | --- |
+| `msi` (exe_type `msi`) | `parse_status`, `table_count`/`tables` (decoded names), `identity` (`product_code`, `upgrade_code`, `package_code`, `product_name`, `product_version`, `manufacturer`), `summary` (the `\x05SummaryInformation` property set: title, author, template, revision number — the PackageCode —, timestamps, application name), `file_count`, `component_count`, `custom_action_count`/`custom_actions` (each with the Type field decoded: `kind` dll/exe/jscript/vbscript, `source`, `deferred_in_script`, `no_impersonate`, `rollback`, `async`, `continue_on_error`, `terminal_server_aware`), `binaries` (Binary-table stream names and sizes — stream bytes are never read), `embedded_cabinets` (Media table's Cabinet column: name, `embedded`, `size`), `digital_signature_present`, `refusals`, `degradations`. |
+| `cab` / `cab_members` (exe_type `cab`) | `parse_status`, `version`, `folder_count`, `methods` (`none`/`mszip`/`lzx`/`quantum`), `member_count`, `total_uncompressed`, `extracted_member_count`, `extraction_refusals`, plus the member listing (`name`, `size`, `unsafe_path`). Members in stored/MSZIP folders extract and their PE members (`.exe`/`.dll`/`.sys`) analyze as `cab-member` units attributed to the member path; LZX/Quantum folders refuse by name (`member_compression_unsupported`) — a stdlib-only constraint, stated rather than worked around. |
+
+CFBF chain sanity is a first-class fact (a malformed chain is a finding, not a swallowed error): `fat_chain_loop`, `minifat_chain_loop`, `sector_out_of_range`, `chain_terminated_early`, `directory_tree_loop`, `stream_chain_broken` are named degradations beside whatever was read. Caps are measured (module docstrings): CFBF 4,096 directory entries / 256 MiB per stream / 512 MiB total read budget; CAB 16,384 members / 512 MiB total / 256 MiB per member. In SBOM output the `.msi` parent carries the product identity and codes (`internal:msiProductCode` etc.) and a `.cab` lists its members as components keyed by member path; refusals and degradations reach the BOM as `internal:msi_refusals` / `internal:cab_refusals` (rule 32).
+
+### Installers and ClickOnce manifests (W4.3)
+
+A PE whose overlay residue classifies as an installer family (the W0.2 overlay classifier) carries an `installer` block in its metadata; ClickOnce manifests (`.application`, and `.manifest` files whose namespace is ClickOnce's `asm.v2`) parse as their own units.
+
+| Attribute | Description |
+| --- | --- |
+| `installer.family` | `nsis`, `sfx_7z`, `inno` or `installshield` — what the overlay classifier matched. |
+| `installer.extraction` | States the honesty of the block: `detection_only` (NSIS, Inno, InstallShield — no member extraction) or `members` (7z-SFX — member listing and bounded extraction). **Detection-only is stated in the block, never implied.** |
+| `installer.nsis_firstheader` | The documented NSIS `firstheader`: `flags`, `offset`, `length_of_header`, `length_of_all_following_data`. NSIS member extraction is deliberately not implemented — the data block is a compiled install-script database resolved by emulating the script VM, which is a decompiler, not a container reader. Detection-only, stated. |
+| `installer.sfx_payload` | The appended 7z archive (signature-header CRC verified before use): `offset`, `version`, `member_count`, `members` (name, size — exact for LZMA/LZMA2/copy folders), `total_unpacked`. BCJ2-encoded folders (x86-filtered SFX modules) refuse by name (`member_compression_unsupported`, `folder_unpack_sizes_unresolved`) rather than listing as analyzable. |
+| `clickonce` (exe_type `clickonce`) | `kind` (`deployment`/`application`), `identity` (name, version, publicKeyToken, culture, architecture), `publisher`, `product`, `update_url` (the `<deploymentProvider>`), `requested_execution_level`, `permission_set_unrestricted`, `compatible_frameworks`, `files` (application manifests), `signature_present` (XML-DSig), `refusals`. |
+
+The runner analyzes a 7z-SFX's decodable members (`.exe`/`.dll`/`.sys`) as `sfx-member` units attributed to their member path, beside the stub executable's own top-level unit. The `installer` block rides parse() output, so it changes the stored cache shape; `CACHE_SCHEMA_VERSION` stays frozen at 10 for the rest of v4 pre-release and `blint cache clear` is what a checkout running with `--cache` needs. No rule consumes the installer block yet — a "packed installer" rule needs a measured benign population (software installers are overwhelmingly legitimate), which is not yet measured.

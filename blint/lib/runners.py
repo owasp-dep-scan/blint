@@ -17,7 +17,10 @@ from blint.lib.analysis import (
 )
 from blint.lib.android import analyze_android_app
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
+from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
+from blint.lib.clickonce import clickonce_metadata, is_clickonce_file, parse_clickonce
+from blint.lib.container import bounded_temp_dir
 from blint.lib.finding_ids import attach_finding_ids
 from blint.lib.ios import (
     collect_ios_app_detailed,
@@ -30,6 +33,20 @@ from blint.lib.macos_bundle import (
     is_macos_bundle,
     path_inside_any_bundle,
 )
+from blint.lib.msi import parse_msi
+from blint.lib.msix import (
+    collect_msix_detailed,
+    container_metadata,
+    enrich_member_metadata,
+    is_msix_file,
+)
+from blint.lib.office import (
+    analyze_office_file,
+    extract_msg_attachments,
+    is_msg_file,
+    office_exe_type,
+    office_metadata,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -39,10 +56,12 @@ from blint.lib.parallel import (
 from blint.lib.pe_catalog import apply_catalog_signature, build_catalog_index
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
+from blint.lib.sevenz import extract_sevenz_members
 from blint.lib.tbd_index import TbdSdkError, load_or_build_index
 from blint.lib.utils import (
     export_metadata,
     find_android_files,
+    find_clickonce_files,
     find_ios_files,
     gen_file_list,
     get_hex_truncation_count,
@@ -131,6 +150,9 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
         if blint_options.sbom_output_dir and not os.path.exists(blint_options.sbom_output_dir):
             os.makedirs(blint_options.sbom_output_dir)
     exe_files = gen_file_list(blint_options.src_dir_image)
+    for src in blint_options.src_dir_image:
+        if files := find_clickonce_files(src):
+            exe_files += [f for f in files if f not in exe_files]
     wasm_files = [f for f in exe_files if is_wasm_file(f)]
     if wasm_files:
         LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
@@ -167,6 +189,9 @@ def run_default_mode(blint_options: BlintOptions) -> None:
     for src in blint_options.src_dir_image:
         if files := find_macos_bundles(src):
             macos_bundles += files
+        if files := find_clickonce_files(src):
+            # Text-format containers the binary sniff cannot see.
+            exe_files += [f for f in files if f not in exe_files]
     # A bundle directory covers everything inside it (the walker descends
     # into embedded bundles itself), so loose executables discovered within
     # one must not also be analysed as top-level units.
@@ -687,14 +712,56 @@ class AnalysisRunner:
             if bundle_processed:
                 self._mark_success("top-level")
             return
+        elif is_msix_file(f):
+            container_processed = self._process_msix_container(
+                f, blint_options, wants_callgraph_outputs
+            )
+            self.progress.advance(self.task)
+            if container_processed:
+                self._mark_success("top-level")
+            return
+        elif office_exe_type(f):
+            office_processed = self._process_office_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            if office_processed:
+                self._mark_success("top-level")
+            return
+        elif f.lower().endswith((".msi", ".msp")):
+            self._process_msi_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            self._mark_success("top-level")
+            return
+        elif is_cab_file(f):
+            cab_processed = self._process_cab_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            if cab_processed:
+                self._mark_success("top-level")
+            return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
                 LOG.debug(f"Skipping disassembly for wasm file {f}")
             metadata = self._parse_with_cache(f, blint_options, "top-level")
+        if is_clickonce_file(f):
+            # ClickOnce manifests are XML: parse, report declared facts,
+            # done — no member extraction (the referenced assemblies live
+            # on the deployment share, not in the file).
+            clickonce_block = parse_clickonce(f)
+            if clickonce_block is not None:
+                metadata = clickonce_metadata(clickonce_block, f)
+                self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+                self._mark_success("top-level")
+                self.progress.advance(self.task)
+                return
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
         self.progress.advance(self.task)
+        # W4.3: a 7z-SFX carries its payload as an appended 7z archive; the
+        # decodable members analyze as sfx-member units attributed to their
+        # member path, beside the stub executable's own top-level unit.
+        installer_block = metadata.get("installer") if isinstance(metadata, dict) else None
+        if isinstance(installer_block, dict) and installer_block.get("family") == "sfx_7z":
+            self._process_sfx_members(f, blint_options, wants_callgraph_outputs)
 
     def _process_ios_file(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
@@ -784,6 +851,252 @@ class AnalysisRunner:
                 self._mark_success("bundle-member")
             except Exception as e:
                 self._record_failure(bin_path, "bundle-member", "process", e)
+        return True
+
+    def _process_sfx_members(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Extract an SFX's appended 7z payload and analyze its PE members.
+
+        The stub executable has already been analyzed as its own unit; each
+        decodable member is an ``sfx-member`` unit. Members in BCJ2/PPMd/
+        encrypted folders refuse by name (the installer block records the
+        refusal), and the temp directory is removed on every exit path.
+        """
+        assert self.task is not None
+        try:
+            with open(f, "rb") as handle:
+                data = handle.read(8 * 1024 * 1024)
+        except OSError:
+            return
+        with bounded_temp_dir(prefix="blint_sfx_") as temp_dir:
+            refusals: list[str] = []
+            extracted = extract_sevenz_members(data, temp_dir, refusals)
+            for member_name, member_path in sorted(extracted.items()):
+                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
+                    continue
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{member_name}[/bold] (sfx-member)",
+                )
+                self._mark_attempted("sfx-member")
+                try:
+                    member_metadata = self._parse_with_cache(member_path, blint_options, "sfx-member")
+                    member_metadata["container"] = {
+                        "kind": "sfx_7z",
+                        "member_path": member_name,
+                        "role": "sfx-member",
+                    }
+                    member_metadata["name"] = member_name
+                    member_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("sfx-member")
+                except Exception as e:
+                    self._record_failure(member_name, "sfx-member", "process", e)
+
+    def _process_office_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Analyze one Office document (OOXML, legacy, .msg, RTF).
+
+        Structure, macros and relationships feed the rule engine as the
+        macro_code/relationships/ole_streams evidence families; ``.msg``
+        attachments extract to a bounded temp dir and become inputs
+        themselves (``msg-attachment`` units). Returns ``True`` when the
+        document was analyzed.
+        """
+        assert self.task is not None
+        exe_type = office_exe_type(f)
+        refusals: list[str] = []
+        degradations: list[str] = []
+        block = analyze_office_file(f, refusals, degradations)
+        if block is None:
+            self._record_skip(f, "top-level", "office_parse_failed")
+            return False
+        if not is_msg_file(f):
+            metadata = office_metadata(block, f, exe_type)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            return True
+        # .msg: analyze, then extract attachments so they become inputs.
+        with bounded_temp_dir(prefix="blint_msg_") as temp_dir:
+            extracted = extract_msg_attachments(f, temp_dir, refusals)
+            block["extracted_attachment_count"] = len(extracted)
+            block["refusals"] = sorted(set(block.get("refusals") or []) | set(refusals))
+            metadata = office_metadata(block, f, exe_type)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            for member_name, member_path in sorted(extracted.items()):
+                self._mark_attempted("msg-attachment")
+                try:
+                    self.progress.update(
+                        self.task,
+                        description=f"Processing [bold]{member_name}[/bold] (msg-attachment)",
+                    )
+                    attachment_metadata = self._parse_with_cache(
+                        member_path, blint_options, "msg-attachment"
+                    )
+                    attachment_metadata["container"] = {
+                        "kind": "msg",
+                        "member_path": member_name,
+                        "role": "msg-attachment",
+                    }
+                    attachment_metadata["name"] = member_name
+                    attachment_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, attachment_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("msg-attachment")
+                except Exception as e:
+                    self._record_failure(member_name, "msg-attachment", "process", e)
+        return True
+
+    def _process_msix_container(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Unpack an MSIX/Appx package or bundle and analyse its members.
+
+        The container itself is one analyzed unit — its manifest identity,
+        capabilities, signature and refusals are what the container rules run
+        against — and every member binary is its own unit under the
+        ``msix-member`` role, so a bundle holding three packages of fifteen
+        PEs accounts as one ``top-level`` unit, three ``msix-package`` units
+        and forty-five ``msix-member`` units, never one confused total
+        (ground rule 19). Member isolation matches the ``.ipa`` path: one bad
+        member records a failure and the remaining members are still
+        analyzed.
+
+        Returns ``True`` when the container was collected and analyzed,
+        ``False`` when the container itself was skipped.
+        """
+        assert self.task is not None
+        collection, collect_reason = collect_msix_detailed(f)
+        if collection is None:
+            self._record_skip(f, "top-level", collect_reason or "collect_failed")
+            return False
+        try:
+            metadata = container_metadata(collection, f)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            is_bundle = collection.get("kind") in ("msixbundle", "appxbundle")
+            for package in collection.get("packages") or []:
+                if is_bundle:
+                    # A nested package is a unit in its own right: it was
+                    # walked (manifest/signature/members) or it refused by
+                    # name — never a silent in-between.
+                    self._mark_attempted("msix-package")
+                    if (
+                        package.get("refusals")
+                        and not package.get("binaries")
+                        and not (package.get("identity") or {}).get("identity")
+                    ):
+                        self._record_skip(
+                            f"{f}!{package.get('container_path')}",
+                            "msix-package",
+                            "; ".join(sorted(set(package["refusals"]))),
+                        )
+                    else:
+                        self._mark_success("msix-package")
+                for entry in package.get("binaries") or []:
+                    bin_path = entry["path"]
+                    self.progress.update(
+                        self.task,
+                        description=(
+                            f"Processing [bold]{os.path.basename(bin_path)}[/bold] "
+                            f"({entry.get('container_path')})"
+                        ),
+                    )
+                    self._mark_attempted("msix-member")
+                    try:
+                        member_metadata = self._parse_with_cache(
+                            bin_path, blint_options, "msix-member"
+                        )
+                        enrich_member_metadata(member_metadata, collection, entry)
+                        self._finalize_metadata(
+                            bin_path, member_metadata, blint_options, wants_callgraph_outputs
+                        )
+                        self._mark_success("msix-member")
+                    except Exception as e:
+                        self._record_failure(
+                            entry.get("container_path") or bin_path, "msix-member", "process", e
+                        )
+            return True
+        finally:
+            shutil.rmtree(collection.get("temp_dir") or "", ignore_errors=True)
+
+    def _process_msi_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Analyze one .msi database: tables, custom actions, embedded CABs.
+
+        The database itself is the analyzed unit; its facts (identity,
+        custom actions, cabinets, refusals) are what the metadata and the
+        checks carry. Embedded cabinet members are listed, not extracted —
+        the File table already names what the package ships.
+        """
+        refusals: list[str] = []
+        degradations: list[str] = []
+        msi_block = parse_msi(f, refusals, degradations)
+        metadata: dict[str, Any] = {
+            "name": os.path.basename(f),
+            "file_path": f,
+            "exe_type": "msi",
+            "msi": msi_block,
+        }
+        self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+
+    def _process_cab_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Extract a standalone cabinet and analyze its PE members.
+
+        Members in folders blint can decode (stored/MSZIP) are extracted to
+        a bounded temp directory and analyzed through the normal PE path,
+        attributed to their member path; LZX/Quantum folders refuse by name.
+        Returns ``True`` when the cabinet was collected and analyzed.
+        """
+        assert self.task is not None
+        with bounded_temp_dir(prefix="blint_cab_") as temp_dir:
+            refusals: list[str] = []
+            extracted = extract_cab_members(f, temp_dir, refusals)
+            cab_block = parse_cab(f)
+            metadata: dict[str, Any] = {
+                "name": os.path.basename(f),
+                "file_path": f,
+                "exe_type": "cab",
+                "cab": {
+                    **{k: v for k, v in cab_block.items() if k != "members"},
+                    "extracted_member_count": len(extracted),
+                    # Extraction refusals ride the exported metadata, not
+                    # just the log: a cabinet whose folder refused must not
+                    # read as an empty archive (rule 32).
+                    "extraction_refusals": sorted(set(refusals)),
+                },
+                "cab_members": cab_block.get("members") or [],
+            }
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            for member_name, member_path in sorted(extracted.items()):
+                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
+                    continue
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{member_name}[/bold] (cab-member)",
+                )
+                self._mark_attempted("cab-member")
+                try:
+                    member_metadata = self._parse_with_cache(member_path, blint_options, "cab-member")
+                    member_metadata["container"] = {
+                        "kind": "cab",
+                        "member_path": member_name,
+                        "role": "cab-member",
+                    }
+                    member_metadata["name"] = member_name
+                    member_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("cab-member")
+                except Exception as e:
+                    self._record_failure(member_name, "cab-member", "process", e)
         return True
 
     def _finalize_metadata(

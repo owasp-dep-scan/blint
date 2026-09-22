@@ -257,3 +257,33 @@ The application metadata properties support manifest review without a second dec
 The behavioural properties support static triage. A high severity behaviour such as `ANDROID_NATIVE_EXEC` or `ANDROID_DYNAMIC_CODE_LOADING` is a strong candidate for review, and the compound value gives an example call site so that a reviewer can start from concrete evidence. Because the behaviours are static, they are best used together with the reachability findings from atom, where a behaviour that is also reachable is higher confidence than one that is only present.
 
 The service properties support data flow and third party review. The combination of `internal:detection` set to static and a nonzero `internal:reachableFlows` distinguishes an SDK that is merely bundled from one that the application actually uses, and the `data.flow` direction supports egress and ingress analysis.
+
+## Windows component identity (W4.5)
+
+This section documents the purl schemes and identity properties blint uses for Windows inputs. The principle across all of them: the purl states only what the container or the binary itself declares, and every naming decision carries its evidence beside it, so a consumer can always tell a resource-named component from a filename-named one.
+
+### Native PE components (`pkg:generic`)
+
+A native PE's parent component is named from its `OriginalFilename` VERSIONINFO resource when one is present (renaming a file is free; the resource is not), else from the on-disk name. The decision is visible:
+
+| Property                   | Meaning                                                                    |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `internal:filename_original` | The `OriginalFilename` the binary declares.                               |
+| `internal:filename_on_disk`  | The on-disk name, carried only when it differs from the resource — a mismatch is evidence, not noise. |
+| `internal:version_source`    | `version_info` (the resource), `package_identity` (a manifest), `deployment_identity` (ClickOnce), `assembly_version`/`package_version` (managed). |
+| `internal:signer_cn`         | The Authenticode signer common name, when a signature block parsed.        |
+| `internal:signing_class`     | The W2.4 signing class (`commercial_ov`, `microsoft_1st_party`, `self_signed`, ...). Absent when undetermined — absence never reads as `unsigned`. |
+
+The purl stays `pkg:generic` unless a build BOM (`--src-dir-boms`) names the package: the overlay is consulted under the on-disk stem, the resource stem, and the `pkg:nuget/<name>` keys the BOM store holds, and an overlay hit may yield a `pkg:nuget` purl because a BOM naming the package is evidence, unlike a filename.
+
+### MSIX/Appx packages (`pkg:appx`)
+
+The purl type `pkg:appx` is blint's documented scheme for Windows app packages (the purl spec's type list has no appx entry; `pkg:ios`/`pkg:macos` set the in-repo precedent for platform scheme types). The namespace-less form is `pkg:appx/<Identity Name>@<Identity Version>` — the exact strings from `AppxManifest.xml` / `AppxBundleManifest.xml`. The publisher distinguished name rides as the `internal:appxPublisher` property rather than a purl namespace (the DN is long and percent-encoding it would make the purl unmatchable), and `internal:version_source=package_identity` marks the version as the manifest's.
+
+### MSI databases (`pkg:generic`)
+
+An `.msi` parent is `pkg:generic/<ProductName>@<ProductVersion>` with the codes as properties: `internal:msiProductCode` (GUID), `internal:msiUpgradeCode`, `internal:msiPackageCode` (the summary information's revision-number GUID), and `internal:msiManufacturer`. No `pkg:msi` type exists in the purl spec and none is invented here.
+
+### ClickOnce deployments (`pkg:generic`)
+
+A `.application` manifest yields `pkg:generic/<assemblyIdentity name>@<version>` with the public key token as a `public_key_token` qualifier, plus `internal:clickonceUpdateUrl` and `internal:clickoncePublisher`.

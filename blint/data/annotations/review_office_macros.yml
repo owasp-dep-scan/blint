@@ -1,0 +1,137 @@
+text: Review for the Office container and indicator surface
+group: MACRO_REVIEWS
+url:
+  documentation: https://learn.microsoft.com/en-us/deployoffice/security/
+exe_type:
+  - ooxmldocument
+  - oleofficedocument
+  - msgdocument
+  - rtfdocument
+rules:
+  - id: OFFICE_AUTO_EXEC_MACRO
+    title: Auto-Executing Macro Entry Point
+    summary: The macro project declares an entry point that runs without user action
+    description: |
+      The document's macro project declares an auto-executing entry point
+      (AutoOpen/AutoClose for Word, Workbook_Open/Auto_Close for Excel,
+      Auto_Open/Auto_New). Code at these entry points runs as soon as the
+      document opens — before the user reads anything — which is what makes
+      them the classic delivery step in macro-borne campaigns, and also a
+      legitimate automation pattern in template documents. The finding names
+      the entry point reached; weigh what else the macro does beside it.
+    severity: medium
+    # Measured (W4.4 gate): benign generated documents and template-free
+    # corpus documents carry no auto-exec entry points.
+    patterns:
+      - autoopen
+      - autoclose
+      - auto_new
+      - document_open
+      - workbook_open
+      - auto_open
+  - id: OFFICE_SHELL_EXECUTION
+    title: Macro Spawns a Shell or Script Host
+    summary: The macro reaches a command interpreter or script host
+    description: |
+      The macro code references WScript.Shell, ShellExecute, or calls Shell
+      with a command string — the bridge from a document into arbitrary
+      process execution. Legitimate installers-and-configuration documents
+      do this too, which is why the finding names the mechanism and lets
+      the analyst weigh the target.
+    severity: high
+    patterns:
+      - wscript.shell
+      - shellexecute
+      - shell "cmd
+      - shell("cmd
+      - .run "cmd
+      - winexec
+  - id: OFFICE_URL_DOWNLOAD
+    title: Macro Downloads Content Over HTTP
+    summary: The macro references URLDownloadToFile or HTTP client objects
+    description: |
+      The macro references URLDownloadToFile, MSXML2.XMLHTTP,
+      ServerXMLHTTP or WinHttp — the classic second-stage retrieval path.
+      Benign documents occasionally poll a known endpoint; the finding
+      names the reference so the analyst can check the target.
+    severity: high
+    patterns:
+      - urldownloadtofile
+      - msxml2.xmlhttp
+      - serverxmlhttp
+      - winhttp
+      - wininet
+  - id: OFFICE_ENVIRONMENT_PROBE
+    title: Macro Probes Environment Variables
+    summary: The macro reads process environment variables
+    description: |
+      The macro calls Environ(), commonly to fingerprint the user profile,
+      domain, or AV presence. On its own this is reconnaissance signal, not
+      an execution primitive.
+    severity: low
+    patterns:
+      - environ(
+      - environ$
+  - id: OFFICE_EXTERNAL_RELATIONSHIP
+    title: External Relationship to a Remote Target
+    summary: The document references content that lives outside the file
+    description: |
+      The document's relationship graph contains an External-mode target —
+      a linked OLE object, a remote template, a linked image or frame —
+      meaning the document pulls content from a location that can change
+      after the document is reviewed. Remote template injection
+      (an attachedTemplate relationship to an attacker URL) lives exactly
+      here, which is why this is the highest-signal Office indicator blint
+      reports. Benign documents legitimately link images and templates;
+      the finding names the relationship type and target.
+    severity: low
+    patterns:
+      - ":external:http://"
+      - ":external:https://"
+      - ":external:file://"
+      - "attachedtemplate:external:"
+  - id: OFFICE_VBA_STOMPING_EVIDENCE
+    title: Compiled VBA P-Code Without Matching Source
+    summary: The compiled macro stream is present but source does not recover
+    description: |
+      The document carries a compiled _VBA_PROJECT stream while at least one
+      declared module's source text fails to decompress or is absent — the
+      structural shape of VBA stomping, where the executed p-code differs
+      from the source an analyst would read. This is a structural fact
+      about what the container holds, not a verdict about intent.
+    severity: high
+    patterns:
+      - stomping_evidence
+  - id: OFFICE_XLM_MACRO_SHEET
+    title: Excel 4.0 Macro Sheet Present
+    summary: The workbook contains an XLM macro sheet
+    description: |
+      The workbook carries an Excel 4.0 (XLM) macro sheet — a pre-VBA macro
+      form that most review tooling overlooks precisely because it is not
+      VBA. XLM macros are fully capable of shell and download primitives.
+      Legacy accounting workbooks still use XLM legitimately.
+    severity: medium
+    patterns:
+      - xlm_macro_sheet
+  - id: OFFICE_DDE_FIELD
+    title: DDE Field Code in Document Body
+    summary: The document body contains DDE or DDEAUTO field instructions
+    description: |
+      The document part contains a DDE/DDEAUTO field instruction — the
+      field executes an external program when the document opens and the
+      user accepts the link-update prompt, with no macro involved.
+    severity: high
+    patterns:
+      - ddeauto
+      - "dde:"
+  - id: OFFICE_OLE_PACKAGE_OBJECT
+    title: Embedded OLE Package Object
+    summary: The document embeds an OLE package that can carry arbitrary files
+    description: |
+      The document embeds an Ole10Native OLE package — a container that
+      can carry an arbitrary file plus the command line to launch it.
+      Embedded worksheets and documents are ordinary; packages that name
+      executables are worth reading.
+    severity: medium
+    patterns:
+      - "olestreams:ole10native:"
