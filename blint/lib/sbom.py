@@ -49,6 +49,10 @@ from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.msi import parse_msi
 from blint.lib.msix import MSIX_EXTENSIONS, collect_msix_detailed
 from blint.lib.nuget_package import read_nupkg_nuspec
+from blint.lib.office import (
+    analyze_office_file,
+    office_exe_type,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -237,6 +241,51 @@ def generate(
                         advance=1,
                     )
                     components += process_nupkg_file(dependencies_dict, exe, sbom)
+                    continue
+                if office_exe_type(exe):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    refusals: list[str] = []
+                    degradations: list[str] = []
+                    office_block = analyze_office_file(exe, refusals, degradations)
+                    parent = default_parent([exe])
+                    parent.properties = [
+                        Property(name="internal:srcFile", value=exe),
+                        Property(name="internal:containerKind", value=office_exe_type(exe)),
+                    ]
+                    if office_block is None:
+                        parent.properties.append(
+                            Property(name="internal:office_refusal", value="office_parse_failed")
+                        )
+                    else:
+                        if office_block.get("external_relationship_count"):
+                            parent.properties.append(
+                                Property(
+                                    name="internal:officeExternalRelationships",
+                                    value=str(office_block["external_relationship_count"]),
+                                )
+                            )
+                        if office_block.get("vba_project_present"):
+                            parent.properties.append(
+                                Property(name="internal:officeVbaProject", value="present")
+                            )
+                        if (office_block.get("vba") or {}).get("vba_stomping_evidence"):
+                            parent.properties.append(
+                                Property(name="internal:officeVbaStompingEvidence", value="true")
+                            )
+                        if office_block.get("refusals"):
+                            parent.properties.append(
+                                Property(
+                                    name="internal:office_refusals",
+                                    value=", ".join(sorted(set(office_block["refusals"]))),
+                                )
+                            )
+                    if not sbom.metadata.component.components:
+                        sbom.metadata.component.components = []
+                    _add_to_parent_component(sbom.metadata.component.components, parent)
                     continue
                 if exe.lower().endswith(".application"):
                     progress.update(

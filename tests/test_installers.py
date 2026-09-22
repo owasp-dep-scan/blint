@@ -11,13 +11,27 @@ import logging
 import os
 import struct
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
 
+from blint.lib.analysis import initialize_rules
 from blint.lib.clickonce import is_clickonce_file, parse_clickonce
 from blint.lib.installers import _parse_nsis_firstheader, detect_installer
+from blint.lib.review_runner import ReviewRunner
 from blint.lib.sevenz import find_archive_candidates, parse_sevenz_blob
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_rules_once():
+    """initialize_rules() clears and refills the global rule dicts, so the
+    repeated loads in these tests cannot append duplicates (the engine's
+    load path is append-only by design; the clearing entry point is the
+    one the CLI uses)."""
+    from blint.config import BlintOptions
+
+    initialize_rules(BlintOptions(reports_dir=str(Path(tempfile.mkdtemp()))))
 
 _DATA = os.path.join(os.path.dirname(__file__), "data")
 _PE = os.path.join(_DATA, "pe", "msvc-hello-x64.exe")
@@ -192,3 +206,178 @@ def test_sfx_runner_members_and_leak_delta(tmp_path):
     names = {m["name"]: m["size"] for m in installer["sfx_payload"]["members"]}
     assert names == {"notes.md": 5002, "readme.txt": 20}
 
+
+# ---------------------------------------------------------------------------
+# W4.4 — Office documents (OOXML, legacy CFBF, RTF)
+# ---------------------------------------------------------------------------
+
+def _ovba_raw_chunk(payload: bytes) -> bytes:
+    """One raw (uncompressed) MS-OVBA chunk: header + literal bytes."""
+    header = 0x1800 | ((len(payload) - 1 + 3) & 0x0FFF)
+    return struct.pack("<H", header) + payload
+
+
+def _ovba_compressed(text: bytes) -> bytes:
+    out = bytearray(b"\x01")
+    for offset in range(0, len(text), 4096):
+        out += _ovba_raw_chunk(text[offset : offset + 4096])
+    return bytes(out)
+
+
+def _vba_module_source(lines):
+    return ("\r\n".join(lines) + "\r\n").encode("latin-1")
+
+
+def build_vba_project_bin(modules: dict[str, bytes]) -> bytes:
+    """A minimal vbaProject.bin: VBA/dir (compressed) + module streams,
+    built with the test_cfbf builder."""
+    from tests.test_cfbf import build_cfbf
+
+    dir_records = bytearray()
+    for name in modules:
+        encoded = name.encode("latin-1")
+        # MODULENAME: id(2) reserved(4) size(4) name
+        dir_records += struct.pack("<HII", 0x0019, 0, len(encoded)) + encoded
+    dir_records += struct.pack("<H", 0x000F) + b"\x00" * 8
+    streams = {"VBA/dir": _ovba_compressed(bytes(dir_records))}
+    for name, source in modules.items():
+        streams[f"VBA/{name}"] = _ovba_compressed(source)
+    return build_cfbf(streams)
+
+
+def build_docx(tmp_path, name="test.docx", *, remote_template=False, vba_modules=None, dde=False, hyperlink=False):
+    doc_parts = []
+    if dde:
+        doc_parts.append('<w:p><w:r><w:instrText>DDEAUTO c:\\\\windows\\\\system32\\\\cmd.exe "/x"</w:instrText></w:r></w:p>')
+    if hyperlink:
+        doc_parts.append('<w:p><w:r><w:t>see https://example.com/docs</w:t></w:r></w:p>')
+    document = (
+        '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>" + "".join(doc_parts) + "</w:body></w:document>"
+    )
+    rels = ['<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">']
+    if remote_template:
+        rels.append(
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/attachedTemplate"'
+            ' Target="http://evil.example.com/template.dotm" TargetMode="External"/>'
+        )
+    if hyperlink:
+        rels.append(
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"'
+            ' Target="https://example.com/docs" TargetMode="External"/>'
+        )
+    rels.append("</Relationships>")
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        zf.writestr("word/document.xml", document)
+        zf.writestr("word/_rels/document.xml.rels", "".join(rels))
+        if vba_modules:
+            zf.writestr("word/vbaProject.bin", build_vba_project_bin(vba_modules))
+    return str(path)
+
+
+def test_ooxml_external_relationship_and_dde(tmp_path):
+    from blint.lib.office import analyze_ooxml, office_metadata
+
+    docx = build_docx(tmp_path, remote_template=True, dde=True)
+    refusals: list[str] = []
+    block = analyze_ooxml(docx, refusals, [])
+    assert block["parse_status"] == "parsed"
+    assert block["external_relationship_count"] == 1
+    assert block["external_template"] == "http://evil.example.com/template.dotm"
+    assert any("DDEAUTO" in field for field in block["dde_fields"])
+    metadata = office_metadata(block, docx, "ooxmldocument")
+    assert any("attachedtemplate:external:" in r.lower() for r in metadata["relationships"])
+
+
+def test_ooxml_vba_macro_extraction(tmp_path):
+    from blint.lib.office import analyze_ooxml, office_metadata
+    source = _vba_module_source([
+        "Attribute VB_Name = \"ThisDocument\"",
+        "Sub AutoOpen()",
+        "    Shell \"cmd.exe /c calc.exe\"",
+        "End Sub",
+    ])
+    docx = build_docx(tmp_path, vba_modules={"ThisDocument": source})
+    block = analyze_ooxml(docx, _refusals := [], [])
+    assert block["vba_project_present"] is True
+    vba = block["vba"]
+    assert vba["module_count"] == 1
+    assert vba["modules"][0]["source_present"] is True
+    assert "AutoOpen" in vba["modules"][0]["source"]
+    metadata = office_metadata(block, "test.docx", "ooxmldocument")
+    runner = ReviewRunner()
+    results = runner.run_review(metadata)
+    assert "OFFICE_AUTO_EXEC_MACRO" in results
+    assert "OFFICE_SHELL_EXECUTION" in results
+
+
+def test_legacy_doc_vba_and_stomping_evidence(tmp_path):
+    from blint.lib.analysis import load_default_rules
+    from blint.lib.office import analyze_legacy_office, office_metadata
+    from tests.test_cfbf import build_cfbf
+
+    load_default_rules()
+    source = _vba_module_source(["Sub AutoOpen()", "    Environ(\"USERNAME\")", "End Sub"])
+    # The dir declares a second module whose stream is absent — the
+    # structural shape of VBA stomping (p-code present, source missing).
+    dir_records = struct.pack("<HII", 0x0019, 0, 12) + b"ThisDocument"
+    dir_records += struct.pack("<HII", 0x0019, 0, 7) + b"Stomped"
+    dir_records += struct.pack("<H", 0x000F) + bytes(8)
+    streams = {
+        "WordDocument": b"\xec\xa5" + b"\x00" * 100,
+        "Macros/VBA/dir": _ovba_compressed(bytes(dir_records)),
+        "Macros/VBA/ThisDocument": _ovba_compressed(source),
+        "Macros/PROJECT": b"Reference=*\\G{11111111-1111-1111-1111-111111111111}#1.0#C:\\tlb.tlb#Offset\r\n",
+        "_VBA_PROJECT": b"\xcc\x45\x00" + b"\x00" * 50,
+    }
+    doc_path = tmp_path / "sample.doc"
+    doc_path.write_bytes(build_cfbf(streams))
+    block = analyze_legacy_office(str(doc_path), [], [])
+    assert block["parse_status"] == "parsed"
+    vba = block["vba"]
+    assert vba is not None
+    assert vba["module_count"] == 2
+    assert vba["compiled_pcode_present"] is True
+    assert vba["vba_stomping_evidence"] is True
+    assert any("tlb.tlb" in ref for ref in vba["references"])
+    recovered = {m["name"]: m for m in vba["modules"]}
+    assert recovered["ThisDocument"]["source_present"] is True
+    assert recovered["Stomped"]["source_present"] is False
+    metadata = office_metadata(block, "sample.doc", "oleofficedocument")
+    runner = ReviewRunner()
+    results = runner.run_review(metadata)
+    assert "OFFICE_AUTO_EXEC_MACRO" in results
+    assert "OFFICE_VBA_STOMPING_EVIDENCE" in results
+
+
+def test_rtf_objdata_cfbf_extraction(tmp_path):
+    from blint.lib.office import analyze_rtf
+    from tests.test_cfbf import build_cfbf
+
+    inner = build_cfbf({"\x01Ole10Native": b"\x08\x00\x00\x00\x01test.ex\x00"})
+    body = b"{\\rtf1\\ansi{\\object{\\*\\objdata " + inner.hex().encode().upper() + b"}}}"
+    path = tmp_path / "sample.rtf"
+    path.write_bytes(body)
+    block = analyze_rtf(str(path), [], [])
+    assert block["rtf_detected"] is True
+    assert block["object_count"] == 1
+    assert block["objects"][0]["format"] == "cfbf"
+
+
+def test_benign_document_population(tmp_path):
+    """Ground-rule-34 population: a benign document with an ordinary
+    hyperlink hits only the external-relationship fact (low severity), and
+    a plain document hits nothing."""
+    from blint.lib.office import analyze_ooxml, office_metadata
+    plain = build_docx(tmp_path, name="plain.docx")
+    block = analyze_ooxml(plain, [], [])
+    runner = ReviewRunner()
+    results = runner.run_review(office_metadata(block, "plain.docx", "ooxmldocument"))
+    assert results == {}
+
+    linked = build_docx(tmp_path, name="linked.docx", hyperlink=True)
+    block = analyze_ooxml(linked, [], [])
+    results = runner.run_review(office_metadata(block, "linked.docx", "ooxmldocument"))
+    assert set(results) == {"OFFICE_EXTERNAL_RELATIONSHIP"}

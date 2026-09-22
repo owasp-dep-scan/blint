@@ -40,6 +40,13 @@ from blint.lib.msix import (
     enrich_member_metadata,
     is_msix_file,
 )
+from blint.lib.office import (
+    analyze_office_file,
+    extract_msg_attachments,
+    is_msg_file,
+    office_exe_type,
+    office_metadata,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -713,6 +720,12 @@ class AnalysisRunner:
             if container_processed:
                 self._mark_success("top-level")
             return
+        elif office_exe_type(f):
+            office_processed = self._process_office_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            if office_processed:
+                self._mark_success("top-level")
+            return
         elif f.lower().endswith((".msi", ".msp")):
             self._process_msi_file(f, blint_options, wants_callgraph_outputs)
             self.progress.advance(self.task)
@@ -841,6 +854,104 @@ class AnalysisRunner:
         return True
 
     def _process_sfx_members(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Extract an SFX's appended 7z payload and analyze its PE members.
+
+        The stub executable has already been analyzed as its own unit; each
+        decodable member is an ``sfx-member`` unit. Members in BCJ2/PPMd/
+        encrypted folders refuse by name (the installer block records the
+        refusal), and the temp directory is removed on every exit path.
+        """
+        assert self.task is not None
+        try:
+            with open(f, "rb") as handle:
+                data = handle.read(8 * 1024 * 1024)
+        except OSError:
+            return
+        with bounded_temp_dir(prefix="blint_sfx_") as temp_dir:
+            refusals: list[str] = []
+            extracted = extract_sevenz_members(data, temp_dir, refusals)
+            for member_name, member_path in sorted(extracted.items()):
+                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
+                    continue
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{member_name}[/bold] (sfx-member)",
+                )
+                self._mark_attempted("sfx-member")
+                try:
+                    member_metadata = self._parse_with_cache(member_path, blint_options, "sfx-member")
+                    member_metadata["container"] = {
+                        "kind": "sfx_7z",
+                        "member_path": member_name,
+                        "role": "sfx-member",
+                    }
+                    member_metadata["name"] = member_name
+                    member_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("sfx-member")
+                except Exception as e:
+                    self._record_failure(member_name, "sfx-member", "process", e)
+
+    def _process_office_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Analyze one Office document (OOXML, legacy, .msg, RTF).
+
+        Structure, macros and relationships feed the rule engine as the
+        macro_code/relationships/ole_streams evidence families; ``.msg``
+        attachments extract to a bounded temp dir and become inputs
+        themselves (``msg-attachment`` units). Returns ``True`` when the
+        document was analyzed.
+        """
+        assert self.task is not None
+        exe_type = office_exe_type(f)
+        refusals: list[str] = []
+        degradations: list[str] = []
+        block = analyze_office_file(f, refusals, degradations)
+        if block is None:
+            self._record_skip(f, "top-level", "office_parse_failed")
+            return False
+        if not is_msg_file(f):
+            metadata = office_metadata(block, f, exe_type)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            return True
+        # .msg: analyze, then extract attachments so they become inputs.
+        with bounded_temp_dir(prefix="blint_msg_") as temp_dir:
+            extracted = extract_msg_attachments(f, temp_dir, refusals)
+            block["extracted_attachment_count"] = len(extracted)
+            block["refusals"] = sorted(set(block.get("refusals") or []) | set(refusals))
+            metadata = office_metadata(block, f, exe_type)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            for member_name, member_path in sorted(extracted.items()):
+                self._mark_attempted("msg-attachment")
+                try:
+                    self.progress.update(
+                        self.task,
+                        description=f"Processing [bold]{member_name}[/bold] (msg-attachment)",
+                    )
+                    attachment_metadata = self._parse_with_cache(
+                        member_path, blint_options, "msg-attachment"
+                    )
+                    attachment_metadata["container"] = {
+                        "kind": "msg",
+                        "member_path": member_name,
+                        "role": "msg-attachment",
+                    }
+                    attachment_metadata["name"] = member_name
+                    attachment_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, attachment_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("msg-attachment")
+                except Exception as e:
+                    self._record_failure(member_name, "msg-attachment", "process", e)
+        return True
+
+    def _process_msix_container(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
     ) -> None:
         """Extract an SFX's appended 7z payload and analyze its PE members.

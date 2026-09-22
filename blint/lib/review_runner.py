@@ -8,6 +8,7 @@ from blint.lib.analysis import (
     review_exe_dict,
     review_functions_dict,
     review_imports_dict,
+    review_macro_dict,
     review_methods_dict,
     review_rules_cache,
     review_symbols_dict,
@@ -36,6 +37,7 @@ class ReviewRunner:
         self.review_entries_list: list[dict[str, Any]] | None = None
         self.review_functions_list: list[dict[str, Any]] | None = None
         self.review_binary_list: list[dict[str, Any]] | None = None
+        self.review_macro_list: list[dict[str, Any]] | None = None
 
     def run_review(self, metadata: dict[str, Any]) -> ReviewResults:
         """
@@ -66,6 +68,14 @@ class ReviewRunner:
             or self.review_binary_list
         ):
             return self._review_lists(metadata)
+        if metadata.get("exe_type") in (
+            "ooxmldocument",
+            "oleofficedocument",
+            "msgdocument",
+            "rtfdocument",
+        ):
+            self._review_office(metadata)
+            return self.results
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
 
@@ -95,6 +105,20 @@ class ReviewRunner:
         self.results |= build_pii_review_results(metadata, EVIDENCE_LIMIT)
         self.results |= build_loader_symbol_review_results(metadata, EVIDENCE_LIMIT)
         return self.results
+
+    def _review_office(self, metadata: dict[str, Any]) -> None:
+        """Reviews the office evidence families (W4.4): macro source lines,
+        relationship rows and OLE stream names — the document equivalents
+        of functions/imports/symbols."""
+        candidates: list[str] = []
+        candidates += metadata.get("macro_code") or []
+        candidates += metadata.get("relationships") or []
+        candidates += metadata.get("ole_streams") or []
+        candidates += metadata.get("informative_strings") or []
+        if not candidates:
+            return
+        LOG.debug(f"Reviewing {len(candidates)} office evidence strings")
+        self.run_review_methods_symbols(self.review_macro_list, candidates)
 
     def _review_imports(self, metadata: dict[str, Any]) -> None:
         """Reviews imports in the metadata."""
@@ -237,6 +261,7 @@ class ReviewRunner:
         if binary_type and binary_type != exe_type:
             binary_rules += review_binary_dict.get(binary_type) or []
         self.review_binary_list = binary_rules or None
+        self.review_macro_list = review_macro_dict.get(exe_type)
 
     def process_review(self, f: str, exe_name: str) -> list[dict[str, Any]]:
         """Processes the review results for the given executable and review."""

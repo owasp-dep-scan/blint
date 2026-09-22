@@ -107,6 +107,7 @@ review_imports_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 review_entries_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 review_functions_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 review_binary_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+review_macro_dict: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
 
 review_rules_cache: dict[str, Any] = {
     "PII_READ": {
@@ -139,6 +140,7 @@ REVIEW_GROUP_TARGETS: dict[str, defaultdict[str, list[dict[str, Any]]]] = {
     "ENTRIES_REVIEWS": review_entries_dict,
     "FUNCTION_REVIEWS": review_functions_dict,
     "BINARY_REVIEWS": review_binary_dict,
+    "MACRO_REVIEWS": review_macro_dict,
 }
 
 # Populated by register_review_rules as annotation blocks load. The engine
@@ -255,8 +257,22 @@ for tmp_data in raw_rules:
         rules_dict[rule.get("id")] = rule
 
 
+# Guard so repeated module-import-time loads (test modules, multiple
+# callers) cannot append duplicate registrations; initialize_rules resets
+# it because it clears the dicts first and must re-load.
+_default_rules_loaded = False
+
+
 def load_default_rules() -> None:
-    """Load default rules from package resources."""
+    """Load default rules from package resources (idempotent).
+
+    The registration is append-only, so a second call with no intervening
+    clear would duplicate every rule block; initialize_rules resets the
+    flag because it clears the dicts and must re-load.
+    """
+    global _default_rules_loaded
+    if _default_rules_loaded:
+        return
     with get_resource("blint.data", "rules.yml") as fp:
         raw_rules = fp.read().split("---")
     for tmp_data in raw_rules:
@@ -275,6 +291,7 @@ def load_default_rules() -> None:
                 if not methods_reviews_groups:
                     continue
                 register_review_rules(methods_reviews_groups, source=review_methods_file)
+    _default_rules_loaded = True
 
 
 def load_custom_rules(
@@ -338,8 +355,11 @@ def initialize_rules(blint_options: BlintOptions) -> None:
     review_entries_dict.clear()
     review_functions_dict.clear()
     review_binary_dict.clear()
+    review_macro_dict.clear()
     review_rules_cache.clear()
+    global _default_rules_loaded
     review_rule_sources.clear()
+    _default_rules_loaded = False
     review_rules_cache.update(
         {
             "PII_READ": {
