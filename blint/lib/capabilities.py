@@ -64,6 +64,7 @@ DISASSEMBLY_EVIDENCE_RULE_IDS: frozenset[str] = frozenset(
         "CUSTOM_COMMAND_DISPATCH_TABLE",
         "PE_HOST_PROCESS_NAME_GATE",
         "RUNTIME_CONSTRUCTED_SECURITY_STRINGS",
+        "USERMODE_DIRECT_SYSCALL",
     }
 )
 
@@ -80,6 +81,13 @@ def _entry(kind: str, rule: dict[str, Any]) -> dict[str, Any]:
     for optional in ("summary", "severity", "description"):
         if rule.get(optional) is not None:
             entry[optional] = rule.get(optional)
+    # ATT&CK (issue #1) and D3FEND (issue #126) mappings, applied as the
+    # rules are written rather than in a later pass. Absent when the rule
+    # declares none - a rule with no mapping is not the same as an
+    # untagged catalog.
+    for tag_field in ("attack", "d3fend"):
+        if rule.get(tag_field):
+            entry[tag_field] = list(rule.get(tag_field))
     return entry
 
 

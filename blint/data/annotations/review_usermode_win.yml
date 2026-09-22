@@ -1,0 +1,70 @@
+---
+text: Review for kernel-adjacent user-mode behaviour - direct syscalls, process injection, ETW/AMSI tampering, and persistence surfaces
+group: BINARY_REVIEWS
+exe_type:
+  - PE32
+  - PE64
+  - dotnetbinary
+  - gobinary
+  - genericbinary
+# ATT&CK (issue #1) and D3FEND (issue #126) tags ride the `attack` and
+# `d3fend` fields on every rule in this file, applied as the rules were
+# written. D3FEND mappings are deliberately sparse: only unambiguous ones
+# are stated (D3-PLA Process Analysis, D3-UPA User Process Analysis); a
+# considered "no clean mapping yet" beats a wrong taxonomy ID.
+rules:
+  - id: USERMODE_DIRECT_SYSCALL
+    title: User-mode image issues direct syscalls outside ntdll
+    summary: The binary executes syscall/sysenter (or svc on ARM64) in its own code instead of calling ntdll, the Hell's Gate / Halo's Gate shape.
+    description: |
+      This user-mode image contains code that executes the kernel transition instruction itself - `syscall` or `int 2e` on x86/x64, `svc #0` on ARM64 - rather than calling the corresponding ntdll export. That is legitimate only inside ntdll (and the boot loaders); anywhere else it is the hallmark of direct-syscall evasion frameworks (Hell's Gate, Halo's Gate, SysWhispers-generated code): the tool resolves syscall numbers at runtime and invokes the kernel directly, so every user-mode hook an EDR placed on ntdll's exports - the standard instrumentation point - is silently bypassed. The image may also be an unpacked payload whose shellcode stages transition directly. The instruction can also appear in a manually written stub, so read the surrounding code: what matters is whether the syscall numbers are looked up or sorted (SSN resolution) before the transition.
+      blint excludes ntdll itself from this rule by its version-resource OriginalFilename. Evidence names the functions containing the transitions.
+    attack:
+      - T1106 (Native API)
+      - T1562.001 (Impair Defenses: Disable or Modify Tools)
+    d3fend:
+      - D3-UPA (User Process Analysis)
+    check_type: binary_analysis
+  - id: PROCESS_INJECTION_PRIMITIVES
+    title: Image chains cross-process allocation, write and execution primitives
+    summary: Two or more of the three injection stages - remote allocation, remote write, remote execution start - are present in the import surface, scored as a family rather than as isolated imports.
+    description: |
+      The three stages of process injection are each individually unremarkable - plenty of legitimate software allocates, writes or starts threads - but the *combination across another process's handle* is the signature: allocate writable memory in a target process (VirtualAllocEx / NtAllocateVirtualMemory), copy the payload in (WriteProcessMemory / NtMapViewOfSection), and start it (CreateRemoteThread, NtCreateThreadEx, QueueUserAPC, or a hijacked thread via SetThreadContext and ResumeThread). The classic shellcode-injection chain is all three; an APC chain is write plus queue; DLL injection via CreateRemoteThread(load-library) is allocation plus write plus remote thread. blint scores the stages found in the import table and reports the chain it sees; a JIT, a debugger or an RPA tool can reach two stages legitimately, so read the evidence with the image's purpose in mind. measured over a benign Windows System32 slice: single stages are common, the full three-stage chain is not (see the packet report).
+    attack:
+      - T1055 (Process Injection)
+      - T1055.003 (Thread Execution Hijacking)
+      - T1055.004 (Asynchronous Procedure Call)
+    d3fend:
+      - D3-PLA (Process Analysis)
+    check_type: binary_analysis
+  - id: ETW_PATCH_EVIDENCE
+    title: Image references ETW trace routines alongside memory-patching primitives
+    summary: EtwEventWrite or NtTraceEvent is in the import surface, and the image also carries the APIs used to unprotect and patch code pages.
+    description: |
+      Patching ETW (Event Tracing for Windows) at runtime - typically zeroing the EtwEventWrite entry point in ntdll or un-registering providers - blinds process-creation, image-load and .NET logging, and it is one of the first moves post-exploitation frameworks make. The statically decidable shape is narrow: the image imports or dynamically resolves the trace routines AND carries VirtualProtect/NtProtectVirtualMemory (making pages writable) or WriteProcessMemory. Security tooling legitimately imports both pairs, so this is a review signal that needs the surrounding image read, not a verdict. blint cannot see runtime patching of another process's memory; confirm dynamically before acting.
+    attack:
+      - T1562.001 (Impair Defenses: Disable or Modify Tools)
+      - T1070 (Indicator Removal)
+    check_type: binary_analysis
+  - id: AMSI_PATCH_EVIDENCE
+    title: Image references AmsiScanBuffer alongside memory-patching primitives
+    summary: The image names AmsiScanBuffer - the AMSI entry point every script host routes through - and carries page-protection APIs.
+    description: |
+      AMSI (the Antimalware Scan Interface) receives every script and macro buffer before execution; patching AmsiScanBuffer's prologue so it always returns "clean" is the standard pre-dropper move for script-based loaders, and referencing the symbol by name (for GetProcAddress or a direct offset) is the statically visible half. The companion half is the ability to make the patch stick: VirtualProtect/NtProtectVirtualMemory or WriteProcessMemory in the same image. A CRITICAL caveat: a legitimate component can reference AMSI only if it is itself an AMSI provider or an AV product - ordinary applications never need this symbol. Check which this is.
+    attack:
+      - T1562.001 (Impair Defenses: Disable or Modify Tools)
+    check_type: binary_analysis
+  - id: PERSISTENCE_SURFACE_REFERENCES
+    title: Image references multiple autostart or extension registry surfaces
+    summary: Run keys, IFEO, AppInit/AppCert, WMI event consumers, scheduled-task XML or the Services control set are named in the image, and service-manager APIs are imported.
+    description: |
+      This image references two or more of the documented Windows persistence/extension surfaces - the CurrentVersion Run keys, Image File Execution Options (debugger hijacking of a launched process), AppInit_DLLs and AppCertDlls (loaded into every GUI process and every created process respectively), WMI event consumers (permanent, event-driven execution), scheduled-task XML, or the Services control set - together with the service-manager import set that installs them. One surface alone is every installer and management agent on Windows; *several, plus the ability to write them*, is the shape of malware establishing redundant, mutually-restoring footholds. A reference is not a write: services.exe, Group Policy and security products name these keys routinely. blint recovers the references from section bytes, so nothing that hit the strings list's caps is invisible; the evidence snippets are in the persistence_surfaces block for review.
+    attack:
+      - T1547.001 (Registry Run Keys / Startup Folder)
+      - T1543.003 (Windows Service)
+      - T1053.005 (Scheduled Task)
+      - T1546.003 (Windows Management Instrumentation Event Subscription)
+      - T1546.009 (AppCert DLLs)
+      - T1546.010 (AppInit DLLs)
+      - T1546.012 (Image File Execution Options Injection)
+    check_type: binary_analysis

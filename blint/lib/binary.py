@@ -222,6 +222,7 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.pe_driver import refresh_driver_block_after_disassembly
 from blint.lib.pe_host_plugins import classify_host_plugins
 from blint.lib.pe_imports import (  # noqa: F401
     apiset_host,
@@ -231,10 +232,19 @@ from blint.lib.pe_imports import (  # noqa: F401
     parse_pe_delay_imports,
     summarize_resolution,
 )
+from blint.lib.pe_ioctl_depth import (
+    CONSTRAINT_LISTING_LIMIT,
+    annotate_input_length_checks,
+    collect_input_length_constraints,
+    recover_device_acl,
+)
+from blint.lib.pe_kernel_posture import refresh_kernel_posture_after_disassembly
 from blint.lib.pe_layout import (  # noqa: F401
     parse_pe_layout,
     parse_pre_main_execution,
 )
+from blint.lib.pe_usermode_surface import collect_rpc_interfaces
+from blint.lib.pe_vulnerable_drivers import match_vulnerable_driver
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
 from blint.lib.swift_metadata import merge_swift_functions, parse_swift_metadata
@@ -246,6 +256,7 @@ from blint.lib.utils import (  # noqa: F401
     cleanup_dict_lief_errors,
     coerce_to_text,
 )
+from blint.lib.windows_posture import build_windows_posture
 from blint.logger import DEBUG, LOG
 
 if LOG.level != DEBUG:
@@ -642,6 +653,12 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     Adds various derived, high-level attributes to the metadata dictionary.
     """
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
+    # W5.3: exact-digest matching against the shipped loldrivers.io /
+    # Microsoft-blocklist snapshot. Runs after the digests exist, which is
+    # why it lives here and not in the format parsers. Data with
+    # provenance, never a scan-time network call.
+    if metadata.get("binary_type") == "PE":
+        metadata["vulnerable_driver"] = match_vulnerable_driver(metadata)
     metadata["security_properties"] = construct_security_properties(metadata, parsed_obj)
     _record_slice_variance(metadata, metadata["security_properties"])
     _record_code_signature_variance(metadata)
@@ -669,6 +686,12 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
             )
     if build_info:
         metadata["build_info"] = build_info
+    # W5.5: the at-a-glance Windows posture summary. Runs last in this
+    # function so every block it summarises (code_signature,
+    # security_properties, driver, dotnet, the container lane) is already
+    # in place; it reads those blocks and recomputes nothing.
+    if posture := build_windows_posture(metadata):
+        metadata["windows_posture"] = posture
     return metadata
 
 
@@ -1410,12 +1433,37 @@ def parse(
             metadata["call_site_arguments_coverage"] = callsite_coverage
             if callsite_entries:
                 metadata["call_site_arguments"] = callsite_entries
+            # W5.4: RPC interface UUIDs, anchored to the registration call
+            # sites the abstract interpreter resolved.
+            if rpc_interfaces := collect_rpc_interfaces(parsed_obj, callsite_entries):
+                metadata["rpc_interfaces"] = rpc_interfaces
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
                     metadata["disassembled_functions"],
                     sections=_pe_data_section_bytes(parsed_obj),
                 ):
                     metadata["driver_ioctls"] = driver_ioctls
+                # W5.3: input-length validation per recovered control code,
+                # correlated at the handler-function level (the block states
+                # the confidence). Runs whether or not dispatch stores were
+                # recovered - the constraints are facts about the functions
+                # that compare the length, independent of the slot store.
+                if driver_ioctls := collect_input_length_constraints(
+                    metadata["disassembled_functions"]
+                ):
+                    if isinstance(metadata.get("driver_ioctls"), dict):
+                        annotate_input_length_checks(
+                            metadata["driver_ioctls"].get("ioctls") or [], driver_ioctls
+                        )
+                    if isinstance(metadata.get("driver"), dict):
+                        # Keyed by the handler function, not just by the
+                        # sizes: the map's key is the only thing that says
+                        # *which* routine does the checking, and dropping it
+                        # left a list of constants naming nothing (rule 11).
+                        metadata["driver"]["input_length_constraints"] = [
+                            {"function": function, **facts}
+                            for function, facts in sorted(driver_ioctls.items())
+                        ][:CONSTRAINT_LISTING_LIMIT]
         # The kernel object namespace paths are recovered from strings, so unlike
         # the IOCTL surface they are available whether or not the image was
         # disassembled. They are collected for every PE, not just drivers: for a
@@ -1424,6 +1472,18 @@ def parse(
         if isinstance(parsed_obj, lief.PE.Binary):
             if driver_interface := classify_driver_strings(metadata):
                 metadata["driver_interface"] = driver_interface
+            # W5.3: the device DACL, from the SDDL strings an image that
+            # calls IoCreateDeviceSecure installs with its device object.
+            if device_acl := recover_device_acl(parsed_obj):
+                if isinstance(metadata.get("driver"), dict):
+                    metadata["driver"]["device_acl"] = device_acl
+            # W5.1: with disassembly available, the driver block gains the
+            # facts only disassembly can see (registered WDM callbacks, the
+            # dispatch routine summary from driver_ioctls).
+            refresh_driver_block_after_disassembly(metadata)
+            # W5.2: the MSR/port-instruction evidence for the scored
+            # dangerous-import families is disassembly-level.
+            refresh_kernel_posture_after_disassembly(metadata)
             # Embedded cryptographic constants and opaque data regions are
             # properties of the section bytes, so they are recovered whether or
             # not the image was disassembled.

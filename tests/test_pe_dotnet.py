@@ -1493,9 +1493,27 @@ def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
     managed = {
         r["id"] for r in rules if "dotnetbinary" in (r.get("exe_types") or [])
     }
-    # Every removal must be argued in rules.yml beside the scope itself.
+    # Every scope change must be argued beside the scope itself.
+    # CHECK_CANARY / CHECK_RPATH: W3.1 - meaningless on pure-IL images,
+    # their PE scopes were dropped entirely.
     argued_removals = {"CHECK_CANARY", "CHECK_RPATH"}
-    assert native - managed == set()
+    # W5.2: rules whose subject is a native kernel image and which would
+    # be dead weight (or a lie) in managed scope. The conditions are
+    # defined on section flags and alignment, relocations and the boot
+    # loader's subsystem; the driver gate (pe_driver.is_windows_driver)
+    # never attaches a driver block to a dotnetbinary, so HVCI
+    # compatibility and boot-start-ness are not claims about a managed
+    # assembly.
+    argued_pe_only_scopes = {
+        "CHECK_HVCI_COMPATIBLE",
+        "CHECK_BOOT_START_INTEGRITYCHECK",
+        # W5.3: the rule reports "this exact image is a kernel driver on
+        # the blocklist"; a managed assembly is not a kernel image, and
+        # exe_type dotnetbinary is set precisely when a CLI header exists,
+        # which no driver in the snapshot has.
+        "CHECK_KNOWN_VULNERABLE_DRIVER",
+    }
+    assert native - managed == set(argued_pe_only_scopes)
     assert argued_removals & native == set()
 
 

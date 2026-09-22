@@ -483,6 +483,108 @@ def check_lsa_plugin(
     )
 
 
+def check_known_vulnerable_driver(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a binary whose digest pins it in the vulnerable-driver
+    snapshot (04/C.4).
+
+    The snapshot (loldrivers.io plus the Microsoft recommended driver block
+    rules) ships as data with provenance; refreshing it is a data PR and
+    there is no network call at scan time. Matching is exact-hash only -
+    SHA-256 or MD5 - because driver filenames collide across vendors and
+    the accusation is specific enough that a name match would be a false
+    positive by construction. The finding names the driver entry and the
+    source that knows it, so a reviewer can go from blint's line to the
+    published advisory directly.
+    """
+    block = metadata.get("vulnerable_driver")
+    if not isinstance(block, dict):
+        return True
+    matches = block.get("matches") or []
+    if block.get("lookup_status") != "matched" or not matches:
+        return True
+    named = []
+    for match in matches[:3]:
+        named.append(f"{match.get('driver')} ({match.get('source')}, by {match.get('field')})")
+    return "known vulnerable driver: " + "; ".join(named)
+
+
+def _driver_block(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """The W5.1 ``driver`` block when this image is a driver."""
+    block = metadata.get("driver")
+    if isinstance(block, dict):
+        return block
+    return None
+
+
+def check_hvci_compatible(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Reports the HVCI conditions a driver fails, with per-condition
+    evidence (04/B).
+
+    Memory integrity (HVCI) refuses kernel drivers whose image cannot be
+    mapped safely at randomized addresses: x86 code, writable+executable
+    pages, sub-page section alignment, stripped relocations. Microsoft's
+    own checker is a documented ruleset, so the finding names *which*
+    condition failed and why - "not compatible" alone says nothing a
+    reviewer can act on. Measured before this rule shipped (ground rule
+    34): all 330 drivers on the VM's full System32\\drivers pass every
+    condition, so a failure is a signal, not noise. Conditions whose
+    source could not be read are ``undetermined``, not failed, and an
+    image with any undetermined condition states the gap instead of a
+    verdict.
+    """
+    driver = _driver_block(metadata)
+    if not driver:
+        return True
+    hvci = driver.get("hvci_compatibility") or {}
+    failed = hvci.get("failed_conditions") or []
+    if failed:
+        evidence = hvci.get("failure_evidence") or {}
+        detail = "; ".join(
+            f"{condition}: {evidence.get(condition, 'failed')}" for condition in failed[:5]
+        )
+        return f"HVCI-incompatible ({detail})"
+    # An undetermined condition does NOT fire this rule. The rule is titled
+    # "Driver Incompatible with HVCI" at high severity; rendering "blint
+    # could not read the section characteristics" under that title is the
+    # two-outcomes-one-rule conflation ground rule 14 forbids, and it would
+    # accuse a driver of a violation blint never observed. The gap is not
+    # swallowed either: hvci_compatibility.compatible is null and
+    # undetermined_conditions names each one, which is where a blind spot
+    # belongs (rule 32).
+    return True
+
+
+def check_boot_start_integritycheck(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a boot-start driver without /INTEGRITYCHECK (04/B).
+
+    ``/INTEGRITYCHECK`` (FORCE_INTEGRITY) is mandatory for boot-start
+    drivers - the images winload loads before the kernel can enforce
+    signature policy any other way. Boot-start-ness is determined
+    statically exactly once: the WINDOWS_BOOT_APPLICATION subsystem. For
+    every other driver, StartType lives in the registry blint does not
+    read, so the fact is undetermined and this rule stays silent rather
+    than assume (rule 11). The flag's absence must be *computed* - a
+    driver whose DLL-characteristics source was absent is undetermined
+    and passes silently (the key is then not in kernel_hardening).
+    """
+    driver = _driver_block(metadata)
+    if not driver:
+        return True
+    hardening = driver.get("kernel_hardening") or {}
+    if hardening.get("boot_start") is not True:
+        return True
+    if hardening.get("force_integrity") is False:
+        return "/INTEGRITYCHECK (FORCE_INTEGRITY) is absent on a boot-start driver"
+    # force_integrity absent from the block means the DLL-characteristics
+    # source was unreadable: undetermined, not absent - the rule stays
+    # silent (ground rule 32).
+    return True
+
+
 def check_msix_restricted_capability(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
