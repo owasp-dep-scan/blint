@@ -181,9 +181,14 @@ def generate(
     components = []
     dependencies = []
     dependencies_dict: dict[str, set] = {}
+    # W6.1: the emitted document declares the requested spec version. blint
+    # populates no CycloneDX 1.7-only field (see the W6.1 notes in
+    # docs/METADATA.md), so a document declared 1.6 is exactly the 1.6 shape
+    # and validates against the official 1.6 schema; 1.7 is the default.
+    spec_version = getattr(blint_options, "sbom_spec_version", "1.7") or "1.7"
     sbom = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
-        specVersion="1.6",
+        specVersion=spec_version,
         version=1,
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )
@@ -681,9 +686,11 @@ def _scratch_sbom() -> CycloneDX:
     its dedupe against the accumulated list) happens exactly once, at the
     unit's merge position, in submission order.
     """
+    # Never serialized: components are drained into the parent document.
+    # Declared 1.7 to match the default emit path.
     scratch = CycloneDX(
         bomFormat=BomFormat.CycloneDX,
-        specVersion="1.6",
+        specVersion="1.7",
         version=1,
         serialNumber=f"urn:uuid:{uuid.uuid4()}",
     )

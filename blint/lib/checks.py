@@ -417,38 +417,172 @@ def check_privileged_host_plugin(
     return "plugin contracts satisfied: " + "; ".join(described)
 
 
+def _macos_host_plugin(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """The macOS host_plugin block, or None (the PE block carries contracts)."""
+    block = metadata.get("host_plugin")
+    if isinstance(block, dict) and block.get("kind") and not block.get("contracts"):
+        return block
+    return None
+
+
+def check_macos_host_plugin(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports that this bundle is a plugin loaded into a named host (M1.1).
+
+    Context for a reviewer, not an accusation: legitimate audio, camera and
+    indexing software looks exactly like this, which is why the severity is
+    informational. What the finding names is the consequence the bundle
+    suffix + location carry - the host process the plugin loads into, that
+    host's privilege, and how the plugin got there (a ``.driver`` installs
+    with an administrator password and no dialog; a ``.systemextension`` /
+    ``.dext`` activates through a one-time user-approval dialog). The
+    block is present only when the kind names a host, so an absent block
+    reads as "no host determined from this bundle", never as "verified not
+    a plugin".
+    """
+    block = _macos_host_plugin(metadata)
+    if not block:
+        return True
+    scope = block.get("install_scope") or "no install scope determined (bundle seen out of context)"
+    described = (
+        f"{block.get('title')} ({block.get('kind')}), loaded into "
+        f"{block.get('host')}; host privilege: {block.get('host_privilege')}; "
+        f"activation: {block.get('activation')}; install scope: {scope}"
+    )
+    if app := block.get("containing_app"):
+        described += f"; contained by application {app}"
+    return described
+
+
+def check_audio_plugin_network(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports an Audio Server Plug-In declaring network access (M1.1).
+
+    The finding is about a declaration, not observed behaviour: the
+    bundle's Info.plist carries ``AudioServerPlugIn_Network`` and blint
+    read it statically - blint did not watch the plugin use the network.
+    The declaration is a request for the audio plugin host to extend the
+    plugin's restrictive base sandbox with network access, which the host
+    honours. Measured on a stock system (macOS 15.8: 0 of the 12 Apple HAL
+    plugins declare it, including Apple's own network-audio AirPlay.driver
+    and AppleAVBAudio.driver, which reach the network through companion
+    processes over Mach IPC instead), so the rule is quiet by construction
+    on the benign population.
+    """
+    block = _macos_host_plugin(metadata)
+    if not block:
+        return True
+    declarations = block.get("declarations") or {}
+    if declarations.get("network") is not True:
+        return True
+    return (
+        "the bundle's Info.plist declares AudioServerPlugIn_Network - a request "
+        "that the audio plugin host extend this plugin's sandbox to allow "
+        "network access. This is a declaration blint read from the bundle, not "
+        "behaviour it observed; blint did not watch the plugin open any "
+        "network connection"
+    )
+
+
 def check_unsigned_host_plugin(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports a host-plugin contract not vouched for by any signer (04/F).
+    """Reports a host-plugin contract not vouched for by any signer (04/F, M1.1).
 
-    The contracts load into SYSTEM and protected hosts automatically and
-    forever once registered - installed once with admin rights, no consent
-    surface after - so an unsigned or self-vouched plugin is the finding
-    that matters. The verdict follows the W2.4 ``signing_class`` exactly:
-    it fires on ``unsigned``, ``self_signed`` and ``unknown_root``, and
-    stays silent when the class is absent (undetermined - blint's default
-    invocation performs no catalog lookup, and absence of a class is
-    neither signed nor unsigned) or when the walk was truncated.
+    The PE form follows the W2.4 ``signing_class`` exactly: it fires on
+    ``unsigned``, ``self_signed`` and ``unknown_root``, and stays silent
+    when the class is absent (undetermined - blint's default invocation
+    performs no catalog lookup, and absence of a class is neither signed
+    nor unsigned) or when the walk was truncated.
+
+    The macOS form (M1.1) fires on a plugin bundle in a system or
+    machine-wide install scope that is neither an Apple platform binary
+    nor Developer-ID-signed: auto-loaded into the named host on every
+    boot, installed once, vouched for by nobody. It stays silent when the
+    signature could not be determined (no blob, or a parse failure), when
+    the signature is fine but its identity is something blint cannot
+    classify, and when the bundle has no install scope - a plugin in a
+    downloads folder is not installed anywhere yet, and the finding would
+    be a verdict blint did not determine. Trust follows the primary
+    slice's parsed signature, the slice whose facts the metadata top level
+    carries.
     """
     contracts = _host_plugin_contracts(metadata)
-    if not contracts:
+    if contracts:
+        block = _parsed_signature_block(metadata)
+        signing_class = (block or {}).get("signing_class")
+        if signing_class not in ("unsigned", "self_signed", "unknown_root"):
+            return True
+        contract_ids = ", ".join(sorted({str(c.get("id")) for c in contracts}))
+        if signing_class == "unsigned":
+            detail = "no signature: a performed, complete catalog lookup found nothing"
+        elif signing_class == "self_signed":
+            detail = "self-signed: the signer vouches for itself, no authority stands behind it"
+        else:
+            detail = "chain terminates outside the shipped root snapshot"
+        return (
+            f"auto-loaded plugin contract(s) {contract_ids} with signing class "
+            f"{signing_class} ({detail})"
+        )
+    macos_block = _macos_host_plugin(metadata)
+    if not macos_block:
         return True
-    block = _parsed_signature_block(metadata)
-    signing_class = (block or {}).get("signing_class")
-    if signing_class not in ("unsigned", "self_signed", "unknown_root"):
+    if macos_block.get("install_scope") not in ("system", "machine"):
         return True
-    contract_ids = ", ".join(sorted({str(c.get("id")) for c in contracts}))
-    if signing_class == "unsigned":
-        detail = "no signature: a performed, complete catalog lookup found nothing"
-    elif signing_class == "self_signed":
-        detail = "self-signed: the signer vouches for itself, no authority stands behind it"
-    else:
-        detail = "chain terminates outside the shipped root snapshot"
+    detail = _macos_plugin_identity_verdict(metadata)
+    if detail is None:
+        return True
     return (
-        f"auto-loaded plugin contract(s) {contract_ids} with signing class "
-        f"{signing_class} ({detail})"
+        f"{macos_block.get('title')} in {macos_block.get('install_scope')}-wide install "
+        f"scope with no identity vouching for it: {detail}. Auto-loaded into "
+        f"{macos_block.get('host')} - {macos_block.get('activation')} - and "
+        "nothing stands behind the code that runs there"
     )
+
+
+def _macos_plugin_identity_verdict(metadata: dict[str, Any]) -> str | None:
+    """Why nothing vouches for this Mach-O, or None when undetermined.
+
+    Reads the primary slice's ``code_signature`` block: an Apple platform
+    binary (any CodeDirectory carrying a platform identifier, the fact
+    ``codesign -dv`` prints as ``Platform identifier``) and a Developer-ID
+    signer (the CMS signer common name, what ``spctl -a -vv`` prints as
+    the origin) both vouch. An absent signature, an ad-hoc or
+    linker-signed blob, and a parsed signature whose signer is neither of
+    those do not. A blob blint could not parse determines nothing.
+    """
+    signature = metadata.get("code_signature")
+    if not isinstance(signature, dict):
+        return None
+    status = signature.get("parse_status")
+    if signature.get("available") is False or status == "absent":
+        return "the binary carries no code signature at all"
+    # A present blob blint could not parse (or a shape with no status at
+    # all) determines nothing: undetermined is neither signed nor unsigned.
+    if status != "parsed":
+        return None
+    superblob = signature.get("superblob")
+    if not isinstance(superblob, dict):
+        return None
+    for directory in superblob.get("code_directories") or []:
+        if isinstance(directory, dict) and directory.get("platform_id"):
+            return None
+    provenance = superblob.get("provenance")
+    cms = superblob.get("cms")
+    if provenance in ("adhoc", "linker_signed"):
+        return f"signed {provenance.replace('_', ' ')} - a signature with no identity behind it"
+    if provenance == "cms_signed" and isinstance(cms, dict):
+        signer_cn = cms.get("signer_cn")
+        if isinstance(signer_cn, str) and signer_cn:
+            if "Developer ID" in signer_cn:
+                return None
+            return (
+                f"signed by {signer_cn!r}, which is neither an Apple platform "
+                "identity nor a Developer ID certificate"
+            )
+    return None
 
 
 def check_lsa_plugin(

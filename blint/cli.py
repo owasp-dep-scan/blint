@@ -240,6 +240,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="SBOM output file. Defaults to sbom-binary-postbuild.cdx.json in current directory.",
     )
     sbom_parser.add_argument(
+        "--sbom-spec-version",
+        choices=["1.6", "1.7"],
+        default="1.7",
+        dest="sbom_spec_version",
+        help="CycloneDX specification version to declare in the SBOM "
+        "(default 1.7). blint populates no 1.7-only field, so a 1.6 "
+        "document is the exact 1.6 shape.",
+    )
+    sbom_parser.add_argument(
         "--deep",
         action="store_true",
         default=False,
@@ -634,6 +643,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         db_mode=args.db_mode,
         image_url=args.image_url if args.db_mode else None,
         sbom_output=args.sbom_output,
+        sbom_spec_version=getattr(args, "sbom_spec_version", "1.7"),
         src_dir_boms=args.src_dir_boms,
         src_dir_image=args.src_dir_image,
         stdout_mode=args.stdout_mode,

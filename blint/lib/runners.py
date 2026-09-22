@@ -847,6 +847,11 @@ class AnalysisRunner:
                     entry.get("bundle_path"),
                     context_key="macos_bundle",
                 )
+                # A plugin-kind bundle member (M1.1) carries the bundle's
+                # host_plugin block on its entry; the metadata top level is
+                # where the checks read it, matching the PE shape.
+                if host_plugin := entry.get("host_plugin"):
+                    metadata["host_plugin"] = host_plugin
                 self._finalize_metadata(bin_path, metadata, blint_options, wants_callgraph_outputs)
                 self._mark_success("bundle-member")
             except Exception as e:

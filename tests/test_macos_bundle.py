@@ -239,7 +239,23 @@ def test_path_inside_any_bundle_filters_discovered_files(tmp_path):
 
 
 def test_suffixes_tuple_shape():
-    assert MACOS_BUNDLE_SUFFIXES == (".app", ".framework", ".dsym", ".xpc", ".appex")
+    # The plugin kinds (M1.1) extend the tuple; .app kinds first, plugin
+    # kinds after, so the tuple reads in declaration order.
+    assert MACOS_BUNDLE_SUFFIXES == (
+        ".app",
+        ".framework",
+        ".dsym",
+        ".xpc",
+        ".appex",
+        ".driver",
+        ".plugin",
+        ".component",
+        ".qlgenerator",
+        ".mdimporter",
+        ".systemextension",
+        ".dext",
+        ".bundle",
+    )
 
 
 def test_process_macos_bundle_file_builds_pkg_macos_hierarchy(tmp_path):
