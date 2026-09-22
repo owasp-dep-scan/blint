@@ -170,8 +170,6 @@ class SevenZipArchive:
         blob = self.next_header_blob
         if not blob:
             raise SevenZError("empty next header")
-        if blob[0] == K_ENCODED_HEADER_PLACEHOLDER:
-            pass
         if blob[0] == K_ENCODED_HEADER:
             streams, _pos = self._parse_streams_info(blob, 1, len(blob))
             folder0 = streams["folders"][0] if streams["folders"] else None
@@ -517,9 +515,6 @@ class SevenZipArchive:
                 return dest
             offset += entry_size
         return None
-
-
-K_ENCODED_HEADER_PLACEHOLDER = 0x17
 
 
 def _build_archive(data: bytes, refusals: list[str], degradations: list[str]):

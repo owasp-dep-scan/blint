@@ -121,3 +121,77 @@ def test_nupkg_identity_purls_escape_reserved_characters(tmp_path):
     assert parent.bom_ref.root == parent.purl
     assert components[0].purl == "pkg:nuget/Dep%20Name@2.0%20rc"
     assert components[0].bom_ref.root == components[0].purl
+
+
+def test_original_filename_identity_upgrade():
+    """W4.5: a PE whose VERSIONINFO states an OriginalFilename names the
+    component from the resource, with the on-disk name carried as evidence
+    when it differs (ground rule 32: the mismatch is visible)."""
+
+    from blint.lib.sbom import (
+        add_signer_evidence,
+        upgrade_parent_to_original_filename,
+    )
+
+    metadata = {
+        "file_path": "/scan/renamed-tool.exe",
+        "name": "renamed-tool.exe",
+        "version_info": {
+            "strings": {
+                "000004b0": {
+                    "OriginalFilename": "actual-tool.exe",
+                    "ProductName": "Actual Tool",
+                }
+            }
+        },
+        "code_signature": {
+            "parse_status": "parsed",
+            "signing_class": "commercial_ov",
+            "signatures": [{"signer": {"cn": "Acme Corp"}}],
+        },
+    }
+    parent = default_parent(["/scan/renamed-tool.exe"])
+    upgrade_parent_to_original_filename(parent, metadata, None)
+    add_signer_evidence(parent, metadata)
+    assert parent.name == "actual-tool"
+    names = {p.name: p.value for p in parent.properties}
+    assert names["internal:filename_original"] == "actual-tool.exe"
+    assert names["internal:filename_on_disk"] == "renamed-tool.exe"
+    assert names["internal:version_source"] == "version_info"
+    assert names["internal:signer_cn"] == "Acme Corp"
+    assert names["internal:signing_class"] == "commercial_ov"
+    # The purl stays generic: a resource name is not a package id.
+    assert parent.purl == "pkg:generic/actual-tool"
+
+
+def test_original_filename_overlay_reaches_both_names():
+    """The W3.5 coupling lesson: the overlay lookup must be re-keyed under
+    the resource stem, or renaming the component makes the build-BOM
+    overlay unreachable."""
+
+    from blint.lib.sbom import upgrade_parent_to_original_filename
+
+    metadata = {
+        "file_path": "/scan/vendor.dll",
+        "name": "vendor.dll",
+        "version_info": {"strings": {"0": {"OriginalFilename": "real.dll"}}},
+    }
+    overlay = {
+        "pkg:nuget/real": "pkg:nuget/real@2.5.0",
+        "pkg:generic/real": "pkg:generic/real@2.5.0",
+    }
+    parent = default_parent(["/scan/vendor.dll"], overlay)
+    upgrade_parent_to_original_filename(parent, metadata, overlay)
+    assert parent.purl == "pkg:nuget/real@2.5.0"
+    assert parent.name == "real"
+    assert parent.version.root == "2.5.0"
+
+
+def test_original_filename_absent_keeps_filename():
+    from blint.lib.sbom import upgrade_parent_to_original_filename
+
+    metadata = {"file_path": "/scan/tool.exe", "name": "tool.exe"}
+    parent = default_parent(["/scan/tool.exe"])
+    upgrade_parent_to_original_filename(parent, metadata, None)
+    assert parent.name == "tool.exe"
+    assert not [p for p in (parent.properties or []) if p.name == "internal:filename_original"]

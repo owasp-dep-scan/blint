@@ -912,6 +912,9 @@ def process_exe_file(
     dotnet_metadata = metadata.get("dotnet") or {}
     if (assembly := dotnet_metadata.get("assembly") or {}).get("name"):
         upgrade_parent_to_assembly_identity(parent_component, assembly, symbols_purl_map)
+    else:
+        upgrade_parent_to_original_filename(parent_component, metadata, symbols_purl_map)
+    add_signer_evidence(parent_component, metadata)
     if assemblyref_state := dotnet_assemblyref_state(dotnet_metadata):
         parent_component.properties.append(
             Property(name="internal:dotnet_assemblyref_state", value=assemblyref_state)
@@ -2012,6 +2015,99 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
         comp.bom_ref = RefType(purl)
         components.append(comp)
     return components
+
+
+def upgrade_parent_to_original_filename(
+    parent: Component,
+    metadata: dict[str, Any],
+    symbols_purl_map: dict | None = None,
+) -> Component:
+    """Restate a native file's parent identity from its VERSIONINFO resource.
+
+    Section 03/D: renaming a file is free, the `OriginalFilename` resource is
+    not — so the component is named by the resource while the on-disk name
+    rides as evidence (`internal:filename_on_disk`, `internal:filename_
+    original`), making a mismatch visible instead of silently normalizing
+    it. The build-BOM overlay (`--src-dir-boms`) is consulted under BOTH
+    names — the W3.5 lesson: the lookup key and the computed purl are
+    coupled, and renaming the component without re-keying the lookup made
+    the overlay unreachable for every input last time. Nothing here invents
+    a `pkg:nuget` purl from a name: the overlay hit may yield one because a
+    BOM naming the package is evidence.
+    """
+    version_info = metadata.get("version_info") or {}
+    tables = version_info.get("strings") or {}
+    original_filename = None
+    for table in tables.values():
+        candidate = (table or {}).get("OriginalFilename")
+        if candidate:
+            original_filename = str(candidate)
+            break
+    if not original_filename:
+        return parent
+    on_disk = os.path.basename(metadata.get("file_path") or metadata.get("name") or "")
+    stem = original_filename
+    for suffix in (".exe", ".dll", ".sys"):
+        if stem.lower().endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    stem = stem.strip() or original_filename
+    properties = [
+        Property(name="internal:filename_original", value=original_filename),
+        Property(name="internal:version_source", value="version_info"),
+    ]
+    renamed = bool(on_disk and on_disk.lower() != original_filename.lower())
+    overlay_hit = False
+    if renamed:
+        properties.append(Property(name="internal:filename_on_disk", value=on_disk))
+        # Re-key the overlay lookup under the resource name; the on-disk
+        # name was already tried inside default_parent. The NuGet key is
+        # tried first: a package identity is the stronger evidence.
+        if symbols_purl_map:
+            for key in (f"pkg:nuget/{stem}", f"pkg:generic/{stem}"):
+                overlay = symbols_purl_map.get(key)
+                if overlay:
+                    parent.purl = overlay
+                    parent.bom_ref = RefType(overlay)
+                    parent.name = stem
+                    overlay_hit = True
+                    version = None
+                    if "@" in overlay:
+                        version = overlay.split("@")[-1].split("?")[0]
+                    parent.version = Version(version) if version else None
+                    break
+        if not overlay_hit:
+            # Renamed without an overlay identity: rebuild the generic purl
+            # from the resource stem so name and purl agree.
+            parent.purl = PackageURL(type="generic", name=stem).to_string()
+            parent.bom_ref = RefType(parent.purl)
+    parent.name = stem
+    parent.properties = (parent.properties or []) + properties
+    return parent
+
+
+def add_signer_evidence(parent: Component, metadata: dict[str, Any]) -> None:
+    """Authenticode signer CN and signing class as component evidence.
+
+    The Windows answer to "who actually shipped this": the signer the
+    signature chain names (when the structured block parsed) and the W2.4
+    signing class, carried as properties. Absent block, absent class —
+    the undetermined states — stay absent, never rendered as "unsigned".
+    """
+    block = metadata.get("code_signature")
+    if not isinstance(block, dict) or block.get("parse_status") != "parsed":
+        return
+    signer_cn = None
+    for signature in block.get("signatures") or []:
+        signer = signature.get("signer") or {}
+        if signer.get("cn"):
+            signer_cn = signer["cn"]
+            break
+    if signer_cn:
+        parent.properties.append(Property(name="internal:signer_cn", value=signer_cn))
+    signing_class = block.get("signing_class")
+    if signing_class:
+        parent.properties.append(Property(name="internal:signing_class", value=signing_class))
 
 
 def upgrade_parent_to_assembly_identity(
