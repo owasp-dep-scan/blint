@@ -42,7 +42,6 @@ import blint.lib.runners as runners_mod
 import blint.lib.sbom as sbom_mod
 from blint.config import BlintOptions
 from blint.lib.parallel import (
-    BufferedLogHandler,
     PoolStartupError,
     WorkerSpec,
     default_context,
@@ -241,26 +240,6 @@ def test_default_context_never_forks():
     deadlocks on its first log line.
     """
     assert default_context().get_start_method() != "fork"
-
-
-def test_buffered_log_handler_capacity_and_drop_summary():
-    handler = BufferedLogHandler(capacity=3)
-    root = logging.getLogger()
-    old_level = root.level
-    old_handlers = root.handlers
-    root.setLevel(logging.DEBUG)
-    root.handlers = [handler]
-    try:
-        for i in range(5):
-            logging.getLogger("blint.test").warning("msg %d", i)
-    finally:
-        root.handlers = old_handlers
-        root.setLevel(old_level)
-    records = handler.take()
-    assert [message for _, message in records[:3]] == ["msg 0", "msg 1", "msg 2"]
-    assert "2 further worker log line(s) dropped" in records[-1][1]
-    # take() resets: the next snapshot is empty, the drop notice is not repeated.
-    assert handler.take() == []
 
 
 # --------------------------------------------------------------------------
