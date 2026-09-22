@@ -483,6 +483,29 @@ def check_lsa_plugin(
     )
 
 
+def check_msix_restricted_capability(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports the restricted capabilities an MSIX/Appx manifest declares.
+
+    Restricted capabilities (the ``rescap`` namespace — ``runFullTrust``,
+    ``allowElevation``, ``broadFileSystemAccess`` and friends) are the
+    declarations that take a packaged application out of the app container:
+    each one is named in the finding because each names a different
+    capability surface. The verdict follows the declared facts only —
+    blint performs no review of the package's store approval — and reads
+    the counted total, so a manifest past the listing cap still fires (the
+    W3.2 lesson: a listing bound must not become a detection boundary).
+    """
+    container = metadata.get("container")
+    if not isinstance(container, dict):
+        return True
+    restricted = container.get("capabilities", {}).get("restricted") or []
+    if not restricted and not container.get("restricted_capability_count"):
+        return True
+    return ", ".join(str(name) for name in restricted[:10])
+
+
 def check_dll_characteristics(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:

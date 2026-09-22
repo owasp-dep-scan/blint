@@ -33,6 +33,7 @@ from blint.lib.checks import (
     check_libc_portability,  # noqa: F401
     check_link_closure,  # noqa: F401
     check_lsa_plugin,  # noqa: F401
+    check_msix_restricted_capability,  # noqa: F401
     check_nx,  # noqa: F401
     check_objc_load_methods,  # noqa: F401
     check_packed,  # noqa: F401

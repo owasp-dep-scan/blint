@@ -21,7 +21,12 @@ returned ``refusals`` list — never a silent skip.
 No extraction happens anywhere: the single ``.nuspec`` member is read into
 memory, so there is no temp directory to clean up on any path. The leak test
 asserts the stronger form of that claim: no temp entry is ever created,
-across success and across every refusal.
+across success and across every refusal. That property is why this reader is
+*not* a client of the W4.1 extraction framework (``blint.lib.container``) —
+not extracting is stronger than extracting safely — but the member
+path-safety and symlink checks are the framework's shared implementations
+(``member_path_unsafe`` / ``zip_member_is_symlink``), imported rather than
+kept as a second copy.
 
 Caps are set at >= 2x the maximum measured over 136 real ``.nupkg`` archives
 on the Windows 11 ground-truth VM plus the corpus packages: 695 members max
@@ -31,6 +36,8 @@ on the Windows 11 ground-truth VM plus the corpus packages: 695 members max
 
 import xml.etree.ElementTree as ET
 import zipfile
+
+from blint.lib.container import member_path_unsafe, zip_member_is_symlink
 
 # Measured maxima in the module docstring; every cap has a hostile fixture
 # in tests/test_nuget_package.py that exceeds it and is refused by name.
@@ -59,36 +66,12 @@ def _member_depth(name: str) -> int:
     return len(name.split("/"))
 
 
-def _member_path_unsafe(name: str) -> bool:
-    """A member name blint must never treat as a path it could extract.
-
-    Ground rule 30's traversal class: ``..`` segments, rooted absolute
-    paths, Windows drive letters, and backslash separators (the zip spec
-    says ``/``; a ``\\`` is how an extracted path escapes on Windows).
-    """
-    if not name or "\x00" in name:
-        return True
-    if "\\" in name:
-        return True
-    if name.startswith("/"):
-        return True
-    segments = name.split("/")
-    if any(seg == ".." for seg in segments):
-        return True
-    # Any drive-letter prefix, with or without a directory component: both
-    # `C:evil` (drive-relative) and `C:/evil/x` (drive-absolute) escape an
-    # output directory, because ntpath.join discards the base as soon as
-    # the second argument names a drive. Refusing only the first form would
-    # leave the one an archiver actually writes.
-    return len(name) >= 2 and name[1] == ":" and name[0].isalpha()
-
-
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
     # Unix mode bits live in the high 16 bits of external_attr; 0o120000 is
     # S_IFLNK. A symlink member is refused even though this reader never
     # extracts: a later extractor could, and the refusal is a fact about
     # the archive.
-    return ((info.external_attr >> 16) & 0o170000) == 0o120000
+    return zip_member_is_symlink(info)
 
 
 def read_nupkg_nuspec(path: str) -> dict:
@@ -127,7 +110,7 @@ def read_nupkg_nuspec(path: str) -> dict:
                     break
                 result["member_count"] += 1
                 name = info.filename
-                if _member_path_unsafe(name):
+                if member_path_unsafe(name):
                     result["refusals"].append("member_path_unsafe")
                     continue
                 if _is_symlink(info):

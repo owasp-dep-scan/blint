@@ -30,6 +30,12 @@ from blint.lib.macos_bundle import (
     is_macos_bundle,
     path_inside_any_bundle,
 )
+from blint.lib.msix import (
+    collect_msix_detailed,
+    container_metadata,
+    enrich_member_metadata,
+    is_msix_file,
+)
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -687,6 +693,14 @@ class AnalysisRunner:
             if bundle_processed:
                 self._mark_success("top-level")
             return
+        elif is_msix_file(f):
+            container_processed = self._process_msix_container(
+                f, blint_options, wants_callgraph_outputs
+            )
+            self.progress.advance(self.task)
+            if container_processed:
+                self._mark_success("top-level")
+            return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
@@ -785,6 +799,78 @@ class AnalysisRunner:
             except Exception as e:
                 self._record_failure(bin_path, "bundle-member", "process", e)
         return True
+
+    def _process_msix_container(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Unpack an MSIX/Appx package or bundle and analyse its members.
+
+        The container itself is one analyzed unit — its manifest identity,
+        capabilities, signature and refusals are what the container rules run
+        against — and every member binary is its own unit under the
+        ``msix-member`` role, so a bundle holding three packages of fifteen
+        PEs accounts as one ``top-level`` unit, three ``msix-package`` units
+        and forty-five ``msix-member`` units, never one confused total
+        (ground rule 19). Member isolation matches the ``.ipa`` path: one bad
+        member records a failure and the remaining members are still
+        analyzed.
+
+        Returns ``True`` when the container was collected and analyzed,
+        ``False`` when the container itself was skipped.
+        """
+        assert self.task is not None
+        collection, collect_reason = collect_msix_detailed(f)
+        if collection is None:
+            self._record_skip(f, "top-level", collect_reason or "collect_failed")
+            return False
+        try:
+            metadata = container_metadata(collection, f)
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            is_bundle = collection.get("kind") in ("msixbundle", "appxbundle")
+            for package in collection.get("packages") or []:
+                if is_bundle:
+                    # A nested package is a unit in its own right: it was
+                    # walked (manifest/signature/members) or it refused by
+                    # name — never a silent in-between.
+                    self._mark_attempted("msix-package")
+                    if (
+                        package.get("refusals")
+                        and not package.get("binaries")
+                        and not (package.get("identity") or {}).get("identity")
+                    ):
+                        self._record_skip(
+                            f"{f}!{package.get('container_path')}",
+                            "msix-package",
+                            "; ".join(sorted(set(package["refusals"]))),
+                        )
+                    else:
+                        self._mark_success("msix-package")
+                for entry in package.get("binaries") or []:
+                    bin_path = entry["path"]
+                    self.progress.update(
+                        self.task,
+                        description=(
+                            f"Processing [bold]{os.path.basename(bin_path)}[/bold] "
+                            f"({entry.get('container_path')})"
+                        ),
+                    )
+                    self._mark_attempted("msix-member")
+                    try:
+                        member_metadata = self._parse_with_cache(
+                            bin_path, blint_options, "msix-member"
+                        )
+                        enrich_member_metadata(member_metadata, collection, entry)
+                        self._finalize_metadata(
+                            bin_path, member_metadata, blint_options, wants_callgraph_outputs
+                        )
+                        self._mark_success("msix-member")
+                    except Exception as e:
+                        self._record_failure(
+                            entry.get("container_path") or bin_path, "msix-member", "process", e
+                        )
+            return True
+        finally:
+            shutil.rmtree(collection.get("temp_dir") or "", ignore_errors=True)
 
     def _finalize_metadata(
         self,

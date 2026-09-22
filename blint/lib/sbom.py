@@ -44,6 +44,7 @@ from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
+from blint.lib.msix import MSIX_EXTENSIONS, collect_msix_detailed
 from blint.lib.nuget_package import read_nupkg_nuspec
 from blint.lib.parallel import (
     PoolStartupError,
@@ -222,6 +223,17 @@ def generate(
                         components += process_wasm_file(dependencies_dict, exe, sbom)
                     else:
                         skipped_wasm += 1
+                    continue
+                if exe.lower().endswith(MSIX_EXTENSIONS):
+                    # W4.1: an MSIX/Appx package or bundle is a container —
+                    # identity from its AppxManifest, members from the
+                    # archive, never parsed as a bare PE.
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_msix_file(dependencies_dict, exe, sbom)
                     continue
                 if exe.lower().endswith(".nupkg"):
                     # W3.5: a .nupkg is a package archive, not a binary —
@@ -2088,6 +2100,100 @@ def process_nupkg_file(
     if lib_components:
         track_dependency(dependencies_dict, parent, lib_components)
     return lib_components
+
+
+def process_msix_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process an MSIX/Appx package or bundle: identity from its manifest.
+
+    The container becomes the parent component (identity from
+    ``AppxManifest.xml`` / ``AppxBundleManifest.xml`` — never the filename)
+    and every member binary becomes a child component keyed by its place in
+    the package. Member binaries are identified by their package context and
+    content hash without a full parse, mirroring the ``.ipa`` SBOM path; the
+    parsed-member identity upgrade is the identity packet's (W4.5) business.
+
+    Container refusals reach the BOM, not only the metadata sidecar the CLI
+    does not ship (rule 32, per the W3.5 ``internal:dotnet_assemblyref_state``
+    precedent): a refused package or a bundle whose manifest was unreadable
+    states it beside the component.
+    """
+    collection, reason = collect_msix_detailed(f)
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    if collection is None:
+        parent = default_parent([f])
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(
+                name="internal:container_refusal", value=reason or "collect_failed"
+            ),
+        ]
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        return []
+    try:
+        # Both the package and the bundle manifest store their Identity
+        # under the facts dict's "identity" key — one shape for both.
+        identity = (collection.get("identity") or {}).get("identity") or {}
+        name = identity.get("name") or os.path.basename(f)
+        version = str(identity.get("version") or "")
+        purl = PackageURL(type="appx", name=name, version=version or None).to_string()
+        parent = Component(
+            type=Type.application,
+            name=name,
+            version=version,
+            purl=purl,
+            evidence=create_component_evidence(f, 1.0),
+        )
+        parent.bom_ref = RefType(purl)
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(name="internal:containerKind", value=collection.get("kind") or ""),
+            Property(name="internal:version_source", value="package_identity"),
+        ]
+        if identity.get("publisher"):
+            parent.properties.append(
+                Property(name="internal:appxPublisher", value=identity["publisher"])
+            )
+        refusals = collection.get("refusals") or []
+        if refusals:
+            parent.properties.append(
+                Property(name="internal:container_refusals", value=", ".join(sorted(set(refusals))))
+            )
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        member_components: list[Component] = []
+        for entry in collection.get("binaries") or []:
+            container_path = entry.get("container_path") or os.path.basename(entry["path"])
+            member_name = os.path.basename(container_path)
+            purl_path = container_path.replace("\\", "/")
+            comp_purl = PackageURL(
+                type="file", name=member_name, qualifiers={"path": purl_path}
+            ).to_string()
+            comp = Component(
+                type=Type.library,
+                name=member_name,
+                purl=comp_purl,
+                scope=Scope.required,
+                evidence=create_component_evidence(f, 0.8),
+                properties=[
+                    Property(name="internal:srcFile", value=f),
+                    Property(name="internal:containerPath", value=purl_path),
+                ],
+            )
+            comp.bom_ref = RefType(comp_purl)
+            hashes = calculate_hashes(entry["path"])
+            if hashes.get("sha256"):
+                comp.hashes = [Hash(alg=HashAlg.SHA_256, content=hashes["sha256"])]
+            member_components.append(comp)
+        if member_components:
+            track_dependency(dependencies_dict, parent, member_components)
+        return member_components
+    finally:
+        if collection and collection.get("temp_dir"):
+            shutil.rmtree(collection["temp_dir"], ignore_errors=True)
 
 
 def process_dotnet_dependencies(
