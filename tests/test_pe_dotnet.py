@@ -1148,13 +1148,17 @@ def test_sbom_components_from_assembly_refs():
         {"name": "Foo.Resources", "version": "1.0.0.0", "culture": "zh-Hans"},
     ]
     comps = process_dotnet_assembly_refs(refs)
+    # W3.5: the token is a purl qualifier (03/D), not a property — a token
+    # in the purl is matchable by a consumer that has not found the
+    # component yet; the unsigned ref carries no qualifier at all rather
+    # than an empty one.
     assert [c.purl for c in comps] == [
-        "pkg:nuget/System.Runtime@8.0.0.0",
+        "pkg:nuget/System.Runtime@8.0.0.0?token=b03f5f7f11d50a3a",
         "pkg:nuget/Foo.Resources@1.0.0.0",
     ]
     by_purl = {c.purl: c for c in comps}
-    props = {p.name: p.value for p in by_purl["pkg:nuget/System.Runtime@8.0.0.0"].properties}
-    assert props["internal:public_key_token"] == "b03f5f7f11d50a3a"
+    props = {p.name: p.value for p in by_purl["pkg:nuget/System.Runtime@8.0.0.0?token=b03f5f7f11d50a3a"].properties}
+    assert "internal:public_key_token" not in props
     props2 = {p.name: p.value for p in by_purl["pkg:nuget/Foo.Resources@1.0.0.0"].properties}
     assert props2["internal:culture"] == "zh-Hans"
     # The version slot says which kind of version it holds: an AssemblyRef
@@ -1204,7 +1208,12 @@ def test_assembly_refs_do_not_duplicate_a_deps_json_package():
         if str(getattr(c, "purl", "")).startswith("pkg:nuget/")
     )
     assert "pkg:nuget/Newtonsoft.Json@13.0.3" in nuget
-    assert "pkg:nuget/Newtonsoft.Json@13.0.0.0" not in nuget
+    assert not any(
+        p.startswith("pkg:nuget/Newtonsoft.Json@13.0.0.0") for p in nuget
+    )
+    # An unsigned ref (no token) keeps its bare purl shape; the dedupe key
+    # is still the package name, so the qualifier cannot split one package
+    # into two components.
     assert "pkg:nuget/Serilog@4.0.0.0" in nuget
 
 
