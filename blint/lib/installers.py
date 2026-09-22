@@ -18,8 +18,11 @@ not open:
 - **inno / installshield** — detection-only, no structure facts beyond the
   overlay classification and the marker that matched.
 
-The block rides parse() output, so CACHE_SCHEMA_VERSION moves in this
-packet (10 → 11) — the first stored-shape change of the wave.
+The block rides parse() output, so it changes the stored cache shape.
+``CACHE_SCHEMA_VERSION`` does not move for it: the constant is frozen at 10
+for the rest of v4 pre-release (the reasoning is at the constant itself),
+and a development checkout that has been running with ``--cache`` clears it
+with ``blint cache clear``.
 """
 
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>

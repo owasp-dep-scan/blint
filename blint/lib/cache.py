@@ -71,45 +71,28 @@ from blint.db import _apply_runtime_pragmas, _execute
 from blint.lib.binary import parse as binary_parse
 from blint.logger import LOG
 
-# Schema history. 2: parse output changed — vendored-banner strings matching
-# blint.lib.banners signatures are now kept in `strings` — so entries written
-# by an earlier cache schema must not be served to a banner-expecting reader.
-# 3: unified branch semantics changed the *values* the recovery produces for
-# unchanged inputs (stack strings, call-site arguments), and a warm cache
-# must not keep serving the earlier answers. 4: Mach-O function metadata is
-# normalized to the virtual address space, so function addresses, sub_<addr>
-# names, disassembly keys and discovery records all change value for
-# unchanged inputs. 5: the pointer-string resolver reads PE strings at all
-# (image-base offset) and decodes UTF-16LE, so call_site_arguments `string`
-# fields change value for unchanged PE inputs. 6: managed PE binaries gain
-# the `dotnet` block and move to `exe_type: dotnetbinary` (W3.1), so
-# entries written before the CLR metadata reader must not be served to a
-# consumer reading either key. 7: the managed capability surface (W3.2) —
-# the `dotnet` block gains `typerefs`, `memberrefs`, `user_strings_count`
-# and `user_strings_sha256`, `strings` becomes the #US literals with a
-# `strings_source` beside it, and P/Invoke scopes join `dynamic_entries`
-# under the PINVOKE tag. A schema-6 entry carries none of it, so serving
-# one leaves every managed capability rule with nothing to match and
-# `strings` holding the byte scan's noise — the exact state the packet
-# exists to end. 8: the privileged-host plugin surface (W5.6) — PE metadata
-# gains the `host_plugin` block, `exports_read_status` beside an unreadable
-# export table, and `host_plugin_scope`/`host_plugin_slice_variance` for
-# ARM64X images. A schema-7 entry carries none of it: the block is simply
-# absent, which reads as "no plugin contract evidenced" — the three W5.6
-# rules then match nothing on a warm cache exactly the way the managed
-# rules did on a schema-6 cache (the W3.2 review lesson: every stored-shape
-# change bumps this). 9: the publish shape (W3.3) — PE metadata gains
-# `dotnet.shape` with its evidence list and, for a single-file publish, the
-# decoded `dotnet.shape.bundle` manifest and its member listing. A schema-8
-# entry has none of it, so a warm cache would serve a NativeAOT image and a
-# single-file bundle as ordinary native PEs — the exact "absence reads as
-# not .NET" the packet exists to end. 10: the strong-name block (W3.4) —
-# `dotnet.strong_name` with the declared-key/signature/null-signature
-# triple, `delay_sign` and the InternalsVisibleTo listing. A schema-9 entry
-# carries none of it, and a null signature would read as absent — on a
-# delay-signed assembly, exactly the verdict-shaped gap the packet exists
-# to close.
-CACHE_SCHEMA_VERSION = 11
+# The stored-metadata shape, part of the cache key beside the file digest,
+# the installed blint version and the options digest.
+#
+# Frozen at 10 for the rest of v4 pre-release; it is not bumped per change.
+# The counter earned its reputation honestly — a warm cache once served a
+# pre-W3.2 shape and left every new managed rule matching nothing — but the
+# population a bump protects is people holding caches written by a *released*
+# blint, and there are none: this whole module postdates v3.4.0, the last
+# tag, and no release tag contains any value this constant has ever held.
+# The only holders are development checkouts, where `blint cache clear` is
+# the one-command answer; the cache is opt-in (`--cache`) besides, so an
+# ordinary run never reads a stale entry at all. And `_blint_version()` is
+# the *installed distribution's* version, frozen at `pip install -e` time,
+# so in a development checkout it does not move when the tree does — this
+# constant was doing all the invalidation work and buying almost nothing.
+#
+# **At the v4.0.0 release, reset this to 1** and delete this comment down to
+# that sentence. v4 ships as one shape, nothing in the wild can hold an
+# earlier one, and the counter starts from 1 on the first post-release change
+# to the stored metadata. Until then: change the shape freely, and run
+# `blint cache clear` on any machine that has been running with `--cache`.
+CACHE_SCHEMA_VERSION = 10
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that
