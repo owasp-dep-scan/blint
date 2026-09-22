@@ -68,6 +68,11 @@ from blint.lib.pe_layout import parse_pe_layout, parse_pre_main_execution
 from blint.lib.pe_overlay import classify_pe_overlay
 from blint.lib.pe_resources import parse_pe_resources
 from blint.lib.pe_signature import parse_pe_code_signature
+from blint.lib.pe_usermode_surface import (
+    collect_amsi_references,
+    collect_com_registration,
+    collect_persistence_surfaces,
+)
 from blint.lib.utils import (
     camel_to_snake,
     demangle_symbolic_name,
@@ -1052,6 +1057,16 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
         # dispatch routines) on the disassembly path.
         if driver_block := build_driver_block(metadata, parsed_obj):
             metadata["driver"] = driver_block
+        # W5.4: the kernel-adjacent user-mode surface - the COM identity
+        # the image references and the autostart/extension registry
+        # surfaces it names (both section-byte scans; the rules that judge
+        # them live in review_usermode_win.yml).
+        if com_registration := collect_com_registration(parsed_obj):
+            metadata["com_registration"] = com_registration
+        if persistence := collect_persistence_surfaces(parsed_obj):
+            metadata["persistence_surfaces"] = persistence
+        if amsi := collect_amsi_references(parsed_obj):
+            metadata["amsi_references"] = amsi
         rdata_section = parsed_obj.get_section(".rdata")
         text_section = parsed_obj.get_section(".text")
         # If there are no .rdata and .text section, then attempt to look for two alphanumeric sections

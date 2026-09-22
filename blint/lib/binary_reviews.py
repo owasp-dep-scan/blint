@@ -381,10 +381,209 @@ def _is_covert_channel_path(path: str) -> bool:
     return leaf in COVERT_CHANNEL_DEVICES
 
 
+# ---------------------------------------------------------------------------
+# W5.4: kernel-adjacent user-mode surface. Every rule here is a *review*
+# signal, not a findings rule, by measurement: the benign populations
+# (System32 slice + tiers 0/1) carry injection chains on debug and
+# Sysinternals tooling, ETW/AMSI patch shapes on OS components and
+# Microsoft clients, and persistence surfaces on the very tools that
+# manage persistence. The rules give a reviewer the shape and name the
+# primitives; they never render a verdict on their own.
+# ---------------------------------------------------------------------------
+
+# The three cross-process injection stages (plan 04/D). Each set holds the
+# imports that realize the stage; the Ex/Nt forms take a target-process
+# handle, which is what makes them cross-process by construction.
+INJECTION_STAGES: dict[str, set[str]] = {
+    "remote_allocation": {"virtualallocex", "ntallocatevirtualmemory"},
+    "remote_write": {
+        "writeprocessmemory",
+        "ntwritevirtualmemory",
+        "ntmapviewofsection",
+        "zwmapviewofsection",
+    },
+    "remote_execution": {
+        "createremotethread",
+        "createremotethreadex",
+        "ntcreatethreadex",
+        "rtlcreateuserthread",
+        "queueuserapc",
+        "ntqueueapcthread",
+        "setthreadcontext",
+        "resumethread",
+    },
+}
+
+# ETW trace routines and the primitives that make patching them possible.
+ETW_TRACE_IMPORTS: set[str] = {"etweventwrite", "nttraceevent"}
+MEMORY_PATCH_IMPORTS: set[str] = {
+    "virtualprotect",
+    "virtualprotectex",
+    "ntprotectvirtualmemory",
+    "zwprotectvirtualmemory",
+    "writeprocessmemory",
+    "ntwritevirtualmemory",
+}
+
+# The kernel transition instructions a *user-mode* image has no business
+# executing outside ntdll: x86/x64 `syscall`/`sysenter`/`int 2e`, ARM64
+# `svc #0`. blint renders immediates in decimal, so `int 2e` also appears
+# as `int 46`.
+_DIRECT_SYSCALL_RE = re.compile(
+    r"\b(?:syscall|sysenter)\b|\bint\s+(?:0x2e|46|2eh)\b|\bsvc\s+#?0\b"
+)
+
+# The service-manager import set that can install a service.
+SERVICE_MANAGER_IMPORTS_W54: set[str] = {
+    "openscmanagera",
+    "openscmanagerw",
+    "createservicea",
+    "createservicew",
+}
+
+
+def _is_ntdll(metadata: dict) -> bool:
+    """True when the image is ntdll itself, which owns every syscall stub."""
+    from blint.lib.driver_ioctl import _normalized_callee
+
+    candidates = {str(metadata.get("name") or "")}
+    version_info = metadata.get("version_info") or {}
+    for table in (version_info.get("strings") or {}).values():
+        entry = table.get("OriginalFilename") if isinstance(table, dict) else None
+        if entry:
+            candidates.add(str(entry))
+    return any(_normalized_callee(name) == "ntdll.dll" for name in candidates if name)
+
+
+def _evaluate_usermode_surface(rule_id: str, metadata: dict, import_names: set[str]) -> list[dict]:
+    """The W5.4 review-rule evaluators."""
+
+    if rule_id == "USERMODE_DIRECT_SYSCALL":
+        # A kernel image never syscalls (it calls ntoskrnl exports), and
+        # ntdll is where the transitions belong.
+        if is_kernel_driver(metadata) or _is_ntdll(metadata):
+            return []
+        disassembled = metadata.get("disassembled_functions") or {}
+        functions = []
+        for func_data in disassembled.values():
+            if not isinstance(func_data, dict):
+                continue
+            assembly = (func_data.get("assembly") or "").lower()
+            if assembly and _DIRECT_SYSCALL_RE.search(assembly):
+                functions.append(
+                    {
+                        "function": str(func_data.get("name") or ""),
+                        "address": func_data.get("address"),
+                    }
+                )
+                if len(functions) >= 5:
+                    break
+        if not functions:
+            return []
+        return [
+            {
+                "detail": (
+                    "User-mode code executes kernel transitions directly "
+                    "(syscall/int 2e/svc #0) instead of calling ntdll: the "
+                    "shape of direct-syscall evasion, where user-mode API "
+                    "hooks never fire."
+                ),
+                "functions": functions,
+            }
+        ]
+
+    if rule_id == "PROCESS_INJECTION_PRIMITIVES":
+        stages = {
+            stage: sorted(import_names & members)
+            for stage, members in INJECTION_STAGES.items()
+            if import_names & members
+        }
+        if len(stages) < 2:
+            return []
+        code_signature = metadata.get("code_signature") or {}
+        return [
+            {
+                "stages": stages,
+                "stage_count": len(stages),
+                "signing_class": code_signature.get("signing_class"),
+                "detail": (
+                    "Cross-process allocation/write/execution primitives present: "
+                    "the injection chain shape. Debuggers, Sysinternals-style tools "
+                    "and RPA software reach two or three stages legitimately - read "
+                    "the chain with the image's purpose and signature."
+                ),
+            }
+        ]
+
+    if rule_id == "ETW_PATCH_EVIDENCE":
+        trace = sorted(import_names & ETW_TRACE_IMPORTS)
+        patch = sorted(import_names & MEMORY_PATCH_IMPORTS)
+        if not trace or not patch:
+            return []
+        return [
+            {
+                "trace_routines": trace,
+                "patch_primitives": patch,
+                "detail": (
+                    "References ETW trace routines alongside page-protection/"
+                    "write primitives - the statically decidable half of ETW "
+                    "tampering. Security tooling imports both legitimately."
+                ),
+            }
+        ]
+
+    if rule_id == "AMSI_PATCH_EVIDENCE":
+        amsi = metadata.get("amsi_references") or {}
+        patch = sorted(import_names & MEMORY_PATCH_IMPORTS)
+        if not amsi or not patch:
+            return []
+        return [
+            {
+                "amsi_references": amsi.get("references"),
+                "patch_primitives": patch,
+                "detail": (
+                    "References AmsiScanBuffer - the AMSI entry point - alongside "
+                    "page-protection/write primitives. Only AMSI providers and AV "
+                    "products belong in this shape."
+                ),
+            }
+        ]
+
+    if rule_id == "PERSISTENCE_SURFACE_REFERENCES":
+        persistence = metadata.get("persistence_surfaces") or {}
+        surfaces = sorted((persistence.get("surfaces") or {}).keys())
+        service_apis = sorted(import_names & SERVICE_MANAGER_IMPORTS_W54)
+        if len(surfaces) < 2 or not service_apis:
+            return []
+        return [
+            {
+                "surfaces": surfaces,
+                "service_apis": service_apis,
+                "detail": (
+                    "Names multiple autostart/extension registry surfaces and "
+                    "imports the service-manager APIs that write them - the "
+                    "redundant-foothold shape. The tools that manage persistence "
+                    "(Autoruns, Group Policy, security products) look the same."
+                ),
+            }
+        ]
+
+    return []
+
+
 def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     """Evaluate rule-specific whole-binary heuristics. Returns evidence list."""
     if rule_id in IMPLANT_RULE_EVALUATORS:
         return evaluate_implant_rule(rule_id, metadata)
+
+    if rule_id in (
+        "USERMODE_DIRECT_SYSCALL",
+        "PROCESS_INJECTION_PRIMITIVES",
+        "ETW_PATCH_EVIDENCE",
+        "AMSI_PATCH_EVIDENCE",
+        "PERSISTENCE_SURFACE_REFERENCES",
+    ):
+        return _evaluate_usermode_surface(rule_id, metadata, _collect_import_names(metadata))
 
     if rule_id == "CALL_SITE_CONSTANT_ARGUMENTS":
         return _evaluate_callsite_constant_arguments(metadata)

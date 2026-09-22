@@ -243,6 +243,7 @@ from blint.lib.pe_layout import (  # noqa: F401
     parse_pe_layout,
     parse_pre_main_execution,
 )
+from blint.lib.pe_usermode_surface import collect_rpc_interfaces
 from blint.lib.pe_vulnerable_drivers import match_vulnerable_driver
 from blint.lib.similarity import attach_function_hashes, compute_import_hash
 from blint.lib.stack_strings import analyze_stack_strings
@@ -1425,6 +1426,10 @@ def parse(
             metadata["call_site_arguments_coverage"] = callsite_coverage
             if callsite_entries:
                 metadata["call_site_arguments"] = callsite_entries
+            # W5.4: RPC interface UUIDs, anchored to the registration call
+            # sites the abstract interpreter resolved.
+            if rpc_interfaces := collect_rpc_interfaces(parsed_obj, callsite_entries):
+                metadata["rpc_interfaces"] = rpc_interfaces
             if isinstance(parsed_obj, lief.PE.Binary) and is_kernel_driver(metadata):
                 if driver_ioctls := collect_driver_ioctls(
                     metadata["disassembled_functions"],
