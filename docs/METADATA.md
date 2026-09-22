@@ -8,6 +8,17 @@ The primary goal of blint's metadata generation is to act as a "Rosetta Stone" f
 
 This guide details the attributes found in the metadata, their purpose, and the methods blint uses to obtain them, including notable strengths and limitations.
 
+## CycloneDX SBOM output (W6.1)
+
+`blint sbom` emits a CycloneDX document generated from the official **1.7** schema (`blint/cyclonedx/spec.py`, regenerated with datamodel-codegen — the exact command and version are recorded in that file's header). `specVersion` is `1.7` by default and `1.6` remains selectable with `--sbom-spec-version 1.6` for consumers that have not caught up: **blint populates no CycloneDX 1.7-only field**, so a document declared 1.6 is exactly the 1.6 shape — the two emissions differ only in `specVersion` (and the per-run `serialNumber`/`timestamp`), and both validate against their respective official schemas. Emitted documents were validated against the official `bom-1.7.schema.json` and `bom-1.6.schema.json` (jsonschema) and ingested by Dependency-Track 4.14.4 (both declarations parsed, identical component counts); cdxgen 12.8.4 emits 1.7 itself and its output validates against the same schema files.
+
+The 1.7-only fields are deliberately **not populated yet** — a considered "not yet" per field:
+
+- `citations` (root): bibliographic attribution for the BOM itself; static binary analysis produces no citation data.
+- `component.isExternal`: whether a component is not built from the project's own source. blint cannot determine build provenance from binaries — every component would carry the same value, and a constant field is noise a reader cannot act on.
+- `component.versionRange`: blint identifies exact versions (with `internal:version_source` naming which kind) or nothing; a range would be fabricated.
+- `metadata.distributionConstraints` / `tlpClassification`: marking and export-control constraints require a policy input blint does not have; hardcoding a default would state a classification blint did not determine. Both wait for an explicit CLI input.
+
 ## Core Concepts and Top-Level Attributes
 
 At the highest level, the JSON output contains attributes that identify the binary and provide universally applicable information.
