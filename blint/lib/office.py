@@ -422,16 +422,26 @@ def analyze_ooxml(path: str, refusals: list[str], degradations: list[str]) -> di
             if any("_xmlsignatures/" in name for name in by_name):
                 block["macro_signature_present"] = True
             # Stream-smuggling spots and embedded objects.
+            # Both listings are bounded, so both carry their full count
+            # beside them: everywhere else in this reader a capped list
+            # rides with an uncapped `_count`, and a list that silently
+            # stopped at the cap would read as the whole document (rule 32).
+            embedded_total = 0
+            printer_total = 0
             for name, info in by_name.items():
                 lowered = name.lower()
                 if "embeddings/" in lowered:
+                    embedded_total += 1
                     if len(block["embedded_ole_objects"]) < MAX_LISTED_OLE_OBJECTS:
                         block["embedded_ole_objects"].append({"name": name, "size": info.file_size})
                 elif "activex/" in lowered and lowered.endswith(".bin"):
                     block["activex_present"] = True
                 elif "printersettings" in lowered:
+                    printer_total += 1
                     if len(block["printer_settings"]) < MAX_LISTED_OLE_OBJECTS:
                         block["printer_settings"].append({"name": name, "size": info.file_size})
+            block["embedded_ole_object_count"] = embedded_total
+            block["printer_settings_count"] = printer_total
             # DDE field codes in the main document parts.
             for part_name in ("word/document.xml", "word/document2.xml"):
                 info = by_name.get(part_name)

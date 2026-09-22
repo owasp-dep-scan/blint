@@ -501,8 +501,15 @@ def check_msix_restricted_capability(
     if not isinstance(container, dict):
         return True
     restricted = container.get("capabilities", {}).get("restricted") or []
-    if not restricted and not container.get("restricted_capability_count"):
+    counted = container.get("restricted_capability_count") or 0
+    if not restricted and not counted:
         return True
+    if not restricted:
+        # Counted but unlisted. The engine treats any string as a finding,
+        # so returning the empty join would have titled it "(...)" with
+        # nothing inside — a finding that names nothing (rule 11). The
+        # count is what blint determined, so the count is what it says.
+        return f"{counted} restricted capabilities"
     return ", ".join(str(name) for name in restricted[:10])
 
 

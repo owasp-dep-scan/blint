@@ -122,19 +122,36 @@ def walk_zip_members(
     """
     accepted: list[zipfile.ZipInfo] = []
     total_uncompressed = 0
+    examined = 0
     per_member_cap = min(
         limits.max_member_size, member_size_cap if member_size_cap is not None else limits.max_member_size
     )
     for info in archive.infolist():
-        if len(accepted) >= limits.max_members:
+        # The bound is on members *examined*, not members accepted: an
+        # archive of a million unsafe names must trip the count cap, and
+        # counting only the survivors would let it walk forever while the
+        # refusal list grew a million entries. This is also the semantics
+        # `nuget_package` has always had under the same refusal name.
+        if examined >= limits.max_members:
             refusals.append("member_count_exceeds_cap")
             break
+        examined += 1
         name = info.filename
         if member_path_unsafe(name):
             refusals.append("member_path_unsafe")
             continue
         if zip_member_is_symlink(info):
             refusals.append("member_is_symlink")
+            continue
+        if info.is_dir():
+            # A directory entry names no bytes, so it is not a member any
+            # reader reads or extracts. It is dropped only after the path
+            # and symlink checks, which are facts about the archive and are
+            # still named for it. Passing it through instead would make the
+            # extractor open a directory for writing and record the
+            # resulting OSError as `member_unreadable` — a refusal that
+            # reads as a finding about the archive when it is only an
+            # artefact of this loop (rule 14).
             continue
         if len(name.rstrip("/").split("/")) > limits.max_member_depth:
             refusals.append("member_depth_exceeds_cap")
@@ -209,9 +226,13 @@ def extract_zip_members(
 ) -> dict[str, str]:
     """Extract the named members into ``dest_dir`` under the reader's bounds.
 
-    Extraction is streamed: the loop enforces the declared size and the
-    per-member cap against bytes actually read, so a member that lies about
-    its size is cut off and named rather than absorbed. Returns a mapping of
+    Extraction is streamed and the loop enforces ``max_member_size`` against
+    bytes actually read, so a member whose real content exceeds the cap is
+    cut off and named rather than absorbed. The *declared* size is not a
+    second bound here and this docstring used to claim it was: zipfile stops
+    the decompressor at ``file_size`` and fails the CRC, so a member that
+    understates itself arrives as ``member_unreadable``. The cap is the
+    bound blint enforces; the CRC is what catches the lie. Returns a mapping of
     member name → extracted path for the members that extracted cleanly;
     refused members are named in ``refusals`` and simply do not appear in
     the mapping. Destinations are pre-joined through ``os.path.join`` after

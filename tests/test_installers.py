@@ -5,6 +5,7 @@ the ground-truth VM (the corpus carries the resulting SFX); synthetic
 fixtures cover the hostile shapes (ground rules 22/30/33).
 """
 
+import base64
 import glob
 import json
 import logging
@@ -148,16 +149,36 @@ def _build_sfx(archive_path, stub_extra=b""):
     return stub + archive
 
 
-@pytest.mark.skipif(not os.path.isfile("/tmp/test1.7z"), reason="ground-truth 7z fixture not built")
+# A real 7-Zip archive, 257 bytes, committed as base64 so these tests need
+# no external file and no 7-Zip on the machine running them. It was created
+# by p7zip 17.05 (`7z a -mx=9 test1.7z notes.md readme.txt`) and `7z l`
+# reports exactly the two members and sizes asserted below — the ground
+# truth is 7-Zip's own listing, not blint's reader agreeing with a fixture
+# blint's reader shaped. It replaces a hardcoded `/tmp/test1.7z`, which was
+# a scratch file on one machine: the listing test skipped silently
+# everywhere else and the runner test below failed outright.
+_SEVENZ_FIXTURE_B64 = (
+    "N3q8ryccAATB+RL7wQAAAAAAAAAgAAAAAAAAAFSkaZzgFpMATF0AMRsJYcWBCBLLxr4TOTul"
+    "WHBtDm4cEMbs6hcQZ8rl2kjsLxokiCn+aPktsFEygeNbJJGvocbep2niTDYd8SSJa5hy6qRY"
+    "cII90PUwAAAAAIEzB64P0vUM/UDAkNL/dKEfpyix8FmzAE0fb3HRVxn0ZWxtmVnkZIu3ZrUo"
+    "ivuG67ze3I9cFwmqijuISkjZhS4HMN6U9RfRX1GMLu8zYqnjL0eE7UWNJ8iSPWWZu0cKTg25"
+    "dWKKxnz2oAAAFwZUAQltAAcLAQABIwMBAQVdABAAAAx+CgF9rJAPAAA="
+)
+
+
+def _sevenz_fixture() -> bytes:
+    return base64.b64decode(_SEVENZ_FIXTURE_B64)
+
+
 def test_sevenz_listing_matches_7z_l():
-    """Facts cross-checked against `7z l` on the ground-truth VM:
-    notes.md 5002, readme.txt 20 (see the packet's gate block)."""
-    data = Path("/tmp/test1.7z").read_bytes()
+    """Facts cross-checked against `7z l`, which reports notes.md 5760 and
+    readme.txt 20 for this archive."""
+    data = _sevenz_fixture()
     refs, degs = [], []
     block = parse_sevenz_blob(data, refs, degs)
     assert block is not None
     names = {m["name"]: m["size"] for m in block["members"]}
-    assert names == {"notes.md": 5002, "readme.txt": 20}
+    assert names == {"notes.md": 5760, "readme.txt": 20}
 
 
 def test_sevenz_crc_rejects_false_signature():
@@ -184,7 +205,7 @@ def test_sfx_runner_members_and_leak_delta(tmp_path):
     # appended — exactly the shape a 7-Zip SFX module produces (the stub's
     # overlay is the archive).
     stub = Path(_PE).read_bytes()
-    archive_bytes = Path("/tmp/test1.7z").read_bytes()
+    archive_bytes = _sevenz_fixture()
     sfx_path = tmp_path / "setup.exe"
     sfx_path.write_bytes(stub + archive_bytes)
     before = set(glob.glob(os.path.join(tempfile.gettempdir(), "blint_sfx_*")))
@@ -204,7 +225,7 @@ def test_sfx_runner_members_and_leak_delta(tmp_path):
     assert installer["family"] == "sfx_7z"
     assert installer["extraction"] == "members"
     names = {m["name"]: m["size"] for m in installer["sfx_payload"]["members"]}
-    assert names == {"notes.md": 5002, "readme.txt": 20}
+    assert names == {"notes.md": 5760, "readme.txt": 20}
 
 
 # ---------------------------------------------------------------------------

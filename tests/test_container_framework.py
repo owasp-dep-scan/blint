@@ -201,3 +201,65 @@ def test_bounded_temp_dir_cleans_up_on_success():
     after = _live_framework_temp_dirs()
     assert after - before == set()
     assert not os.path.isdir(temp_dir)
+
+
+def test_member_count_cap_counts_members_examined_not_accepted(tmp_path):
+    """An archive of refused members still trips the count cap.
+
+    The bound was written against the *accepted* list, so an archive whose
+    members are all refused never reached it: the walk ran to the end of
+    the central directory and the refusal list grew one entry per member,
+    while `member_count_exceeds_cap` — the refusal that says the listing is
+    partial — was never named. ``nuget_package`` has always counted every
+    member under this name; two counting rules behind one refusal name is
+    the thing rule 21 forbids.
+    """
+    path = tmp_path / "manyrefused.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        for index in range(LIMITS.max_members * 3):
+            zf.writestr(f"../evil{index}.txt", b"x")
+        zf.writestr("good.txt", b"ok")
+    refusals: list[str] = []
+    with zipfile.ZipFile(path) as archive:
+        accepted = walk_zip_members(archive, LIMITS, refusals)
+    assert "member_count_exceeds_cap" in refusals
+    assert accepted == []
+    # The walk stopped at the cap instead of naming every member in the
+    # archive: the refusal list is bounded by the cap, not by the input.
+    assert len(refusals) <= LIMITS.max_members + 1
+
+
+def test_directory_entries_are_not_members_and_never_refuse(tmp_path):
+    """An ordinary archive with directory entries reports no refusal.
+
+    A directory entry names no bytes. Passed to the extractor it became an
+    `open()` on a directory, and the OSError was recorded as
+    `member_unreadable` — a refusal that reads as a finding about the
+    archive when it was only an artefact of the loop (rule 14). Unsafe and
+    symlinked directory names are still named, which is asserted here too.
+    """
+    path = tmp_path / "withdirs.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("dir/", b"")
+        zf.writestr("dir/nested/", b"")
+        zf.writestr("dir/nested/file.txt", b"payload")
+    refusals: list[str] = []
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with zipfile.ZipFile(path) as archive:
+        members = walk_zip_members(archive, LIMITS, refusals)
+        extracted = extract_zip_members(archive, members, str(dest), LIMITS, refusals)
+    assert [info.filename for info in members] == ["dir/nested/file.txt"]
+    assert refusals == []
+    assert set(extracted) == {"dir/nested/file.txt"}
+    assert (dest / "dir" / "nested" / "file.txt").read_bytes() == b"payload"
+
+    # A directory entry whose name is unsafe is still a fact about the
+    # archive, so it is refused rather than dropped as "just a directory".
+    hostile = tmp_path / "hostiledir.zip"
+    with zipfile.ZipFile(hostile, "w") as zf:
+        zf.writestr("../escape/", b"")
+    hostile_refusals: list[str] = []
+    with zipfile.ZipFile(hostile) as archive:
+        assert walk_zip_members(archive, LIMITS, hostile_refusals) == []
+    assert hostile_refusals == ["member_path_unsafe"]

@@ -953,49 +953,6 @@ class AnalysisRunner:
 
     def _process_msix_container(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
-    ) -> None:
-        """Extract an SFX's appended 7z payload and analyze its PE members.
-
-        The stub executable has already been analyzed as its own unit; each
-        decodable member is an ``sfx-member`` unit. Members in BCJ2/PPMd/
-        encrypted folders refuse by name (the installer block records the
-        refusal), and the temp directory is removed on every exit path.
-        """
-        assert self.task is not None
-        try:
-            with open(f, "rb") as handle:
-                data = handle.read(8 * 1024 * 1024)
-        except OSError:
-            return
-        with bounded_temp_dir(prefix="blint_sfx_") as temp_dir:
-            refusals: list[str] = []
-            extracted = extract_sevenz_members(data, temp_dir, refusals)
-            for member_name, member_path in sorted(extracted.items()):
-                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
-                    continue
-                self.progress.update(
-                    self.task,
-                    description=f"Processing [bold]{member_name}[/bold] (sfx-member)",
-                )
-                self._mark_attempted("sfx-member")
-                try:
-                    member_metadata = self._parse_with_cache(member_path, blint_options, "sfx-member")
-                    member_metadata["container"] = {
-                        "kind": "sfx_7z",
-                        "member_path": member_name,
-                        "role": "sfx-member",
-                    }
-                    member_metadata["name"] = member_name
-                    member_metadata["file_path"] = member_name
-                    self._finalize_metadata(
-                        member_path, member_metadata, blint_options, wants_callgraph_outputs
-                    )
-                    self._mark_success("sfx-member")
-                except Exception as e:
-                    self._record_failure(member_name, "sfx-member", "process", e)
-
-    def _process_msix_container(
-        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
     ) -> bool:
         """Unpack an MSIX/Appx package or bundle and analyse its members.
 

@@ -18,6 +18,7 @@ import zipfile
 
 import pytest
 
+from blint.lib import msix
 from blint.lib.msix import (
     collect_msix_detailed,
     container_metadata,
@@ -449,3 +450,28 @@ def test_real_bundle_metadata_exports_and_container_findings(tmp_path):
         member_metadata["container"]["member_path"]
         == "CascadiaPackage_1.22.12111.0_ARM64.msix/wt.exe"
     )
+
+
+def test_binary_count_cap_is_named_not_silently_truncated(tmp_path, monkeypatch):
+    """A package shipping more PE members than the cap says so.
+
+    Ground rule 33: the fixture exceeds the cap rather than sitting under
+    it. The refusal was previously appended after the list had already been
+    sliced to the cap, so the condition could not hold for any input and a
+    package over the cap analysed the first ``MAX_MEMBER_BINARIES`` members
+    and reported a clean, complete-looking result.
+    """
+    monkeypatch.setattr(msix, "MAX_MEMBER_BINARIES", 4)
+    extra = {f"extra{i}.dll": b"MZ" + bytes(64) for i in range(6)}
+    package = _build_package(tmp_path / "over.msix", extra_members=extra)
+    before = _live_msix_temp_dirs()
+    collection, reason = collect_msix_detailed(package)
+    try:
+        assert reason is None
+        entry = collection["packages"][0]
+        assert "member_binary_count_exceeds_cap" in entry["refusals"]
+        # The cap still bounds the fan-out it was there to bound.
+        assert len(entry["binaries"]) <= 4
+    finally:
+        shutil.rmtree(collection.get("temp_dir") or "", ignore_errors=True)
+    assert _live_msix_temp_dirs() - before == set()

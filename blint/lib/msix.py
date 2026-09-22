@@ -350,9 +350,16 @@ def _package_collection(
             info
             for info in members
             if os.path.splitext(info.filename)[1].lower() in (".exe", ".dll")
-        ][:MAX_MEMBER_BINARIES]
+        ]
+        # Named before the slice, not after: truncating first made
+        # `len(pe_infos) > MAX_MEMBER_BINARIES` unsatisfiable, so a package
+        # shipping more binaries than the cap analysed the first 512 and
+        # reported nothing at all — the absence reading as a complete
+        # result (rule 32). The refusal is the only thing that says the
+        # unit list is partial.
         if len(pe_infos) > MAX_MEMBER_BINARIES:
             package_refusals.append("member_binary_count_exceeds_cap")
+            pe_infos = pe_infos[:MAX_MEMBER_BINARIES]
         extracted = extract_zip_members(archive, pe_infos, temp_dir, MSIX_LIMITS, package_refusals)
     verification = {"verified_files": 0, "verified_blocks": 0, "mismatches": []}
     for member_name, file_path in sorted(extracted.items()):
