@@ -402,3 +402,271 @@ def test_benign_document_population(tmp_path):
     block = analyze_ooxml(linked, [], [])
     results = runner.run_review(office_metadata(block, "linked.docx", "ooxmldocument"))
     assert set(results) == {"OFFICE_EXTERNAL_RELATIONSHIP"}
+
+
+# ---------------------------------------------------------------------------
+# W4.4 — the paths the packet claimed but no test reached: .msg attachments,
+# XLM macro sheets, and a .ppt's nested OLE storage. Each fixture is checked
+# against an implementation that is not blint (ground rule 29): extract_msg
+# 0.56.1 for the message, xlrd for the workbook, and the record layout
+# oletools' own ppt_record_parser reads for the presentation.
+# ---------------------------------------------------------------------------
+
+def build_msg(tmp_path, name="mail.msg", *, attachment=b"MZ\x00\x00", filename="payload.exe",
+              subject="Quarterly report"):
+    """A genuine ``.msg``: MS-OXMSG names attachment storages
+    ``__attach_version1.0_#XXXXXXXX`` and property streams
+    ``__substg1.0_<tag><type>``. extract_msg 0.56.1 reads this fixture as a
+    message with subject %r and one attachment named ``payload.exe``.
+    """
+    from tests.test_cfbf import build_cfbf
+
+    image = build_cfbf(
+        {
+            "__properties_version1.0": b"\x00" * 32,
+            "__substg1.0_0037001F": subject.encode("utf-16-le"),
+        },
+        storages={
+            # extract_msg refuses a message without the named-property
+            # streams; including them keeps the fixture one a real reader
+            # accepts rather than one only blint tolerates.
+            "__nameid_version1.0": {
+                "__substg1.0_00020102": b"",
+                "__substg1.0_00030102": b"",
+                "__substg1.0_00040102": b"",
+            },
+            "__attach_version1.0_#00000000": {
+                "__properties_version1.0": b"\x00" * 8,
+                "__substg1.0_3704001F": filename.encode("utf-16-le"),
+                "__substg1.0_37010102": attachment,
+            },
+        },
+    )
+    path = tmp_path / name
+    path.write_bytes(image)
+    return str(path)
+
+
+def test_msg_attachments_are_found_and_extracted(tmp_path):
+    """A real ``.msg``'s attachment storage is found, named and extracted.
+
+    Both the analyzer and the extractor matched on
+    ``"__attach_version1.0_/"``, which requires a storage literally named
+    ``__attach_version1.0_`` with children beneath it. MS-OXMSG puts the
+    eight-hex-digit index in the storage's own name, so the real shape
+    never matched: every ``.msg`` reported zero attachments, recorded no
+    refusal, and the ``msg-attachment`` unit role was unreachable. The
+    subject missed for the same reason — ``endswith("0037")`` against
+    ``__substg1.0_0037001F``.
+    """
+    from blint.lib.office import analyze_msg, extract_msg_attachments
+
+    pe_bytes = Path(_PE).read_bytes()[:2048]
+    path = build_msg(tmp_path, attachment=pe_bytes)
+    refusals, degradations = [], []
+    block = analyze_msg(path, refusals, degradations)
+    assert block["attachment_count"] == 1
+    assert block["attachments"][0]["path"] == "__attach_version1.0_#00000000"
+    # Name and size as extract_msg reports them for this fixture.
+    assert block["attachments"][0]["name"] == "payload.exe"
+    assert block["attachments"][0]["size"] == 2048
+    assert block["subject"] == "Quarterly report"
+
+    dest = tmp_path / "out"
+    dest.mkdir()
+    extract_refusals: list[str] = []
+    extracted = extract_msg_attachments(path, str(dest), extract_refusals)
+    assert extract_refusals == []
+    assert len(extracted) == 1
+    (only_path,) = extracted.values()
+    assert Path(only_path).read_bytes() == pe_bytes
+
+
+def test_msg_attachment_becomes_its_own_unit(tmp_path):
+    """The runner analyzes an extracted attachment as a ``msg-attachment``
+    unit and leaves no temp directory behind (rule 18 as a live delta)."""
+    logging.disable(logging.CRITICAL)
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_default_mode
+
+    path = build_msg(tmp_path, attachment=Path(_PE).read_bytes())
+    before = set(glob.glob(os.path.join(tempfile.gettempdir(), "blint_msg_*")))
+    reports = os.path.join(str(tmp_path), "reports")
+    run_default_mode(
+        BlintOptions(
+            src_dir_image=[path], reports_dir=reports, no_reviews=True, quiet_mode=True
+        )
+    )
+    assert set(glob.glob(os.path.join(tempfile.gettempdir(), "blint_msg_*"))) - before == set()
+    with open(os.path.join(reports, "mail.msg-metadata.json")) as handle:
+        metadata = json.load(handle)
+    assert metadata["office"]["attachment_count"] == 1
+    # The attachment's own unit: a PE parsed on its own terms, attributed
+    # to the member path it arrived through.
+    produced = sorted(os.path.basename(p) for p in glob.glob(os.path.join(reports, "*-metadata.json")))
+    assert "payload.exe-metadata.json" in produced, produced
+
+
+def _boundsheet(name: str, sheet_type: int, hs_state: int = 0, ply_pos: int = 0) -> bytes:
+    """One BoundSheet8 record: lbPlyPos(4), hsState(1), dt(1), name."""
+    body = struct.pack("<IBB", ply_pos, hs_state, sheet_type)
+    body += bytes([len(name), 0]) + name.encode("latin-1")
+    return struct.pack("<HH", 0x0085, len(body)) + body
+
+
+def build_xls(tmp_path, sheets, name="book.xls"):
+    """A BIFF8 workbook with real per-sheet substreams.
+
+    ``sheets`` is ``[(name, dt, hsState)]``. The substream offsets are real,
+    so xlrd parses the result — which is what makes it ground truth rather
+    than a fixture shaped by the code under test.
+    """
+    from tests.test_cfbf import build_cfbf
+
+    end = struct.pack("<HH", 0x000A, 0)
+
+    def bof(sub_type):
+        return struct.pack("<HH", 0x0809, 16) + struct.pack(
+            "<HHHHHHHH", 0x0600, sub_type, 0, 0, 0, 0, 0, 0
+        )
+
+    sub_types = {0x00: 0x0010, 0x01: 0x0040, 0x02: 0x0020, 0x06: 0x0005}
+    header_len = len(bof(5)) + sum(
+        len(_boundsheet(n, dt, hs)) for n, dt, hs in sheets
+    ) + len(end)
+    positions, offset = [], header_len
+    for _name, sheet_type, _hs in sheets:
+        positions.append(offset)
+        offset += len(bof(sub_types[sheet_type])) + len(end)
+    stream = bof(5)
+    for index, (sheet_name, sheet_type, hs_state) in enumerate(sheets):
+        stream += _boundsheet(sheet_name, sheet_type, hs_state, positions[index])
+    stream += end
+    for _name, sheet_type, _hs in sheets:
+        stream += bof(sub_types[sheet_type]) + end
+    path = tmp_path / name
+    path.write_bytes(build_cfbf({"Workbook": stream}))
+    return str(path)
+
+
+def test_hidden_worksheet_is_not_an_xlm_macro_sheet(tmp_path):
+    """A hidden worksheet is hidden, not a macro sheet.
+
+    BoundSheet8 carries visibility (``hsState``) and sheet type (``dt``) in
+    two different bytes. The detection OR'd the hidden bit into the macro
+    verdict, so every workbook holding a hidden worksheet — an ordinary,
+    common shape — reported an Excel 4.0 macro sheet and fed
+    ``xlm_macro_sheet`` to the macro rules. xlrd reads this same fixture as
+    two *worksheets*, the second with ``visibility=1``.
+    """
+    from blint.lib.office import analyze_legacy_office
+
+    path = build_xls(tmp_path, [("Sheet1", 0x00, 0), ("Hidden", 0x00, 1)], name="hidden.xls")
+    block = analyze_legacy_office(path, [], [])
+    sheet_facts = block["macro_sheet"]
+    assert sheet_facts["macro_sheet"] is False
+    assert sheet_facts["sheet_count"] == 2
+    # The hidden bit is still a fact about the workbook; it is reported as
+    # what it is rather than discarded or misread.
+    assert sheet_facts["hidden_sheet_count"] == 1
+
+
+def test_xlm_macro_sheet_is_detected_by_sheet_type(tmp_path):
+    """``dt == 1`` is the Excel 4.0 macro sheet, and nothing else is.
+
+    xlrd lists only ``Sheet1`` as a worksheet for this fixture — it skips
+    the second sheet precisely because its substream type is a macro sheet,
+    which is the independent confirmation that ``dt`` is what says so.
+    """
+    from blint.lib.office import analyze_legacy_office
+
+    path = build_xls(tmp_path, [("Sheet1", 0x00, 0), ("Macro1", 0x01, 0)], name="xlm.xls")
+    block = analyze_legacy_office(path, [], [])
+    assert block["macro_sheet"]["macro_sheet"] is True
+    assert block["macro_sheet"]["hidden_sheet_count"] == 0
+
+    # A chart sheet and a VB module sheet are neither of the two.
+    other = analyze_legacy_office(
+        build_xls(tmp_path, [("Chart1", 0x02, 0), ("Module1", 0x06, 0)], name="other.xls"), [], []
+    )
+    assert other["macro_sheet"]["macro_sheet"] is False
+    assert other["macro_sheet"]["sheet_count"] == 2
+
+
+def build_ppt(tmp_path, modules, name="deck.ppt", *, compressed=True):
+    """A legacy ``.ppt`` whose VBA lives in a nested OLE storage.
+
+    The project is an ExOleObjStg record (``recType`` 0x1011) inside the
+    ``PowerPoint Document`` stream, zlib-compressed behind its decompressed
+    length when ``recInstance``'s low bit is set — the two shapes
+    ``oletools.ppt_record_parser`` reads.
+    """
+    import zlib
+
+    from tests.test_cfbf import build_cfbf
+
+    vba_bin = build_vba_project_bin(modules)
+    if compressed:
+        body = struct.pack("<I", len(vba_bin)) + zlib.compress(vba_bin)
+        version_instance = 0x001 << 4
+    else:
+        body = vba_bin
+        version_instance = 0x000
+    record = struct.pack("<HHI", version_instance, 0x1011, len(body)) + body
+    path = tmp_path / name
+    path.write_bytes(
+        build_cfbf({"PowerPoint Document": record, "Current User": b"\x00" * 24})
+    )
+    return str(path)
+
+
+@pytest.mark.parametrize("compressed", [True, False])
+def test_ppt_vba_lives_in_a_nested_ole_storage(tmp_path, compressed):
+    """A ``.ppt``'s macros are reached by unwrapping the nested OLE object.
+
+    PowerPoint does not put the VBA project in a storage the directory tree
+    names, so the generic storage walk that serves ``.doc`` and ``.xls``
+    found nothing at all for a macro-bearing presentation. Both record
+    shapes are exercised: compressed (the usual) and uncompressed.
+
+    Ground truth for the record itself, on the Windows VM:
+    ``oletools.ppt_record_parser`` reads the compressed fixture's record as
+    a ``PptRecordExOleVbaActiveXAtom`` (0x1011) and decompresses it to 2560
+    bytes beginning ``d0cf11e0a1b11ae1`` — the same nested CFBF, at the same
+    size, that blint unwraps here. What oletools does *not* confirm is the
+    VBA project inside it: ``olevba`` reports ``detect_vba=False`` for this
+    file because ``build_vba_project_bin`` writes a minimal ``dir``/module
+    pair rather than a project olevba's own VBA parser accepts — the same
+    limitation the OOXML macro test above already lives with. The unwrap is
+    what is pinned to an outside implementation; the module-name reading is
+    pinned to the builder.
+    """
+    from blint.lib.office import analyze_legacy_office
+
+    source = _vba_module_source(["Sub AutoOpen()", '    MsgBox "hi"', "End Sub"])
+    path = build_ppt(
+        tmp_path, {"Module1": source}, name=f"deck{int(compressed)}.ppt", compressed=compressed
+    )
+    degradations: list[str] = []
+    block = analyze_legacy_office(path, [], degradations)
+    assert block["ppt_ole_object_count"] == 1
+    assert block["vba_project_present"] is True
+    modules = {m["name"]: m.get("source") for m in block["vba"]["modules"]}
+    assert "Module1" in modules
+    assert "MsgBox" in modules["Module1"]
+    assert degradations == []
+
+
+def test_ppt_record_that_lies_about_its_length_is_named(tmp_path):
+    """A record longer than the stream is a named degradation, not a crash
+    and not silence (rule 30/32)."""
+    from blint.lib.office import analyze_legacy_office
+    from tests.test_cfbf import build_cfbf
+
+    record = struct.pack("<HHI", 0x001 << 4, 0x1011, 0xFFFFFF) + b"\x00" * 16
+    path = tmp_path / "liar.ppt"
+    path.write_bytes(build_cfbf({"PowerPoint Document": record}))
+    degradations: list[str] = []
+    block = analyze_legacy_office(str(path), [], degradations)
+    assert block["ppt_ole_object_count"] == 0
+    assert "ppt_record_length_exceeds_stream" in degradations

@@ -50,8 +50,17 @@ def build_cfbf(
     out_of_range: str | None = None,
     early_terminate: str | None = None,
     oversized_declared: str | None = None,
+    storages: dict[str, dict[str, bytes]] | None = None,
 ):
     """Build a minimal CFBF image with every stream at the root.
+
+    ``storages`` adds real storage nesting: ``{"StorageName": {"stream":
+    b"..."}}`` becomes a storage directory entry whose ``child`` points at
+    its streams, which is how ``CfbfReader.tree()`` derives a path. Names
+    in ``streams`` are literal entry names — a ``/`` in one is part of the
+    name, not a hierarchy — so any fixture whose subject is the nesting
+    itself (``.msg`` attachment storages, an MSI's substorages) must use
+    this parameter or it tests a path the format cannot produce.
 
     Streams at or above the mini cutoff (4,096 bytes) get regular FAT
     sectors; smaller ones go into a mini stream with a mini FAT, like a
@@ -61,6 +70,14 @@ def build_cfbf(
     ``oversized_declared`` leaves the chain short but declares a huge size.
     """
     MINI = 64
+    # Storage children are allocated exactly like root streams; the
+    # composite key keeps them distinct while the directory section below
+    # gives them their real parent.
+    storages = storages or {}
+    streams = dict(streams)
+    for storage_name, children in storages.items():
+        for child_name, payload in children.items():
+            streams[f"{storage_name}\x01{child_name}"] = payload
     big_names = [n for n, v in streams.items() if len(v) >= MINI_CUTOFF]
     small_names = [n for n, v in streams.items() if len(v) < MINI_CUTOFF]
 
@@ -86,7 +103,8 @@ def build_cfbf(
     fat: list[int] = []
 
     def alloc_chain(payload: bytes, terminate=ENDOFCHAIN) -> tuple[int | None, list[bytes]]:
-        nonlocal fat
+        # `fat` is mutated in place, never rebound, so no `nonlocal` —
+        # CI's flake8 gate selects F82, which F824 matches by prefix.
         blocks = (len(payload) + SECTOR - 1) // SECTOR
         if not blocks:
             return None, []
@@ -111,24 +129,63 @@ def build_cfbf(
         "Root Entry", 5, start=mini_storage_start if mini_stream_sectors else ENDOFCHAIN,
         size=len(mini_stream), child=1,
     )
-    names = list(streams)
-    dir_entries = [root]
-    for index, name in enumerate(names):
+    def _start_of(name):
         if name in big_starts:
             start = big_starts[name]
         elif name in mini_chain_starts:
             start = mini_chain_starts[name]
         else:
             start = ENDOFCHAIN
-        dir_entries.append(
-            build_directory_entry(
-                name,
-                2,
-                right=index + 2 if index + 2 <= len(names) else 0xFFFFFFFF,
-                start=start if start is not None else ENDOFCHAIN,
-                size=len(streams[name]),
+        return ENDOFCHAIN if start is None else start
+
+    root_names = [n for n in streams if "\x01" not in n]
+    # Directory order: root, root-level streams, one entry per storage,
+    # then each storage's children. `names` keeps the flat allocation
+    # order the hostile knobs below index into.
+    names = root_names + [f"{s}\x01{c}" for s, cs in storages.items() for c in cs]
+    top_level = root_names + list(storages)
+    dir_entries = [root]
+    index_of = {name: position + 1 for position, name in enumerate(top_level)}
+    child_index = len(top_level) + 1
+    storage_children: dict[str, list[str]] = {}
+    for storage_name, children in storages.items():
+        storage_children[storage_name] = []
+        for child_name in children:
+            storage_children[storage_name].append(child_name)
+            index_of[f"{storage_name}\x01{child_name}"] = child_index
+            child_index += 1
+
+    for position, name in enumerate(top_level):
+        sibling = position + 2 if position + 2 <= len(top_level) else 0xFFFFFFFF
+        if name in storages:
+            first = storage_children[name]
+            dir_entries.append(
+                build_directory_entry(
+                    name,
+                    1,
+                    right=sibling,
+                    child=index_of[f"{name}\x01{first[0]}"] if first else 0xFFFFFFFF,
+                )
             )
-        )
+        else:
+            dir_entries.append(
+                build_directory_entry(
+                    name, 2, right=sibling, start=_start_of(name), size=len(streams[name])
+                )
+            )
+    for storage_name, children in storage_children.items():
+        for position, child_name in enumerate(children):
+            key = f"{storage_name}\x01{child_name}"
+            nxt = children[position + 1] if position + 1 < len(children) else None
+            dir_entries.append(
+                build_directory_entry(
+                    child_name,
+                    2,
+                    right=index_of[f"{storage_name}\x01{nxt}"] if nxt else 0xFFFFFFFF,
+                    start=_start_of(key),
+                    size=len(streams[key]),
+                )
+            )
     if oversized_declared in streams:
         position = names.index(oversized_declared) + 1
         entry = bytearray(dir_entries[position])

@@ -39,9 +39,15 @@ import os
 import re
 import struct
 import zipfile
+import zlib
 
 from blint.lib.cfbf import CfbfError, CfbfReader, is_cfbf_bytes, parse_cfbf
-from blint.lib.container import ContainerLimits, read_zip_member_bounded, walk_zip_members
+from blint.lib.container import (
+    ContainerLimits,
+    member_path_unsafe,
+    read_zip_member_bounded,
+    walk_zip_members,
+)
 
 # Measured caps: benign generated documents and the corpus reference
 # documents run far below these; hostile fixtures exceed them by name.
@@ -61,6 +67,9 @@ MAX_MSG_ATTACHMENT_BYTES = 64 * 1024 * 1024
 MAX_RTF_OBJECT_BYTES = 64 * 1024 * 1024
 MAX_RTF_SCAN_BYTES = 32 * 1024 * 1024
 MAX_BIFF_WALK_RECORDS = 200000
+# Nested OLE objects unwrapped from a .ppt's PowerPoint Document stream.
+MAX_PPT_OLE_OBJECTS = 64
+PPT_EXOLEOBJSTG_RECORD = 0x1011
 
 OOXML_EXTENSIONS = (".docx", ".docm", ".dotm", ".xlsx", ".xlsm", ".xltm", ".pptx", ".pptm", ".potm")
 LEGACY_OFFICE_EXTENSIONS = (".doc", ".xls", ".ppt")
@@ -465,6 +474,60 @@ def analyze_ooxml(path: str, refusals: list[str], degradations: list[str]) -> di
 # Legacy Office (.doc/.xls/.ppt) and .msg — through the CFBF reader
 # ---------------------------------------------------------------------------
 
+def iter_ppt_ole_objects(stream_bytes: bytes, degradations: list[str]):
+    """Yield the nested CFBF images a ``PowerPoint Document`` stream carries.
+
+    A legacy ``.ppt`` does not keep its VBA project in a storage the
+    directory tree names. It keeps it inside the ``PowerPoint Document``
+    stream, in an ExOleObjStg record (``recType`` 0x1011) whose payload is
+    a whole OLE compound file — zlib-compressed when ``recInstance`` has
+    its low bit set, with the decompressed length in front (MS-PPT 2.10.36;
+    ``oletools.ppt_record_parser`` reads the same two shapes). Without this
+    unwrap the generic storage walk sees a ``.ppt``'s macros not at all.
+
+    Every bound here faces untrusted input (rule 30): the record walk is
+    capped, each decompression is capped at ``MAX_VBA_MODULE_BYTES``
+    against bytes actually produced, and a record that lies about its
+    length or decompresses to something that is not a CFBF is named as a
+    degradation rather than skipped in silence.
+    """
+    position = 0
+    yielded = 0
+    records = 0
+    while position + 8 <= len(stream_bytes) and records < MAX_BIFF_WALK_RECORDS:
+        records += 1
+        version_instance, record_type, record_length = struct.unpack(
+            "<HHI", stream_bytes[position : position + 8]
+        )
+        body = stream_bytes[position + 8 : position + 8 + record_length]
+        if record_length > len(stream_bytes) - position - 8:
+            degradations.append("ppt_record_length_exceeds_stream")
+            return
+        position += 8 + record_length
+        if record_type != PPT_EXOLEOBJSTG_RECORD:
+            continue
+        if yielded >= MAX_PPT_OLE_OBJECTS:
+            degradations.append("ppt_ole_object_count_exceeds_cap")
+            return
+        compressed = bool((version_instance >> 4) & 0x001)
+        if not compressed:
+            payload = body
+        elif len(body) <= 4:
+            degradations.append("ppt_ole_object_truncated")
+            continue
+        else:
+            try:
+                payload = zlib.decompressobj().decompress(body[4:], MAX_VBA_MODULE_BYTES)
+            except zlib.error:
+                degradations.append("ppt_ole_object_undecompressible")
+                continue
+        if not is_cfbf_bytes(payload):
+            degradations.append("ppt_ole_object_not_cfbf")
+            continue
+        yielded += 1
+        yield payload
+
+
 def _biff_macro_sheet_detection(workbook_bytes: bytes) -> dict:
     """Excel 4.0 (XLM) macro-sheet detection from the BIFF record stream."""
     result = {"biff_parse_status": "not_biff", "macro_sheet": False, "sheet_count": 0}
@@ -474,35 +537,30 @@ def _biff_macro_sheet_detection(workbook_bytes: bytes) -> dict:
     if bof_id not in (0x0409, 0x0209, 0x0809):
         return result
     result["biff_parse_status"] = "parsed"
+    result["hidden_sheet_count"] = 0
     position = 0
     records = 0
     while position + 4 <= len(workbook_bytes) and records < MAX_BIFF_WALK_RECORDS:
         record_id, record_size = struct.unpack("<HH", workbook_bytes[position : position + 4])
         body = workbook_bytes[position + 4 : position + 4 + record_size]
         records += 1
-        if record_id in (0x0085, 0x0851) and len(body) >= 6:  # BOUNDSHEET / SHEETEX
-            grbit = struct.unpack("<H", body[-4:-2])[0] if record_id == 0x0085 else 0
-            # BOUNDSHEET hidden/macro state lives in the grbit (hs state bits 8-9; type bits 0-1)
-            sheet_type = grbit & 0x0003
-            _ = sheet_type
+        if record_id == 0x0085 and len(body) >= 6:  # BoundSheet8
+            # MS-XLS BoundSheet8: lbPlyPos(4), then hsState(1) and dt(1).
+            # `hsState` is visibility (0 visible, 1 hidden, 2 very hidden)
+            # and `dt` is the sheet type (0 worksheet, 1 Excel 4.0 macro
+            # sheet, 2 chart, 6 VB module). They are two different bytes
+            # answering two different questions: reading the hidden bit as
+            # a macro-sheet signal reported every workbook with a hidden
+            # worksheet — an ordinary, common shape — as carrying an XLM
+            # macro sheet. Only dt == 1 is a macro sheet.
+            hs_state, sheet_type = body[4], body[5]
+            result["sheet_count"] += 1
+            if sheet_type == 0x01:
+                result["macro_sheet"] = True
+            if hs_state in (0x01, 0x02):
+                result["hidden_sheet_count"] += 1
         position += 4 + record_size
     result["record_count"] = records
-    result["macro_sheet"] = False
-    # A macro sheet is a BOUNDSHEET whose grbit type bits are 0x1 (macro).
-    position = 0
-    while position + 4 <= len(workbook_bytes):
-        record_id, record_size = struct.unpack("<HH", workbook_bytes[position : position + 4])
-        body = workbook_bytes[position + 4 : position + 4 + record_size]
-        if record_id == 0x0085 and len(body) >= 6:
-            result["sheet_count"] += 1
-            (grbit,) = struct.unpack("<H", body[4:6])
-            # BIFF8 BOUNDSHEET grbit: bits 8-15 carry the sheet type
-            # (0 worksheet, 1 macro sheet, 2 chart, 3 VB module).
-            if (grbit >> 8) & 0x03 == 1 or grbit & 0x01:
-                result["macro_sheet"] = True
-        position += 4 + record_size
-        if position >= len(workbook_bytes):
-            break
     return result
 
 
@@ -547,7 +605,6 @@ def analyze_legacy_office(path: str, refusals: list[str], degradations: list[str
     if vba_dir is not None:
         # Re-read the whole VBA storage through the project extractor.
         block["vba"] = _extract_vba_project_from_storage(reader, lowered_paths, degradations)
-    ole10 = lowered_paths.get("\\x01ole10native".replace("\\x01", "\x01") )
     ole10 = lowered_paths.get("\x01ole10native")
     if ole10 is not None:
         block["ole10_native_present"] = True
@@ -567,6 +624,23 @@ def analyze_legacy_office(path: str, refusals: list[str], degradations: list[str
                 if flags == 1 and len(strings) >= 3:
                     break
             block["ole10_native_files"] = strings[:MAX_LISTED_OLE_OBJECTS]
+    powerpoint = lowered_paths.get("powerpoint document")
+    if powerpoint is not None:
+        # A .ppt keeps its VBA project inside this stream, not in a storage
+        # the directory tree names, so the generic storage walk above found
+        # nothing for every macro-bearing presentation.
+        block["ppt_ole_object_count"] = 0
+        stream_bytes = reader.read_entry(powerpoint, cap=MAX_VBA_MODULE_BYTES * 16)
+        for image in iter_ppt_ole_objects(stream_bytes or b"", degradations):
+            block["ppt_ole_object_count"] += 1
+            nested = _extract_vba_project(image, block["refusals"], degradations)
+            if nested.get("modules"):
+                block["vba_project_present"] = True
+                if block["vba"] is None:
+                    block["vba"] = nested
+                else:
+                    block["vba"]["modules"] += nested["modules"]
+                    block["vba"]["module_count"] = len(block["vba"]["modules"])
     if any(p.endswith("workbook") or p == "book" for p in lowered_paths):
         workbook = lowered_paths.get("workbook") or lowered_paths.get("book")
         body = reader.read_entry(workbook, cap=MAX_VBA_MODULE_BYTES * 4)
@@ -666,6 +740,33 @@ def _extract_vba_project_from_storage(reader: CfbfReader, lowered_paths: dict, d
     return project
 
 
+def _is_attachment_storage(path: str, entry_type: str) -> bool:
+    """True for a top-level ``__attach_version1.0_#XXXXXXXX`` storage.
+
+    MS-OXMSG names each attachment storage with an eight-hex-digit index
+    after the prefix, so the storage's own tree path is
+    ``__attach_version1.0_#00000000`` — no trailing separator. Matching on
+    ``"__attach_version1.0_/"`` instead required a storage literally named
+    ``__attach_version1.0_`` with children under it, which no message
+    writer produces: every real ``.msg`` reported zero attachments, and
+    said nothing about it (rule 32).
+    """
+    return entry_type == "storage" and "/" not in path and path.startswith("__attach_version1.0_")
+
+
+def _decode_property_string(raw: bytes, stream_path: str) -> str:
+    """Decode a ``__substg1.0_`` string property by its property type.
+
+    The last four hex digits of the stream name are the property type:
+    ``001F`` is PT_UNICODE (UTF-16LE), ``001E`` is PT_STRING8. Decoding
+    every stream as UTF-16 turned an 8-bit subject into mojibake rather
+    than text.
+    """
+    if stream_path.upper().endswith("001E"):
+        return raw.decode("latin-1", "replace").rstrip("\x00")
+    return raw.decode("utf-16-le", "replace").rstrip("\x00")
+
+
 def analyze_msg(path: str, refusals: list[str], degradations: list[str]) -> dict:
     """``.msg``/``.oft`` through the CFBF reader: properties + attachments.
 
@@ -701,28 +802,36 @@ def analyze_msg(path: str, refusals: list[str], degradations: list[str]) -> dict
     attachments = []
     for entry in tree:
         path = entry["path"]
-        if path.startswith("__attach_version1.0_/") and entry["type"] == "storage":
+        if _is_attachment_storage(path, entry["type"]):
             attachments.append(path)
     block["attachment_count"] = len(attachments)
     for attachment_root in attachments[:MAX_LISTED_ATTACHMENTS]:
         attachment = {"path": attachment_root, "name": None, "size": None}
         for entry in tree:
             if entry["path"].startswith(attachment_root + "/") and entry["type"] == "stream":
-                if entry["path"].endswith("37010102"):  # PR_ATTACH_DATA_BIN
+                local = entry["path"].rsplit("/", 1)[-1].upper()
+                if local.startswith("__SUBSTG1.0_3701"):  # PR_ATTACH_DATA_BIN
                     attachment["size"] = entry["size"]
-                elif entry["path"].endswith("3707") or entry["path"].endswith("3704"):  # PR_ATTACHMENT_FILENAME-ish
+                elif local.startswith(("__SUBSTG1.0_3707", "__SUBSTG1.0_3704")):
+                    # PR_ATTACH_LONG_FILENAME (3707) and the short 8.3 name
+                    # (3704). Both carry a property-type suffix, so the name
+                    # is matched by prefix: `endswith("3707")` matched
+                    # neither the long form nor the short one.
                     raw = reader.read_entry(entry, cap=1024)
-                    if raw:
-                        attachment["name"] = raw.decode("utf-16-le", "replace").rstrip("\x00") or None
-        attachments_idx = len(block["attachments"])
-        _ = attachments_idx
+                    if raw and (not attachment["name"] or local.startswith("__SUBSTG1.0_3707")):
+                        attachment["name"] = (
+                            _decode_property_string(raw, entry["path"]) or None
+                        )
         block["attachments"].append(attachment)
-    # Subject property (top-level __substg1.0_0037).
+    # Subject: PR_SUBJECT is property 0037, so the stream is
+    # `__substg1.0_0037001F` / `_0037001E` — the property-type suffix is
+    # part of the name, and matching on `endswith("0037")` matched neither.
     for entry in streams:
-        if entry["path"].endswith("0037") and entry["path"].startswith("__substg"):
+        local = entry["path"].upper()
+        if "/" not in entry["path"] and local.startswith("__SUBSTG1.0_0037"):
             raw = reader.read_entry(entry, cap=4096)
             if raw:
-                block["subject"] = raw.decode("utf-16-le", "replace").rstrip("\x00")
+                block["subject"] = _decode_property_string(raw, entry["path"])
             break
     if degradations:
         block["parse_status"] = "partial"
@@ -866,10 +975,18 @@ def build_review_evidence(block: dict, exe_type: str) -> dict:
 def extract_msg_attachments(path: str, dest_dir: str, refusals: list[str]) -> dict[str, str]:
     """Extract ``.msg`` attachments so they become inputs themselves.
 
-    Attachment properties live under ``__attach_version1.0_*`` storages;
-    the data stream is ``__substg1.0_37010102`` (PR_ATTACH_DATA_BIN).
-    Extraction is bounded per attachment and in total; the caller owns the
-    ``dest_dir``.
+    Attachment properties live under ``__attach_version1.0_#XXXXXXXX``
+    storages; the data stream is ``__substg1.0_37010102``
+    (PR_ATTACH_DATA_BIN). Extraction is bounded per attachment and in
+    total; the caller owns the ``dest_dir``.
+
+    The returned key is the member path a unit is attributed to, so it
+    names the attachment as the message names it (PR_ATTACH_LONG_FILENAME)
+    rather than the property stream the bytes came out of — a unit called
+    ``__substg1.0_37010102`` tells a reader nothing about what was
+    attached. That name is untrusted, so it is only ever a label: the file
+    on disk is named from the index, and a name carrying a path separator
+    falls back to the stream name under a refusal.
     """
     extracted: dict[str, str] = {}
     try:
@@ -888,12 +1005,22 @@ def extract_msg_attachments(path: str, dest_dir: str, refusals: list[str]) -> di
     position = 0
     for entry in tree:
         path_key = entry["path"]
-        if not path_key.startswith("__attach_version1.0_/") or entry["type"] != "storage":
+        if not _is_attachment_storage(path_key, entry["type"]):
             continue
         if position >= MAX_LISTED_ATTACHMENTS:
             refusals.append("attachment_count_exceeds_cap")
             break
         position += 1
+        declared_name = None
+        for stream in tree:
+            stream_path = stream["path"]
+            if not stream_path.startswith(path_key + "/"):
+                continue
+            local = stream_path.rsplit("/", 1)[-1]
+            if local.upper().startswith(("__SUBSTG1.0_3707", "__SUBSTG1.0_3704")):
+                raw = reader.read_entry(stream, cap=1024)
+                if raw and (not declared_name or local.upper().startswith("__SUBSTG1.0_3707")):
+                    declared_name = _decode_property_string(raw, stream_path) or None
         for stream in tree:
             stream_path = stream["path"]
             if not stream_path.startswith(path_key + "/"):
@@ -907,17 +1034,18 @@ def extract_msg_attachments(path: str, dest_dir: str, refusals: list[str]) -> di
             payload = reader.read_entry(stream, cap=MAX_MSG_ATTACHMENT_BYTES)
             if not payload:
                 continue
-            name = local
-            position_name = payload
-            _ = position_name
-            dest = os.path.join(dest_dir, f"attachment_{position}_{name}.bin")
+            dest = os.path.join(dest_dir, f"attachment_{position}_{local}.bin")
             try:
                 with open(dest, "wb") as out:
                     out.write(payload)
             except OSError:
                 refusals.append("member_unreadable")
                 continue
-            extracted[f"attachment_{position}/{local}"] = dest
+            label = declared_name or local
+            if member_path_unsafe(label):
+                refusals.append("attachment_name_unsafe")
+                label = local
+            extracted[f"attachment_{position}/{label}"] = dest
             total_written += len(payload)
     return extracted
 
