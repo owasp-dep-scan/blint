@@ -1,0 +1,56 @@
+tests/test_pe_driver.py
+  s_be4a6ad278f92a::t_d7943d342b499c 26-27,559-591
+  s_be4a6ad278f92a::t_a45e2dda20e732 30
+tests/test_pe_kernel_posture.py
+  s_be4a6ad278f92a::t_0a2261b403a79d 330-348
+blint/lib/checks.py
+  s_be4a6ad278f92a::t_dadf4d9d9a086c 548-555
+tests/test_pe_ioctl_depth.py
+  s_be4a6ad278f92a::t_d115aced8f88ce 23,297-330,332-334
+  s_be4a6ad278f92a::t_eba2ab2d9b943a 331
+blint/lib/pe_usermode_surface.py
+  s_be4a6ad278f92a::t_d4468e705cb527 116-123,128-129,131,134,138-147
+  s_be4a6ad278f92a::t_425949a49771b9 173
+  s_be4a6ad278f92a::t_28cbff5ca412b9 165-172,174-181,186
+blint/lib/pe_ioctl_depth.py
+  s_be4a6ad278f92a::t_0df86f7fc12f18 209
+  s_be4a6ad278f92a::t_87b95b420003a3 187-194,197-200
+  s_be4a6ad278f92a::t_2f6915e096e9d3 248-255
+  s_be4a6ad278f92a::t_e13a4ab86f1cb9 85-89
+  s_be4a6ad278f92a::t_939eae4d82e34f 103-144
+  s_be4a6ad278f92a::t_3c04bb3bdf045c 176,184-185,195-196,201
+  s_be4a6ad278f92a::t_2e3bd4a252b517 216
+  s_be4a6ad278f92a::t_d1548d84c7884e 98-100
+  s_be4a6ad278f92a::t_51cfdce9026ad3 101-102
+blint/lib/windows_posture.py
+  s_be4a6ad278f92a::t_a298234e57c480 142-146
+tests/test_pe_usermode_surface.py
+  s_be4a6ad278f92a::t_e9de8434e879fe 25,328-360,363
+  s_be4a6ad278f92a::t_0f70a98cc07d60 361-362
+blint/lib/binary.py
+  s_be4a6ad278f92a::t_e3201055245504 1459-1466
+blint/lib/pe_driver.py
+  s_be4a6ad278f92a::t_fc45a40348dc21 342-351
+  s_be4a6ad278f92a::t_e0c27a6a146899 317
+  s_be4a6ad278f92a::t_f4a48b7ea005dc 299-304
+  s_be4a6ad278f92a::t_d9b2b2ae2465a1 411-417,419
+blint/lib/pe_kernel_posture.py
+  s_be4a6ad278f92a::t_c6e30297095dd6 402-403
+  s_be4a6ad278f92a::t_1f021f2ebe1e13 179-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bb690e0230185d7e35b6e573d15d5c39fe7d292c",
+  "prompts": {},
+  "sessions": {
+    "s_be4a6ad278f92a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ff64c36-3822-4501-a594-f3ce8590a96c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
