@@ -222,6 +222,7 @@ from blint.lib.import_attribution import (
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
 from blint.lib.macho_objc import parse_objc_metadata
+from blint.lib.pe_driver import refresh_driver_block_after_disassembly
 from blint.lib.pe_host_plugins import classify_host_plugins
 from blint.lib.pe_imports import (  # noqa: F401
     apiset_host,
@@ -1424,6 +1425,10 @@ def parse(
         if isinstance(parsed_obj, lief.PE.Binary):
             if driver_interface := classify_driver_strings(metadata):
                 metadata["driver_interface"] = driver_interface
+            # W5.1: with disassembly available, the driver block gains the
+            # facts only disassembly can see (registered WDM callbacks, the
+            # dispatch routine summary from driver_ioctls).
+            refresh_driver_block_after_disassembly(metadata)
             # Embedded cryptographic constants and opaque data regions are
             # properties of the section bytes, so they are recovered whether or
             # not the image was disassembled.

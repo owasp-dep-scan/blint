@@ -1,0 +1,110 @@
+# Driver-kind classification signals (PE lane W5.1, plan 04/A).
+#
+# A driver's kind changes what every other signal means: an IOCTL surface on
+# a minifilter is ordinary, the same surface on an unsigned WDM driver that
+# maps physical memory is a BYOVD candidate. So kind is *determined* from the
+# evidence below, never defaulted - a driver whose kind blint cannot
+# establish is reported as "unknown" (ground rule 32), and "wdm" itself is a
+# determination (the image imports the WDM interface surface from
+# ntoskrnl.exe and no framework evidence contradicts it), not a fallback.
+#
+# Every signal is a documented, exclusive relationship between a driver and
+# the component it binds to. Provenance per kind:
+#
+# - umdf            UMDF drivers are user-mode DLLs that import the
+#                   reflection-based UMDF framework (WUDFx02000.dll on
+#                   Windows 8+; the 02003 variant ships in later builds).
+#                   Microsoft Learn, "Getting Started with UMDF".
+#                   This is the one signal the plan's gate sentence does not
+#                   name (a UMDF DLL imports neither ntoskrnl.exe nor a
+#                   NATIVE subsystem), and the only way the plan's own kind
+#                   enum entry "umdf" is reachable; the addition is recorded
+#                   in the packet commit.
+# - minifilter      File system minifilter drivers register with the Filter
+#                   Manager, which lives in fltmgr.sys; only a minifilter
+#                   imports it. Microsoft Learn, "About Filter Manager"
+#                   / FltRegisterFilter: "a minifilter driver ... calls
+#                   FltRegisterFilter".
+# - storport        Storage miniport drivers bind to the Storport driver
+#                   (storport.sys); legacy SCSI Port miniports bind to
+#                   scsiport.sys. Microsoft Learn, "Storport I/O Model".
+# - ndis            NDIS drivers of every flavor (miniport, protocol,
+#                   filter) import the NDIS library ndis.sys.
+#                   Microsoft Learn, "Introduction to NDIS".
+# - wfp             Windows Filtering Platform callout drivers that run in
+#                   kernel mode import the FWP client library fwpkclnt.sys,
+#                   or call the Fwps*/Fwpm* routines netio.sys exports.
+#                   Microsoft Learn, "Windows Filtering Platform callout
+#                   drivers".
+# - wdf_static      A KMDF driver linked statically against the framework
+#                   imports the framework runtime directly
+#                   (Wdf01000.sys; Wdf01100.sys and later minor versions in
+#                   newer kits - the shared prefix is the signal).
+# - kmdf            A KMDF driver bound dynamically imports WdfLdr.sys, the
+#                   framework loader, and calls WdfVersionBind through it.
+#                   Microsoft Learn, "KMDF architecture".
+# - wdm             A kernel driver whose kernel interface is ntoskrnl.exe's
+#                   WDM export surface (Io*/Ke*/Mm*/Zw* routines) with no
+#                   framework import above is a WDM driver. This is the
+#                   classic definition, and it is evidence-based here: the
+#                   import must be present for the kind to be assigned.
+#
+# HAL extensions are deliberately NOT in this table. blint cannot
+# statically distinguish "HAL extension" from an ordinary WDM driver that
+# also imports hal.dll (most drivers import both ntoskrnl.exe and hal.dll),
+# and inventing a weaker signal to fill the enum would manufacture kinds.
+# Such drivers classify as wdm or unknown, with their evidence shown.
+#
+# Precedence: when a driver matches several kinds (a KMDF minifilter
+# imports both fltmgr.sys and wdfldr.sys), the kind reported is the first
+# match in this order - the specific I/O model (filter, storage, network)
+# says more about what its IOCTL surface means than the framework wrapping
+# it. Nothing is discarded: every matched signal is carried in
+# driver.kind_evidence so a reader can see the full classification basis.
+precedence:
+  - umdf
+  - minifilter
+  - storport
+  - ndis
+  - wfp
+  - wdf_static
+  - kmdf
+  - wdm
+
+kinds:
+  umdf:
+    title: User-Mode Driver Framework driver
+    dll_prefixes:
+      - wudfx
+  minifilter:
+    title: File system minifilter
+    dlls:
+      - fltmgr.sys
+  storport:
+    title: Storage port/miniport driver
+    dlls:
+      - storport.sys
+      - scsiport.sys
+  ndis:
+    title: NDIS network driver
+    dlls:
+      - ndis.sys
+  wfp:
+    title: Windows Filtering Platform callout
+    dlls:
+      - fwpkclnt.sys
+    import_prefixes:
+      - fwps
+      - fwpm
+  wdf_static:
+    title: KMDF driver (statically linked framework)
+    dll_prefixes:
+      - wdf01
+  kmdf:
+    title: KMDF driver (dynamically bound through WdfLdr)
+    dlls:
+      - wdfldr.sys
+  wdm:
+    title: WDM driver
+    dlls:
+      - ntoskrnl.exe

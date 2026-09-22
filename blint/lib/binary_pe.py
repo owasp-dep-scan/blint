@@ -52,6 +52,7 @@ from blint.lib.pe_debug import (
 )
 from blint.lib.pe_dotnet import parse_pe_dotnet
 from blint.lib.pe_dotnet_shape import classify_dotnet_shape, read_bundle_deps_json
+from blint.lib.pe_driver import build_driver_block
 from blint.lib.pe_imports import (
     TAG_FORWARDER,
     TAG_PINVOKE,
@@ -1044,6 +1045,13 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                 if e["name"] == "ntoskrnl.exe":
                     metadata["is_driver"] = True
                     break
+        # W5.1: the driver identity block (kind, WDF binding, kernel object
+        # paths, signing class) for every driver-shaped image. The block
+        # needs imports and code_signature, both set above; binary.parse
+        # refreshes it with the disassembly-derived facts (WDM callbacks,
+        # dispatch routines) on the disassembly path.
+        if driver_block := build_driver_block(metadata, parsed_obj):
+            metadata["driver"] = driver_block
         rdata_section = parsed_obj.get_section(".rdata")
         text_section = parsed_obj.get_section(".text")
         # If there are no .rdata and .text section, then attempt to look for two alphanumeric sections
