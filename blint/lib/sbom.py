@@ -91,17 +91,24 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict | None = None) ->
     # artifact kind, so the component type keeps following it.
     if name.endswith(".dll"):
         name = name.removesuffix(".dll")
-        purl_type = "generic"
         pkg_type = Type.library
     else:
-        purl_type = "generic"
         pkg_type = Type.application
-    purl = PackageURL(type=purl_type, name=name).to_string()
-    if symbols_purl_map and symbols_purl_map.get(purl):
-        purl = symbols_purl_map[purl]
-        pkg_type = Type.library
-        if "@" in purl:
-            version = purl.split("@")[-1]
+    purl = PackageURL(type="generic", name=name).to_string()
+    # A build BOM (`--src-dir-boms`) states real package identities, and
+    # `populate_purl_lookup` keys them by unversioned `pkg:nuget/<name>`
+    # only. Looking that map up under the generic purl computed above can
+    # never hit, so the lookup is tried under both: the generic purl this
+    # function produces, and the NuGet key the map actually holds. A hit
+    # is evidence — a BOM naming the package — not a filename guess, which
+    # is why it may still yield a `pkg:nuget` purl here.
+    for key in (purl, f"pkg:nuget/{name}"):
+        if symbols_purl_map and symbols_purl_map.get(key):
+            purl = symbols_purl_map[key]
+            pkg_type = Type.library
+            if "@" in purl:
+                version = purl.split("@")[-1]
+            break
     component = Component(type=pkg_type, name=name, version=version, purl=purl)
     component.bom_ref = RefType(purl)
     return component
@@ -2020,7 +2027,14 @@ def process_nupkg_file(
     package_id = nuspec.get("package_id")
     package_version = nuspec.get("package_version")
     if package_id and package_version:
-        purl = f"pkg:nuget/{package_id}@{package_version}"
+        # Built through PackageURL, not an f-string: these two come from
+        # untrusted XML inside an untrusted archive, and a character that
+        # needs escaping (a space, a `?`, a `#`) would otherwise produce a
+        # purl and a bom-ref that do not round-trip. The AssemblyRef path
+        # is built the same way, from the same reasoning.
+        purl = PackageURL(
+            type="nuget", name=package_id, version=package_version
+        ).to_string()
         parent = Component(
             type=Type.library,
             name=package_id,
@@ -2050,9 +2064,9 @@ def process_nupkg_file(
         if not dep_id:
             continue
         exact = dep.get("exact_version")
-        dep_purl = (
-            f"pkg:nuget/{dep_id}@{exact}" if exact else f"pkg:nuget/{dep_id}"
-        )
+        dep_purl = PackageURL(
+            type="nuget", name=dep_id, version=exact or None
+        ).to_string()
         if any(str(c.purl) == dep_purl for c in lib_components):
             continue
         properties = [Property(name="internal:version_range", value=dep.get("version_range") or "")]

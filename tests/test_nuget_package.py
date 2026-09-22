@@ -186,7 +186,19 @@ def test_nuspec_size_cap_refuses_by_name(tmp_path):
 
 @pytest.mark.parametrize(
     "member_name",
-    ["../evil.txt", "lib/../../evil.txt", "/etc/passwd", "C:evil.dll"],
+    [
+        "../evil.txt",
+        "lib/../../evil.txt",
+        "/etc/passwd",
+        "C:evil.dll",
+        # The drive-absolute form, which is what an archiver actually
+        # writes and what ntpath.join actually honours: joining an output
+        # directory with "C:/evil/x" yields "C:/evil/x". Testing only the
+        # drive-relative "C:evil.dll" above tested the shape the code
+        # happened to check rather than the shape that escapes.
+        "C:/evil/evil.dll",
+        "c:/evil.dll",
+    ],
 )
 def test_unsafe_member_paths_refuse_by_name(tmp_path, member_name):
     # Ground rule 30's traversal class. A "\" in a member name is refused

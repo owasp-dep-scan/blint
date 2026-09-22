@@ -75,12 +75,12 @@ def _member_path_unsafe(name: str) -> bool:
     segments = name.split("/")
     if any(seg == ".." for seg in segments):
         return True
-    if len(segments) == 1 and ":" in name.split(".")[0]:
-        # drive-letter member like "C:evil" with no directory component
-        prefix = name.split(":")[0]
-        if len(prefix) == 1 and prefix.isalpha():
-            return True
-    return False
+    # Any drive-letter prefix, with or without a directory component: both
+    # `C:evil` (drive-relative) and `C:/evil/x` (drive-absolute) escape an
+    # output directory, because ntpath.join discards the base as soon as
+    # the second argument names a drive. Refusing only the first form would
+    # leave the one an archiver actually writes.
+    return len(name) >= 2 and name[1] == ":" and name[0].isalpha()
 
 
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
