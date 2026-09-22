@@ -1,4 +1,28 @@
 ---
+- id: CHECK_HVCI_COMPATIBLE
+  title: Driver Incompatible with HVCI (Memory Integrity)
+  description: |
+    This driver's image violates Microsoft's documented HVCI (hypervisor-protected code integrity / memory integrity) compatibility ruleset, so with memory integrity enabled the kernel refuses to load it - or the driver's vendor ships it with memory integrity effectively unusable on the machines it protects. Each violation names its condition: an x86 machine target (x86 kernels are never HVCI-compatible), a section that is both writable and executable (HVCI forbids W+X kernel pages), section alignment below one page (executable pages are managed at page granularity), or stripped base relocations (a driver without relocations cannot load at randomized addresses).
+    Measured before this rule shipped: all 330 drivers on a Windows 11 ARM64 system's full C:\Windows\System32\drivers pass every condition, so a failure is a signal, not noise. blint evaluates the statically decidable conditions only; it does not emulate Microsoft's checker beyond them, and a condition whose header source could not be read is reported undetermined rather than failed.
+    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (the W5.6 measurement: 3 of 177 Windows PEs land outside PE32/PE64).
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - genericbinary
+- id: CHECK_BOOT_START_INTEGRITYCHECK
+  title: Boot-Start Driver Without /INTEGRITYCHECK
+  description: |
+    This driver is loaded by the Windows boot loader (subsystem WINDOWS_BOOT_APPLICATION - the set winload itself loads) and does not set /INTEGRITYCHECK (FORCE_INTEGRITY), which is mandatory for boot-start drivers: the flag is what lets the loader enforce the image's integrity before the kernel exists to do so.
+    Boot-start-ness is determined statically exactly once, from the subsystem; for every other driver the StartType lives in the registry blint does not read, so this rule stays silent rather than assume a driver is boot-start. The flag's absence must also be computed from a readable DLL-characteristics source - an undetermined flag is not an absent one.
+    Measured population: no WINDOWS_BOOT_APPLICATION image exists in the lane's driver corpus (the VM's System32\drivers carries none), so this rule fires zero times on the benign population; the fixtures prove both the firing and the silent shapes.
+  severity: medium
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - genericbinary
 - id: CHECK_NX
   title: Missing Non-Executable Memory Protection
   description: |

@@ -74,7 +74,7 @@ def test_all_ids_unique(index):
 def test_check_count_and_engine_parity(index):
     """The catalog's checks are exactly the rules the engine dispatches."""
     checks = _by_kind(index, "check")
-    assert len(checks) == 35  # rules.yml today (20 + the four provisioning/objc-load rules; W0.3 removed the five PE property rules, W1.1 added CHECK_BUILD_PATH_LEAK, W1.4 added CHECK_TLS_CALLBACKS, W2.2 added CHECK_SIGNATURE_NOT_TIMESTAMPED and CHECK_WEAK_SIGNATURE_DIGEST, W2.4 added CHECK_SELF_SIGNED, CHECK_SIGNATURE_UNKNOWN_ROOT, CHECK_KERNEL_SIGNING_CLASS and CHECK_SIGNER_MISMATCH, W5.6 added CHECK_PRIVILEGED_HOST_PLUGIN, CHECK_UNSIGNED_HOST_PLUGIN and CHECK_LSA_PLUGIN, W4.1 added CHECK_MSIX_RESTRICTED_CAPABILITY)
+    assert len(checks) == 37  # rules.yml today (20 + the four provisioning/objc-load rules; W0.3 removed the five PE property rules, W1.1 added CHECK_BUILD_PATH_LEAK, W1.4 added CHECK_TLS_CALLBACKS, W2.2 added CHECK_SIGNATURE_NOT_TIMESTAMPED and CHECK_WEAK_SIGNATURE_DIGEST, W2.4 added CHECK_SELF_SIGNED, CHECK_SIGNATURE_UNKNOWN_ROOT, CHECK_KERNEL_SIGNING_CLASS and CHECK_SIGNER_MISMATCH, W5.6 added CHECK_PRIVILEGED_HOST_PLUGIN, CHECK_UNSIGNED_HOST_PLUGIN and CHECK_LSA_PLUGIN, W4.1 added CHECK_MSIX_RESTRICTED_CAPABILITY, W5.2 added CHECK_HVCI_COMPATIBLE and CHECK_BOOT_START_INTEGRITYCHECK)
     assert {e["id"] for e in checks} == set(analysis_mod.rules_dict)
 
 

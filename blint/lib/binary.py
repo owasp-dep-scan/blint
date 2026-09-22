@@ -232,6 +232,7 @@ from blint.lib.pe_imports import (  # noqa: F401
     parse_pe_delay_imports,
     summarize_resolution,
 )
+from blint.lib.pe_kernel_posture import refresh_kernel_posture_after_disassembly
 from blint.lib.pe_layout import (  # noqa: F401
     parse_pe_layout,
     parse_pre_main_execution,
@@ -1429,6 +1430,9 @@ def parse(
             # facts only disassembly can see (registered WDM callbacks, the
             # dispatch routine summary from driver_ioctls).
             refresh_driver_block_after_disassembly(metadata)
+            # W5.2: the MSR/port-instruction evidence for the scored
+            # dangerous-import families is disassembly-level.
+            refresh_kernel_posture_after_disassembly(metadata)
             # Embedded cryptographic constants and opaque data regions are
             # properties of the section bytes, so they are recovered whether or
             # not the image was disassembled.

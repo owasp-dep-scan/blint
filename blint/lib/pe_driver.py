@@ -38,6 +38,7 @@ from typing import Any
 import lief
 
 from blint.lib.binary_common import is_string_bearing_section
+from blint.lib.pe_kernel_posture import apply_kernel_posture
 
 # Kernel object namespace prefixes. Kernel object paths are unambiguous, so
 # a match is a fact about the object the image names (the same prefixes
@@ -609,6 +610,10 @@ def build_driver_block(metadata: dict[str, Any], parsed_obj: lief.PE.Binary) -> 
         if signing_view:
             signing_view["source"] = "code_signature"
             block["signing"] = signing_view
+    # W5.2: the kernel hardening posture (HVCI conditions, kernel CFG /
+    # retpoline facts, scored BYOVD primitive families) attaches here so the
+    # block stays the one-stop driver identity+posture summary.
+    apply_kernel_posture(block, metadata)
     return block
 
 
