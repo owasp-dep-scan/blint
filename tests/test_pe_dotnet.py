@@ -1507,6 +1507,11 @@ def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
     argued_pe_only_scopes = {
         "CHECK_HVCI_COMPATIBLE",
         "CHECK_BOOT_START_INTEGRITYCHECK",
+        # W5.3: the rule reports "this exact image is a kernel driver on
+        # the blocklist"; a managed assembly is not a kernel image, and
+        # exe_type dotnetbinary is set precisely when a CLI header exists,
+        # which no driver in the snapshot has.
+        "CHECK_KNOWN_VULNERABLE_DRIVER",
     }
     assert native - managed == set(argued_pe_only_scopes)
     assert argued_removals & native == set()

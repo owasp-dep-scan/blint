@@ -483,6 +483,33 @@ def check_lsa_plugin(
     )
 
 
+def check_known_vulnerable_driver(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Reports a binary whose digest pins it in the vulnerable-driver
+    snapshot (04/C.4).
+
+    The snapshot (loldrivers.io plus the Microsoft recommended driver block
+    rules) ships as data with provenance; refreshing it is a data PR and
+    there is no network call at scan time. Matching is exact-hash only -
+    SHA-256 or MD5 - because driver filenames collide across vendors and
+    the accusation is specific enough that a name match would be a false
+    positive by construction. The finding names the driver entry and the
+    source that knows it, so a reviewer can go from blint's line to the
+    published advisory directly.
+    """
+    block = metadata.get("vulnerable_driver")
+    if not isinstance(block, dict):
+        return True
+    matches = block.get("matches") or []
+    if block.get("lookup_status") != "matched" or not matches:
+        return True
+    named = []
+    for match in matches[:3]:
+        named.append(f"{match.get('driver')} ({match.get('source')}, by {match.get('field')})")
+    return "known vulnerable driver: " + "; ".join(named)
+
+
 def _driver_block(metadata: dict[str, Any]) -> dict[str, Any] | None:
     """The W5.1 ``driver`` block when this image is a driver."""
     block = metadata.get("driver")

@@ -1,4 +1,16 @@
 ---
+- id: CHECK_KNOWN_VULNERABLE_DRIVER
+  title: Known Vulnerable Driver
+  description: |
+    This exact file (matched by SHA-256 or MD5 digest, never by name) is listed in blint's shipped snapshot of the loldrivers.io dataset and/or the Microsoft recommended driver block rules: a legitimately signed driver with a published vulnerability that bring-your-own-vulnerable-driver (BYOVD) chains load to gain kernel read/write, defeat HVCI and PPL, and disable security software. The finding names the driver entry and the source that lists it.
+    The snapshot ships as data with its fetch date and source URLs (blint/data/pe_vulnerable_drivers.json); refreshing it is a data PR - there is no network call at scan time, ever. Matching is exact-digest only because driver filenames collide across vendors and this accusation is specific enough that a name match would be a false positive by construction. Measured: zero hits across all 330 drivers on a Windows 11 system's full C:\Windows\System32\drivers (the benign sub-tier), and the published control codes of CVE-2025-7771 (ThrottleStop.sys 0x80006498/0x8000649C) reproduce from the matched sample.
+    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (the W5.6 measurement).
+  severity: high
+  exe_types:
+    - PE32
+    - PE64
+    - gobinary
+    - genericbinary
 - id: CHECK_HVCI_COMPATIBLE
   title: Driver Incompatible with HVCI (Memory Integrity)
   description: |

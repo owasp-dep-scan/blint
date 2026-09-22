@@ -32,6 +32,7 @@ from blint.lib.checks import (
     check_dll_characteristics,  # noqa: F401
     check_hvci_compatible,  # noqa: F401
     check_kernel_signing_class,  # noqa: F401
+    check_known_vulnerable_driver,  # noqa: F401
     check_libc_portability,  # noqa: F401
     check_link_closure,  # noqa: F401
     check_lsa_plugin,  # noqa: F401

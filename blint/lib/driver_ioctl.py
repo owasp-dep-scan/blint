@@ -244,6 +244,18 @@ _DISPATCH_STORE_TEMPLATE_X86 = (
     r"(?:{hex_off}|{dec_off}|{suffix_off})\s*\]\s*,"
 )
 
+# The ARM64 form, for the same two slots: `str x9, [x0, #224]`. The slot holds
+# a function pointer, so only the 64-bit `str x` form counts (`str w`/`strb`
+# at the same offset is a different object). `str xzr` is the driver writing
+# NULL - explicitly no handler - and never counts, and a frame-pointer base
+# (x29) is excluded for the same reason as rsp/rbp above. blint renders
+# immediates in decimal by default, so the offset is matched in both decimal
+# and 0x-hex forms.
+_DISPATCH_STORE_TEMPLATE_ARM64 = (
+    r"\bstr\s+x(?!zr\b)([0-9]+)\s*,\s*\[\s*"
+    r"(?!x29\b|xzr\b)x[0-9]+\s*,\s*#(?:{dec_off}|{hex_off})\s*\]"
+)
+
 
 def _dispatch_store_patterns(
     slots: dict[int, str] | None = None, template: str | None = None
@@ -264,6 +276,9 @@ def _dispatch_store_patterns(
 DISPATCH_STORE_PATTERNS = _dispatch_store_patterns()
 DISPATCH_STORE_PATTERNS_X86 = _dispatch_store_patterns(
     DISPATCH_SLOTS_X86, _DISPATCH_STORE_TEMPLATE_X86
+)
+DISPATCH_STORE_PATTERNS_ARM64 = _dispatch_store_patterns(
+    DISPATCH_SLOTS, _DISPATCH_STORE_TEMPLATE_ARM64
 )
 
 # A kernel driver runs in the native subsystem; user-mode PE files do not.
@@ -337,9 +352,12 @@ def is_plausible_ioctl(code: int) -> bool:
 def find_dispatch_handlers(disassembled_functions: dict) -> list[dict]:
     """Find functions that install an IRP_MJ_DEVICE_CONTROL dispatch routine.
 
-    Both the x64 and the x86 DRIVER_OBJECT layouts are matched, since a driver
-    built for 32-bit Windows stores through a different offset and stride and
-    would otherwise look like it never installs a dispatch routine at all.
+    All three nyxstone renderings are matched: Intel x64, Intel x86, and
+    AArch64 (`str xN, [xM, #224]` - the W5.3 addition; the lane's own
+    driver corpus is ARM64 and without it no inbox driver reported a
+    dispatch routine at all). A 32-bit driver installing its dispatch
+    routine is invisible to the x64 offsets alone, and an ARM64 driver was
+    invisible to both, which is why the layouts are matched together.
     """
     handlers: list[dict] = []
     for func_key, func_data in disassembled_functions.items():
@@ -349,6 +367,7 @@ def find_dispatch_handlers(disassembled_functions: dict) -> list[dict]:
         for patterns, layout in (
             (DISPATCH_STORE_PATTERNS, "x64"),
             (DISPATCH_STORE_PATTERNS_X86, "x86"),
+            (DISPATCH_STORE_PATTERNS_ARM64, "arm64"),
         ):
             for slot_name, pattern in patterns.items():
                 if pattern.search(assembly):
