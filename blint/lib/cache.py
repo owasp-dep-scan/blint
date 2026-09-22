@@ -109,7 +109,7 @@ from blint.logger import LOG
 # carries none of it, and a null signature would read as absent — on a
 # delay-signed assembly, exactly the verdict-shaped gap the packet exists
 # to close.
-CACHE_SCHEMA_VERSION = 10
+CACHE_SCHEMA_VERSION = 11
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that

@@ -19,6 +19,7 @@ from blint.lib.android import analyze_android_app
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
+from blint.lib.clickonce import clickonce_metadata, is_clickonce_file, parse_clickonce
 from blint.lib.container import bounded_temp_dir
 from blint.lib.finding_ids import attach_finding_ids
 from blint.lib.ios import (
@@ -48,10 +49,12 @@ from blint.lib.parallel import (
 from blint.lib.pe_catalog import apply_catalog_signature, build_catalog_index
 from blint.lib.review_runner import ReviewRunner
 from blint.lib.sbom import generate
+from blint.lib.sevenz import extract_sevenz_members
 from blint.lib.tbd_index import TbdSdkError, load_or_build_index
 from blint.lib.utils import (
     export_metadata,
     find_android_files,
+    find_clickonce_files,
     find_ios_files,
     gen_file_list,
     get_hex_truncation_count,
@@ -140,6 +143,9 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
         if blint_options.sbom_output_dir and not os.path.exists(blint_options.sbom_output_dir):
             os.makedirs(blint_options.sbom_output_dir)
     exe_files = gen_file_list(blint_options.src_dir_image)
+    for src in blint_options.src_dir_image:
+        if files := find_clickonce_files(src):
+            exe_files += [f for f in files if f not in exe_files]
     wasm_files = [f for f in exe_files if is_wasm_file(f)]
     if wasm_files:
         LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
@@ -176,6 +182,9 @@ def run_default_mode(blint_options: BlintOptions) -> None:
     for src in blint_options.src_dir_image:
         if files := find_macos_bundles(src):
             macos_bundles += files
+        if files := find_clickonce_files(src):
+            # Text-format containers the binary sniff cannot see.
+            exe_files += [f for f in files if f not in exe_files]
     # A bundle directory covers everything inside it (the walker descends
     # into embedded bundles itself), so loose executables discovered within
     # one must not also be analysed as top-level units.
@@ -720,9 +729,26 @@ class AnalysisRunner:
             if blint_options.disassemble and not should_disassemble:
                 LOG.debug(f"Skipping disassembly for wasm file {f}")
             metadata = self._parse_with_cache(f, blint_options, "top-level")
+        if is_clickonce_file(f):
+            # ClickOnce manifests are XML: parse, report declared facts,
+            # done — no member extraction (the referenced assemblies live
+            # on the deployment share, not in the file).
+            clickonce_block = parse_clickonce(f)
+            if clickonce_block is not None:
+                metadata = clickonce_metadata(clickonce_block, f)
+                self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+                self._mark_success("top-level")
+                self.progress.advance(self.task)
+                return
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
         self.progress.advance(self.task)
+        # W4.3: a 7z-SFX carries its payload as an appended 7z archive; the
+        # decodable members analyze as sfx-member units attributed to their
+        # member path, beside the stub executable's own top-level unit.
+        installer_block = metadata.get("installer") if isinstance(metadata, dict) else None
+        if isinstance(installer_block, dict) and installer_block.get("family") == "sfx_7z":
+            self._process_sfx_members(f, blint_options, wants_callgraph_outputs)
 
     def _process_ios_file(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
@@ -813,6 +839,49 @@ class AnalysisRunner:
             except Exception as e:
                 self._record_failure(bin_path, "bundle-member", "process", e)
         return True
+
+    def _process_sfx_members(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Extract an SFX's appended 7z payload and analyze its PE members.
+
+        The stub executable has already been analyzed as its own unit; each
+        decodable member is an ``sfx-member`` unit. Members in BCJ2/PPMd/
+        encrypted folders refuse by name (the installer block records the
+        refusal), and the temp directory is removed on every exit path.
+        """
+        assert self.task is not None
+        try:
+            with open(f, "rb") as handle:
+                data = handle.read(8 * 1024 * 1024)
+        except OSError:
+            return
+        with bounded_temp_dir(prefix="blint_sfx_") as temp_dir:
+            refusals: list[str] = []
+            extracted = extract_sevenz_members(data, temp_dir, refusals)
+            for member_name, member_path in sorted(extracted.items()):
+                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
+                    continue
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{member_name}[/bold] (sfx-member)",
+                )
+                self._mark_attempted("sfx-member")
+                try:
+                    member_metadata = self._parse_with_cache(member_path, blint_options, "sfx-member")
+                    member_metadata["container"] = {
+                        "kind": "sfx_7z",
+                        "member_path": member_name,
+                        "role": "sfx-member",
+                    }
+                    member_metadata["name"] = member_name
+                    member_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("sfx-member")
+                except Exception as e:
+                    self._record_failure(member_name, "sfx-member", "process", e)
 
     def _process_msix_container(
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool

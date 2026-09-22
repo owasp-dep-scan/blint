@@ -449,6 +449,20 @@ def is_android_app(path: str) -> bool:
 
 IOS_APP_EXTNS: tuple[str, ...] = (".ipa",)
 
+# ClickOnce deployment manifests are XML text, so the binary sniff misses
+# them; they are discovered by extension and content-checked at routing.
+CLICKONCE_EXTS: tuple[str, ...] = (".application",)
+
+
+def find_clickonce_files(path: str) -> list[str]:
+    """
+    Discover ClickOnce deployment manifests (``.application``) under a path.
+
+    :param path: Project directory
+    :return: List of ClickOnce deployment manifests
+    """
+    return find_files(path, list(CLICKONCE_EXTS))
+
 
 def find_ios_files(path: str) -> list[str]:
     """

@@ -43,6 +43,7 @@ from blint.lib.android_services import detect_services
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.cab import is_cab_file, parse_cab
+from blint.lib.clickonce import parse_clickonce
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.msi import parse_msi
@@ -236,6 +237,14 @@ def generate(
                         advance=1,
                     )
                     components += process_nupkg_file(dependencies_dict, exe, sbom)
+                    continue
+                if exe.lower().endswith(".application"):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_clickonce_file(dependencies_dict, exe, sbom)
                     continue
                 if exe.lower().endswith((".msi", ".msp")):
                     progress.update(
@@ -2212,6 +2221,71 @@ def process_msix_file(
     finally:
         if collection and collection.get("temp_dir"):
             shutil.rmtree(collection["temp_dir"], ignore_errors=True)
+
+
+def process_clickonce_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one ClickOnce deployment manifest: identity from XML.
+
+    The deployment identity (name, version, public key token) is the
+    component; the update URL and requested trust ride as properties.
+    Refusals reach the BOM beside the component (rule 32).
+    """
+    block = parse_clickonce(f)
+    if block is None:
+        parent = default_parent([f])
+        parent.properties = [
+            Property(name="internal:srcFile", value=f),
+            Property(name="internal:container_refusal", value="manifest_unparseable"),
+        ]
+        if not sbom.metadata.component.components:
+            sbom.metadata.component.components = []
+        _add_to_parent_component(sbom.metadata.component.components, parent)
+        return []
+    identity = block.get("identity") or {}
+    name = identity.get("name") or os.path.basename(f)
+    version = str(identity.get("version") or "")
+    token = identity.get("publicKeyToken")
+    purl = PackageURL(
+        type="generic", name=name, version=version or None,
+        qualifiers={"public_key_token": token} if token else None,
+    ).to_string()
+    parent = Component(
+        type=Type.application,
+        name=name,
+        version=version,
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value=f"clickonce-{block.get('kind')}"),
+        Property(name="internal:version_source", value="deployment_identity"),
+    ]
+    if block.get("update_url"):
+        parent.properties.append(
+            Property(name="internal:clickonceUpdateUrl", value=block["update_url"])
+        )
+    if block.get("publisher"):
+        parent.properties.append(
+            Property(name="internal:clickoncePublisher", value=block["publisher"])
+        )
+    if block.get("signature_present"):
+        parent.properties.append(
+            Property(name="internal:clickonceSigned", value="true")
+        )
+    if block.get("refusals"):
+        parent.properties.append(
+            Property(name="internal:clickonce_refusals", value=", ".join(sorted(set(block["refusals"]))))
+        )
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    return []
 
 
 def process_msi_file(

@@ -39,6 +39,7 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.driver_ioctl import (
     IOCTL_TABLE_SECTIONS,
 )
+from blint.lib.installers import detect_installer
 from blint.lib.pe_constants import (
     IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS,
     decode_dll_characteristics,
@@ -1223,6 +1224,12 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             # pe_overlay, so a signed stock binary reports no overlay at all.
             if overlay_info := classify_pe_overlay(parsed_obj, exe_file):
                 metadata["overlay_info"] = overlay_info
+                # W4.3: installer families (nsis, sfx_7z, inno,
+                # installshield) get documented header facts; sfx_7z adds
+                # the appended 7z payload's member listing. CACHE_SCHEMA_
+                # VERSION moved to 11 in this packet for this block.
+                if installer_block := detect_installer(exe_file, overlay_info.get("classification")):
+                    metadata["installer"] = installer_block
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Failed to parse PE overlay for {exe_file}: {e}")
     return metadata
