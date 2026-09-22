@@ -29,6 +29,7 @@ from blint.cyclonedx.spec import (
     Scope,
     Tools,
     Type,
+    Version,
 )
 from blint.db import (
     blintdb_fuzzy_layer_state,
@@ -43,6 +44,7 @@ from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
+from blint.lib.nuget_package import read_nupkg_nuspec
 from blint.lib.parallel import (
     PoolStartupError,
     WorkerSpec,
@@ -78,11 +80,23 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict | None = None) ->
     # Extract the name from the .rlib files
     if name.endswith(".rlib"):
         name = name.split("-")[0].removeprefix("lib")
-    purl_type = "nuget" if name.endswith(".dll") else "generic"
-    if purl_type == "nuget":
-        name = name.replace(".dll", "")
+    # W3.5: a `.dll` filename is not evidence of a NuGet package (ground
+    # rule 11) — over corpus tiers 0/1/5, 217 of 219 `pkg:nuget` parents
+    # produced here sat on native DLLs with no CLI header (`pkg:nuget/
+    # python313`, `pkg:nuget/libcrypto-3`). The purl type here is now
+    # always generic; a `pkg:nuget` purl comes only from evidence — the
+    # CLI-header assembly identity for a managed file
+    # (upgrade_parent_to_assembly_identity) or the `.nuspec` for a `.nupkg`
+    # input (process_nupkg_file). The `.dll` basename still marks the
+    # artifact kind, so the component type keeps following it.
+    if name.endswith(".dll"):
+        name = name.removesuffix(".dll")
+        purl_type = "generic"
+        pkg_type = Type.library
+    else:
+        purl_type = "generic"
+        pkg_type = Type.application
     purl = PackageURL(type=purl_type, name=name).to_string()
-    pkg_type = Type.library if purl_type not in ("generic",) else Type.application
     if symbols_purl_map and symbols_purl_map.get(purl):
         purl = symbols_purl_map[purl]
         pkg_type = Type.library
@@ -201,6 +215,17 @@ def generate(
                         components += process_wasm_file(dependencies_dict, exe, sbom)
                     else:
                         skipped_wasm += 1
+                    continue
+                if exe.lower().endswith(".nupkg"):
+                    # W3.5: a .nupkg is a package archive, not a binary —
+                    # its identity comes from the .nuspec member, never
+                    # from being parsed as a PE.
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_nupkg_file(dependencies_dict, exe, sbom)
                     continue
                 progress.update(
                     task,
@@ -460,8 +485,12 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
         # Strip the extension and version suffix so the component name matches
         # what a package ecosystem calls the library.
         base = name.split(".so")[0].removesuffix(".dylib").removesuffix(".dll")
-        pkg_type = "nuget" if name.endswith(".dll") else "generic"
-        purl = PackageURL(type=pkg_type, name=base).to_string()
+        # W3.5: no `pkg:nuget` from a `.dll` filename here — this layer
+        # knows a library name a binary loads at runtime, and a name is not
+        # evidence of a package (ground rule 11). Only ELF producers feed
+        # this list, so the branch was unreachable in practice; it is gone
+        # on principle, with a negative fixture holding the property.
+        purl = PackageURL(type="generic", name=base).to_string()
         comp = Component(
             type=Type.library,
             name=base,
@@ -502,7 +531,10 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
         group = ""
         name = symbol["name"]
         version = None
-        pkg_type = "nuget" if name.endswith(".dll") else "generic"
+        # W3.5: same correction as the recovered-dependency site — a
+        # `.dll`-suffixed GNU version-definition name (this list is
+        # ELF-produced only) is not evidence of a NuGet package.
+        pkg_type = "generic"
         if "_" in name:
             tmp_a = name.split("_")
             if len(tmp_a) == 2:
@@ -511,8 +543,6 @@ def components_from_symbols_version(symbols_version: list[dict]) -> list[Compone
                 if name.startswith("glib"):
                     name = name.removeprefix("g")
                     group = "gnu"
-        if pkg_type == "nuget":
-            name = name.replace(".dll", "")
         purl = PackageURL(
             type=pkg_type,
             namespace=group or None,
@@ -613,6 +643,18 @@ def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
         }
     scratch = _scratch_sbom()
     deps_updates: dict[str, set] = {}
+    if file_path.lower().endswith(".nupkg"):
+        # W3.5: same routing as the sequential loop — a .nupkg's identity
+        # comes from its .nuspec member, not from PE parsing.
+        components = process_nupkg_file(deps_updates, file_path, scratch)
+        return {
+            "wasm": False,
+            "skipped": False,
+            "components": components,
+            "parent_components": _drain_parent_components(scratch),
+            "deps_updates": {ref: sorted(refs) for ref, refs in deps_updates.items()},
+            "logs": take_worker_logs(),
+        }
     components = process_exe_file(
         deps_updates,
         state["deep_mode"],
@@ -767,6 +809,18 @@ def process_exe_file(
     metadata: dict[str, Any] = parse(exe, disassemble=disassemble, sdk_path=sdk_path)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
+    # W3.5: a managed file's identity comes from its CLI header, not its
+    # filename — the same evidence rule that removed the `.dll`-to-nuget
+    # heuristic from default_parent. Files with a CLI header but no stated
+    # assembly identity (apphosts, single-file bundles, unreadable streams)
+    # keep the generic parent: the purl states only what blint can back.
+    dotnet_metadata = metadata.get("dotnet") or {}
+    if (assembly := dotnet_metadata.get("assembly") or {}).get("name"):
+        upgrade_parent_to_assembly_identity(parent_component, assembly, symbols_purl_map)
+    if assemblyref_state := dotnet_assemblyref_state(dotnet_metadata):
+        parent_component.properties.append(
+            Property(name="internal:dotnet_assemblyref_state", value=assemblyref_state)
+        )
     lib_components: list[Component] = []
     for prop in (
         "binary_type",
@@ -1817,12 +1871,17 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
 
     The version is the four-part assembly version the metadata carries (the
     NuGet package version may differ; the assembly version is what the
-    loading runtime binds against). The public key token rides as a
-    property — the identity qualifier every NuGet consumer knows.
+    loading runtime binds against). The public key token rides as a purl
+    ``token`` qualifier (W3.5, section 03/D) — the identity qualifier every
+    NuGet consumer knows — and no longer as a property: a token in the
+    purl is matchable, the same token in a property is only visible to a
+    consumer that already found the component.
 
-    Because the two versions differ — Newtonsoft.Json 13.0.3 ships
-    assembly version 13.0.0.0 — every component says which one it carries
-    in ``internal:version_source``. A consumer matching these purls against
+    Because the two versions differ — measured over the tier-2 corpus and
+    a 21-package VM oracle, zero of 50 package identities are string-equal
+    and 31 differ semantically (Newtonsoft.Json 13.0.3 ships assembly
+    version 13.0.0.0) — every component says which one it carries in
+    ``internal:version_source``. A consumer matching these purls against
     NuGet advisories would otherwise silently miss, and a version slot that
     does not say what kind of version it holds is a claim blint cannot back
     (ground rule 11).
@@ -1834,21 +1893,19 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
         version = ref.get("version")
         if not name or not version:
             continue
-        purl = f"pkg:nuget/{name}@{version}"
+        token = ref.get("public_key_token")
+        purl = PackageURL(
+            type="nuget",
+            name=name,
+            version=version,
+            qualifiers={"token": token} if token else None,
+        ).to_string()
         if purl in seen:
             continue
         seen.add(purl)
-        properties = [
-            Property(name="internal:version_source", value="assembly_version")
-        ]
-        if token := ref.get("public_key_token"):
-            properties.append(
-                Property(name="internal:public_key_token", value=token)
-            )
+        properties = [Property(name="internal:version_source", value="assembly_version")]
         if ref.get("culture") and ref.get("culture") != "neutral":
-            properties.append(
-                Property(name="internal:culture", value=ref["culture"])
-            )
+            properties.append(Property(name="internal:culture", value=ref["culture"]))
         comp = Component(
             type=Type.library,
             name=name,
@@ -1860,6 +1917,163 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
         comp.bom_ref = RefType(purl)
         components.append(comp)
     return components
+
+
+def upgrade_parent_to_assembly_identity(
+    parent: Component,
+    assembly: dict,
+    symbols_purl_map: dict | None = None,
+) -> Component:
+    """Restate a managed file's parent component from its CLI-header identity.
+
+    Section 03/D: a managed assembly's component identity is
+    ``pkg:nuget/<assembly name>@<assembly version>`` with the public key
+    token as a ``token`` qualifier. The version slot holds the four-part
+    assembly version and says so (``internal:version_source``); the NuGet
+    package version is not synthesised from it — measured over tier-2 and
+    the VM oracle set, the two agree as strings on zero of 50 identities,
+    so a synthesised purl is a match a consumer silently misses.
+
+    When a build BOM (``--src-dir-boms``) already knows this package's
+    real package version, its purl wins and the version source becomes the
+    build BOM.
+    """
+    name = assembly.get("name")
+    if not name:
+        return parent
+    version = assembly.get("version")
+    token = assembly.get("public_key_token")
+    purl = PackageURL(
+        type="nuget",
+        name=name,
+        version=version,
+        qualifiers={"token": token} if token else None,
+    ).to_string()
+    version_source = "assembly_version"
+    if symbols_purl_map:
+        overlay = symbols_purl_map.get(f"pkg:nuget/{name}")
+        if overlay:
+            purl = overlay
+            version = None
+            if "@" in overlay:
+                version = overlay.split("@")[-1].split("?")[0]
+            version_source = "package_version"
+    parent.name = name
+    # The model coerces str -> Version only through the constructor, so a
+    # bare assignment here would leave a str in a field the serializer
+    # expects to be a model.
+    parent.version = Version(version) if version else None
+    parent.type = Type.library
+    parent.purl = purl
+    parent.bom_ref = RefType(purl)
+    parent.properties.append(
+        Property(name="internal:version_source", value=version_source)
+    )
+    return parent
+
+
+def dotnet_assemblyref_state(dotnet_metadata: dict) -> str | None:
+    """How complete the AssemblyRef evidence is, for the BOM's rule-32 duty.
+
+    A managed component whose AssemblyRef table blint could not read must
+    not read as "has no dependencies". States: ``read`` (every row listed —
+    including a genuine zero, the netmodule shape), ``capped`` (listing
+    truncated at MAX_LISTED_ASSEMBLY_REFS), or the dotnet block's own
+    ``parse_status`` (``partial``/``malformed``/``no_cli_metadata``) when
+    the stream stopped before the table. None for a file with no dotnet
+    block at all — nothing to state.
+    """
+    if not dotnet_metadata:
+        return None
+    parse_status = dotnet_metadata.get("parse_status")
+    if parse_status in ("partial", "malformed", "no_cli_metadata"):
+        return str(parse_status)
+    if "assembly_refs_listed_capped" in (dotnet_metadata.get("degradations") or []):
+        return "capped"
+    return "read"
+
+
+def process_nupkg_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process a ``.nupkg`` archive input: identity from its ``.nuspec``.
+
+    The nuspec is the one place the real package id and package version are
+    stated — assembly metadata cannot give them (the assembly name inside a
+    package may differ from the package id, and the assembly version is not
+    the package version). The version slot therefore holds a genuine
+    package version with ``internal:version_source=package_version``.
+
+    Dependency entries carry nuspec version ranges; only an exact pin
+    ``[1.2.3]`` becomes a purl version — a floor or interval stays the
+    ``internal:version_range`` property, because a range is a version
+    blint does not have (ground rule 11).
+
+    A refused or nuspec-less archive still emits its component, generic,
+    with the refusals named as a property (rule 30/32): a `.nupkg` in the
+    scan that produced no package identity must not vanish silently.
+    """
+    nuspec = read_nupkg_nuspec(f)
+    refusals = nuspec.get("refusals") or []
+    package_id = nuspec.get("package_id")
+    package_version = nuspec.get("package_version")
+    if package_id and package_version:
+        purl = f"pkg:nuget/{package_id}@{package_version}"
+        parent = Component(
+            type=Type.library,
+            name=package_id,
+            version=package_version,
+            purl=purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(f, 1.0),
+            properties=[
+                Property(name="internal:version_source", value="package_version"),
+                Property(name="internal:srcFile", value=f),
+            ],
+        )
+        parent.bom_ref = RefType(purl)
+    else:
+        parent = default_parent([f])
+        parent.properties = [Property(name="internal:srcFile", value=f)]
+    if refusals:
+        parent.properties.append(
+            Property(name="internal:nupkg_refusals", value=", ".join(sorted(set(refusals))))
+        )
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    lib_components: list[Component] = []
+    for dep in nuspec.get("dependencies") or []:
+        dep_id = dep.get("id")
+        if not dep_id:
+            continue
+        exact = dep.get("exact_version")
+        dep_purl = (
+            f"pkg:nuget/{dep_id}@{exact}" if exact else f"pkg:nuget/{dep_id}"
+        )
+        if any(str(c.purl) == dep_purl for c in lib_components):
+            continue
+        properties = [Property(name="internal:version_range", value=dep.get("version_range") or "")]
+        if exact:
+            properties.append(
+                Property(name="internal:version_source", value="package_version")
+            )
+        comp = Component(
+            type=Type.library,
+            name=dep_id,
+            version=exact,
+            purl=dep_purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(f, 0.8),
+            properties=properties,
+        )
+        comp.bom_ref = RefType(dep_purl)
+        lib_components.append(comp)
+    if lib_components:
+        track_dependency(dependencies_dict, parent, lib_components)
+    return lib_components
 
 
 def process_dotnet_dependencies(
@@ -1902,6 +2116,11 @@ def process_dotnet_dependencies(
             scope=Scope.required,
             evidence=create_component_evidence(v.get("path"), 1.0) if v.get("path") else {},
             properties=[
+                # W3.5: the deps.json overlay is the one producer that
+                # states actual NuGet package versions; the property keeps
+                # it distinguishable from the assembly versions the
+                # AssemblyRef path carries in the same slot.
+                Property(name="internal:version_source", value="package_version"),
                 Property(name="internal:serviceable", value=str(v.get("serviceable")).lower()),
                 Property(name="internal:hash_path", value=v.get("hashPath")),
             ],
