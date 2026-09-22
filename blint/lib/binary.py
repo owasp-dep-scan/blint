@@ -1456,10 +1456,14 @@ def parse(
                             metadata["driver_ioctls"].get("ioctls") or [], driver_ioctls
                         )
                     if isinstance(metadata.get("driver"), dict):
-                        metadata["driver"]["input_length_constraints"] = sorted(
-                            driver_ioctls.values(),
-                            key=lambda entry: entry["input_length_constants"],
-                        )[:CONSTRAINT_LISTING_LIMIT]
+                        # Keyed by the handler function, not just by the
+                        # sizes: the map's key is the only thing that says
+                        # *which* routine does the checking, and dropping it
+                        # left a list of constants naming nothing (rule 11).
+                        metadata["driver"]["input_length_constraints"] = [
+                            {"function": function, **facts}
+                            for function, facts in sorted(driver_ioctls.items())
+                        ][:CONSTRAINT_LISTING_LIMIT]
         # The kernel object namespace paths are recovered from strings, so unlike
         # the IOCTL surface they are available whether or not the image was
         # disassembled. They are collected for every PE, not just drivers: for a

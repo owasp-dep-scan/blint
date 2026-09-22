@@ -545,14 +545,14 @@ def check_hvci_compatible(f: str, metadata: dict[str, Any], rule_obj: dict[str, 
             f"{condition}: {evidence.get(condition, 'failed')}" for condition in failed[:5]
         )
         return f"HVCI-incompatible ({detail})"
-    if hvci.get("compatible") is None:
-        # Every condition that could be evaluated passed; the rest lacked
-        # their source. A partial pass is stated, never silently clean.
-        undetermined = hvci.get("undetermined_conditions") or []
-        return (
-            f"HVCI conditions undetermined ({', '.join(undetermined[:5])}): "
-            "the verdict needs the missing header sources"
-        )
+    # An undetermined condition does NOT fire this rule. The rule is titled
+    # "Driver Incompatible with HVCI" at high severity; rendering "blint
+    # could not read the section characteristics" under that title is the
+    # two-outcomes-one-rule conflation ground rule 14 forbids, and it would
+    # accuse a driver of a violation blint never observed. The gap is not
+    # swallowed either: hvci_compatibility.compatible is null and
+    # undetermined_conditions names each one, which is where a blind spot
+    # belongs (rule 32).
     return True
 
 

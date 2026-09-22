@@ -296,7 +296,12 @@ ADD_DEVICE_OFFSETS: dict[str, int] = {"64": 0x20, "32": 0x10}
 # Base registers that address the stack frame are excluded: a DRIVER_OBJECT
 # pointer is a parameter, not a local at the same offset.
 _INTEL_STORE_RE = re.compile(
-    r"^\s*mov\s+(?:qword\s+ptr\s+)?\[\s*"
+    # `dword ptr` is accepted as well as `qword ptr`: a 32-bit callback slot
+    # holds a 32-bit pointer and nyxstone renders the size hint, so matching
+    # only the 64-bit hint meant the x86 layout never matched a single
+    # store and could not be reached (the width table exists precisely
+    # because 32-bit drivers store through different offsets).
+    r"^\s*mov\s+(?:[qd]word\s+ptr\s+)?\[\s*"
     r"(?!rsp|rbp|esp|ebp)(?P<base>[a-z][a-z0-9]*)\s*\+\s*"
     r"(?P<off>0x[0-9a-f]+|[0-9]+)\s*\]\s*,"
 )
@@ -309,7 +314,7 @@ _ARM64_STORE_RE = re.compile(
 # store through the loaded register at the AddDevice offset.
 _INTEL_EXT_LOAD_RE = re.compile(
     r"^\s*mov\s+(?P<dst>[a-z][a-z0-9]*)\s*,\s*"
-    r"(?:qword\s+ptr\s+)?\[\s*(?P<src>[a-z][a-z0-9]*)\s*\+\s*"
+    r"(?:[qd]word\s+ptr\s+)?\[\s*(?P<src>[a-z][a-z0-9]*)\s*\+\s*"
     r"(?P<off>0x[0-9a-f]+|[0-9]+)\s*\]"
 )
 _ARM64_EXT_LOAD_RE = re.compile(
@@ -332,6 +337,16 @@ def _parse_offset(token: str) -> int | None:
         return int(token, 10)
     except ValueError:
         return None
+
+
+def _is_zero_immediate(token: str) -> bool:
+    """True when the stored operand is literally zero, in any rendering.
+
+    `0`, `0x0`, `0x00`, `0h` - and nothing else. An immediate that merely
+    begins with a zero digit is an address, not a NULL.
+    """
+    value = _parse_offset(token.rstrip("h") if token.endswith("h") else token)
+    return value == 0
 
 
 def _register_alias(reg: str) -> str:
@@ -393,9 +408,15 @@ def _register_callbacks_for_layout(
             continue
         if intel:
             # A NULL store is the driver stating "no callback here", not a
-            # registration; refuse it rather than claim the callback.
+            # registration; refuse it rather than claim the callback. Only
+            # an exact zero is NULL: `startswith("0")` also refused every
+            # absolute immediate, which is precisely how a 32-bit driver
+            # registers (`mov dword ptr [eax+0x34], 0x401000` - the address
+            # of DriverUnload). That made the x86 layout unreachable - no
+            # 32-bit driver could report a callback or a dispatch store at
+            # all, the same blind spot W5.3 fixed for ARM64.
             stored = line.rsplit(",", 1)[-1].strip()
-            if stored.startswith("0"):
+            if _is_zero_immediate(stored):
                 continue
             if _register_was_zeroed(lines, index, stored):
                 continue

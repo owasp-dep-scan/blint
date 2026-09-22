@@ -176,6 +176,10 @@ def _condition_relocations_present(metadata: dict[str, Any]) -> tuple[bool | Non
             if size:
                 return True, f"base relocation directory present ({size} bytes)"
             return False, "base relocation directory declared with size 0 (relocations stripped)"
+    # The shape blint's own parser produces for a stripped image: parse_pe_data
+    # emits only directories with a non-zero size, so the entry is absent
+    # rather than present-and-empty. The size-0 branch above holds for
+    # metadata from any other producer.
     return False, "no base relocation directory"
 
 
@@ -395,4 +399,5 @@ def refresh_kernel_posture_after_disassembly(metadata: dict[str, Any]) -> None:
         }
     )
     dangerous["capability_score"] = dangerous.get("capability_score", 0) + MSR_FAMILY_WEIGHT
-    dangerous.setdefault("score_note", "")
+    # No score_note default: the block created here has no import families
+    # to be prevalent, and an empty note reads as a note that says nothing.

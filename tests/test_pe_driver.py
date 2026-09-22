@@ -23,8 +23,11 @@ from pathlib import Path
 import pytest
 
 from blint.lib.pe_driver import (
+    ADD_DEVICE_OFFSETS,
+    DRIVER_OBJECT_LAYOUTS,
     OBJECT_PATH_LIMIT,
     _driver_signing_view,
+    _register_callbacks_for_layout,
     build_driver_block,
     classify_driver_kind,
     is_windows_driver,
@@ -553,3 +556,36 @@ def test_benign_subtier_kinds_are_established():
             assert block["kind"] == expected_kinds[sample.name.lower()], sample.name
         checked += 1
     assert checked >= 10, f"sub-tier slice unexpectedly small: {checked}"
+
+
+def test_x86_driver_registers_callbacks_through_absolute_immediates():
+    """A 32-bit driver stores the address of its routine, not a register.
+
+    `mov dword ptr [eax+0x34], 0x401000` is how MSVC emits
+    `DriverObject->DriverUnload = DriverUnload` in non-PIC 32-bit code.
+    Treating any operand beginning with `0` as NULL refused every one of
+    them, so no 32-bit driver could report a callback or reach the
+    MajorFunction corroboration at all - the x86 layout was unreachable,
+    the same blind spot W5.3 fixed for ARM64.
+    """
+    lines = [
+        "mov dword ptr [eax + 0x38], 0x401000",
+        "mov dword ptr [eax + 0x34], 0x402000",
+    ]
+    callbacks, fast_io = _register_callbacks_for_layout(
+        lines, DRIVER_OBJECT_LAYOUTS["32"], ADD_DEVICE_OFFSETS["32"]
+    )
+    assert callbacks == {"DriverUnload"}
+    assert fast_io is False
+
+
+def test_explicit_null_store_still_refuses_the_callback():
+    """Only a literal zero is the driver saying "no callback here"."""
+    lines = [
+        "mov dword ptr [eax + 0x38], 0x401000",
+        "mov dword ptr [eax + 0x34], 0x0",
+    ]
+    callbacks, _ = _register_callbacks_for_layout(
+        lines, DRIVER_OBJECT_LAYOUTS["32"], ADD_DEVICE_OFFSETS["32"]
+    )
+    assert callbacks == set()

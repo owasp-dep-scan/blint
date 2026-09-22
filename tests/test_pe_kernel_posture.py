@@ -327,3 +327,22 @@ def test_benign_subtier_is_hvci_clean_and_never_fires():
         assert "CHECK_BOOT_START_INTEGRITYCHECK" not in findings, sample.name
         checked += 1
     assert checked >= 6
+
+
+def test_undetermined_hvci_conditions_do_not_fire_the_incompatibility_rule():
+    """A blind spot is not a violation.
+
+    CHECK_HVCI_COMPATIBLE is titled "Driver Incompatible with HVCI" and is
+    high severity. Returning a string when a condition's *source* could not
+    be read rendered "blint could not tell" under that title at that
+    severity - two outcomes under one rule id (ground rule 14) - and
+    accused a driver of a violation blint never observed. The gap is
+    carried by the block instead, which is where a blind spot belongs.
+    """
+    block = evaluate_hvci_compatibility(
+        {"machine_type_value": 0xAA64, "section_alignment": 0x1000, "wx_segments": []}
+    )
+    assert block["compatible"] is None
+    assert block["undetermined_conditions"] == ["relocations_present"]
+    assert block["failed_conditions"] == []
+    assert check_hvci_compatible("f", {"driver": {"hvci_compatibility": block}}, {}) is True

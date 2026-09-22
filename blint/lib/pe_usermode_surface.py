@@ -113,40 +113,38 @@ def collect_com_registration(parsed_obj: lief.PE.Binary) -> dict[str, Any] | Non
     registered.
     """
     guid_re = re.compile(b"(?:CLSID|APPID)\\\\" + _GUID_RE, re.IGNORECASE)
-    clsids: set[str] = set()
-    appids: set[str] = set()
-    truncated = {"clsids": 0, "appids": 0}
+    # De-duplicated *before* the listing bound, not after it. Counting at
+    # the bound counted occurrences, not identities: a CLSID string past
+    # the cap that appears three times in .rdata (the ordinary case - a
+    # class is named by its registration table and by its call sites) added
+    # three to the count, so 20 distinct CLSIDs reported clsid_count 28.
+    # A count that is not a count of anything is worse than no count
+    # (rule 11).
+    seen: dict[bytes, set[str]] = {b"CLSID": set(), b"APPID": set()}
     for view in _iter_section_views(parsed_obj):
         for match in guid_re.finditer(view):
             raw = match.group(0)
             kind = raw.split(b"\\")[0].upper()
+            if kind not in seen:
+                continue
             try:
-                text = raw.decode("latin-1")
+                seen[kind].add(raw.decode("latin-1"))
             except (UnicodeDecodeError, ValueError):
                 continue
-            if kind == b"CLSID":
-                if text not in clsids:
-                    if len(clsids) >= COM_LISTING_LIMIT:
-                        truncated["clsids"] += 1
-                    else:
-                        clsids.add(text)
-            else:
-                if text not in appids:
-                    if len(appids) >= COM_LISTING_LIMIT:
-                        truncated["appids"] += 1
-                    else:
-                        appids.add(text)
+    clsids, appids = sorted(seen[b"CLSID"]), sorted(seen[b"APPID"])
     if not clsids and not appids:
         return None
     block: dict[str, Any] = {"source": "registry_path_strings"}
-    if clsids:
-        block["clsids"] = sorted(clsids)
-        block["clsid_count"] = len(clsids) + truncated["clsids"]
-    if appids:
-        block["appids"] = sorted(appids)
-        block["appid_count"] = len(appids) + truncated["appids"]
-    if any(truncated.values()):
-        block["listing_truncated"] = {k: v for k, v in truncated.items() if v}
+    truncated: dict[str, int] = {}
+    for key, values in (("clsid", clsids), ("appid", appids)):
+        if not values:
+            continue
+        block[f"{key}s"] = values[:COM_LISTING_LIMIT]
+        block[f"{key}_count"] = len(values)
+        if len(values) > COM_LISTING_LIMIT:
+            truncated[f"{key}s"] = len(values) - COM_LISTING_LIMIT
+    if truncated:
+        block["listing_truncated"] = truncated
     return block
 
 
@@ -164,24 +162,28 @@ def collect_persistence_surfaces(parsed_obj: lief.PE.Binary) -> dict[str, Any] |
     for view in _iter_section_views(parsed_obj):
         lowered = view.lower()
         for surface, marker in PERSISTENCE_MARKERS:
-            occurrences = lowered.count(marker)
-            if not occurrences:
-                continue
-            counts[surface] = counts.get(surface, 0) + occurrences
-            if surface not in evidence:
-                evidence[surface] = []
-            if len(evidence[surface]) < PERSISTENCE_LISTING_LIMIT:
-                start = lowered.find(marker)
-                try:
-                    snippet = view[start : start + 64].split(b"\x00")[0].decode("latin-1")
-                except (UnicodeDecodeError, ValueError):
-                    snippet = marker.decode("latin-1")
-                evidence[surface].append(snippet)
+            # Walk the actual occurrences. Taking `lowered.find(marker)` for
+            # every evidence slot re-reported the first hit, so a listing
+            # bound of four could only ever hold one distinct snippet per
+            # view and the second Run key an image names was never shown -
+            # the evidence said less than the count it sat beside.
+            start = lowered.find(marker)
+            while start >= 0:
+                counts[surface] = counts.get(surface, 0) + 1
+                seen = evidence.setdefault(surface, [])
+                if len(seen) < PERSISTENCE_LISTING_LIMIT:
+                    try:
+                        snippet = view[start : start + 64].split(b"\x00")[0].decode("latin-1")
+                    except (UnicodeDecodeError, ValueError):
+                        snippet = marker.decode("latin-1")
+                    if snippet not in seen:
+                        seen.append(snippet)
+                start = lowered.find(marker, start + len(marker))
     if not counts:
         return None
     return {
         "surfaces": dict(sorted(counts.items())),
-        "evidence": evidence,
+        "evidence": {surface: evidence[surface] for surface in sorted(counts)},
         "source": "section_scan",
         "note": "a reference is not a write; weigh with the rest of the image",
     }

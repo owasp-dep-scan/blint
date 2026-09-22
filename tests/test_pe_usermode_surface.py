@@ -22,6 +22,7 @@ import pytest
 from blint.lib.binary_reviews import _evaluate_binary_analysis
 from blint.lib.capabilities import build_capability_index
 from blint.lib.pe_usermode_surface import (
+    COM_LISTING_LIMIT,
     collect_amsi_references,
     collect_com_registration,
     collect_persistence_surfaces,
@@ -324,3 +325,39 @@ def test_rpc_fixture_uuid_matches_source(rpc_fixture_metadata):
     assert DECLARED_UUID in uuids
     # The same real artifact is a clean negative for direct syscalls.
     assert _evaluate_binary_analysis("USERMODE_DIRECT_SYSCALL", rpc_fixture_metadata) == []
+
+
+def test_com_counts_are_distinct_identities_not_occurrences():
+    """clsid_count counts CLSIDs, not times a CLSID was seen.
+
+    De-duplicating only at the listing bound counted occurrences past it:
+    a class named three times in .rdata (its registration table and its
+    call sites - the ordinary shape) added three. Twenty distinct CLSIDs
+    reported twenty-eight.
+    """
+    guids = [f"{{{i:08d}-0000-0000-0000-000000000000}}" for i in range(20)]
+    blob = b"".join((f"CLSID\\{guid}\x00" * 3).encode() for guid in guids)
+    block = collect_com_registration(_FakeParsed([_FakeSection(".rdata", blob)]))
+    assert block["clsid_count"] == 20
+    assert len(block["clsids"]) == COM_LISTING_LIMIT
+    assert block["listing_truncated"] == {"clsids": 20 - COM_LISTING_LIMIT}
+
+
+def test_persistence_evidence_names_each_occurrence_not_the_first_one_repeatedly():
+    """The evidence listing shows distinct references, one per occurrence.
+
+    Re-reading `find(marker)` for every evidence slot re-reported the first
+    hit, so the second Run key an image names was never shown and the
+    listing bound could never be reached - the evidence said less than the
+    count beside it.
+    """
+    blob = (
+        b"software\\microsoft\\windows\\currentversion\\run\\Alpha\x00"
+        b"software\\microsoft\\windows\\currentversion\\run\\Beta\x00"
+    )
+    block = collect_persistence_surfaces(_FakeParsed([_FakeSection(".rdata", blob)]))
+    assert block["surfaces"]["run_key"] == 2
+    assert block["evidence"]["run_key"] == [
+        "currentversion\\run\\Alpha",
+        "currentversion\\run\\Beta",
+    ]

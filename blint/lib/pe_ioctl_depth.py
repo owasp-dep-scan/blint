@@ -82,7 +82,11 @@ _EQUALITY_BRANCH_RE = re.compile(r"^\s*(?:je|jz|jne|jnz|b\.eq|b\.ne)\b")
 _RANGE_BRANCH_RE = re.compile(
     r"^\s*(?:ja|jae|jb|jbe|jna|jnae|jnb|jnbe|jg|jge|jl|jle|b\.hs|b\.hi|b\.lo|b\.ls)\b"
 )
-# How far past the stack-location load the length access may sit.
+# How far past the stack-location load the length access may sit. This is
+# the whole basis for reading a `[reg+0xc]` access as InputBufferLength:
+# +0x0C is an ordinary offset that every other structure in the function
+# also uses, and without the window a single stack-location load licensed
+# every such access to the end of the function.
 _LENGTH_WINDOW = 12
 
 # Listing bound on the constraints reported per driver. A listing bound
@@ -91,12 +95,53 @@ _LENGTH_WINDOW = 12
 CONSTRAINT_LISTING_LIMIT = 16
 
 
-def _stack_location_offsets(widths: tuple[str, ...]) -> set[int]:
-    values = set()
-    for width in widths:
-        token = STACK_LOCATION_OFFSETS[width]
-        values.add(_parse_immediate(token))
-    return values
+STACK_LOCATION_OFFSET_VALUES: frozenset[int] = frozenset(
+    _parse_immediate(token) for token in STACK_LOCATION_OFFSETS.values()
+)
+
+
+_INTEL_REG_CMP_RE = re.compile(
+    r"^\s*cmp\s+(?P<reg>[a-z][a-z0-9]*)\s*,\s*(?P<imm>[^,\s]+)"
+)
+
+
+def _comparison_kind(lines: list[str], index: int) -> str:
+    """How the branch after a compare uses it: equality, range, or neither."""
+    branch = lines[index + 1] if index + 1 < len(lines) else ""
+    if _EQUALITY_BRANCH_RE.match(branch):
+        return "equality"
+    if _RANGE_BRANCH_RE.match(branch):
+        return "range"
+    return "compare"
+
+
+def _consume_register_compare(
+    line: str,
+    index: int,
+    lines: list[str],
+    pending_lengths: list[tuple[int, str]],
+    constants: list[int],
+    kinds: set[str],
+) -> bool:
+    """Answer a pending length load with a register compare, if this is one.
+
+    Returns True when the line was a compare against a register holding a
+    recognized InputBufferLength, so the caller stops processing it.
+    """
+    cmp_match = _ARM64_REG_CMP_RE.match(line) or _INTEL_REG_CMP_RE.match(line)
+    if not cmp_match:
+        return False
+    # Answer the most recent length load still in flight.
+    for pending in reversed(pending_lengths):
+        if pending[1] != cmp_match.group("reg"):
+            continue
+        value = _parse_immediate(cmp_match.group("imm"))
+        if value is not None:
+            constants.append(value)
+            kinds.add(_comparison_kind(lines, index))
+        pending_lengths.remove(pending)
+        return True
+    return False
 
 
 def collect_input_length_constraints(
@@ -128,7 +173,7 @@ def collect_input_length_constraints(
         function_name = str(func_data.get("name") or func_key)
         constants: list[int] = []
         kinds: set[str] = set()
-        saw_stack_location = False
+        stack_location_at: int | None = None
         pending_lengths: list[tuple[int, str]] = []
         for index, line in enumerate(lines):
             intel = _INTEL_STACK_LOCATION_RE.match(line)
@@ -136,51 +181,39 @@ def collect_input_length_constraints(
             if intel or arm64:
                 off_token = intel.group("off") if intel else arm64.group("off")
                 off = _parse_immediate(off_token)
-                if off in (0xB8, 0x60):
-                    saw_stack_location = True
+                if off in STACK_LOCATION_OFFSET_VALUES:
+                    stack_location_at = index
                     continue
-            if not saw_stack_location:
+            # The register compare answers a load that already passed the
+            # window, so it is handled before the window gate - the window
+            # bounds which accesses are *recognized* as the length field,
+            # not how far the comparison of a recognized one may sit.
+            if pending_lengths and _consume_register_compare(
+                line, index, lines, pending_lengths, constants, kinds
+            ):
+                continue
+            # _LENGTH_WINDOW is the claim the docstring makes and now the
+            # one the scan enforces: only a length access inside the window
+            # that follows a stack-location load is InputBufferLength. +0x0C
+            # is an offset every other structure in the function uses too,
+            # so without the window one stack-location load licensed every
+            # `[reg+0xc]` access to the end of the function (rule 9).
+            if stack_location_at is None or index - stack_location_at > _LENGTH_WINDOW:
                 continue
             # Intel: a compare straight against the memory operand.
             intel_cmp = _INTEL_LENGTH_CMP_RE.match(line)
             if intel_cmp and _parse_immediate(intel_cmp.group("off")) in length_offsets:
                 value = _parse_immediate(intel_cmp.group("imm"))
-                branch = lines[index + 1] if index + 1 < len(lines) else ""
-                kind = "equality" if _EQUALITY_BRANCH_RE.match(branch) else (
-                    "range" if _RANGE_BRANCH_RE.match(branch) else "compare"
-                )
                 if value is not None:
                     constants.append(value)
-                    kinds.add(kind)
+                    kinds.add(_comparison_kind(lines, index))
                 continue
             # ARM64 (and register-held Intel lengths): load then compare.
             load = _ARM64_LENGTH_LOAD_RE.match(line) or _INTEL_LENGTH_LOAD_RE.match(line)
             if load and _parse_immediate(load.group("off")) in length_offsets:
                 pending_lengths.append((index, load.group("dst")))
                 continue
-            if pending_lengths:
-                arm_cmp = _ARM64_REG_CMP_RE.match(line)
-                intel_reg_cmp = re.match(r"^\s*cmp\s+(?P<reg>[a-z][a-z0-9]*)\s*,\s*(?P<imm>[^,\s]+)", line)
-                cmp_match = arm_cmp or intel_reg_cmp
-                if cmp_match:
-                    # Answer the most recent length load still in flight.
-                    for pending_index, pending_reg in reversed(pending_lengths):
-                        if pending_reg == cmp_match.group("reg"):
-                            value = _parse_immediate(cmp_match.group("imm"))
-                            branch = lines[index + 1] if index + 1 < len(lines) else ""
-                            kind = (
-                                "equality"
-                                if _EQUALITY_BRANCH_RE.match(branch)
-                                else "range"
-                                if _RANGE_BRANCH_RE.match(branch)
-                                else "compare"
-                            )
-                            if value is not None:
-                                constants.append(value)
-                                kinds.add(kind)
-                            pending_lengths.remove((pending_index, pending_reg))
-                            break
-        if saw_stack_location and constants:
+        if stack_location_at is not None and constants:
             constraints[function_name] = {
                 "input_length_constants": sorted(set(constants))[:16],
                 "comparison_kinds": sorted(kinds),
@@ -212,9 +245,14 @@ def annotate_input_length_checks(
 # takes. Bounded so a coincidental byte run cannot read as a descriptor.
 _SDDL_ACE = rb"\([AD];;[A-Za-z0-9;-]+;;;[A-Za-z-]{2,}\)"
 SDDL_DEVICE_RE_ASCII = re.compile(rb"D:P?[NRX]?" + _SDDL_ACE + rb"(?:" + _SDDL_ACE + rb"){0,8}")
-# SID strings whose grant reaches beyond admins/system. WD=Everyone,
-# AN=Anonymous, BU=Builtin Users, AU=Authenticated Users.
-_WORLD_SID_RE = re.compile(rb";;;(?:WD|AN|BU|AU)\)")
+# Grant ACEs whose trustee reaches beyond admins/system. WD=Everyone,
+# AN=Anonymous, BU=Builtin Users, AU=Authenticated Users. The leading `A`
+# is load-bearing: matching the trustee alone made a *deny* ACE read as a
+# grant, so `D:P(D;;GA;;;WD)(A;;GA;;;SY)` - a descriptor that explicitly
+# locks Everyone out, the most restricted shape there is - reported
+# world_accessible and turned the IOCTL list into "unprivileged attack
+# surface" backwards (rule 14).
+_WORLD_SID_RE = re.compile(rb"\(A;;[A-Za-z0-9;-]+;;;(?:WD|AN|BU|AU)\)")
 
 # How many SDDL strings are listed as evidence (a listing bound only; the
 # world_accessible verdict scans every match, uncapped).

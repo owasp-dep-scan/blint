@@ -20,6 +20,7 @@ import pytest
 from blint.lib.checks import check_known_vulnerable_driver
 from blint.lib.driver_ioctl import find_dispatch_handlers
 from blint.lib.pe_ioctl_depth import (
+    _LENGTH_WINDOW,
     _wide_view,
     annotate_input_length_checks,
     collect_input_length_constraints,
@@ -293,3 +294,41 @@ def test_published_control_codes_reproduce_and_snapshot_matches():
     assert block.get("lookup_status") == "matched"
     sources = {match["source"] for match in block.get("matches") or []}
     assert "loldrivers" in sources
+
+
+def test_deny_everyone_is_not_world_accessible():
+    """A deny ACE naming Everyone locks it out; it must not read as a grant.
+
+    Matching the trustee alone (`;;;WD)`) made the most restricted
+    descriptor there is - one that explicitly denies Everyone - report
+    world_accessible, inverting the fact that decides whether the recovered
+    IOCTL list is unprivileged attack surface.
+    """
+    sddl = b"D:P(D;;GA;;;WD)(A;;GA;;;SY)(A;;GA;;;BA)\x00"
+    block = recover_device_acl(_FakeParsed([_FakeSection(".rdata", sddl)]))
+    assert block["sddl_strings"]
+    assert block["world_accessible"] is False
+    granted = b"D:P(A;;GA;;;WD)(A;;GA;;;SY)\x00"
+    assert recover_device_acl(_FakeParsed([_FakeSection(".rdata", granted)]))[
+        "world_accessible"
+    ] is True
+
+
+def test_length_access_far_from_the_stack_location_load_is_not_a_length_check():
+    """+0x0C is only InputBufferLength near the stack-location load.
+
+    _LENGTH_WINDOW was defined and never applied, so one stack-location
+    load licensed every `[reg+0xc]` access to the end of the function -
+    and +0x0C is an offset every other structure in a dispatch routine
+    uses too.
+    """
+    far = "\n".join(
+        ["mov rbx, qword ptr [rdx + 0xb8]"]
+        + ["nop"] * (_LENGTH_WINDOW + 4)
+        + ["cmp dword ptr [rbx + 0xc], 0x28", "je 0x1000"]
+    )
+    assert collect_input_length_constraints({"f": {"name": "f", "assembly": far}}) == {}
+    near = "mov rbx, qword ptr [rdx + 0xb8]\ncmp dword ptr [rbx + 0xc], 0x28\nje 0x1000"
+    assert collect_input_length_constraints({"g": {"name": "g", "assembly": near}}) == {
+        "g": {"input_length_constants": [0x28], "comparison_kinds": ["equality"]}
+    }

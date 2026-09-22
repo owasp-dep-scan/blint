@@ -139,9 +139,9 @@ def build_windows_posture(metadata: dict[str, Any]) -> dict[str, Any] | None:
     elif metadata.get("is_dotnet"):
         block["managed_shape"] = "il_assembly"
 
-    if len(block) <= 1:
-        # A PE whose only content would be the sources map carries nothing
-        # worth summarising; stay silent rather than emit an empty block
-        # that reads as analysed (rule 32).
-        return None
+    # No emptiness guard: `hardening` and `sources` are set unconditionally
+    # above, so every PE carries a block - which is what the module
+    # docstring says and what rule 32 wants (a PE with nothing notable is
+    # still a PE blint looked at). The guard this replaced tested
+    # `len(block) <= 1` and could never be true.
     return block
