@@ -17,7 +17,9 @@ from blint.lib.analysis import (
 )
 from blint.lib.android import analyze_android_app
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
+from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
+from blint.lib.container import bounded_temp_dir
 from blint.lib.finding_ids import attach_finding_ids
 from blint.lib.ios import (
     collect_ios_app_detailed,
@@ -30,6 +32,7 @@ from blint.lib.macos_bundle import (
     is_macos_bundle,
     path_inside_any_bundle,
 )
+from blint.lib.msi import parse_msi
 from blint.lib.msix import (
     collect_msix_detailed,
     container_metadata,
@@ -701,6 +704,17 @@ class AnalysisRunner:
             if container_processed:
                 self._mark_success("top-level")
             return
+        elif f.lower().endswith((".msi", ".msp")):
+            self._process_msi_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            self._mark_success("top-level")
+            return
+        elif is_cab_file(f):
+            cab_processed = self._process_cab_file(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            if cab_processed:
+                self._mark_success("top-level")
+            return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
@@ -871,6 +885,82 @@ class AnalysisRunner:
             return True
         finally:
             shutil.rmtree(collection.get("temp_dir") or "", ignore_errors=True)
+
+    def _process_msi_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Analyze one .msi database: tables, custom actions, embedded CABs.
+
+        The database itself is the analyzed unit; its facts (identity,
+        custom actions, cabinets, refusals) are what the metadata and the
+        checks carry. Embedded cabinet members are listed, not extracted —
+        the File table already names what the package ships.
+        """
+        refusals: list[str] = []
+        degradations: list[str] = []
+        msi_block = parse_msi(f, refusals, degradations)
+        metadata: dict[str, Any] = {
+            "name": os.path.basename(f),
+            "file_path": f,
+            "exe_type": "msi",
+            "msi": msi_block,
+        }
+        self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+
+    def _process_cab_file(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> bool:
+        """Extract a standalone cabinet and analyze its PE members.
+
+        Members in folders blint can decode (stored/MSZIP) are extracted to
+        a bounded temp directory and analyzed through the normal PE path,
+        attributed to their member path; LZX/Quantum folders refuse by name.
+        Returns ``True`` when the cabinet was collected and analyzed.
+        """
+        assert self.task is not None
+        with bounded_temp_dir(prefix="blint_cab_") as temp_dir:
+            refusals: list[str] = []
+            extracted = extract_cab_members(f, temp_dir, refusals)
+            cab_block = parse_cab(f)
+            metadata: dict[str, Any] = {
+                "name": os.path.basename(f),
+                "file_path": f,
+                "exe_type": "cab",
+                "cab": {
+                    **{k: v for k, v in cab_block.items() if k != "members"},
+                    "extracted_member_count": len(extracted),
+                    # Extraction refusals ride the exported metadata, not
+                    # just the log: a cabinet whose folder refused must not
+                    # read as an empty archive (rule 32).
+                    "extraction_refusals": sorted(set(refusals)),
+                },
+                "cab_members": cab_block.get("members") or [],
+            }
+            self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+            for member_name, member_path in sorted(extracted.items()):
+                if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
+                    continue
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{member_name}[/bold] (cab-member)",
+                )
+                self._mark_attempted("cab-member")
+                try:
+                    member_metadata = self._parse_with_cache(member_path, blint_options, "cab-member")
+                    member_metadata["container"] = {
+                        "kind": "cab",
+                        "member_path": member_name,
+                        "role": "cab-member",
+                    }
+                    member_metadata["name"] = member_name
+                    member_metadata["file_path"] = member_name
+                    self._finalize_metadata(
+                        member_path, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("cab-member")
+                except Exception as e:
+                    self._record_failure(member_name, "cab-member", "process", e)
+        return True
 
     def _finalize_metadata(
         self,

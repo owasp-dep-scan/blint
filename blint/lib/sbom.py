@@ -42,8 +42,10 @@ from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_services import detect_services
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
+from blint.lib.cab import is_cab_file, parse_cab
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
+from blint.lib.msi import parse_msi
 from blint.lib.msix import MSIX_EXTENSIONS, collect_msix_detailed
 from blint.lib.nuget_package import read_nupkg_nuspec
 from blint.lib.parallel import (
@@ -224,17 +226,6 @@ def generate(
                     else:
                         skipped_wasm += 1
                     continue
-                if exe.lower().endswith(MSIX_EXTENSIONS):
-                    # W4.1: an MSIX/Appx package or bundle is a container —
-                    # identity from its AppxManifest, members from the
-                    # archive, never parsed as a bare PE.
-                    progress.update(
-                        task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
-                        advance=1,
-                    )
-                    components += process_msix_file(dependencies_dict, exe, sbom)
-                    continue
                 if exe.lower().endswith(".nupkg"):
                     # W3.5: a .nupkg is a package archive, not a binary —
                     # its identity comes from the .nuspec member, never
@@ -245,6 +236,33 @@ def generate(
                         advance=1,
                     )
                     components += process_nupkg_file(dependencies_dict, exe, sbom)
+                    continue
+                if exe.lower().endswith((".msi", ".msp")):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_msi_file(dependencies_dict, exe, sbom)
+                    continue
+                if is_cab_file(exe):
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_cab_file(dependencies_dict, exe, sbom)
+                    continue
+                if exe.lower().endswith(MSIX_EXTENSIONS):
+                    # W4.1: an MSIX/Appx package or bundle is a container —
+                    # identity from its AppxManifest, members from the
+                    # archive, never parsed as a bare PE.
+                    progress.update(
+                        task,
+                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        advance=1,
+                    )
+                    components += process_msix_file(dependencies_dict, exe, sbom)
                     continue
                 progress.update(
                     task,
@@ -2194,6 +2212,123 @@ def process_msix_file(
     finally:
         if collection and collection.get("temp_dir"):
             shutil.rmtree(collection["temp_dir"], ignore_errors=True)
+
+
+def process_msi_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one ``.msi`` database: identity from its Property table.
+
+    The parent component carries the product identity and codes; refusals
+    and degradations reach the BOM as properties (rule 32). Embedded
+    cabinets and Binary-table streams are named as properties without being
+    emitted as components — the File table, not the CAB listing, is the
+    package's own statement of what it ships.
+    """
+    refusals: list[str] = []
+    degradations: list[str] = []
+    msi_block = parse_msi(f, refusals, degradations)
+    identity = msi_block.get("identity") or {}
+    name = identity.get("product_name") or os.path.basename(f)
+    version = str(identity.get("product_version") or "")
+    purl = PackageURL(type="generic", name=name, version=version or None).to_string()
+    parent = Component(
+        type=Type.application,
+        name=name,
+        version=version,
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value="msi"),
+    ]
+    scalar_props = {
+        "internal:msiProductCode": identity.get("product_code"),
+        "internal:msiUpgradeCode": identity.get("upgrade_code"),
+        "internal:msiPackageCode": identity.get("package_code"),
+        "internal:msiManufacturer": identity.get("manufacturer"),
+        "internal:fileCount": msi_block.get("file_count"),
+        "internal:componentCount": msi_block.get("component_count"),
+        "internal:customActionCount": msi_block.get("custom_action_count"),
+    }
+    for key, value in scalar_props.items():
+        if value:
+            parent.properties.append(Property(name=key, value=str(value)))
+    if msi_block.get("digital_signature_present"):
+        parent.properties.append(
+            Property(name="internal:msiDigitalSignature", value="present")
+        )
+    if refusals:
+        parent.properties.append(
+            Property(name="internal:msi_refusals", value=", ".join(sorted(set(refusals))))
+        )
+    if degradations:
+        parent.properties.append(
+            Property(name="internal:msi_degradations", value=", ".join(sorted(set(degradations))))
+        )
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    return []
+
+
+def process_cab_file(
+    dependencies_dict: dict[str, set],
+    f: str,
+    sbom: CycloneDX,
+) -> list[Component]:
+    """Process one standalone cabinet: the member listing becomes components.
+
+    Members are listed, not extracted, here: the component carries the
+    member path and size. Refusals (unsupported folder compression, unsafe
+    paths) reach the BOM beside the parent (rule 32).
+    """
+    cab_block = parse_cab(f)
+    purl = PackageURL(type="generic", name=os.path.basename(f)).to_string()
+    parent = Component(
+        type=Type.library,
+        name=os.path.basename(f),
+        purl=purl,
+        evidence=create_component_evidence(f, 1.0),
+    )
+    parent.bom_ref = RefType(purl)
+    parent.properties = [
+        Property(name="internal:srcFile", value=f),
+        Property(name="internal:containerKind", value="cab"),
+        Property(name="internal:memberCount", value=str(cab_block.get("member_count") or 0)),
+    ]
+    refusals = cab_block.get("refusals") or []
+    if refusals:
+        parent.properties.append(
+            Property(name="internal:cab_refusals", value=", ".join(sorted(set(refusals))))
+        )
+    member_components: list[Component] = []
+    for member in (cab_block.get("members") or [])[:1024]:
+        member_purl = PackageURL(
+            type="file", name=os.path.basename(member["name"]), qualifiers={"path": member["name"]}
+        ).to_string()
+        comp = Component(
+            type=Type.library,
+            name=member["name"],
+            purl=member_purl,
+            evidence=create_component_evidence(f, 0.6),
+            properties=[
+                Property(name="internal:srcFile", value=f),
+                Property(name="internal:cabMember", value="true"),
+            ],
+        )
+        comp.bom_ref = RefType(member_purl)
+        member_components.append(comp)
+    if not sbom.metadata.component.components:
+        sbom.metadata.component.components = []
+    _add_to_parent_component(sbom.metadata.component.components, parent)
+    if member_components:
+        track_dependency(dependencies_dict, parent, member_components)
+    return member_components
 
 
 def process_dotnet_dependencies(
