@@ -256,6 +256,7 @@ from blint.lib.utils import (  # noqa: F401
     cleanup_dict_lief_errors,
     coerce_to_text,
 )
+from blint.lib.windows_posture import build_windows_posture
 from blint.logger import DEBUG, LOG
 
 if LOG.level != DEBUG:
@@ -685,6 +686,12 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
             )
     if build_info:
         metadata["build_info"] = build_info
+    # W5.5: the at-a-glance Windows posture summary. Runs last in this
+    # function so every block it summarises (code_signature,
+    # security_properties, driver, dotnet, the container lane) is already
+    # in place; it reads those blocks and recomputes nothing.
+    if posture := build_windows_posture(metadata):
+        metadata["windows_posture"] = posture
     return metadata
 
 

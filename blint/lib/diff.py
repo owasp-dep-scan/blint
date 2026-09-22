@@ -523,6 +523,105 @@ def _packing_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[s
     return delta
 
 
+def _windows_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[str, Any]:
+    """Windows update-triage deltas (04/E): the changes a Windows reviewer
+    asks for first.
+
+    - changed signer (the re-sign that is the shape of a tampered update)
+    - signing-class change
+    - driver kind change
+    - IOCTL surface gained or lost codes (W5.3 recovered sets)
+    - P/Invoke targets gained or lost (the managed/native boundary moved)
+    - manifest execution level changed (an update that silently asks for
+      more privilege)
+    - vulnerable-driver snapshot status changed (the blocklist caught up
+      with, or dropped, this exact binary)
+
+    Lost hardening flags are deliberately NOT here - the hardening layer
+    owns ``security_properties`` and classifies those changes with
+    polarity; restating them would be a second place for the same fact
+    (rule 21).
+    """
+    delta: dict[str, Any] = {}
+
+    def _signer_identity(meta: dict[str, Any]) -> dict[str, Any]:
+        block = meta.get("code_signature") or {}
+        if not isinstance(block, dict):
+            return {}
+        signatures = block.get("signatures") or []
+        index = block.get("signing_class_signature", 0)
+        if index >= len(signatures):
+            index = 0
+        signer = (signatures[index] or {}).get("signer") or {} if signatures else {}
+        identity: dict[str, Any] = {}
+        if signer.get("cn"):
+            identity["cn"] = signer.get("cn")
+        if signer.get("serial"):
+            identity["serial"] = signer.get("serial")
+        return identity
+
+    old_signer, new_signer = _signer_identity(old_meta), _signer_identity(new_meta)
+    if old_signer or new_signer:
+        if old_signer.get("serial") != new_signer.get("serial") or old_signer.get(
+            "cn"
+        ) != new_signer.get("cn"):
+            delta["signer_changed"] = {"old": old_signer, "new": new_signer}
+
+    old_class = (old_meta.get("code_signature") or {}).get("signing_class")
+    new_class = (new_meta.get("code_signature") or {}).get("signing_class")
+    if old_class != new_class and (old_class or new_class):
+        delta["signing_class_changed"] = {"old": old_class, "new": new_class}
+
+    old_driver = old_meta.get("driver") or {}
+    new_driver = new_meta.get("driver") or {}
+    old_kind, new_kind = old_driver.get("kind"), new_driver.get("kind")
+    if old_kind != new_kind and (old_kind or new_kind):
+        delta["driver_kind_changed"] = {"old": old_kind, "new": new_kind}
+
+    def _ioctl_codes(meta: dict[str, Any]) -> set[str]:
+        ioctls = (meta.get("driver_ioctls") or {}).get("ioctls") or []
+        return {str(entry.get("code")) for entry in ioctls if isinstance(entry, dict)}
+
+    old_codes, new_codes = _ioctl_codes(old_meta), _ioctl_codes(new_meta)
+    if old_codes or new_codes:
+        added = sorted(new_codes - old_codes)
+        removed = sorted(old_codes - new_codes)
+        if added or removed:
+            delta["ioctl_surface_changed"] = _bounded(added, removed)
+
+    def _pinvoke_modules(meta: dict[str, Any]) -> set[str]:
+        dotnet = meta.get("dotnet") or {}
+        return {
+            str(entry.get("module") or "").lower()
+            for entry in dotnet.get("pinvoke") or []
+            if isinstance(entry, dict) and entry.get("module")
+        }
+
+    old_pinvoke, new_pinvoke = _pinvoke_modules(old_meta), _pinvoke_modules(new_meta)
+    if old_pinvoke or new_pinvoke:
+        added = sorted(new_pinvoke - old_pinvoke)
+        removed = sorted(old_pinvoke - new_pinvoke)
+        if added or removed:
+            delta["pinvoke_changed"] = _bounded(added, removed)
+
+    def _execution_level(meta: dict[str, Any]) -> Any:
+        manifest = (meta.get("resources") or {}).get("manifest_parsed") or {}
+        if isinstance(manifest, dict):
+            return manifest.get("requestedExecutionLevel")
+        return None
+
+    old_level, new_level = _execution_level(old_meta), _execution_level(new_meta)
+    if old_level != new_level and (old_level or new_level):
+        delta["manifest_execution_level_changed"] = {"old": old_level, "new": new_level}
+
+    old_vd = (old_meta.get("vulnerable_driver") or {}).get("lookup_status")
+    new_vd = (new_meta.get("vulnerable_driver") or {}).get("lookup_status")
+    if old_vd != new_vd and "matched" in (old_vd, new_vd):
+        delta["vulnerable_driver_status_changed"] = {"old": old_vd, "new": new_vd}
+
+    return delta
+
+
 def _symbol_table_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[str, Any]:
     """Symbol-table surface: function/symbol counts plus real-name churn.
 
@@ -945,6 +1044,7 @@ def diff_binary_metadata(
     sections = _sections_delta(old.metadata, new.metadata)
     packing = _packing_delta(old.metadata, new.metadata)
     hardening = _hardening_delta(old.metadata, new.metadata)
+    windows = _windows_delta(old.metadata, new.metadata)
     symbols = _symbol_table_delta(old.metadata, new.metadata)
     findings = _findings_delta(old.findings, new.findings)
     reviews = {} if no_reviews else _reviews_delta(old.reviews, new.reviews)
@@ -976,6 +1076,7 @@ def diff_binary_metadata(
                 _has_delta(sections, _sections_changed(sections)),
                 _has_delta(packing, bool(packing)),
                 _has_delta(hardening, bool(hardening.get("changes"))),
+                _has_delta(windows, bool(windows)),
                 _symbol_delta_changed(symbols),
                 _has_delta(findings, _findings_changed(findings)),
                 _has_delta(reviews, _reviews_changed(reviews)),
@@ -998,6 +1099,8 @@ def diff_binary_metadata(
         report["sections"] = sections
     if packing:
         report["packing"] = packing
+    if windows:
+        report["windows"] = windows
     if reviews:
         report["reviews"] = reviews
     if notes:
@@ -1091,10 +1194,12 @@ def _summary(report: dict[str, Any]) -> dict[str, Any]:
     reviews = report.get("reviews") or {}
     functions = report.get("functions") or {}
     imports = report.get("imports") or {}
+    windows = report.get("windows") or {}
     return {
         "hardening_regressions": hardening.get("regression_count", 0),
         "hardening_improvements": hardening.get("improvement_count", 0),
         "hardening_changes": hardening.get("unclassified_count", 0),
+        "windows_changes": len(windows),
         "findings_added": findings.get("added_count", 0),
         "findings_removed": findings.get("removed_count", 0),
         "findings_severity_changed": len(findings.get("severity_changed") or []),
