@@ -498,6 +498,43 @@ def purl_field(value: Any) -> str | None:
     return value or None
 
 
+def _generic_package_identity(purl: str | None) -> tuple[str, str] | None:
+    """Identity of a pkg:generic purl as (name, version), or None.
+
+    A homebrew formula name may carry its own versioned suffix (openssl@3);
+    the suffix is part of the formula's identity, not a different project,
+    so it is normalized away before comparing against a banner's plain
+    library name. Anything that is not a generic purl with both a name and
+    a version has no identity here and never merges.
+    """
+    if not purl or not purl.startswith("pkg:generic/"):
+        return None
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return None
+    name = re.sub(r"@\d+$", "", parsed.name)
+    return (name, parsed.version or "")
+
+
+def _find_component_by_package_identity(
+    components: list[Component], purl: str
+) -> Component | None:
+    """The component naming the same generic package+version as ``purl``.
+
+    Used by the banner layer to corroborate instead of duplicating: the
+    blintdb match for the same library carries qualifiers in its purl, so
+    purl-string equality cannot see the overlap (F2a.2).
+    """
+    identity = _generic_package_identity(purl)
+    if identity is None:
+        return next((comp for comp in components if comp.purl == purl), None)
+    for comp in components:
+        if _generic_package_identity(getattr(comp, "purl", None)) == identity:
+            return comp
+    return None
+
+
 def components_from_abi_requirements(abi_analysis: dict) -> list[Component]:
     """Create components from the ABI floor each version provider imposes.
 
@@ -1263,7 +1300,14 @@ def process_exe_file(
     # the binary. An evidence layer independent of blintdb — a banner claims
     # library and version directly — so it runs regardless of --use-blintdb.
     # A banner hit on a library blintdb already attributed corroborates that
-    # component instead of emitting a duplicate.
+    # component instead of emitting a duplicate. The comparison is by
+    # package identity (type + name + version), not by purl string: a
+    # blintdb match carries qualifiers the banner purl never has
+    # (?source_hash=..., ?package_manager=homebrew&tap=...), and a homebrew
+    # formula name may carry its own versioned suffix (openssl@3) — an exact
+    # string compare leaves a second, unqualified component beside the
+    # match (F2a.2: zlib/libpng/openssl@3 each broke the small-corpus
+    # validator that way).
     banner_result = detect_vendored_banners(metadata)
     for banner in banner_result["banners"]:
         banner_evidence = {
@@ -1271,10 +1315,7 @@ def process_exe_file(
             "vendored_attribution": "vendored_banner",
             "vendored_banner": banner["banner"],
         }
-        existing = next(
-            (comp for comp in lib_components if getattr(comp, "purl", None) == banner["purl"]),
-            None,
-        )
+        existing = _find_component_by_package_identity(lib_components, banner["purl"])
         if existing is not None:
             for key, value in banner_evidence.items():
                 existing.properties.append(Property(name=f"internal:{key}", value=value))
