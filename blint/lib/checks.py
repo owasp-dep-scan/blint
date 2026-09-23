@@ -1,4 +1,5 @@
 # pylint: disable=missing-function-docstring,unused-argument
+import os
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
@@ -10,6 +11,11 @@ from blint.lib.provisioning import (
     is_wildcard,
 )
 from blint.lib.utils import parse_pe_manifest
+
+# The CHECK_ABI_FLOOR baseline can be set per run. The CLI option
+# --glibc-baseline writes this variable so there is exactly one resolution
+# path; the rule's baseline_version in rules.yml stays the built-in default.
+GLIBC_BASELINE_ENV = "BLINT_GLIBC_BASELINE"
 
 
 def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
@@ -936,19 +942,50 @@ def check_libc_portability(
     return ", ".join(names[:10])
 
 
-def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    # Fails when the binary requires a runtime newer than the configured
-    # baseline, which is the version the deployment target is known to ship.
+def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str | dict:
+    """Reports a GLIBC symbol-version floor above the deployment baseline.
+
+    The baseline is the user's deployment target when one was set through
+    ``--glibc-baseline`` / ``BLINT_GLIBC_BASELINE``, and the rule's built-in
+    default otherwise. The provenance changes what the finding means: a floor
+    above a baseline somebody chose is a deployment error (``medium``), a
+    floor above a built-in default nobody chose is a note (``info``), and the
+    finding says which of the two it used.
+
+    Only GLIBC floors are compared - a glibc baseline says nothing about the
+    GLIBCXX/libstdc++ floor or any other provider, whose requirements stay in
+    ``abi_analysis.requirements``. musl and bionic binaries carry no GLIBC
+    version nodes, so the rule cannot apply to them (ground rule 35: a rule
+    must not fire where its concept does not exist).
+    """
     abi = metadata.get("abi_analysis") or {}
+    if abi.get("libc") in ("musl", "bionic"):
+        return True
     required = abi.get("min_glibc_version")
     if not required:
         return True
-    baseline = str(rule_obj.get("baseline_version") or "").strip()
+    user_baseline = os.environ.get(GLIBC_BASELINE_ENV, "").strip()
+    baseline = user_baseline or str(rule_obj.get("baseline_version") or "").strip()
     if not baseline:
         return True
     if version_sort_key(required) <= version_sort_key(baseline):
         return True
-    return f"requires glibc {required}, baseline is {baseline}"
+    if user_baseline:
+        return {
+            "severity": "medium",
+            "evidence": (
+                f"GLIBC floor {required} exceeds the configured baseline {baseline} "
+                f"({GLIBC_BASELINE_ENV})"
+            ),
+        }
+    return {
+        "severity": "info",
+        "evidence": (
+            f"GLIBC floor {required} exceeds the built-in default baseline {baseline}; "
+            f"set --glibc-baseline or {GLIBC_BASELINE_ENV} to your deployment target "
+            "to make this a policy finding"
+        ),
+    }
 
 
 def check_runtime_loading(

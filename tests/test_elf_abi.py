@@ -6,6 +6,7 @@ import shutil
 
 import pytest
 
+from blint.lib.analysis import run_checks
 from blint.lib.binary import parse, parse_symbols
 from blint.lib.checks import (
     check_abi_floor,
@@ -392,14 +393,125 @@ def test_recovered_dependency_components_are_optional():
     }
 
 
-def test_abi_floor_check_compares_against_the_baseline():
-    metadata = {"abi_analysis": {"min_glibc_version": "2.34"}}
-    assert check_abi_floor("f", metadata, {"baseline_version": "2.34"}) is True
-    assert check_abi_floor("f", metadata, {"baseline_version": "2.17"}) == (
-        "requires glibc 2.34, baseline is 2.17"
+def test_abi_floor_check_compares_against_the_baseline(monkeypatch):
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    rule = {"baseline_version": "2.28"}
+    # A floor at or below the baseline is not a finding, whoever set it.
+    assert (
+        check_abi_floor(
+            "f", {"abi_analysis": {"min_glibc_version": "2.28", "libc": "glibc"}}, rule
+        )
+        is True
+    )
+    assert (
+        check_abi_floor(
+            "f", {"abi_analysis": {"min_glibc_version": "2.17", "libc": "glibc"}}, rule
+        )
+        is True
     )
     # A binary with no derived floor cannot violate one.
-    assert check_abi_floor("f", {}, {"baseline_version": "2.17"}) is True
+    assert check_abi_floor("f", {}, rule) is True
+
+
+def test_abi_floor_default_baseline_reports_info_and_names_the_provider(monkeypatch):
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    result = check_abi_floor(
+        "f", {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}},
+        {"baseline_version": "2.28"},
+    )
+    # A floor above a default nobody chose is a note, not a policy finding,
+    # and the finding says both the provider and which baseline was used.
+    assert result["severity"] == "info"
+    assert result["evidence"].startswith("GLIBC floor 2.34")
+    assert "built-in default baseline 2.28" in result["evidence"]
+    assert "BLINT_GLIBC_BASELINE" in result["evidence"]
+
+
+def test_abi_floor_user_baseline_keeps_medium_and_names_the_env(monkeypatch):
+    metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}}
+    rule = {"baseline_version": "2.28"}
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    result = check_abi_floor("f", metadata, rule)
+    # A floor above a baseline somebody chose is a deployment error.
+    assert result["severity"] == "medium"
+    assert "GLIBC floor 2.34" in result["evidence"]
+    assert "configured baseline 2.17" in result["evidence"]
+    assert "BLINT_GLIBC_BASELINE" in result["evidence"]
+    # The user baseline is compared, not the YAML default: equal and below
+    # never fire.
+    at_baseline = {"abi_analysis": {"min_glibc_version": "2.17", "libc": "glibc"}}
+    assert check_abi_floor("f", at_baseline, rule) is True
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.41")
+    assert check_abi_floor("f", metadata, rule) is True
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.34")
+    assert check_abi_floor("f", metadata, rule) is True
+
+
+def test_abi_floor_never_fires_on_musl_or_bionic(monkeypatch):
+    # Ground rule 35: a glibc baseline is meaningless against a binary that
+    # carries no GLIBC version nodes, so even a synthetic floor on a musl or
+    # bionic binary must not fire.
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    for libc in ("musl", "bionic"):
+        metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": libc}}
+        assert check_abi_floor("f", metadata, {"baseline_version": "2.28"}) is True
+    # The committed musl snapshot is the real shape: musl, no GLIBC floor.
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    assert check_abi_floor("f", snapshot("x86_64-musl"), {"baseline_version": "2.28"}) is True
+
+
+def test_abi_floor_ignores_non_glibc_providers(monkeypatch):
+    # A glibc baseline says nothing about a GLIBCXX floor: the C++ floor is
+    # recorded in abi_analysis.requirements but never compared here.
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    metadata = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "min_glibc_version": "",
+            "requirements": [{"provider": "GLIBCXX", "min_version": "3.4.30"}],
+        }
+    }
+    assert check_abi_floor("f", metadata, {"baseline_version": "2.28"}) is True
+
+
+def test_abi_floor_severity_flows_into_the_finding(monkeypatch):
+    # run_rule honours the check's per-finding severity override, and the
+    # override must not leak into the shared rule object.
+    from blint.lib.analysis import rules_dict, run_rule
+
+    rule = rules_dict["CHECK_ABI_FLOOR"]
+    metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}}
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    default_finding = run_rule("demo", metadata, rule, "genericbinary", "CHECK_ABI_FLOOR")
+    assert default_finding["severity"] == "info"
+    assert "GLIBC floor 2.34" in default_finding["title"]
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    user_finding = run_rule("demo", metadata, rule, "genericbinary", "CHECK_ABI_FLOOR")
+    assert user_finding["severity"] == "medium"
+    assert rules_dict["CHECK_ABI_FLOOR"]["severity"] == "medium"
+
+
+def test_abi_floor_on_a_real_glibc_elf(monkeypatch):
+    # plain-libc-demo.elf binds GLIBC_2.34 symbols (floor verified with
+    # readelf --dyn-syms), so one real binary spans all three outcomes.
+    metadata = parse(
+        os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+    )
+    assert metadata["abi_analysis"]["min_glibc_version"] == "2.34"
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    (default_finding,) = [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
+    assert default_finding["severity"] == "info"
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    (user_finding,) = [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
+    assert user_finding["severity"] == "medium"
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.34")
+    assert not [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
 
 
 def test_portability_and_loading_checks_name_their_evidence():

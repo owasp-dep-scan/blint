@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from blint.cli import build_parser
+import pytest
+
+from blint.cli import build_parser, handle_args
 
 
 def test_export_callgraph_mermaid_flag_sets_option():
@@ -75,3 +77,22 @@ def test_banner_survives_legacy_codepage_console(tmp_path):
         env=env,
     )
     assert result.returncode == 0, result.stderr[-400:]
+
+
+def test_glibc_baseline_flag_sets_the_env_var(monkeypatch, tmp_path):
+    """--glibc-baseline is the CLI spelling of BLINT_GLIBC_BASELINE."""
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    args = build_parser().parse_args(
+        ["--no-banner", "--glibc-baseline", "2.17", "-i", str(tmp_path)]
+    )
+    handle_args(args)
+    import os
+
+    assert os.environ["BLINT_GLIBC_BASELINE"] == "2.17"
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+
+
+def test_glibc_baseline_flag_rejects_malformed_versions():
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--glibc-baseline", "two-point-two-eight"])

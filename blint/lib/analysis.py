@@ -525,6 +525,14 @@ def run_rule(
     """
     if cfn := getattr(sys.modules[__name__], cid.lower(), None):
         result = cfn(f, metadata, rule_obj=rule_obj)
+        if isinstance(result, dict) and result:
+            # A check may override rule fields for this one finding (severity
+            # is the field in use) alongside the evidence string it would
+            # otherwise have returned; the rule object itself is never
+            # mutated, because it is shared across every file in the run.
+            overrides = {key: value for key, value in result.items() if key != "evidence"}
+            aresult = {**rule_obj, **overrides, "filename": f}
+            return process_result(metadata, aresult, exe_type, result.get("evidence"))
         if result is False or isinstance(result, str):
             aresult = {**rule_obj, "filename": f}
             return process_result(metadata, aresult, exe_type, result)

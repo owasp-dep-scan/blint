@@ -54,6 +54,14 @@ means the source was absent, which is never a failure), `limit` /
 `baseline_version` (thresholds), and `exe_types`. Custom rules files can extend
 these; ids must not collide with built-ins.
 
+`CHECK_ABI_FLOOR`'s `baseline_version` is the built-in default, not the whole
+policy: a run can name its own deployment floor with `--glibc-baseline` or
+`BLINT_GLIBC_BASELINE` (the option wins when both are given). A GLIBC floor
+above a user-set baseline is a `medium` finding; above the built-in default it
+is `info` and the finding says the default was used. Only GLIBC floors are
+compared (a glibc baseline says nothing about a GLIBCXX/libstdc++ floor), and
+musl and bionic binaries never fire the rule.
+
 - `exe_types` is a scope declaration: a rule only runs on files whose resolved
   `exe_type` is in the list. A file whose type could not be resolved (an
   unparseable input, a `.cat` or `.zip` archive) is outside every declared
