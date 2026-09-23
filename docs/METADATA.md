@@ -697,7 +697,7 @@ Libraries opened through `dlopen` never appear in `DT_NEEDED`, so a dependency l
 
 | Property          | Description                                                                                                                                |
 | :---------------- | :----------------------------------------------------------------------------------------------------------------------------------------- |
-| `entry_points`    | The runtime-loading functions the binary imports (`dlopen`, `dlmopen`, `android_dlopen_ext`, `LoadLibraryW`, `dlsym`, …).                  |
+| `entry_points`    | The runtime-loading functions the binary imports (`dlopen`, `dlmopen`, `android_dlopen_ext`, `LoadLibraryW`, `dlsym`, …). A function the binary merely defines does not count — the dynamic loader exports `dlopen` itself, and its own `libc.so` string is its job, not a `dlopen` call.                  |
 | `loads_libraries` | True when at least one entry point actually opens a library. `dlsym` alone operates on a handle the caller already has and does not count. |
 | `call_sites`      | Maps each entry point to the functions that call it. Populated only with `--disassemble`.                                                  |
 | `call_site_count` | Total number of call sites across all entry points.                                                                                        |

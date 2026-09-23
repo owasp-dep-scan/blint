@@ -3,6 +3,7 @@ import os
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
+from blint.lib.elf_dlopen import imported_loader_entry_points
 from blint.lib.provisioning import (
     application_identifier,
     entitlement,
@@ -1043,15 +1044,34 @@ def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) 
 def check_runtime_loading(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    # Libraries opened at runtime are absent from the dependency table, so an
-    # image that loads them has a dependency surface no static list describes.
+    """Reports library names the binary could load at runtime - as strings.
+
+    The evidence is never an observed load: it is library-name strings from
+    the image's data sections, paired with the loader entry points
+    (dlopen / LoadLibrary* / NSAddImage / ...) the binary imports. The
+    finding states both, so a reader cannot mistake it for a trace.
+
+    With no imported loader entry point the rule is suppressed rather than
+    lowered: the binary has no way to open a library by name, so however
+    many library-shaped strings it carries (name tables, message catalogs,
+    loader manifests), a finding titled "loads libraries" would be a false
+    claim at any severity.
+    """
     recovered = metadata.get("recovered_dependencies") or []
     confident = [
         entry["name"] for entry in recovered if entry.get("confidence") in ("high", "medium")
     ]
     if not confident:
         return True
-    return ", ".join(sorted(confident)[:10])
+    entry_points = imported_loader_entry_points(metadata)
+    if not entry_points:
+        return True
+    names = ", ".join(sorted(confident)[:10])
+    loaders = ", ".join(sorted(entry_points))
+    return (
+        f"library-name strings ({names}) paired with imported loader entry "
+        f"points ({loaders}); the strings are evidence, not observed loads"
+    )
 
 
 def check_link_closure(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:

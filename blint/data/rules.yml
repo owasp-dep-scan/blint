@@ -582,7 +582,8 @@
 - id: CHECK_RUNTIME_LOADING
   title: Loads Libraries That Are Not Declared Dependencies
   description: |
-    The binary opens shared libraries at runtime by name. Those libraries never appear in the dynamic dependency table, so a dependency list, an SBOM, or a vulnerability scan built from that table alone omits them entirely — and they are frequently the components that matter most, since drivers, codecs, authentication modules and cryptographic providers are almost always loaded on demand.
+    The finding names library-name strings found in the binary's data sections, paired with the loader entry points it imports (`dlopen`, `LoadLibrary*`, `NSAddImage`, ...). The evidence is a string, not an observed load: blint does not trace execution, and the finding says so. A binary that imports no loader entry point cannot open a library by name at all, so its library-shaped strings (name tables, message catalogs) are not reported — suppressed rather than lowered, because "loads libraries" would be a false claim at any severity.
+    Libraries opened at runtime never appear in the dynamic dependency table, so a dependency list, an SBOM, or a vulnerability scan built from that table alone omits them entirely — and they are frequently the components that matter most, since drivers, codecs, authentication modules and cryptographic providers are almost always loaded on demand. A loader entry point the binary merely defines (the dynamic loader exports `dlopen` itself) is not evidence of loading.
     There is a second consequence: a library resolved by name at runtime is subject to the full library search path at the moment of the call, which is a wider trust boundary than the one that applied at link time.
     Declare these dependencies explicitly so downstream consumers can see them, and prefer an absolute path over a bare name when the location is known.
   severity: info

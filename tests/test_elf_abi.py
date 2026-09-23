@@ -23,6 +23,7 @@ from blint.lib.elf_abi import (
 )
 from blint.lib.elf_dlopen import (
     _normalize_candidate,
+    imported_loader_entry_points,
     recover_runtime_dependencies,
     summarize_runtime_loading,
 )
@@ -525,6 +526,7 @@ def test_portability_and_loading_checks_name_their_evidence():
                 "shared_libc_imports": ["dl_iterate_phdr"],
             },
         },
+        "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
         "recovered_dependencies": [{"name": "libcuda.so.1", "confidence": "high"}],
         "link_closure": {
             "risky_search_paths": [{"kind": "DT_RPATH", "path": ".", "issue": "current-directory"}]
@@ -536,7 +538,8 @@ def test_portability_and_loading_checks_name_their_evidence():
     # dl_iterate_phdr is exported by both measured libcs, so it is not a
     # portability block and must not be listed.
     assert "dl_iterate_phdr" not in result
-    assert check_runtime_loading("f", metadata, {}) == "libcuda.so.1"
+    loading = check_runtime_loading("f", metadata, {})
+    assert "libcuda.so.1" in loading and "not observed loads" in loading
     assert "current-directory" in check_search_path("f", metadata, {})
     assert check_libc_portability("f", {}, {}) is True
     assert check_search_path("f", {}, {}) is True
@@ -721,3 +724,75 @@ class TestVirtualSizePerFormatLimit:
         )
         assert metadata["binary_type"] == "ELF"
         assert check_virtual_size("f", metadata, self.RULE) is True
+
+
+class TestRuntimeLoadingStatesItsEvidence:
+    """F1b.4: the finding's evidence is a string paired with imported loader
+    entry points, and a binary that cannot open a library by name is never
+    reported as loading one."""
+
+    def test_name_with_loader_import_fires_naming_both(self):
+        metadata = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "recovered_dependencies": [
+                {"name": "libstdbuf.so", "confidence": "high"},
+                {"name": "libfoo.so", "confidence": "low"},
+            ],
+        }
+        result = check_runtime_loading("f", metadata, {})
+        # The low-confidence candidate stays out; the evidence names the
+        # string, the loader entry point, and its own nature.
+        assert "libstdbuf.so" in result
+        assert "libfoo.so" not in result
+        assert "library-name strings" in result
+        assert "dlopen" in result
+        assert "not observed loads" in result
+
+    def test_name_without_loader_import_is_suppressed(self):
+        # However the names got into the metadata (a stale parse, another
+        # producer), no imported loader entry point means the binary cannot
+        # open a library by name: suppress rather than lower, because the
+        # rule's title would be false at any severity.
+        metadata = {
+            "recovered_dependencies": [{"name": "libfoo.so", "confidence": "high"}],
+            "dynamic_symbols": [{"name": "printf", "is_imported": True}],
+        }
+        assert check_runtime_loading("f", metadata, {}) is True
+
+    def test_no_names_at_all_never_fires(self):
+        metadata = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "recovered_dependencies": [],
+        }
+        assert check_runtime_loading("f", metadata, {}) is True
+        assert check_runtime_loading("f", {}, {}) is True
+
+    def test_real_elf_without_runtime_loading_stays_silent(self):
+        metadata = parse(
+            os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+        )
+        assert check_runtime_loading("f", metadata, {}) is True
+
+    def test_loader_defining_dlopen_is_not_a_loader_client(self):
+        # The ld-musl shape that fired on tier-0: the dynamic loader defines
+        # dlopen/dlsym (is_imported False) and carries libc.so as data.
+        # Defining the entry point is the loader's job, not evidence it calls
+        # one, so nothing is recovered and the rule cannot fire.
+        loader_shape = {
+            "dynamic_symbols": [
+                {"name": "dlopen", "is_imported": False},
+                {"name": "dlsym", "is_imported": False},
+            ],
+            "strings": [{"value": "libc.so", "section": ".rodata"}],
+        }
+        assert imported_loader_entry_points(loader_shape) == set()
+        assert recover_runtime_dependencies(loader_shape) == []
+
+    def test_importing_dlopen_with_a_string_recovers(self):
+        client_shape = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "strings": [{"value": "libstdbuf.so", "section": ".rodata"}],
+        }
+        assert imported_loader_entry_points(client_shape) == {"dlopen"}
+        recovered = recover_runtime_dependencies(client_shape)
+        assert [entry["name"] for entry in recovered] == ["libstdbuf.so"]
