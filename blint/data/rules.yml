@@ -40,6 +40,7 @@
   description: |
     Most modern CPUs protect against executing non-executable memory regions (heap, stack, etc). This is known either as `Non-eXecute (NX) or eXecute-Disable (XD)`. This protection reduces the areas an attacker can use to perform arbitrary code execution.
     An operating system with support for the NX bit may mark certain areas of memory as non-executable. The processor will then refuse to execute any code residing in these areas of memory. The general technique, known as executable space protection, also called Write XOR Execute, is used to prevent certain types of malicious software from taking over computers by inserting their code into another program's data storage area and running their own code from within this section; one class of such attacks is known as the buffer overflow attack.
+    Scope: the rule applies to loadable images. An ET relocatable object (a kernel module or `.o` file) has no program headers and therefore no `PT_GNU_STACK` at all - readelf -l reports no GNU_STACK line - so "stack is executable" is not a claim the artifact supports and the rule stays silent for `elf_type: REL`. Measured on the ELF/Mach-O tier-0 benign corpus (F0): all 12 findings were ET_REL kernel modules, every one false against readelf; a genuine executable-stack finding (GNU_STACK RWE on a loadable ELF) still fires.
     Do not disable this protection. Check and remove the below gcc flags.
 
     ```bash

@@ -1459,3 +1459,33 @@ def test_check_pie_keeps_legacy_metadata_behavior():
     pre-gate semantics rather than silently widening or narrowing."""
     assert _pie_fires({"exe_type": "MachO", "binary_type": "MachO", "is_pie": False})
     assert _pie_fires({"exe_type": "genericbinary", "binary_type": "ELF", "is_pie": False})
+
+
+# --- F1a.2: CHECK_NX applies only to loadable images -------------------------
+
+
+def _nx_fires(metadata):
+    results = run_checks("probe", metadata)
+    return any(result["id"] == "CHECK_NX" for result in results)
+
+
+def test_check_nx_not_applicable_to_relocatable_object():
+    """readelf -h type REL / readelf -l without any GNU_STACK: an object
+    file has no stack to make executable. All 12 F0 NX findings were
+    kernel modules in exactly this shape."""
+    assert not _nx_fires(
+        {
+            "exe_type": "genericbinary",
+            "binary_type": "ELF",
+            "elf_type": "REL",
+            "has_nx": False,
+        }
+    )
+
+
+def test_check_nx_fires_on_executable_stack_and_legacy_metadata():
+    assert _nx_fires(
+        {"exe_type": "genericbinary", "binary_type": "ELF", "elf_type": "EXEC", "has_nx": False}
+    )
+    # Metadata without elf_type keeps the pre-gate behavior.
+    assert _nx_fires({"exe_type": "genericbinary", "binary_type": "ELF", "has_nx": False})

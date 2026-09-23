@@ -13,6 +13,17 @@ from blint.lib.utils import parse_pe_manifest
 
 
 def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+    # NX is a property of a loadable image. An ET_REL object (kernel
+    # module, object file) has no program headers at all, so there is no
+    # PT_GNU_STACK for has_nx to have read: F0 measured every ET_REL file
+    # in the benign corpus firing a critical NX finding on exactly that
+    # absence (readelf -l: no GNU_STACK, type REL). Metadata shapes without
+    # elf_type keep the pre-gate behavior.
+    if (
+        str(metadata.get("binary_type") or "").upper() == "ELF"
+        and str(metadata.get("elf_type") or "").upper() == "REL"
+    ):
+        return True
     return metadata.get("has_nx") is not False
 
 
