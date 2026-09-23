@@ -516,14 +516,158 @@ def test_abi_floor_on_a_real_glibc_elf(monkeypatch):
 
 def test_portability_and_loading_checks_name_their_evidence():
     metadata = {
-        "abi_analysis": {"features": {"implementation_specific_imports": ["dl_iterate_phdr"]}},
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": {
+                "implementation_specific_imports": ["backtrace", "dl_iterate_phdr"],
+                "glibc_specific_imports": ["backtrace"],
+                "shared_libc_imports": ["dl_iterate_phdr"],
+            },
+        },
         "recovered_dependencies": [{"name": "libcuda.so.1", "confidence": "high"}],
         "link_closure": {
             "risky_search_paths": [{"kind": "DT_RPATH", "path": ".", "issue": "current-directory"}]
         },
     }
-    assert check_libc_portability("f", metadata, {}) == "dl_iterate_phdr"
+    result = check_libc_portability("f", metadata, {})
+    assert result.startswith("glibc-specific")
+    assert "backtrace" in result
+    # dl_iterate_phdr is exported by both measured libcs, so it is not a
+    # portability block and must not be listed.
+    assert "dl_iterate_phdr" not in result
     assert check_runtime_loading("f", metadata, {}) == "libcuda.so.1"
     assert "current-directory" in check_search_path("f", metadata, {})
     assert check_libc_portability("f", {}, {}) is True
     assert check_search_path("f", {}, {}) is True
+
+
+def test_libc_portability_classification_from_measured_symbol_lists():
+    # The per-symbol availability table must classify exactly the interfaces
+    # the measured glibc 2.41 / musl 1.2.6 symbol lists say it does (see
+    # INTERFACE_LIBC_AVAILABILITY's provenance comment for the measurement).
+    from blint.lib.elf_abi import INTERFACE_LIBC_AVAILABILITY as table
+
+    assert table["backtrace"] == "glibc"
+    assert table["__freadahead"] == "musl"
+    assert table["dl_iterate_phdr"] == "both"
+    assert table["pthread_getattr_np"] == "both"
+    assert table["__libc_start_main"] == "both"
+    assert table["__register_frame_info"] == "neither"
+
+
+def test_libc_portability_fires_only_on_the_libc_specific_subset():
+    def features(**buckets):
+        merged = {
+            "implementation_specific_imports": sorted(
+                name for names in buckets.values() for name in names
+            )
+        }
+        merged.update(buckets)
+        return merged
+
+    glibc_binary = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": features(
+                glibc_specific_imports=["_obstack_begin", "backtrace"],
+                shared_libc_imports=["__ctype_b_loc", "__libc_start_main", "dl_iterate_phdr"],
+            ),
+        }
+    }
+    result = check_libc_portability("f", glibc_binary, {})
+    assert result.startswith("glibc-specific")
+    assert "_obstack_begin" in result and "backtrace" in result
+    assert "__libc_start_main" not in result and "__ctype_b_loc" not in result
+
+    # A glibc binary binding only shared interfaces is portable between the
+    # two measured libcs: no finding.
+    shared_only = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": features(shared_libc_imports=["__libc_start_main", "dladdr"]),
+        }
+    }
+    assert check_libc_portability("f", shared_only, {}) is True
+
+    # The F0 defect case: a musl binary importing dl_iterate_phdr and
+    # pthread_getattr_np - musl's own interface - was called glibc-bound.
+    musl_shared_only = {
+        "abi_analysis": {
+            "libc": "musl",
+            "features": features(
+                shared_libc_imports=[
+                    "__libc_start_main",
+                    "dl_iterate_phdr",
+                    "pthread_getattr_np",
+                    "pthread_setname_np",
+                ]
+            ),
+        }
+    }
+    assert check_libc_portability("f", musl_shared_only, {}) is True
+
+    # A musl binary binding musl's own extra interface is a finding, and the
+    # evidence names musl - never glibc.
+    musl_specific = {
+        "abi_analysis": {
+            "libc": "musl",
+            "features": features(musl_specific_imports=["__freadahead"]),
+        }
+    }
+    musl_result = check_libc_portability("f", musl_specific, {})
+    assert musl_result.startswith("musl-specific")
+    assert "__freadahead" in musl_result
+    assert "glibc-specific" not in musl_result
+
+    # No libc identified: each binding is named with its own provider rather
+    # than guessed.
+    unknown = {
+        "abi_analysis": {
+            "libc": "",
+            "features": features(
+                glibc_specific_imports=["backtrace"],
+                musl_specific_imports=["__freadahead"],
+            ),
+        }
+    }
+    unknown_result = check_libc_portability("f", unknown, {})
+    assert "glibc-specific: backtrace" in unknown_result
+    assert "musl-specific: __freadahead" in unknown_result
+
+
+def test_libc_portability_ignores_non_libc_runtime_interfaces():
+    # __register_frame_info and friends are exported by libgcc_s, not by
+    # either libc: recording them as C library internals was a misattribution
+    # the measurement exposed, and the rule must not report them.
+    metadata = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": {
+                "implementation_specific_imports": ["__register_frame_info"],
+                "non_libc_runtime_imports": ["__register_frame_info"],
+            },
+        }
+    }
+    assert check_libc_portability("f", metadata, {}) is True
+
+
+def test_libc_portability_on_real_binaries():
+    # Committed snapshots of one Rust project built for glibc and musl.
+    glibc_abi = analyze_elf_abi(snapshot("x86_64-linux"))
+    result = check_libc_portability("f", {"abi_analysis": glibc_abi}, {})
+    assert result.startswith("glibc-specific")
+    assert "__cxa_thread_atexit_impl" in result
+    assert "gnu_get_libc_version" in result
+    assert "dl_iterate_phdr" not in result
+
+    musl_abi = analyze_elf_abi(snapshot("x86_64-musl"))
+    # The musl build binds only interfaces both libcs export, so the rule
+    # that F0 measured firing here 4 times is now silent on it.
+    assert check_libc_portability("f", {"abi_analysis": musl_abi}, {}) is True
+
+    # A real committed glibc ELF whose only non-standard import is
+    # __libc_start_main (shared) also stays silent.
+    real = parse(
+        os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+    )
+    assert check_libc_portability("f", real, {}) is True

@@ -932,14 +932,45 @@ def check_build_path_leak(
 def check_libc_portability(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    # An image that reaches into C library internals is bound to the
-    # implementation it was built against, so report the interfaces by name
-    # rather than a bare pass or fail.
+    """Reports interfaces that bind the binary to one C library implementation.
+
+    Availability is measured per symbol (see INTERFACE_LIBC_AVAILABILITY in
+    elf_abi): an interface both glibc 2.41 and musl 1.2.6 export is a
+    non-standard extension but NOT a portability block, so it is not a
+    finding. What fires is the interface the binary's own libc does not share
+    with the other one - glibc-only interfaces on a glibc binary, musl-only
+    interfaces on a musl binary - and the evidence names which libc it
+    measured, so musl's own interface is never called glibc-specific. When
+    the libc cannot be identified, any implementation-specific binding is
+    named with its provider rather than guessed at.
+    """
     abi = metadata.get("abi_analysis") or {}
-    names = (abi.get("features") or {}).get("implementation_specific_imports") or []
-    if not names:
+    features = abi.get("features") or {}
+    libc = abi.get("libc")
+    if libc == "glibc":
+        specific = features.get("glibc_specific_imports") or []
+        if not specific:
+            return True
+        return (
+            f"glibc-specific (measured against glibc 2.41 / musl 1.2.6): "
+            f"{', '.join(specific[:10])}"
+        )
+    if libc == "musl":
+        specific = features.get("musl_specific_imports") or []
+        if not specific:
+            return True
+        return (
+            f"musl-specific (measured against musl 1.2.6 / glibc 2.41): "
+            f"{', '.join(specific[:10])}"
+        )
+    by_provider = []
+    if glibc_only := features.get("glibc_specific_imports") or []:
+        by_provider.append(f"glibc-specific: {', '.join(glibc_only[:5])}")
+    if musl_only := features.get("musl_specific_imports") or []:
+        by_provider.append(f"musl-specific: {', '.join(musl_only[:5])}")
+    if not by_provider:
         return True
-    return ", ".join(names[:10])
+    return "; ".join(by_provider)
 
 
 def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str | dict:
