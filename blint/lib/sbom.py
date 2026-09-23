@@ -535,6 +535,148 @@ def _find_component_by_package_identity(
     return None
 
 
+def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
+    """Identity of a matched purl with the version dropped.
+
+    Two blintdb rows for the same project at different versions (a Homebrew
+    machine holding two kegs of openssl@3) group under one key, so their
+    versions can be decided by artifact evidence rather than by score
+    (F2a.3). Qualifiers stay in the key: the same name under a different
+    tap or source hash is a different project row, not a version conflict.
+    """
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return None
+    qualifiers = "&".join(f"{k}={v}" for k, v in sorted((parsed.qualifiers or {}).items()))
+    return (parsed.type, parsed.namespace or "", parsed.name, qualifiers)
+
+
+def _artifact_version_evidence(exe: str, metadata: dict) -> dict[str, list[str]]:
+    """Version-bearing evidence read from the artifact itself.
+
+    Sources, as named evidence: the artifact path (a Cellar/vcpkg install
+    path names the version it came from), ELF SONAMEs, and the current/
+    compatibility versions of the linked dylibs. A dylib's current_version
+    is an ABI version (libcrypto.3.dylib reports 3.0.0 for every 3.6.x
+    release), so evidence that matches no candidate version contributes
+    nothing — callers only let *matching* evidence separate candidates.
+    """
+    evidence: dict[str, list[str]] = {}
+    if path_versions := sorted(set(re.findall(r"\d+\.\d+(?:\.\d+)+", str(exe)))):
+        evidence["path"] = path_versions
+    soname_versions = sorted(
+        {
+            version
+            for entry in metadata.get("dynamic_entries") or []
+            if isinstance(entry, dict) and entry.get("tag") == "SONAME"
+            for version in re.findall(r"\d+\.\d+(?:\.\d+)+", str(entry.get("name") or ""))
+        }
+    )
+    if soname_versions:
+        evidence["soname"] = soname_versions
+    dylib_versions = sorted(
+        {
+            str(library.get("version"))
+            for library in metadata.get("libraries") or []
+            if isinstance(library, dict) and library.get("version")
+        }
+    )
+    if dylib_versions:
+        evidence["dylib_current_version"] = dylib_versions
+    return evidence
+
+
+def _unversioned_purl(purl: str) -> str | None:
+    """The same purl with its version dropped, for an unresolved conflict.
+
+    String surgery rather than a PackageURL round-trip: rebuilding a purl
+    re-encodes names the database stored verbatim (a Homebrew formula name
+    like openssl@3 becomes openssl%403), which would change the component
+    identity the producer stated.
+    """
+    base, sep, qualifiers = purl.partition("?")
+    if "@" not in base.rsplit("/", 1)[-1]:
+        return None
+    unversioned_base = base.rsplit("@", 1)[0]
+    return unversioned_base + (sep + qualifiers if sep else "")
+
+
+def _resolve_version_conflicts(
+    detected: set[str], evidence_by_purl: dict, exe: str, metadata: dict
+) -> tuple[set[str], dict[str, dict[str, str]]]:
+    """Decide between several versions of one matched project (F2a.3).
+
+    Version-bearing evidence from the artifact outranks match score: when
+    exactly one candidate version appears in the artifact's own path,
+    SONAME or dylib versions, that version wins and the others are
+    dropped. When the evidence cannot separate the candidates, neither
+    version is emitted — the group collapses to one unversioned component
+    carrying a blintdb_version_ambiguity property naming the candidates
+    and the evidence consulted. Picking by score alone is what made a
+    stale keg of openssl@3 outrank the installed one.
+
+    Returns (detected set after resolution, property additions per purl).
+    """
+    notes: dict[str, dict[str, str]] = {}
+    groups: dict[tuple, list[str]] = {}
+    for purl in detected:
+        key = _purl_group_key(purl)
+        if key is not None:
+            groups.setdefault(key, []).append(purl)
+    resolved = set(detected)
+    artifact_evidence = _artifact_version_evidence(exe, metadata)
+    evidence_values = {version for versions in artifact_evidence.values() for version in versions}
+    for key, purls in groups.items():
+        if len(purls) < 2:
+            continue
+        versions = {}
+        for purl in purls:
+            try:
+                versions[purl] = PackageURL.from_string(purl).version or ""
+            except ValueError:
+                versions[purl] = ""
+        matching = {purl for purl, version in versions.items() if version in evidence_values}
+        detail = {
+            "candidates": ", ".join(
+                f"{versions[purl]} (score {evidence_by_purl.get(purl, {}).get('score')})"
+                for purl in sorted(purls)
+            ),
+            "evidence": "; ".join(f"{k}={','.join(v)}" for k, v in artifact_evidence.items())
+            or "none",
+        }
+        if len(matching) == 1:
+            kept = next(iter(matching))
+            dropped = sorted(set(purls) - matching)
+            resolved -= set(dropped)
+            notes[kept] = {
+                "blintdb_version_evidence": (
+                    f"{detail['evidence']} separated {versions[kept]} from "
+                    f"{', '.join(versions[p] for p in dropped)}"
+                )
+            }
+            continue
+        # Zero or several candidates match the artifact's evidence: emit
+        # neither version. The unversioned component inherits the strongest
+        # candidate's evidence block and records the ambiguity by name.
+        strongest = max(
+            purls, key=lambda p: evidence_by_purl.get(p, {}).get("score") or 0
+        )
+        ambiguous_purl = _unversioned_purl(strongest)
+        if not ambiguous_purl or ambiguous_purl in resolved:
+            continue
+        resolved -= set(purls)
+        resolved.add(ambiguous_purl)
+        if strongest in evidence_by_purl:
+            evidence_by_purl[ambiguous_purl] = evidence_by_purl[strongest]
+        notes[ambiguous_purl] = {
+            "blintdb_version_ambiguity": (
+                f"{detail['candidates']}; artifact evidence consulted: {detail['evidence']}"
+            )
+        }
+    return resolved, notes
+
+
 def components_from_abi_requirements(abi_analysis: dict) -> list[Component]:
     """Create components from the ABI floor each version provider imposes.
 
@@ -1221,7 +1363,16 @@ def process_exe_file(
         )
         if binaries_detected:
             LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
+            # F2a.3: when the database holds several versions of the same
+            # project (two kegs of a formula), artifact evidence decides
+            # between them or the conflict collapses to one unversioned
+            # component with an ambiguity property — score never picks a
+            # version the artifact did not come from.
+            binaries_detected, version_notes = _resolve_version_conflicts(
+                binaries_detected, binary_evidence, exe, metadata
+            )
         else:
+            version_notes = {}
             LOG.debug(f"Unable to identify a blintdb match for {exe}.")
         for binary_purl in sorted(binaries_detected):
             evidence = binary_evidence.get(binary_purl, {})
@@ -1284,6 +1435,9 @@ def process_exe_file(
                     f" qualification={member['qualification']}"
                     for member in evidence.get("blintdb_members", [])
                 ],
+                # F2a.3 resolution notes: which artifact evidence separated
+                # a version conflict, or the recorded ambiguity when none did.
+                **(version_notes.get(binary_purl) or {}),
             }
             comp = create_dynamic_component(
                 {"purl": binary_purl, "tag": "NEEDED"},

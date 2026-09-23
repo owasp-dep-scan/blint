@@ -1095,3 +1095,134 @@ def test_banner_of_a_different_version_stays_separate(tmp_path, monkeypatch):
         "pkg:generic/zlib@1.3.1?source_hash=abc",
         "pkg:generic/zlib@1.3.2",
     ]
+
+
+# --- F2a.3: version conflicts between matched versions of one project ----
+
+
+def _create_two_version_blintdb(db_file):
+    """One project name ingested at two versions, like two Homebrew kegs."""
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        """
+        CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE Projects (project_id INTEGER PRIMARY KEY, name TEXT NOT NULL, purl TEXT);
+        CREATE TABLE Builds (build_id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
+            llvm_target_tuple TEXT, FOREIGN KEY (project_id) REFERENCES Projects(project_id));
+        CREATE TABLE Binaries (binary_id INTEGER PRIMARY KEY, build_id INTEGER NOT NULL,
+            name TEXT, binary_type TEXT, llvm_target_tuple TEXT,
+            FOREIGN KEY (build_id) REFERENCES Builds(build_id));
+        CREATE TABLE Symbols (symbol_id INTEGER PRIMARY KEY, binary_id INTEGER NOT NULL,
+            name TEXT NOT NULL, source TEXT NOT NULL,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        CREATE TABLE FunctionFingerprints (function_id INTEGER PRIMARY KEY,
+            binary_id INTEGER NOT NULL, function_key TEXT NOT NULL,
+            instruction_hash TEXT, assembly_hash TEXT,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        """
+    )
+    connection.executemany(
+        "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
+        (("schema_family", "blint-db"), ("schema_version", "2")),
+    )
+    for project_id, version in ((1, "3.6.3"), (2, "3.6.4")):
+        connection.execute(
+            "INSERT INTO Projects(project_id, name, purl) VALUES(?, 'openssl@3', ?)",
+            (project_id, f"pkg:generic/openssl@3@{version}?package_manager=homebrew&tap=homebrew/core"),
+        )
+        connection.execute(
+            "INSERT INTO Builds(build_id, project_id) VALUES(?, ?)", (project_id, project_id)
+        )
+        connection.execute(
+            "INSERT INTO Binaries(binary_id, build_id, name, binary_type) VALUES(?, ?, 'openssl', 'MachO')",
+            (project_id, project_id),
+        )
+    # Both versions carry the same symbols so both matches surface.
+    connection.executemany(
+        "INSERT INTO Symbols(symbol_id, binary_id, name, source) VALUES(?, ?, ?, 'symtab_symbols')",
+        [
+            (1, 1, "EVP_DigestSignInit"),
+            (2, 1, "SSL_new"),
+            (3, 1, "SSL_CTX_new"),
+            (4, 1, "X509_new"),
+            (5, 1, "RSA_new"),
+            (6, 2, "EVP_DigestSignInit"),
+            (7, 2, "SSL_new"),
+            (8, 2, "SSL_CTX_new"),
+            (9, 2, "X509_new"),
+            (10, 2, "RSA_new"),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+
+def _openssl_metadata():
+    return {
+        "name": "openssl",
+        "binary_type": "MachO",
+        "strings": [{"value": "OpenSSL 3.6.3 1 Jan 2026"}],
+        "symtab_symbols": [
+            {"name": "EVP_DigestSignInit"},
+            {"name": "SSL_new"},
+            {"name": "SSL_CTX_new"},
+            {"name": "X509_new"},
+            {"name": "RSA_new"},
+        ],
+    }
+
+
+def _run_openssl_sbom(tmp_path, monkeypatch, exe_path, metadata):
+    db_file = tmp_path / "blint.db"
+    _create_two_version_blintdb(db_file)
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+    return process_exe_file(
+        {},
+        False,
+        exe_path,
+        sbom,
+        [],
+        {},
+        True,
+        True,
+    )
+
+
+def test_version_conflict_resolved_by_artifact_path(tmp_path, monkeypatch):
+    """The artifact's own install path names the keg it came from; that
+    evidence outranks score and drops the other version (F2a.3)."""
+    components = _run_openssl_sbom(
+        tmp_path,
+        monkeypatch,
+        "/opt/homebrew/Cellar/openssl@3/3.6.3/bin/openssl",
+        _openssl_metadata(),
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3@3.6.3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "internal:blintdb_version_evidence" in props
+    assert "path=3.6.3" in props["internal:blintdb_version_evidence"]
+
+
+def test_version_conflict_without_artifact_evidence_records_ambiguity(tmp_path, monkeypatch):
+    """No version-bearing evidence: neither version is emitted, and the
+    ambiguity is a named property instead of a score-picked winner."""
+    metadata = _openssl_metadata()
+    metadata["strings"] = []  # no banner either side can lean on
+    components = _run_openssl_sbom(
+        tmp_path,
+        monkeypatch,
+        "/tmp/demo/openssl",
+        metadata,
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "internal:blintdb_version_ambiguity" in props
+    assert "3.6.3" in props["internal:blintdb_version_ambiguity"]
+    assert "3.6.4" in props["internal:blintdb_version_ambiguity"]
