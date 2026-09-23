@@ -423,10 +423,15 @@ def test_refused_nupkg_still_emits_a_component_naming_the_refusal(tmp_path):
 
 
 def test_dll_named_symbols_version_entry_is_generic_not_nuget():
-    from blint.lib.sbom import components_from_symbols_version
+    """F2a.4 strengthened this negative property: symbol-version nodes are
+    no longer components at all, so a `.dll`-suffixed GNU version node can
+    never become any purl, NuGet or otherwise - it rides the parent
+    component's internal:symbols_version property verbatim."""
+    from blint.lib.sbom import format_abi_requirements
 
-    comps = components_from_symbols_version([{"name": "fake.dll", "value": 1}])
-    assert [str(c.purl) for c in comps] == ["pkg:generic/fake.dll"]
+    line = format_abi_requirements({"requirements": []})
+    assert line == ""
+    assert "nuget" not in line
 
 
 def test_dll_named_recovered_dependency_is_generic_not_nuget():

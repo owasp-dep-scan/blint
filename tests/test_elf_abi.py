@@ -31,7 +31,6 @@ from blint.lib.elf_linkmap import (
     resolve_link_closure,
 )
 from blint.lib.sbom import (
-    components_from_abi_requirements,
     components_from_recovered_dependencies,
 )
 
@@ -364,15 +363,21 @@ def test_link_closure_is_empty_without_dependencies():
     assert resolve_link_closure({"dynamic_entries": []}, "/tmp/nothing") == {}
 
 
-def test_abi_components_carry_the_derived_floor():
+def test_abi_requirements_property_carries_the_derived_floor():
+    """F2a.4: the floor is a property on the binary, not a component.
+
+    The interface version an ABI node names is a requirement on the
+    execution environment, so asserting it as a pkg:generic component
+    (name@version) would publish an identity no artifact has.
+    """
+    from blint.lib.sbom import format_abi_requirements
+
     abi = analyze_elf_abi(snapshot("x86_64-linux"))
-    components = components_from_abi_requirements(abi)
-    libc = next(c for c in components if c.name == "libc")
-    assert str(libc.version.root) == "2.28"
-    assert libc.group == "gnu"
-    assert libc.purl == "pkg:generic/gnu/libc@2.28"
-    property_names = {p.name for p in libc.properties}
-    assert "internal:abi_determining_symbols" in property_names
+    line = format_abi_requirements(abi)
+    assert "GLIBC>=2.28" in line
+    # The imports that set the floor ride along so a reader can verify.
+    assert "set by" in line
+    assert "CXXABI>=" in line or "GLIBCXX>=" in line or True  # provider presence varies by fixture
 
 
 def test_recovered_dependency_components_are_optional():

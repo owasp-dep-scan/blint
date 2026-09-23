@@ -677,68 +677,27 @@ def _resolve_version_conflicts(
     return resolved, notes
 
 
-def components_from_abi_requirements(abi_analysis: dict) -> list[Component]:
-    """Create components from the ABI floor each version provider imposes.
+def format_abi_requirements(abi_analysis: dict) -> str:
+    """Format the ABI floor each version provider imposes as one property line.
 
-    The version recorded here is the highest version node any *imported* symbol
-    binds to, which is the actual minimum the binary needs at runtime. Deriving
-    it from the imports rather than from the version definition table avoids two
-    errors that table alone produces: attributing a version to a provider no
-    symbol uses, and reporting a version lower than the one really required.
-
-    Args:
-        abi_analysis (dict): The ``abi_analysis`` block from parsed metadata.
-
-    Returns:
-        list[Component]: list of components
+    Each entry reads ``PROVIDER>=min_version (N symbols)`` and, when the
+    analysis recorded them, the imports that set the floor - so a reader can
+    verify a surprising requirement instead of taking it on trust. These are
+    requirements on the execution environment (interface versions), which is
+    why they are a property on the binary's component and not components:
+    see the F2a.4 note in process_exe_file.
     """
-    lib_components: list[Component] = []
+    parts = []
     for requirement in abi_analysis.get("requirements") or []:
         provider = requirement.get("provider") or ""
-        version = requirement.get("min_version") or None
-        name = requirement.get("package_name") or provider.lower()
-        group = requirement.get("package_group") or ""
-        if not name:
+        if not provider:
             continue
-        purl = PackageURL(
-            type="generic",
-            namespace=group or None,
-            name=name,
-            version=purl_field(version),
-        ).to_string()
-        properties = [
-            Property(name="internal:abi_provider", value=provider),
-            Property(
-                name="internal:abi_symbol_count",
-                value=str(requirement.get("symbol_count", 0)),
-            ),
-        ]
+        version = requirement.get("min_version") or "unversioned"
+        entry = f"{provider}>={version} ({requirement.get('symbol_count', 0)} symbols)"
         if determining := requirement.get("determining_symbols"):
-            # Recording which imports set the floor lets a reader verify a
-            # surprising version requirement instead of taking it on trust.
-            properties.append(
-                Property(
-                    name="internal:abi_determining_symbols",
-                    value=", ".join(determining[:8]),
-                )
-            )
-        comp = Component(
-            type=Type.library,
-            group=group,
-            name=name,
-            version=version,
-            purl=purl,
-            # A floor derived from the imports is much stronger evidence than a
-            # name split, but it is still a floor rather than the exact version
-            # installed, so it stays short of full confidence.
-            evidence=create_component_evidence(
-                f"{provider}_{version}" if version else provider, 0.8
-            ),
-            properties=properties,
-        )
-        comp.bom_ref = RefType(purl)
-        lib_components.append(comp)
-    return lib_components
+            entry += f" [set by {', '.join(determining[:4])}]"
+        parts.append(entry)
+    return "; ".join(parts)
 
 
 def components_from_recovered_dependencies(recovered: list[dict]) -> list[Component]:
@@ -786,59 +745,6 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
                     value="; ".join(entry.get("evidence") or []),
                 ),
             ],
-        )
-        comp.bom_ref = RefType(purl)
-        lib_components.append(comp)
-    return lib_components
-
-
-def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
-    """
-    Creates a list of Component objects from symbols version.
-    This style of detection is quite imprecise since the version is just a min
-    specifier. It is a fallback for binaries where the per-symbol version
-    information needed by ``components_from_abi_requirements`` is unavailable.
-
-    Args:
-        symbols_version (list[dict]): A list of symbols version.
-
-    Returns:
-        list[Component]: list of components
-    """
-    lib_components: list[Component] = []
-    for symbol in symbols_version:
-        group = ""
-        name = symbol["name"]
-        version = None
-        # W3.5: same correction as the recovered-dependency site — a
-        # `.dll`-suffixed GNU version-definition name (this list is
-        # ELF-produced only) is not evidence of a NuGet package.
-        pkg_type = "generic"
-        if "_" in name:
-            tmp_a = name.split("_")
-            if len(tmp_a) == 2:
-                version = tmp_a[-1]
-                name = tmp_a[0].lower()
-                if name.startswith("glib"):
-                    name = name.removeprefix("g")
-                    group = "gnu"
-        purl = PackageURL(
-            type=pkg_type,
-            namespace=group or None,
-            name=name,
-            version=purl_field(version),
-            qualifiers=(
-                {"hash": hash_value} if (hash_value := purl_field(symbol.get("hash"))) else {}
-            ),
-        ).to_string()
-        comp = Component(
-            type=Type.library,
-            group=group,
-            name=name,
-            version=version,
-            purl=purl,
-            evidence=create_component_evidence(symbol["name"], 0.5),
-            properties=[Property(name="internal:symbol_version", value=symbol["name"])],
         )
         comp.bom_ref = RefType(purl)
         lib_components.append(comp)
@@ -1170,14 +1076,19 @@ def process_exe_file(
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         abi_analysis: dict = metadata.get("abi_analysis") or {}
-        # The ABI floor computed from the imported symbols supersedes the
-        # version-node heuristic, which cannot tell which nodes are actually
-        # bound. Fall back to it only when no floor could be derived.
-        abi_components = components_from_abi_requirements(abi_analysis)
-        if abi_components:
-            lib_components += abi_components
-        else:
-            lib_components += components_from_symbols_version(symbols_version)
+        # F2a.4: the ABI floor each version provider imposes (GLIBC_2.38,
+        # GLIBCXX_3.4.32, ...) is a requirement the binary places on its
+        # execution environment, not a software artifact the binary is
+        # composed of, so it is recorded as properties on the binary's own
+        # component and never emitted as a component. A components[] entry
+        # asserts an artifact identity (name@version) that vulnerability
+        # matching consumes; the version in an ABI floor is an *interface*
+        # version - the installed libc answering GLIBC_2.38 imports is the
+        # distro's 2.41, not "libc 2.38" - so a pkg:generic/gnu/libc@2.38
+        # component claims an identity no artifact has and mis-matches
+        # advisories in both directions. The requirement itself is real and
+        # stays, as internal:abi_* properties plus the raw interface list in
+        # internal:symbols_version.
         lib_components += components_from_recovered_dependencies(
             metadata.get("recovered_dependencies")
         )
@@ -1188,11 +1099,19 @@ def process_exe_file(
                 "abi_portability_notes",
                 " ".join(abi_analysis.get("portability_notes") or []),
             ),
+            ("abi_requirements", format_abi_requirements(abi_analysis)),
         ):
             if prop_value:
                 parent_component.properties.append(
                     Property(name=f"internal:{prop_name}", value=str(prop_value))
                 )
+        if symbols_version:
+            parent_component.properties.append(
+                Property(
+                    name="internal:symbols_version",
+                    value=", ".join([f["name"] for f in symbols_version]),
+                )
+            )
         if link_hygiene := metadata.get("link_hygiene"):
             # A declared dependency nothing imports from still lands in every
             # downstream inventory and vulnerability match, so the SBOM is the
@@ -1228,13 +1147,6 @@ def process_exe_file(
                         value=str(link_closure["unresolved_symbol_count"]),
                     )
                 )
-        if not lib_components and symbols_version:
-            parent_component.properties.append(
-                Property(
-                    name="internal:symbols_version",
-                    value=", ".join([f["name"] for f in symbols_version]),
-                )
-            )
 
         internal_functions = sorted(
             {
