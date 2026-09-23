@@ -19,7 +19,16 @@ What it does:
 3. Classifies every corpus file by format and architecture using ``file -b``
    (named external tool; its version is recorded in the output). file(1) is
    the grouper precisely because it is not blint.
-4. Emits, split by format and by architecture:
+4. Classifies every corpus file by format and architecture using ``file -b``
+   (named external tool; its version is recorded in the output). file(1) is
+   the grouper precisely because it is not blint.
+5. Splits findings that only exist because a manifest entry is *derived* (a
+   reconstruction from another artifact — dyld-cache extractions today) out of
+   the headline, and reports them in their own section. Only rules whose
+   answer extraction changes are excluded (``EXTRACTION_SENSITIVE_RULES`` —
+   see its comment for the per-rule argument); findings the extraction cannot
+   change stay in the headline even when they land on a derived file.
+6. Emits, split by format and by architecture:
    - findings per rule;
    - findings per severity;
    - findings per file;
@@ -29,7 +38,7 @@ What it does:
    - findings whose ``filename`` does not map to any manifest entry (these
      are reported, not silently dropped: a blint run that analyzed files the
      manifest does not know about is a measurement bug).
-5. Writes a JSON sidecar (``--out``, default ``<reports>/fp-gate.json``) so
+7. Writes a JSON sidecar (``--out``, default ``<reports>/fp-gate.json``) so
    before/after deltas can be diffed mechanically, and prints the tables.
 
 Usage:
@@ -52,6 +61,28 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS = Path.home() / "sandbox" / "fp-corpus"
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "warning", "info"]
+
+# Rules whose *answer* changes when the corpus file is a reconstruction from
+# another artifact (manifest key ``derived``, e.g. "dyld-cache-extraction").
+# A finding from one of these rules on a derived file is kept out of the
+# headline and reported separately; findings from every other rule stay in the
+# headline even on derived files.
+#
+# CHECK_CODESIGN is the only member, by elimination over the rules that fire
+# on this corpus's derived files plus the ones that could:
+# - codesign: the dyld shared cache signs the cache as a whole; `ipsw dyld
+#   extract` writes each image with no LC_CODE_SIGNATURE at all, so every
+#   extraction is unsigned *because of extraction* — while the same libraries
+#   on disk (usr/lib) are signed and the rule is silent on them.
+# - PIE: the MH_PIE flag is a Mach-O header bit carried verbatim through
+#   extraction; the extracted image reports what the original had.
+# - UNUSED_DEPENDENCIES: LC_LOAD_DYLIB commands are reconstructed from the
+#   cache's own metadata; otool -L of an extraction reads the dependency set
+#   the original declared.
+# - OBJC_LOAD_METHODS / CANARY: __objc_nlclslist and the symbol tables are
+#   image content, not signature content, and survive extraction.
+# - every ELF rule: derived files here are Mach-O only.
+EXTRACTION_SENSITIVE_RULES = frozenset({"CHECK_CODESIGN"})
 
 
 def run_blint(corpus_root: Path, reports_dir: Path, input_dirs: list[str]) -> None:
@@ -183,12 +214,25 @@ def build_report(
     unmatched: list[str],
     file_tool: str,
 ) -> dict:
+    derived_paths = {entry["path"] for entry in entries if entry.get("derived")}
+    # Headline keeps every finding except those an artifact derivation is
+    # solely responsible for: an extraction-sensitive rule firing on a
+    # derived file. Everything else — including other rules on the same
+    # derived files — stays, so the headline only loses what the derivation,
+    # not the binary, caused.
+    headline_pairs: list[tuple[dict, dict]] = []
+    excluded_pairs: list[tuple[dict, dict]] = []
+    for finding, entry in pairs:
+        if entry["path"] in derived_paths and str(finding.get("id")) in EXTRACTION_SENSITIVE_RULES:
+            excluded_pairs.append((finding, entry))
+        else:
+            headline_pairs.append((finding, entry))
     per_file: Counter = Counter()
     rule_by_format: dict[str, Counter] = defaultdict(Counter)
     rule_by_arch: dict[str, Counter] = defaultdict(Counter)
     severity_by_format: dict[str, Counter] = defaultdict(Counter)
     rule_totals: Counter = Counter()
-    for finding, entry in pairs:
+    for finding, entry in headline_pairs:
         fmt, arch = classifications[entry["path"]]
         rule = str(finding.get("id") or "UNKNOWN")
         per_file[entry["path"]] += 1
@@ -202,15 +246,35 @@ def build_report(
         fmt, arch = classifications[entry["path"]]
         files_by_format[fmt] += 1
         files_by_arch[arch] += 1
+    derived_rules: Counter = Counter()
+    derived_files_by_format: Counter = Counter()
+    for entry in entries:
+        if entry["path"] in derived_paths:
+            fmt, _ = classifications[entry["path"]]
+            derived_files_by_format[fmt] += 1
+    for finding, entry in pairs:
+        if entry["path"] in derived_paths:
+            derived_rules[str(finding.get("id") or "UNKNOWN")] += 1
     counts_with_findings = [count for count in per_file.values()]
     counts_all = [per_file.get(entry["path"], 0) for entry in entries]
     return {
         "tool": {
             "file": file_tool,
             "corpus_files": len(entries),
-            "findings": len(pairs),
+            "findings": len(headline_pairs),
+            "excluded_derived_findings": len(excluded_pairs),
             "unmatched_findings": len(unmatched),
             "unmatched_examples": sorted(set(unmatched))[:10],
+        },
+        "derived": {
+            "files": len(derived_paths),
+            "files_by_format": dict(sorted(derived_files_by_format.items())),
+            "kinds": dict(
+                sorted(Counter(e["derived"] for e in entries if e.get("derived")).items())
+            ),
+            "findings_per_rule": dict(sorted(derived_rules.items())),
+            "excluded_from_headline": len(excluded_pairs),
+            "excluded_rules": sorted(EXTRACTION_SENSITIVE_RULES),
         },
         "corpus_files_by_format": dict(sorted(files_by_format.items())),
         "corpus_files_by_arch": dict(sorted(files_by_arch.items())),
@@ -244,8 +308,17 @@ def build_report(
 
 def print_report(report: dict) -> None:
     tool = report["tool"]
+    derived = report["derived"]
     print(f"\ncorpus files: {tool['corpus_files']}  findings: {tool['findings']}")
     print(f"file(1): {tool['file']}")
+    if derived["files"]:
+        print(
+            f"derived files: {derived['files']} {derived['kinds']} — "
+            f"{derived['excluded_from_headline']} findings from "
+            f"{', '.join(derived['excluded_rules'])} excluded from the headline above; "
+            "findings on derived files by rule: "
+            f"{derived['findings_per_rule']}"
+        )
     if tool["unmatched_findings"]:
         print(
             f"WARNING: {tool['unmatched_findings']} findings did not map to manifest entries"
