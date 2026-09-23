@@ -296,7 +296,14 @@ def main() -> int:
     args = build_parser().parse_args()
     corpus_root = Path(args.corpus).expanduser().resolve()
     entries = load_manifest(corpus_root, args.tier or ["tier0"])
-    input_dirs = sorted({str((corpus_root / entry["path"]).parent) for entry in entries})
+    parent_dirs = {str((corpus_root / entry["path"]).parent) for entry in entries}
+    # Only the top-most parent directories are passed to blint: a nested
+    # directory (tier0-reference/python-amd64 inside tier0-reference) walked
+    # again as its own -i input would analyze those files twice and double
+    # every per-file count.
+    input_dirs = sorted(
+        d for d in parent_dirs if not any(o != d and d.startswith(o + os.sep) for o in parent_dirs)
+    )
     reports_dir = Path(args.reports).expanduser() if args.reports else corpus_root / "reports"
     findings_file = reports_dir / "findings.json"
     if args.force_run or not findings_file.exists():
