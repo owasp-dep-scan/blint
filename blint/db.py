@@ -197,13 +197,31 @@ def _resolve_db_file(db_file: str | None = None) -> str | None:
 
 
 def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection | None:
-    """Open a direct connection to the local blintdb SQLite database."""
+    """Open a direct connection to the local blintdb SQLite database.
+
+    Returns None — never raises — when the database cannot be opened, so an
+    unreadable or unreachable blintdb degrades the run to no-blintdb rather
+    than crashing the SBOM. Symlinked directory components are resolved with
+    ``os.path.realpath`` first: ``SQLITE_OPEN_NOFOLLOW`` refuses any path
+    with a symlinked component, and on macOS even ``/tmp`` is one
+    (``/tmp`` -> ``/private/tmp``). NOFOLLOW still applies to the resolved
+    path, so a database file that is itself a symlink keeps being refused
+    rather than silently followed.
+    """
     database_file = _resolve_db_file(db_file)
     if not database_file or not os.path.exists(database_file):
         return None
     flags = apsw.SQLITE_OPEN_NOFOLLOW
     flags |= apsw.SQLITE_OPEN_READONLY if read_only else apsw.SQLITE_OPEN_READWRITE
-    connection = apsw.Connection(os.path.abspath(database_file), flags=flags)
+    try:
+        connection = apsw.Connection(os.path.realpath(database_file), flags=flags)
+    except apsw.Error as exc:
+        LOG.warning(
+            "Unable to open blintdb at %s (%s); continuing without blintdb",
+            database_file,
+            exc,
+        )
+        return None
     _apply_runtime_pragmas(connection, read_only=read_only)
     return connection
 
