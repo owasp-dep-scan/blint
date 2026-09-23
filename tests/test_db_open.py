@@ -7,12 +7,13 @@ A blintdb that cannot be opened must degrade the run to no-blintdb with a
 warning, never crash the SBOM (ground rule: a false positive is a defect of
 the same severity as a crash — and so is a crash). The macOS reproducer from
 D0 is BLINTDB_HOME=/tmp/...: SQLITE_OPEN_NOFOLLOW refuses any symlinked path
-component, and /tmp is one. The fix resolves the path with realpath first and
-keeps NOFOLLOW on the resolved path.
+component, and /tmp is one. The fix resolves the containing directory with
+realpath and keeps NOFOLLOW on the file name.
 """
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ import pytest
 from blint import db as db_module
 from blint.db import detect_binaries_utilized, get, is_supported_blintdb
 from tests.test_sbom_blintdb import _create_v2_blintdb
+
+# Both refusals are POSIX semantics: SQLite implements SQLITE_OPEN_NOFOLLOW in
+# its unix VFS only, and chmod(0) does not stop the owner reading on Windows.
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="NOFOLLOW and chmod-based unreadability are POSIX-only",
+)
 
 
 @pytest.fixture()
@@ -51,6 +59,7 @@ def test_get_opens_through_symlinked_directory_component(real_v2_db: Path, tmp_p
     assert evidence == {}
 
 
+@posix_only
 def test_get_degrades_on_unreadable_database(real_v2_db: Path, tmp_path: Path, caplog):
     """An unreadable database logs a warning and returns None, never raises."""
     unreadable = tmp_path / "unreadable-home" / "blint.db"
@@ -68,6 +77,7 @@ def test_get_degrades_on_unreadable_database(real_v2_db: Path, tmp_path: Path, c
         os.chmod(unreadable, 0o644)
 
 
+@posix_only
 def test_get_refuses_a_symlinked_database_file(real_v2_db: Path, tmp_path: Path, caplog):
     """Only directory components are resolved; a database file that is
     itself a symlink is still refused by NOFOLLOW, and the run degrades."""
