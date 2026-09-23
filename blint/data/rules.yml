@@ -243,7 +243,7 @@
 - id: CHECK_VIRTUAL_SIZE
   title: Optimize binary virtual size
   description: |
-    Checks the binary virtual size when mapped in memory (default 30MB).
+    Checks the binary virtual size when mapped in memory, against a limit calibrated per format: 30MB for PE (a PE's SizeOfImage over 30MB is anomalous - the benign corpus tops out at 6.5MB) and 128MB for ELF (a stock static Go build with net/http maps 37.4MB, so the ELF limit sits at 3.4x the benign corpus maximum). Mach-O metadata carries no virtual size, so the check does not run there.
     Use a packer such as [upx](https://github.com/upx/upx) to compress your binaries.
     For gcc, use flags such as `-s`, `-Os` or strip unwanted comment and build id sections from your ELF binaries.
     When you compile and link your Go programs with the gc toolchain on Linux, macOS, FreeBSD or NetBSD, the resulting binaries contain DWARFv4 debugging information that recent versions (≥7.5) of the GDB debugger can use to inspect a live process or a core dump.
@@ -253,6 +253,13 @@
     ```
   severity: medium
   limit: 30MB
+  # F1b.3: per-format calibration, measured over the benign corpora (PE
+  # tier-0: p50 0.1 / p95 5.0 / max 6.5 MiB over 62 files; ELF tier-0:
+  # p50 0.1 / p95 3.2 / max 37.4 MiB over 107 files, the max being a stock
+  # static Go net/http build). `limit` stays the default for any format
+  # without its own entry.
+  format_limits:
+    ELF: 128MB
   exe_types:
     - genericbinary
     - gobinary

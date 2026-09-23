@@ -48,7 +48,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
 YAML carries the fields a check function evaluates: `mandatory_values`
 (matched against the structured `dll_characteristics` flags), `allowed_values`
-(manifest comparison), `property_key` (a `security_properties` key — the rule
+(manifest comparison), `format_limits` (a per-binary-type override of `limit`), `property_key` (a `security_properties` key — the rule
 fires only when the key was **computed** and is not `true`; an omitted key
 means the source was absent, which is never a failure), `limit` /
 `baseline_version` (thresholds), and `exe_types`. Custom rules files can extend

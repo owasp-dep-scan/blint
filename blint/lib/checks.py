@@ -132,15 +132,36 @@ def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> b
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
 
 
+def _parse_mb_limit(raw: Any) -> int | None:
+    """Parse a rule limit like ``30MB`` / ``30M`` / ``30`` into MiB, or None."""
+    if raw is None:
+        return None
+    limit = str(raw).replace("MB", "").replace("M", "").strip()
+    return int(limit) if limit.isdigit() else None
+
+
 def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
-    if virtual_size := metadata.get("virtual_size"):
-        size_limit = 30
-        if raw_limit := rule_obj.get("limit"):
-            limit = str(raw_limit).replace("MB", "").replace("M", "")
-            if limit.isdigit():
-                size_limit = int(limit)
-        return virtual_size / 1024 / 1024 < size_limit
-    return True
+    """Reports a mapped memory footprint above the format's calibrated limit.
+
+    The limits are per format because virtual size means something different
+    on each (F1b.3): a PE's SizeOfImage over 30 MB is anomalous - the benign
+    PE corpus tops out at 6.5 MB - while an ELF's PT_LOAD sum is dominated by
+    legitimate whole-runtime reservations: a stock static Go build with
+    net/http maps 37.4 MB and is normal, so the ELF limit sits at 128 MB
+    (3.4x the benign corpus maximum, 40x its p95). Mach-O produces no
+    virtual_size, so the check never runs there. ``limit`` is the default for
+    formats without their own entry in ``format_limits``.
+    """
+    virtual_size = metadata.get("virtual_size")
+    if not virtual_size:
+        return True
+    size_limit = _parse_mb_limit(rule_obj.get("limit")) or 30
+    format_limits = rule_obj.get("format_limits") or {}
+    binary_type = str(metadata.get("binary_type") or "").upper()
+    if binary_type in format_limits:
+        if (per_format := _parse_mb_limit(format_limits[binary_type])) is not None:
+            size_limit = per_format
+    return virtual_size / 1024 / 1024 < size_limit
 
 
 def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:

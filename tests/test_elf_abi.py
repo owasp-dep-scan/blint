@@ -13,6 +13,7 @@ from blint.lib.checks import (
     check_libc_portability,
     check_runtime_loading,
     check_search_path,
+    check_virtual_size,
 )
 from blint.lib.elf_abi import (
     analyze_elf_abi,
@@ -671,3 +672,52 @@ def test_libc_portability_on_real_binaries():
         os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
     )
     assert check_libc_portability("f", real, {}) is True
+
+
+class TestVirtualSizePerFormatLimit:
+    """F1b.3: the 30MB cap came from PE practice; ELF gets its own, from the
+    measured benign distribution. Both sides of every limit, plus the Mach-O
+    and rule-without-format_limits shapes."""
+
+    RULE = {"limit": "30MB", "format_limits": {"ELF": "128MB"}}
+
+    def test_elf_limit_is_128mb_on_both_sides(self):
+        below = {"binary_type": "ELF", "virtual_size": 128 * 1024 * 1024 - 1}
+        at_limit = {"binary_type": "ELF", "virtual_size": 128 * 1024 * 1024}
+        # A stock static Go net/http build maps 37.4 MB - the exact tier-0
+        # file that the PE-derived 30MB limit fired on - and must pass now.
+        benign_go = {"binary_type": "ELF", "virtual_size": int(37.4 * 1024 * 1024)}
+        assert check_virtual_size("f", benign_go, self.RULE) is True
+        assert check_virtual_size("f", below, self.RULE) is True
+        assert check_virtual_size("f", at_limit, self.RULE) is False
+
+    def test_pe_keeps_the_30mb_limit(self):
+        below = {"binary_type": "PE", "virtual_size": 30 * 1024 * 1024 - 1}
+        at_limit = {"binary_type": "PE", "virtual_size": 30 * 1024 * 1024}
+        benign_max = {"binary_type": "PE", "virtual_size": int(6.5 * 1024 * 1024)}
+        assert check_virtual_size("f", benign_max, self.RULE) is True
+        assert check_virtual_size("f", below, self.RULE) is True
+        assert check_virtual_size("f", at_limit, self.RULE) is False
+
+    def test_unknown_format_falls_back_to_the_default_limit(self):
+        other = {"binary_type": "WASM", "virtual_size": 31 * 1024 * 1024}
+        assert check_virtual_size("f", other, self.RULE) is False
+        no_type = {"virtual_size": 31 * 1024 * 1024}
+        assert check_virtual_size("f", no_type, self.RULE) is False
+
+    def test_rule_without_format_limits_keeps_the_single_limit(self):
+        legacy = {"limit": "30MB"}
+        elf_40mb = {"binary_type": "ELF", "virtual_size": 40 * 1024 * 1024}
+        assert check_virtual_size("f", elf_40mb, legacy) is False
+
+    def test_no_virtual_size_never_fires(self):
+        # Mach-O metadata carries no virtual_size at all, so the check is
+        # data-gated off there regardless of limits.
+        assert check_virtual_size("f", {"binary_type": "MachO"}, self.RULE) is True
+
+    def test_real_elf_fixture_passes(self):
+        metadata = parse(
+            os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+        )
+        assert metadata["binary_type"] == "ELF"
+        assert check_virtual_size("f", metadata, self.RULE) is True
