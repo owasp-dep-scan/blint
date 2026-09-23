@@ -3855,3 +3855,23 @@ def test_check_packed_fires_on_upx_evidence_and_not_on_classified_overlay():
         }
     }
     assert check_packed("installer.exe", overlay_only, rule_obj={}) is True
+
+
+# --- F1a.1: file-class facts the PIE applicability gate reads ----------------
+
+
+def test_elf_metadata_exposes_header_type():
+    """elf_type names the ELF header type (F1a: PIE/NX applicability)."""
+    metadata = parse(str(TEST_DATA_DIR / "fortified-libc-demo.elf"))
+    assert metadata.get("elf_type") == "DYN"
+    assert metadata.get("interpreter", "").startswith("/lib/ld-")
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O filetype probe needs a macOS host binary")
+def test_macho_metadata_exposes_filetype():
+    metadata = parse("/bin/ls")
+    assert metadata.get("macho_filetype") == "EXECUTE"
+    # libSystem.B.dylib is a cache stub on modern macOS; libgmalloc is a
+    # real on-disk dylib.
+    metadata_dylib = parse("/usr/lib/libgmalloc.dylib")
+    assert metadata_dylib.get("macho_filetype") == "DYLIB"

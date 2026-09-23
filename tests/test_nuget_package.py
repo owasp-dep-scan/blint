@@ -422,11 +422,8 @@ def test_refused_nupkg_still_emits_a_component_naming_the_refusal(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_dll_named_symbols_version_entry_is_generic_not_nuget():
-    from blint.lib.sbom import components_from_symbols_version
-
-    comps = components_from_symbols_version([{"name": "fake.dll", "value": 1}])
-    assert [str(c.purl) for c in comps] == ["pkg:generic/fake.dll"]
+# The .dll-named symbol-version case is covered end to end by
+# tests/test_sbom_blintdb.py::test_deep_elf_abi_floor_is_a_parent_property_not_a_component.
 
 
 def test_dll_named_recovered_dependency_is_generic_not_nuget():

@@ -498,68 +498,216 @@ def purl_field(value: Any) -> str | None:
     return value or None
 
 
-def components_from_abi_requirements(abi_analysis: dict) -> list[Component]:
-    """Create components from the ABI floor each version provider imposes.
+def _generic_package_identity(purl: str | None) -> tuple[str, str] | None:
+    """Identity of a pkg:generic purl as (name, version), or None.
 
-    The version recorded here is the highest version node any *imported* symbol
-    binds to, which is the actual minimum the binary needs at runtime. Deriving
-    it from the imports rather than from the version definition table avoids two
-    errors that table alone produces: attributing a version to a provider no
-    symbol uses, and reporting a version lower than the one really required.
-
-    Args:
-        abi_analysis (dict): The ``abi_analysis`` block from parsed metadata.
-
-    Returns:
-        list[Component]: list of components
+    A homebrew formula name may carry its own versioned suffix (openssl@3);
+    the suffix is part of the formula's identity, not a different project,
+    so it is normalized away before comparing against a banner's plain
+    library name. Anything that is not a generic purl with both a name and
+    a version has no identity here and never merges.
     """
-    lib_components: list[Component] = []
+    if not purl or not purl.startswith("pkg:generic/"):
+        return None
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return None
+    name = re.sub(r"@\d+$", "", parsed.name)
+    return (name, parsed.version or "")
+
+
+def _find_component_by_package_identity(
+    components: list[Component], purl: str
+) -> Component | None:
+    """The component naming the same generic package+version as ``purl``.
+
+    Used by the banner layer to corroborate instead of duplicating: the
+    blintdb match for the same library carries qualifiers in its purl, so
+    purl-string equality cannot see the overlap (F2a.2).
+    """
+    identity = _generic_package_identity(purl)
+    if identity is None:
+        return next((comp for comp in components if comp.purl == purl), None)
+    for comp in components:
+        if _generic_package_identity(getattr(comp, "purl", None)) == identity:
+            return comp
+    return None
+
+
+def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
+    """Identity of a matched purl with the version dropped.
+
+    Two blintdb rows for the same project at different versions (a Homebrew
+    machine holding two kegs of openssl@3) group under one key, so their
+    versions can be decided by artifact evidence rather than by score
+    (F2a.3). Qualifiers stay in the key: the same name under a different
+    tap or source hash is a different project row, not a version conflict.
+    """
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return None
+    qualifiers = "&".join(f"{k}={v}" for k, v in sorted((parsed.qualifiers or {}).items()))
+    return (parsed.type, parsed.namespace or "", parsed.name, qualifiers)
+
+
+def _artifact_version_evidence(
+    exe: str, metadata: dict, project_name: str
+) -> dict[str, list[str]]:
+    """Version-bearing evidence read from the artifact itself.
+
+    Sources, as named evidence: the artifact path (a Cellar/vcpkg install
+    path names the version it came from), the artifact's own ELF SONAME,
+    and version banners naming the project under decision. The versions of
+    *linked* dylibs are deliberately not evidence: they describe the
+    artifact's dependencies, not the artifact, so a dependency whose
+    version happens to equal a candidate would decide the wrong project.
+    Evidence that matches no candidate contributes nothing — callers only
+    let *matching* evidence separate candidates.
+    """
+    evidence: dict[str, list[str]] = {}
+    if path_versions := sorted(set(re.findall(r"\d+\.\d+(?:\.\d+)+", str(exe)))):
+        evidence["path"] = path_versions
+    soname_versions = sorted(
+        {
+            version
+            for entry in metadata.get("dynamic_entries") or []
+            if isinstance(entry, dict) and entry.get("tag") == "SONAME"
+            for version in re.findall(r"\d+\.\d+(?:\.\d+)+", str(entry.get("name") or ""))
+        }
+    )
+    if soname_versions:
+        evidence["soname"] = soname_versions
+    banner_versions = sorted(
+        {
+            identity[1]
+            for banner in detect_vendored_banners(metadata)["banners"]
+            if (identity := _generic_package_identity(banner.get("purl")))
+            and identity[0] == project_name
+            and identity[1]
+        }
+    )
+    if banner_versions:
+        evidence["banner"] = banner_versions
+    return evidence
+
+
+def _unversioned_purl(purl: str) -> str | None:
+    """The same purl with its version dropped, for an unresolved conflict.
+
+    String surgery rather than a PackageURL round-trip: rebuilding a purl
+    re-encodes names the database stored verbatim (a Homebrew formula name
+    like openssl@3 becomes openssl%403), which would change the component
+    identity the producer stated.
+    """
+    base, sep, qualifiers = purl.partition("?")
+    if "@" not in base.rsplit("/", 1)[-1]:
+        return None
+    unversioned_base = base.rsplit("@", 1)[0]
+    return unversioned_base + (sep + qualifiers if sep else "")
+
+
+def _resolve_version_conflicts(
+    detected: set[str], evidence_by_purl: dict, exe: str, metadata: dict
+) -> tuple[set[str], dict[str, dict[str, str]]]:
+    """Decide between several versions of one matched project (F2a.3).
+
+    Version-bearing evidence from the artifact outranks match score: when
+    exactly one candidate version appears in the artifact's own path,
+    SONAME or a version banner naming the project, that version wins and the others are
+    dropped. When the evidence cannot separate the candidates, neither
+    version is emitted — the group collapses to one unversioned component
+    carrying a blintdb_version_ambiguity property naming the candidates
+    and the evidence consulted. Picking by score alone is what made a
+    stale keg of openssl@3 outrank the installed one.
+
+    Returns (detected set after resolution, property additions per purl).
+    """
+    notes: dict[str, dict[str, str]] = {}
+    groups: dict[tuple, list[str]] = {}
+    for purl in detected:
+        key = _purl_group_key(purl)
+        if key is not None:
+            groups.setdefault(key, []).append(purl)
+    resolved = set(detected)
+    for key, purls in groups.items():
+        if len(purls) < 2:
+            continue
+        project_name = re.sub(r"@\d+$", "", key[2])
+        artifact_evidence = _artifact_version_evidence(exe, metadata, project_name)
+        evidence_values = {v for versions in artifact_evidence.values() for v in versions}
+        versions = {}
+        for purl in purls:
+            try:
+                versions[purl] = PackageURL.from_string(purl).version or ""
+            except ValueError:
+                versions[purl] = ""
+        matching = {purl for purl, version in versions.items() if version in evidence_values}
+        detail = {
+            "candidates": ", ".join(
+                f"{versions[purl]} (score {evidence_by_purl.get(purl, {}).get('score')})"
+                for purl in sorted(purls)
+            ),
+            "evidence": "; ".join(f"{k}={','.join(v)}" for k, v in artifact_evidence.items())
+            or "none",
+        }
+        if len(matching) == 1:
+            kept = next(iter(matching))
+            dropped = sorted(set(purls) - matching)
+            resolved -= set(dropped)
+            notes[kept] = {
+                "blintdb_version_evidence": (
+                    f"{detail['evidence']} separated {versions[kept]} from "
+                    f"{', '.join(versions[p] for p in dropped)}"
+                )
+            }
+            continue
+        # Zero or several candidates match the artifact's evidence: emit
+        # neither version. The unversioned component inherits the strongest
+        # candidate's evidence block and records the ambiguity by name.
+        strongest = max(
+            purls, key=lambda p: evidence_by_purl.get(p, {}).get("score") or 0
+        )
+        ambiguous_purl = _unversioned_purl(strongest)
+        if not ambiguous_purl:
+            continue
+        # An unversioned row of the same project may already be among the
+        # candidates; it absorbs the versioned ones rather than letting
+        # them all through.
+        resolved -= set(purls)
+        resolved.add(ambiguous_purl)
+        if strongest in evidence_by_purl:
+            evidence_by_purl.setdefault(ambiguous_purl, evidence_by_purl[strongest])
+        notes[ambiguous_purl] = {
+            "blintdb_version_ambiguity": (
+                f"{detail['candidates']}; artifact evidence consulted: {detail['evidence']}"
+            )
+        }
+    return resolved, notes
+
+
+def format_abi_requirements(abi_analysis: dict) -> str:
+    """Format the ABI floor each version provider imposes as one property line.
+
+    Each entry reads ``PROVIDER>=min_version (N symbols)`` and, when the
+    analysis recorded them, the imports that set the floor - so a reader can
+    verify a surprising requirement instead of taking it on trust. These are
+    requirements on the execution environment (interface versions), which is
+    why they are a property on the binary's component and not components:
+    see the F2a.4 note in process_exe_file.
+    """
+    parts = []
     for requirement in abi_analysis.get("requirements") or []:
         provider = requirement.get("provider") or ""
-        version = requirement.get("min_version") or None
-        name = requirement.get("package_name") or provider.lower()
-        group = requirement.get("package_group") or ""
-        if not name:
+        if not provider:
             continue
-        purl = PackageURL(
-            type="generic",
-            namespace=group or None,
-            name=name,
-            version=purl_field(version),
-        ).to_string()
-        properties = [
-            Property(name="internal:abi_provider", value=provider),
-            Property(
-                name="internal:abi_symbol_count",
-                value=str(requirement.get("symbol_count", 0)),
-            ),
-        ]
+        version = requirement.get("min_version") or "unversioned"
+        entry = f"{provider}>={version} ({requirement.get('symbol_count', 0)} symbols)"
         if determining := requirement.get("determining_symbols"):
-            # Recording which imports set the floor lets a reader verify a
-            # surprising version requirement instead of taking it on trust.
-            properties.append(
-                Property(
-                    name="internal:abi_determining_symbols",
-                    value=", ".join(determining[:8]),
-                )
-            )
-        comp = Component(
-            type=Type.library,
-            group=group,
-            name=name,
-            version=version,
-            purl=purl,
-            # A floor derived from the imports is much stronger evidence than a
-            # name split, but it is still a floor rather than the exact version
-            # installed, so it stays short of full confidence.
-            evidence=create_component_evidence(
-                f"{provider}_{version}" if version else provider, 0.8
-            ),
-            properties=properties,
-        )
-        comp.bom_ref = RefType(purl)
-        lib_components.append(comp)
-    return lib_components
+            entry += f" [set by {', '.join(determining[:4])}]"
+        parts.append(entry)
+    return "; ".join(parts)
 
 
 def components_from_recovered_dependencies(recovered: list[dict]) -> list[Component]:
@@ -607,59 +755,6 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
                     value="; ".join(entry.get("evidence") or []),
                 ),
             ],
-        )
-        comp.bom_ref = RefType(purl)
-        lib_components.append(comp)
-    return lib_components
-
-
-def components_from_symbols_version(symbols_version: list[dict]) -> list[Component]:
-    """
-    Creates a list of Component objects from symbols version.
-    This style of detection is quite imprecise since the version is just a min
-    specifier. It is a fallback for binaries where the per-symbol version
-    information needed by ``components_from_abi_requirements`` is unavailable.
-
-    Args:
-        symbols_version (list[dict]): A list of symbols version.
-
-    Returns:
-        list[Component]: list of components
-    """
-    lib_components: list[Component] = []
-    for symbol in symbols_version:
-        group = ""
-        name = symbol["name"]
-        version = None
-        # W3.5: same correction as the recovered-dependency site — a
-        # `.dll`-suffixed GNU version-definition name (this list is
-        # ELF-produced only) is not evidence of a NuGet package.
-        pkg_type = "generic"
-        if "_" in name:
-            tmp_a = name.split("_")
-            if len(tmp_a) == 2:
-                version = tmp_a[-1]
-                name = tmp_a[0].lower()
-                if name.startswith("glib"):
-                    name = name.removeprefix("g")
-                    group = "gnu"
-        purl = PackageURL(
-            type=pkg_type,
-            namespace=group or None,
-            name=name,
-            version=purl_field(version),
-            qualifiers=(
-                {"hash": hash_value} if (hash_value := purl_field(symbol.get("hash"))) else {}
-            ),
-        ).to_string()
-        comp = Component(
-            type=Type.library,
-            group=group,
-            name=name,
-            version=version,
-            purl=purl,
-            evidence=create_component_evidence(symbol["name"], 0.5),
-            properties=[Property(name="internal:symbol_version", value=symbol["name"])],
         )
         comp.bom_ref = RefType(purl)
         lib_components.append(comp)
@@ -991,14 +1086,19 @@ def process_exe_file(
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         abi_analysis: dict = metadata.get("abi_analysis") or {}
-        # The ABI floor computed from the imported symbols supersedes the
-        # version-node heuristic, which cannot tell which nodes are actually
-        # bound. Fall back to it only when no floor could be derived.
-        abi_components = components_from_abi_requirements(abi_analysis)
-        if abi_components:
-            lib_components += abi_components
-        else:
-            lib_components += components_from_symbols_version(symbols_version)
+        # F2a.4: the ABI floor each version provider imposes (GLIBC_2.38,
+        # GLIBCXX_3.4.32, ...) is a requirement the binary places on its
+        # execution environment, not a software artifact the binary is
+        # composed of, so it is recorded as properties on the binary's own
+        # component and never emitted as a component. A components[] entry
+        # asserts an artifact identity (name@version) that vulnerability
+        # matching consumes; the version in an ABI floor is an *interface*
+        # version - the installed libc answering GLIBC_2.38 imports is the
+        # distro's 2.41, not "libc 2.38" - so a pkg:generic/gnu/libc@2.38
+        # component claims an identity no artifact has and mis-matches
+        # advisories in both directions. The requirement itself is real and
+        # stays, as internal:abi_* properties plus the raw interface list in
+        # internal:symbols_version.
         lib_components += components_from_recovered_dependencies(
             metadata.get("recovered_dependencies")
         )
@@ -1009,11 +1109,19 @@ def process_exe_file(
                 "abi_portability_notes",
                 " ".join(abi_analysis.get("portability_notes") or []),
             ),
+            ("abi_requirements", format_abi_requirements(abi_analysis)),
         ):
             if prop_value:
                 parent_component.properties.append(
                     Property(name=f"internal:{prop_name}", value=str(prop_value))
                 )
+        if symbols_version:
+            parent_component.properties.append(
+                Property(
+                    name="internal:symbols_version",
+                    value=", ".join([f["name"] for f in symbols_version]),
+                )
+            )
         if link_hygiene := metadata.get("link_hygiene"):
             # A declared dependency nothing imports from still lands in every
             # downstream inventory and vulnerability match, so the SBOM is the
@@ -1049,13 +1157,6 @@ def process_exe_file(
                         value=str(link_closure["unresolved_symbol_count"]),
                     )
                 )
-        if not lib_components and symbols_version:
-            parent_component.properties.append(
-                Property(
-                    name="internal:symbols_version",
-                    value=", ".join([f["name"] for f in symbols_version]),
-                )
-            )
 
         internal_functions = sorted(
             {
@@ -1184,7 +1285,16 @@ def process_exe_file(
         )
         if binaries_detected:
             LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
+            # F2a.3: when the database holds several versions of the same
+            # project (two kegs of a formula), artifact evidence decides
+            # between them or the conflict collapses to one unversioned
+            # component with an ambiguity property — score never picks a
+            # version the artifact did not come from.
+            binaries_detected, version_notes = _resolve_version_conflicts(
+                binaries_detected, binary_evidence, exe, metadata
+            )
         else:
+            version_notes = {}
             LOG.debug(f"Unable to identify a blintdb match for {exe}.")
         for binary_purl in sorted(binaries_detected):
             evidence = binary_evidence.get(binary_purl, {})
@@ -1247,6 +1357,9 @@ def process_exe_file(
                     f" qualification={member['qualification']}"
                     for member in evidence.get("blintdb_members", [])
                 ],
+                # F2a.3 resolution notes: which artifact evidence separated
+                # a version conflict, or the recorded ambiguity when none did.
+                **(version_notes.get(binary_purl) or {}),
             }
             comp = create_dynamic_component(
                 {"purl": binary_purl, "tag": "NEEDED"},
@@ -1263,7 +1376,14 @@ def process_exe_file(
     # the binary. An evidence layer independent of blintdb — a banner claims
     # library and version directly — so it runs regardless of --use-blintdb.
     # A banner hit on a library blintdb already attributed corroborates that
-    # component instead of emitting a duplicate.
+    # component instead of emitting a duplicate. The comparison is by
+    # package identity (type + name + version), not by purl string: a
+    # blintdb match carries qualifiers the banner purl never has
+    # (?source_hash=..., ?package_manager=homebrew&tap=...), and a homebrew
+    # formula name may carry its own versioned suffix (openssl@3) — an exact
+    # string compare leaves a second, unqualified component beside the
+    # match (F2a.2: zlib/libpng/openssl@3 each broke the small-corpus
+    # validator that way).
     banner_result = detect_vendored_banners(metadata)
     for banner in banner_result["banners"]:
         banner_evidence = {
@@ -1271,10 +1391,7 @@ def process_exe_file(
             "vendored_attribution": "vendored_banner",
             "vendored_banner": banner["banner"],
         }
-        existing = next(
-            (comp for comp in lib_components if getattr(comp, "purl", None) == banner["purl"]),
-            None,
-        )
+        existing = _find_component_by_package_identity(lib_components, banner["purl"])
         if existing is not None:
             for key, value in banner_evidence.items():
                 existing.properties.append(Property(name=f"internal:{key}", value=value))

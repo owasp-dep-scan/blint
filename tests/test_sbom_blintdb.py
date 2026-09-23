@@ -936,3 +936,355 @@ def test_supported_version_stamp_with_a_foreign_layout_is_refused_not_raised(tmp
 
     assert is_supported_blintdb(str(db_file)) is True
     assert lookup_project_matches({"imports": ["puts"]}, db_file=str(db_file)) == []
+
+
+# --- F2a.2: banner attribution merges into the qualified blintdb component ----
+
+
+def _create_blintdb_with_purl(db_file, project_purl, binary_name="libz.1.dylib"):
+    """A v2-shaped database with one project whose purl carries qualifiers."""
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        """
+        CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE Projects (project_id INTEGER PRIMARY KEY, name TEXT NOT NULL, purl TEXT);
+        CREATE TABLE Builds (build_id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
+            llvm_target_tuple TEXT, FOREIGN KEY (project_id) REFERENCES Projects(project_id));
+        CREATE TABLE Binaries (binary_id INTEGER PRIMARY KEY, build_id INTEGER NOT NULL,
+            name TEXT, binary_type TEXT, llvm_target_tuple TEXT,
+            FOREIGN KEY (build_id) REFERENCES Builds(build_id));
+        CREATE TABLE Symbols (symbol_id INTEGER PRIMARY KEY, binary_id INTEGER NOT NULL,
+            name TEXT NOT NULL, source TEXT NOT NULL,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        CREATE TABLE FunctionFingerprints (function_id INTEGER PRIMARY KEY,
+            binary_id INTEGER NOT NULL, function_key TEXT NOT NULL,
+            instruction_hash TEXT, assembly_hash TEXT,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        """
+    )
+    connection.executemany(
+        "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
+        (("schema_family", "blint-db"), ("schema_version", "2")),
+    )
+    connection.execute("INSERT INTO Projects(project_id, name, purl) VALUES(1, 'zlib', ?)", (project_purl,))
+    connection.execute("INSERT INTO Builds(build_id, project_id) VALUES(1, 1)")
+    connection.execute(
+        "INSERT INTO Binaries(binary_id, build_id, name, binary_type) VALUES(1, 1, ?, 'MachO')",
+        (binary_name,),
+    )
+    # Six symbols: symbol-only matches surface at >= 5 distinct symbols
+    # (SYMBOL_ONLY_MATCH_THRESHOLD with MIN_MATCH_SCORE at its default 10).
+    connection.executemany(
+        "INSERT INTO Symbols(symbol_id, binary_id, name, source) VALUES(?, 1, ?, 'symtab_symbols')",
+        (
+            (1, "deflate"),
+            (2, "inflate"),
+            (3, "zlibVersion"),
+            (4, "compress2"),
+            (5, "uncompress"),
+            (6, "crc32"),
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+
+def _banner_metadata(version="1.3.2"):
+    return {
+        "name": "libz.1.dylib",
+        "binary_type": "MachO",
+        "strings": [
+            {"value": f"deflate {version} Copyright (Jean-loup Gailly)"},
+            {"value": "inflate 1.3.2 Copyright (Mark Adler)"},
+        ],
+        "symtab_symbols": [
+            {"name": "deflate"},
+            {"name": "inflate"},
+            {"name": "zlibVersion"},
+            {"name": "compress2"},
+            {"name": "uncompress"},
+            {"name": "crc32"},
+        ],
+    }
+
+
+def _run_process_exe_with_db(tmp_path, monkeypatch, project_purl, metadata):
+    db_file = tmp_path / "blint.db"
+    _create_blintdb_with_purl(db_file, project_purl)
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+    return process_exe_file(
+        {},
+        False,
+        "/tmp/demo/libz.1.dylib",
+        sbom,
+        [],
+        {},
+        True,
+        True,
+    )
+
+
+def test_banner_merges_into_qualified_blintdb_component(tmp_path, monkeypatch):
+    """One component, both evidence sources (F2a.2's defect shape).
+
+    The blintdb match carries ?source_hash in its purl; the banner's purl is
+    unqualified. An exact-string compare left both components in the BOM,
+    which broke exact-match validation on the small corpus.
+    """
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/zlib@1.3.2?source_hash=d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3",
+        _banner_metadata(),
+    )
+    zlib_components = [c for c in components if "zlib" in (c.purl or "")]
+    assert len(zlib_components) == 1, [c.purl for c in zlib_components]
+    merged = zlib_components[0]
+    assert merged.purl.endswith("?source_hash=d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3")
+    prop_names = {prop.name for prop in merged.properties}
+    assert "internal:blintdb_matched_symbols" in prop_names
+    assert "internal:vendored_banner" in prop_names
+    assert "internal:vendored_attribution" in prop_names
+    assert merged.purl != "pkg:generic/zlib@1.3.2"
+
+
+def test_banner_merges_into_homebrew_versioned_formula_component(tmp_path, monkeypatch):
+    """openssl@3@3.6.3 (formula name with its own versioned suffix) merges
+    with the plain openssl 3.6.3 banner."""
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/openssl@3@3.6.3?package_manager=homebrew&tap=homebrew/core",
+        {
+            "name": "openssl",
+            "binary_type": "MachO",
+            "strings": [{"value": "OpenSSL 3.6.3 1 Jan 2026"}],
+            "symtab_symbols": [
+                {"name": "deflate"},
+                {"name": "inflate"},
+                {"name": "zlibVersion"},
+                {"name": "compress2"},
+                {"name": "uncompress"},
+                {"name": "crc32"},
+            ],
+        },
+    )
+    openssl_components = [c for c in components if "openssl" in (c.purl or "")]
+    assert len(openssl_components) == 1, [c.purl for c in openssl_components]
+    prop_names = {prop.name for prop in openssl_components[0].properties}
+    assert "internal:vendored_banner" in prop_names
+    assert "internal:blintdb_matched_symbols" in prop_names
+
+
+def test_banner_of_a_different_version_stays_separate(tmp_path, monkeypatch):
+    """A banner naming a different version than the match is real
+    information (the binary carries two copies) and is not merged away."""
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/zlib@1.3.1?source_hash=abc",
+        _banner_metadata(version="1.3.2"),
+    )
+    zlib_purls = sorted(c.purl for c in components if "zlib" in (c.purl or ""))
+    assert zlib_purls == [
+        "pkg:generic/zlib@1.3.1?source_hash=abc",
+        "pkg:generic/zlib@1.3.2",
+    ]
+
+
+# --- F2a.3: version conflicts between matched versions of one project ----
+
+
+def _create_two_version_blintdb(db_file):
+    """One project name ingested at two versions, like two Homebrew kegs."""
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        """
+        CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE Projects (project_id INTEGER PRIMARY KEY, name TEXT NOT NULL, purl TEXT);
+        CREATE TABLE Builds (build_id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
+            llvm_target_tuple TEXT, FOREIGN KEY (project_id) REFERENCES Projects(project_id));
+        CREATE TABLE Binaries (binary_id INTEGER PRIMARY KEY, build_id INTEGER NOT NULL,
+            name TEXT, binary_type TEXT, llvm_target_tuple TEXT,
+            FOREIGN KEY (build_id) REFERENCES Builds(build_id));
+        CREATE TABLE Symbols (symbol_id INTEGER PRIMARY KEY, binary_id INTEGER NOT NULL,
+            name TEXT NOT NULL, source TEXT NOT NULL,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        CREATE TABLE FunctionFingerprints (function_id INTEGER PRIMARY KEY,
+            binary_id INTEGER NOT NULL, function_key TEXT NOT NULL,
+            instruction_hash TEXT, assembly_hash TEXT,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        """
+    )
+    connection.executemany(
+        "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
+        (("schema_family", "blint-db"), ("schema_version", "2")),
+    )
+    for project_id, version in ((1, "3.6.3"), (2, "3.6.4")):
+        connection.execute(
+            "INSERT INTO Projects(project_id, name, purl) VALUES(?, 'openssl@3', ?)",
+            (project_id, f"pkg:generic/openssl@3@{version}?package_manager=homebrew&tap=homebrew/core"),
+        )
+        connection.execute(
+            "INSERT INTO Builds(build_id, project_id) VALUES(?, ?)", (project_id, project_id)
+        )
+        connection.execute(
+            "INSERT INTO Binaries(binary_id, build_id, name, binary_type) VALUES(?, ?, 'openssl', 'MachO')",
+            (project_id, project_id),
+        )
+    # Both versions carry the same symbols so both matches surface.
+    connection.executemany(
+        "INSERT INTO Symbols(symbol_id, binary_id, name, source) VALUES(?, ?, ?, 'symtab_symbols')",
+        [
+            (1, 1, "EVP_DigestSignInit"),
+            (2, 1, "SSL_new"),
+            (3, 1, "SSL_CTX_new"),
+            (4, 1, "X509_new"),
+            (5, 1, "RSA_new"),
+            (6, 2, "EVP_DigestSignInit"),
+            (7, 2, "SSL_new"),
+            (8, 2, "SSL_CTX_new"),
+            (9, 2, "X509_new"),
+            (10, 2, "RSA_new"),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+
+def _openssl_metadata():
+    return {
+        "name": "openssl",
+        "binary_type": "MachO",
+        "strings": [{"value": "OpenSSL 3.6.3 1 Jan 2026"}],
+        "symtab_symbols": [
+            {"name": "EVP_DigestSignInit"},
+            {"name": "SSL_new"},
+            {"name": "SSL_CTX_new"},
+            {"name": "X509_new"},
+            {"name": "RSA_new"},
+        ],
+    }
+
+
+def _run_openssl_sbom(tmp_path, monkeypatch, exe_path, metadata):
+    db_file = tmp_path / "blint.db"
+    _create_two_version_blintdb(db_file)
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+    return process_exe_file(
+        {},
+        False,
+        exe_path,
+        sbom,
+        [],
+        {},
+        True,
+        True,
+    )
+
+
+def test_version_conflict_resolved_by_artifact_path(tmp_path, monkeypatch):
+    """The artifact's own install path names the keg it came from; that
+    evidence outranks score and drops the other version (F2a.3)."""
+    components = _run_openssl_sbom(
+        tmp_path,
+        monkeypatch,
+        "/opt/homebrew/Cellar/openssl@3/3.6.3/bin/openssl",
+        _openssl_metadata(),
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3@3.6.3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "internal:blintdb_version_evidence" in props
+    assert "path=3.6.3" in props["internal:blintdb_version_evidence"]
+
+
+def test_version_conflict_without_artifact_evidence_records_ambiguity(tmp_path, monkeypatch):
+    """No version-bearing evidence: neither version is emitted, and the
+    ambiguity is a named property instead of a score-picked winner."""
+    metadata = _openssl_metadata()
+    metadata["strings"] = []  # no banner either side can lean on
+    components = _run_openssl_sbom(
+        tmp_path,
+        monkeypatch,
+        "/tmp/demo/openssl",
+        metadata,
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "internal:blintdb_version_ambiguity" in props
+    assert "3.6.3" in props["internal:blintdb_version_ambiguity"]
+    assert "3.6.4" in props["internal:blintdb_version_ambiguity"]
+
+
+def test_version_conflict_resolved_by_banner_naming_the_project(tmp_path, monkeypatch):
+    """A version banner for the project under decision is artifact evidence:
+    it separates the kegs, and the banner then corroborates the kept
+    component instead of standing beside it (review of F2a.2/F2a.3)."""
+    components = _run_openssl_sbom(
+        tmp_path, monkeypatch, "/tmp/demo/openssl", _openssl_metadata()
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3@3.6.3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "banner=3.6.3" in props["internal:blintdb_version_evidence"]
+
+
+def test_linked_dylib_versions_never_decide_a_version_conflict(tmp_path, monkeypatch):
+    """A dependency's current_version describes the dependency, not the
+    artifact, so it must not pick between candidate versions."""
+    metadata = _openssl_metadata()
+    metadata["strings"] = []
+    metadata["libraries"] = [{"name": "/usr/lib/libfoo.dylib", "version": "3.6.4"}]
+    components = _run_openssl_sbom(tmp_path, monkeypatch, "/tmp/demo/openssl", metadata)
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3?package_manager=homebrew&tap=homebrew/core"]
+
+
+def test_deep_elf_abi_floor_is_a_parent_property_not_a_component(monkeypatch):
+    """F2a.4 end to end: under --deep the GLIBC floor is recorded on the
+    binary's own component and no pkg:generic/gnu/libc component appears."""
+    metadata = {
+        "name": "demo",
+        "binary_type": "ELF",
+        # fake.dll: a .dll-suffixed GNU version node must never become a
+        # component of any type, NuGet or otherwise.
+        "symbols_version": [{"name": "GLIBC_2.34"}, {"name": "fake.dll"}],
+        "abi_analysis": {
+            "requirements": [
+                {
+                    "provider": "GLIBC",
+                    "min_version": "2.34",
+                    "package_name": "libc",
+                    "package_group": "gnu",
+                    "symbol_count": 3,
+                    "determining_symbols": ["__libc_start_main"],
+                }
+            ]
+        },
+    }
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+    components = process_exe_file({}, True, "/tmp/demo/demo", sbom, [], {}, False, False)
+    everything = components + list(sbom.metadata.component.components)
+    assert not [c for c in everything if "gnu/libc" in (c.purl or "")]
+    assert not [c for c in everything if "fake" in (c.purl or "") or "nuget" in (c.purl or "")]
+    props = {
+        p.name: p.value for c in everything for p in (getattr(c, "properties", None) or [])
+    }
+    assert props["internal:abi_requirements"].startswith("GLIBC>=2.34 (3 symbols)")
+    assert props["internal:symbols_version"] == "GLIBC_2.34, fake.dll"

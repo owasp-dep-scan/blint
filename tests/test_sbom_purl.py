@@ -9,7 +9,6 @@ f-string purl construction these call sites used previously tolerated any type.
 from packageurl import PackageURL
 
 from blint.lib.sbom import (
-    components_from_symbols_version,
     create_library_component,
     default_parent,
     purl_field,
@@ -27,31 +26,11 @@ def test_purl_field_coerces_numbers_and_drops_empty_values():
     assert purl_field(True) is None
 
 
-def test_components_from_symbols_version_accepts_integer_hash():
-    """Regression: an int hash crashed SBOM generation for ELF binaries."""
-    components = components_from_symbols_version(
-        [{"name": "GLIBC_2.34", "hash": 157882997, "value": 0}]
-    )
-    assert len(components) == 1
-    purl = components[0].purl
-    assert "hash=157882997" in purl
-    # The purl must remain parseable after coercion.
-    assert PackageURL.from_string(purl).qualifiers["hash"] == "157882997"
-
-
-def test_components_from_symbols_version_omits_absent_hash():
-    components = components_from_symbols_version([{"name": "GLIBC_2.34", "value": 0}])
-    assert "hash=" not in components[0].purl
-
-
-def test_components_from_symbols_version_escapes_reserved_characters():
-    """The behaviour the PackageURL switch was made for must still hold."""
-    components = components_from_symbols_version(
-        [{"name": "lib with space+plus", "hash": "abc", "value": 0}]
-    )
-    purl = components[0].purl
-    assert " " not in purl
-    assert PackageURL.from_string(purl).name == "lib with space+plus"
+# F2a.4: the ELF symbol-version nodes are no longer emitted as components
+# (an interface floor is a requirement on the execution environment, not an
+# artifact identity); the raw node names ride the parent component as the
+# internal:symbols_version property, so the purl-coercion concerns those
+# tests covered apply to create_library_component and stay covered there.
 
 
 def test_create_library_component_accepts_numeric_versions():

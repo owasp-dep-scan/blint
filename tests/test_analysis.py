@@ -1388,3 +1388,104 @@ def test_rule_machine_type_gate_resolution_rules():
     # ...but an absent gate means "all", preserving existing rule behavior.
     assert _rule_machine_type_allows({}, {})
     assert _rule_machine_type_allows({"machine_type": "AMD64"}, {"machine_types": []})
+
+
+# --- F1a.1: CHECK_PIE applies only to main executables ----------------------
+
+
+def _pie_fires(metadata):
+    results = run_checks("probe", metadata)
+    return any(result["id"] == "CHECK_PIE" for result in results)
+
+
+def test_check_pie_not_applicable_to_mach_o_dylib():
+    """otool -hv filetype DYLIB: position-independent by construction.
+
+    F0 measured 236 false CHECK_PIE findings on dylibs (every one confirmed
+    against otool); the rule must stay silent for them.
+    """
+    assert not _pie_fires(
+        {"exe_type": "MachO", "binary_type": "MachO", "macho_filetype": "DYLIB", "is_pie": False}
+    )
+
+
+def test_check_pie_not_applicable_to_elf_shared_object():
+    """readelf -h type DYN without an interpreter: a shared library."""
+    assert not _pie_fires(
+        {
+            "exe_type": "genericbinary",
+            "binary_type": "ELF",
+            "elf_type": "DYN",
+            "is_pie": False,
+        }
+    )
+
+
+def test_check_pie_not_applicable_to_relocatable_object():
+    """readelf -h type REL: a kernel module or object file has no load
+    address; PIE cannot apply."""
+    assert not _pie_fires(
+        {
+            "exe_type": "genericbinary",
+            "binary_type": "ELF",
+            "elf_type": "REL",
+            "is_pie": False,
+        }
+    )
+
+
+def test_check_pie_fires_on_main_executables_without_pie():
+    assert _pie_fires(
+        {"exe_type": "MachO", "binary_type": "MachO", "macho_filetype": "EXECUTE", "is_pie": False}
+    )
+    assert _pie_fires(
+        {"exe_type": "genericbinary", "binary_type": "ELF", "elf_type": "EXEC", "is_pie": False}
+    )
+    # A DYN image with an interpreter is a PIE-capable executable; missing
+    # the PIE property there is a real finding.
+    assert _pie_fires(
+        {
+            "exe_type": "genericbinary",
+            "binary_type": "ELF",
+            "elf_type": "DYN",
+            "interpreter": "/lib/ld-linux-aarch64.so.1",
+            "is_pie": False,
+        }
+    )
+
+
+def test_check_pie_keeps_legacy_metadata_behavior():
+    """Metadata shapes that predate elf_type/macho_filetype keep the
+    pre-gate semantics rather than silently widening or narrowing."""
+    assert _pie_fires({"exe_type": "MachO", "binary_type": "MachO", "is_pie": False})
+    assert _pie_fires({"exe_type": "genericbinary", "binary_type": "ELF", "is_pie": False})
+
+
+# --- F1a.2: CHECK_NX applies only to loadable images -------------------------
+
+
+def _nx_fires(metadata):
+    results = run_checks("probe", metadata)
+    return any(result["id"] == "CHECK_NX" for result in results)
+
+
+def test_check_nx_not_applicable_to_relocatable_object():
+    """readelf -h type REL / readelf -l without any GNU_STACK: an object
+    file has no stack to make executable. All 12 F0 NX findings were
+    kernel modules in exactly this shape."""
+    assert not _nx_fires(
+        {
+            "exe_type": "genericbinary",
+            "binary_type": "ELF",
+            "elf_type": "REL",
+            "has_nx": False,
+        }
+    )
+
+
+def test_check_nx_fires_on_executable_stack_and_legacy_metadata():
+    assert _nx_fires(
+        {"exe_type": "genericbinary", "binary_type": "ELF", "elf_type": "EXEC", "has_nx": False}
+    )
+    # Metadata without elf_type keeps the pre-gate behavior.
+    assert _nx_fires({"exe_type": "genericbinary", "binary_type": "ELF", "has_nx": False})
