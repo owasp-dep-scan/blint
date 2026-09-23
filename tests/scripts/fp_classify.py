@@ -217,9 +217,9 @@ print(json.dumps(facts))
             "debian:stable",
             "sh",
             "-c",
-            "apt-get update >/dev/null 2>&1; apt-get install -y --no-install-recommends binutils python3 >/dev/null 2>&1; "
+            ("apt-get update >/dev/null 2>&1; apt-get install -y --no-install-recommends binutils python3 >/dev/null 2>&1; "
             "readelf --version | head -1 >&2; "
-            f"echo {encoded} | base64 -d | python3 -",
+            f"echo {encoded} | base64 -d | python3 -"),
         ],
         capture_output=True,
         text=True,
@@ -237,7 +237,6 @@ def classify_finding(
     finding: dict, rel_path: str, facts: dict, corpus_root: Path
 ) -> tuple[str, str]:
     """Return (verdict, reason) for one finding."""
-    rule = finding.get("id")
     kind = facts.get("kind")
     if kind == "macho":
         return classify_macho_finding(finding, rel_path, facts, corpus_root)
@@ -253,8 +252,8 @@ def classify_macho_finding(
         if facts["filetype"] != "MH_EXECUTE":
             return (
                 "false",
-                f"otool -hv filetype {facts['filetype']}: PIE is a property of "
-                "main executables, not of dylibs/bundles/objects",
+                (f"otool -hv filetype {facts['filetype']}: PIE is a property of "
+                "main executables, not of dylibs/bundles/objects"),
             )
         if not facts["pie_flag"]:
             return "true", "otool -hv: MH_EXECUTE without PIE flag"
@@ -348,8 +347,8 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
         if facts["max_glibc"] is None:
             return (
                 "false",
-                "readelf --dyn-syms: no GLIBC_ version references at all "
-                f"(interpreter: {facts.get('interpreter')})",
+                ("readelf --dyn-syms: no GLIBC_ version references at all "
+                f"(interpreter: {facts.get('interpreter')})"),
             )
         m = re.search(r"requires glibc ([0-9.]+)", str(finding.get("title") or ""))
         claimed = float(m.group(1)) if m else None
@@ -377,8 +376,8 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
             )
         return (
             "true",
-            f"readelf --dyn-syms confirms the listed implementation-internal symbols "
-            f"(libc: {libc})",
+            (f"readelf --dyn-syms confirms the listed implementation-internal symbols "
+            f"(libc: {libc})"),
         )
     if rule == "CHECK_VIRTUAL_SIZE":
         mib = facts["pt_load_memsum"] / 1024 / 1024
@@ -400,8 +399,8 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
         if all(found for _, found in verdicts):
             return (
                 "true",
-                "the named library strings exist in the file bytes (grep); the rule "
-                "reports embedded names, not verified dlopen behaviour",
+                ("the named library strings exist in the file bytes (grep); the rule "
+                "reports embedded names, not verified dlopen behaviour"),
             )
         missing = [n for n, found in verdicts if not found]
         return "false", f"named library strings absent from the file: {missing}"

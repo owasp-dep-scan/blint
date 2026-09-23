@@ -1226,3 +1226,65 @@ def test_version_conflict_without_artifact_evidence_records_ambiguity(tmp_path, 
     assert "internal:blintdb_version_ambiguity" in props
     assert "3.6.3" in props["internal:blintdb_version_ambiguity"]
     assert "3.6.4" in props["internal:blintdb_version_ambiguity"]
+
+
+def test_version_conflict_resolved_by_banner_naming_the_project(tmp_path, monkeypatch):
+    """A version banner for the project under decision is artifact evidence:
+    it separates the kegs, and the banner then corroborates the kept
+    component instead of standing beside it (review of F2a.2/F2a.3)."""
+    components = _run_openssl_sbom(
+        tmp_path, monkeypatch, "/tmp/demo/openssl", _openssl_metadata()
+    )
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3@3.6.3?package_manager=homebrew&tap=homebrew/core"]
+    props = {p.name: p.value for p in components[0].properties}
+    assert "banner=3.6.3" in props["internal:blintdb_version_evidence"]
+
+
+def test_linked_dylib_versions_never_decide_a_version_conflict(tmp_path, monkeypatch):
+    """A dependency's current_version describes the dependency, not the
+    artifact, so it must not pick between candidate versions."""
+    metadata = _openssl_metadata()
+    metadata["strings"] = []
+    metadata["libraries"] = [{"name": "/usr/lib/libfoo.dylib", "version": "3.6.4"}]
+    components = _run_openssl_sbom(tmp_path, monkeypatch, "/tmp/demo/openssl", metadata)
+    purls = [c.purl for c in components if "openssl" in (c.purl or "")]
+    assert purls == ["pkg:generic/openssl@3?package_manager=homebrew&tap=homebrew/core"]
+
+
+def test_deep_elf_abi_floor_is_a_parent_property_not_a_component(monkeypatch):
+    """F2a.4 end to end: under --deep the GLIBC floor is recorded on the
+    binary's own component and no pkg:generic/gnu/libc component appears."""
+    metadata = {
+        "name": "demo",
+        "binary_type": "ELF",
+        # fake.dll: a .dll-suffixed GNU version node must never become a
+        # component of any type, NuGet or otherwise.
+        "symbols_version": [{"name": "GLIBC_2.34"}, {"name": "fake.dll"}],
+        "abi_analysis": {
+            "requirements": [
+                {
+                    "provider": "GLIBC",
+                    "min_version": "2.34",
+                    "package_name": "libc",
+                    "package_group": "gnu",
+                    "symbol_count": 3,
+                    "determining_symbols": ["__libc_start_main"],
+                }
+            ]
+        },
+    }
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+    components = process_exe_file({}, True, "/tmp/demo/demo", sbom, [], {}, False, False)
+    everything = components + list(sbom.metadata.component.components)
+    assert not [c for c in everything if "gnu/libc" in (c.purl or "")]
+    assert not [c for c in everything if "fake" in (c.purl or "") or "nuget" in (c.purl or "")]
+    props = {
+        p.name: p.value for c in everything for p in (getattr(c, "properties", None) or [])
+    }
+    assert props["internal:abi_requirements"].startswith("GLIBC>=2.34 (3 symbols)")
+    assert props["internal:symbols_version"] == "GLIBC_2.34, fake.dll"

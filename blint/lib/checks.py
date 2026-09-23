@@ -98,7 +98,7 @@ def _is_main_executable(metadata: dict[str, Any]) -> bool:
     binary_type = str(metadata.get("binary_type") or "").upper()
     if binary_type == "MACHO":
         filetype = str(metadata.get("macho_filetype") or "").upper()
-        return filetype in ("", "EXECUTE", "EXECUTABLE", "MH_EXECUTE")
+        return filetype in ("", "EXECUTE")
     if binary_type == "ELF":
         elf_type = str(metadata.get("elf_type") or "").upper()
         if elf_type in ("", "EXEC"):

@@ -13,7 +13,6 @@ keeps NOFOLLOW on the resolved path.
 
 import os
 import shutil
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -69,20 +68,16 @@ def test_get_degrades_on_unreadable_database(real_v2_db: Path, tmp_path: Path, c
         os.chmod(unreadable, 0o644)
 
 
-def test_get_symlinked_database_file_resolves_to_target(real_v2_db: Path, tmp_path: Path):
-    """A database file that is itself a symlink resolves to its target.
-
-    NOFOLLOW applies to the *resolved* path, so refusing symlinked directory
-    components does not extend to refusing the database file once realpath
-    has resolved it; this test documents that boundary rather than leaving it
-    implicit.
-    """
+def test_get_refuses_a_symlinked_database_file(real_v2_db: Path, tmp_path: Path, caplog):
+    """Only directory components are resolved; a database file that is
+    itself a symlink is still refused by NOFOLLOW, and the run degrades."""
     link_home = tmp_path / "file-link-home"
     link_home.mkdir()
     os.symlink(real_v2_db, link_home / "blint.db")
-    connection = get(str(link_home / "blint.db"))
-    assert connection is not None
-    connection.close()
+    with caplog.at_level("WARNING", logger="blint.logger"):
+        connection = get(str(link_home / "blint.db"))
+    assert connection is None
+    assert "continuing without blintdb" in caplog.text
 
 
 def test_get_returns_none_for_missing_database(tmp_path: Path):

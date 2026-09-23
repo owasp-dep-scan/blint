@@ -296,9 +296,9 @@ class CorpusBuilder:
             ("go-hello-darwin", 'package main\nimport "fmt"\nfunc main(){fmt.Println("hi")}\n'),
             (
                 "go-net-darwin",
-                'package main\nimport ("net/http"; "os")\n'
+                ('package main\nimport ("net/http"; "os")\n'
                 'func main(){http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request){w.WriteHeader(200)});'
-                'http.ListenAndServe("127.0.0.1:0", nil); os.Exit(0)}\n',
+                'http.ListenAndServe("127.0.0.1:0", nil); os.Exit(0)}\n'),
             ),
         ):
             with tempfile.TemporaryDirectory() as tmp:
@@ -514,8 +514,8 @@ touch /tmp/selection /tmp/provenance
                         "golang:1.26",
                         "sh",
                         "-c",
-                        f"cd /src && CGO_ENABLED=0 go build -tags netgo -ldflags '-s -w' "
-                        f"-o /src/{name} {src} && go version > /src/go-version.txt",
+                        (f"cd /src && CGO_ENABLED=0 go build -tags netgo -ldflags '-s -w' "
+                        f"-o /src/{name} {src} && go version > /src/go-version.txt"),
                     ]
                 )
                 if result.returncode != 0 or not (tmp_path / name).exists():
@@ -541,9 +541,9 @@ touch /tmp/selection /tmp/provenance
                     "alpine:latest",
                     "sh",
                     "-c",
-                    "apk update >/dev/null 2>&1; cd /host && apk fetch linux-lts >/dev/null 2>&1 && "
+                    ("apk update >/dev/null 2>&1; cd /host && apk fetch linux-lts >/dev/null 2>&1 && "
                     "tar xzf linux-lts-*.apk && find lib/modules -name '*.ko*' | sort "
-                    "| head -40 > selection.txt && cat /etc/os-release | head -2 >> selection.txt",
+                    "| head -40 > selection.txt && cat /etc/os-release | head -2 >> selection.txt"),
                 ]
             )
             if result.returncode != 0 or not (tmp_path / "selection.txt").exists():
@@ -553,7 +553,7 @@ touch /tmp/selection /tmp/provenance
                 )
                 return
             lines = (tmp_path / "selection.txt").read_text().splitlines()
-            os_release = " ".join(lines[-2:])
+
             modules = sorted(line for line in lines[:-2] if line.strip())
             chosen = self.sample_files(modules, KERNEL_MODULE_SAMPLE)
             alpine_ver = self._distro_version("alpine")

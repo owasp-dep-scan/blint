@@ -377,7 +377,6 @@ def test_abi_requirements_property_carries_the_derived_floor():
     assert "GLIBC>=2.28" in line
     # The imports that set the floor ride along so a reader can verify.
     assert "set by" in line
-    assert "CXXABI>=" in line or "GLIBCXX>=" in line or True  # provider presence varies by fixture
 
 
 def test_recovered_dependency_components_are_optional():

@@ -552,15 +552,19 @@ def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
     return (parsed.type, parsed.namespace or "", parsed.name, qualifiers)
 
 
-def _artifact_version_evidence(exe: str, metadata: dict) -> dict[str, list[str]]:
+def _artifact_version_evidence(
+    exe: str, metadata: dict, project_name: str
+) -> dict[str, list[str]]:
     """Version-bearing evidence read from the artifact itself.
 
     Sources, as named evidence: the artifact path (a Cellar/vcpkg install
-    path names the version it came from), ELF SONAMEs, and the current/
-    compatibility versions of the linked dylibs. A dylib's current_version
-    is an ABI version (libcrypto.3.dylib reports 3.0.0 for every 3.6.x
-    release), so evidence that matches no candidate version contributes
-    nothing — callers only let *matching* evidence separate candidates.
+    path names the version it came from), the artifact's own ELF SONAME,
+    and version banners naming the project under decision. The versions of
+    *linked* dylibs are deliberately not evidence: they describe the
+    artifact's dependencies, not the artifact, so a dependency whose
+    version happens to equal a candidate would decide the wrong project.
+    Evidence that matches no candidate contributes nothing — callers only
+    let *matching* evidence separate candidates.
     """
     evidence: dict[str, list[str]] = {}
     if path_versions := sorted(set(re.findall(r"\d+\.\d+(?:\.\d+)+", str(exe)))):
@@ -575,15 +579,17 @@ def _artifact_version_evidence(exe: str, metadata: dict) -> dict[str, list[str]]
     )
     if soname_versions:
         evidence["soname"] = soname_versions
-    dylib_versions = sorted(
+    banner_versions = sorted(
         {
-            str(library.get("version"))
-            for library in metadata.get("libraries") or []
-            if isinstance(library, dict) and library.get("version")
+            identity[1]
+            for banner in detect_vendored_banners(metadata)["banners"]
+            if (identity := _generic_package_identity(banner.get("purl")))
+            and identity[0] == project_name
+            and identity[1]
         }
     )
-    if dylib_versions:
-        evidence["dylib_current_version"] = dylib_versions
+    if banner_versions:
+        evidence["banner"] = banner_versions
     return evidence
 
 
@@ -609,7 +615,7 @@ def _resolve_version_conflicts(
 
     Version-bearing evidence from the artifact outranks match score: when
     exactly one candidate version appears in the artifact's own path,
-    SONAME or dylib versions, that version wins and the others are
+    SONAME or a version banner naming the project, that version wins and the others are
     dropped. When the evidence cannot separate the candidates, neither
     version is emitted — the group collapses to one unversioned component
     carrying a blintdb_version_ambiguity property naming the candidates
@@ -625,11 +631,12 @@ def _resolve_version_conflicts(
         if key is not None:
             groups.setdefault(key, []).append(purl)
     resolved = set(detected)
-    artifact_evidence = _artifact_version_evidence(exe, metadata)
-    evidence_values = {version for versions in artifact_evidence.values() for version in versions}
     for key, purls in groups.items():
         if len(purls) < 2:
             continue
+        project_name = re.sub(r"@\d+$", "", key[2])
+        artifact_evidence = _artifact_version_evidence(exe, metadata, project_name)
+        evidence_values = {v for versions in artifact_evidence.values() for v in versions}
         versions = {}
         for purl in purls:
             try:
@@ -663,12 +670,15 @@ def _resolve_version_conflicts(
             purls, key=lambda p: evidence_by_purl.get(p, {}).get("score") or 0
         )
         ambiguous_purl = _unversioned_purl(strongest)
-        if not ambiguous_purl or ambiguous_purl in resolved:
+        if not ambiguous_purl:
             continue
+        # An unversioned row of the same project may already be among the
+        # candidates; it absorbs the versioned ones rather than letting
+        # them all through.
         resolved -= set(purls)
         resolved.add(ambiguous_purl)
         if strongest in evidence_by_purl:
-            evidence_by_purl[ambiguous_purl] = evidence_by_purl[strongest]
+            evidence_by_purl.setdefault(ambiguous_purl, evidence_by_purl[strongest])
         notes[ambiguous_purl] = {
             "blintdb_version_ambiguity": (
                 f"{detail['candidates']}; artifact evidence consulted: {detail['evidence']}"
