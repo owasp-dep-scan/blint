@@ -1,0 +1,122 @@
+# macOS host-plugin kinds (blint lane M1.1, plan 07).
+#
+# Each entry names the host process a plugin bundle of that kind loads into,
+# that host's privilege, and how the plugin is activated. Pinned against
+# Apple's documented extension points, with the measurements that scoped the
+# rules re-taken on the machine this packet was built on (macOS 15.8, build
+# 24H23) rather than inherited from the plan's macOS 26 research system.
+#
+# AudioServerPlugIn declaration keys across the 12 Apple HAL plugins in
+# /System/Library/Audio/Plug-Ins/HAL (third-party /Library/Audio/Plug-Ins/HAL
+# is empty on this machine; /Library/CoreMediaIO/Plug-Ins/DAL holds only a
+# plugins-info.txt; /Library/Audio/Plug-Ins/Components is empty):
+#
+#   AudioServerPlugIn_MachServices        7 of 12  (array of Mach service names)
+#   AudioServerPlugIn_IOKitUserClients    6 of 12  (array of user-client class names)
+#   AudioServerPlugIn_LoadingConditions   5 of 12  (dict of load-gating conditions)
+#   AudioServerPlugIn_Create              0 of 12
+#   AudioServerPlugIn_Network             0 of 12  - including AirPlay.driver and
+#                                              AppleAVBAudio.driver, Apple's own
+#                                              network audio, which hand off to
+#                                              companion processes over Mach IPC
+#                                              instead of opening sockets
+#
+# Because of that table:
+# - CHECK_AUDIO_PLUGIN_NETWORK ships at medium: no plugin on a stock system
+#   declares the key, so the rule is quiet by construction there.
+# - CHECK_AUDIO_PLUGIN_MACH_SERVICES does NOT ship. 7 of 12 Apple plugins
+#   declare _MachServices (AirPlay.driver declares only that), so a rule on
+#   bare presence fires on the operating system's own plugins - the
+#   CHECK_SIGNER_MISMATCH shape from W2.4 (152 hits on 178 benign files
+#   before it was re-scoped). The service names are recorded in
+#   host_plugin.declarations.mach_services and no rule fires on them.
+#
+# Host facts and their sources:
+# - .driver: Apple's AudioServerPlugIn.h (MacOSX SDK) - a plugin "may also
+#   use network resources" but "must declare this in its bundle's info.plist
+#   with the key named, AudioServerPlugIn_Network"; plugins run in a
+#   per-plugin child of com.apple.audio.Core-Audio-Driver-Service.xpc as
+#   _coreaudiod, whose sandbox the host extends from the Info.plist
+#   declarations (its log strings name the Mach-service and IOKit
+#   user-client extensions).
+# - .plugin under CoreMediaIO/Plug-Ins/DAL: the documented install location
+#   of a camera DAL plug-in, loaded into any application that opens a
+#   camera. A .plugin anywhere else names no host: the suffix alone does
+#   not determine one, so no host_plugin block is emitted for it.
+# - .component: Audio Unit, loaded by every Audio Unit host process.
+# - .qlgenerator / .mdimporter: loaded by QuickLookUIService / mdworker on
+#   files the user previews or indexes rather than opens.
+# - .systemextension / .dext: managed by sysextd, activated by the
+#   containing application through a one-time user-approval dialog
+#   (OSSystemExtensionRequest) - unlike a .driver, which installs with an
+#   administrator password and no dialog. A DriverKit extension runs in its
+#   own driver process while its containing application keeps ordinary
+#   network access, so nothing in this block may be read as "this software
+#   cannot reach the network" (plan 07's honesty requirement).
+
+kinds:
+  driver:
+    title: Audio Server Plug-In
+    host: >-
+      a per-plugin child process of
+      com.apple.audio.Core-Audio-Driver-Service.xpc (the Core Audio driver
+      service)
+    host_privilege: runs as user _coreaudiod
+    activation: >-
+      installed into its scan directory with administrator rights once, then
+      loaded automatically on every boot with no per-load prompt and no
+      consent surface after the install
+    reads_audio_declarations: true
+  dal_plugin:
+    title: CoreMediaIO DAL camera plug-in
+    host: any application that opens a camera
+    host_privilege: the opening application's privileges
+    activation: >-
+      installed into the DAL plug-ins directory with administrator rights
+      once, then loaded into every application that opens a camera, with no
+      per-load prompt
+    require_path_marker: coremediaio/plug-ins/dal
+  component:
+    title: Audio Unit
+    host: every Audio Unit host process (any application that loads audio units)
+    host_privilege: the host application's privileges
+    activation: >-
+      installed into an Audio Units directory once, then loaded by whatever
+      application requests the unit, with no per-load prompt
+  qlgenerator:
+    title: QuickLook generator
+    host: QuickLookUIService (and the qlmanage/quicklookd helpers)
+    host_privilege: runs as the console user
+    activation: >-
+      loaded by the system to render files the user previews, without the
+      file being opened - install once and every previewable file of the
+      handled type reaches this code
+  mdimporter:
+    title: Spotlight metadata importer
+    host: mdworker (Spotlight's per-import worker)
+    host_privilege: runs as the console user, sandboxed by Spotlight
+    activation: >-
+      loaded by Spotlight to index files the user merely saves, without the
+      file being opened - install once and every indexed file of the handled
+      type reaches this code
+  systemextension:
+    title: System Extension
+    host: its own process, managed by sysextd
+    host_privilege: >-
+      varies by extension category (network extensions act for the user;
+      DriverKit extensions hold the restricted IOKit rights their
+      entitlements grant)
+    activation: >-
+      activated by its containing application through a one-time
+      user-approval dialog (OSSystemExtensionRequest); the approval happens
+      once at activation, not on every load, and the extension stays active
+      across reboots
+  dext:
+    title: DriverKit extension
+    host: its own DriverKit user-space driver process, managed by sysextd
+    host_privilege: restricted IOKit user-client access granted by its declared entitlements
+    activation: >-
+      activated by its containing application through a one-time
+      user-approval dialog (OSSystemExtensionRequest); the approval happens
+      once at activation, not on every load, and the extension stays active
+      across reboots

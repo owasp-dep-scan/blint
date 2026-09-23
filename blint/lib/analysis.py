@@ -24,6 +24,7 @@ from blint.lib import pe_constants
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
+    check_audio_plugin_network,  # noqa: F401
     check_authenticode,  # noqa: F401
     check_boot_start_integritycheck,  # noqa: F401
     check_build_path_leak,  # noqa: F401
@@ -36,6 +37,7 @@ from blint.lib.checks import (
     check_libc_portability,  # noqa: F401
     check_link_closure,  # noqa: F401
     check_lsa_plugin,  # noqa: F401
+    check_macos_host_plugin,  # noqa: F401
     check_msix_restricted_capability,  # noqa: F401
     check_nx,  # noqa: F401
     check_objc_load_methods,  # noqa: F401

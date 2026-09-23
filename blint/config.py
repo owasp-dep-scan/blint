@@ -1259,6 +1259,11 @@ class BlintOptions:
     no_reviews: bool = False
     reports_dir: str = ""
     sbom_mode: bool = False
+    # CycloneDX spec version the SBOM declares (W6.1). "1.7" by default;
+    # "1.6" remains selectable for consumers that have not caught up. blint
+    # populates no 1.7-only field, so a 1.6-declared document is exactly the
+    # 1.6 shape and validates against the official 1.6 schema.
+    sbom_spec_version: str = "1.7"
     quiet_mode: bool = False
     db_mode: bool = False
     wasm_sbom: bool = False

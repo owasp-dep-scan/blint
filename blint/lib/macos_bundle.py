@@ -1,13 +1,18 @@
-"""macOS bundle (``.app`` / ``.framework`` / ``.dSYM``) handling for blint.
+"""macOS bundle (``.app`` / ``.framework`` / ``.dSYM`` / plugin kinds) handling.
 
 A macOS bundle is a directory, not an archive: the main Mach-O lives under
 ``Contents/MacOS`` (named by ``CFBundleExecutable``), embedded frameworks
 under ``Contents/Frameworks``, app extensions under ``Contents/PlugIns`` and
 XPC services under ``Contents/XPCServices``. ``.framework`` bundles carry the
 executable at their root (or under ``Versions/``), and a ``.dSYM`` wraps the
-DWARF slice(s) under ``Contents/Resources/DWARF``. This module enumerates the
-Mach-O binaries to analyse and exposes the bundle context so each binary's
-report can be enriched.
+DWARF slice(s) under ``Contents/Resources/DWARF``. The plugin bundle kinds
+(``.driver``, ``.plugin``, ``.component``, ``.qlgenerator``, ``.mdimporter``,
+``.systemextension``, ``.dext``) use the app layout unchanged, and a bundle
+of one of those kinds additionally gets a ``host_plugin`` block on each of
+its binary entries (:mod:`blint.lib.macos_host_plugins`) naming the host
+process it loads into and its ``Info.plist`` capability declarations. This
+module enumerates the Mach-O binaries to analyse and exposes the bundle
+context so each binary's report can be enriched.
 
 The plist reading, privacy-manifest aggregation and report enrichment are
 shared with the ``.ipa`` path in :mod:`blint.lib.ios` — two bundle walkers
@@ -18,6 +23,7 @@ import os
 import plistlib
 
 from blint.lib.ios import bundle_info_from_plist, read_privacy_manifest
+from blint.lib.macos_host_plugins import classify_host_plugin
 from blint.lib.provisioning import (
     decode_provisioning_profile,
     load_embedded_profile,
@@ -28,7 +34,24 @@ from blint.logger import LOG
 
 # Bundle directory suffixes, matched case-insensitively (macOS volumes are
 # commonly case-insensitive, so ``Foo.app`` and ``Foo.APP`` are the same shape).
-MACOS_BUNDLE_SUFFIXES: tuple[str, ...] = (".app", ".framework", ".dsym", ".xpc", ".appex")
+# The plugin kinds (M1.1, plan 07) all use the same ``Contents/Info.plist`` +
+# ``Contents/MacOS`` layout the app kinds do, measured on this system across
+# .driver, .qlgenerator, .mdimporter, .component and .systemextension bundles.
+MACOS_BUNDLE_SUFFIXES: tuple[str, ...] = (
+    ".app",
+    ".framework",
+    ".dsym",
+    ".xpc",
+    ".appex",
+    ".driver",
+    ".plugin",
+    ".component",
+    ".qlgenerator",
+    ".mdimporter",
+    ".systemextension",
+    ".dext",
+    ".bundle",
+)
 
 _KIND_BY_SUFFIX = {
     ".app": "app",
@@ -36,11 +59,25 @@ _KIND_BY_SUFFIX = {
     ".xpc": "xpc",
     ".framework": "framework",
     ".dsym": "dsym",
+    ".driver": "driver",
+    ".plugin": "plugin",
+    ".component": "component",
+    ".qlgenerator": "qlgenerator",
+    ".mdimporter": "mdimporter",
+    ".systemextension": "systemextension",
+    ".dext": "dext",
+    # Generic loadable bundle: recognized so an embedded UI/support bundle
+    # (CoreAudio.component ships CoreAudioAUUI.bundle, measured) is not
+    # lost relative to the plain directory scan that preceded bundle
+    # recognition. It names no host - the suffix determines none - so it
+    # gets no host_plugin block.
+    ".bundle": "bundle",
 }
 
 # Per-bundle-kind locations of Info.plist, tried in order. The root-level
 # entries accept the iOS layout (no Contents/), which extracted .ipa payloads
-# and some cross-platform tools produce, so one walker reads both.
+# and some cross-platform tools produce, so one walker reads both. The plugin
+# kinds keep the strict Contents-only layout they are measured to ship.
 _INFO_PLIST_LOCATIONS: dict[str, tuple[str, ...]] = {
     "app": ("Contents/Info.plist", "Info.plist"),
     "appex": ("Contents/Info.plist", "Info.plist"),
@@ -52,6 +89,14 @@ _INFO_PLIST_LOCATIONS: dict[str, tuple[str, ...]] = {
         "Info.plist",
     ),
     "dsym": ("Contents/Info.plist",),
+    "driver": ("Contents/Info.plist",),
+    "plugin": ("Contents/Info.plist",),
+    "component": ("Contents/Info.plist",),
+    "qlgenerator": ("Contents/Info.plist",),
+    "mdimporter": ("Contents/Info.plist",),
+    "systemextension": ("Contents/Info.plist",),
+    "dext": ("Contents/Info.plist",),
+    "bundle": ("Contents/Info.plist",),
 }
 
 # Directories that may hold embedded components, per kind. Missing directories
@@ -59,6 +104,11 @@ _INFO_PLIST_LOCATIONS: dict[str, tuple[str, ...]] = {
 # ``Versions/Current/...`` and ``Versions/A/...`` resolve to the same files on
 # every modern framework; ``_add_binary`` deduplicates by real path, so the
 # aliasing costs one stat per entry, not a duplicate binary.
+# The plugin kinds keep the same embedded-component directories the app kinds
+# have, because a vendor plugin that ships a framework or an AU UI bundle must
+# not lose it relative to the plain directory scan that preceded bundle
+# recognition (measured: CoreAudio.component ships Contents/PlugIns/
+# CoreAudioAUUI.bundle).
 _EMBEDDED_DIRS: dict[str, tuple[str, ...]] = {
     "app": (
         "Contents/Frameworks",
@@ -73,16 +123,39 @@ _EMBEDDED_DIRS: dict[str, tuple[str, ...]] = {
     "xpc": ("Contents/Frameworks", "Frameworks"),
     "framework": ("Frameworks", "Versions/A/Frameworks", "Versions/Current/Frameworks"),
     "dsym": (),
+    # The plugin and generic kinds walk the same modern embedded-component
+    # set an app does: a plugin that ships an XPC service (iChat.qlgenerator
+    # ships one, measured), a helper under Contents/Library or an embedded
+    # framework must not lose it relative to the plain directory scan that
+    # preceded bundle recognition.
+    "driver": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "plugin": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "component": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "qlgenerator": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "mdimporter": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "systemextension": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "dext": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
+    "bundle": ("Contents/Frameworks", "Contents/PlugIns", "Contents/XPCServices", "Contents/Library"),
 }
 
 # The role an embedded bundle's executable plays, by the bundle's kind. The
 # role names what the component is for; ``main`` is reserved for the
-# top-level bundle's own executable.
+# top-level bundle's own executable. The plugin kinds share the ``plugin``
+# role: their specific identity is the ``host_plugin`` block, not the role
+# counter.
 _SUB_BUNDLE_ROLES = {
     "framework": "framework",
     "app": "plugin",
     "appex": "plugin",
     "xpc": "xpc",
+    "driver": "plugin",
+    "plugin": "plugin",
+    "component": "plugin",
+    "qlgenerator": "plugin",
+    "mdimporter": "plugin",
+    "systemextension": "plugin",
+    "dext": "plugin",
+    "bundle": "plugin",
 }
 
 # Directories inside a bundle's code tree that hold no executables by
@@ -190,8 +263,18 @@ def collect_macos_bundle(bundle_dir: str) -> dict | None:
 
 
 def _bundle_info(bundle_dir: str, kind: str) -> dict:
-    """Read the bundle's Info.plist from whichever layout it uses."""
+    """Read the bundle's Info.plist from whichever layout it uses.
+
+    Plugin-kind bundles additionally carry ``host_plugin`` — the block from
+    :func:`blint.lib.macos_host_plugins.classify_host_plugin` — describing
+    the host process the bundle loads into, its activation path and its
+    capability declarations. It rides on the info dict (excluded from the
+    per-binary bundle context, which duplicates identity only) and is
+    stamped onto the bundle's binary entries by the walk.
+    """
     info: dict = {"bundle_dir": os.path.basename(bundle_dir.rstrip(os.sep))}
+    plist: object = None
+    plist_status = "info_plist_absent"
     for relative in _INFO_PLIST_LOCATIONS.get(kind, ()):
         plist_path = os.path.join(bundle_dir, *relative.split("/"))
         if not os.path.isfile(plist_path):
@@ -201,9 +284,15 @@ def _bundle_info(bundle_dir: str, kind: str) -> dict:
                 plist = plistlib.load(fp)
         except (OSError, ValueError, plistlib.InvalidFileException) as e:
             LOG.debug(f"Could not read Info.plist at {plist_path}: {e}")
+            plist = None
+            plist_status = "info_plist_unreadable"
             break
-        info.update(bundle_info_from_plist(plist))
+        plist_status = "read" if isinstance(plist, dict) else "info_plist_not_a_dict"
+        if isinstance(plist, dict):
+            info.update(bundle_info_from_plist(plist))
         break
+    if host_plugin := classify_host_plugin(bundle_dir, kind, plist, plist_status):
+        info["host_plugin"] = host_plugin
     # Frameworks, XPC services and dSYMs often ship no CFBundleIdentifier;
     # the bundle name is the identity both Apple tooling and users know them
     # by, and the SBOM needs one either way.
@@ -264,7 +353,15 @@ def _walk_bundle(
     helper, debug). Loose Mach-O files that are neither a recognised bundle
     nor a ``.dylib`` (a helper tool, say) are not collected — adding them
     would turn every stray file in ``PlugIns`` into a unit.
+
+    Every member of a plugin-kind bundle carries that bundle's
+    ``host_plugin`` block: the members load into the named host alongside
+    the executable. An embedded plugin bundle stamps its own block on its
+    members first, and ``setdefault`` here keeps it — an app containing a
+    DriverKit extension reports the extension's host, not the app's
+    (absent) one.
     """
+    start = len(binaries)
     if kind == "dsym":
         dwarf_dir = os.path.join(bundle_dir, "Contents", "Resources", "DWARF")
         if os.path.isdir(dwarf_dir):
@@ -350,6 +447,9 @@ def _walk_bundle(
     # Walked after the sub-bundles so a nested bundle's executable keeps
     # its bundle role and identity rather than being claimed as a tool.
     _sweep_tool_binaries(bundle_dir, kind, binaries, bundle_dir)
+    if host_plugin := bundle_info.get("host_plugin"):
+        for entry in binaries[start:]:
+            entry.setdefault("host_plugin", host_plugin)
 
 
 def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_dir: str) -> None:

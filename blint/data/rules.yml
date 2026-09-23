@@ -372,16 +372,38 @@
     - dotnetbinary
     - gobinary
     - genericbinary
+- id: CHECK_MACOS_HOST_PLUGIN
+  title: macOS Host-Plugin Bundle
+  description: |
+    This binary belongs to a macOS plugin bundle - a .driver (Audio Server Plug-In), a CoreMediaIO DAL camera .plugin, an Audio Unit .component, a QuickLook .qlgenerator, a Spotlight .mdimporter, or a .systemextension / .dext - which macOS loads into a named host process automatically: the audio plugin hosts running as _coreaudiod, any application that opens a camera, the QuickLook and Spotlight services that render or index files the user merely previews or saves. The finding names the host, its privilege and the activation path, because that context is the security object: a .driver is installed with an administrator password once and loaded on every boot with no consent surface after, while a .systemextension / .dext activates through a one-time user-approval dialog from its containing application.
+    This is context for a reviewer, not an accusation - legitimate audio, camera and indexing software looks exactly like this, which is why the severity is informational. Every capability the block lists is a declaration read from the bundle's Info.plist, never observed behaviour. A .dext's containing application keeps ordinary network access, so nothing in this finding may be read as "this software cannot reach the network". The scope covers gobinary and genericbinary alongside MachO for the same reason the PE host-plugin rules do: exe_type is a toolchain label that overwrites the format one, and a plugin built with Go or Rust loads into the same hosts.
+  severity: info
+  exe_types:
+    - MachO
+    - gobinary
+    - genericbinary
+- id: CHECK_AUDIO_PLUGIN_NETWORK
+  title: Audio Plugin Network Declaration
+  description: |
+    This Audio Server Plug-In's Info.plist declares AudioServerPlugIn_Network - the documented key by which an audio plugin asks its host to extend the plugin's sandbox to allow network access. The finding is about the declaration, a request the bundle made that blint read statically; it is not a claim that the plugin was seen using the network. There is no consent surface after installation and the macOS firewall is inbound-only, so this declaration is the plugin's entire network gate.
+    Measured on a stock macOS 15.8 system: 0 of the 12 Apple HAL plugins declare the key, including Apple's own network-audio plugins (AirPlay.driver, AppleAVBAudio.driver), which reach the network by handing off to companion processes over Mach IPC declared through AudioServerPlugIn_MachServices instead. The rule is therefore quiet by construction on the benign population, which is exactly why the declaration is worth reporting when it appears. AudioServerPlugIn_MachServices itself fires no rule: 7 of those 12 Apple plugins declare it, so bare presence is noise on the operating system's own plugins - the service names are recorded in the host_plugin block instead (the CHECK_SIGNER_MISMATCH shape from W2.4).
+  severity: medium
+  exe_types:
+    - MachO
+    - gobinary
+    - genericbinary
 - id: CHECK_UNSIGNED_HOST_PLUGIN
   title: Unsigned Privileged-Host Plugin
   description: |
     This binary satisfies a privileged-host plugin contract (see CHECK_PRIVILEGED_HOST_PLUGIN) and nothing vouches for it: the W2.4 signing class is unsigned (a performed, complete catalog lookup found no signature), self_signed (the signer vouches for itself) or unknown_root (the chain terminates outside the shipped root snapshot). Auto-loaded into a SYSTEM or protected host on every boot, installed once with admin rights, vouched for by nobody - this is the finding that matters in the plugin surface, because it is how an attacker's DLL becomes a permanent, invisible tenant of lsass.exe or spoolsv.exe.
     The verdict follows signing_class exactly and stays silent when the class is undetermined (absent): blint's default invocation performs no catalog lookup, and absence of a determination is neither signed nor unsigned. Every plugin DLL on a stock System32 is Microsoft-signed, so this fires zero times on the benign system population.
+    On Mach-O (M1.1) the same finding covers a macOS plugin bundle in a system or machine-wide install scope that is neither an Apple platform binary nor Developer-ID-signed: an unsigned or ad-hoc-signed .driver in /Library/Audio/Plug-Ins/HAL is loaded into the audio hosts on every boot, installed once with an admin password, vouched for by nobody. It stays silent when the signature is undetermined (blint could not parse the blob), when the identity is something blint cannot classify, and when the bundle has no install scope - a plugin in a downloads folder is not installed anywhere yet. The Mach-O scope covers gobinary and genericbinary for the same toolchain-label reason as CHECK_MACOS_HOST_PLUGIN.
   severity: high
   exe_types:
     - PE32
     - PE64
     - dotnetbinary
+    - MachO
     - gobinary
     - genericbinary
 - id: CHECK_LSA_PLUGIN

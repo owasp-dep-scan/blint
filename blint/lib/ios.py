@@ -406,7 +406,11 @@ def enrich_with_bundle_context(
     """
     if not isinstance(metadata, dict):
         return metadata
-    context = {k: v for k, v in bundle_info.items() if k != "executable"}
+    # ``host_plugin`` (macOS plugin bundles, M1.1) reaches the metadata top
+    # level through the walker's binary entries rather than the context
+    # block, so the checks read one shape for PE and Mach-O and the block is
+    # not duplicated under macos_bundle.
+    context = {k: v for k, v in bundle_info.items() if k not in ("executable", "host_plugin")}
     context["role"] = role
     if bundle_path:
         context["bundle_path"] = bundle_path
