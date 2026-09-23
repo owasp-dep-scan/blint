@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from blint.cli import build_parser
 
 
@@ -40,3 +42,36 @@ def test_diff_subcommand_json_flag():
 def test_diff_subcommand_in_help():
     parser = build_parser()
     assert "diff" in parser.format_help()
+
+
+def test_banner_survives_legacy_codepage_console(tmp_path):
+    """The startup banner must not crash a legacy-codepage stdout (#80).
+
+    A Windows console with cp1252/IBM437 cannot encode the block-art logo,
+    and blint crashed at ``print(BLINT_LOGO)`` before scanning anything -
+    found by the #80 stress run against a real System32. Reproduced here
+    portably by forcing ``PYTHONIOENCODING=cp1252`` on any platform: the
+    scan must complete (exit 0) with the plain-text fallback banner.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ, PYTHONIOENCODING="cp1252", BLINT_CACHE_DIR=str(tmp_path / "cache"))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "blint.cli",
+            "-q",
+            "--no-reviews",
+            "-i",
+            str(Path(__file__).resolve().parent / "data" / "complex_flow.wasm"),
+            "-o",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr[-400:]

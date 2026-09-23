@@ -623,7 +623,15 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
     if args is None:
         args = build_args()
     if not args.no_banner and args.subcommand_name != "sbom":
-        print(BLINT_LOGO)
+        try:
+            print(BLINT_LOGO)
+        except UnicodeEncodeError:
+            # A legacy Windows codepage console (cp1252, IBM437) cannot
+            # encode the block-art logo, and the tool crashed here at
+            # startup before scanning anything (found by the #80 stress
+            # run against a real System32). The scan must always run; fall
+            # back to a plain spelling of the name.
+            print("OWASP blint", end="\n\n")
     if not args.src_dir_image:
         args.src_dir_image = [os.getcwd()]
     try:
