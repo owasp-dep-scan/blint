@@ -421,6 +421,11 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
         if "musl" in parsed_obj.interpreter:
             metadata["is_musl"] = True
     metadata["is_pie"] = parsed_obj.is_pie
+    # ELF header type as a plain name (EXEC/DYN/REL). PIE and NX are
+    # properties of loadable images: a REL object has no segments and a DYN
+    # without an interpreter is a shared library, so rules keyed on those
+    # facts need the type to ask whether they apply at all (F1a).
+    metadata["elf_type"] = enum_to_str(parsed_obj.header.file_type)
     metadata["is_targeting_android"] = parsed_obj.is_targeting_android
     metadata["virtual_size"] = parsed_obj.virtual_size
     metadata["has_nx"] = parsed_obj.has_nx

@@ -494,6 +494,11 @@ def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bin
     metadata["name"] = exe_file
     metadata["imagebase"] = parsed_obj.imagebase
     metadata["is_pie"] = parsed_obj.is_pie
+    # Mach-O filetype as a plain name (EXECUTE/DYLIB/BUNDLE/...). PIE is a
+    # property of main executables - a dylib is position-independent by
+    # construction - so the PIE rule needs the filetype to ask whether it
+    # applies (F1a).
+    metadata["macho_filetype"] = enum_to_str(parsed_obj.header.file_type)
     metadata["has_nx"] = parsed_obj.has_nx
     metadata["wx_segments"] = parse_mach0_wx_segments(parsed_obj)
     metadata["exe_type"] = "MachO"

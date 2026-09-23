@@ -72,7 +72,33 @@ def check_tls_callbacks(
     return ", ".join(str(name) for name in names[:10])
 
 
+def _is_main_executable(metadata: dict[str, Any]) -> bool:
+    """Whether PIE is a meaningful question for this file.
+
+    PIE is a property of main executables: a Mach-O dylib and an ELF shared
+    object are position-independent or loaded at a slide by construction,
+    and an ET_REL object has no load address at all. F0 measured the PIE
+    rule firing on exactly those files 274 of 276 times on the benign
+    tier-0 corpus, every finding false by construction (otool -hv filetype
+    DYLIB, readelf -h type DYN/REL). The type fields are absent from
+    metadata shapes older than this gate; those keep the pre-gate behavior
+    (applicable) rather than silently widening the rule.
+    """
+    binary_type = str(metadata.get("binary_type") or "").upper()
+    if binary_type == "MACHO":
+        filetype = str(metadata.get("macho_filetype") or "").upper()
+        return filetype in ("", "EXECUTE", "EXECUTABLE", "MH_EXECUTE")
+    if binary_type == "ELF":
+        elf_type = str(metadata.get("elf_type") or "").upper()
+        if elf_type in ("", "EXEC"):
+            return True
+        return elf_type == "DYN" and bool(metadata.get("interpreter"))
+    return True
+
+
 def check_pie(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
+    if not _is_main_executable(metadata):
+        return True
     return metadata.get("is_pie") is not False
 
 

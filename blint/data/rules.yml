@@ -145,6 +145,7 @@
     `Position-Independent Executable (PIE)` executes properly regardless of its absolute address. PIE binaries are used in some security-focused Linux distributions to allow PaX or Exec Shield to use address space layout randomization to prevent attackers from knowing where existing executable code is during a security attack using exploits that rely on knowing the offset of the executable code in the binary, such as return-to-libc attacks.
     Apple's macOS and iOS fully support PIE executables; a warning is issued when non-PIE iOS executables are submitted for approval to Apple's App Store.
     Android enabled support for PIEs in Jelly Bean and removed non-PIE linker support in Lollipop.
+    Scope: the rule fires only on main executables. PIE is a property of the image the loader places at a random base — a Mach-O dylib (otool -hv filetype DYLIB), an ELF shared object (readelf -h type DYN without an interpreter) and an ET_REL relocatable object are position-independent or relocated by the loader by construction, so a PIE finding on them is false by construction. Measured on the ELF/Mach-O tier-0 benign corpus (F0): 274 of 276 findings were on exactly those files, every one confirmed false against otool/readelf; the two true findings were ET_EXEC executables and keep firing.
     For go binary builds, enable pie by specifying the buildmode=pie as described in the [documentation](https://pkg.go.dev/cmd/go#hdr-Build_modes). The below command line enables pie along with relro and other protections.
 
     ```bash
