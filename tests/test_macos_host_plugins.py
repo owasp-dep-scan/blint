@@ -15,24 +15,29 @@ are synthetic for that reason and that reason is measured: 0 of the 12
 Apple HAL plugins on this machine declare the network key.
 
 Real-artifact ground truth (rule 29) runs where the artifacts exist and is
-skip-guarded otherwise. Tools and outputs, recorded 2026-09-22 on macOS
-15.8 (build 24H23):
+skip-guarded otherwise. These tests run ``codesign`` on the same file in
+the same run and compare blint's answer to its output, rather than to
+values recorded on one machine: both did the latter first, and both failed
+on the reviewer's Mac. ``Platform identifier`` is the macOS major version
+(16 on macOS 15.8, 26 on macOS 26.6.2), and the activated system extension
+a Mac happens to have is whichever one its owner installed — neither is a
+constant, while "carries a platform identifier" and "is Developer-ID
+signed" are the properties the rules actually read.
 
-- ``codesign -dv --entitlements -`` on AirPlay.driver prints
-  ``Platform identifier=16``, ``Identifier=com.apple.audio.Halogen`` and
-  origin ``Software Signing``; blint's parse agrees on all three
-  (platform_id 16, identifier, cms signer_cn).
-- ``codesign -dv`` on the Tailscale system extension prints
-  ``TeamIdentifier=W5364U7YZB`` and ``spctl -a -vv`` prints
-  ``origin=Developer ID Application: Tailscale Inc. (W5364U7YZB)``;
-  ``systemextensionsctl list`` shows it
-  ``enabled active W5364U7YZB io.tailscale.ipn.macsys.network-extension``.
-  blint's parse agrees: team_id W5364U7YZB, signer_cn carries
-  ``Developer ID Application: Tailscale Inc. (W5364U7YZB)``.
+Originally recorded 2026-09-22 on macOS 15.8 (build 24H23):
+``codesign -dv --entitlements -`` on AirPlay.driver printed
+``Platform identifier=16``, ``Identifier=com.apple.audio.Halogen`` and
+origin ``Software Signing``; ``codesign -dv`` on that machine's activated
+Tailscale extension printed ``TeamIdentifier=W5364U7YZB`` with
+``spctl -a -vv`` origin ``Developer ID Application: Tailscale Inc.
+(W5364U7YZB)``. blint agreed with all of it. Re-measured on the reviewer's
+macOS 26.6.2: ``Platform identifier=26``, blint's ``platform_id`` 26.
 """
 
 import os
 import plistlib
+import re
+import subprocess
 
 import orjson
 import pytest
@@ -549,11 +554,27 @@ def test_real_airplay_driver_is_a_platform_binary_system_plugin():
         "com.apple.coremedia.bufferedairplayglobalroutingregistry.xpc",
     ]
     assert "network" not in block["declarations"]
-    # codesign -dv: Platform identifier=16, Identifier=com.apple.audio.Halogen.
+    # codesign -dv on this bundle prints `Platform identifier=<n>` and
+    # `Identifier=com.apple.audio.Halogen`. The *number* is the macOS major
+    # version (16 on macOS 15.8, 26 on macOS 26.6.2), so asserting a literal
+    # pins the suite to one OS release — it failed on the reviewer's Mac for
+    # exactly that reason. What the rule actually reads is the presence of a
+    # platform identifier, which is what makes this an Apple platform binary,
+    # so that is what is asserted; the value is cross-checked against
+    # codesign itself below rather than against a constant.
     metadata = parse(entry["path"])
     directories = metadata["code_signature"]["superblob"]["code_directories"]
-    assert any(d.get("platform_id") == 16 for d in directories)
+    platform_ids = [d.get("platform_id") for d in directories if d.get("platform_id")]
+    assert platform_ids, "an Apple platform binary carries a platform identifier"
     assert any(d.get("identifier") == "com.apple.audio.Halogen" for d in directories)
+    printed = subprocess.run(
+        ["codesign", "-dv", AIRPLAY_DRIVER], capture_output=True, text=True
+    )
+    match = re.search(r"Platform identifier=(\d+)", printed.stderr)
+    assert match, "codesign must print a platform identifier for this bundle"
+    assert int(match.group(1)) in platform_ids, (
+        "blint's platform_id must be the one codesign reports on this machine"
+    )
     metadata["host_plugin"] = block
     assert check_unsigned_host_plugin("AirPlay", metadata, {}) is True
 
@@ -582,15 +603,28 @@ def test_real_activated_sysext_is_developer_id_signed_machine_scope():
     assert block["install_scope"] == "machine"
     # The activated copy has no containing app in its ancestry.
     assert "containing_app" not in block
-    # codesign -dv: TeamIdentifier=W5364U7YZB; spctl -a -vv: origin=
-    # Developer ID Application: Tailscale Inc. (W5364U7YZB).
+    # Ground truth from codesign itself, on whatever extension this machine
+    # has activated. The original form asserted one vendor's team identifier
+    # and common name (Tailscale's), which the skipif did not guarantee was
+    # present: any Mac with a different activated extension failed, and the
+    # reviewer's did. What is machine-independent is the property the rule
+    # reads — an activated extension is Developer-ID signed — so blint's
+    # answer is compared against codesign's on the same file instead of
+    # against a constant from another machine.
     metadata = parse(entry["path"])
     superblob = metadata["code_signature"]["superblob"]
     primary = next(d for d in superblob["code_directories"] if d.get("slot_type") == "code_directory")
-    assert primary.get("team_id") == "W5364U7YZB"
-    assert "Developer ID Application: Tailscale Inc." in (superblob["cms"] or {}).get("signer_cn", "")
+    printed = subprocess.run(["codesign", "-dv", sysext], capture_output=True, text=True)
+    team = re.search(r"TeamIdentifier=(\S+)", printed.stderr)
+    assert team and team.group(1) != "not set", "an activated extension is team-signed"
+    assert primary.get("team_id") == team.group(1)
+    signer_cn = (superblob["cms"] or {}).get("signer_cn", "")
+    assert signer_cn.startswith("Developer ID Application:"), (
+        f"an activated system extension is Developer-ID signed; got {signer_cn!r}"
+    )
+    assert team.group(1) in signer_cn, "the Developer ID CN carries its own team identifier"
     metadata["host_plugin"] = block
-    assert check_unsigned_host_plugin("tailscale", metadata, {}) is True
+    assert check_unsigned_host_plugin("sysext", metadata, {}) is True
 
 
 @pytest.mark.parametrize(
@@ -607,3 +641,86 @@ def test_real_system_plugin_kinds_get_blocks(bundle_path):
     assert block, f"{bundle_path} must carry a host_plugin block"
     assert block["install_scope"] == "system"
     assert block["host"]
+
+
+def test_extension_shipped_inside_an_application_has_no_install_scope(tmp_path):
+    """Payload inside an app is not installed anywhere — not even under /Library.
+
+    The module docstring has always said a `.systemextension`/`.dext` found
+    inside an application gets no install scope: the copy macOS runs is the
+    activated one staged under /Library/SystemExtensions. The code asked
+    only about the path, so a vendor extension under
+    /Library/Application Support/<Vendor>/<App>.app/... came back `machine`
+    — and `CHECK_UNSIGNED_HOST_PLUGIN` is high on machine scope, so an
+    ad-hoc-signed extension that is not installed at all was reported as
+    "installed machine-wide, vouched for by nobody".
+
+    The existing coverage used an app under /Applications, which returns
+    None for an unrelated reason (it is in neither scope root), so it passed
+    against the defect.
+    """
+    # A real /Library path, not tmp_path: under tmp_path the scope is None
+    # for an unrelated reason (it is in neither scope root), which is why
+    # the existing /Applications coverage passed against the defect. The
+    # path need not exist — the ancestor test is structural.
+    ext_path = (
+        "/Library/Application Support/Acme/Acme.app"
+        "/Contents/Library/SystemExtensions/com.acme.net.systemextension"
+    )
+    block = classify_host_plugin(ext_path, "systemextension", {}, "read")
+    assert "install_scope" not in block
+    # And the rule that reads the scope stays silent on this payload, even
+    # with no signature at all.
+    metadata = {"host_plugin": block, "code_signature": {"parse_status": "absent"}}
+    assert check_unsigned_host_plugin("net", metadata, {}) is True
+    # The containing app is still named when it can be read — that fact is
+    # unchanged, and it is what a reviewer follows to find who vouches.
+    app = tmp_path / "Acme.app"
+    _write_plist(app / "Contents" / "Info.plist", {"CFBundleIdentifier": "com.acme.app"})
+    ext = app / "Contents" / "Library" / "SystemExtensions" / "com.acme.net.systemextension"
+    _write_plist(ext / "Contents" / "Info.plist", {"CFBundleExecutable": "net"})
+    _write(ext / "Contents" / "MacOS" / "net")
+    assert classify_host_plugin(str(ext), "systemextension", {}, "read")[
+        "containing_app"
+    ] == "com.acme.app"
+    # The exemption is about extensions activated from an app, not about the
+    # directory: a .driver inside an app under /Library keeps machine scope,
+    # and so does an extension staged where macOS actually activates it.
+    driver = classify_host_plugin(
+        "/Library/Application Support/Acme/Acme.app/Contents/X.driver", "driver", {}, "read"
+    )
+    assert driver["install_scope"] == "machine"
+    staged = classify_host_plugin(
+        "/Library/SystemExtensions/ABC-123/com.acme.net.systemextension",
+        "systemextension",
+        {},
+        "read",
+    )
+    assert staged["install_scope"] == "machine"
+    assert "containing_app" not in staged
+
+
+def test_a_plugin_kind_declaring_a_path_marker_reads_it_from_the_table(monkeypatch):
+    """The marker is data, not a literal in the classifier.
+
+    `require_path_marker` sat in macos_host_plugin_kinds.yml while the DAL
+    check compared against a hardcoded copy of the same string, so editing
+    the table changed nothing (rule 21).
+    """
+    import blint.lib.macos_host_plugins as mod
+
+    monkeypatch.setattr(
+        mod,
+        "_kinds_table",
+        lambda: {
+            "kinds": {
+                "dal_plugin": {
+                    "title": "Test DAL",
+                    "host": "a camera client",
+                    "require_path_marker": "vendor/camera-plugins",
+                }
+            }
+        },
+    )
+    assert mod.classify_host_plugin("/opt/vendor/camera-plugins/X.plugin", "plugin", {}, "read")
+    assert mod.classify_host_plugin("/opt/elsewhere/X.plugin", "plugin", {}, "read") is None

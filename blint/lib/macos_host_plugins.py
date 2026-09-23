@@ -128,6 +128,42 @@ def install_scope(bundle_dir: str) -> str | None:
     return None
 
 
+def _plugin_install_scope(kind: str, bundle_dir: str) -> str | None:
+    """The install scope a *plugin block* may carry, which is not always the
+    scope of the directory it sits in.
+
+    A ``.systemextension`` / ``.dext`` shipped inside an application is not
+    installed anywhere: the copy macOS runs is the activated one staged under
+    ``/Library/SystemExtensions/<UUID>/``, and this one is inert payload. The
+    module docstring has said so since the packet was written, but the code
+    asked :func:`install_scope` about the path alone — so a vendor extension
+    under ``/Library/Application Support/Acme/Acme.app/...`` came back
+    ``machine``, which is how ``CHECK_UNSIGNED_HOST_PLUGIN`` (high) reaches an
+    ad-hoc-signed extension that is not installed at all and calls it
+    "installed machine-wide, vouched for by nobody". The test is the
+    structural one - is there an ``.app`` ancestor - not whether that app's
+    identity could be read: an extension inside an application whose
+    ``Info.plist`` blint cannot parse is still inert payload, and tying the
+    scope to plist readability would make a high finding appear or vanish
+    with an unrelated parse failure.
+    """
+    if kind in ("systemextension", "dext") and _application_ancestor(bundle_dir) is not None:
+        return None
+    return install_scope(bundle_dir)
+
+
+def _application_ancestor(bundle_dir: str) -> str | None:
+    """The nearest ``.app`` directory this bundle sits inside, or None."""
+    current = os.path.abspath(bundle_dir)
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+        if current.endswith(".app"):
+            return current
+
+
 def _table_entry(kind: str, bundle_dir: str) -> tuple[str, dict] | None:
     """The ``(table_key, entry)`` for a bundle kind, or None.
 
@@ -135,19 +171,24 @@ def _table_entry(kind: str, bundle_dir: str) -> tuple[str, dict] | None:
     ``CoreMediaIO/Plug-Ins/DAL`` path; the marker check runs on the
     normalized bundle path so a scan of an extracted disk image or an
     unusual mount still classifies by location rather than by prefix.
+
+    The marker itself comes from the entry's ``require_path_marker`` field.
+    It was hardcoded here while the table also declared it, so the data file
+    documented a rule the code did not read and editing the table would have
+    changed nothing (rule 21: one place for a fact). An entry that declares
+    a marker and does not match it names no host.
     """
     table = _kinds_table().get("kinds") or {}
-    if kind == "plugin":
-        normalized = os.path.abspath(bundle_dir).replace("\\", "/").lower()
-        if "coremediaio/plug-ins/dal" not in normalized:
-            return None
-        key = "dal_plugin"
-    else:
-        key = kind
+    key = "dal_plugin" if kind == "plugin" else kind
     entry = table.get(key)
-    if isinstance(entry, dict):
-        return key, entry
-    return None
+    if not isinstance(entry, dict):
+        return None
+    marker = entry.get("require_path_marker")
+    if isinstance(marker, str) and marker:
+        normalized = os.path.abspath(bundle_dir).replace("\\", "/").lower()
+        if marker.lower() not in normalized:
+            return None
+    return key, entry
 
 
 def containing_app(bundle_dir: str) -> str | None:
@@ -162,24 +203,17 @@ def containing_app(bundle_dir: str) -> str | None:
     ``CFBundleIdentifier``; when that is missing the bundle *name* is used
     rather than a path, which would move whenever the app is reinstalled.
     """
-    current = os.path.abspath(bundle_dir)
-    while True:
-        parent = os.path.dirname(current)
-        if parent == current:
-            return None
-        current = parent
-        if not current.endswith(".app"):
-            continue
-        plist = _read_bundle_plist(current)
-        if plist is None:
-            return None
-        identifier = plist.get("CFBundleIdentifier")
-        if isinstance(identifier, str) and identifier:
-            return identifier
-        name = plist.get("CFBundleName")
-        if isinstance(name, str) and name:
-            return name
+    app = _application_ancestor(bundle_dir)
+    if app is None:
         return None
+    plist = _read_bundle_plist(app)
+    if not isinstance(plist, dict):
+        return None
+    for key in ("CFBundleIdentifier", "CFBundleName"):
+        value = plist.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _read_bundle_plist(bundle_dir: str) -> dict | None:
@@ -266,7 +300,7 @@ def classify_host_plugin(
     ):
         if isinstance(entry.get(source_key), str) and entry[source_key]:
             block[block_key] = entry[source_key]
-    if scope := install_scope(bundle_dir):
+    if scope := _plugin_install_scope(kind, bundle_dir):
         block["install_scope"] = scope
     if entry.get("reads_audio_declarations"):
         declarations = _declarations(plist, plist_status)
