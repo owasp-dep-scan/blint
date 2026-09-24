@@ -152,7 +152,8 @@ def test_classify_entry_dir_matrix() -> None:
 
 def test_retired_abis_recorded(tmp_path: Path) -> None:
     apk = tmp_path / "retired.apk"
-    elf = (DATA / "truncated.so").read_bytes()[:64]
+    # ELF header of a real NDK build (the committed stored16k fixture).
+    elf = read_library_bytes(str(STORED16K), "lib/arm64-v8a/libhello.so", 64)
     with zipfile.ZipFile(apk, "w") as zf:
         zf.writestr("lib/armeabi/libold.so", elf)
         zf.writestr("lib/mips/liboldmips.so", elf)

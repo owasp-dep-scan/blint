@@ -507,9 +507,10 @@ def read_library_bytes(container: str, entry_name: str, limit: int = MAX_LIB_ENT
 
 
 def _spool_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> IO[bytes]:
-    """Copy one inner apk out of a bundle, spilling to disk past 64 MiB."""
-    # The caller owns and closes the spool.
-    spool = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)  # noqa: SIM115
+    """Copy one inner apk out of a bundle into an anonymous temp file."""
+    # The caller owns and closes the spool. Not SpooledTemporaryFile:
+    # before Python 3.11 it lacks seekable(), which zipfile needs.
+    spool = tempfile.TemporaryFile()  # noqa: SIM115
     with zf.open(info) as fh:
         shutil.copyfileobj(fh, spool, 1 << 20)
     spool.seek(0)
@@ -519,7 +520,7 @@ def _spool_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> IO[bytes]:
 class LibraryReader:
     """Reads library bytes from their zip locations, opening each split once.
 
-    Used as a context manager; bundle splits are spooled on first use and
+    Used as a context manager; bundle splits are copied to a temp file on first use and
     kept open until exit, so a bundle with many libraries is not re-read
     per library.
     """
