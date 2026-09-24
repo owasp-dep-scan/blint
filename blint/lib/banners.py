@@ -9,6 +9,21 @@ about a version and easy to misread from an unrelated string, so every
 signature here requires the version to appear *inside* a string that also
 names the library. A bare ``"3.46.0"`` is never a sqlite banner no matter how
 likely that looks.
+
+A banner string alone does not prove the code is in the artifact (F2b.2).
+macOS measured both shapes on one system: ``libcrypto.0.9.7.dylib`` carries
+"AES part of OpenSSL 0.9.7l 28 Sep 2006" AND exports the OpenSSL API
+(BN_new, EVP_*, 2714 symbols) - the library itself, the banner true as
+vendored code. ``assetutil`` links ``/usr/lib/libz.1.dylib`` dynamically,
+defines no zlib symbol at all, and still carries "deflate 1.2.5 Copyright" -
+a stale build-time banner naming a zlib that is not even the linked one
+(1.2.12): a mention, not code. So a detected banner is emitted as a
+*vendored* banner only when the artifact corroborates it - it defines
+symbols from the library's own API - or when it declares no dynamic
+dependencies at all (a stripped static image has no symbol table left to
+corroborate with, and nowhere else for the code to be). A banner-shaped
+string in a dynamically linked artifact with no matching defined symbols is
+returned as a *mention*: recorded for visibility, never a component.
 """
 
 import re
@@ -23,6 +38,27 @@ BANNER_LAYER_INACTIVE_NO_STRINGS = "inactive_no_strings"
 # detection time), and a regex that must match within a single extracted
 # string. The regex carries a ``version`` named group; a string can match a
 # signature at most once (re.IGNORECASE where the upstream banner case varies).
+# API anchor per library: symbols the library itself exports (prefix form -
+# API families share prefixes: deflateInit_/_end are deflate's). A detected
+# banner corroborated by at least one such *defined* (not imported) symbol
+# means the artifact carries the library's code; imports do not count,
+# because a dynamically linked client imports the API while owning none of
+# it. Compact family prefixes only - never a full symbol dump.
+# Leading underscore (Mach-O) and case-insensitive: the same export reads
+# _BN_new in nm, _bn_new in a dyld-cache symtab and BN_new in an ELF dynsym.
+BANNER_API_ANCHORS = {
+    "zlib": re.compile(r"^_?(?:deflate|inflate|zlibVersion|compress|uncompress|crc32|adler32)", re.IGNORECASE),
+    "lua": re.compile(r"^_?(?:lua_|luaL_)", re.IGNORECASE),
+    "openssl": re.compile(
+        r"^_?(?:BN_|EVP_|AES_|RSA_|DH_|DSA_|SHA[0-9]|SHA3|MD5|SSLeay|OPENSSL_|ERR_|X509|ASN1)",
+        re.IGNORECASE,
+    ),
+    "curl": re.compile(r"^_?curl_", re.IGNORECASE),
+    "expat": re.compile(r"^_?(?:XML_|expat_)", re.IGNORECASE),
+    "libpng": re.compile(r"^_?png_", re.IGNORECASE),
+    "zstd": re.compile(r"^_?ZSTD_", re.IGNORECASE),
+}
+
 BANNER_SIGNATURES = (
     {
         "library": "zlib",
@@ -118,19 +154,59 @@ def is_probable_banner_string(value: str) -> bool:
     return any(signature["regex"].search(value) for signature in BANNER_SIGNATURES)
 
 
+def _defined_api_symbol_counts(metadata: dict) -> dict[str, int]:
+    """Count the artifact's *defined* symbols matching each library's API.
+
+    Imported symbols do not count: a dynamically linked client imports the
+    whole API while owning none of the code.
+    """
+    counts: dict[str, int] = {library: 0 for library in BANNER_API_ANCHORS}
+    for bucket in ("dynamic_symbols", "symtab_symbols"):
+        for symbol in metadata.get(bucket) or []:
+            if not isinstance(symbol, dict) or symbol.get("is_imported"):
+                continue
+            name = symbol.get("name") or ""
+            if not name:
+                continue
+            for library, anchor in BANNER_API_ANCHORS.items():
+                if anchor.match(name):
+                    counts[library] += 1
+    return counts
+
+
+def _declares_dynamic_dependencies(metadata: dict) -> bool:
+    """Whether the artifact declares any dynamic dependency at all.
+
+    An image that declares none is statically shaped: a stripped static
+    binary has no symbol table to corroborate a banner with, and nowhere
+    outside the image for the library's code to live, so its banner stays a
+    vendored banner.
+    """
+    for entry in metadata.get("dynamic_entries") or []:
+        if isinstance(entry, dict) and entry.get("tag") in ("NEEDED", "LOAD_DYLIB"):
+            return True
+    return bool(metadata.get("libraries"))
+
+
 def detect_vendored_banners(metadata: dict) -> dict:
     """Scan extracted strings for vendored-source version banners.
 
-    Returns a dict with a ``banners`` list of matches
+    Returns a dict with a ``banners`` list of corroborated matches
     (``library``, ``version``, ``purl``, ``banner`` — the matched string,
-    truncated) and a ``state`` naming why the layer did or did not run.
-    Multiple versions of the same library are reported separately: merging
-    them into one would hide the ambiguity a conflicting pair reveals.
+    truncated — and ``api_symbol_count``), a ``mentions`` list of
+    banner-shaped strings the artifact's own symbols do not corroborate
+    (same entry shape), and a ``state`` naming why the layer did or did not
+    run. Multiple versions of the same library are reported separately:
+    merging them into one would hide the ambiguity a conflicting pair
+    reveals.
     """
     string_values = _iter_string_values(metadata)
     if not string_values:
-        return {"banners": [], "state": BANNER_LAYER_INACTIVE_NO_STRINGS}
+        return {"banners": [], "mentions": [], "state": BANNER_LAYER_INACTIVE_NO_STRINGS}
+    api_counts = _defined_api_symbol_counts(metadata)
+    statically_shaped = not _declares_dynamic_dependencies(metadata)
     banners = []
+    mentions = []
     seen = set()
     for value in string_values:
         # A single string is scanned against every signature; banners are
@@ -147,12 +223,19 @@ def detect_vendored_banners(metadata: dict) -> dict:
             if key in seen:
                 continue
             seen.add(key)
-            banners.append(
-                {
-                    "library": signature["library"],
-                    "version": version,
-                    "purl": f"{signature['purl']}@{version}",
-                    "banner": value[:256],
-                }
-            )
-    return {"banners": banners, "state": BANNER_LAYER_ACTIVE}
+            entry = {
+                "library": signature["library"],
+                "version": version,
+                "purl": f"{signature['purl']}@{version}",
+                "banner": value[:256],
+            }
+            # Vendored code in the artifact, or a stripped static image the
+            # code cannot be disproved in: a component claim. Anything else
+            # is a mention - a build-time or diagnostic string naming a
+            # library whose code this artifact does not carry.
+            if api_counts[signature["library"]] > 0 or statically_shaped:
+                entry["api_symbol_count"] = api_counts[signature["library"]]
+                banners.append(entry)
+            else:
+                mentions.append(entry)
+    return {"banners": banners, "mentions": mentions, "state": BANNER_LAYER_ACTIVE}

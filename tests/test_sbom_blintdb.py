@@ -1120,6 +1120,56 @@ def test_banner_of_a_different_version_stays_separate(tmp_path, monkeypatch):
     ]
 
 
+# --- F2b.2: vendored banners vs version-mention strings -------------------
+
+
+def test_mention_only_banner_is_not_a_component(tmp_path, monkeypatch):
+    """The assetutil shape at SBOM level.
+
+    A dynamically linked artifact whose only zlib tie is a stale banner
+    string emits no pkg:generic/zlib component; the mention is recorded on
+    the parent so the string is visible without asserting code.
+    """
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/otherlib@1.0.0",
+        {
+            "name": "assetutil",
+            "binary_type": "MachO",
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            "dynamic_entries": [{"tag": "NEEDED", "name": "/usr/lib/libz.1.dylib"}],
+            "dynamic_symbols": [{"name": "_deflate", "is_imported": True}],
+        },
+    )
+    assert [c.purl for c in components if "zlib" in (c.purl or "")] == []
+
+
+def test_vendored_banner_component_carries_the_corroboration_count(tmp_path, monkeypatch):
+    """The libcrypto.0.9.7 shape at SBOM level: banner + the library's own
+    exported API in the artifact - the component stays and its evidence
+    states how many API symbols corroborate it."""
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/otherlib@1.0.0",
+        {
+            "name": "libcrypto.0.9.7.dylib",
+            "binary_type": "MachO",
+            "strings": [{"value": "Big Number part of OpenSSL 0.9.7l 28 Sep 2006"}],
+            "dynamic_symbols": [
+                {"name": "_BN_new", "is_imported": False},
+                {"name": "_EVP_Digest", "is_imported": False},
+            ],
+        },
+    )
+    openssl_components = [c for c in components if "openssl@" in (c.purl or "")]
+    assert [c.purl for c in openssl_components] == ["pkg:generic/openssl@0.9.7l"]
+    props = {p.name: p.value for p in openssl_components[0].properties}
+    assert props["internal:vendored_banner_api_symbols"] == "2"
+    assert props["internal:vendored_attribution"] == "vendored_banner"
+
+
 # --- F2a.3: version conflicts between matched versions of one project ----
 
 

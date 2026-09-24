@@ -541,6 +541,67 @@ def test_banner_signatures_reject_unanchored_versions():
         assert detected["banners"] == [], value
 
 
+def test_banner_vendored_case_library_code_in_the_artifact():
+    """F2b.2 vendored case: the artifact defines the library's own API.
+
+    The measured shape of libcrypto.0.9.7.dylib - per-module banner strings
+    plus 2714 exported OpenSSL API symbols - must emit the banner as
+    vendored code with the corroboration counted.
+    """
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": "Big Number part of OpenSSL 0.9.7l 28 Sep 2006"}],
+            "dynamic_symbols": [
+                # the dyld-cache symtab form blint actually records
+                {"name": "_bn_new", "is_imported": False},
+                {"name": "_AES_cbc_encrypt", "is_imported": False},
+                {"name": "EVP_Digest", "is_imported": False},
+            ],
+        }
+    )
+    assert detected["state"] == BANNER_LAYER_ACTIVE
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@0.9.7l"]
+    assert detected["banners"][0]["api_symbol_count"] == 3
+    assert detected["mentions"] == []
+
+
+def test_banner_mention_case_stale_string_no_library_code():
+    """F2b.2 mention case: the string names a version, the code is absent.
+
+    The measured shape of assetutil - "deflate 1.2.5 Copyright" banner while
+    linking /usr/lib/libz.1.dylib at 1.2.12 and defining no zlib symbol.
+    The banner becomes a mention, never a component.
+    """
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            # A declared dynamic dependency: this artifact is not statically
+            # shaped, so the banner must corroborate or step down.
+            "dynamic_entries": [{"tag": "NEEDED", "name": "libz.1.dylib"}],
+            "dynamic_symbols": [
+                # importing the API does not corroborate - the client owns
+                # none of the code
+                {"name": "_deflate", "is_imported": True},
+                {"name": "_main", "is_imported": False},
+            ],
+        }
+    )
+    assert detected["banners"] == []
+    assert [m["purl"] for m in detected["mentions"]] == ["pkg:generic/zlib@1.2.5"]
+
+
+def test_banner_on_a_stripped_static_image_stays_vendored():
+    # No symbol table left to corroborate with and nowhere else for the
+    # code to live: the banner itself is the witness (strings-only metadata
+    # is the shape the existing suite already uses).
+    detected = detect_vendored_banners(
+        {"strings": [{"value": "OpenSSL 3.2.0 23 Feb 2024"}]}
+    )
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@3.2.0"]
+    assert detected["banners"][0]["api_symbol_count"] == 0
+    assert detected["mentions"] == []
+
+
 def test_rejected_signature_documented():
     """A library left out of the table records why, so removal is a decision."""
     reasons = {entry["library"]: entry["reason"] for entry in REJECTED_SIGNATURES}
@@ -551,6 +612,7 @@ def test_rejected_signature_documented():
 def test_banner_detection_states_and_dedup():
     assert detect_vendored_banners({}) == {
         "banners": [],
+        "mentions": [],
         "state": BANNER_LAYER_INACTIVE_NO_STRINGS,
     }
     two_versions = detect_vendored_banners(

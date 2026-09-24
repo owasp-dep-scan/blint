@@ -579,10 +579,11 @@ def _artifact_version_evidence(
     )
     if soname_versions:
         evidence["soname"] = soname_versions
+    banner_result = detect_vendored_banners(metadata)
     banner_versions = sorted(
         {
             identity[1]
-            for banner in detect_vendored_banners(metadata)["banners"]
+            for banner in banner_result["banners"] + banner_result.get("mentions", [])
             if (identity := _generic_package_identity(banner.get("purl")))
             and identity[0] == project_name
             and identity[1]
@@ -1390,6 +1391,11 @@ def process_exe_file(
             "vendored_banner_layer": banner_result["state"],
             "vendored_attribution": "vendored_banner",
             "vendored_banner": banner["banner"],
+            # How the string claim was corroborated: symbols from the
+            # library's own API defined in this artifact (a count of 0 with
+            # no declared dependencies is the stripped-static case, where
+            # the banner itself is the only witness left).
+            "vendored_banner_api_symbols": str(banner.get("api_symbol_count", 0)),
         }
         existing = _find_component_by_package_identity(lib_components, banner["purl"])
         if existing is not None:
@@ -1405,6 +1411,21 @@ def process_exe_file(
                     banner_evidence,
                 )
             )
+    # Banner-shaped strings the artifact's symbols do not corroborate are
+    # mentions, not dependencies (F2b.2: assetutil's stale "deflate 1.2.5"
+    # while linking libz.1.dylib at 1.2.12). Recorded on the parent so the
+    # gap is visible without asserting a component the code cannot back.
+    if banner_mentions := banner_result.get("mentions"):
+        parent_component.properties.append(
+            Property(
+                name="internal:vendored_banner_mentions",
+                value="; ".join(
+                    f"{mention['purl']} (string only; no {mention['library']} "
+                    "API symbols defined in this artifact)"
+                    for mention in banner_mentions
+                ),
+            )
+        )
 
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
