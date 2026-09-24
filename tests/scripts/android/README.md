@@ -71,3 +71,15 @@ in the A0.2 commit with the extraction log.
 | `jni_sources/` | tier-1 planted-variant sources; built by the real NDK, every flag is the expected fact |
 | `make_hostile_fixtures.py` | tier-4 hostile inputs; each shape names the spec it is built to |
 | `baseline_android.py` | A0.3 baseline: SBOM components/build-id versions, standalone .so findings per rule/ABI, `--disassemble` functions per ABI |
+
+## A0.2 corpus results (2026-09-24)
+
+| Tier | Collected | Notes |
+|---|---|---|
+| 0 arm64 | API 34/35/36 × {`/apex` (~280 MB), `/system/lib64` (~200 MB), `/vendor/lib64` (~80 MB)} via `adb root` | 1398-1541 ELF files per image; `_system_lib`/`_vendor_lib` are empty because the arm64-only images ship no 32-bit libs |
+| 0 x86_64 | **not collected** | images cannot boot on ARM64 hosts (A0.1) and static extraction is blocked — see the `tier0_extract_x86` docstring and the A0.2 commit |
+| 1 NDK | 122 files: 5 ABIs (incl. riscv64) × r27/r28 × {hello, page4k, page16k, textrels, static, + hwasan/memtag/bti on arm64}, stripped + unstripped, 9 APKs + 1 multi-ABI xapk | every planted fact verified with `llvm-readelf` from the same NDK in the same run; r27 defaults to 4 KiB LOAD alignment, r28 to 16 KiB |
+| 2 F-Droid | seed (26 APKs) unchanged, per the prompt | — |
+| 3 frameworks | React Native 0.76.9 hello app built locally (`com.blint.rnhello_1.apk`, 4 ABIs, Hermes) | Unity: no Unity editor/licence on this machine — not collected. .NET: `dotnet workload install` needs elevation on this machine (root-owned SDK manifest at /usr/local/share/dotnet, and `--to-path` still requires it) — not collected, no sudo available |
+| 4 hostile | 9 fixtures, generated from a real NDK `libhello.so` base | the ≤100 KB subset is committed under `tests/data/android/` |
+
