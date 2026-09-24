@@ -316,6 +316,7 @@ def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) ->
 # (12), beside arm64e; naming it "arm64" made it indistinguishable from a
 # plain arm64 slice, and `codesign --arch arm64` answers for arm64e.
 _ARM64E_X1_SUBTYPE = 12
+_X86_64_H_SUBTYPE = 8
 _ARM64_SUBTYPE_NAMES = {
     0: "arm64",
     1: "arm64",
@@ -331,9 +332,13 @@ def _macho_arch_name(cpu_type: str, cpu_subtype: int) -> str:
     than folded into plain arm64, so two slices never share a name.
     """
     base = (cpu_type or "unknown").lower()
+    subtype = int(cpu_subtype or 0) & CPU_SUBTYPE_FLAG_MASK
     if base == "arm64":
-        subtype = int(cpu_subtype or 0) & CPU_SUBTYPE_FLAG_MASK
         return _ARM64_SUBTYPE_NAMES.get(subtype, f"arm64.subtype{subtype}")
+    if base == "x86_64" and subtype == _X86_64_H_SUBTYPE:
+        # Haswell slice (uuidgen, sqlite3 ship x86_64 and x86_64h side by
+        # side); naming both x86_64 merged two slices under one name.
+        return "x86_64h"
     return base
 
 

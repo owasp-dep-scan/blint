@@ -302,10 +302,10 @@ def test_runtime_version_reported_when_v20500():
 def test_unknown_hash_type_named_without_cdhash():
     # An unrecognized hash type must be named as unknown rather than guessed,
     # and no cdhash can be claimed for an algorithm blint cannot compute.
-    cd = _code_directory(hash_type=4)
+    cd = _code_directory(hash_type=9)
     detail = parse_superblob(_superblob([(0, cd)]))
     directory = detail["code_directories"][0]
-    assert directory["hash_type"] == "unknown(4)"
+    assert directory["hash_type"] == "unknown(9)"
     assert "cdhash" not in directory
     assert "cdhash_full" not in directory
 
@@ -571,3 +571,34 @@ def test_superblob_output_is_plain_json():
 def test_provenance_matrix_without_cms(flags, expected):
     detail = parse_superblob(_superblob([(0, _code_directory(flags=flags))]))
     assert detail["provenance"] == expected
+
+
+def test_cdhash_sha384_and_sha256_truncated_hash_types():
+    """CS_HASHTYPE_SHA256_TRUNCATED (3) digests with SHA-256 and
+    CS_HASHTYPE_SHA384 (4) with SHA-384; the cdhash is 20 bytes either way."""
+    for hash_type, name, algorithm in ((3, "sha256_truncated", "sha256"), (4, "sha384", "sha384")):
+        cd = _code_directory(hash_type=hash_type)
+        directory = parse_superblob(_superblob([(0, cd)]))["code_directories"][0]
+        assert directory["hash_type"] == name
+        assert directory["cdhash"] == hashlib.new(algorithm, cd).hexdigest()[:40]
+
+
+def test_summary_cdhash_is_the_strongest_code_directory():
+    """A SHA-1 slot-0 directory with a SHA-256 alternate (the dual signature
+    Apple ships for binaries that still load on old systems) reports the
+    SHA-256 directory's cdhash, as codesign's CDHash line does. Identity
+    fields still come from slot 0."""
+    primary = _code_directory(identifier="com.example.dual", hash_type=1, flags=0x10000)
+    alternate = _code_directory(identifier="com.example.dual", hash_type=2, flags=0x10000)
+    summary = signature_summary(parse_superblob(_superblob([(0, primary), (0x1000, alternate)])))
+    assert summary["cdhash"] == hashlib.sha256(alternate).hexdigest()[:40]
+    assert summary["hash_type"] == "sha256"
+    assert summary["cdhash_slot"] == "alternate_code_directory_0x1000"
+    assert summary["identifier"] == "com.example.dual"
+    # One directory: unchanged, whatever its hash type.
+    single = signature_summary(parse_superblob(_superblob([(0, primary)])))
+    assert single["cdhash"] == hashlib.sha1(primary).hexdigest()[:40]
+    assert single["cdhash_slot"] == "code_directory"
+    # Order does not matter: a stronger slot 0 beats a weaker alternate.
+    reversed_ = signature_summary(parse_superblob(_superblob([(0, alternate), (0x1000, primary)])))
+    assert reversed_["cdhash"] == hashlib.sha256(alternate).hexdigest()[:40]

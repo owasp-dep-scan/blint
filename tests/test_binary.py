@@ -3890,6 +3890,7 @@ def test_macho_arm64_subtypes_keep_distinct_slice_names():
     assert _macho_arch_name("ARM64", 12) == "arm64e.x1"
     assert _macho_arch_name("ARM64", 7) == "arm64.subtype7"
     assert _macho_arch_name("X86_64", 3) == "x86_64"
+    assert _macho_arch_name("X86_64", 8) == "x86_64h"
 
 
 def test_macho_pac_recognises_the_ptrauth_abi_flag_beyond_lief():
@@ -3911,3 +3912,40 @@ def test_macho_pac_recognises_the_ptrauth_abi_flag_beyond_lief():
     assert not _macho_has_pac(slice_(0x0000000C))
     assert not _macho_has_pac(slice_(0x0))
     assert not _macho_has_pac(slice_(0x80000003, cpu="CPU_TYPE.X86_64"))
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("codesign") is None, reason="codesign is macOS-only"
+)
+@pytest.mark.parametrize(
+    "system_binary",
+    [
+        # x86_64 + x86_64h + arm64e + arm64e.x1 on macOS 27
+        "/usr/bin/uuidgen",
+        # SHA-1 slot-0 CodeDirectory plus a SHA-256 alternate
+        "/System/Applications/Automator.app/Contents/MacOS/Automator",
+        "/usr/sbin/kextfind",
+    ],
+)
+def test_every_slice_cdhash_matches_codesign_for_that_arch(system_binary):
+    """Each slice is addressable by its own arch name, and its cdhash is the
+    one codesign reports for that arch in the same run."""
+    if not os.path.exists(system_binary):
+        pytest.skip(f"{system_binary} not present on this system")
+    lipo_archs = subprocess.run(
+        ["lipo", "-archs", system_binary], capture_output=True, text=True
+    ).stdout.split()
+    slices = parse(system_binary).get("slices") or []
+    assert sorted(entry["arch"] for entry in slices) == sorted(lipo_archs)
+    for entry in slices:
+        details = subprocess.run(
+            ["codesign", "-dvvv", "--arch", entry["arch"], system_binary],
+            capture_output=True,
+            text=True,
+        ).stderr
+        expected = next(
+            line.split("=", 1)[1].strip().lower()
+            for line in details.splitlines()
+            if line.startswith("CDHash=")
+        )
+        assert entry["code_signature"]["cdhash"] == expected, entry["arch"]
