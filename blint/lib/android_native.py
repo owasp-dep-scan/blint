@@ -23,12 +23,13 @@ Zip-slip style names are recorded, never written to disk.
 from __future__ import annotations
 
 import hashlib
-import io
 import os
+import shutil
 import struct
+import tempfile
 import zipfile
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import IO, Any
 
 from blint.logger import LOG
 
@@ -252,7 +253,7 @@ class _Budget:
             LOG.warning("Android native scan refused: %s", refusal)
 
 
-def _open_zip(source: str | io.BytesIO) -> zipfile.ZipFile | None:
+def _open_zip(source: str | IO[bytes]) -> zipfile.ZipFile | None:
     try:
         return zipfile.ZipFile(source)
     except (zipfile.BadZipFile, OSError, ValueError) as e:
@@ -425,7 +426,7 @@ def scan_android_native(app_file: str, manifest_attrs: dict[str, Any] | None = N
 
     is_aab = str(app_file).lower().endswith(".aab")
 
-    def scan_zip(source: str | io.BytesIO, container: str, split: str, depth: int) -> None:
+    def scan_zip(source: str | IO[bytes], container: str, split: str, depth: int) -> None:
         record = {"container": container, "split": split, "depth": depth}
         zf = _open_zip(source)
         if zf is None:
@@ -456,16 +457,11 @@ def scan_android_native(app_file: str, manifest_attrs: dict[str, Any] | None = N
                         if info.filename.lower().endswith(BUNDLE_EXTENSIONS):
                             nested_refused = True
                         continue
-                    if info.file_size > MAX_LIB_ENTRY_BYTES * 8:
+                    if info.file_size > MAX_TOTAL_LIB_BYTES:
                         refusals.append("bundle_member_exceeds_cap")
                         continue
-                    with zf.open(info) as fh:
-                        scan_zip(
-                            io.BytesIO(fh.read()),
-                            app_file,
-                            info.filename,
-                            1,
-                        )
+                    with _spool_member(zf, info) as inner:
+                        scan_zip(inner, app_file, info.filename, 1)
         else:
             refusals.append("container_unreadable")
         if nested_refused:
@@ -510,17 +506,65 @@ def read_library_bytes(container: str, entry_name: str, limit: int = MAX_LIB_ENT
         return None
 
 
-def read_bundle_member_bytes(
-    bundle_path: str, inner_apk: str, limit: int = MAX_LIB_ENTRY_BYTES
-) -> io.BytesIO | None:
-    """Bounded read of one inner apk out of a split bundle."""
-    zf = _open_zip(bundle_path)
-    if zf is None:
-        return None
-    try:
-        with zf:
-            info = zf.getinfo(inner_apk)
-            with zf.open(info) as fh:
-                return io.BytesIO(fh.read(limit + 1))
-    except (KeyError, zipfile.BadZipFile, OSError, ValueError):
-        return None
+def _spool_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> IO[bytes]:
+    """Copy one inner apk out of a bundle, spilling to disk past 64 MiB."""
+    # The caller owns and closes the spool.
+    spool = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)  # noqa: SIM115
+    with zf.open(info) as fh:
+        shutil.copyfileobj(fh, spool, 1 << 20)
+    spool.seek(0)
+    return spool
+
+
+class LibraryReader:
+    """Reads library bytes from their zip locations, opening each split once.
+
+    Used as a context manager; bundle splits are spooled on first use and
+    kept open until exit, so a bundle with many libraries is not re-read
+    per library.
+    """
+
+    def __init__(self, app_file: str, limit: int = MAX_LIB_ENTRY_BYTES) -> None:
+        self.app_file = app_file
+        self.limit = limit
+        self._zips: dict[str, zipfile.ZipFile | None] = {}
+        self._spools: list[Any] = []
+
+    def __enter__(self) -> LibraryReader:  # noqa: PYI034
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        for zf in self._zips.values():
+            if zf is not None:
+                zf.close()
+        for spool in self._spools:
+            spool.close()
+
+    def _zip_for(self, split: str) -> zipfile.ZipFile | None:
+        if split in self._zips:
+            return self._zips[split]
+        zf = None
+        if not split:
+            zf = _open_zip(self.app_file)
+        else:
+            outer = self._zip_for("")
+            if outer is not None:
+                try:
+                    spool = _spool_member(outer, outer.getinfo(split))
+                    self._spools.append(spool)
+                    zf = _open_zip(spool)
+                except (KeyError, zipfile.BadZipFile, OSError, ValueError):
+                    zf = None
+        self._zips[split] = zf
+        return zf
+
+    def read(self, location: dict[str, Any]) -> bytes | None:
+        """Bounded read of the library at one model location."""
+        zf = self._zip_for(location.get("split") or "")
+        if zf is None:
+            return None
+        try:
+            with zf.open(location["entry_name"]) as fh:
+                return fh.read(self.limit + 1)[: self.limit]
+        except (KeyError, zipfile.BadZipFile, OSError, ValueError):
+            return None

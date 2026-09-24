@@ -15,11 +15,7 @@ from packageurl import PackageURL
 
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
-from blint.lib.android_native import (
-    read_bundle_member_bytes,
-    read_library_bytes,
-    scan_android_native,
-)
+from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import parse, parse_dex
 from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
 from blint.lib.utils import (
@@ -533,25 +529,6 @@ NDK_PLATFORM_LIBRARIES = frozenset({
 })
 
 
-def _so_member_bytes(app_file: str, lib: dict) -> bytes | None:
-    """Read one model library's bytes from its primary location."""
-    loc = (lib.get("locations") or [{}])[0]
-    if not loc:
-        return None
-    if loc.get("split"):
-        inner = read_bundle_member_bytes(app_file, loc["split"])
-        if inner is None:
-            return None
-        import zipfile
-
-        try:
-            with zipfile.ZipFile(inner) as zf:
-                return zf.read(loc["entry_name"])
-        except (KeyError, zipfile.BadZipFile, OSError):
-            return None
-    return read_library_bytes(app_file, loc["entry_name"])
-
-
 def _so_version_and_build_id(so_metadata: dict) -> tuple[str | None, str | None]:
     """Split the notes into a real version and a build-id.
 
@@ -590,9 +567,12 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
     """
     model = scan_android_native(app_file)
     parsed: dict[str, dict] = {}
-    with tempfile.TemporaryDirectory(prefix="blint_android_so") as temp_dir:
+    with (
+        tempfile.TemporaryDirectory(prefix="blint_android_so") as temp_dir,
+        LibraryReader(app_file) as reader,
+    ):
         for lib in model["libraries"]:
-            data = _so_member_bytes(app_file, lib)
+            data = reader.read(lib["locations"][0])
             if not data:
                 continue
             member = os.path.join(temp_dir, lib["name"])
@@ -624,15 +604,11 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
             for loc in lib.get("locations") or []
         })
         build_ids = sorted({
-            f"{abi}:{build}"
-            for (abi, build) in {
-                loc.get("abi"): build
-                for lib, meta in members
-                for loc in lib.get("locations") or []
-                for build in [_so_version_and_build_id(meta)[1]]
-                if build
-            }.items()
-            if abi
+            f"{loc['abi']}:{build}"
+            for lib, meta in members
+            if (build := _so_version_and_build_id(meta)[1])
+            for loc in lib.get("locations") or []
+            if loc.get("abi")
         })
         functions = sorted({
             f.get("name")
@@ -684,6 +660,7 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
         component.bom_ref = RefType(purl)
         components.append(component)
     return components
+
 
 def parse_so_file(app_file: str, app_temp_dir: str, sof: str) -> Component:
     """Parses the given shared object (SO) file and generates metadata for it.

@@ -17,11 +17,7 @@ from blint.lib.analysis import (
     run_wasm_findings,
 )
 from blint.lib.android import analyze_android_app
-from blint.lib.android_native import (
-    read_bundle_member_bytes,
-    read_library_bytes,
-    scan_android_native,
-)
+from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
@@ -1255,7 +1251,10 @@ class AnalysisRunner:
         if not units:
             return
         app_base = os.path.basename(f)
-        with bounded_temp_dir(prefix="blint_android_so_") as temp_dir:
+        with (
+            bounded_temp_dir(prefix="blint_android_so_") as temp_dir,
+            LibraryReader(f) as reader,
+        ):
             for (_abi, name), entry in sorted(units.items()):
                 locations = entry["locations"]
                 lib = entry["lib"]
@@ -1270,9 +1269,7 @@ class AnalysisRunner:
                 )
                 self._mark_attempted("apk-so-member")
                 try:
-                    member_path = self._materialize_apk_member(
-                        temp_dir, f, lib, locations
-                    )
+                    member_path = _materialize_apk_member(temp_dir, reader, primary)
                     if member_path is None:
                         raise RuntimeError(
                             f"could not read {primary['entry_name']} from the app"
@@ -1307,37 +1304,6 @@ class AnalysisRunner:
                 except Exception as e:
                     self._record_failure(display, "apk-so-member", "process", e)
 
-    def _materialize_apk_member(
-        self, temp_dir: str, app_file: str, lib: dict[str, Any], locations: list[dict]
-    ) -> str | None:
-        """Write one library's bytes to a bounded temp file for parsing.
-
-        The bytes come from the zip in place (A1.1): a plain apk member is
-        read directly; a bundle member is read out of its inner apk. The
-        per-entry budget bounded the read at scan time and bounds it again
-        here.
-        """
-        primary = locations[0]
-        data: bytes | None
-        if primary["split"]:
-            inner = read_bundle_member_bytes(app_file, primary["split"])
-            if inner is None:
-                return None
-            import zipfile as _zipfile
-
-            with _zipfile.ZipFile(inner) as zf:
-                data = zf.read(primary["entry_name"])
-        else:
-            data = read_library_bytes(app_file, primary["entry_name"])
-        if data is None or not data:
-            return None
-        target = Path(temp_dir) / (
-            primary["entry_name"].replace("/", "~").replace(os.sep, "~")
-        )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-        return str(target)
-
     def _process_android_file(self, f: str) -> dict[str, Any] | None:
         """Disassemble an android app's dex bytecode into review metadata.
 
@@ -1361,6 +1327,16 @@ class AnalysisRunner:
         if self.reviewer.results:
             review = self.reviewer.process_review(f, exe_name)
             self.reviews += review
+
+
+def _materialize_apk_member(temp_dir: str, reader: LibraryReader, location: dict[str, Any]) -> str | None:
+    """Write one library's bytes to a temp file for parsing."""
+    data = reader.read(location)
+    if not data:
+        return None
+    target = Path(temp_dir) / location["entry_name"].replace("/", "~")
+    target.write_bytes(data)
+    return str(target)
 
 
 def _android_native_summary(native: dict[str, Any]) -> dict[str, Any]:

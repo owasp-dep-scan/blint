@@ -486,8 +486,6 @@ def _write_tier1_manifest(out_root: Path, lib_out: Path) -> None:
         json.dumps({"tier": 1, "entries": entries}, indent=1))
 
 
-
-
 # ---------------------------------------------------------------------------
 # tier 0 x86_64: static extraction from the (unbootable-on-ARM) images
 # ---------------------------------------------------------------------------
@@ -562,7 +560,7 @@ def _parse_lp_super(img: Path) -> dict[str, list[tuple[int, int]]]:
     )
     part_off, part_count = _p_off, _p_count
     ext_off, ext_count = _e_off, _e_count
-    _hsize = vals_hsize = struct.unpack_from("<I", meta, 8)[0]
+    vals_hsize = struct.unpack_from("<I", meta, 8)[0]
     # Partition entries (52 bytes: name[36] + three u32 + u16, naturally
     # padded) and extent entries (24 bytes: u64 num_sectors, u32 device,
     # u64 device_offset) are read at the descriptor's own entry_size so a
