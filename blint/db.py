@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 import itertools
 import os
+import re
 from pathlib import Path
 
 import apsw
@@ -27,6 +28,19 @@ SUPPORTED_DB_SCHEMA_VERSIONS = (2, 3, 4)
 DB_QUERY_LIMIT = 50
 DB_EVIDENCE_LIMIT = 25
 SYMBOL_ONLY_MATCH_THRESHOLD = max(3, MIN_MATCH_SCORE // 2)
+# Symbol-only attribution without a binary-name agreement needs far more
+# than the floor above (F2b.1). Measured on tier-0 after import and spread
+# suppression: every remaining false attribution was a nameless match of
+# 6-9 coincidental local symbol names (/bin/csh -> openssl@3 on 6;
+# libAppleDeviceQueryArmory -> ripgrep on 9), while every true component on
+# the corpus matched 79-338 of the project's identity symbols WITH a name
+# agreement. A nameless symbol-only match claims "most of this library's
+# identity surface is present"; 30 sits 3.3x above the observed false
+# maximum and 2.6x below the weakest true match, leaving room for a real
+# partial embed (half of zlib's ~80 exports) while clearing every measured
+# false shape. Name-matched candidates keep the original floor: the name is
+# the evidence (libfmt.12.1.0.dylib identifies itself with three symbols).
+SYMBOL_ONLY_NAMELESS_MATCH_THRESHOLD = 30
 MIN_FUNCTION_INSTRUCTION_COUNT_FOR_HASH_LOOKUP = 4
 # Minimum instruction count for a function's fuzzy hash to take part in a
 # blintdb lookup. Exact-hash lookups use
@@ -61,6 +75,36 @@ FUZZY_ONLY_MATCH_THRESHOLD = 8
 # of its functions came from. Rows that fail the gate keep their fuzzy score
 # contribution — they are corroboration, never sole attribution.
 FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
+# A symbol name defined by this many distinct project NAMES in the queried
+# database carries no project identity and is not a match signal (F2b.1).
+# Distinct names, not distinct project rows: a project ingested at two
+# versions (two Homebrew kegs) shares nearly every symbol with itself, and
+# that repetition is version ambiguity to resolve with artifact evidence
+# (F2a.3), not low information.
+# Measured on tier-0 after import suppression: what still cross-matched
+# projects was mechanically emitted names (_main, __mh_execute_header,
+# _OUTLINED_FUNCTION_N - present in every Mach-O build that has them) and
+# runtime-provided names (the Rust standard library, shared by every Rust
+# project: wasm-tools matched ripgrep on 984 of them). A project's real
+# identity names - deflate, png_, curl_, ZSTD_, ares_ - are defined by one
+# project in the corpus. The gate is per (name, source) against the whole
+# database, unfiltered by binary type: commonality is the property being
+# measured.
+LOW_INFORMATION_PROJECT_SPREAD = 2
+
+# Names the toolchain emits, not the project chooses, so they can never
+# identify a project however many of them match (F2b.1). Measured on tier-0:
+# frc.dylib matched ripgrep on 31 _OUTLINED_FUNCTION_<n> names - clang
+# numbers outlined functions per binary, and the numbers happened to overlap;
+# __mh_execute_header sits in every Mach-O image; main/_start/_init/_fini
+# are the loader's fixed names. Blocking the shape, not a number range:
+# _OUTLINED_FUNCTION_14 in one binary is not the same function as
+# _OUTLINED_FUNCTION_14 in another.
+MECHANICALLY_EMITTED_SYMBOL_RE = re.compile(
+    r"^_*(?:__mh_[a-z]+_header|OUTLINED_FUNCTION_\d+|main|start|init|fini|_GLOBAL__sub_I_.*)$",
+    re.IGNORECASE,
+)
+
 # Score contribution of a matching binary-level import-set digest. One lookup
 # carries a single import hash, so this contributes at most one weight and is
 # kept below SYMBOL_ONLY_MATCH_THRESHOLD: import evidence corroborates but can
@@ -76,6 +120,21 @@ IMPORT_HASH_MATCH_WEIGHT = 4.0
 # a shared shape class.
 CFG_HASH_MATCH_WEIGHT = 0.0
 CALLGRAPH_ONLY_MATCH_THRESHOLD = 8
+# Exact hashes are strong evidence per function, but a handful of shared
+# functions is not a shared project. Measured on tier-0 in --deep mode
+# (F2b.1): one instruction hash (plus one fuzzy) attributed bzip2 to a Rust
+# binary and zstd to Apple's libcrypto - compiler-emitted thunks compile
+# identically everywhere - and NINE attributed ripgrep to Apple's
+# libGPUCompilerImpl. A count bar alone cannot separate those from a real
+# embed, so hash-only attribution mirrors the fuzzy layer's double gate: a
+# population of distinct hashes AND coverage of the query's own eligible
+# instruction hashes (the embed's code is most of a stripped binary's code;
+# the measured false shapes covered a fraction of a percent). Hashes below
+# the bar still count as corroboration beside a name or symbol agreement -
+# every true deep match measured carries one of those too (validator, all
+# 15 selectors: name agreement plus 38-2923 instruction hashes).
+HASH_ONLY_MATCH_THRESHOLD = 8
+HASH_ONLY_MIN_QUERY_COVERAGE = 0.5
 # Score contribution per shared canonical function, capped so a very large
 # overlap corroborates strongly without completely overwhelming other evidence.
 CALLGRAPH_MATCH_WEIGHT = 0.5
@@ -323,7 +382,16 @@ def _supported_schema_version(meta: dict[str, str]) -> bool:
 
 
 def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
-    """Extract source-aware symbol buckets matching the blintdb v2 schema."""
+    """Extract source-aware symbol buckets matching the blintdb v2 schema.
+
+    Imported symbols are excluded (F2b.1): an import names the library that
+    *provides* it, not the artifact, so matching on imports makes every
+    macOS binary "match" every macOS-built project on their shared libSystem
+    imports - measured on tier-0, /bin/cat attracted five projects per
+    database that way. Two agreeing signals cover every recorded shape: the
+    ``is_imported`` flag, and the ``library::symbol`` name form PE and
+    Mach-O import entries carry.
+    """
     if not metadata:
         return {}
     source_map = {}
@@ -332,10 +400,12 @@ def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
         names = []
         for entry in entries:
             if isinstance(entry, dict):
+                if entry.get("is_imported"):
+                    continue
                 name = entry.get("name")
             else:
                 name = entry
-            if name:
+            if name and "::" not in name:
                 names.append(name)
         cleaned_names = _clean_nonempty_values(names)
         if cleaned_names:
@@ -759,6 +829,26 @@ def _build_binary_filters(binary_metadata: dict | None) -> tuple[str, list[str]]
     return " AND " + " AND ".join(predicates), params
 
 
+def _build_binary_type_filter(binary_metadata: dict | None) -> tuple[str, list[str]]:
+    """The fallback filter: binary_type agreement only (F2b.1).
+
+    The first pass requires binary_type AND llvm_target_tuple to agree and
+    falls back when it finds nothing, but the fallback used to drop every
+    filter - which is how a static ELF Rust binary matched the Mach-O
+    ripgrep build on 984 shared Rust-std symbol names (tier-0 measurement:
+    wasm-tools-aarch64-musl -> ripgrep, score 986, no name match, no
+    hashes). A binary cannot change format between build and query, so the
+    retry keeps the format predicate and relaxes only the target tuple.
+    Rows that never recorded a binary_type stay eligible so a database with
+    untyped rows keeps working.
+    """
+    if not binary_metadata or not binary_metadata.get("binary_type"):
+        return "", []
+    return " AND (Binaries.binary_type = ? OR Binaries.binary_type IS NULL OR Binaries.binary_type = '')", [
+        str(binary_metadata["binary_type"])
+    ]
+
+
 def _ensure_project_match(project_matches: dict, row) -> dict:
     project_key = row["project_purl"] or f"project:{row['project_id']}"
     return project_matches.setdefault(
@@ -860,6 +950,7 @@ def _query_project_symbol_matches(
     source: str,
     binary_filters: str = "",
     binary_filter_params: list[str] | None = None,
+    imported_predicate: str = "",
     limit: int = DB_QUERY_LIMIT,
 ) -> list[dict]:
     if not symbol_names:
@@ -887,6 +978,7 @@ def _query_project_symbol_matches(
             AND Projects.purl != ''
             AND Symbols.source = ?
             AND Symbols.name IN ({placeholders})
+            {imported_predicate}
             {binary_filters}
         GROUP BY Projects.project_id
         ORDER BY matched_symbol_count DESC, matched_row_count DESC, Projects.project_id ASC
@@ -982,6 +1074,41 @@ def _query_project_import_hash_matches(
     return _execute(connection, query, params)
 
 
+def _query_low_information_names(
+    connection: apsw.Connection,
+    symbol_source_map: dict[str, list[str]],
+) -> dict[str, set[str]]:
+    """Names per source defined by too many distinct projects to identify one.
+
+    The spread is counted over every project in the database - a name two
+    projects define cannot pick between them however strongly one scores.
+    """
+    low_information: dict[str, set[str]] = {}
+    for source, names in symbol_source_map.items():
+        for batch in _batched(_clean_nonempty_values(names)):
+            placeholders = ",".join("?" for _ in batch)
+            rows = _execute(
+                connection,
+                f"""
+                    SELECT Symbols.name
+                    FROM Symbols
+                    JOIN Binaries ON Symbols.binary_id = Binaries.binary_id
+                    JOIN Builds ON Binaries.build_id = Builds.build_id
+                    JOIN Projects ON Builds.project_id = Projects.project_id
+                    WHERE Symbols.source = ?
+                        AND Symbols.name IN ({placeholders})
+                    GROUP BY Symbols.name
+                    HAVING COUNT(DISTINCT Projects.name) >= ?
+                """,
+                [source, *batch, LOW_INFORMATION_PROJECT_SPREAD],
+            )
+            if rows:
+                low_information.setdefault(source, set()).update(
+                    row["name"] for row in rows
+                )
+    return low_information
+
+
 def _query_symbol_batches(
     connection: apsw.Connection,
     project_matches: dict,
@@ -989,6 +1116,7 @@ def _query_symbol_batches(
     *,
     binary_filters: str = "",
     binary_filter_params: list[str] | None = None,
+    imported_predicate: str = "",
     limit: int = DB_QUERY_LIMIT,
 ) -> bool:
     found_matches = False
@@ -1000,6 +1128,7 @@ def _query_symbol_batches(
                 source=source,
                 binary_filters=binary_filters,
                 binary_filter_params=binary_filter_params,
+                imported_predicate=imported_predicate,
                 limit=limit,
             )
             if rows:
@@ -1085,6 +1214,7 @@ def _finalize_project_matches(
     *,
     target_binary_names: set[str] | None = None,
     fuzzy_query_count: int = 0,
+    instruction_hash_query_count: int = 0,
 ) -> list[dict]:
     target_binary_names = target_binary_names or set()
     finalized_matches = []
@@ -1122,6 +1252,11 @@ def _finalize_project_matches(
         if binary_name_match:
             base_score += float(max(MIN_MATCH_SCORE * 3, 18))
         fuzzy_coverage = matched_fuzzy_hash_count / fuzzy_query_count if fuzzy_query_count else 0.0
+        instruction_hash_coverage = (
+            matched_instruction_hash_count / instruction_hash_query_count
+            if instruction_hash_query_count
+            else 0.0
+        )
         score = (
             base_score
             + matched_fuzzy_hash_count * FUZZY_HASH_MATCH_WEIGHT
@@ -1131,6 +1266,10 @@ def _finalize_project_matches(
         fuzzy_only_qualified = (
             matched_fuzzy_hash_count >= FUZZY_ONLY_MATCH_THRESHOLD
             and fuzzy_coverage >= FUZZY_ONLY_MIN_QUERY_COVERAGE
+        )
+        hash_only_qualified = (
+            matched_instruction_hash_count >= HASH_ONLY_MATCH_THRESHOLD
+            and instruction_hash_coverage >= HASH_ONLY_MIN_QUERY_COVERAGE
         )
         if not (
             matched_instruction_hash_count
@@ -1161,6 +1300,7 @@ def _finalize_project_matches(
                     :DB_EVIDENCE_LIMIT
                 ],
                 "fuzzy_only_qualified": fuzzy_only_qualified,
+                "hash_only_qualified": hash_only_qualified,
                 "matched_fuzzy_hash_count": matched_fuzzy_hash_count,
                 "matched_fuzzy_hashes": sorted(match["matched_fuzzy_hashes"])[:DB_EVIDENCE_LIMIT],
                 "matched_cfg_hash_count": matched_cfg_hash_count,
@@ -1217,7 +1357,12 @@ def lookup_project_matches(
     normalized_source_map = {
         source: _clean_nonempty_values(names)
         for source, names in (symbol_source_map or {}).items()
-        if _clean_nonempty_values(names)
+        # The imports bucket names what the artifact links against, not what
+        # it is; matching on it made every macOS binary match every
+        # macOS-built project on their shared libSystem imports (F2b.1).
+        # build_symbol_source_map already drops imported entries from every
+        # bucket; this keeps hand-built maps honest too.
+        if source != "imports" and _clean_nonempty_values(names)
     }
     normalized_hash_index = {
         key: _clean_nonempty_values(values)
@@ -1228,6 +1373,7 @@ def lookup_project_matches(
     if not normalized_source_map and not normalized_hash_index and not normalized_canon_names:
         return []
     binary_filters, binary_filter_params = _build_binary_filters(binary_metadata)
+    binary_type_filters, binary_type_filter_params = _build_binary_type_filter(binary_metadata)
     connection = get(database_file)
     if not connection:
         return []
@@ -1244,6 +1390,14 @@ def lookup_project_matches(
         )
         target_binary_names = {target_binary_name} if target_binary_name else set()
         capabilities = blintdb_hash_capabilities(database_file)
+        # DB-side import suppression (F2b.1): a stored imported symbol names
+        # the library it came from, not the project, and matching a query's
+        # defined symbol against another project's import row attributes
+        # code the project does not contain. Applied only when the column
+        # exists - v2-era databases do not carry it.
+        symbols_imported_predicate = ""
+        if "is_imported" in _table_columns(connection, "Symbols"):
+            symbols_imported_predicate = "AND (Symbols.is_imported = 0 OR Symbols.is_imported IS NULL)"
         hash_found = False
         if instruction_hashes := normalized_hash_index.get("instruction_hashes"):
             hash_found = _query_hash_batches(
@@ -1260,6 +1414,8 @@ def lookup_project_matches(
                     project_matches,
                     instruction_hashes,
                     hash_column="instruction_hash",
+                    binary_filters=binary_type_filters,
+                    binary_filter_params=binary_type_filter_params,
                 )
         if assembly_hashes := normalized_hash_index.get("assembly_hashes"):
             assembly_found = _query_hash_batches(
@@ -1276,6 +1432,8 @@ def lookup_project_matches(
                     project_matches,
                     assembly_hashes,
                     hash_column="assembly_hash",
+                    binary_filters=binary_type_filters,
+                    binary_filter_params=binary_type_filter_params,
                 )
             hash_found = hash_found or assembly_found
         if fuzzy_hashes := normalized_hash_index.get("fuzzy_hashes"):
@@ -1300,6 +1458,8 @@ def lookup_project_matches(
                         project_matches,
                         fuzzy_hashes,
                         hash_column="fuzzy_hash",
+                        binary_filters=binary_type_filters,
+                        binary_filter_params=binary_type_filter_params,
                     )
         # fuzzy_found deliberately does not feed hash_found: that flag waives
         # the symbol-only filter for every candidate in the lookup, so one
@@ -1325,21 +1485,37 @@ def lookup_project_matches(
                     project_matches,
                     cfg_hashes,
                     hash_column="cfg_hash",
+                    binary_filters=binary_type_filters,
+                    binary_filter_params=binary_type_filter_params,
                 )
         symbol_found = False
         if normalized_source_map:
+            low_information = _query_low_information_names(
+                connection, normalized_source_map
+            )
+            for source, names in list(normalized_source_map.items()):
+                kept = [name for name in names if name not in low_information.get(source, ())]
+                kept = [name for name in kept if not MECHANICALLY_EMITTED_SYMBOL_RE.match(name)]
+                if kept:
+                    normalized_source_map[source] = kept
+                else:
+                    del normalized_source_map[source]
             symbol_found = _query_symbol_batches(
                 connection,
                 project_matches,
                 normalized_source_map,
                 binary_filters=binary_filters,
                 binary_filter_params=binary_filter_params,
+                imported_predicate=symbols_imported_predicate,
             )
             if not symbol_found and binary_filters:
                 symbol_found = _query_symbol_batches(
                     connection,
                     project_matches,
                     normalized_source_map,
+                    binary_filters=binary_type_filters,
+                    binary_filter_params=binary_type_filter_params,
+                    imported_predicate=symbols_imported_predicate,
                 )
         # An empty import hash is never queried: statically linked binaries
         # would otherwise all match each other.
@@ -1365,12 +1541,13 @@ def lookup_project_matches(
                 import_found = _query_project_import_hash_matches(
                     connection,
                     query_import_hashes,
+                    binary_filters=binary_type_filters,
+                    binary_filter_params=binary_type_filter_params,
                 )
             if import_found:
                 _merge_import_hash_rows(project_matches, import_found)
-        callgraph_found = False
         if normalized_canon_names and _blintdb_has_callgraph_tables(connection):
-            callgraph_found = _query_callgraph_batches(
+            _query_callgraph_batches(
                 connection,
                 project_matches,
                 normalized_canon_names,
@@ -1379,7 +1556,41 @@ def lookup_project_matches(
             project_matches,
             target_binary_names=target_binary_names,
             fuzzy_query_count=len(normalized_hash_index.get("fuzzy_hashes") or []),
+            instruction_hash_query_count=len(
+                normalized_hash_index.get("instruction_hashes") or []
+            ),
         )
+        def _qualifies(match: dict) -> bool:
+            """Per-candidate attribution gate (F2b.1).
+
+            A candidate attributes the artifact when its OWN evidence carries
+            the claim: a binary-name agreement corroborated by at least one
+            matched symbol or exact hash or a qualifying callgraph overlap; a
+            population of exact hashes covering the query; a qualifying
+            callgraph overlap; fuzzy evidence through both its gates; or 30+
+            identity symbols. The old
+            global waiver - any hash hit anywhere returned every finalized
+            candidate - is what surfaced deep mode's false shapes: 3
+            coincidental symbols riding another project's hash hit, and one
+            shared 4-instruction thunk attributing a whole library.
+            """
+            exact_hashes = (
+                match["matched_instruction_hash_count"] + match["matched_assembly_hash_count"]
+            )
+            if match["binary_name_match"] and (
+                match["matched_symbol_count"] >= 1
+                or exact_hashes >= 1
+                or match["matched_callgraph_count"] >= CALLGRAPH_ONLY_MATCH_THRESHOLD
+            ):
+                return True
+            if match["hash_only_qualified"]:
+                return True
+            if match["matched_callgraph_count"] >= CALLGRAPH_ONLY_MATCH_THRESHOLD:
+                return True
+            if match["fuzzy_only_qualified"]:
+                return True
+            return match["matched_symbol_count"] >= SYMBOL_ONLY_NAMELESS_MATCH_THRESHOLD
+
         name_matched_rows = [match for match in matches if match["binary_name_match"]]
         name_matched_purls = {match["project_purl"] for match in name_matched_rows}
         if name_matched_purls:
@@ -1400,14 +1611,12 @@ def lookup_project_matches(
                     >= max(SYMBOL_ONLY_MATCH_THRESHOLD, strongest_name_match_score / 4)
                 )
             ]
-        if hash_found or callgraph_found:
-            return matches[:limit]
-        return [
-            match
-            for match in matches
-            if match["matched_symbol_count"] >= SYMBOL_ONLY_MATCH_THRESHOLD
-            or match["fuzzy_only_qualified"]
-        ][:limit]
+        # Both return paths use the same per-candidate gate: hash or callgraph
+        # evidence somewhere in the lookup never waives the bar for every
+        # other candidate (F2b.1 deep measurement: with the waiver, a 3-symbol
+        # c-ares match on libsystem_c.dylib and two 1-hash matches rode along
+        # on other files' hash hits).
+        return [match for match in matches if _qualifies(match)][:limit]
     finally:
         connection.close()
 
