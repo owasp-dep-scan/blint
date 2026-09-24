@@ -7,7 +7,11 @@ binaries with a ``MANIFEST.json`` in the same entry shape as the PE lane's
 ``~/sandbox/pe-corpus``: one entry per file with ``path`` (relative to the
 corpus root), ``tier``, ``sha256``, ``bytes``, ``source`` (provenance string
 naming the distro image + package + version, or the toolchain that built the
-file) and ``fetched`` (UTC timestamp).
+file) and ``fetched`` (UTC timestamp). Entries reconstructed from another
+artifact additionally carry ``derived`` naming the derivation — dyld-cache
+extractions carry ``"dyld-cache-extraction"`` — because an extracted image is
+unsigned however its on-system original was signed, and gates must be able to
+keep those findings out of the benign headline (F1b.0).
 
 Why a builder rather than a committed corpus: Apple system binaries and
 distro packages cannot be committed. The builder is deterministic for a fixed
@@ -169,8 +173,21 @@ class CorpusBuilder:
         self.macOS_version = sh(["sw_vers", "-productVersion"]).stdout.strip() or "macOS"
         self.macOS_build = sh(["sw_vers", "-buildVersion"]).stdout.strip()
 
-    def add_file(self, src: Path, rel_dir: str, source: str, dest_name: str | None = None) -> None:
-        """Copy src into <root>/<rel_dir>/ (basename, or dest_name when given)."""
+    def add_file(
+        self,
+        src: Path,
+        rel_dir: str,
+        source: str,
+        dest_name: str | None = None,
+        derived: str | None = None,
+    ) -> None:
+        """Copy src into <root>/<rel_dir>/ (basename, or dest_name when given).
+
+        ``derived`` records that the file is a reconstruction from another
+        artifact rather than a byte-for-byte original, so downstream gates can
+        tell "unsigned because it was extracted" from "unsigned as shipped"
+        (F1b.0). Only dyld-cache extraction sets it today.
+        """
         if not src.is_file() or src.is_symlink():
             return
         dest_dir = self.root / rel_dir
@@ -181,16 +198,17 @@ class CorpusBuilder:
             # (SF_RESTRICTED and friends) that chflags cannot re-apply, and the
             # corpus needs the bytes, not the flags.
             shutil.copyfile(src, dest)
-        self.entries.append(
-            {
-                "path": str(dest.relative_to(self.root)),
-                "tier": "tier0",
-                "sha256": file_sha256(dest),
-                "bytes": dest.stat().st_size,
-                "source": source,
-                "fetched": self.now,
-            }
-        )
+        entry = {
+            "path": str(dest.relative_to(self.root)),
+            "tier": "tier0",
+            "sha256": file_sha256(dest),
+            "bytes": dest.stat().st_size,
+            "source": source,
+            "fetched": self.now,
+        }
+        if derived:
+            entry["derived"] = derived
+        self.entries.append(entry)
 
     def sample_files(self, files: list[Path], cap: int) -> list[Path]:
         if len(files) <= cap:
@@ -266,6 +284,7 @@ class CorpusBuilder:
                     path,
                     rel_dir,
                     ipsw_src.format(arch=arch) + f"; install path {rel}",
+                    derived="dyld-cache-extraction",
                 )
 
     def add_app(self, app: Path) -> None:

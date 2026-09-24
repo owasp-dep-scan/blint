@@ -6,12 +6,14 @@ import shutil
 
 import pytest
 
+from blint.lib.analysis import run_checks
 from blint.lib.binary import parse, parse_symbols
 from blint.lib.checks import (
     check_abi_floor,
     check_libc_portability,
     check_runtime_loading,
     check_search_path,
+    check_virtual_size,
 )
 from blint.lib.elf_abi import (
     analyze_elf_abi,
@@ -21,6 +23,7 @@ from blint.lib.elf_abi import (
 )
 from blint.lib.elf_dlopen import (
     _normalize_candidate,
+    imported_loader_entry_points,
     recover_runtime_dependencies,
     summarize_runtime_loading,
 )
@@ -392,26 +395,417 @@ def test_recovered_dependency_components_are_optional():
     }
 
 
-def test_abi_floor_check_compares_against_the_baseline():
-    metadata = {"abi_analysis": {"min_glibc_version": "2.34"}}
-    assert check_abi_floor("f", metadata, {"baseline_version": "2.34"}) is True
-    assert check_abi_floor("f", metadata, {"baseline_version": "2.17"}) == (
-        "requires glibc 2.34, baseline is 2.17"
+def test_abi_floor_check_compares_against_the_baseline(monkeypatch):
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    rule = {"baseline_version": "2.28"}
+    # A floor at or below the baseline is not a finding, whoever set it.
+    assert (
+        check_abi_floor(
+            "f", {"abi_analysis": {"min_glibc_version": "2.28", "libc": "glibc"}}, rule
+        )
+        is True
+    )
+    assert (
+        check_abi_floor(
+            "f", {"abi_analysis": {"min_glibc_version": "2.17", "libc": "glibc"}}, rule
+        )
+        is True
     )
     # A binary with no derived floor cannot violate one.
-    assert check_abi_floor("f", {}, {"baseline_version": "2.17"}) is True
+    assert check_abi_floor("f", {}, rule) is True
+
+
+def test_abi_floor_default_baseline_reports_info_and_names_the_provider(monkeypatch):
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    result = check_abi_floor(
+        "f", {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}},
+        {"baseline_version": "2.28"},
+    )
+    # A floor above a default nobody chose is a note, not a policy finding,
+    # and the finding says both the provider and which baseline was used.
+    assert result["severity"] == "info"
+    assert result["evidence"].startswith("GLIBC floor 2.34")
+    assert "built-in default baseline 2.28" in result["evidence"]
+    assert "BLINT_GLIBC_BASELINE" in result["evidence"]
+
+
+def test_abi_floor_user_baseline_keeps_medium_and_names_the_env(monkeypatch):
+    metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}}
+    rule = {"baseline_version": "2.28"}
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    result = check_abi_floor("f", metadata, rule)
+    # A floor above a baseline somebody chose is a deployment error.
+    assert result["severity"] == "medium"
+    assert "GLIBC floor 2.34" in result["evidence"]
+    assert "configured baseline 2.17" in result["evidence"]
+    assert "BLINT_GLIBC_BASELINE" in result["evidence"]
+    # The user baseline is compared, not the YAML default: equal and below
+    # never fire.
+    at_baseline = {"abi_analysis": {"min_glibc_version": "2.17", "libc": "glibc"}}
+    assert check_abi_floor("f", at_baseline, rule) is True
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.41")
+    assert check_abi_floor("f", metadata, rule) is True
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.34")
+    assert check_abi_floor("f", metadata, rule) is True
+
+
+def test_abi_floor_never_fires_on_musl_or_bionic(monkeypatch):
+    # Ground rule 35: a glibc baseline is meaningless against a binary that
+    # carries no GLIBC version nodes, so even a synthetic floor on a musl or
+    # bionic binary must not fire.
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    for libc in ("musl", "bionic"):
+        metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": libc}}
+        assert check_abi_floor("f", metadata, {"baseline_version": "2.28"}) is True
+    # The committed musl snapshot is the real shape: musl, no GLIBC floor.
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    assert check_abi_floor("f", snapshot("x86_64-musl"), {"baseline_version": "2.28"}) is True
+
+
+def test_abi_floor_ignores_non_glibc_providers(monkeypatch):
+    # A glibc baseline says nothing about a GLIBCXX floor: the C++ floor is
+    # recorded in abi_analysis.requirements but never compared here.
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    metadata = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "min_glibc_version": "",
+            "requirements": [{"provider": "GLIBCXX", "min_version": "3.4.30"}],
+        }
+    }
+    assert check_abi_floor("f", metadata, {"baseline_version": "2.28"}) is True
+
+
+def test_abi_floor_severity_flows_into_the_finding(monkeypatch):
+    # run_rule honours the check's per-finding severity override, and the
+    # override must not leak into the shared rule object.
+    from blint.lib.analysis import rules_dict, run_rule
+
+    rule = rules_dict["CHECK_ABI_FLOOR"]
+    metadata = {"abi_analysis": {"min_glibc_version": "2.34", "libc": "glibc"}}
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    default_finding = run_rule("demo", metadata, rule, "genericbinary", "CHECK_ABI_FLOOR")
+    assert default_finding["severity"] == "info"
+    assert "GLIBC floor 2.34" in default_finding["title"]
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    user_finding = run_rule("demo", metadata, rule, "genericbinary", "CHECK_ABI_FLOOR")
+    assert user_finding["severity"] == "medium"
+    assert rules_dict["CHECK_ABI_FLOOR"]["severity"] == "medium"
+
+
+def test_abi_floor_on_a_real_glibc_elf(monkeypatch):
+    # plain-libc-demo.elf binds GLIBC_2.34 symbols (floor verified with
+    # readelf --dyn-syms), so one real binary spans all three outcomes.
+    metadata = parse(
+        os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+    )
+    assert metadata["abi_analysis"]["min_glibc_version"] == "2.34"
+    monkeypatch.delenv("BLINT_GLIBC_BASELINE", raising=False)
+    (default_finding,) = [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
+    assert default_finding["severity"] == "info"
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
+    (user_finding,) = [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
+    assert user_finding["severity"] == "medium"
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.34")
+    assert not [
+        f for f in run_checks("plain-libc-demo.elf", metadata) if f["id"] == "CHECK_ABI_FLOOR"
+    ]
 
 
 def test_portability_and_loading_checks_name_their_evidence():
     metadata = {
-        "abi_analysis": {"features": {"implementation_specific_imports": ["dl_iterate_phdr"]}},
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": {
+                "implementation_specific_imports": ["backtrace", "dl_iterate_phdr"],
+                "glibc_specific_imports": ["backtrace"],
+                "shared_libc_imports": ["dl_iterate_phdr"],
+            },
+        },
+        "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
         "recovered_dependencies": [{"name": "libcuda.so.1", "confidence": "high"}],
         "link_closure": {
             "risky_search_paths": [{"kind": "DT_RPATH", "path": ".", "issue": "current-directory"}]
         },
     }
-    assert check_libc_portability("f", metadata, {}) == "dl_iterate_phdr"
-    assert check_runtime_loading("f", metadata, {}) == "libcuda.so.1"
+    result = check_libc_portability("f", metadata, {})
+    assert result.startswith("glibc-specific")
+    assert "backtrace" in result
+    # dl_iterate_phdr is exported by both measured libcs, so it is not a
+    # portability block and must not be listed.
+    assert "dl_iterate_phdr" not in result
+    loading = check_runtime_loading("f", metadata, {})
+    assert "libcuda.so.1" in loading and "not observed loads" in loading
     assert "current-directory" in check_search_path("f", metadata, {})
     assert check_libc_portability("f", {}, {}) is True
     assert check_search_path("f", {}, {}) is True
+
+
+def test_libc_portability_classification_from_measured_symbol_lists():
+    # The per-symbol availability table must classify exactly the interfaces
+    # the measured glibc 2.41 / musl 1.2.6 symbol lists say it does (see
+    # INTERFACE_LIBC_AVAILABILITY's provenance comment for the measurement).
+    from blint.lib.elf_abi import INTERFACE_LIBC_AVAILABILITY as table
+
+    assert table["backtrace"] == "glibc"
+    assert table["__freadahead"] == "musl"
+    assert table["dl_iterate_phdr"] == "both"
+    assert table["pthread_getattr_np"] == "both"
+    assert table["__libc_start_main"] == "both"
+    assert table["__register_frame_info"] == "neither"
+
+
+def test_libc_portability_fires_only_on_the_libc_specific_subset():
+    def features(**buckets):
+        merged = {
+            "implementation_specific_imports": sorted(
+                name for names in buckets.values() for name in names
+            )
+        }
+        merged.update(buckets)
+        return merged
+
+    glibc_binary = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": features(
+                glibc_specific_imports=["_obstack_begin", "backtrace"],
+                shared_libc_imports=["__ctype_b_loc", "__libc_start_main", "dl_iterate_phdr"],
+            ),
+        }
+    }
+    result = check_libc_portability("f", glibc_binary, {})
+    assert result.startswith("glibc-specific")
+    assert "_obstack_begin" in result and "backtrace" in result
+    assert "__libc_start_main" not in result and "__ctype_b_loc" not in result
+
+    # A glibc binary binding only shared interfaces is portable between the
+    # two measured libcs: no finding.
+    shared_only = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": features(shared_libc_imports=["__libc_start_main", "dladdr"]),
+        }
+    }
+    assert check_libc_portability("f", shared_only, {}) is True
+
+    # The F0 defect case: a musl binary importing dl_iterate_phdr and
+    # pthread_getattr_np - musl's own interface - was called glibc-bound.
+    musl_shared_only = {
+        "abi_analysis": {
+            "libc": "musl",
+            "features": features(
+                shared_libc_imports=[
+                    "__libc_start_main",
+                    "dl_iterate_phdr",
+                    "pthread_getattr_np",
+                    "pthread_setname_np",
+                ]
+            ),
+        }
+    }
+    assert check_libc_portability("f", musl_shared_only, {}) is True
+
+    # A musl binary binding musl's own extra interface is a finding, and the
+    # evidence names musl - never glibc.
+    musl_specific = {
+        "abi_analysis": {
+            "libc": "musl",
+            "features": features(musl_specific_imports=["__freadahead"]),
+        }
+    }
+    musl_result = check_libc_portability("f", musl_specific, {})
+    assert musl_result.startswith("musl-specific")
+    assert "__freadahead" in musl_result
+    assert "glibc-specific" not in musl_result
+
+    # No libc identified: each binding is named with its own provider rather
+    # than guessed.
+    unknown = {
+        "abi_analysis": {
+            "libc": "",
+            "features": features(
+                glibc_specific_imports=["backtrace"],
+                musl_specific_imports=["__freadahead"],
+            ),
+        }
+    }
+    unknown_result = check_libc_portability("f", unknown, {})
+    assert "glibc-specific: backtrace" in unknown_result
+    assert "musl-specific: __freadahead" in unknown_result
+
+
+def test_libc_portability_ignores_non_libc_runtime_interfaces():
+    # __register_frame_info and friends are exported by libgcc_s, not by
+    # either libc: recording them as C library internals was a misattribution
+    # the measurement exposed, and the rule must not report them.
+    metadata = {
+        "abi_analysis": {
+            "libc": "glibc",
+            "features": {
+                "implementation_specific_imports": ["__register_frame_info"],
+                "non_libc_runtime_imports": ["__register_frame_info"],
+            },
+        }
+    }
+    assert check_libc_portability("f", metadata, {}) is True
+
+
+def test_libc_portability_on_real_binaries():
+    # Committed snapshots of one Rust project built for glibc and musl.
+    glibc_abi = analyze_elf_abi(snapshot("x86_64-linux"))
+    result = check_libc_portability("f", {"abi_analysis": glibc_abi}, {})
+    assert result.startswith("glibc-specific")
+    assert "__cxa_thread_atexit_impl" in result
+    assert "gnu_get_libc_version" in result
+    assert "dl_iterate_phdr" not in result
+
+    musl_abi = analyze_elf_abi(snapshot("x86_64-musl"))
+    # The musl build binds only interfaces both libcs export, so the rule
+    # that F0 measured firing here 4 times is now silent on it.
+    assert check_libc_portability("f", {"abi_analysis": musl_abi}, {}) is True
+
+    # A real committed glibc ELF whose only non-standard import is
+    # __libc_start_main (shared) also stays silent.
+    real = parse(
+        os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+    )
+    assert check_libc_portability("f", real, {}) is True
+
+
+class TestVirtualSizePerFormatLimit:
+    """F1b.3: the 30MB cap came from PE practice; ELF gets its own, from the
+    measured benign distribution. Both sides of every limit, plus the Mach-O
+    and rule-without-format_limits shapes."""
+
+    RULE = {"limit": "30MB", "format_limits": {"ELF": "128MB"}}
+
+    def test_elf_limit_is_128mb_on_both_sides(self):
+        below = {"binary_type": "ELF", "virtual_size": 128 * 1024 * 1024 - 1}
+        at_limit = {"binary_type": "ELF", "virtual_size": 128 * 1024 * 1024}
+        # A stock static Go net/http build maps 37.4 MB - the exact tier-0
+        # file that the PE-derived 30MB limit fired on - and must pass now.
+        benign_go = {"binary_type": "ELF", "virtual_size": int(37.4 * 1024 * 1024)}
+        assert check_virtual_size("f", benign_go, self.RULE) is True
+        assert check_virtual_size("f", below, self.RULE) is True
+        assert check_virtual_size("f", at_limit, self.RULE) is False
+
+    def test_pe_keeps_the_30mb_limit(self):
+        below = {"binary_type": "PE", "virtual_size": 30 * 1024 * 1024 - 1}
+        at_limit = {"binary_type": "PE", "virtual_size": 30 * 1024 * 1024}
+        benign_max = {"binary_type": "PE", "virtual_size": int(6.5 * 1024 * 1024)}
+        assert check_virtual_size("f", benign_max, self.RULE) is True
+        assert check_virtual_size("f", below, self.RULE) is True
+        assert check_virtual_size("f", at_limit, self.RULE) is False
+
+    def test_unknown_format_falls_back_to_the_default_limit(self):
+        other = {"binary_type": "WASM", "virtual_size": 31 * 1024 * 1024}
+        assert check_virtual_size("f", other, self.RULE) is False
+        no_type = {"virtual_size": 31 * 1024 * 1024}
+        assert check_virtual_size("f", no_type, self.RULE) is False
+
+    def test_rule_without_format_limits_keeps_the_single_limit(self):
+        legacy = {"limit": "30MB"}
+        elf_40mb = {"binary_type": "ELF", "virtual_size": 40 * 1024 * 1024}
+        assert check_virtual_size("f", elf_40mb, legacy) is False
+
+    def test_no_virtual_size_never_fires(self):
+        # Mach-O metadata carries no virtual_size at all, so the check is
+        # data-gated off there regardless of limits.
+        assert check_virtual_size("f", {"binary_type": "MachO"}, self.RULE) is True
+
+    def test_real_elf_fixture_passes(self):
+        metadata = parse(
+            os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+        )
+        assert metadata["binary_type"] == "ELF"
+        assert check_virtual_size("f", metadata, self.RULE) is True
+
+
+class TestRuntimeLoadingStatesItsEvidence:
+    """F1b.4: the finding's evidence is a string paired with imported loader
+    entry points, and a binary that cannot open a library by name is never
+    reported as loading one."""
+
+    def test_name_with_loader_import_fires_naming_both(self):
+        metadata = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "recovered_dependencies": [
+                {"name": "libstdbuf.so", "confidence": "high"},
+                {"name": "libfoo.so", "confidence": "low"},
+            ],
+        }
+        result = check_runtime_loading("f", metadata, {})
+        # The low-confidence candidate stays out; the evidence names the
+        # string, the loader entry point, and its own nature.
+        assert "libstdbuf.so" in result
+        assert "libfoo.so" not in result
+        assert "library-name strings" in result
+        assert "dlopen" in result
+        assert "not observed loads" in result
+
+    def test_name_without_loader_import_is_suppressed(self):
+        # However the names got into the metadata (a stale parse, another
+        # producer), no imported loader entry point means the binary cannot
+        # open a library by name: suppress rather than lower, because the
+        # rule's title would be false at any severity.
+        metadata = {
+            "recovered_dependencies": [{"name": "libfoo.so", "confidence": "high"}],
+            "dynamic_symbols": [{"name": "printf", "is_imported": True}],
+        }
+        assert check_runtime_loading("f", metadata, {}) is True
+
+    def test_no_names_at_all_never_fires(self):
+        metadata = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "recovered_dependencies": [],
+        }
+        assert check_runtime_loading("f", metadata, {}) is True
+        assert check_runtime_loading("f", {}, {}) is True
+
+    def test_real_elf_without_runtime_loading_stays_silent(self):
+        metadata = parse(
+            os.path.join(os.path.dirname(__file__), "data", "plain-libc-demo.elf")
+        )
+        assert check_runtime_loading("f", metadata, {}) is True
+
+    def test_loader_defining_dlopen_is_not_a_loader_client(self):
+        # The ld-musl shape that fired on tier-0: the dynamic loader defines
+        # dlopen/dlsym (is_imported False) and carries libc.so as data.
+        # Defining the entry point is the loader's job, not evidence it calls
+        # one, so nothing is recovered and the rule cannot fire.
+        loader_shape = {
+            "dynamic_symbols": [
+                {"name": "dlopen", "is_imported": False},
+                {"name": "dlsym", "is_imported": False},
+            ],
+            "strings": [{"value": "libc.so", "section": ".rodata"}],
+        }
+        assert imported_loader_entry_points(loader_shape) == set()
+        assert recover_runtime_dependencies(loader_shape) == []
+
+    def test_importing_dlopen_with_a_string_recovers(self):
+        client_shape = {
+            "dynamic_symbols": [{"name": "dlopen", "is_imported": True}],
+            "strings": [{"value": "libstdbuf.so", "section": ".rodata"}],
+        }
+        assert imported_loader_entry_points(client_shape) == {"dlopen"}
+        recovered = recover_runtime_dependencies(client_shape)
+        assert [entry["name"] for entry in recovered] == ["libstdbuf.so"]
+
+
+def test_abi_floor_ignores_an_unparseable_env_baseline(monkeypatch, caplog):
+    """A non-version BLINT_GLIBC_BASELINE falls back to the default at info
+    rather than turning every glibc binary into a medium finding."""
+    from blint.lib.checks import check_abi_floor
+
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "rhel8")
+    metadata = {"abi_analysis": {"libc": "glibc", "min_glibc_version": "2.34"}}
+    with caplog.at_level("WARNING", logger="blint.logger"):
+        result = check_abi_floor("x", metadata, {"baseline_version": "2.28"})
+    assert result["severity"] == "info"
+    assert "rhel8" in caplog.text

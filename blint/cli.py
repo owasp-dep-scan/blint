@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 from blint.config import BLINTDB_HOME, BLINTDB_IMAGE_URL, BLINTDB_LOC, BlintOptions
@@ -33,6 +34,15 @@ def _callgraph_default_algorithm() -> str:
     from blint.lib.callgraph.algorithms import DEFAULT_ALGORITHM
 
     return DEFAULT_ALGORITHM
+
+
+def glibc_baseline_version(value: str) -> str:
+    """argparse type for --glibc-baseline: a dotted numeric version."""
+    if not re.fullmatch(r"\d+(\.\d+)*", (value or "").strip()):
+        raise argparse.ArgumentTypeError(
+            f"--glibc-baseline expects a dotted version like 2.28, not {value!r}"
+        )
+    return value.strip()
 
 
 def build_args() -> argparse.Namespace:
@@ -205,6 +215,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Analyze up to N binaries in parallel worker processes. Accepts "
         "a positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
         "(sequential, unchanged behavior).",
+    )
+    parser.add_argument(
+        "--glibc-baseline",
+        dest="glibc_baseline",
+        type=glibc_baseline_version,
+        default=None,
+        metavar="VERSION",
+        help="Oldest glibc your deployment target ships (for example 2.28 for "
+        "RHEL 8). CHECK_ABI_FLOOR compares each binary's GLIBC symbol-version "
+        "floor against it; a floor above a baseline set here is a medium "
+        "finding, above the built-in default it is info. Equivalent to the "
+        "BLINT_GLIBC_BASELINE environment variable; the option wins when both "
+        "are given.",
     )
     parser.add_argument(
         "-q",
@@ -639,6 +662,11 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
     except ValueError as exc:
         LOG.error(str(exc))
         raise SystemExit(2) from exc
+    # --glibc-baseline is the CLI spelling of BLINT_GLIBC_BASELINE: the check
+    # resolves one variable, and the option wins when both are given. Set
+    # here so worker processes (see --jobs) inherit it too.
+    if getattr(args, "glibc_baseline", None):
+        os.environ["BLINT_GLIBC_BASELINE"] = args.glibc_baseline
     blint_options = BlintOptions(
         deep_mode=args.deep_mode,
         exports_prefix=args.exports_prefix,

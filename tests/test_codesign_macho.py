@@ -15,7 +15,10 @@ CodeDirectory bytes), not by calling into the module under test.
 
 import hashlib
 import plistlib
+import shutil
 import struct
+import subprocess
+import sys
 
 import orjson
 import pytest
@@ -152,15 +155,21 @@ def _code_directory(
     at ``teamOffset`` (v0x20200+), exec-segment fields (v0x20400+), runtime
     version (v0x20500+).
     """
-    header_len = 0x5C if (version >= 0x20500 and runtime_version) else 0x58
+    # xnu cs_blobs.h: v0x20500 adds runtime and preEncryptOffset, so its
+    # fixed header is 0x60. hashOffset points at code slot 0; the special
+    # slots' hashes sit immediately before it.
+    n_special = 2
+    header_len = 0x60 if (version >= 0x20500 and runtime_version) else 0x58
     ident = identifier.encode() + b"\x00"
     ident_offset = header_len
-    hash_offset = ident_offset + len(ident)
-    hashes = b"\xaa" * (32 * code_slots)
+    hash_offset = ident_offset + len(ident) + 32 * n_special
+    hashes = b"\xbb" * (32 * n_special) + b"\xaa" * (32 * code_slots)
     body = bytearray(header_len)
     struct.pack_into(">II", body, 0, CSMAGIC_CODEDIRECTORY, 0)
     struct.pack_into(">II", body, 8, version, flags)
-    struct.pack_into(">IIIII", body, 0x10, hash_offset, ident_offset, 2, code_slots, 0x2000)
+    struct.pack_into(
+        ">IIIII", body, 0x10, hash_offset, ident_offset, n_special, code_slots, 0x2000
+    )
     body[0x24] = 32  # hash size
     body[0x25] = hash_type
     body[0x26] = platform
@@ -186,11 +195,13 @@ def _requirements_blob(types: list[int]) -> bytes:
     body = struct.pack(">I", len(types))
     offset = 8 + 4 + 8 * len(types)
     for slot_type in types:
-        req = _blob(0xFADE0C00 + slot_type, b"\x00" * 8)
+        # Every individual requirement is CSMAGIC_REQUIREMENT (0xfade0c00);
+        # its type lives in the index, not in the magic.
+        req = _blob(0xFADE0C00, b"\x00" * 8)
         body += struct.pack(">II", slot_type, offset)
         offset += len(req)
-    for slot_type in types:
-        body += _blob(0xFADE0C00 + slot_type, b"\x00" * 8)
+    for _slot_type in types:
+        body += _blob(0xFADE0C00, b"\x00" * 8)
     return _blob(CSMAGIC_REQUIREMENTS, body)
 
 
@@ -274,8 +285,12 @@ def test_cdhash_sha1_variant():
 
 
 def test_code_directory_v20100_has_no_team_or_execseg_fields():
-    cd = _code_directory(version=0x20100, team_id="SHOULD_NOT_APPEAR")
-    detail = parse_superblob(_superblob([(0, cd)]))
+    # Build a v0x20400 directory that really carries a team offset and
+    # exec-segment fields, then relabel it v0x20100: the parser must gate on
+    # the version, not on whether the bytes happen to be there.
+    cd = bytearray(_code_directory(version=0x20400, team_id="SHOULD_NOT_APPEAR", exec_seg_flags=1))
+    struct.pack_into(">I", cd, 8, 0x20100)
+    detail = parse_superblob(_superblob([(0, bytes(cd))]))
     directory = detail["code_directories"][0]
     assert "team_id" not in directory
     assert "exec_seg_flags" not in directory
@@ -302,10 +317,10 @@ def test_runtime_version_reported_when_v20500():
 def test_unknown_hash_type_named_without_cdhash():
     # An unrecognized hash type must be named as unknown rather than guessed,
     # and no cdhash can be claimed for an algorithm blint cannot compute.
-    cd = _code_directory(hash_type=4)
+    cd = _code_directory(hash_type=9)
     detail = parse_superblob(_superblob([(0, cd)]))
     directory = detail["code_directories"][0]
-    assert directory["hash_type"] == "unknown(4)"
+    assert directory["hash_type"] == "unknown(9)"
     assert "cdhash" not in directory
     assert "cdhash_full" not in directory
 
@@ -571,3 +586,73 @@ def test_superblob_output_is_plain_json():
 def test_provenance_matrix_without_cms(flags, expected):
     detail = parse_superblob(_superblob([(0, _code_directory(flags=flags))]))
     assert detail["provenance"] == expected
+
+
+def test_cdhash_sha384_and_sha256_truncated_hash_types():
+    """CS_HASHTYPE_SHA256_TRUNCATED (3) digests with SHA-256 and
+    CS_HASHTYPE_SHA384 (4) with SHA-384; the cdhash is 20 bytes either way."""
+    for hash_type, name, algorithm in ((3, "sha256_truncated", "sha256"), (4, "sha384", "sha384")):
+        cd = _code_directory(hash_type=hash_type)
+        directory = parse_superblob(_superblob([(0, cd)]))["code_directories"][0]
+        assert directory["hash_type"] == name
+        assert directory["cdhash"] == hashlib.new(algorithm, cd).hexdigest()[:40]
+
+
+def test_summary_cdhash_is_the_strongest_code_directory():
+    """A SHA-1 slot-0 directory with a SHA-256 alternate (the dual signature
+    Apple ships for binaries that still load on old systems) reports the
+    SHA-256 directory's cdhash, as codesign's CDHash line does. Identity
+    fields still come from slot 0."""
+    primary = _code_directory(identifier="com.example.dual", hash_type=1, flags=0x10000)
+    alternate = _code_directory(identifier="com.example.dual", hash_type=2, flags=0x10000)
+    summary = signature_summary(parse_superblob(_superblob([(0, primary), (0x1000, alternate)])))
+    assert summary["cdhash"] == hashlib.sha256(alternate).hexdigest()[:40]
+    assert summary["hash_type"] == "sha256"
+    assert summary["cdhash_slot"] == "alternate_code_directory_0x1000"
+    assert summary["identifier"] == "com.example.dual"
+    detail = parse_superblob(_superblob([(0, primary), (0x1000, alternate)]))
+    assert detail["effective_cdhash"] == summary["cdhash"]
+    assert detail["effective_cdhash_slot"] == "alternate_code_directory_0x1000"
+    # One directory: unchanged, whatever its hash type.
+    single = signature_summary(parse_superblob(_superblob([(0, primary)])))
+    assert single["cdhash"] == hashlib.sha1(primary).hexdigest()[:40]
+    assert single["cdhash_slot"] == "code_directory"
+    # Order does not matter: a stronger slot 0 beats a weaker alternate.
+    reversed_ = signature_summary(parse_superblob(_superblob([(0, alternate), (0x1000, primary)])))
+    assert reversed_["cdhash"] == hashlib.sha256(alternate).hexdigest()[:40]
+
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or shutil.which("codesign") is None, reason="macOS only")
+def test_real_signature_fields_match_codesign():
+    """Parse a real embedded signature (not a built one) and compare every
+    CodeDirectory field codesign -dvvv prints for the same slice."""
+    import re
+
+    import lief
+
+    path = "/bin/ls"
+    fat = lief.MachO.parse(path)
+    for index in range(len(fat)):
+        slice_obj = fat.at(index)
+        arch = subprocess.run(["lipo", "-archs", path], capture_output=True, text=True).stdout.split()[index]
+        detail = parse_superblob(bytes(slice_obj.code_signature.content))
+        info = subprocess.run(
+            ["codesign", "-dvvv", "--arch", arch, path], capture_output=True, text=True
+        ).stderr
+        cd_line = next(line for line in info.splitlines() if line.startswith("CodeDirectory v="))
+        version, flags, code, special = re.search(
+            r"v=(\w+) .*flags=0x(\w+).*hashes=(\d+)\+(\d+)", cd_line
+        ).groups()
+        directory = detail["code_directories"][0]
+        assert directory["version"] == f"0x{version}"
+        assert directory["flags_raw"] == int(flags, 16)
+        assert directory["code_slots"] == int(code)
+        assert directory["special_slots"] == int(special)
+        identifier = re.search(r"^Identifier=(.+)$", info, re.MULTILINE).group(1)
+        assert directory["identifier"] == identifier
+        platform = re.search(r"^Platform identifier=(\d+)$", info, re.MULTILINE)
+        if platform:
+            assert directory["platform_id"] == int(platform.group(1))
+        cdhash = re.search(r"^CDHash=(\w+)$", info, re.MULTILINE).group(1)
+        assert detail["effective_cdhash"] == cdhash

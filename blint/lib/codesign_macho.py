@@ -76,8 +76,14 @@ EXEC_SEG_FLAGS = {
     "can_exec_cd_hash": 0x200,
 }
 
-CD_HASH_ALGORITHMS = {1: "sha1", 2: "sha256"}
-CD_HASH_TYPE_NAMES = {0: "none", 1: "sha1", 2: "sha256"}
+# CS_HASHTYPE_* from the xnu cs_blobs.h. sha256_truncated digests with
+# SHA-256 like sha256; the cdhash is the first 20 bytes either way.
+CD_HASH_ALGORITHMS = {1: "sha1", 2: "sha256", 3: "sha256", 4: "sha384"}
+CD_HASH_TYPE_NAMES = {0: "none", 1: "sha1", 2: "sha256", 3: "sha256_truncated", 4: "sha384"}
+# The kernel and codesign report the cdhash of the strongest CodeDirectory
+# when a signature carries alternates: a SHA-1 slot-0 directory kept for old
+# systems plus a SHA-256 alternate reports the SHA-256 one as CDHash.
+CD_HASH_TYPE_RANK = {"sha1": 1, "sha256_truncated": 2, "sha256": 3, "sha384": 4}
 
 REQUIREMENT_TYPES = {
     1: "host",
@@ -652,6 +658,12 @@ def parse_superblob(blob: bytes) -> dict:
     if cms_der is not None:
         detail["cms"] = _parse_cms_signature(cms_der)
     detail["provenance"] = _provenance(primary_flags_raw, detail["cms"])
+    # The cdhash this signature is known by (codesign's CDHash line): the
+    # strongest directory's, which is not code_directories[0] when a SHA-1
+    # directory is kept for old systems beside a SHA-256 alternate.
+    if strongest := strongest_code_directory(detail["code_directories"]):
+        detail["effective_cdhash"] = strongest["cdhash"]
+        detail["effective_cdhash_slot"] = strongest.get("slot_type")
     detail["parse_status"] = "parsed"
     return detail
 
@@ -700,6 +712,21 @@ def _provenance(primary_flags_raw: int | None, cms: dict | None) -> str:
     return "unknown"
 
 
+def strongest_code_directory(directories: list[dict]) -> dict | None:
+    """The CodeDirectory whose cdhash codesign and the kernel report.
+
+    The strongest hash type wins; ties keep slot order, so a signature with
+    one CodeDirectory is unaffected.
+    """
+    ranked = [d for d in directories if d.get("cdhash")]
+    if not ranked:
+        return None
+    return max(
+        ranked,
+        key=lambda d: CD_HASH_TYPE_RANK.get(d.get("hash_type") or "", 0),
+    )
+
+
 def signature_summary(detail: dict) -> dict | None:
     """Lean per-slice view of a parsed signature for ``slices[]`` entries.
 
@@ -720,14 +747,16 @@ def signature_summary(detail: dict) -> dict | None:
         (d for d in directories if d.get("slot_type") == "code_directory"),
         directories[0] if directories else None,
     )
+    strongest = strongest_code_directory(directories) or primary
     return {
         "available": True,
         "parse_status": "parsed",
         "provenance": detail.get("provenance"),
         "identifier": primary.get("identifier") if primary else None,
         "team_id": primary.get("team_id") if primary else None,
-        "cdhash": primary.get("cdhash") if primary else None,
-        "hash_type": primary.get("hash_type") if primary else None,
+        "cdhash": strongest.get("cdhash") if strongest else None,
+        "hash_type": strongest.get("hash_type") if strongest else None,
+        "cdhash_slot": strongest.get("slot_type") if strongest else None,
         "flags": primary.get("flags") if primary else None,
         "entitlements": detail.get("entitlements"),
         "entitlements_der": detail.get("entitlements_der"),

@@ -95,78 +95,88 @@ TLS_SYMBOL_TYPES = frozenset({"TLS"})
 # wide, which prevents the object from ever being unloaded.
 UNIQUE_BINDINGS = frozenset({"GNU_UNIQUE", "UNIQUE"})
 
+# Interfaces outside the portable libc surface, classified by which C library
+# implementations actually export them. The classification is MEASURED, not
+# remembered: it comes from the exported dynamic symbol tables (readelf
+# --dyn-syms, defined GLOBAL and WEAK FUNC entries, symbol-version suffixes
+# stripped) of
+# - glibc 2.41  (Debian 13 package 2.41-12+deb13u4)  /lib/aarch64-linux-gnu/libc.so.6
+# - musl 1.2.6  (Alpine package musl-1.2.6-r2)       /lib/ld-musl-aarch64.so.1
+# glibc merged libdl/libpthread/librt into libc.so.6 in 2.34, so at the
+# measured version that one file is the whole runtime surface; older glibc
+# provided the same symbols through the libdl/libpthread components of the
+# same runtime. A symbol both libraries export ("both") is a GNU/BSD
+# extension but NOT a glibc-versus-musl portability block, so it must not be
+# reported as one. Symbols neither libc exports ("neither") belong to other
+# runtime libraries (libgcc_s unwinder entry points, the loader's private
+# aliases) and are not libc interfaces at all.
+INTERFACE_LIBC_AVAILABILITY = {
+    # glibc only: present in glibc 2.41, absent from musl 1.2.6.
+    "backtrace": "glibc",
+    "backtrace_symbols": "glibc",
+    "backtrace_symbols_fd": "glibc",
+    "dladdr1": "glibc",
+    "dlvsym": "glibc",
+    "getgrent_r": "glibc",
+    "getpwent_r": "glibc",
+    "gnu_get_libc_release": "glibc",
+    "gnu_get_libc_version": "glibc",
+    "mallinfo": "glibc",
+    "mallinfo2": "glibc",
+    "malloc_info": "glibc",
+    "malloc_stats": "glibc",
+    "malloc_trim": "glibc",
+    "mallopt": "glibc",
+    "obstack_free": "glibc",
+    "pthread_attr_getaffinity_np": "glibc",
+    "pthread_attr_setaffinity_np": "glibc",
+    "_dl_find_object": "glibc",
+    "_obstack_begin": "glibc",
+    "_obstack_newchunk": "glibc",
+    "__cxa_thread_atexit_impl": "glibc",
+    "__libc_calloc": "glibc",
+    "__libc_free": "glibc",
+    "__libc_malloc": "glibc",
+    "__libc_realloc": "glibc",
+    "__nss_configure_lookup": "glibc",
+    "__pthread_register_cancel": "glibc",
+    "__pthread_unregister_cancel": "glibc",
+    "__register_atfork": "glibc",
+    # musl only: present in musl 1.2.6, absent from glibc 2.41.
+    "__freadahead": "musl",
+    # Both: non-standard, but portable between the two measured libcs.
+    "_IO_getc": "both",
+    "_IO_putc": "both",
+    "__ctype_b_loc": "both",
+    "__ctype_tolower_loc": "both",
+    "__ctype_toupper_loc": "both",
+    "__fpurge": "both",
+    "__libc_current_sigrtmax": "both",
+    "__libc_current_sigrtmin": "both",
+    "__libc_start_main": "both",
+    "dl_iterate_phdr": "both",
+    "dladdr": "both",
+    "dlinfo": "both",
+    "fopencookie": "both",
+    "malloc_usable_size": "both",
+    "pthread_getattr_np": "both",
+    "pthread_getname_np": "both",
+    "pthread_setname_np": "both",
+    "pthread_timedjoin_np": "both",
+    "pthread_tryjoin_np": "both",
+    # Neither libc: compiler/other runtime libraries.
+    "_Unwind_Find_FDE": "neither",
+    "__register_frame_info": "neither",
+    "__deregister_frame_info": "neither",
+    "_dl_sym": "neither",
+}
+
 # Interfaces whose behaviour is tied to a specific C library implementation
-# rather than to a standard. A binary that imports these cannot be re-pointed at
-# a different libc without a compatibility layer, so they are worth surfacing
-# even when every other portability signal is clean.
-IMPLEMENTATION_SPECIFIC_INTERFACES = frozenset(
-    {
-        # Loader and link map introspection.
-        "dl_iterate_phdr",
-        "_dl_find_object",
-        "dladdr",
-        "dladdr1",
-        "dlinfo",
-        "dlvsym",
-        "_dl_sym",
-        # Backtrace support, which walks loader-private structures.
-        "backtrace",
-        "backtrace_symbols",
-        "backtrace_symbols_fd",
-        # Allocator internals.
-        "malloc_usable_size",
-        "malloc_trim",
-        "malloc_stats",
-        "malloc_info",
-        "mallinfo",
-        "mallinfo2",
-        "mallopt",
-        "__libc_malloc",
-        "__libc_free",
-        "__libc_calloc",
-        "__libc_realloc",
-        # stdio internals exposed as public symbols.
-        "fopencookie",
-        "__freadahead",
-        "__fpurge",
-        "_IO_getc",
-        "_IO_putc",
-        # Threading internals beyond the POSIX surface.
-        "pthread_getattr_np",
-        "pthread_setname_np",
-        "pthread_getname_np",
-        "pthread_attr_setaffinity_np",
-        "pthread_attr_getaffinity_np",
-        "pthread_timedjoin_np",
-        "pthread_tryjoin_np",
-        "__pthread_register_cancel",
-        "__pthread_unregister_cancel",
-        # Locale and iconv internals.
-        "__ctype_b_loc",
-        "__ctype_tolower_loc",
-        "__ctype_toupper_loc",
-        "gnu_get_libc_version",
-        "gnu_get_libc_release",
-        # Name service switch, which loads implementation modules at runtime.
-        "__nss_configure_lookup",
-        "getpwent_r",
-        "getgrent_r",
-        # Obstack and other GNU extensions with an exported ABI.
-        "_obstack_begin",
-        "_obstack_newchunk",
-        "obstack_free",
-        # Registration hooks used by the GNU runtime.
-        "__register_atfork",
-        "__cxa_thread_atexit_impl",
-        "__libc_start_main",
-        "__libc_current_sigrtmin",
-        "__libc_current_sigrtmax",
-        # Stack unwinder entry points, whose ABI differs between runtimes.
-        "_Unwind_Find_FDE",
-        "__register_frame_info",
-        "__deregister_frame_info",
-    }
-)
+# rather than to a standard, i.e. every interface classified above. A binary
+# that imports a glibc-only or musl-only one cannot be re-pointed at the other
+# libc without a compatibility layer, so they are worth surfacing even when
+# every other portability signal is clean; a "both" one is not a block.
+IMPLEMENTATION_SPECIFIC_INTERFACES = frozenset(INTERFACE_LIBC_AVAILABILITY)
 
 
 def parse_version_node(node: str) -> tuple[str, str]:
@@ -326,6 +336,10 @@ def _collect_symbol_features(metadata: dict) -> dict:
         "unique_symbols": [],
         "imported_ifunc_symbols": [],
         "implementation_specific_imports": [],
+        "glibc_specific_imports": [],
+        "musl_specific_imports": [],
+        "shared_libc_imports": [],
+        "non_libc_runtime_imports": [],
     }
     seen_impl = set()
     for bucket in ("dynamic_symbols", "symtab_symbols"):
@@ -351,7 +365,23 @@ def _collect_symbol_features(metadata: dict) -> dict:
             ):
                 seen_impl.add(name)
                 features["implementation_specific_imports"].append(name)
-    features["implementation_specific_imports"].sort()
+                availability = INTERFACE_LIBC_AVAILABILITY[name]
+                if availability == "glibc":
+                    features["glibc_specific_imports"].append(name)
+                elif availability == "musl":
+                    features["musl_specific_imports"].append(name)
+                elif availability == "both":
+                    features["shared_libc_imports"].append(name)
+                else:
+                    features["non_libc_runtime_imports"].append(name)
+    for key in (
+        "implementation_specific_imports",
+        "glibc_specific_imports",
+        "musl_specific_imports",
+        "shared_libc_imports",
+        "non_libc_runtime_imports",
+    ):
+        features[key].sort()
     return features
 
 
@@ -463,11 +493,27 @@ def _build_portability_notes(summary: dict) -> list[str]:
         notes.append(
             "Defines process-unique symbols, which prevent the object from being unloaded."
         )
-    if summary["uses_implementation_specific_interfaces"]:
-        names = ", ".join(summary["features"]["implementation_specific_imports"][:5])
+    features = summary["features"]
+    glibc_only = features["glibc_specific_imports"]
+    musl_only = features["musl_specific_imports"]
+    if summary["libc"] != "musl" and glibc_only:
+        names = ", ".join(glibc_only[:5])
         notes.append(
-            f"Imports C library implementation internals ({names}); these have no "
-            "portable equivalent across libc implementations."
+            f"Binds glibc-specific interfaces ({names}); musl 1.2.6 does not "
+            "provide them, so the binary will not run against a musl-based "
+            "runtime without a compatibility layer."
+        )
+    if summary["libc"] != "glibc" and musl_only:
+        names = ", ".join(musl_only[:5])
+        notes.append(
+            f"Binds musl-specific interfaces ({names}); glibc 2.41 does not "
+            "provide them."
+        )
+    if features["non_libc_runtime_imports"]:
+        names = ", ".join(features["non_libc_runtime_imports"][:5])
+        notes.append(
+            f"Imports interfaces exported by neither measured libc ({names}); "
+            "these belong to other runtime libraries such as libgcc_s."
         )
     if summary["is_statically_linked"] and summary["uses_implementation_specific_interfaces"]:
         notes.append(

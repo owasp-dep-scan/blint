@@ -541,6 +541,67 @@ def test_banner_signatures_reject_unanchored_versions():
         assert detected["banners"] == [], value
 
 
+def test_banner_vendored_case_library_code_in_the_artifact():
+    """F2b.2 vendored case: the artifact defines the library's own API.
+
+    The measured shape of libcrypto.0.9.7.dylib - per-module banner strings
+    plus 2714 exported OpenSSL API symbols - must emit the banner as
+    vendored code with the corroboration counted.
+    """
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": "Big Number part of OpenSSL 0.9.7l 28 Sep 2006"}],
+            "dynamic_symbols": [
+                # the dyld-cache symtab form blint actually records
+                {"name": "_bn_new", "is_imported": False},
+                {"name": "_AES_cbc_encrypt", "is_imported": False},
+                {"name": "EVP_Digest", "is_imported": False},
+            ],
+        }
+    )
+    assert detected["state"] == BANNER_LAYER_ACTIVE
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@0.9.7l"]
+    assert detected["banners"][0]["api_symbol_count"] == 3
+    assert detected["mentions"] == []
+
+
+def test_banner_mention_case_stale_string_no_library_code():
+    """F2b.2 mention case: the string names a version, the code is absent.
+
+    The measured shape of assetutil - "deflate 1.2.5 Copyright" banner while
+    linking /usr/lib/libz.1.dylib at 1.2.12 and defining no zlib symbol.
+    The banner becomes a mention, never a component.
+    """
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            # A declared dynamic dependency: this artifact is not statically
+            # shaped, so the banner must corroborate or step down.
+            "dynamic_entries": [{"tag": "NEEDED", "name": "libz.1.dylib"}],
+            "dynamic_symbols": [
+                # importing the API does not corroborate - the client owns
+                # none of the code
+                {"name": "_deflate", "is_imported": True},
+                {"name": "_main", "is_imported": False},
+            ],
+        }
+    )
+    assert detected["banners"] == []
+    assert [m["purl"] for m in detected["mentions"]] == ["pkg:generic/zlib@1.2.5"]
+
+
+def test_banner_on_a_stripped_static_image_stays_vendored():
+    # No symbol table left to corroborate with and nowhere else for the
+    # code to live: the banner itself is the witness (strings-only metadata
+    # is the shape the existing suite already uses).
+    detected = detect_vendored_banners(
+        {"strings": [{"value": "OpenSSL 3.2.0 23 Feb 2024"}]}
+    )
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@3.2.0"]
+    assert detected["banners"][0]["api_symbol_count"] == 0
+    assert detected["mentions"] == []
+
+
 def test_rejected_signature_documented():
     """A library left out of the table records why, so removal is a decision."""
     reasons = {entry["library"]: entry["reason"] for entry in REJECTED_SIGNATURES}
@@ -551,6 +612,7 @@ def test_rejected_signature_documented():
 def test_banner_detection_states_and_dedup():
     assert detect_vendored_banners({}) == {
         "banners": [],
+        "mentions": [],
         "state": BANNER_LAYER_INACTIVE_NO_STRINGS,
     }
     two_versions = detect_vendored_banners(
@@ -691,3 +753,38 @@ def test_an_empty_archive_name_is_not_a_member(tmp_path):
     metadata = _with_extra_exact_functions(_member_query_metadata(), 8)
     matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
     assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
+
+
+def test_banner_in_stripped_shared_object_with_hidden_vendored_code_stays_vendored():
+    """An Android-style .so that statically embeds OpenSSL with hidden
+    visibility: it links other libraries, defines no OpenSSL symbol in its
+    dynamic table, and does not link or import libcrypto. Nothing shows the
+    code living elsewhere, so the banner stays a vendored component."""
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": "OpenSSL 3.0.13 30 Jan 2024"}],
+            "dynamic_entries": [
+                {"tag": "NEEDED", "name": "liblog.so"},
+                {"tag": "NEEDED", "name": "libc.so"},
+            ],
+            "dynamic_symbols": [
+                {"name": "JNI_OnLoad", "is_imported": False},
+                {"name": "__android_log_print", "is_imported": True},
+            ],
+        }
+    )
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@3.0.13"]
+    assert detected["mentions"] == []
+
+
+def test_banner_is_a_mention_when_the_library_is_linked_by_name():
+    """Linking libz without importing a recognisable symbol (a stripped
+    import table) is still the code living elsewhere."""
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            "libraries": [{"name": "/usr/lib/libz.1.dylib", "version": "1.2.12"}],
+        }
+    )
+    assert detected["banners"] == []
+    assert [m["purl"] for m in detected["mentions"]] == ["pkg:generic/zlib@1.2.5"]

@@ -48,11 +48,19 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
 YAML carries the fields a check function evaluates: `mandatory_values`
 (matched against the structured `dll_characteristics` flags), `allowed_values`
-(manifest comparison), `property_key` (a `security_properties` key — the rule
+(manifest comparison), `format_limits` (a per-binary-type override of `limit`), `property_key` (a `security_properties` key — the rule
 fires only when the key was **computed** and is not `true`; an omitted key
 means the source was absent, which is never a failure), `limit` /
 `baseline_version` (thresholds), and `exe_types`. Custom rules files can extend
 these; ids must not collide with built-ins.
+
+`CHECK_ABI_FLOOR`'s `baseline_version` is the built-in default, not the whole
+policy: a run can name its own deployment floor with `--glibc-baseline` or
+`BLINT_GLIBC_BASELINE` (the option wins when both are given). A GLIBC floor
+above a user-set baseline is a `medium` finding; above the built-in default it
+is `info` and the finding says the default was used. Only GLIBC floors are
+compared (a glibc baseline says nothing about a GLIBCXX/libstdc++ floor), and
+musl and bionic binaries never fire the rule.
 
 - `exe_types` is a scope declaration: a rule only runs on files whose resolved
   `exe_type` is in the list. A file whose type could not be resolved (an

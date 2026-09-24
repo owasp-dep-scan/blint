@@ -941,8 +941,8 @@ def test_universal_slice_variance_omitted_when_slices_agree(tmp_path):
                 (MACHO_CPU_X86_64, 3, _wx_macho_binary(0x3), 12),
                 (
                     MACHO_CPU_ARM64,
-                    3,
-                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=3),
+                    0,
+                    _wx_macho_binary(0x3, cpu_type=MACHO_CPU_ARM64, cpu_subtype=0),
                     14,
                 ),
             ]
@@ -3875,3 +3875,114 @@ def test_macho_metadata_exposes_filetype():
     # real on-disk dylib.
     metadata_dylib = parse("/usr/lib/libgmalloc.dylib")
     assert metadata_dylib.get("macho_filetype") == "DYLIB"
+
+
+def test_macho_arm64_subtypes_keep_distinct_slice_names():
+    """macOS 27 system binaries carry an arm64e.x1 slice (subtype 12) beside
+    arm64e; it must not be named arm64, and an unknown subtype must not
+    collapse into another slice's name."""
+    from blint.lib.binary_macho import _macho_arch_name
+
+    assert _macho_arch_name("ARM64", 0) == "arm64"
+    assert _macho_arch_name("ARM64", 2) == "arm64e"
+    # High bits carry the ABI/ptrauth flags and do not change the name.
+    assert _macho_arch_name("ARM64", 0x80000002) == "arm64e"
+    assert _macho_arch_name("ARM64", 12) == "arm64e.x1"
+    assert _macho_arch_name("ARM64", 7) == "arm64.subtype7"
+    assert _macho_arch_name("X86_64", 3) == "x86_64"
+    assert _macho_arch_name("X86_64", 8) == "x86_64h"
+
+
+def test_macho_pac_recognises_the_ptrauth_abi_flag_beyond_lief():
+    """LIEF only knows arm64e (subtype 2); arm64e.x1 (12) carries the same
+    CPU_SUBTYPE_PTRAUTH_ABI flag and is a PAC slice."""
+    from types import SimpleNamespace
+
+    from blint.lib.binary_macho import _macho_has_pac
+
+    def slice_(subtype, lief_says=False, cpu="CPU_TYPE.ARM64"):
+        return SimpleNamespace(
+            support_arm64_ptr_auth=lief_says,
+            header=SimpleNamespace(cpu_type=cpu, cpu_subtype=subtype),
+        )
+
+    assert _macho_has_pac(slice_(0x80000002, lief_says=True))
+    assert _macho_has_pac(slice_(0x8000000C))
+    # The subtype without the ptrauth-ABI flag, plain arm64, and x86_64 are not PAC.
+    assert not _macho_has_pac(slice_(0x0000000C))
+    assert not _macho_has_pac(slice_(0x0))
+    assert not _macho_has_pac(slice_(0x80000003, cpu="CPU_TYPE.X86_64"))
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("codesign") is None, reason="codesign is macOS-only"
+)
+@pytest.mark.parametrize(
+    "system_binary",
+    [
+        # x86_64 + x86_64h + arm64e + arm64e.x1 on macOS 27
+        "/usr/bin/uuidgen",
+        # SHA-1 slot-0 CodeDirectory plus a SHA-256 alternate
+        "/System/Applications/Automator.app/Contents/MacOS/Automator",
+        "/usr/sbin/kextfind",
+    ],
+)
+def test_every_slice_cdhash_matches_codesign_for_that_arch(system_binary):
+    """Each slice is addressable by its own arch name, and its cdhash is the
+    one codesign reports for that arch in the same run."""
+    if not os.path.exists(system_binary):
+        pytest.skip(f"{system_binary} not present on this system")
+    lipo_archs = subprocess.run(
+        ["lipo", "-archs", system_binary], capture_output=True, text=True
+    ).stdout.split()
+    slices = parse(system_binary).get("slices") or []
+    assert sorted(entry["arch"] for entry in slices) == sorted(lipo_archs)
+    for entry in slices:
+        details = subprocess.run(
+            ["codesign", "-dvvv", "--arch", entry["arch"], system_binary],
+            capture_output=True,
+            text=True,
+        ).stderr
+        expected = next(
+            line.split("=", 1)[1].strip().lower()
+            for line in details.splitlines()
+            if line.startswith("CDHash=")
+        )
+        assert entry["code_signature"]["cdhash"] == expected, entry["arch"]
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("codesign") is None, reason="codesign is macOS-only"
+)
+def test_thin_arm64e_x1_slice_signature_and_disassembly(tmp_path):
+    """A thin arm64e.x1 image (lipo -thin from a macOS 27 system binary):
+    its effective cdhash matches codesign, and PAuth_LR prologues decode."""
+    source = "/System/Applications/Automator.app/Contents/MacOS/Automator"
+    if not os.path.exists(source) or "arm64e.x1" not in subprocess.run(
+        ["lipo", "-archs", source], capture_output=True, text=True
+    ).stdout.split():
+        pytest.skip("no arm64e.x1 slice on this system")
+    thin = tmp_path / "automator-x1"
+    subprocess.run(["lipo", "-thin", "arm64e.x1", source, "-output", str(thin)], check=True)
+    expected = next(
+        line.split("=", 1)[1].strip().lower()
+        for line in subprocess.run(
+            ["codesign", "-dvvv", str(thin)], capture_output=True, text=True
+        ).stderr.splitlines()
+        if line.startswith("CDHash=")
+    )
+    metadata = parse(str(thin))
+    assert metadata["code_signature"]["superblob"]["effective_cdhash"] == expected
+    assert metadata["security_properties"]["pac"] is True
+    from blint.lib.disassembler import NYXSTONE_AVAILABLE
+
+    if not NYXSTONE_AVAILABLE:
+        return
+    deep = parse(str(thin), disassemble=True)
+    decoded = [
+        v for v in (deep.get("disassembled_functions") or {}).values() if v.get("instruction_count")
+    ]
+    # A function that fails to decode never enters disassembled_functions, so
+    # coverage is measured against the function list: without +pauth-lr two
+    # thirds failed at their first instruction (pacibsppc) and were dropped.
+    assert len(decoded) >= 0.9 * len(deep.get("functions") or [])

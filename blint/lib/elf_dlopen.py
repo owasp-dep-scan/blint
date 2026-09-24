@@ -95,11 +95,22 @@ def _normalize_candidate(value: str) -> tuple[str, str]:
 
 
 def _loading_imports(metadata: dict) -> set[str]:
-    """Collect the runtime-loading entry points the binary actually imports."""
+    """Collect the runtime-loading entry points the binary actually imports.
+
+    A symbol the binary *defines* does not count: the dynamic loader exports
+    ``dlopen`` (and libc-adjacent runtimes export their own loaders), and
+    counting the definition made the musl loader itself look like a dlopen
+    client - the loader maps libc because that is its job, not because it
+    calls a loader entry point. Entries carrying an explicit
+    ``is_imported: False`` are skipped; shapes without the flag (the PE
+    ``imports`` bucket, minimal metadata) are imports by construction.
+    """
     found = set()
     for bucket in ("dynamic_symbols", "symtab_symbols", "imports"):
         for entry in metadata.get(bucket) or []:
             if not isinstance(entry, dict):
+                continue
+            if entry.get("is_imported") is False:
                 continue
             name = entry.get("name") or ""
             # PE imports are recorded as `library::function`.
@@ -108,6 +119,15 @@ def _loading_imports(metadata: dict) -> set[str]:
             if name in RUNTIME_LOAD_IMPORTS:
                 found.add(name)
     return found
+
+
+def imported_loader_entry_points(metadata: dict) -> set[str]:
+    """Loader entry points this binary imports, symbol-lookup-only excluded.
+
+    The set that makes runtime loading possible at all; the CHECK_RUNTIME_LOADING
+    finding names it so the string evidence is never read as an observed load.
+    """
+    return _loading_imports(metadata) - SYMBOL_LOOKUP_IMPORTS
 
 
 def _loading_call_sites(metadata: dict) -> dict[str, list[str]]:

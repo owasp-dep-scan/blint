@@ -1,7 +1,10 @@
 # pylint: disable=missing-function-docstring,unused-argument
+import os
+import re
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
+from blint.lib.elf_dlopen import imported_loader_entry_points
 from blint.lib.provisioning import (
     application_identifier,
     entitlement,
@@ -10,6 +13,31 @@ from blint.lib.provisioning import (
     is_wildcard,
 )
 from blint.lib.utils import parse_pe_manifest
+from blint.logger import LOG
+
+# The CHECK_ABI_FLOOR baseline can be set per run. The CLI option
+# --glibc-baseline writes this variable so there is exactly one resolution
+# path; the rule's baseline_version in rules.yml stays the built-in default.
+GLIBC_BASELINE_ENV = "BLINT_GLIBC_BASELINE"
+_GLIBC_BASELINE_RE = re.compile(r"\d+(\.\d+)*")
+_warned_baselines: set[str] = set()
+
+
+def _user_glibc_baseline() -> str:
+    """The user's glibc baseline, or "" when unset or not a dotted version.
+
+    An unparseable value is ignored with one warning: comparing floors
+    against it would turn every glibc binary into a medium finding.
+    """
+    value = os.environ.get(GLIBC_BASELINE_ENV, "").strip()
+    if value and not _GLIBC_BASELINE_RE.fullmatch(value):
+        if value not in _warned_baselines:
+            _warned_baselines.add(value)
+            LOG.warning(
+                f"Ignoring {GLIBC_BASELINE_ENV}={value!r}: expected a dotted version like 2.28"
+            )
+        return ""
+    return value
 
 
 def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
@@ -126,15 +154,36 @@ def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> b
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
 
 
+def _parse_mb_limit(raw: Any) -> int | None:
+    """Parse a rule limit like ``30MB`` / ``30M`` / ``30`` into MiB, or None."""
+    if raw is None:
+        return None
+    limit = str(raw).replace("MB", "").replace("M", "").strip()
+    return int(limit) if limit.isdigit() else None
+
+
 def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
-    if virtual_size := metadata.get("virtual_size"):
-        size_limit = 30
-        if raw_limit := rule_obj.get("limit"):
-            limit = str(raw_limit).replace("MB", "").replace("M", "")
-            if limit.isdigit():
-                size_limit = int(limit)
-        return virtual_size / 1024 / 1024 < size_limit
-    return True
+    """Reports a mapped memory footprint above the format's calibrated limit.
+
+    The limits are per format because virtual size means something different
+    on each (F1b.3): a PE's SizeOfImage over 30 MB is anomalous - the benign
+    PE corpus tops out at 6.5 MB - while an ELF's PT_LOAD sum is dominated by
+    legitimate whole-runtime reservations: a stock static Go build with
+    net/http maps 37.4 MB and is normal, so the ELF limit sits at 128 MB
+    (3.4x the benign corpus maximum, 40x its p95). Mach-O produces no
+    virtual_size, so the check never runs there. ``limit`` is the default for
+    formats without their own entry in ``format_limits``.
+    """
+    virtual_size = metadata.get("virtual_size")
+    if not virtual_size:
+        return True
+    size_limit = _parse_mb_limit(rule_obj.get("limit")) or 30
+    format_limits = rule_obj.get("format_limits") or {}
+    binary_type = str(metadata.get("binary_type") or "").upper()
+    if binary_type in format_limits:
+        if (per_format := _parse_mb_limit(format_limits[binary_type])) is not None:
+            size_limit = per_format
+    return virtual_size / 1024 / 1024 < size_limit
 
 
 def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
@@ -926,43 +975,124 @@ def check_build_path_leak(
 def check_libc_portability(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    # An image that reaches into C library internals is bound to the
-    # implementation it was built against, so report the interfaces by name
-    # rather than a bare pass or fail.
+    """Reports interfaces that bind the binary to one C library implementation.
+
+    Availability is measured per symbol (see INTERFACE_LIBC_AVAILABILITY in
+    elf_abi): an interface both glibc 2.41 and musl 1.2.6 export is a
+    non-standard extension but NOT a portability block, so it is not a
+    finding. What fires is the interface the binary's own libc does not share
+    with the other one - glibc-only interfaces on a glibc binary, musl-only
+    interfaces on a musl binary - and the evidence names which libc it
+    measured, so musl's own interface is never called glibc-specific. When
+    the libc cannot be identified, any implementation-specific binding is
+    named with its provider rather than guessed at.
+    """
     abi = metadata.get("abi_analysis") or {}
-    names = (abi.get("features") or {}).get("implementation_specific_imports") or []
-    if not names:
+    features = abi.get("features") or {}
+    libc = abi.get("libc")
+    if libc == "glibc":
+        specific = features.get("glibc_specific_imports") or []
+        if not specific:
+            return True
+        return (
+            f"glibc-specific (measured against glibc 2.41 / musl 1.2.6): "
+            f"{', '.join(specific[:10])}"
+        )
+    if libc == "musl":
+        specific = features.get("musl_specific_imports") or []
+        if not specific:
+            return True
+        return (
+            f"musl-specific (measured against musl 1.2.6 / glibc 2.41): "
+            f"{', '.join(specific[:10])}"
+        )
+    by_provider = []
+    if glibc_only := features.get("glibc_specific_imports") or []:
+        by_provider.append(f"glibc-specific: {', '.join(glibc_only[:5])}")
+    if musl_only := features.get("musl_specific_imports") or []:
+        by_provider.append(f"musl-specific: {', '.join(musl_only[:5])}")
+    if not by_provider:
         return True
-    return ", ".join(names[:10])
+    return "; ".join(by_provider)
 
 
-def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    # Fails when the binary requires a runtime newer than the configured
-    # baseline, which is the version the deployment target is known to ship.
+def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str | dict:
+    """Reports a GLIBC symbol-version floor above the deployment baseline.
+
+    The baseline is the user's deployment target when one was set through
+    ``--glibc-baseline`` / ``BLINT_GLIBC_BASELINE``, and the rule's built-in
+    default otherwise. The provenance changes what the finding means: a floor
+    above a baseline somebody chose is a deployment error (``medium``), a
+    floor above a built-in default nobody chose is a note (``info``), and the
+    finding says which of the two it used.
+
+    Only GLIBC floors are compared - a glibc baseline says nothing about the
+    GLIBCXX/libstdc++ floor or any other provider, whose requirements stay in
+    ``abi_analysis.requirements``. musl and bionic binaries carry no GLIBC
+    version nodes, so the rule cannot apply to them (ground rule 35: a rule
+    must not fire where its concept does not exist).
+    """
     abi = metadata.get("abi_analysis") or {}
+    if abi.get("libc") in ("musl", "bionic"):
+        return True
     required = abi.get("min_glibc_version")
     if not required:
         return True
-    baseline = str(rule_obj.get("baseline_version") or "").strip()
+    user_baseline = _user_glibc_baseline()
+    baseline = user_baseline or str(rule_obj.get("baseline_version") or "").strip()
     if not baseline:
         return True
     if version_sort_key(required) <= version_sort_key(baseline):
         return True
-    return f"requires glibc {required}, baseline is {baseline}"
+    if user_baseline:
+        return {
+            "severity": "medium",
+            "evidence": (
+                f"GLIBC floor {required} exceeds the configured baseline {baseline} "
+                f"({GLIBC_BASELINE_ENV})"
+            ),
+        }
+    return {
+        "severity": "info",
+        "evidence": (
+            f"GLIBC floor {required} exceeds the built-in default baseline {baseline}; "
+            f"set --glibc-baseline or {GLIBC_BASELINE_ENV} to your deployment target "
+            "to make this a policy finding"
+        ),
+    }
 
 
 def check_runtime_loading(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    # Libraries opened at runtime are absent from the dependency table, so an
-    # image that loads them has a dependency surface no static list describes.
+    """Reports library names the binary could load at runtime - as strings.
+
+    The evidence is never an observed load: it is library-name strings from
+    the image's data sections, paired with the loader entry points
+    (dlopen / LoadLibrary* / NSAddImage / ...) the binary imports. The
+    finding states both, so a reader cannot mistake it for a trace.
+
+    With no imported loader entry point the rule is suppressed rather than
+    lowered: the binary has no way to open a library by name, so however
+    many library-shaped strings it carries (name tables, message catalogs,
+    loader manifests), a finding titled "loads libraries" would be a false
+    claim at any severity.
+    """
     recovered = metadata.get("recovered_dependencies") or []
     confident = [
         entry["name"] for entry in recovered if entry.get("confidence") in ("high", "medium")
     ]
     if not confident:
         return True
-    return ", ".join(sorted(confident)[:10])
+    entry_points = imported_loader_entry_points(metadata)
+    if not entry_points:
+        return True
+    names = ", ".join(sorted(confident)[:10])
+    loaders = ", ".join(sorted(entry_points))
+    return (
+        f"library-name strings ({names}) paired with imported loader entry "
+        f"points ({loaders}); the strings are evidence, not observed loads"
+    )
 
 
 def check_link_closure(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:

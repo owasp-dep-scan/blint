@@ -422,6 +422,54 @@ def _normalize_arch_target(arch_target: str) -> str:
     return (arch_target or "").lower()
 
 
+# LLVM decodes an extension's instructions only when the feature is on, and
+# nyxstone starts from the generic CPU, so every extension a shipped binary
+# uses has to be named. Disassembly of an existing binary never needs to
+# withhold an instruction - llvm-objdump enables all AArch64 extensions for
+# the same reason - so each list is every extension LLVM 18 decodes for that
+# architecture, minus the ones whose encodings collide with another
+# extension's. Measured on shipped binaries (macOS 27 arm64e/arm64e.x1,
+# Android system and app libraries, the wasm-tools fixtures): without these,
+# LSE atomics, AES/SHA/CRC, SVE/SME, MTE, CSSC, CPA and RCPC3 instructions
+# failed to decode, and a riscv64 build lost 85% of its functions to
+# compressed instructions alone.
+AARCH64_DISASSEMBLY_FEATURES = (
+    "+v9.5a,+pauth,+pauth-lr,+lse,+rcpc,+rcpc-immo,+rcpc3,+crc,+aes,+sha2,+sha3,+sm4,"
+    "+fullfp16,+fp16fml,+dotprod,+bf16,+i8mm,+rdm,+jsconv,+complxnum,+sve,+sve2,"
+    "+sve2-bitperm,+sve2-aes,+sve2-sha3,+sve2-sm4,+sve2p1,+sme,+sme2,+sme2p1,+sme-f64f64,"
+    "+sme-i16i64,+sme-f16f16,+mte,+mops,+cssc,+cpa,+d128,+the,+lse128,+gcs,+ls64,+hbc,"
+    "+rand,+tme,+spe,+fp8,+faminmax,+lut"
+)
+# Zcmp/Zcmt reuse the compressed double-precision load/store encodings and
+# XTheadVector the V encodings, so they stay off: with D and V on, those
+# words mean c.fld/c.fsd and RVV.
+RISCV_DISASSEMBLY_FEATURES = (
+    "+m,+a,+f,+d,+c,+zicsr,+zifencei,+v,+zba,+zbb,+zbc,+zbs,+zfh,+zfa,+zcb,+zicond,"
+    "+zihintpause,+zicbom,+zicboz,+zicbop,+zawrs,+zvbb,+zvbc,+zvkn,+zvksh,+zkn,+zks"
+)
+
+
+def _default_disassembly_features(arch_target: str) -> str:
+    """The extension set blint enables for decoding this architecture."""
+    arch = (arch_target or "").lower().split("-", 1)[0]
+    if arch in ("aarch64", "arm64", "arm64e", "aarch64_be"):
+        return AARCH64_DISASSEMBLY_FEATURES
+    if arch.startswith("riscv"):
+        return RISCV_DISASSEMBLY_FEATURES
+    return ""
+
+
+def _merge_features(defaults: str, requested: str) -> str:
+    """Caller features win: they are appended, so a '-feat' can turn one off."""
+    seen, merged = set(), []
+    for feature in [*defaults.split(","), *(requested or "").split(",")]:
+        feature = feature.strip()
+        if feature and feature not in seen:
+            seen.add(feature)
+            merged.append(feature)
+    return ",".join(merged)
+
+
 @cache
 def _has_supported_nyxstone_target(arch_target: str) -> bool:
     normalized_target = (arch_target or "").strip()
@@ -1310,6 +1358,11 @@ def _append_unique_target_addr(target_addrs: list[int], addr_val) -> None:
         target_addrs.append(addr_val)
 
 
+# Branch and address-forming mnemonics whose single immediate operand LLVM
+# prints as a byte offset from the instruction's own address.
+AARCH64_PC_RELATIVE_MNEMONICS = frozenset({"b", "bl", "adr", "bc"})
+
+
 def _resolve_operand_target_addresses(
     mnemonic: str,
     operand: str,
@@ -1338,6 +1391,16 @@ def _resolve_operand_target_addresses(
             )
             val = _parse_immediate_token(immediate_token)
             is_hex_token = immediate_token.lower().lstrip("#").startswith(("0x", "+0x", "-0x"))
+            if val is not None and is_aarch64 and whole_operand_is_immediate:
+                # LLVM's AArch64 printer (nyxstone) renders these operands
+                # PC-relative in every immediate style: adrp as a delta from
+                # the instruction's 4 KiB page, b/bl/adr from its address.
+                # That exact target goes first; the guesses below remain as
+                # fallbacks for other disassembly text.
+                if mnemonic == "adrp":
+                    _append_unique_target_addr(target_addrs, (instr.address & ~0xFFF) + val)
+                elif mnemonic in AARCH64_PC_RELATIVE_MNEMONICS or mnemonic.startswith("b."):
+                    _append_unique_target_addr(target_addrs, instr.address + val)
             if val is not None and is_hex_token:
                 _append_unique_target_addr(target_addrs, val)
             elif val is not None:
@@ -1576,6 +1639,31 @@ def _filter_windows_arm64_indirect_candidates(
     return [addr for addr in candidate_addrs if 0 <= addr <= 0x0000FFFFFFFFFFFF]
 
 
+# AArch64 loads that write two registers.
+AARCH64_PAIR_LOADS = frozenset({"ldp", "ldnp", "ldpsw", "ldxp", "ldaxp", "ldiapp"})
+# Mnemonics whose first register operand is only read. Stores name their
+# source first; compares, tests and branches write no general register.
+_AARCH64_FIRST_OPERAND_READ_PREFIXES = ("st", "cmp", "cmn", "tst", "cb", "tb", "b", "prfm", "ret")
+_X86_FIRST_OPERAND_READ = frozenset(
+    {"cmp", "test", "push", "bt", "call", "jmp", "ret", "out", "outs", "verr", "verw"}
+)
+
+
+def _writes_first_operand(mnemonic: str, is_aarch64: bool) -> bool:
+    if is_aarch64:
+        return not mnemonic.startswith(_AARCH64_FIRST_OPERAND_READ_PREFIXES) or mnemonic in {
+            "bic",
+            "bics",
+            "bfi",
+            "bfm",
+            "bfxil",
+            "bsl",
+            "bit",
+            "bif",
+        }
+    return mnemonic not in _X86_FIRST_OPERAND_READ and not mnemonic.startswith(("j", "cmp"))
+
+
 def _update_register_target(
     instr,
     reg_targets: dict,
@@ -1598,8 +1686,17 @@ def _update_register_target(
     dst_reg = _extract_register_token(operands[0], arch_reg_set)
     if not dst_reg:
         return
+    if not _writes_first_operand(mnemonic, is_aarch64):
+        return
+    if is_aarch64 and mnemonic in AARCH64_PAIR_LOADS and len(operands) >= 2:
+        # Both destinations are written by a pair load; the tracker models
+        # neither (the loaded values are memory, not addresses it knows).
+        reg_targets.pop(dst_reg, None)
+        if second := _extract_register_token(operands[1], arch_reg_set):
+            reg_targets.pop(second, None)
+        return
 
-    if is_aarch64 and mnemonic.startswith("ldr") and len(operands) >= 2:
+    if is_aarch64 and mnemonic.startswith(("ldr", "ldur")) and len(operands) >= 2:
         src = ",".join(part.strip() for part in operands[1:])
         src_base_reg, src_displacement, has_mem_operand = _parse_arm64_memory_operand_base_disp(
             src, arch_reg_set
@@ -1627,7 +1724,11 @@ def _update_register_target(
                         chain_hops=next_hops,
                     )
                     return
-            reg_targets.pop(dst_reg, None)
+            # A pointer loaded from memory the tracker cannot place (a vtable
+            # slot off a heap object). No address is known, but the load is
+            # the evidence a later blr through this register should report
+            # as unresolved rather than drop.
+            reg_targets[dst_reg] = _build_reg_target(raw_operand=_raw_operand_text(src))
             return
 
     if mnemonic in {"mov", "movq", "movabs", "lea", "adr", "adrp"} and len(operands) >= 2:
@@ -1702,6 +1803,12 @@ def _update_register_target(
                 )
                 return
         reg_targets.pop(dst_reg, None)
+        return
+    # Any other instruction that writes its first register operand (csel,
+    # orr, ldur, pop, xor, ...) leaves a value the tracker does not model;
+    # keeping the old target would resolve a later indirect call through a
+    # register that no longer holds it.
+    reg_targets.pop(dst_reg, None)
 
 
 def _resolve_direct_calls(
@@ -1871,6 +1978,22 @@ def _resolve_direct_calls(
                             target_addrs=target_addrs,
                             raw_operand=raw_operand,
                         )
+                elif not is_aarch64 and not is_mips and "[" in operand and "]" in operand:
+                    # Tail jump through a pointer slot - jmp qword ptr
+                    # [rip + N] is the PLT, -fno-plt and PE import-thunk
+                    # shape. Named from the slot, like a call through one;
+                    # the slot's address is never offered as the callee's.
+                    slot_addrs = _resolve_operand_target_addresses(
+                        mnemonic, operand, tail_instr, is_aarch64, is_mips, is_windows
+                    )
+                    target_name = _lookup_target_name(slot_addrs, addr_to_name_map)
+                    if target_name:
+                        _append_call_target(
+                            direct_call_targets,
+                            kind="tailcall",
+                            target_name=target_name,
+                            raw_operand=_raw_operand_text(operand),
+                        )
                 elif not any(ch in operand for ch in ("[", "]")):
                     target_addrs = _resolve_operand_target_addresses(
                         mnemonic,
@@ -2035,11 +2158,7 @@ def disassemble_functions(
             arch_target or "<empty>",
         )
         return disassembly_results
-    if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
-        if not features:
-            features = "+pauth"
-        elif "+pauth" not in features:
-            features += ",+pauth"
+    features = _merge_features(_default_disassembly_features(arch_target), features)
     # Nyxstone's LLVM backend only supports the ELF object format, so MachO and
     # PE triples must be remapped to an ELF-compatible triple for initialization.
     # The original arch_target is retained for the architecture-specific decode

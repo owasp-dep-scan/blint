@@ -15,6 +15,7 @@ from blint.db import (
     blintdb_fuzzy_layer_state,
     blintdb_hash_capabilities,
     build_function_hash_index,
+    build_symbol_source_map,
     detect_binaries_utilized,
     is_supported_blintdb,
     lookup_project_matches,
@@ -94,16 +95,23 @@ def _create_v2_blintdb(db_file):
     connection.executemany(
         "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, ?)",
         [
+            # F2b.1: each project carries its own identity names. A name two
+            # projects share (the old fixture had helper and puts in both) is
+            # low information by definition - spread suppression drops it -
+            # and imports never identify a project anyway.
             (1, "helper", "symtab_symbols"),
             (1, "puts", "imports"),
             (1, "strlen", "dynamic_symbols"),
-            (2, "helper", "symtab_symbols"),
-            (2, "puts", "imports"),
+            (2, "other_helper", "symtab_symbols"),
         ],
     )
     connection.executemany(
         "INSERT INTO FunctionFingerprints(binary_id, function_key, instruction_hash, assembly_hash) VALUES(?, ?, ?, ?)",
         [
+            (1, f"0x401000::fn{digit}", "b" * 63 + digit, "a" * 64)
+            for digit in "01234567"
+        ]
+        + [
             (1, "0x401000::helper", "b" * 64, "a" * 64),
             (2, "0x501000::helper", "d" * 64, "c" * 64),
         ],
@@ -225,10 +233,10 @@ def _create_v3_blintdb(db_file, *, populate=True):
     connection.executemany(
         "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, ?)",
         [
+            # distinct identity names per project (F2b.1 spread suppression)
             (1, "helper", "symtab_symbols"),
             (1, "puts", "imports"),
-            (2, "helper", "symtab_symbols"),
-            (2, "puts", "imports"),
+            (2, "other_helper", "symtab_symbols"),
         ],
     )
     fuzzy_values = [f"{i:016x}" for i in range(8)] if populate else [None] * 8
@@ -295,14 +303,20 @@ def test_lookup_project_matches_prefers_function_hashes(tmp_path):
     db_file = tmp_path / "blint.db"
     _create_v2_blintdb(db_file)
 
+    # A population of exact hashes (HASH_ONLY_MATCH_THRESHOLD = 8): one
+    # shared 4-instruction thunk is a compiler artifact, not a shared project
+    # (measured on tier-0 deep mode, F2b.1).
+    instruction_hashes = ["b" * 63 + digit for digit in "01234567"]
     matches = lookup_project_matches(
         {
             "symtab_symbols": ["helper"],
+            # The imports bucket is skipped entirely (F2b.1): it names what
+            # the artifact links against, not what it is.
             "imports": ["puts"],
             "dynamic_symbols": ["strlen"],
         },
         function_hash_index={
-            "instruction_hashes": ["b" * 64],
+            "instruction_hashes": instruction_hashes,
             "assembly_hashes": ["a" * 64],
         },
         binary_metadata={
@@ -314,9 +328,9 @@ def test_lookup_project_matches_prefers_function_hashes(tmp_path):
 
     assert matches
     assert matches[0]["project_purl"] == "pkg:generic/demo@1.0.0"
-    assert matches[0]["matched_instruction_hash_count"] == 1
-    assert matches[0]["matched_symbol_count"] == 3
-    assert matches[0]["score"] >= 24.0
+    assert matches[0]["matched_instruction_hash_count"] == 8
+    assert matches[0]["matched_symbol_count"] == 2
+    assert matches[0]["score"] >= 20.0
 
 
 def test_detect_binaries_utilized_returns_rich_evidence(tmp_path):
@@ -327,6 +341,7 @@ def test_detect_binaries_utilized_returns_rich_evidence(tmp_path):
         symbol_source_map={"imports": ["puts"], "symtab_symbols": ["helper"]},
         function_hash_index={"instruction_hashes": ["b" * 64]},
         binary_metadata={
+            "name": "libdemo.so",
             "binary_type": "ELF",
             "llvm_target_tuple": "x86_64-pc-linux-gnu",
         },
@@ -335,7 +350,7 @@ def test_detect_binaries_utilized_returns_rich_evidence(tmp_path):
 
     assert binaries_detected == {"pkg:generic/demo@1.0.0"}
     assert evidence["pkg:generic/demo@1.0.0"]["matched_instruction_hash_count"] == 1
-    assert evidence["pkg:generic/demo@1.0.0"]["matched_symbols"] == ["helper", "puts"]
+    assert evidence["pkg:generic/demo@1.0.0"]["matched_symbols"] == ["helper"]
 
 
 def test_process_exe_file_uses_blintdb_hash_matches(tmp_path, monkeypatch):
@@ -367,7 +382,10 @@ def test_process_exe_file_uses_blintdb_hash_matches(tmp_path, monkeypatch):
     assert matched.purl == "pkg:generic/demo@1.0.0"
     assert prop_map["internal:blintdb_matched_instruction_hash_count"] == "1"
     assert prop_map["internal:blintdb_binary_name_match"] == "True"
-    assert prop_map["internal:blintdb_matched_symbols"] == "helper, puts, strlen"
+    # F2b.1: puts and strlen are libc imports of the demo binary - an import
+    # names the provider library, not the artifact, so only the demo's own
+    # defined symbol counts as a match.
+    assert prop_map["internal:blintdb_matched_symbols"] == "helper"
 
 
 def test_blint_options_auto_enable_disassembly_for_deep_blintdb_sbom():
@@ -419,9 +437,11 @@ def test_execute_returns_rows_for_matching_aggregate(tmp_path):
             "SELECT binary_id, COUNT(*) AS cnt FROM Symbols WHERE name = ? GROUP BY binary_id",
             ["helper"],
         )
-        assert len(rows) == 2
-        assert {row["binary_id"] for row in rows} == {1, 2}
-        assert all(row["cnt"] == 1 for row in rows)
+        # helper is demo's identity name alone since F2b.1 - the shared-name
+        # fixture rows were low information and are gone.
+        assert len(rows) == 1
+        assert rows[0]["binary_id"] == 1
+        assert rows[0]["cnt"] == 1
     finally:
         connection.close()
 
@@ -1008,9 +1028,9 @@ def _banner_metadata(version="1.3.2"):
     }
 
 
-def _run_process_exe_with_db(tmp_path, monkeypatch, project_purl, metadata):
+def _run_process_exe_with_db(tmp_path, monkeypatch, project_purl, metadata, binary_name="libz.1.dylib"):
     db_file = tmp_path / "blint.db"
-    _create_blintdb_with_purl(db_file, project_purl)
+    _create_blintdb_with_purl(db_file, project_purl, binary_name=binary_name)
     sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
     monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
     monkeypatch.setattr(
@@ -1073,6 +1093,9 @@ def test_banner_merges_into_homebrew_versioned_formula_component(tmp_path, monke
                 {"name": "crc32"},
             ],
         },
+        # the DB binary carries the artifact's name so the six symbols ride
+        # the name-match door (F2b.1); the floor for nameless matches is 30.
+        binary_name="openssl",
     )
     openssl_components = [c for c in components if "openssl" in (c.purl or "")]
     assert len(openssl_components) == 1, [c.purl for c in openssl_components]
@@ -1095,6 +1118,56 @@ def test_banner_of_a_different_version_stays_separate(tmp_path, monkeypatch):
         "pkg:generic/zlib@1.3.1?source_hash=abc",
         "pkg:generic/zlib@1.3.2",
     ]
+
+
+# --- F2b.2: vendored banners vs version-mention strings -------------------
+
+
+def test_mention_only_banner_is_not_a_component(tmp_path, monkeypatch):
+    """The assetutil shape at SBOM level.
+
+    A dynamically linked artifact whose only zlib tie is a stale banner
+    string emits no pkg:generic/zlib component; the mention is recorded on
+    the parent so the string is visible without asserting code.
+    """
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/otherlib@1.0.0",
+        {
+            "name": "assetutil",
+            "binary_type": "MachO",
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            "dynamic_entries": [{"tag": "NEEDED", "name": "/usr/lib/libz.1.dylib"}],
+            "dynamic_symbols": [{"name": "_deflate", "is_imported": True}],
+        },
+    )
+    assert [c.purl for c in components if "zlib" in (c.purl or "")] == []
+
+
+def test_vendored_banner_component_carries_the_corroboration_count(tmp_path, monkeypatch):
+    """The libcrypto.0.9.7 shape at SBOM level: banner + the library's own
+    exported API in the artifact - the component stays and its evidence
+    states how many API symbols corroborate it."""
+    components = _run_process_exe_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/otherlib@1.0.0",
+        {
+            "name": "libcrypto.0.9.7.dylib",
+            "binary_type": "MachO",
+            "strings": [{"value": "Big Number part of OpenSSL 0.9.7l 28 Sep 2006"}],
+            "dynamic_symbols": [
+                {"name": "_BN_new", "is_imported": False},
+                {"name": "_EVP_Digest", "is_imported": False},
+            ],
+        },
+    )
+    openssl_components = [c for c in components if "openssl@" in (c.purl or "")]
+    assert [c.purl for c in openssl_components] == ["pkg:generic/openssl@0.9.7l"]
+    props = {p.name: p.value for p in openssl_components[0].properties}
+    assert props["internal:vendored_banner_api_symbols"] == "2"
+    assert props["internal:vendored_attribution"] == "vendored_banner"
 
 
 # --- F2a.3: version conflicts between matched versions of one project ----
@@ -1288,3 +1361,405 @@ def test_deep_elf_abi_floor_is_a_parent_property_not_a_component(monkeypatch):
     }
     assert props["internal:abi_requirements"].startswith("GLIBC>=2.34 (3 symbols)")
     assert props["internal:symbols_version"] == "GLIBC_2.34, fake.dll"
+
+
+# --- F2b.1: a fixture crossing every suppression ---------------------------
+
+
+def _create_typed_blintdb(db_file, rows, fingerprints=None):
+    """A v2-shaped database with explicit binary_type and project names.
+
+    rows: (binary_name, binary_type, project_name, project_purl, symbols)
+    fingerprints: optional (binary_id, function_key, instruction_hash) tuples
+    """
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        """
+        CREATE TABLE SchemaMeta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE Projects (project_id INTEGER PRIMARY KEY, name TEXT NOT NULL, purl TEXT);
+        CREATE TABLE Builds (build_id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
+            llvm_target_tuple TEXT, FOREIGN KEY (project_id) REFERENCES Projects(project_id));
+        CREATE TABLE Binaries (binary_id INTEGER PRIMARY KEY, build_id INTEGER NOT NULL,
+            name TEXT, binary_type TEXT, llvm_target_tuple TEXT,
+            FOREIGN KEY (build_id) REFERENCES Builds(build_id));
+        CREATE TABLE Symbols (symbol_id INTEGER PRIMARY KEY, binary_id INTEGER NOT NULL,
+            name TEXT NOT NULL, source TEXT NOT NULL,
+            FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        CREATE TABLE FunctionFingerprints (function_id INTEGER PRIMARY KEY,
+            binary_id INTEGER NOT NULL, function_key TEXT NOT NULL, instruction_hash TEXT,
+            assembly_hash TEXT, FOREIGN KEY (binary_id) REFERENCES Binaries(binary_id));
+        """
+    )
+    connection.executemany(
+        "INSERT INTO SchemaMeta(key, value) VALUES(?, ?)",
+        (("schema_family", "blint-db"), ("schema_version", "2")),
+    )
+    for index, (binary_name, binary_type, project_name, project_purl, symbols) in enumerate(
+        rows, start=1
+    ):
+        connection.execute(
+            "INSERT INTO Projects(project_id, name, purl) VALUES(?, ?, ?)",
+            (index, project_name, project_purl),
+        )
+        connection.execute(
+            "INSERT INTO Builds(build_id, project_id) VALUES(?, ?)", (index, index)
+        )
+        connection.execute(
+            "INSERT INTO Binaries(binary_id, build_id, name, binary_type) VALUES(?, ?, ?, ?)",
+            (index, index, binary_name, binary_type),
+        )
+        connection.executemany(
+            "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, 'symtab_symbols')",
+            [(index, name) for name in symbols],
+        )
+    if fingerprints:
+        connection.executemany(
+            "INSERT INTO FunctionFingerprints(binary_id, function_key, instruction_hash)"
+            " VALUES(?, ?, ?)",
+            fingerprints,
+        )
+    connection.commit()
+    connection.close()
+
+
+def test_imported_symbols_never_enter_the_query_map():
+    """Query-side import suppression: flag, library:: form, imports bucket.
+
+    /bin/cat's five false projects on tier-0 all matched on
+    libSystem.B.dylib::_close-shaped imports; an import names the provider,
+    not the artifact.
+    """
+    source_map = build_symbol_source_map(
+        {
+            "symtab_symbols": [
+                {"name": "/usr/lib/libSystem.B.dylib::_close", "is_imported": True},
+                {"name": "/usr/lib/libSystem.B.dylib::__stack_chk_fail", "is_imported": True},
+                {"name": "cat_read", "is_imported": False},
+                {"name": "cat_write"},
+            ],
+            "imports": [
+                {"name": "KERNEL32.dll::CreateFileW", "is_imported": True},
+                {"name": "plain_import", "is_imported": True},
+            ],
+        }
+    )
+    assert source_map == {"symtab_symbols": ["cat_read", "cat_write"]}
+    # and the lookup refuses the imports bucket even when handed one directly
+    matches = lookup_project_matches(
+        {"imports": ["CreateFileW"]},
+        binary_metadata={"binary_type": "PE"},
+        db_file="/nonexistent",
+    )
+    assert matches == []
+
+
+def test_fallback_retry_never_crosses_binary_type(tmp_path):
+    """The retry keeps the format predicate (F2b.1).
+
+    A static ELF Rust binary matched the Mach-O ripgrep build on 984 shared
+    Rust-std names through the previously unfiltered retry; identical
+    symbols behind a different binary_type must not match. Rows that never
+    recorded a binary_type stay eligible, so an untyped database keeps
+    working.
+    """
+    db_file = tmp_path / "typed.db"
+    _create_typed_blintdb(
+        db_file,
+        [
+            (
+                "rg",
+                "MachO",
+                "ripgrep",
+                "pkg:generic/ripgrep@15.2.0",
+                ["_ZN4core6result", "_ZN3std5alloc", "rg_main"],
+            )
+        ],
+    )
+    elf_query = {
+        "binary_type": "ELF",
+        "llvm_target_tuple": "aarch64-unknown-linux-musl",
+        "name": "wasm-tools",
+    }
+    matches = lookup_project_matches(
+        {"symtab_symbols": ["_ZN4core6result", "_ZN3std5alloc", "rg_main"]},
+        binary_metadata=elf_query,
+        db_file=str(db_file),
+    )
+    assert matches == []
+    # A Mach-O query still finds it through the first pass (the artifact
+    # carries the project's binary name, so the name door applies)...
+    macho_query = dict(elf_query, binary_type="MachO", llvm_target_tuple="aarch64-apple-darwin", name="rg")
+    matches = lookup_project_matches(
+        {"symtab_symbols": ["_ZN4core6result", "_ZN3std5alloc", "rg_main"]},
+        binary_metadata=macho_query,
+        db_file=str(db_file),
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/ripgrep@15.2.0"]
+    # ...and an untyped row is reachable through the retry.
+    untyped = tmp_path / "untyped.db"
+    _create_typed_blintdb(
+        untyped,
+        [
+            (
+                "rg",
+                None,
+                "ripgrep",
+                "pkg:generic/ripgrep@15.2.0",
+                ["_ZN4core6result", "_ZN3std5alloc", "rg_main"],
+            )
+        ],
+    )
+    matches = lookup_project_matches(
+        {"symtab_symbols": ["_ZN4core6result", "_ZN3std5alloc", "rg_main"]},
+        binary_metadata=dict(elf_query, name="rg"),
+        db_file=str(untyped),
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/ripgrep@15.2.0"]
+
+
+def test_low_information_spread_suppression(tmp_path):
+    """A name two project names define cannot identify either (F2b.1).
+
+    _main, __mh_execute_header and _OUTLINED_FUNCTION_N reached every
+    project; the boundary fixture asserts exactly two defining project
+    names suppress while one keeps.
+    """
+    db_file = tmp_path / "spread.db"
+    shared = ["_main", "__mh_execute_header"]
+    _create_typed_blintdb(
+        db_file,
+        [
+            ("openssl", "MachO", "openssl@3", "pkg:generic/openssl@3@3.6.3", shared + ["ssl_only"]),
+            ("rg", "MachO", "ripgrep", "pkg:generic/ripgrep@15.2.0", shared + ["rg_only"]),
+        ],
+    )
+    csh = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "csh"}
+    # The shared names are gone, so csh (which only ever matched those)
+    # identifies nothing.
+    matches = lookup_project_matches(
+        {"symtab_symbols": shared}, binary_metadata=csh, db_file=str(db_file)
+    )
+    assert matches == []
+    # ssl_only still identifies the openssl project for a nameless artifact
+    # below the symbol floor it cannot - the suppression and the floor are
+    # independent layers - but for the project's own binary the name door
+    # applies.
+    matches = lookup_project_matches(
+        {"symtab_symbols": shared + ["ssl_only"]},
+        binary_metadata=dict(csh, name="openssl"),
+        db_file=str(db_file),
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/openssl@3@3.6.3"]
+
+
+def test_mechanically_emitted_names_never_match(tmp_path):
+    """Toolchain-emitted names are not identity (F2b.1).
+
+    frc.dylib matched ripgrep on 31 _OUTLINED_FUNCTION_<n> names - clang
+    numbers outlined functions per binary and the numbers happened to
+    overlap. The names are blocked by shape, project-chosen names are not.
+    """
+    from blint.db import MECHANICALLY_EMITTED_SYMBOL_RE
+
+    db_file = tmp_path / "mechanical.db"
+    outlined = [f"_OUTLINED_FUNCTION_{i}" for i in range(31)]
+    _create_typed_blintdb(
+        db_file,
+        [
+            ("rg", "MachO", "ripgrep", "pkg:generic/ripgrep@15.2.0", outlined + ["rg_main"]),
+        ],
+    )
+    metadata = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "frc.dylib"}
+    assert lookup_project_matches(
+        {"symtab_symbols": outlined}, binary_metadata=metadata, db_file=str(db_file)
+    ) == []
+    # the project's own chosen name still identifies it
+    matches = lookup_project_matches(
+        {"symtab_symbols": outlined + ["rg_main"]},
+        binary_metadata=dict(metadata, name="rg"),
+        db_file=str(db_file),
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/ripgrep@15.2.0"]
+    for chosen in ("deflate", "rg_main", "png_create_read_struct"):
+        assert not MECHANICALLY_EMITTED_SYMBOL_RE.match(chosen), chosen
+    for mechanical in ("_OUTLINED_FUNCTION_0", "__mh_execute_header", "_main", "main", "_start", "init", "fini"):
+        assert MECHANICALLY_EMITTED_SYMBOL_RE.match(mechanical), mechanical
+
+
+def test_nameless_symbol_only_floor(tmp_path):
+    """A nameless symbol-only match needs 30 identity symbols (F2b.1).
+
+    The measured false shapes matched 6-9 coincidental local names; a real
+    identity match carries 79-338. 29 stays out, 30 passes, and a
+    name-matched candidate rides the name door at any count.
+    """
+    db_file = tmp_path / "floor.db"
+    _create_typed_blintdb(
+        db_file,
+        [
+            ("libz.1.dylib", "MachO", "zlib", "pkg:generic/zlib@1.3.2",
+             [f"zsym_{i}" for i in range(40)]),
+        ],
+    )
+    metadata = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "mystery"}
+    nameless_29 = lookup_project_matches(
+        {"symtab_symbols": [f"zsym_{i}" for i in range(29)]},
+        binary_metadata=metadata,
+        db_file=str(db_file),
+    )
+    assert nameless_29 == []
+    nameless_30 = lookup_project_matches(
+        {"symtab_symbols": [f"zsym_{i}" for i in range(30)]},
+        binary_metadata=metadata,
+        db_file=str(db_file),
+    )
+    assert [m["project_purl"] for m in nameless_30] == ["pkg:generic/zlib@1.3.2"]
+    # the name door: three symbols and the artifact's name is enough
+    named = lookup_project_matches(
+        {"symtab_symbols": ["zsym_0", "zsym_1", "zsym_2"]},
+        binary_metadata=dict(metadata, name="libz.1.dylib"),
+        db_file=str(db_file),
+    )
+    assert [m["project_purl"] for m in named] == ["pkg:generic/zlib@1.3.2"]
+
+
+class TestDeepModeQualification:
+    """F2b.1 deep measurement: every false attribution found on tier-0 in
+    --deep mode, and the door that keeps each true shape."""
+
+    def _db(self, tmp_path, name="deep.db"):
+        db_file = tmp_path / name
+        _create_typed_blintdb(
+            db_file,
+            [
+                ("bzip2", "MachO", "bzip2", "pkg:generic/bzip2@1.0.8", ["bz_decompress"]),
+                ("fmt", "MachO", "fmt", "pkg:generic/fmt@12.0.0", ["fmt_vformat"]),
+            ],
+            fingerprints=[(1, "0x1000::thunk", "e" * 64)]
+            + [(1, f"0x1001::fn{i}", "f" * 63 + str(i)) for i in range(9)],
+        )
+        return db_file
+
+    def test_single_hash_without_name_or_symbols_never_attributes(self, tmp_path):
+        # wasm-tools-aarch64-macos -> bzip2 on tier-0: one instruction hash
+        # (plus one fuzzy hash), zero symbols, no name agreement. A shared
+        # 4-instruction thunk is a compiler artifact, not a shared project.
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["unrelated_own_symbol"]},
+            function_hash_index={"instruction_hashes": ["e" * 64], "fuzzy_hashes": ["f" * 64]},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "wasm-tools"},
+            db_file=str(self._db(tmp_path)),
+        )
+        assert matches == []
+
+    def test_hash_population_attributes_without_a_name(self, tmp_path):
+        # A genuine whole-binary embed shares a population of exact hashes.
+        population = ["f" * 63 + str(i) for i in range(8)]
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["unrelated_own_symbol"]},
+            function_hash_index={"instruction_hashes": population},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "mystery"},
+            db_file=str(self._db(tmp_path)),
+        )
+        assert [m["project_purl"] for m in matches] == ["pkg:generic/bzip2@1.0.8"]
+
+    def test_hash_population_below_query_coverage_never_attributes(self, tmp_path):
+        # libGPUCompilerImpl.dylib -> ripgrep on tier-0 deep: nine identical
+        # instruction hashes, zero symbols, no name. Nine crossed the count
+        # bar; what makes it false is that those nine are a fraction of a
+        # percent of the query's own hashed functions - compiler-emitted
+        # functions compile identically everywhere. A real whole-binary
+        # embed is most of the query's code.
+        query = ["f" * 63 + str(i) for i in range(9)] + [
+            "a" * 63 + str(i) for i in range(100)
+        ]
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["unrelated_own_symbol"]},
+            function_hash_index={"instruction_hashes": query},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "libGPUCompilerImpl.dylib"},
+            db_file=str(self._db(tmp_path)),
+        )
+        assert matches == []
+
+    def test_name_with_zero_agreement_never_attributes(self, tmp_path):
+        # /usr/bin/fmt (Apple's formatter) -> fmt on tier-0: name agreement
+        # with libfmt.dylib and not one matched symbol, hash or callgraph.
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["format_paragraph"]},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "fmt"},
+            db_file=str(self._db(tmp_path)),
+        )
+        assert matches == []
+
+    def test_name_with_one_symbol_attributes(self, tmp_path):
+        # the libfmt.12.1.0.dylib validator shape: the name plus one matched
+        # own symbol identifies a thin client library.
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["fmt_vformat"]},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "fmt"},
+            db_file=str(self._db(tmp_path)),
+        )
+        assert [m["project_purl"] for m in matches] == ["pkg:generic/fmt@12.0.0"]
+
+    def test_weak_symbols_do_not_ride_another_projects_hash_hit(self, tmp_path):
+        # libsystem_c.dylib -> c-ares on tier-0: 3 coincidental symbols, no
+        # name; surfaced only because another file's hash evidence waived
+        # the floor for every candidate. The per-candidate gate ends that.
+        db_file = self._db(tmp_path)
+        # query carries the hash population (hash evidence present in the
+        # lookup) AND three symbols of fmt's, naming neither project's binary
+        population = ["f" * 63 + str(i) for i in range(8)]
+        matches = lookup_project_matches(
+            {"symtab_symbols": ["fmt_vformat", "extra_a", "extra_b"]},
+            function_hash_index={"instruction_hashes": population},
+            binary_metadata={"binary_type": "MachO", "llvm_target_tuple": "arm64-apple-darwin", "name": "libsystem_c.dylib"},
+            db_file=str(db_file),
+        )
+        # fmt has a name mismatch and 1 symbol; bzip2 has the hashes (8) and
+        # no symbols: only the hash-population candidate qualifies.
+        assert [m["project_purl"] for m in matches] == ["pkg:generic/bzip2@1.0.8"]
+
+
+def test_spread_names_still_identify_a_name_matched_library(tmp_path):
+    """Spread suppression must not scale into lost recall.
+
+    In a large corpus, every project that statically embeds zlib defines
+    deflate/inflate/crc32, so zlib's own identity names are its most widely
+    spread ones. They cannot attribute a nameless artifact, but the library's
+    own binary, whose name agrees, must still be identified from them.
+    """
+    db_file = tmp_path / "embedders.db"
+    zlib_names = ["deflate", "inflate", "crc32", "adler32"]
+    _create_typed_blintdb(
+        db_file,
+        [
+            ("libz.1.dylib", "MachO", "zlib", "pkg:generic/zlib@1.3.2", zlib_names),
+            ("libpng16.dylib", "MachO", "libpng", "pkg:generic/libpng@1.6.58", zlib_names + ["png_read"]),
+            ("libcurl.dylib", "MachO", "curl", "pkg:generic/curl@8.16.0", zlib_names + ["curl_easy_init"]),
+        ],
+    )
+    libz = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "libz.1.dylib"}
+    matches = lookup_project_matches(
+        {"symtab_symbols": zlib_names}, binary_metadata=libz, db_file=str(db_file)
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/zlib@1.3.2"]
+    # The same names on an unrelated artifact attribute nothing: they cannot
+    # say which of the three projects the code came from.
+    other = dict(libz, name="someapp")
+    assert lookup_project_matches(
+        {"symtab_symbols": zlib_names}, binary_metadata=other, db_file=str(db_file)
+    ) == []
+
+
+def test_toolchain_names_never_corroborate_a_name_match(tmp_path):
+    """/usr/bin/fmt shares a name with the fmt project and nothing else:
+    _main alone must not turn the name agreement into an attribution."""
+    db_file = tmp_path / "fmt.db"
+    _create_typed_blintdb(
+        db_file,
+        [("fmt", "MachO", "fmt", "pkg:generic/fmt@12.1.0", ["_main", "_ZN3fmt2v126detail9vformatE"])],
+    )
+    usr_bin_fmt = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "fmt"}
+    assert lookup_project_matches(
+        {"symtab_symbols": ["_main", "_usage"]}, binary_metadata=usr_bin_fmt, db_file=str(db_file)
+    ) == []

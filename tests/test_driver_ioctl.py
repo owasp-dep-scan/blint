@@ -323,7 +323,7 @@ def test_lnvmsrio_shaped_driver_triggers_full_rule_set_end_to_end():
             "shr eax, 8\n"
             "and eax, 0xff\n"
             "mov ecx, 4\n"
-            "call HalGetBusDataByOffset\n"
+            "call qword ptr [rip + 4092]\n"
             "ret"
         ),
         "direct_calls": ["HalGetBusDataByOffset"],
@@ -386,8 +386,8 @@ def test_well_behaved_driver_does_not_trigger_driver_rules_end_to_end():
                 "name": "checked_read_pci",
                 "address": "0x140002790",
                 "assembly": (
-                    "call SeSinglePrivilegeCheck\ntest al, al\njz fail\n"
-                    "call HalGetBusDataByOffset\nret"
+                    "call qword ptr [rip + 4080]\ntest al, al\nje 16\n"
+                    "call qword ptr [rip + 4092]\nret"
                 ),
                 "direct_calls": ["SeSinglePrivilegeCheck", "HalGetBusDataByOffset"],
                 "instruction_metrics": {},

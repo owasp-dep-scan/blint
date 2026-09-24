@@ -350,20 +350,29 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
                 ("readelf --dyn-syms: no GLIBC_ version references at all "
                 f"(interpreter: {facts.get('interpreter')})"),
             )
-        m = re.search(r"requires glibc ([0-9.]+)", str(finding.get("title") or ""))
+        m = re.search(r"GLIBC floor ([0-9.]+)", str(finding.get("title") or ""))
         claimed = float(m.group(1)) if m else None
         if claimed is not None and claimed > facts["max_glibc"] + 1e-9:
             return (
                 "false",
                 f"readelf max GLIBC_ is {facts['max_glibc']}, finding claims {claimed}",
             )
+        baseline = re.search(r"baseline ([0-9.]+)", str(finding.get("title") or ""))
+        baseline = baseline.group(1) if baseline else "?"
         return (
             "true",
-            f"readelf --dyn-syms: max GLIBC_{facts['max_glibc']} exceeds the 2.28 baseline",
+            (f"readelf --dyn-syms: max GLIBC_{facts['max_glibc']} exceeds the "
+             f"{baseline} baseline; medium when that baseline was user-set, info "
+             "when it is the built-in default"),
         )
     if rule == "CHECK_LIBC_PORTABILITY":
         title = str(finding.get("title") or "")
-        listed = [s.strip() for s in title.split("(")[-1].rstrip(")").split(",") if s.strip()]
+        # F1b.2 title shape: "<kind>-specific (measured against ...): names"
+        kind_match = re.search(r"\b(glibc|musl)-specific[^:]*:\s*(.*)$", title)
+        if not kind_match:
+            return "unverifiable", f"unrecognised title shape: {title[:80]}"
+        kind = kind_match.group(1)
+        listed = [s.strip() for s in kind_match.group(2).rstrip(")").split(",") if s.strip()]
         names = set(facts.get("all_dynsym_names") or [])
         missing = [s for s in listed if s.lstrip("_") not in names and s not in names]
         libc = "musl" if (facts.get("interpreter") or "").startswith("/lib/ld-musl") else (
@@ -374,36 +383,65 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
                 "false",
                 f"readelf --dyn-syms: listed symbols absent from the binary: {missing[:5]}",
             )
+        if libc not in (kind, "static/none"):
+            return (
+                "false",
+                (f"interpreter says {libc} but the finding labels the interfaces "
+                 f"{kind}-specific"),
+            )
         return (
             "true",
-            (f"readelf --dyn-syms confirms the listed implementation-internal symbols "
-            f"(libc: {libc})"),
+            (f"readelf --dyn-syms confirms the listed symbols; the {kind}-only claim was "
+             "measured against the exported symbol lists of glibc 2.41 (debian libc6 "
+             "2.41-12+deb13u4) and musl 1.2.6 (alpine musl-1.2.6-r2), readelf --dyn-syms "
+             f"on each (libc: {libc})"),
         )
     if rule == "CHECK_VIRTUAL_SIZE":
         mib = facts["pt_load_memsum"] / 1024 / 1024
-        if mib >= 30:
+        # F1b.3: per-format limits - 128MB ELF (benign corpus max 37.4 MiB, a
+        # stock static Go build), 30MB default otherwise.
+        limit = 128 if facts.get("type") in ("EXEC", "DYN", "REL") else 30
+        if mib >= limit:
             return (
                 "true",
-                f"readelf -l: PT_LOAD memsz sum {mib:.0f} MiB at or above the 30MB limit",
+                (f"readelf -l: PT_LOAD memsz sum {mib:.0f} MiB at or above the "
+                 f"{limit}MB ELF limit"),
             )
-        return "false", f"readelf -l: PT_LOAD memsz sum {mib:.0f} MiB below the limit"
+        return (
+            "false",
+            f"readelf -l: PT_LOAD memsz sum {mib:.0f} MiB below the {limit}MB limit",
+        )
     if rule == "CHECK_RUNTIME_LOADING":
         title = str(finding.get("title") or "")
-        listed = [s.strip() for s in title.split("(")[-1].rstrip(")").split(",") if s.strip()]
+        # F1b.4 title shape: "library-name strings (a, b) paired with imported
+        # loader entry points (dlopen); the strings are evidence, not observed loads"
+        m = re.search(r"library-name strings \(([^)]*)\).*entry points \(([^)]*)\)", title)
+        if not m:
+            return "unverifiable", f"unrecognised title shape: {title[:80]}"
+        listed = [s.strip() for s in m.group(1).split(",") if s.strip()]
+        entry_points = [s.strip() for s in m.group(2).split(",") if s.strip()]
         if not listed:
             return "unverifiable", "finding lists no library names"
         verdicts = []
         for name in listed:
             grep = sh(["grep", "-c", name, str(corpus_root / rel_path)])
             verdicts.append((name, grep.returncode == 0))
-        if all(found for _, found in verdicts):
-            return (
-                "true",
-                ("the named library strings exist in the file bytes (grep); the rule "
-                "reports embedded names, not verified dlopen behaviour"),
-            )
         missing = [n for n, found in verdicts if not found]
-        return "false", f"named library strings absent from the file: {missing}"
+        if missing:
+            return "false", f"named library strings absent from the file: {missing}"
+        imported = [ep for ep in entry_points if ep in set(facts.get("all_dynsym_names") or [])]
+        if not imported:
+            return (
+                "false",
+                (f"readelf --dyn-syms: none of the claimed entry points {entry_points} "
+                 "is imported"),
+            )
+        return (
+            "true",
+            (f"the named library strings exist in the file bytes (grep) and readelf "
+             f"--dyn-syms confirms {imported} is imported; the finding states string "
+             "evidence, not an observed load"),
+        )
     return "unverifiable", f"no ELF ground truth rule for {rule}"
 
 

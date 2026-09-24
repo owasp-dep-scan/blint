@@ -181,6 +181,7 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 ## Environment Variables
 
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`: Control blintdb download location, source image, and refresh behavior.
+- `BLINT_GLIBC_BASELINE`: Oldest glibc your deployment target ships (for example `2.28` for RHEL 8), used by the `CHECK_ABI_FLOOR` security check. A binary whose GLIBC symbol-version floor exceeds a baseline set here is a `medium` finding; without it the check compares against its built-in default (`2.28` in `rules.yml`) and reports at `info`, saying the default was used. musl and bionic binaries never fire the check. The `--glibc-baseline` CLI option is the same setting and wins when both are given. A value that is not a dotted version is ignored with a warning.
 - `BLINT_CACHE_DIR`: Where the content-addressed parse cache (enabled with `--cache`) stores its database. Defaults to the per-user cache directory.
 - `BLINT_CACHE_MAX_BYTES`: Size bound for the parse cache. Default is 1 GiB; `0` disables eviction.
 - `BLINT_MAX_HEX_BYTES`: Maximum number of raw bytes converted to hex when metadata contains undecodable byte sequences. Default is `4096`.
@@ -208,8 +209,9 @@ usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR]
              [--disassemble] [--export-callgraph-mermaid]
              [--export-callgraph-graphml] [--export-callgraph-gexf]
              [--callgraph-min-confidence {low,medium,high}]
-             [--custom-rules-dir CUSTOM_RULES_DIR] [--sdk-path SDK_PATH]
-             [--cache] [--jobs JOBS] [-q]
+             [--custom-rules-dir CUSTOM_RULES_DIR] [--catalog-dir CATALOG_DIR]
+             [--sdk-path SDK_PATH] [--cache] [--jobs JOBS]
+             [--glibc-baseline VERSION] [-q]
              {sbom,callgraph-match,canonicalize,capabilities,diff,db,cache} ...
 
 Binary linter and SBOM generator.
@@ -234,7 +236,8 @@ options:
                         dictionary.
   --use-blintdb         Use blintdb v2 for symbol resolution where supported.
                         Defaults to true if the file exists at
-                        <user data dir>/blintdb/blint.db. Use environment variables:
+                        /Users/appthreat/Library/Application
+                        Support/blintdb/blint.db. Use environment variables:
                         BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH
                         for customization.
   --disassemble         Disassemble functions and store the instructions in
@@ -258,6 +261,13 @@ options:
                         Path to a directory containing custom YAML rule files
                         (.yml or .yaml). These will be loaded in addition to
                         default rules.
+  --catalog-dir CATALOG_DIR
+                        Path to a directory of .cat catalog files (a copied
+                        CatRoot tree) used to resolve catalog-signed PEs that
+                        carry no embedded signature. Off by default: without
+                        it code_signature.scope stays 'none' with
+                        catalog_lookup 'not_performed' and no unsigned claim
+                        is made.
   --sdk-path SDK_PATH   Path to an Apple SDK root whose .tbd stubs are used to
                         attribute and confirm Mach-O imports (for example the
                         path printed by `xcrun --show-sdk-path`). Off by
@@ -270,6 +280,14 @@ options:
   --jobs JOBS           Analyze up to N binaries in parallel worker processes.
                         Accepts a positive integer, 0 or 'auto' for the CPU
                         count. Defaults to 1 (sequential, unchanged behavior).
+  --glibc-baseline VERSION
+                        Oldest glibc your deployment target ships (for example
+                        2.28 for RHEL 8). CHECK_ABI_FLOOR compares each
+                        binary's GLIBC symbol-version floor against it; a
+                        floor above a baseline set here is a medium finding,
+                        above the built-in default it is info. Equivalent to
+                        the BLINT_GLIBC_BASELINE environment variable; the
+                        option wins when both are given.
   -q, --quiet           Disable logging and progress bars.
 
 sub-commands:

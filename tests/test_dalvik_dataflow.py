@@ -64,8 +64,8 @@ def test_value_known_when_both_paths_agree():
 
 
 def test_fill_array_data_bytes_extracted():
-    # fill-array-data v0, +3 ; <payload at offset 3>
-    head = bytes([0x26, 0x00]) + struct.pack("<i", 3)
+    # fill-array-data v0, +4 ; nop ; <payload at the 4-byte aligned unit 4>
+    head = bytes([0x26, 0x00]) + struct.pack("<i", 4) + bytes([0x00, 0x00])
     payload = (
         bytes([0x00, 0x03, 0x01, 0x00]) + struct.pack("<I", 3) + bytes([0xAA, 0xBB, 0xCC, 0x00])
     )
