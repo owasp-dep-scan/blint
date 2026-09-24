@@ -1,0 +1,1202 @@
+{
+ "sbom": {
+  "apps": [
+   {
+    "app": "app.organicmaps_26082718.apk",
+    "components_total": 73,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/organicmaps@459d0badf12c80ad55828c3f24b227c1f9de768a?arch=arm64-v8a",
+     "pkg:android/organicmaps@7d1f0564a944f569b87a8dfc2a33372bb13881f6?arch=x86_64",
+     "pkg:android/organicmaps@9db678402961229781c3b2e9e130db2f7a089435?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "com.adilhanney.saber_1360101.apk",
+    "components_total": 72,
+    "so_components": 6,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/app@354c3d0b0ec1e5cddf117b9fbbcec02f?arch=armeabi-v7a",
+     "pkg:android/datastore_shared_counter@c2c541cc4337a0fc28271329ef238d6bddf6d70d?arch=armeabi-v7a",
+     "pkg:android/flutter@4c4424757f1e3603b8e1b3f9dbd27cedfdd74af8?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "com.adilhanney.saber_1360102.apk",
+    "components_total": 72,
+    "so_components": 6,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/app@c48b3c892b1f369df2a1dba01e3d9fea?arch=arm64-v8a",
+     "pkg:android/datastore_shared_counter@17db37bd6770ac00dd2d1d2828839fd23a7959a3?arch=arm64-v8a",
+     "pkg:android/flutter@fdf0a0a6f673cdcfc6c0e5f8dc7c8828d63fb3b6?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "com.adilhanney.saber_1360103.apk",
+    "components_total": 72,
+    "so_components": 6,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/app@ec3ca717f3d2df6b12c9030bef0892f0?arch=x86_64",
+     "pkg:android/datastore_shared_counter@c6ef0802be059f5f59b23f1205d040dbc5b1ccad?arch=x86_64",
+     "pkg:android/flutter@132bfb8e399a170c02e5f577474dd0eed81ed2c3?arch=x86_64"
+    ]
+   },
+   {
+    "app": "com.termux.api_1002.apk",
+    "components_total": 53,
+    "so_components": 0,
+    "so_build_id_versions": 0,
+    "purl_samples": []
+   },
+   {
+    "app": "com.termux_1022.apk",
+    "components_total": 48,
+    "so_components": 12,
+    "so_build_id_versions": 12,
+    "purl_samples": [
+     "pkg:android/local-socket@187bde9ea8d9225530441715e9737b735de03be4?arch=armeabi-v7a",
+     "pkg:android/local-socket@26e7e192946e999fe5c7c9bcb963e1a0d7a10e7d?arch=x86",
+     "pkg:android/local-socket@6f84abb1af9cb70d9756d07301b47e61c201e927?arch=x86_64"
+    ]
+   },
+   {
+    "app": "im.vector.app_40106621.apk",
+    "components_total": 100,
+    "so_components": 21,
+    "so_build_id_versions": 19,
+    "purl_samples": [
+     "pkg:android/c++_shared@b173eb5eb81feab46ad25ecced0664b7da0ada0b?arch=armeabi-v7a",
+     "pkg:android/fbjni@bc1f23c0c45e1c7ad496193c948e61d7f39b15e9?arch=armeabi-v7a",
+     "pkg:android/hermes@c552f346e5f90dbb802034f482a968ca3d659a01?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "im.vector.app_40106622.apk",
+    "components_total": 100,
+    "so_components": 21,
+    "so_build_id_versions": 19,
+    "purl_samples": [
+     "pkg:android/c++_shared@6783a7f3a0d9c67c55a74cadc441ed55aaa493da?arch=arm64-v8a",
+     "pkg:android/fbjni@e438f6554af1d86b210a05412e96c4251e570157?arch=arm64-v8a",
+     "pkg:android/hermes@68deec1681e30bbc7ae5dcc0001ee86ba6f019a4?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "im.vector.app_40106623.apk",
+    "components_total": 100,
+    "so_components": 21,
+    "so_build_id_versions": 19,
+    "purl_samples": [
+     "pkg:android/c++_shared@7aea7e5e26c88ba854ff9e8e2a73b2ef125b18d0?arch=x86",
+     "pkg:android/fbjni@17bd6fa76abc96886eca413e322f2cc34f70ff6a?arch=x86",
+     "pkg:android/hermes@5fb30e2233891fee5858942e963ae3e700c4d89f?arch=x86"
+    ]
+   },
+   {
+    "app": "im.vector.app_40106624.apk",
+    "components_total": 100,
+    "so_components": 21,
+    "so_build_id_versions": 19,
+    "purl_samples": [
+     "pkg:android/c++_shared@734ab2eaa203afbb89147d313e46146617bd1a2c?arch=x86_64",
+     "pkg:android/fbjni@2f4b0da170c8a1af5bf245a5dba7c30a6974f2f2?arch=x86_64",
+     "pkg:android/hermes@a5304fff4e48ad931ed40d170e56540d32020230?arch=x86_64"
+    ]
+   },
+   {
+    "app": "io.github.muntashirakon.AppManager_451.apk",
+    "components_total": 16,
+    "so_components": 16,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/am?arch=arm64-v8a",
+     "pkg:android/am?arch=armeabi-v7a",
+     "pkg:android/am?arch=x86"
+    ]
+   },
+   {
+    "app": "net.osmand.plus_540401.apk",
+    "components_total": 95,
+    "so_components": 6,
+    "so_build_id_versions": 5,
+    "purl_samples": [
+     "pkg:android/OsmAndCoreWithJNI@64dfec0eb9c43f9f03fec753b2f04fd605cd9271?arch=armeabi-v7a",
+     "pkg:android/Qt5Core@2.6.28?arch=armeabi-v7a",
+     "pkg:android/Qt5Network@9c93f6c35a2f156420e8596fc98473d344b79305?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "net.osmand.plus_540402.apk",
+    "components_total": 101,
+    "so_components": 12,
+    "so_build_id_versions": 10,
+    "purl_samples": [
+     "pkg:android/OsmAndCoreWithJNI@e5a4f1f9748f988e18b889c87874797e225ca942?arch=x86",
+     "pkg:android/OsmAndCoreWithJNI@f1adc881c8feb2baba5dd6af97e1769838b27abd?arch=x86_64",
+     "pkg:android/Qt5Core@2.6.28?arch=x86"
+    ]
+   },
+   {
+    "app": "net.osmand.plus_540403.apk",
+    "components_total": 95,
+    "so_components": 6,
+    "so_build_id_versions": 5,
+    "purl_samples": [
+     "pkg:android/OsmAndCoreWithJNI@2176d247713a9f671238b967d475ae14602e688f?arch=arm64-v8a",
+     "pkg:android/Qt5Core@2.6.28?arch=arm64-v8a",
+     "pkg:android/Qt5Network@1bd7fddf86fa3104283abaa06b262664cef15b39?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "org.fdroid.fdroid_2000050.apk",
+    "components_total": 114,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/androidx.graphics.path@56b3f97a7efb05fc89674cf68f6c27847a93860b?arch=x86",
+     "pkg:android/androidx.graphics.path@a7846ae06d6bf6cf63fa7c5e056b5de493c71567?arch=arm64-v8a",
+     "pkg:android/androidx.graphics.path@f3e82b0a78f4c567cca77fe6c132199d806987d1?arch=x86_64"
+    ]
+   },
+   {
+    "app": "org.localsend.localsend_app_641.apk",
+    "components_total": 68,
+    "so_components": 5,
+    "so_build_id_versions": 3,
+    "purl_samples": [
+     "pkg:android/app@098f22960c595a604d7bcdcc4e2b8495?arch=x86_64",
+     "pkg:android/dartjni?arch=x86_64",
+     "pkg:android/datastore_shared_counter@c6ef0802be059f5f59b23f1205d040dbc5b1ccad?arch=x86_64"
+    ]
+   },
+   {
+    "app": "org.localsend.localsend_app_642.apk",
+    "components_total": 68,
+    "so_components": 5,
+    "so_build_id_versions": 3,
+    "purl_samples": [
+     "pkg:android/app@1414365c18935931058167e89ea1101f?arch=armeabi-v7a",
+     "pkg:android/dartjni?arch=armeabi-v7a",
+     "pkg:android/datastore_shared_counter@c2c541cc4337a0fc28271329ef238d6bddf6d70d?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "org.localsend.localsend_app_643.apk",
+    "components_total": 68,
+    "so_components": 5,
+    "so_build_id_versions": 3,
+    "purl_samples": [
+     "pkg:android/app@7a3ef9300605299b21a2e1cc72606436?arch=arm64-v8a",
+     "pkg:android/dartjni?arch=arm64-v8a",
+     "pkg:android/datastore_shared_counter@17db37bd6770ac00dd2d1d2828839fd23a7959a3?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "org.mozilla.fennec_fdroid_1560000.apk",
+    "components_total": 135,
+    "so_components": 15,
+    "so_build_id_versions": 14,
+    "purl_samples": [
+     "pkg:android/androidx.graphics.path@fa98a997cdd9b43f190a4bd20f3dad441b4062f0?arch=armeabi-v7a",
+     "pkg:android/clearkey@bbe7beaf181668ce667f51519e6396e48fb35c43?arch=armeabi-v7a",
+     "pkg:android/datastore_shared_counter?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "org.mozilla.fennec_fdroid_1560010.apk",
+    "components_total": 135,
+    "so_components": 15,
+    "so_build_id_versions": 14,
+    "purl_samples": [
+     "pkg:android/androidx.graphics.path@f3e82b0a78f4c567cca77fe6c132199d806987d1?arch=x86_64",
+     "pkg:android/clearkey@56a8f708c933bdf2c994307b1242e8823297d354?arch=x86_64",
+     "pkg:android/datastore_shared_counter?arch=x86_64"
+    ]
+   },
+   {
+    "app": "org.mozilla.fennec_fdroid_1560020.apk",
+    "components_total": 135,
+    "so_components": 15,
+    "so_build_id_versions": 14,
+    "purl_samples": [
+     "pkg:android/androidx.graphics.path@a7846ae06d6bf6cf63fa7c5e056b5de493c71567?arch=arm64-v8a",
+     "pkg:android/clearkey@9e21299bd6263c47884caec9f94dbb6bcfff1be0?arch=arm64-v8a",
+     "pkg:android/datastore_shared_counter?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "org.schabi.newpipe_1015.apk",
+    "components_total": 105,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/androidx.graphics.path@56b3f97a7efb05fc89674cf68f6c27847a93860b?arch=x86",
+     "pkg:android/androidx.graphics.path@a7846ae06d6bf6cf63fa7c5e056b5de493c71567?arch=arm64-v8a",
+     "pkg:android/androidx.graphics.path@f3e82b0a78f4c567cca77fe6c132199d806987d1?arch=x86_64"
+    ]
+   },
+   {
+    "app": "org.videolan.vlc_13070105.apk",
+    "components_total": 4,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/c++_shared@762708dbc6120b26bddc4ab5d3e081f6c9ae6e58?arch=armeabi-v7a",
+     "pkg:android/mla@a6deb5b4c9e17afa5512d7c97d8ed3c5c40e373a?arch=armeabi-v7a",
+     "pkg:android/vlc@b9af724f947df69b5dd14b22c4b96585abba3082?arch=armeabi-v7a"
+    ]
+   },
+   {
+    "app": "org.videolan.vlc_13070106.apk",
+    "components_total": 4,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/c++_shared@7befe631535aa853c4f4ac1293e49dcea34c9b6e?arch=arm64-v8a",
+     "pkg:android/mla@b9e58dc73d0f0d473cadca39d89386f82743b76a?arch=arm64-v8a",
+     "pkg:android/vlc@8529a45c3951bde33b552ae75c53c6980900b6f0?arch=arm64-v8a"
+    ]
+   },
+   {
+    "app": "org.videolan.vlc_13070107.apk",
+    "components_total": 4,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/c++_shared@d5dd9c1863f07a4c97f61114c5c3210fca319b78?arch=x86",
+     "pkg:android/mla@4d580599b4177264899a05d2004705d781d1d8b1?arch=x86",
+     "pkg:android/vlc@df593c7749585c178fe2217219665f0014868035?arch=x86"
+    ]
+   },
+   {
+    "app": "org.videolan.vlc_13070108.apk",
+    "components_total": 4,
+    "so_components": 4,
+    "so_build_id_versions": 4,
+    "purl_samples": [
+     "pkg:android/c++_shared@0f8f9b5a33c8898dc08ae1688f9b1d3d10ff68ab?arch=x86_64",
+     "pkg:android/mla@6bbfcbc3e4ee1dd82fe6bd4facc2b9a1ef9284fa?arch=x86_64",
+     "pkg:android/vlc@47f534bbe42deb4c2baa47e45b4c3f53c1df8496?arch=x86_64"
+    ]
+   }
+  ],
+  "summary": {
+   "apps": 26,
+   "so_components": 242,
+   "so_build_id_versions": 203
+  }
+ },
+ "standalone": {
+  "groups": {
+   "tier0/api34-arm64-v8a": {
+    "scanned": 1541,
+    "files_with_findings": 276,
+    "findings_total": 353,
+    "median_per_file": 2,
+    "per_rule": {
+     "CHECK_CANARY": 183,
+     "CHECK_LIBC_PORTABILITY": 90,
+     "CHECK_PACKED": 6,
+     "CHECK_RPATH": 1,
+     "CHECK_RUNTIME_LOADING": 73
+    }
+   },
+   "tier0/api35-arm64-v8a": {
+    "scanned": 1398,
+    "files_with_findings": 297,
+    "findings_total": 360,
+    "median_per_file": 1,
+    "per_rule": {
+     "CHECK_CANARY": 156,
+     "CHECK_LIBC_PORTABILITY": 126,
+     "CHECK_PACKED": 6,
+     "CHECK_RPATH": 1,
+     "CHECK_RUNTIME_LOADING": 71
+    }
+   },
+   "tier0/api36-arm64": {
+    "scanned": 677,
+    "files_with_findings": 173,
+    "findings_total": 208,
+    "median_per_file": 1,
+    "per_rule": {
+     "CHECK_CANARY": 92,
+     "CHECK_LIBC_PORTABILITY": 84,
+     "CHECK_PACKED": 2,
+     "CHECK_RUNTIME_LOADING": 30
+    }
+   },
+   "tier0/api36-arm64-v8a": {
+    "scanned": 1679,
+    "files_with_findings": 476,
+    "findings_total": 605,
+    "median_per_file": 1,
+    "per_rule": {
+     "CHECK_CANARY": 234,
+     "CHECK_LIBC_PORTABILITY": 288,
+     "CHECK_PACKED": 3,
+     "CHECK_RPATH": 1,
+     "CHECK_RUNTIME_LOADING": 79
+    }
+   },
+   "tier1/r27/arm64-v8a": {
+    "scanned": 14,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r27/armeabi-v7a": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r27/riscv64": {
+    "scanned": 8,
+    "files_with_findings": 8,
+    "findings_total": 8,
+    "median_per_file": 2,
+    "per_rule": {
+     "CHECK_LIBC_PORTABILITY": 8
+    }
+   },
+   "tier1/r27/x86": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r27/x86_64": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r28/arm64-v8a": {
+    "scanned": 14,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r28/armeabi-v7a": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r28/riscv64": {
+    "scanned": 8,
+    "files_with_findings": 8,
+    "findings_total": 8,
+    "median_per_file": 2,
+    "per_rule": {
+     "CHECK_LIBC_PORTABILITY": 8
+    }
+   },
+   "tier1/r28/x86": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   },
+   "tier1/r28/x86_64": {
+    "scanned": 8,
+    "files_with_findings": 0,
+    "findings_total": 0,
+    "median_per_file": 0,
+    "per_rule": {}
+   }
+  }
+ },
+ "functions": {
+  "groups": {
+   "r27/arm64-v8a": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_bti.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_hwasan.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_memtag.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r27/arm64-v8a/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_bti.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_hwasan.so",
+     "functions_total": 15,
+     "symtab_symbols": 74,
+     "symtab_functions": 21,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_memtag.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 61,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r27/armeabi-v7a": [
+    {
+     "file": "libhello.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 15,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    }
+   ],
+   "r27/armeabi-v7a/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 15,
+     "symtab_symbols": 50,
+     "symtab_functions": 12,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    }
+   ],
+   "r27/riscv64": [
+    {
+     "file": "libhello.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    }
+   ],
+   "r27/riscv64/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 10,
+     "symtab_symbols": 499,
+     "symtab_functions": 14,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    }
+   ],
+   "r27/x86": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r27/x86/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 28,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r27/x86_64": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r27/x86_64/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/arm64-v8a": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_bti.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_hwasan.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_memtag.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/arm64-v8a/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_bti.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_hwasan.so",
+     "functions_total": 15,
+     "symtab_symbols": 74,
+     "symtab_functions": 21,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_memtag.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 54,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 61,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/armeabi-v7a": [
+    {
+     "file": "libhello.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 14,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 15,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    }
+   ],
+   "r28/armeabi-v7a/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 14,
+     "symtab_symbols": 47,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 15,
+     "symtab_symbols": 50,
+     "symtab_functions": 12,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    }
+   ],
+   "r28/riscv64": [
+    {
+     "file": "libhello.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 10,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    }
+   ],
+   "r28/riscv64/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 10,
+     "symtab_symbols": 486,
+     "symtab_functions": 14,
+     "dynamic_symbols": 10,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 10,
+     "symtab_symbols": 499,
+     "symtab_functions": 14,
+     "dynamic_symbols": 11,
+     "disassembled": 0
+    }
+   ],
+   "r28/x86": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/x86/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 28,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/x86_64": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 0,
+     "symtab_functions": 0,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ],
+   "r28/x86_64/unstripped": [
+    {
+     "file": "libhello.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page16k.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_page4k.so",
+     "functions_total": 9,
+     "symtab_symbols": 26,
+     "symtab_functions": 12,
+     "dynamic_symbols": 8,
+     "disassembled": 0
+    },
+    {
+     "file": "libhello_textrels.so",
+     "functions_total": 9,
+     "symtab_symbols": 27,
+     "symtab_functions": 12,
+     "dynamic_symbols": 9,
+     "disassembled": 0
+    }
+   ]
+  }
+ }
+}

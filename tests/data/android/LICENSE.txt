@@ -1,0 +1,7 @@
+These fixtures were generated for the blint Android native lane (A0.2):
+the APK/XAPK files were built by the real Android toolchain from the
+sources in tests/scripts/android/jni_sources/ (aapt2 link, zipalign,
+apksigner from build-tools 36.0.0; NDK 27.3.13750724 / 28.2.13676358),
+and the hostile inputs by tests/scripts/android/make_hostile_fixtures.py
+from an NDK-built libhello.so base. They are test data for the Apache-2.0
+blint project and carry no third-party code.

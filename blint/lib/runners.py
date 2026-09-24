@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import sys
+from pathlib import Path
 from typing import Any, Literal
 
 from rich.progress import Progress, TaskID
@@ -16,6 +17,7 @@ from blint.lib.analysis import (
     run_wasm_findings,
 )
 from blint.lib.android import analyze_android_app
+from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
 from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
@@ -690,12 +692,9 @@ class AnalysisRunner:
             or blint_options.export_callgraph_gexf
         )
         if is_android_app(f):
-            metadata = self._process_android_file(f)
-            if metadata is None:
-                # _record_skip already logs the skip with its reason.
-                self._record_skip(f, "top-level", "no_dex_bytecode")
-                self.progress.advance(self.task)
-                return
+            self._process_android_app(f, blint_options, wants_callgraph_outputs)
+            self.progress.advance(self.task)
+            return
         elif is_ios_app(f):
             archive_processed = self._process_ios_file(f, blint_options, wants_callgraph_outputs)
             self.progress.advance(self.task)
@@ -1189,6 +1188,122 @@ class AnalysisRunner:
                 }
             )
 
+    def _process_android_app(
+        self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
+    ) -> None:
+        """Analyze an android app: the dex review metadata, then every
+        native library as a first-class binary (A1.2, 01/C).
+
+        An APK with native code but no dex is analyzed, not skipped (V7):
+        the app-level unit is a container whose metadata carries the
+        native summary (ABI coverage, extractNativeLibs, refusals and
+        unsafe zip names - rule 32), and each ``(app, abi, library)`` is
+        its own ``apk-so-member`` unit below, attributed to its member
+        path beside the app.
+        """
+        assert self.task is not None
+        metadata = self._process_android_file(f)
+        native = scan_android_native(f)
+        if metadata is None:
+            if not (native["libraries"] or native["refusals"] or native["unsafe_names"]):
+                # _record_skip already logs the skip with its reason.
+                self._record_skip(f, "top-level", "no_dex_bytecode")
+                return
+            metadata = {
+                "name": os.path.basename(f),
+                "file_path": f,
+                # No dex to review and no binary rules apply to the zip
+                # container itself; the native members carry the checks.
+                "exe_type": "androidapp",
+            }
+        metadata["android_native"] = _android_native_summary(native)
+        self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
+        self._mark_success("top-level")
+        self._process_apk_so_members(f, native, blint_options, wants_callgraph_outputs)
+
+    def _process_apk_so_members(
+        self,
+        f: str,
+        native: dict[str, Any],
+        blint_options: BlintOptions,
+        wants_callgraph_outputs: bool,
+    ) -> None:
+        """Analyze each (app, abi, library) unit of a scanned app model.
+
+        Units group every location of one library in one ABI - one result
+        per triple, with the other locations as provenance (ground rule
+        36). Heavy work stays behind --disassemble (the parse call gates
+        it) and the --android-abi filter drops non-matching ABIs (and
+        asset payloads, which never feed ABI coverage) before any unit
+        is attempted.
+        """
+        assert self.task is not None
+        android_abis = getattr(blint_options, "android_abis", None) or []
+        units: dict[tuple[str, str], dict[str, Any]] = {}
+        for lib in native["libraries"]:
+            for loc in lib["locations"]:
+                if android_abis and loc["abi"] not in android_abis:
+                    continue
+                entry = units.setdefault(
+                    (loc["abi"], lib["name"]), {"lib": lib, "locations": []}
+                )
+                entry["locations"].append(loc)
+        if not units:
+            return
+        app_base = os.path.basename(f)
+        with (
+            bounded_temp_dir(prefix="blint_android_so_") as temp_dir,
+            LibraryReader(f) as reader,
+        ):
+            for (_abi, name), entry in sorted(units.items()):
+                locations = entry["locations"]
+                lib = entry["lib"]
+                primary = locations[0]
+                display = f"{app_base}!{primary['entry_name']}"
+                # Export/finding name: path separators flattened so every
+                # (app, abi, library) triple gets its own metadata file.
+                flat_name = display.replace(os.sep, "~").replace("/", "~")
+                self.progress.update(
+                    self.task,
+                    description=f"Processing [bold]{flat_name}[/bold] (apk-so-member)",
+                )
+                self._mark_attempted("apk-so-member")
+                try:
+                    member_path = _materialize_apk_member(temp_dir, reader, primary)
+                    if member_path is None:
+                        raise RuntimeError(
+                            f"could not read {primary['entry_name']} from the app"
+                        )
+                    member_metadata = self._parse_with_cache(
+                        member_path, blint_options, "apk-so-member"
+                    )
+                    member_metadata["container"] = {
+                        "kind": "apk" if not primary["split"] else "split",
+                        "app_file": app_base,
+                        "member_path": primary["entry_name"],
+                        "abi": primary["abi"] or None,
+                        "location_kind": primary["location_kind"],
+                        "split": primary["split"] or None,
+                        "role": "apk-so-member",
+                        "sha256": lib["sha256"],
+                        "all_locations": [
+                            {
+                                "split": loc["split"] or None,
+                                "entry_name": loc["entry_name"],
+                            }
+                            for loc in locations
+                        ],
+                        "abi_mismatch": lib["abi_mismatch"],
+                    }
+                    member_metadata["name"] = flat_name
+                    member_metadata["file_path"] = display
+                    self._finalize_metadata(
+                        display, member_metadata, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("apk-so-member")
+                except Exception as e:
+                    self._record_failure(display, "apk-so-member", "process", e)
+
     def _process_android_file(self, f: str) -> dict[str, Any] | None:
         """Disassemble an android app's dex bytecode into review metadata.
 
@@ -1212,6 +1327,51 @@ class AnalysisRunner:
         if self.reviewer.results:
             review = self.reviewer.process_review(f, exe_name)
             self.reviews += review
+
+
+def _materialize_apk_member(temp_dir: str, reader: LibraryReader, location: dict[str, Any]) -> str | None:
+    """Write one library's bytes to a temp file for parsing."""
+    data = reader.read(location)
+    if not data:
+        return None
+    target = Path(temp_dir) / location["entry_name"].replace("/", "~")
+    target.write_bytes(data)
+    return str(target)
+
+
+def _android_native_summary(native: dict[str, Any]) -> dict[str, Any]:
+    """Bounded app-level summary of the native model for metadata export.
+
+    The full model lives in the scan; the exported summary keeps the
+    facts a consumer acts on (coverage, the loader-enforced layout flag,
+    refusals, unsafe names) plus a capped library listing - the cap is a
+    listing bound only, and no rule reads it.
+    """
+    cap = 256
+    libraries = native.get("libraries") or []
+    summary: dict[str, Any] = {
+        "counts": native.get("counts") or {},
+        "abi_coverage": native.get("abi_coverage") or {},
+        "extract_native_libs": native.get("extract_native_libs") or {},
+        "refusals": native.get("refusals") or [],
+        "unsafe_names": native.get("unsafe_names") or [],
+        "libraries": [
+            {
+                "name": lib.get("name"),
+                "abis": lib.get("abis"),
+                "abi_mismatch": lib.get("abi_mismatch"),
+                "not_elf": lib.get("not_elf"),
+                "location_kinds": sorted(
+                    {loc.get("location_kind") for loc in lib.get("locations") or []}
+                ),
+            }
+            for lib in libraries[:cap]
+        ],
+    }
+    if len(libraries) > cap:
+        summary["libraries_capped"] = True
+        summary["libraries_total"] = len(libraries)
+    return summary
 
 
 def _worker_setup_default(payload: dict[str, Any]) -> dict[str, Any]:

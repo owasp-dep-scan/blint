@@ -874,7 +874,7 @@ Compiler and runtime attribution built from binary evidence rather than declared
 
 - **`compilers`**: from ELF `.comment` sections (gcc, clang, rustc, lld with versions), Mach-O `LC_BUILD_VERSION` tool entries, and the PE linker version fields.
 - **`runtimes`**: Go (buildinfo or `runtime.*` symbols), Rust (buildinfo or `_ZN`/`_R` mangling), Swift (`swift_` stdlib symbols), Objective-C (`objc_*` trampolines), MSVC/MinGW CRT fingerprints, .NET.
-- **`libc`**: `glibc` or `musl` from symbol-version requirements and the ELF interpreter.
+- **`libc`**: `glibc`, `musl` or `bionic` from symbol-version requirements, the ELF interpreter and the Android target flag.
 
 Empty lists mean the format carries no such evidence — attribution is never padded with guesses.
 
@@ -910,10 +910,10 @@ Accounting for what was analyzed versus what was discovered, so a run that disas
 Alongside `findings.json`/`reviews.json`, default-mode runs write an `analysis-coverage.json` summarizing the run's _units_ (a top-level file, or one binary contained in an `.ipa`). A binary that fails to parse no longer aborts the scan (issues #122, #188); the failure lands here instead:
 
 - **`units`**: `attempted` / `succeeded` / `failed` / `skipped`. Totals mix granularities: an `.ipa` archive counts as a unit beside the member units it contains.
-- **`units_by_role`**: the same four counters per unit role (`top-level`, `ipa-member`), so a consumer can compute a success rate over just the member binaries or just the top-level inputs.
+- **`units_by_role`**: the same four counters per unit role (`top-level`, plus container member roles such as `ipa-member`, `msix-member`, `cab-member`, `sfx-member`, `msg-attachment` and `apk-so-member`), so a consumer can compute a success rate over just the member binaries or just the top-level inputs.
 - **`failures`**: one record per failed unit with `file_path`, `unit_role` (`top-level` or `ipa-member`), `stage`, `exception_type` and `message`.
 - **`skipped`**: one record per recognized-but-unanalyzed unit with `file_path`, `unit_role` and a machine-readable `reason` (e.g. `extract_failed`, `no_dex_bytecode`).
-- **`cache`**: parse-cache accounting. `enabled` tells a fast run from a cached one; `hits` / `misses` / `stored` count what was served from the content-addressed parse cache; `caches_failures` is always `false` — parse failures are never cached, so every record in `failures` is a fresh failure; `by_role` carries the same three counters per unit role, since not every role can hit the cache (android app units never go through `parse()`).
+- **`cache`**: parse-cache accounting. `enabled` tells a fast run from a cached one; `hits` / `misses` / `stored` count what was served from the content-addressed parse cache; `caches_failures` is always `false` — parse failures are never cached, so every record in `failures` is a fresh failure; `by_role` carries the same three counters per unit role, since not every role can hit the cache (the android app unit itself never goes through `parse()`; its `apk-so-member` units do, and dedupe through the same content-addressed keys).
 
 This file is exported even when the scan produced no findings, so a caller can always tell "clean" from "blind" without reading stderr.
 
