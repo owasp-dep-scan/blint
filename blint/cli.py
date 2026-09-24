@@ -217,6 +217,16 @@ def build_parser() -> argparse.ArgumentParser:
         "(sequential, unchanged behavior).",
     )
     parser.add_argument(
+        "--android-abi",
+        "--android_abi",
+        dest="android_abis",
+        action="append",
+        choices=["arm64-v8a", "armeabi-v7a", "x86_64", "x86", "riscv64"],
+        metavar="ABI",
+        help="Limit Android native-library analysis to the given ABI(s); "
+        "default analyses every ABI the app ships. Repeatable.",
+    )
+    parser.add_argument(
         "--glibc-baseline",
         dest="glibc_baseline",
         type=glibc_baseline_version,
@@ -688,6 +698,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         wasm_strings=args.wasm_strings,
         wasm_call_graph=args.wasm_call_graph,
         disassemble=args.disassemble,
+        android_abis=getattr(args, "android_abis", None) or [],
         render_mermaid_callgraph=args.render_mermaid_callgraph,
         export_callgraph_graphml=args.export_callgraph_graphml,
         export_callgraph_gexf=args.export_callgraph_gexf,

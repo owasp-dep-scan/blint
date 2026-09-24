@@ -1277,6 +1277,9 @@ class BlintOptions:
     stdout_mode: bool = False
     use_blintdb: bool = False
     disassemble: bool = False
+    # Android native-library ABIs to analyze (--android-abi, repeatable).
+    # Empty means every ABI the app ships.
+    android_abis: list[str] = field(default_factory=list)
     # Number of parallel worker processes (--jobs N). 1 (the default)
     # keeps the sequential loop; the CLI resolves 0/auto to the CPU count.
     jobs: int = 1

@@ -150,7 +150,16 @@ def check_canary(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> 
 
 
 def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
-    # Do not recommend setting rpath or runpath
+    # Do not recommend setting rpath or runpath. The rule describes the
+    # glibc ld.so search order (RPATH inheritance, ld.so.cache, /lib and
+    # /usr/lib fallbacks), which bionic does not implement: bionic ignores
+    # DT_RPATH outright and resolves DT_RUNPATH only within the loader
+    # namespace of the library that named it (android-changes-for-ndk-
+    # developers.md, "DT_RUNPATH support"). On bionic binaries the rule's
+    # concept does not exist, so it does not run there (ground rule 35;
+    # A0.3 tier-0 evidence: the 3 hits included bionic's own linker).
+    if (metadata.get("abi_analysis") or {}).get("libc") == "bionic":
+        return True
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
 
 
@@ -986,10 +995,18 @@ def check_libc_portability(
     measured, so musl's own interface is never called glibc-specific. When
     the libc cannot be identified, any implementation-specific binding is
     named with its provider rather than guessed at.
+
+    Bionic is out of scope (ground rule 35): the measurement spans glibc and
+    musl only, and judging a bionic binary by it calls bionic-exported
+    interfaces "glibc-specific" - on the tier-0 corpus the driver is
+    __register_atfork, which bionic's libc.so exports (A0.3: 604 false
+    positives across the three images, zero after this gate).
     """
     abi = metadata.get("abi_analysis") or {}
     features = abi.get("features") or {}
     libc = abi.get("libc")
+    if libc == "bionic":
+        return True
     if libc == "glibc":
         specific = features.get("glibc_specific_imports") or []
         if not specific:

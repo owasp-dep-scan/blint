@@ -618,7 +618,12 @@ def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dic
         composition["linking_type"] = "dynamic" if dependencies else "static"
     composition["dependency_count"] = len(dependencies)
     runtimes = set()
-    if metadata.get("is_musl"):
+    if metadata.get("is_targeting_android"):
+        # bionic: libc.so here is Android's C library, not glibc (the old
+        # tag reported "glibc" on every bionic binary via the libc.so
+        # DT_NEEDED check below - A0.3 V12 evidence).
+        runtimes.add("bionic")
+    elif metadata.get("is_musl"):
         runtimes.add("musl")
     elif "gnu" in metadata.get("llvm_target_tuple", ""):
         runtimes.add("glibc")
@@ -628,7 +633,7 @@ def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dic
         dep_name = dep.get("name", "").lower()
         if "msvc" in dep_name:
             runtimes.add("msvcrt")
-        if "libc.so" in dep_name:
+        if "libc.so" in dep_name and not metadata.get("is_targeting_android"):
             runtimes.add("glibc")
         for d in ("libstdc++", "openssl", "curl", "ffmpeg"):
             if d in dep_name:
