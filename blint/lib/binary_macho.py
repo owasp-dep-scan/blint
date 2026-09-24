@@ -236,11 +236,26 @@ def _macho_is_signed(parsed_obj: lief.MachO.Binary) -> bool:
     return False
 
 
+# CPU_SUBTYPE_PTRAUTH_ABI: set on every arm64e-family slice built for the
+# pointer-authentication ABI. LIEF's support_arm64_ptr_auth only knows
+# subtype 2 (arm64e), so the arm64e.x1 slice macOS 27 ships (subtype 12,
+# flag set) read as having no PAC.
+CPU_SUBTYPE_PTRAUTH_ABI = 0x80000000
+
+
 def _macho_has_pac(parsed_obj: lief.MachO.Binary) -> bool:
     """True when the slice is built for arm64e-style pointer authentication."""
     try:
-        return bool(parsed_obj.support_arm64_ptr_auth)
-    except (AttributeError, TypeError):
+        if parsed_obj.support_arm64_ptr_auth:
+            return True
+        header = parsed_obj.header
+        return (
+            "ARM64" in str(header.cpu_type).upper()
+            and bool(int(header.cpu_subtype) & CPU_SUBTYPE_PTRAUTH_ABI)
+            and int(header.cpu_subtype) & CPU_SUBTYPE_FLAG_MASK
+            in (CPU_SUBTYPE_ARM64E, _ARM64E_X1_SUBTYPE)
+        )
+    except (AttributeError, TypeError, ValueError):
         return False
 
 
@@ -296,12 +311,29 @@ def _macho_security_properties(metadata: dict, parsed_obj: lief.MachO.Binary) ->
     return properties
 
 
+# arm64 CPU subtypes by the names lipo, otool and `codesign --arch` use.
+# macOS 27 ships a third slice in system binaries, CPU_SUBTYPE_ARM64E_X1
+# (12), beside arm64e; naming it "arm64" made it indistinguishable from a
+# plain arm64 slice, and `codesign --arch arm64` answers for arm64e.
+_ARM64E_X1_SUBTYPE = 12
+_ARM64_SUBTYPE_NAMES = {
+    0: "arm64",
+    1: "arm64",
+    CPU_SUBTYPE_ARM64E: "arm64e",
+    _ARM64E_X1_SUBTYPE: "arm64e.x1",
+}
+
+
 def _macho_arch_name(cpu_type: str, cpu_subtype: int) -> str:
-    """Human-readable slice architecture; arm64 vs arm64e must stay distinct."""
+    """Human-readable slice architecture; arm64 subtypes must stay distinct.
+
+    An arm64 subtype blint does not know is named with its number rather
+    than folded into plain arm64, so two slices never share a name.
+    """
     base = (cpu_type or "unknown").lower()
     if base == "arm64":
         subtype = int(cpu_subtype or 0) & CPU_SUBTYPE_FLAG_MASK
-        return "arm64e" if subtype == CPU_SUBTYPE_ARM64E else "arm64"
+        return _ARM64_SUBTYPE_NAMES.get(subtype, f"arm64.subtype{subtype}")
     return base
 
 
