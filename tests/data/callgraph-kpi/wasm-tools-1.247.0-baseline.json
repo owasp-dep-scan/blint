@@ -62,6 +62,38 @@
         "internal_edges": 75854
       }
     },
+    "aarch64-unknown-linux-android": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 5443,
+        "external_reason_buckets": {
+          "address_space_miss": 3125,
+          "address_space_miss:indirect_hint": 17,
+          "address_space_miss:tailcall": 17,
+          "unresolved:indirect_hint": 2073,
+          "unresolved:tailcall": 211
+        },
+        "functions_total": 26102,
+        "functions_with_direct_targets": 23011,
+        "internal_edge_kinds": {
+          "direct": 90403,
+          "indirect_hint": 17,
+          "tailcall": 5791
+        },
+        "internal_edges": 96211
+      }
+    },
     "aarch64-unknown-linux-gnu": {
       "allowed_drop": {
         "external_edges": 68,
@@ -91,6 +123,61 @@
           "tailcall": 7099
         },
         "internal_edges": 74334
+      }
+    },
+    "arm-unknown-linux-android": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 0,
+        "external_reason_buckets": {},
+        "functions_total": 24456,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {},
+        "internal_edges": 0
+      }
+    },
+    "i686-unknown-linux-android": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 12645,
+        "external_reason_buckets": {
+          "address_space_miss": 5905,
+          "address_space_miss:indirect_hint": 424,
+          "address_space_miss:tailcall": 98,
+          "symbol_only_miss:tailcall": 2910,
+          "unresolved:indirect_hint": 3306,
+          "unresolved:tailcall": 2
+        },
+        "functions_total": 25825,
+        "functions_with_direct_targets": 23849,
+        "internal_edge_kinds": {
+          "direct": 119715,
+          "indirect_hint": 1,
+          "tailcall": 4
+        },
+        "internal_edges": 119720
       }
     },
     "riscv64-unknown-linux-gnu": {
@@ -178,6 +265,40 @@
           "tailcall": 5003
         },
         "internal_edges": 69263
+      }
+    },
+    "x86_64-unknown-linux-android": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 111030,
+        "external_reason_buckets": {
+          "address_space_miss": 144,
+          "address_space_miss:indirect_hint": 6117,
+          "address_space_miss:tailcall": 1092,
+          "symbol_only_miss:indirect_hint": 7960,
+          "symbol_only_miss:tailcall": 3038,
+          "unresolved:indirect_hint": 92658,
+          "unresolved:tailcall": 21
+        },
+        "functions_total": 26103,
+        "functions_with_direct_targets": 21694,
+        "internal_edge_kinds": {
+          "direct": 39309,
+          "indirect_hint": 3,
+          "tailcall": 11
+        },
+        "internal_edges": 39323
       }
     },
     "x86_64-unknown-linux-gnu": {

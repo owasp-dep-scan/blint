@@ -1,0 +1,88 @@
+{
+  "ndk": "28.2.13676358",
+  "clang": "Android (13624864, +pgo, -bolt, +lto, -mlgo, based on r530567e) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2)",
+  "llvm_strip": "llvm-strip, compatible with GNU strip",
+  "sources": {
+    "r1_functions.c": "A4a R1 \u2014 one function, one mode: ~10 plain functions, no interworking.",
+    "r2_interwork.c": "A4a R2 \u2014 ARM32 interworking: Thumb <-> ARM bl/blx, bx lr, pop {..., pc},"
+  },
+  "builds": {
+    "liba4a_r1_arm64-v8a.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_arm64-v8a.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "arm64-v8a"
+    },
+    "liba4a_r1_armeabi-v7a.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_armeabi-v7a.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "armeabi-v7a"
+    },
+    "liba4a_r1_x86_64.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_x86_64.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "x86_64"
+    },
+    "liba4a_r1_x86.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_x86.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "x86"
+    },
+    "liba4a_r1_riscv64.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/riscv64-linux-android35-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_riscv64.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "riscv64"
+    },
+    "liba4a_r1_thumb.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang -g -O2 -fno-inline -shared -fPIC -mthumb -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_thumb.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "armeabi-v7a"
+    },
+    "liba4a_r1_arm.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang -g -O2 -fno-inline -shared -fPIC -marm -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_arm.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r1_functions.c",
+      "source": "r1_functions.c",
+      "abi": "armeabi-v7a"
+    },
+    "liba4a_r2_arm64-v8a.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_arm64-v8a.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "arm64-v8a"
+    },
+    "liba4a_r2_armeabi-v7a.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_armeabi-v7a.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "armeabi-v7a"
+    },
+    "liba4a_r2_x86_64.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_x86_64.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "x86_64"
+    },
+    "liba4a_r2_x86.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android24-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_x86.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "x86"
+    },
+    "liba4a_r2_riscv64.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/riscv64-linux-android35-clang -g -O2 -fno-inline -shared -fPIC -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_riscv64.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "riscv64"
+    },
+    "liba4a_r2.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi24-clang -g -O2 -fno-inline -shared -fPIC -mthumb -o /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2.so /Users/prabhu/work/owasp/blint/tests/scripts/android/a4a_sources/r2_interwork.c",
+      "source": "r2_interwork.c",
+      "abi": "armeabi-v7a"
+    },
+    "liba4a_r1_thumb_stripped.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --strip-all /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_thumb_stripped.so",
+      "stripped_from": "liba4a_r1_thumb.so"
+    },
+    "liba4a_r1_arm_stripped.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --strip-all /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r1_arm_stripped.so",
+      "stripped_from": "liba4a_r1_arm.so"
+    },
+    "liba4a_r2_stripped.so": {
+      "command": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --strip-all /Users/prabhu/sandbox/android-corpus/a4a-fixtures/liba4a_r2_stripped.so",
+      "stripped_from": "liba4a_r2.so"
+    }
+  }
+}
