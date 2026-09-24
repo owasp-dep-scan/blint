@@ -390,7 +390,9 @@ def _package_apks(
             for entry_name, path, method in lib_members:
                 if method == "stored":
                     continue
-                zf.writestr(entry_name, path.read_bytes())
+                # zipfile defaults to STORED per call unless told otherwise;
+                # the deflated layout is the point of this variant.
+                zf.writestr(entry_name, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
         stored = [(n, p) for n, p, m in lib_members if m == "stored"]
         if stored:
             _zip_add_stored(target, stored)

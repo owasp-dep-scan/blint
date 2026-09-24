@@ -247,6 +247,14 @@ def read_manifest_attributes(apk_file: str) -> dict:
         }
     )
     attributes["mainActivity"] = find_main_activity(root)
+    # The loader-enforced native-lib layout (01/A.2): declared on
+    # <application>; AGP's default when unset is minSdk >= 23, which
+    # android_native.extract_native_libs_fact derives from minSdkVersion.
+    application = root.find("application")
+    if application is not None:
+        declared = application.get(f"{ANDROID_NS}extractNativeLibs")
+        if declared is not None:
+            attributes["extractNativeLibs"] = declared.lower() == "true"
     return attributes
 
 
