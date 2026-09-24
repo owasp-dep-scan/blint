@@ -1,0 +1,76 @@
+UnwindInformation {
+  UnwindIndexTable {
+    SectionIndex: 10
+    SectionName: .ARM.exidx
+    SectionOffset: 0x434
+    Entries [
+      Entry {
+        FunctionAddress: 0x4C8
+        Model: CantUnwind
+      }
+      Entry {
+        FunctionAddress: 0x4D8
+        Model: CantUnwind
+      }
+      Entry {
+        FunctionAddress: 0x4DC
+        Model: CantUnwind
+      }
+      Entry {
+        FunctionAddress: 0x4E0
+        Model: CantUnwind
+      }
+      Entry {
+        FunctionAddress: 0x4EC
+        Model: CantUnwind
+      }
+      Entry {
+        FunctionAddress: 0x50C
+        Model: Compact (Inline)
+        PersonalityIndex: 0
+        Opcodes [
+          0xB0      ; finish
+          0xB0      ; finish
+          0xB0      ; finish
+        ]
+      }
+      Entry {
+        FunctionAddress: 0x514
+        Model: Compact (Inline)
+        PersonalityIndex: 0
+        Opcodes [
+          0x97      ; vsp = r7
+          0x84 0x08 ; pop {r7, lr}
+        ]
+      }
+      Entry {
+        FunctionAddress: 0x574
+        ExceptionHandlingTable: .ARM.extab
+        TableEntryAddress: 0x4A4
+        Model: Compact
+        PersonalityIndex: 1
+        Opcodes [
+          0x97      ; vsp = r7
+          0x41      ; vsp = vsp - 8
+          0x84 0x0D ; pop {r4, r6, r7, lr}
+          0xB0      ; finish
+          0xB0      ; finish
+        ]
+      }
+      Entry {
+        FunctionAddress: 0x59C
+        Model: Compact (Inline)
+        PersonalityIndex: 0
+        Opcodes [
+          0x00      ; vsp = vsp + 4
+          0xB0      ; finish
+          0xB0      ; finish
+        ]
+      }
+      Entry {
+        FunctionAddress: 0x5B0
+        Model: CantUnwind
+      }
+    ]
+  }
+}

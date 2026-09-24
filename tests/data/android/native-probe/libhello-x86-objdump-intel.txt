@@ -1,0 +1,224 @@
+
+/Users/prabhu/sandbox/android-corpus/tier1-ndk/r28/x86/libhello.so:	file format elf32-i386
+
+Disassembly of section .text:
+
+000005c0 <.text>:
+     5c0:      	push	ebp
+     5c1:      	mov	ebp, esp
+     5c3:      	push	ebx
+     5c4:      	push	eax
+     5c5:      	call	0x5ca <.text+0xa>
+     5ca:      	pop	ebx
+     5cb:      	add	ebx, 0x12d2
+     5d1:      	lea	eax, [ebx - 0xdc]
+     5d7:      	mov	dword ptr [esp], eax
+     5da:      	call	0x780 <__cxa_finalize@plt>
+     5df:      	add	esp, 0x4
+     5e2:      	pop	ebx
+     5e3:      	pop	ebp
+     5e4:      	ret
+     5e5:      	nop
+     5e6:      	nop
+     5e7:      	nop
+     5e8:      	nop
+     5e9:      	nop
+     5ea:      	nop
+     5eb:      	nop
+     5ec:      	nop
+     5ed:      	nop
+     5ee:      	nop
+     5ef:      	nop
+     5f0:      	ret
+     5f1:      	nop
+     5f2:      	nop
+     5f3:      	nop
+     5f4:      	nop
+     5f5:      	nop
+     5f6:      	nop
+     5f7:      	nop
+     5f8:      	nop
+     5f9:      	nop
+     5fa:      	nop
+     5fb:      	nop
+     5fc:      	nop
+     5fd:      	nop
+     5fe:      	nop
+     5ff:      	nop
+     600:      	jmp	0x5f0 <.text+0x30>
+     605:      	nop
+     606:      	nop
+     607:      	nop
+     608:      	nop
+     609:      	nop
+     60a:      	nop
+     60b:      	nop
+     60c:      	nop
+     60d:      	nop
+     60e:      	nop
+     60f:      	nop
+     610:      	push	ebp
+     611:      	mov	ebp, esp
+     613:      	push	ebx
+     614:      	push	eax
+     615:      	call	0x61a <.text+0x5a>
+     61a:      	pop	ebx
+     61b:      	add	ebx, 0x1282
+     621:      	mov	eax, dword ptr [ebp + 0x8]
+     624:      	test	eax, eax
+     626:      	je	0x62a <.text+0x6a>
+     628:      	call	eax
+     62a:      	add	esp, 0x4
+     62d:      	pop	ebx
+     62e:      	pop	ebp
+     62f:      	ret
+     630:      	push	ebp
+     631:      	mov	ebp, esp
+     633:      	push	ebx
+     634:      	push	eax
+     635:      	call	0x63a <.text+0x7a>
+     63a:      	pop	ebx
+     63b:      	add	ebx, 0x1262
+     641:      	sub	esp, 0x4
+     644:      	lea	eax, [ebx - 0xdc]
+     64a:      	lea	ecx, [ebx - 0x128c]
+     650:      	push	eax
+     651:      	push	dword ptr [ebp + 0x8]
+     654:      	push	ecx
+     655:      	call	0x790 <__cxa_atexit@plt>
+     65a:      	add	esp, 0x14
+     65d:      	pop	ebx
+     65e:      	pop	ebp
+     65f:      	ret
+
+00000660 <JNI_OnLoad>:
+     660:      	push	ebp
+     661:      	mov	ebp, esp
+     663:      	and	esp, -0x4
+     666:      	mov	eax, 0x10006
+     66b:      	mov	esp, ebp
+     66d:      	pop	ebp
+     66e:      	ret
+     66f:      	int3
+
+00000670 <java_add_left>:
+     670:      	push	ebp
+     671:      	mov	ebp, esp
+     673:      	push	ebx
+     674:      	and	esp, -0x10
+     677:      	sub	esp, 0x60
+     67a:      	call	0x67f <java_add_left+0xf>
+     67f:      	pop	ebx
+     680:      	add	ebx, 0x121d
+     686:      	mov	eax, dword ptr [ebp + 0xc]
+     689:      	mov	ecx, dword ptr gs:[0x14]
+     690:      	mov	dword ptr [esp + 0x50], ecx
+     694:      	add	eax, dword ptr [ebp + 0x8]
+     697:      	mov	dword ptr [esp + 0xc], eax
+     69b:      	xorps	xmm0, xmm0
+     69e:      	movups	xmmword ptr [esp + 0x40], xmm0
+     6a3:      	movups	xmmword ptr [esp + 0x31], xmm0
+     6a8:      	movups	xmmword ptr [esp + 0x21], xmm0
+     6ad:      	movups	xmmword ptr [esp + 0x11], xmm0
+     6b2:      	mov	eax, dword ptr [esp + 0xc]
+     6b6:      	mov	byte ptr [esp + 0x10], al
+     6ba:      	sub	esp, 0x8
+     6bd:      	lea	eax, [esp + 0x18]
+     6c1:      	push	0x40
+     6c3:      	push	eax
+     6c4:      	call	0x7a0 <blint_sink@plt>
+     6c9:      	add	esp, 0x10
+     6cc:      	movsx	eax, byte ptr [esp + 0x10]
+     6d1:      	add	eax, dword ptr [esp + 0xc]
+     6d5:      	mov	ecx, dword ptr gs:[0x14]
+     6dc:      	cmp	ecx, dword ptr [esp + 0x50]
+     6e0:      	jne	0x6e8 <java_add_left+0x78>
+     6e2:      	lea	esp, [ebp - 0x4]
+     6e5:      	pop	ebx
+     6e6:      	pop	ebp
+     6e7:      	ret
+     6e8:      	call	0x7b0 <__stack_chk_fail@plt>
+     6ed:      	int3
+     6ee:      	int3
+     6ef:      	int3
+
+000006f0 <Java_com_example_blint_fixtures_Hello_stringFromJNI>:
+     6f0:      	push	ebp
+     6f1:      	mov	ebp, esp
+     6f3:      	push	ebx
+     6f4:      	and	esp, -0x10
+     6f7:      	sub	esp, 0x10
+     6fa:      	call	0x6ff <Java_com_example_blint_fixtures_Hello_stringFromJNI+0xf>
+     6ff:      	pop	ebx
+     700:      	add	ebx, 0x119d
+     706:      	mov	eax, dword ptr [ebx + 0x101c]
+     70c:      	test	eax, eax
+     70e:      	jne	0x72f <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x3f>
+     710:      	mov	eax, dword ptr [ebp + 0x8]
+     713:      	mov	ecx, dword ptr [eax]
+     715:      	sub	esp, 0x8
+     718:      	lea	edx, [ebx - 0x1480]
+     71e:      	push	edx
+     71f:      	push	eax
+     720:      	call	dword ptr [ecx + 0x29c]
+     726:      	add	esp, 0x10
+     729:      	mov	dword ptr [ebx + 0x101c], eax
+     72f:      	lea	esp, [ebp - 0x4]
+     732:      	pop	ebx
+     733:      	pop	ebp
+     734:      	ret
+     735:      	int3
+     736:      	int3
+     737:      	int3
+     738:      	int3
+     739:      	int3
+     73a:      	int3
+     73b:      	int3
+     73c:      	int3
+     73d:      	int3
+     73e:      	int3
+     73f:      	int3
+
+00000740 <blint_sink>:
+     740:      	push	ebp
+     741:      	mov	ebp, esp
+     743:      	and	esp, -0x4
+     746:      	sub	esp, 0x8
+     749:      	mov	eax, dword ptr [ebp + 0xc]
+     74c:      	mov	ecx, dword ptr [ebp + 0x8]
+     74f:      	movzx	eax, byte ptr [ecx + eax - 0x1]
+     754:      	mov	byte ptr [esp + 0x7], al
+     758:      	movzx	eax, byte ptr [esp + 0x7]
+     75d:      	mov	esp, ebp
+     75f:      	pop	ebp
+     760:      	ret
+
+Disassembly of section .plt:
+
+00000770 <.plt>:
+     770:      	push	dword ptr [ebx + 0x4]
+     776:      	jmp	dword ptr [ebx + 0x8]
+     77c:      	nop
+     77d:      	nop
+     77e:      	nop
+     77f:      	nop
+
+00000780 <__cxa_finalize@plt>:
+     780:      	jmp	dword ptr [ebx + 0xc]
+     786:      	push	0x0
+     78b:      	jmp	0x770 <.plt>
+
+00000790 <__cxa_atexit@plt>:
+     790:      	jmp	dword ptr [ebx + 0x10]
+     796:      	push	0x8
+     79b:      	jmp	0x770 <.plt>
+
+000007a0 <blint_sink@plt>:
+     7a0:      	jmp	dword ptr [ebx + 0x14]
+     7a6:      	push	0x10
+     7ab:      	jmp	0x770 <.plt>
+
+000007b0 <__stack_chk_fail@plt>:
+     7b0:      	jmp	dword ptr [ebx + 0x18]
+     7b6:      	push	0x18
+     7bb:      	jmp	0x770 <.plt>
