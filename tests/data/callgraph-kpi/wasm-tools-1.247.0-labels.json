@@ -75,9 +75,9 @@
           "type": "external",
           "src": "wasm_tools::dump::Dump::print_module@0x1281ac",
           "target": "[x8,#72]",
-          "reason": "address_space_miss:indirect_hint",
+          "reason": "unresolved:indirect_hint",
           "expect_present": true,
-          "note": "Current unresolved ARM64 indirect dispatch target"
+          "note": "Heap vtable dispatch (ldp x0, x8, [...]; ldr x8, [x8, #72]; blr x8): unresolvable statically, reported as unresolved. It read address_space_miss while a stale adrp address survived the ldp."
         },
         {
           "type": "external",

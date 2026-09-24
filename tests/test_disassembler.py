@@ -955,26 +955,37 @@ def test_resolve_direct_calls_tailcall_windows_decimal_operand_prefers_relative_
     ]
 
 
-def test_resolve_direct_calls_aarch64_large_unsigned_immediate_accepts_hex_style():
+def test_resolve_direct_calls_aarch64_bl_immediate_is_pc_relative():
+    """nyxstone prints bl's operand as a byte offset from the instruction, in
+    decimal by default (Automator arm64e: bl #146012 at 0x100001478 is
+    otool's bl 0x1000261c4 - the page layout differs per slice, the rule
+    does not). The exact target is the first candidate."""
     instr = MagicMock()
-    instr.assembly = "bl #410212"
-    instr.address = 0x1000
+    instr.assembly = "bl #146012"
+    instr.address = 0x100001478
     instr.bytes = b"\x90\x90\x90\x90"
 
     direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x410212: "target_fn"}, "aarch64-unknown-linux-gnu"
+        [instr], {0x100001478 + 146012: "target_fn"}, "aarch64-apple-macosx"
     )
 
     assert direct_calls == ["target_fn"]
-    assert direct_targets == [
-        {
-            "target_name": "target_fn",
-            "target_address": "0x410212",
-            "target_address_candidates": ["0x410212", "0x65264", "0x65268", "0x64264"],
-            "raw_operand": "#410212",
-            "kind": "direct",
-        }
-    ]
+    assert direct_targets[0]["target_address"] == hex(0x100001478 + 146012)
+    assert direct_targets[0]["target_address_candidates"][0] == hex(0x100001478 + 146012)
+
+
+def test_resolve_direct_calls_aarch64_hex_style_bl_is_still_pc_relative():
+    instr = MagicMock()
+    instr.assembly = "bl #0x23a5c"
+    instr.address = 0x100001478
+    instr.bytes = b"\x90\x90\x90\x90"
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [instr], {0x100001478 + 0x23A5C: "target_fn"}, "aarch64-apple-macosx"
+    )
+
+    assert direct_calls == ["target_fn"]
+    assert direct_targets[0]["target_address"] == hex(0x100001478 + 0x23A5C)
 
 
 def test_resolve_direct_calls_aarch64_unsigned_immediate_adds_relative_candidates():
@@ -1000,109 +1011,100 @@ def test_resolve_direct_calls_aarch64_unsigned_immediate_adds_relative_candidate
 
 
 def test_resolve_direct_calls_aarch64_ldr_chain_recovers_blr_target_from_base_register():
+    # nyxstone's real form: adrp's operand is a decimal delta from the
+    # instruction's 4 KiB page (0x100001000 + 266240 = 0x100042000).
     adrp_instr = MagicMock()
-    adrp_instr.assembly = "adrp x8, #0x400000"
-    adrp_instr.address = 0x1000
+    adrp_instr.assembly = "adrp x8, #266240"
+    adrp_instr.address = 0x100001460
     adrp_instr.bytes = b"\x90\x90\x90\x90"
 
     add_instr = MagicMock()
-    add_instr.assembly = "add x8, x8, #0x20"
-    add_instr.address = 0x1004
+    add_instr.assembly = "add x8, x8, #32"
+    add_instr.address = 0x100001464
     add_instr.bytes = b"\x90\x90\x90\x90"
 
     ldr_instr = MagicMock()
-    ldr_instr.assembly = "ldr x16, [x8, #0x18]"
-    ldr_instr.address = 0x1008
+    ldr_instr.assembly = "ldr x16, [x8, #24]"
+    ldr_instr.address = 0x100001468
     ldr_instr.bytes = b"\x90\x90\x90\x90"
 
     blr_instr = MagicMock()
     blr_instr.assembly = "blr x16"
-    blr_instr.address = 0x100C
+    blr_instr.address = 0x10000146C
     blr_instr.bytes = b"\x90\x90\x90\x90"
 
     direct_calls, direct_targets = _resolve_direct_calls(
         [adrp_instr, add_instr, ldr_instr, blr_instr],
-        {0x400038: "dispatch_target"},
-        "aarch64-unknown-linux-gnu",
+        {0x100042038: "dispatch_target"},
+        "aarch64-apple-macosx",
     )
 
     assert direct_calls == []
-    assert direct_targets[-1] == {
-        "target_name": "dispatch_target",
-        "target_address": "0x400038",
-        "target_address_candidates": ["0x400038"],
-        "raw_operand": "[x8, #0x18]",
-        "kind": "indirect_hint",
-    }
+    assert direct_targets[-1]["target_name"] == "dispatch_target"
+    assert direct_targets[-1]["target_address"] == "0x100042038"
+    assert direct_targets[-1]["raw_operand"] == "[x8, #24]"
+    assert direct_targets[-1]["kind"] == "indirect_hint"
 
 
 def test_resolve_direct_calls_aarch64_ldr_post_index_preserves_tail_displacement():
     adrp_instr = MagicMock()
-    adrp_instr.assembly = "adrp x8, #0x400000"
-    adrp_instr.address = 0x1000
+    adrp_instr.assembly = "adrp x8, #266240"
+    adrp_instr.address = 0x100001460
     adrp_instr.bytes = b"\x90\x90\x90\x90"
 
     add_instr = MagicMock()
-    add_instr.assembly = "add x8, x8, #0x20"
-    add_instr.address = 0x1004
+    add_instr.assembly = "add x8, x8, #32"
+    add_instr.address = 0x100001464
     add_instr.bytes = b"\x90\x90\x90\x90"
 
     ldr_instr = MagicMock()
-    ldr_instr.assembly = "ldr x16, [x8], #0x18"
-    ldr_instr.address = 0x1008
+    ldr_instr.assembly = "ldr x16, [x8], #24"
+    ldr_instr.address = 0x100001468
     ldr_instr.bytes = b"\x90\x90\x90\x90"
 
     blr_instr = MagicMock()
     blr_instr.assembly = "blr x16"
-    blr_instr.address = 0x100C
+    blr_instr.address = 0x10000146C
     blr_instr.bytes = b"\x90\x90\x90\x90"
 
     direct_calls, direct_targets = _resolve_direct_calls(
         [adrp_instr, add_instr, ldr_instr, blr_instr],
-        {0x400038: "dispatch_target"},
-        "aarch64-unknown-linux-gnu",
+        {0x100042038: "dispatch_target"},
+        "aarch64-apple-macosx",
     )
 
     assert direct_calls == []
-    assert direct_targets[-1] == {
-        "target_name": "dispatch_target",
-        "target_address": "0x400038",
-        "target_address_candidates": ["0x400038"],
-        "raw_operand": "[x8],#0x18",
-        "kind": "indirect_hint",
-    }
+    assert direct_targets[-1]["target_name"] == "dispatch_target"
+    assert direct_targets[-1]["target_address"] == "0x100042038"
+    assert direct_targets[-1]["kind"] == "indirect_hint"
 
 
 def test_resolve_direct_calls_aarch64_br_tailcall_uses_register_target_tracking():
     adrp_instr = MagicMock()
-    adrp_instr.assembly = "adrp x16, #0x410000"
-    adrp_instr.address = 0x2000
+    adrp_instr.assembly = "adrp x16, #266240"
+    adrp_instr.address = 0x100001460
     adrp_instr.bytes = b"\x90\x90\x90\x90"
 
     add_instr = MagicMock()
-    add_instr.assembly = "add x16, x16, #0x88"
-    add_instr.address = 0x2004
+    add_instr.assembly = "add x16, x16, #136"
+    add_instr.address = 0x100001464
     add_instr.bytes = b"\x90\x90\x90\x90"
 
     tail_instr = MagicMock()
     tail_instr.assembly = "br x16"
-    tail_instr.address = 0x2008
+    tail_instr.address = 0x100001468
     tail_instr.bytes = b"\x90\x90\x90\x90"
 
     direct_calls, direct_targets = _resolve_direct_calls(
         [adrp_instr, add_instr, tail_instr],
-        {0x410088: "tail_target"},
-        "aarch64-unknown-linux-gnu",
+        {0x100042088: "tail_target"},
+        "aarch64-apple-macosx",
     )
 
     assert direct_calls == []
-    assert direct_targets[-1] == {
-        "target_name": "tail_target",
-        "target_address": "0x410088",
-        "target_address_candidates": ["0x410088"],
-        "raw_operand": "x16",
-        "kind": "tailcall",
-    }
+    assert direct_targets[-1]["target_name"] == "tail_target"
+    assert direct_targets[-1]["target_address"] == "0x100042088"
+    assert direct_targets[-1]["kind"] == "tailcall"
 
 
 def test_resolve_direct_calls_aarch64_pac_branch_call_uses_first_register_operand():
@@ -1178,8 +1180,18 @@ def test_resolve_direct_calls_windows_arm64_drops_noncanonical_register_target_c
         [mov_instr, ldr_instr, blr_instr], {}, "aarch64-pc-windows-msvc"
     )
 
+    # The non-canonical candidates are dropped; the dispatch itself stays on
+    # record as unresolved, carrying only its load operand.
     assert direct_calls == []
-    assert direct_targets == []
+    assert direct_targets == [
+        {
+            "target_name": "",
+            "target_address": "",
+            "target_address_candidates": [],
+            "raw_operand": "[x9, #24]",
+            "kind": "indirect_hint",
+        }
+    ]
 
 
 def test_macos_system_symbol_name_detection():
@@ -1202,3 +1214,112 @@ def test_should_skip_symbol_list_for_disassembly_macho_and_pe():
 
     assert _should_skip_symbol_list_for_disassembly(mock_pe, "imports") is True
     assert _should_skip_symbol_list_for_disassembly(mock_pe, "functions") is False
+
+
+def test_disassembly_feature_defaults_per_architecture():
+    from blint.lib.disassembler import _default_disassembly_features, _merge_features
+
+    aarch64 = _default_disassembly_features("arm64e-apple-macosx").split(",")
+    for feature in ("+pauth", "+pauth-lr", "+lse", "+aes", "+sve2", "+sme2", "+mte", "+cssc", "+cpa"):
+        assert feature in aarch64
+    riscv = _default_disassembly_features("riscv64-unknown-linux-gnu").split(",")
+    for feature in ("+c", "+d", "+v", "+zcb"):
+        assert feature in riscv
+    # Encodings that collide with C+D and V are never enabled.
+    for feature in ("+zcmp", "+zcmt", "+xtheadvector"):
+        assert feature not in riscv
+    assert _default_disassembly_features("x86_64-unknown-linux-gnu") == ""
+    # Caller features are kept and appended after the defaults, once.
+    assert _merge_features("+a,+b", "+b,-a") == "+a,+b,-a"
+
+
+@pytest.mark.skipif(not disassembler_module.NYXSTONE_AVAILABLE, reason="nyxstone not installed")
+@pytest.mark.parametrize(
+    "triple, word, mnemonic",
+    [
+        # Words that failed to decode in the measurement, one per missing
+        # extension family, taken from shipped binaries.
+        ("aarch64-unknown-linux-gnu", "41fce0c8", "casal"),  # LSE, Android app libs
+        ("aarch64-unknown-linux-gnu", "2000e0b8", "ldaddal"),  # LSE, Android system libs
+        ("aarch64-unknown-linux-gnu", "404a284e", "aese"),  # AES
+        ("aarch64-unknown-linux-gnu", "fea7c1da", "pacibsppc"),  # PAuth_LR, arm64e.x1
+        ("aarch64-unknown-linux-gnu", "086dc99a", "umin"),  # CSSC, arm64e.x1
+        ("aarch64-unknown-linux-gnu", "8022089a", "addpt"),  # CPA, arm64e.x1
+        ("aarch64-unknown-linux-gnu", "21099a69", "stgp"),  # MTE
+        ("riscv64-unknown-linux-gnu", "797106f4", "addi"),  # C, wasm-tools riscv64
+        ("riscv64-unknown-linux-gnu", "06ec22e8", "sd"),  # C
+    ],
+)
+def test_measured_extension_gaps_now_decode(triple, word, mnemonic):
+    from nyxstone import Nyxstone
+
+    from blint.lib.disassembler import _default_disassembly_features
+
+    nyx = Nyxstone(triple, features=_default_disassembly_features(triple))
+    decoded = nyx.disassemble_to_instructions(list(bytes.fromhex(word)), 0, 1)
+    assert decoded[0].assembly.split()[0] == mnemonic
+
+
+@pytest.mark.parametrize("arch", ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"])
+def test_tail_jump_through_rip_slot_is_named_from_the_slot(arch):
+    """jmp qword ptr [rip + N] (PLT, -fno-plt, PE import thunks) in the form
+    nyxstone prints: the slot names the callee; the slot address is never
+    offered as the callee's address, and an unnamed slot records nothing."""
+    instr = MagicMock()
+    instr.assembly = "jmp qword ptr [rip + 1234]"
+    instr.address = 0x401000
+    instr.bytes = b"\x90" * 6
+
+    _, targets = _resolve_direct_calls([instr], {0x401000 + 6 + 1234: "memcpy"}, arch)
+    assert targets == [
+        {
+            "target_name": "memcpy",
+            "target_address": "",
+            "target_address_candidates": [],
+            "raw_operand": "qword ptr [rip + 1234]",
+            "kind": "tailcall",
+        }
+    ]
+    assert _resolve_direct_calls([instr], {}, arch)[1] == []
+
+
+def _arm64(assembly, address):
+    instr = MagicMock()
+    instr.assembly = assembly
+    instr.address = address
+    instr.bytes = b"\x90\x90\x90\x90"
+    return instr
+
+
+@pytest.mark.parametrize(
+    "clobber",
+    [
+        # The trait-object dispatch shape from the aarch64-macos fixture:
+        # x8 is loaded from the heap by the second slot of a pair load.
+        "ldp x0, x8, [x27, #40]",
+        "csel x8, x9, x10, eq",
+        "orr x8, xzr, #1",
+        "ldur x8, [x29, #-8]",
+    ],
+)
+def test_register_written_by_an_unmodelled_instruction_forgets_its_target(clobber):
+    """A register the tracker cannot model after a write must not keep the
+    address an earlier adrp gave it (the stale-target false edge)."""
+    seq = [
+        _arm64("adrp x8, #266240", 0x100001460),
+        _arm64(clobber, 0x100001464),
+        _arm64("blr x8", 0x100001468),
+    ]
+    _, targets = _resolve_direct_calls(seq, {0x100042000: "stale"}, "aarch64-apple-macosx")
+    assert all(t.get("target_name") != "stale" for t in targets)
+    assert all(t.get("target_address") != "0x100042000" for t in targets)
+
+
+def test_store_does_not_forget_the_register_it_stores():
+    seq = [
+        _arm64("adrp x16, #266240", 0x100001460),
+        _arm64("str x16, [sp, #8]", 0x100001464),
+        _arm64("br x16", 0x100001468),
+    ]
+    _, targets = _resolve_direct_calls(seq, {0x100042000: "kept"}, "aarch64-apple-macosx")
+    assert targets[-1]["target_name"] == "kept"

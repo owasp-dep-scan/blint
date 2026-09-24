@@ -76,11 +76,12 @@ class TestFunctionCfg:
 
     def test_arm64_conditional(self):
         instrs = [
-            _Instr(0x400, "cbz w8, 8", 4),
-            _Instr(0x404, "add x0, x0, 1", 4),
+            # nyxstone's real form: a '#'-prefixed offset from the branch.
+            _Instr(0x400, "cbz w8, #8", 4),
+            _Instr(0x404, "add x0, x0, #1", 4),
             _Instr(0x408, "ret", 4),
         ]
-        parsed = [_parse("cbz", "w8, 8"), _parse("add", "x0, x0, 1"), _parse("ret")]
+        parsed = [_parse("cbz", "w8, #8"), _parse("add", "x0, x0, #1"), _parse("ret")]
         cfg = build_function_cfg(instrs, parsed, "aarch64", 0x400)
         assert cfg["block_count"] == 3
         assert cfg["cyclomatic_complexity"] == 2
@@ -113,15 +114,17 @@ class TestFunctionCfg:
 
 class TestArm64Absint:
     def test_movz_movk_builds_value(self):
-        state = interpret_arm64(["movz x8, #0x2F", "movk x8, #0x75, lsl #8"])
+        # nyxstone's real forms: movz prints as `mov` with a decimal
+        # immediate, and movk shifts are multiples of 16.
+        state = interpret_arm64(["mov x8, #47", "movk x8, #117, lsl #16"])
         value, width = state.get_register("x8")
-        assert value == 0x752F
+        assert value == 0x75002F
         assert width == 8
 
     def test_store_into_frame_slot(self):
         state = interpret_arm64(
             [
-                "movz x8, #0x41",
+                "mov x8, #65",
                 "str x8, [sp, #64]",
             ]
         )
@@ -131,7 +134,7 @@ class TestArm64Absint:
     def test_stur_negative_offset(self):
         state = interpret_arm64(
             [
-                "movz x8, #0x41",
+                "mov x8, #65",
                 "stur x8, [x29, #-24]",
             ]
         )
@@ -140,9 +143,9 @@ class TestArm64Absint:
     def test_call_clobbers_caller_saved_only(self):
         state = interpret_arm64(
             [
-                "movz x0, #7",
-                "movz x19, #9",
-                "bl 0x1234",
+                "mov x0, #7",
+                "mov x19, #9",
+                "bl #4660",
             ]
         )
         assert state.get_register("x0") is None
@@ -155,7 +158,7 @@ class TestArm64Absint:
     def test_unknown_writer_invalidates(self):
         state = interpret_arm64(
             [
-                "movz x8, #5",
+                "mov x8, #5",
                 "ldr x8, [x9]",
             ]
         )
@@ -163,8 +166,9 @@ class TestArm64Absint:
 
     def test_recover_stack_string(self):
         # '/usr' as one 32-bit little-endian store: 0x7273752F puts the bytes
-        # 2F 75 72 73 at sp+8. movz supplies the low half, movk the high one.
-        assembly = "movz w8, #0x752F\nmovk w8, #0x7273, lsl #16\nstr w8, [sp, #8]"
+        # 2F 75 72 73 at sp+8. mov supplies the low half, movk the high one,
+        # in the decimal form nyxstone prints.
+        assembly = "mov w8, #29999\nmovk w8, #29299, lsl #16\nstr w8, [sp, #8]"
         recovered = recover_arm64_stack_strings(assembly)
         values = [entry["value"] for entry in recovered]
         assert "/usr" in values
@@ -313,11 +317,11 @@ class TestCfgSemantics:
     def test_svc_is_not_a_trap(self):
         # A syscall returns control, so the block after it stays reachable.
         instrs = [
-            _Instr(0x400, "mov x0, 1", 4),
-            _Instr(0x404, "svc 128", 4),
+            _Instr(0x400, "mov x0, #1", 4),
+            _Instr(0x404, "svc #0x80", 4),
             _Instr(0x408, "ret", 4),
         ]
-        parsed = [_parse("mov", "x0, 1"), _parse("svc", "128"), _parse("ret")]
+        parsed = [_parse("mov", "x0, #1"), _parse("svc", "#0x80"), _parse("ret")]
         cfg = build_function_cfg(instrs, parsed, "aarch64", 0x400)
         assert cfg["unreachable_block_count"] == 0
         assert cfg["block_count"] == 1

@@ -14,21 +14,22 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 3402,
+        "external_edges": 6151,
         "external_reason_buckets": {
-          "import": 3162,
-          "import:indirect_hint": 3,
-          "import:tailcall": 22,
-          "unresolved:tailcall": 215
+          "import": 3550,
+          "import:indirect_hint": 321,
+          "import:tailcall": 28,
+          "unresolved:indirect_hint": 2032,
+          "unresolved:tailcall": 220
         },
-        "functions_total": 22093,
-        "functions_with_direct_targets": 18675,
+        "functions_total": 22115,
+        "functions_with_direct_targets": 19271,
         "internal_edge_kinds": {
-          "direct": 68341,
-          "indirect_hint": 390,
-          "tailcall": 7088
+          "direct": 74239,
+          "indirect_hint": 62,
+          "tailcall": 7206
         },
-        "internal_edges": 75819
+        "internal_edges": 81507
       }
     },
     "aarch64-pc-windows-msvc": {
@@ -45,19 +46,20 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 93,
+        "external_edges": 2229,
         "external_reason_buckets": {
           "address_space_miss:indirect_hint": 2,
-          "unresolved:tailcall": 91
+          "unresolved:indirect_hint": 2132,
+          "unresolved:tailcall": 95
         },
-        "functions_total": 16193,
-        "functions_with_direct_targets": 16001,
+        "functions_total": 16433,
+        "functions_with_direct_targets": 16301,
         "internal_edge_kinds": {
-          "direct": 66963,
-          "indirect_hint": 405,
-          "tailcall": 5078
+          "direct": 70364,
+          "indirect_hint": 371,
+          "tailcall": 5119
         },
-        "internal_edges": 72446
+        "internal_edges": 75854
       }
     },
     "aarch64-unknown-linux-gnu": {
@@ -74,20 +76,43 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 229,
+        "external_edges": 2118,
         "external_reason_buckets": {
-          "address_space_miss:indirect_hint": 22,
+          "address_space_miss:indirect_hint": 18,
           "address_space_miss:tailcall": 1,
-          "unresolved:tailcall": 206
+          "unresolved:indirect_hint": 1887,
+          "unresolved:tailcall": 212
         },
-        "functions_total": 22219,
-        "functions_with_direct_targets": 19214,
+        "functions_total": 22181,
+        "functions_with_direct_targets": 19255,
         "internal_edge_kinds": {
-          "direct": 67644,
-          "indirect_hint": 127,
-          "tailcall": 7109
+          "direct": 67181,
+          "indirect_hint": 54,
+          "tailcall": 7099
         },
-        "internal_edges": 74880
+        "internal_edges": 74334
+      }
+    },
+    "riscv64-unknown-linux-gnu": {
+      "allowed_drop": {
+        "external_edges": 0,
+        "external_reason_buckets": {
+          "*": 0
+        },
+        "functions_total": 0,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {
+          "*": 0
+        },
+        "internal_edges": 0
+      },
+      "kpi": {
+        "external_edges": 0,
+        "external_reason_buckets": {},
+        "functions_total": 22012,
+        "functions_with_direct_targets": 0,
+        "internal_edge_kinds": {},
+        "internal_edges": 0
       }
     },
     "x86_64-apple-macosx": {
@@ -106,21 +131,20 @@
       "kpi": {
         "external_edges": 8357,
         "external_reason_buckets": {
-          "ambiguous_address:indirect_hint": 1,
           "import": 3407,
           "symbol_only_miss:indirect_hint": 17,
-          "symbol_only_miss:tailcall": 4031,
+          "symbol_only_miss:tailcall": 4032,
           "unresolved:indirect_hint": 718,
           "unresolved:tailcall": 183
         },
         "functions_total": 22187,
-        "functions_with_direct_targets": 17001,
+        "functions_with_direct_targets": 17002,
         "internal_edge_kinds": {
           "direct": 55074,
-          "indirect_hint": 392,
+          "indirect_hint": 390,
           "tailcall": 2066
         },
-        "internal_edges": 57532
+        "internal_edges": 57530
       }
     },
     "x86_64-pc-windows-msvc": {
@@ -137,22 +161,23 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 3939,
+        "external_edges": 3973,
         "external_reason_buckets": {
           "address_space_miss:indirect_hint": 60,
           "address_space_miss:tailcall": 3,
           "symbol_only_miss:indirect_hint": 501,
+          "symbol_only_miss:tailcall": 34,
           "unresolved:indirect_hint": 3358,
           "unresolved:tailcall": 17
         },
         "functions_total": 16556,
-        "functions_with_direct_targets": 16118,
+        "functions_with_direct_targets": 16143,
         "internal_edge_kinds": {
           "direct": 64254,
-          "indirect_hint": 21,
+          "indirect_hint": 6,
           "tailcall": 5003
         },
-        "internal_edges": 69278
+        "internal_edges": 69263
       }
     },
     "x86_64-unknown-linux-gnu": {
@@ -169,24 +194,24 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 92706,
+        "external_edges": 92721,
         "external_reason_buckets": {
           "address_space_miss": 216,
-          "address_space_miss:indirect_hint": 5853,
+          "address_space_miss:indirect_hint": 5845,
           "address_space_miss:tailcall": 1038,
-          "symbol_only_miss:indirect_hint": 6960,
-          "symbol_only_miss:tailcall": 4115,
+          "symbol_only_miss:indirect_hint": 6957,
+          "symbol_only_miss:tailcall": 4141,
           "unresolved:indirect_hint": 74498,
           "unresolved:tailcall": 26
         },
         "functions_total": 22173,
-        "functions_with_direct_targets": 17882,
+        "functions_with_direct_targets": 17901,
         "internal_edge_kinds": {
           "direct": 22257,
-          "indirect_hint": 22,
+          "indirect_hint": 5,
           "tailcall": 9
         },
-        "internal_edges": 22288
+        "internal_edges": 22271
       }
     }
   },

@@ -30,9 +30,11 @@ def test_build_review_metadata_splits_targets_and_strings():
 def test_embedded_fill_array_data_strings_recovered():
     import struct
 
-    # fill-array-data v0, +3 with payload spelling "http://evil.test" in bytes.
+    # fill-array-data v0, +4 with payload spelling "http://evil.test" in bytes.
+    # The payload must be 4-byte aligned, so d8/dx pad with a nop and the
+    # payload lands at code unit 4, as in real dex.
     text = b"http://evil.test"
-    head = bytes([0x26, 0x00]) + struct.pack("<i", 3)
+    head = bytes([0x26, 0x00]) + struct.pack("<i", 4) + bytes([0x00, 0x00])
     payload = bytes([0x00, 0x03, 0x01, 0x00]) + struct.pack("<I", len(text)) + text
     if len(payload) % 2:
         payload += b"\x00"

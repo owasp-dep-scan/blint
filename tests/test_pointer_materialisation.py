@@ -49,7 +49,7 @@ def _arm64_func(assembly: str, blocks: list[dict] | None = None, **overrides) ->
             "edges": [],
         },
         "direct_call_targets": [
-            {"target_name": "_printf", "raw_operand": "_printf", "kind": "call"}
+            {"target_name": "_printf", "raw_operand": "#4096", "kind": "call"}
         ],
     }
     func.update(overrides)
@@ -96,7 +96,7 @@ def _x86_func(
 def test_arm64_adrp_add_completes_to_llvm_objdump_address():
     # The adrp is the second line, so its address is block start + 4: an
     # off-by-one here resolves a different page-base than 0x10011a000.
-    assembly = "mov x10, #1\nadrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl _printf"
+    assembly = "mov x10, #1\nadrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl #4096"
     func = _arm64_func(
         assembly,
         blocks=[{"start": "0x100000ab4", "end": "0x100000ac8", "instructions": 5}],
@@ -113,7 +113,7 @@ def test_arm64_adrp_add_completes_to_llvm_objdump_address():
 
 
 def test_arm64_completed_pointer_moves_between_registers_and_arithmetic():
-    assembly = "adrp x1, #1155072\nadd x1, x1, #1860\nmov x0, x1\nbl _printf"
+    assembly = "adrp x1, #1155072\nadd x1, x1, #1860\nmov x0, x1\nbl #4096"
     func = _arm64_func(assembly)
     records, method = recover_call_site_arguments_with_method(
         func, "aarch64-apple-macosx", "MachO"
@@ -128,7 +128,7 @@ def test_arm64_ldr_through_adrp_base_stays_unknown():
     # adrp x20, 0x100134000; ldr x20, [x20, #72] is a load *through* the
     # pointer. Reporting 0x100134000 — or anything — as the value would
     # manufacture a pointer; the honest result is unknown.
-    assembly = "adrp x20, #1261568\nldr x20, [x20, #72]\nmov x0, x20\nbl _printf"
+    assembly = "adrp x20, #1261568\nldr x20, [x20, #72]\nmov x0, x20\nbl #4096"
     func = _arm64_func(assembly)
     records, method = recover_call_site_arguments_with_method(
         func, "aarch64-apple-macosx", "MachO"
@@ -141,7 +141,7 @@ def test_arm64_ldr_through_adrp_base_stays_unknown():
 
 def test_arm64_bare_adrp_page_is_reported_and_counted():
     # adrp passed straight to a call: the page is what the register held.
-    assembly = "adrp x0, #1261568\nbl _printf"
+    assembly = "adrp x0, #1261568\nbl #4096"
     func = _arm64_func(assembly)
     records, method = recover_call_site_arguments_with_method(
         func, "aarch64-apple-macosx", "MachO"
@@ -156,7 +156,7 @@ def test_arm64_bare_adrp_page_is_reported_and_counted():
 def test_arm64_without_line_addresses_keeps_legacy_symbolic():
     # Blocks without start/end VAs (the shape every older fixture has):
     # no address, no materialisation, and the reason named in coverage.
-    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl _printf"
+    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl #4096"
     func = _arm64_func(
         assembly,
         blocks=[{"instructions": 4}],
@@ -177,7 +177,7 @@ def test_arm64_without_line_addresses_keeps_legacy_symbolic():
 def test_arm64_stride_fallback_without_exported_lengths():
     # arm64's fixed 4-byte word serves when the lengths array is absent
     # (metadata cached by an older blint): the addresses stay computable.
-    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl _printf"
+    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl #4096"
     func = _arm64_func(assembly)
     del func["instruction_lengths"]
     records, method = recover_call_site_arguments_with_method(
@@ -191,7 +191,7 @@ def test_arm64_stride_fallback_without_exported_lengths():
 def test_arm64_block_extent_contradicting_instruction_count_is_named():
     # The block claims 4 instructions but its extent covers 3: the address
     # arithmetic would be built on a lie, so it is refused and counted.
-    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl _printf"
+    assembly = "adrp x9, #1155072\nadd x9, x9, #1852\nmov x0, x9\nbl #4096"
     func = _arm64_func(
         assembly,
         blocks=[{"start": "0x100000ab4", "end": "0x100000ac0", "instructions": 4}],
@@ -208,7 +208,7 @@ def test_arm64_block_extent_contradicting_instruction_count_is_named():
 
 def test_arm64_unmodelled_pc_relative_form_is_named():
     # `adr` (the pc-relative form the model deliberately does not fold).
-    assembly = "adr x0, #8\nbl _printf"
+    assembly = "adr x0, #8\nbl #4096"
     func = _arm64_func(assembly)
     _, coverage = analyze_call_site_arguments({"k": func}, "aarch64-apple-macosx", "MachO")
     assert coverage["functions_unmodelled_pc_relative"] == 1
@@ -286,10 +286,10 @@ def test_x86_materialised_pointer_stored_to_frame_is_not_a_string():
 
 
 def test_block_counts_materialised_arguments_and_resolved_strings():
-    assembly = "adrp x0, #1155072\nadd x0, x0, #1852\nbl _printf"
+    assembly = "adrp x0, #1155072\nadd x0, x0, #1852\nbl #4096"
     func = _arm64_func(
         assembly,
-        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "#4096", "kind": "call"}],
     )
     entries, coverage = analyze_call_site_arguments(
         {"k": func},
@@ -308,13 +308,13 @@ def test_materialised_and_immediate_sites_aggregate_without_conflict():
     # The same callee/position reached once with a materialised pointer and
     # once with an immediate stays two distinct entries: values differ.
     arm = _arm64_func(
-        "adrp x0, #1155072\nadd x0, x0, #1852\nbl _printf",
-        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
+        "adrp x0, #1155072\nadd x0, x0, #1852\nbl #4096",
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "#4096", "kind": "call"}],
     )
     arm2 = _arm64_func(
-        "mov x0, #5\nbl _printf",
+        "mov x0, #5\nbl #4096",
         name="arm2",
-        direct_call_targets=[{"target_name": "printf", "raw_operand": "_printf", "kind": "call"}],
+        direct_call_targets=[{"target_name": "printf", "raw_operand": "#4096", "kind": "call"}],
     )
     entries, coverage = analyze_call_site_arguments(
         {"a": arm, "b": arm2}, "aarch64-apple-macosx", "MachO"
