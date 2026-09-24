@@ -753,3 +753,38 @@ def test_an_empty_archive_name_is_not_a_member(tmp_path):
     metadata = _with_extra_exact_functions(_member_query_metadata(), 8)
     matches, _state = lookup_member_matches(metadata, db_file=str(db_file))
     assert "pkg:generic/tiny@5.0.0" not in {match["project_purl"] for match in matches}
+
+
+def test_banner_in_stripped_shared_object_with_hidden_vendored_code_stays_vendored():
+    """An Android-style .so that statically embeds OpenSSL with hidden
+    visibility: it links other libraries, defines no OpenSSL symbol in its
+    dynamic table, and does not link or import libcrypto. Nothing shows the
+    code living elsewhere, so the banner stays a vendored component."""
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": "OpenSSL 3.0.13 30 Jan 2024"}],
+            "dynamic_entries": [
+                {"tag": "NEEDED", "name": "liblog.so"},
+                {"tag": "NEEDED", "name": "libc.so"},
+            ],
+            "dynamic_symbols": [
+                {"name": "JNI_OnLoad", "is_imported": False},
+                {"name": "__android_log_print", "is_imported": True},
+            ],
+        }
+    )
+    assert [b["purl"] for b in detected["banners"]] == ["pkg:generic/openssl@3.0.13"]
+    assert detected["mentions"] == []
+
+
+def test_banner_is_a_mention_when_the_library_is_linked_by_name():
+    """Linking libz without importing a recognisable symbol (a stripped
+    import table) is still the code living elsewhere."""
+    detected = detect_vendored_banners(
+        {
+            "strings": [{"value": " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly "}],
+            "libraries": [{"name": "/usr/lib/libz.1.dylib", "version": "1.2.12"}],
+        }
+    )
+    assert detected["banners"] == []
+    assert [m["purl"] for m in detected["mentions"]] == ["pkg:generic/zlib@1.2.5"]

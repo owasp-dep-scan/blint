@@ -17,13 +17,12 @@ macOS measured both shapes on one system: ``libcrypto.0.9.7.dylib`` carries
 vendored code. ``assetutil`` links ``/usr/lib/libz.1.dylib`` dynamically,
 defines no zlib symbol at all, and still carries "deflate 1.2.5 Copyright" -
 a stale build-time banner naming a zlib that is not even the linked one
-(1.2.12): a mention, not code. So a detected banner is emitted as a
-*vendored* banner only when the artifact corroborates it - it defines
-symbols from the library's own API - or when it declares no dynamic
-dependencies at all (a stripped static image has no symbol table left to
-corroborate with, and nowhere else for the code to be). A banner-shaped
-string in a dynamically linked artifact with no matching defined symbols is
-returned as a *mention*: recorded for visibility, never a component.
+(1.2.12): a mention, not code. So a detected banner is a *mention* -
+recorded for visibility, never a component - only when the artifact
+defines none of the library's API *and* shows the code living elsewhere
+(it links the library's shared object or imports its API). Absence of
+defined symbols alone is not enough: a stripped image with
+hidden-visibility vendored code has none in its dynamic table.
 """
 
 import re
@@ -57,6 +56,18 @@ BANNER_API_ANCHORS = {
     "expat": re.compile(r"^_?(?:XML_|expat_)", re.IGNORECASE),
     "libpng": re.compile(r"^_?png_", re.IGNORECASE),
     "zstd": re.compile(r"^_?ZSTD_", re.IGNORECASE),
+}
+
+# The library's own shared object, by name, for deciding whether a banner's
+# code demonstrably lives outside the artifact (the artifact links it).
+BANNER_LIBRARY_LINK_NAMES = {
+    "zlib": re.compile(r"(?:^|/)libz\.", re.IGNORECASE),
+    "lua": re.compile(r"(?:^|/)liblua", re.IGNORECASE),
+    "openssl": re.compile(r"(?:^|/)lib(?:crypto|ssl)\.", re.IGNORECASE),
+    "curl": re.compile(r"(?:^|/)libcurl\.", re.IGNORECASE),
+    "expat": re.compile(r"(?:^|/)libexpat\.", re.IGNORECASE),
+    "libpng": re.compile(r"(?:^|/)libpng", re.IGNORECASE),
+    "zstd": re.compile(r"(?:^|/)libzstd\.", re.IGNORECASE),
 }
 
 BANNER_SIGNATURES = (
@@ -174,18 +185,38 @@ def _defined_api_symbol_counts(metadata: dict) -> dict[str, int]:
     return counts
 
 
-def _declares_dynamic_dependencies(metadata: dict) -> bool:
-    """Whether the artifact declares any dynamic dependency at all.
+def _provided_externally(metadata: dict, library: str) -> bool:
+    """Whether the library's code demonstrably lives outside the artifact.
 
-    An image that declares none is statically shaped: a stripped static
-    binary has no symbol table to corroborate a banner with, and nowhere
-    outside the image for the library's code to live, so its banner stays a
-    vendored banner.
+    Two witnesses: the artifact links the library's own shared object
+    (DT_NEEDED / LC_LOAD_DYLIB), or it imports symbols from the library's
+    API. Absence of defined API symbols alone is not a witness - a stripped
+    shared object that embeds OpenSSL with hidden visibility defines none in
+    its dynamic table and still carries the code.
     """
-    for entry in metadata.get("dynamic_entries") or []:
-        if isinstance(entry, dict) and entry.get("tag") in ("NEEDED", "LOAD_DYLIB"):
-            return True
-    return bool(metadata.get("libraries"))
+    link_name = BANNER_LIBRARY_LINK_NAMES.get(library)
+    if link_name:
+        for entry in metadata.get("dynamic_entries") or []:
+            if (
+                isinstance(entry, dict)
+                and entry.get("tag") == "NEEDED"
+                and link_name.search(str(entry.get("name") or ""))
+            ):
+                return True
+        for dylib in metadata.get("libraries") or []:
+            if isinstance(dylib, dict) and link_name.search(str(dylib.get("name") or "")):
+                return True
+    anchor = BANNER_API_ANCHORS.get(library)
+    if anchor:
+        for bucket in ("dynamic_symbols", "symtab_symbols", "imports"):
+            for symbol in metadata.get(bucket) or []:
+                if (
+                    isinstance(symbol, dict)
+                    and (symbol.get("is_imported") or bucket == "imports")
+                    and anchor.match(str(symbol.get("name") or "").rsplit("::", 1)[-1])
+                ):
+                    return True
+    return False
 
 
 def detect_vendored_banners(metadata: dict) -> dict:
@@ -204,7 +235,6 @@ def detect_vendored_banners(metadata: dict) -> dict:
     if not string_values:
         return {"banners": [], "mentions": [], "state": BANNER_LAYER_INACTIVE_NO_STRINGS}
     api_counts = _defined_api_symbol_counts(metadata)
-    statically_shaped = not _declares_dynamic_dependencies(metadata)
     banners = []
     mentions = []
     seen = set()
@@ -229,13 +259,15 @@ def detect_vendored_banners(metadata: dict) -> dict:
                 "purl": f"{signature['purl']}@{version}",
                 "banner": value[:256],
             }
-            # Vendored code in the artifact, or a stripped static image the
-            # code cannot be disproved in: a component claim. Anything else
-            # is a mention - a build-time or diagnostic string naming a
-            # library whose code this artifact does not carry.
-            if api_counts[signature["library"]] > 0 or statically_shaped:
-                entry["api_symbol_count"] = api_counts[signature["library"]]
-                banners.append(entry)
-            else:
+            # A mention only when the artifact defines none of the API and the
+            # code demonstrably lives elsewhere (it links or imports the
+            # library): a stale build-time string. Otherwise a component
+            # claim - corroborated by defined API symbols, or undisproved in
+            # a stripped image that has nowhere else for the code to be.
+            api_count = api_counts.get(signature["library"], 0)
+            if api_count == 0 and _provided_externally(metadata, signature["library"]):
                 mentions.append(entry)
+            else:
+                entry["api_symbol_count"] = api_count
+                banners.append(entry)
     return {"banners": banners, "mentions": mentions, "state": BANNER_LAYER_ACTIVE}

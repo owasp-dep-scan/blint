@@ -571,7 +571,7 @@
     Every versioned symbol a binary imports carries a minimum version of the library that provides it. The highest such version across all imports is the floor: the binary will not start on any host whose runtime is older, and the failure is a load-time error naming a version node rather than anything actionable.
     This finding fires when the GLIBC floor is higher than the baseline. The baseline is yours to set: `--glibc-baseline` (or `BLINT_GLIBC_BASELINE`) names the oldest glibc your deployment target ships, and a floor above a baseline you set is a `medium` deployment error. Without one, the rule compares against its built-in default and reports at `info`, saying the default was used — a floor above a number nobody chose is a note, not a policy violation.
     Only GLIBC floors are compared, and the finding names the provider: a glibc baseline says nothing about a GLIBCXX/libstdc++ floor, which stays recorded in `abi_analysis.requirements`. musl and bionic binaries never fire this rule — they carry no GLIBC version nodes.
-    Fix it by building against the oldest runtime you intend to support, or by pinning the affected symbols to an older version node. The `internal:abi_determining_symbols` property on the component records exactly which imports set the floor.
+    Fix it by building against the oldest runtime you intend to support, or by pinning the affected symbols to an older version node. In an SBOM, the `internal:abi_requirements` property on the binary's component records exactly which imports set the floor.
   severity: medium
   baseline_version: "2.28"
   exe_types:

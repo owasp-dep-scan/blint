@@ -1392,9 +1392,8 @@ def process_exe_file(
             "vendored_attribution": "vendored_banner",
             "vendored_banner": banner["banner"],
             # How the string claim was corroborated: symbols from the
-            # library's own API defined in this artifact (a count of 0 with
-            # no declared dependencies is the stripped-static case, where
-            # the banner itself is the only witness left).
+            # library's own API defined in this artifact (0 is the stripped
+            # case, where the banner itself is the only witness left).
             "vendored_banner_api_symbols": str(banner.get("api_symbol_count", 0)),
         }
         existing = _find_component_by_package_identity(lib_components, banner["purl"])

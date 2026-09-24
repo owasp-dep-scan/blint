@@ -1,5 +1,6 @@
 # pylint: disable=missing-function-docstring,unused-argument
 import os
+import re
 from typing import Any
 
 from blint.lib.elf_abi import version_sort_key
@@ -12,11 +13,31 @@ from blint.lib.provisioning import (
     is_wildcard,
 )
 from blint.lib.utils import parse_pe_manifest
+from blint.logger import LOG
 
 # The CHECK_ABI_FLOOR baseline can be set per run. The CLI option
 # --glibc-baseline writes this variable so there is exactly one resolution
 # path; the rule's baseline_version in rules.yml stays the built-in default.
 GLIBC_BASELINE_ENV = "BLINT_GLIBC_BASELINE"
+_GLIBC_BASELINE_RE = re.compile(r"\d+(\.\d+)*")
+_warned_baselines: set[str] = set()
+
+
+def _user_glibc_baseline() -> str:
+    """The user's glibc baseline, or "" when unset or not a dotted version.
+
+    An unparseable value is ignored with one warning: comparing floors
+    against it would turn every glibc binary into a medium finding.
+    """
+    value = os.environ.get(GLIBC_BASELINE_ENV, "").strip()
+    if value and not _GLIBC_BASELINE_RE.fullmatch(value):
+        if value not in _warned_baselines:
+            _warned_baselines.add(value)
+            LOG.warning(
+                f"Ignoring {GLIBC_BASELINE_ENV}={value!r}: expected a dotted version like 2.28"
+            )
+        return ""
+    return value
 
 
 def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
@@ -1017,7 +1038,7 @@ def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) 
     required = abi.get("min_glibc_version")
     if not required:
         return True
-    user_baseline = os.environ.get(GLIBC_BASELINE_ENV, "").strip()
+    user_baseline = _user_glibc_baseline()
     baseline = user_baseline or str(rule_obj.get("baseline_version") or "").strip()
     if not baseline:
         return True

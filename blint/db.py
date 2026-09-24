@@ -76,7 +76,9 @@ FUZZY_ONLY_MATCH_THRESHOLD = 8
 # contribution — they are corroboration, never sole attribution.
 FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
 # A symbol name defined by this many distinct project NAMES in the queried
-# database carries no project identity and is not a match signal (F2b.1).
+# database carries no project identity, so it does not count towards a
+# nameless attribution (F2b.1). It still matches, and still counts for a
+# candidate whose binary name agrees.
 # Distinct names, not distinct project rows: a project ingested at two
 # versions (two Homebrew kegs) shares nearly every symbol with itself, and
 # that repetition is version ambiguity to resolve with artifact evidence
@@ -1209,20 +1211,41 @@ def _query_callgraph_batches(
     return found_matches
 
 
+def _identity_symbol_count(symbols: set[str], low_information_names: set[str]) -> int:
+    """Matched names that can identify a project: neither spread across
+    several projects nor emitted by the toolchain."""
+    return sum(
+        1
+        for name in symbols
+        if name not in low_information_names and not MECHANICALLY_EMITTED_SYMBOL_RE.match(name)
+    )
+
+
+def _chosen_symbol_count(symbols: set[str]) -> int:
+    """Matched names the project chose, spread or not; toolchain-emitted
+    names (_main, _OUTLINED_FUNCTION_<n>) never corroborate a name match."""
+    return sum(1 for name in symbols if not MECHANICALLY_EMITTED_SYMBOL_RE.match(name))
+
+
 def _finalize_project_matches(
     project_matches: dict,
     *,
     target_binary_names: set[str] | None = None,
     fuzzy_query_count: int = 0,
     instruction_hash_query_count: int = 0,
+    low_information_names: set[str] | None = None,
 ) -> list[dict]:
     target_binary_names = target_binary_names or set()
+    low_information_names = low_information_names or set()
     finalized_matches = []
     for match in project_matches.values():
         if not match["project_purl"]:
             continue
         matched_binary_count = len(match["matched_binary_ids"])
         matched_symbol_count = len(match["matched_symbols"])
+        matched_identity_symbol_count = _identity_symbol_count(
+            match["matched_symbols"], low_information_names
+        )
         matched_binary_name_count = len(match["matched_binary_names"])
         matched_instruction_hash_count = len(match["matched_instruction_hashes"])
         matched_assembly_hash_count = len(match["matched_assembly_hashes"])
@@ -1289,6 +1312,8 @@ def _finalize_project_matches(
                 "matched_binary_names": sorted(match["matched_binary_names"])[:DB_EVIDENCE_LIMIT],
                 "binary_name_match": binary_name_match,
                 "matched_symbol_count": matched_symbol_count,
+                "matched_identity_symbol_count": matched_identity_symbol_count,
+                "matched_chosen_symbol_count": _chosen_symbol_count(match["matched_symbols"]),
                 "matched_symbol_sources": sorted(match["matched_symbol_sources"]),
                 "matched_symbols": sorted(match["matched_symbols"])[:DB_EVIDENCE_LIMIT],
                 "matched_instruction_hash_count": matched_instruction_hash_count,
@@ -1489,17 +1514,22 @@ def lookup_project_matches(
                     binary_filter_params=binary_type_filter_params,
                 )
         symbol_found = False
+        low_information_names: set[str] = set()
         if normalized_source_map:
-            low_information = _query_low_information_names(
-                connection, normalized_source_map
-            )
-            for source, names in list(normalized_source_map.items()):
-                kept = [name for name in names if name not in low_information.get(source, ())]
-                kept = [name for name in kept if not MECHANICALLY_EMITTED_SYMBOL_RE.match(name)]
-                if kept:
-                    normalized_source_map[source] = kept
-                else:
-                    del normalized_source_map[source]
+            # Low-information names still match; they only stop counting
+            # towards a nameless attribution (see _identity_symbol_count).
+            # Pruning them from the query would scale with the database:
+            # every project that statically embeds zlib defines deflate, so
+            # in a corpus of thousands the library's own identity names are
+            # the widest-spread ones and a name-matched libz would be left
+            # with nothing to match on.
+            low_information_names = {
+                name
+                for names in _query_low_information_names(
+                    connection, normalized_source_map
+                ).values()
+                for name in names
+            }
             symbol_found = _query_symbol_batches(
                 connection,
                 project_matches,
@@ -1559,6 +1589,7 @@ def lookup_project_matches(
             instruction_hash_query_count=len(
                 normalized_hash_index.get("instruction_hashes") or []
             ),
+            low_information_names=low_information_names,
         )
         def _qualifies(match: dict) -> bool:
             """Per-candidate attribution gate (F2b.1).
@@ -1578,7 +1609,7 @@ def lookup_project_matches(
                 match["matched_instruction_hash_count"] + match["matched_assembly_hash_count"]
             )
             if match["binary_name_match"] and (
-                match["matched_symbol_count"] >= 1
+                match["matched_chosen_symbol_count"] >= 1
                 or exact_hashes >= 1
                 or match["matched_callgraph_count"] >= CALLGRAPH_ONLY_MATCH_THRESHOLD
             ):
@@ -1589,7 +1620,7 @@ def lookup_project_matches(
                 return True
             if match["fuzzy_only_qualified"]:
                 return True
-            return match["matched_symbol_count"] >= SYMBOL_ONLY_NAMELESS_MATCH_THRESHOLD
+            return match["matched_identity_symbol_count"] >= SYMBOL_ONLY_NAMELESS_MATCH_THRESHOLD
 
         name_matched_rows = [match for match in matches if match["binary_name_match"]]
         name_matched_purls = {match["project_purl"] for match in name_matched_rows}

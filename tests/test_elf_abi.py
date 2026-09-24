@@ -796,3 +796,16 @@ class TestRuntimeLoadingStatesItsEvidence:
         assert imported_loader_entry_points(client_shape) == {"dlopen"}
         recovered = recover_runtime_dependencies(client_shape)
         assert [entry["name"] for entry in recovered] == ["libstdbuf.so"]
+
+
+def test_abi_floor_ignores_an_unparseable_env_baseline(monkeypatch, caplog):
+    """A non-version BLINT_GLIBC_BASELINE falls back to the default at info
+    rather than turning every glibc binary into a medium finding."""
+    from blint.lib.checks import check_abi_floor
+
+    monkeypatch.setenv("BLINT_GLIBC_BASELINE", "rhel8")
+    metadata = {"abi_analysis": {"libc": "glibc", "min_glibc_version": "2.34"}}
+    with caplog.at_level("WARNING", logger="blint.logger"):
+        result = check_abi_floor("x", metadata, {"baseline_version": "2.28"})
+    assert result["severity"] == "info"
+    assert "rhel8" in caplog.text

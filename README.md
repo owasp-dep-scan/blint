@@ -181,7 +181,7 @@ blint sbom -i /path/to/component.wasm -o sbom.cdx.json --wasm-sbom
 ## Environment Variables
 
 - `BLINTDB_HOME`, `BLINTDB_IMAGE_URL`, `BLINTDB_REFRESH`: Control blintdb download location, source image, and refresh behavior.
-- `BLINT_GLIBC_BASELINE`: Oldest glibc your deployment target ships (for example `2.28` for RHEL 8), used by the `CHECK_ABI_FLOOR` security check. A binary whose GLIBC symbol-version floor exceeds a baseline set here is a `medium` finding; without it the check compares against its built-in default (`2.28` in `rules.yml`) and reports at `info`, saying the default was used. musl and bionic binaries never fire the check. The `--glibc-baseline` CLI option is the same setting and wins when both are given.
+- `BLINT_GLIBC_BASELINE`: Oldest glibc your deployment target ships (for example `2.28` for RHEL 8), used by the `CHECK_ABI_FLOOR` security check. A binary whose GLIBC symbol-version floor exceeds a baseline set here is a `medium` finding; without it the check compares against its built-in default (`2.28` in `rules.yml`) and reports at `info`, saying the default was used. musl and bionic binaries never fire the check. The `--glibc-baseline` CLI option is the same setting and wins when both are given. A value that is not a dotted version is ignored with a warning.
 - `BLINT_CACHE_DIR`: Where the content-addressed parse cache (enabled with `--cache`) stores its database. Defaults to the per-user cache directory.
 - `BLINT_CACHE_MAX_BYTES`: Size bound for the parse cache. Default is 1 GiB; `0` disables eviction.
 - `BLINT_MAX_HEX_BYTES`: Maximum number of raw bytes converted to hex when metadata contains undecodable byte sequences. Default is `4096`.

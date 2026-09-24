@@ -1718,3 +1718,48 @@ class TestDeepModeQualification:
         # fmt has a name mismatch and 1 symbol; bzip2 has the hashes (8) and
         # no symbols: only the hash-population candidate qualifies.
         assert [m["project_purl"] for m in matches] == ["pkg:generic/bzip2@1.0.8"]
+
+
+def test_spread_names_still_identify_a_name_matched_library(tmp_path):
+    """Spread suppression must not scale into lost recall.
+
+    In a large corpus, every project that statically embeds zlib defines
+    deflate/inflate/crc32, so zlib's own identity names are its most widely
+    spread ones. They cannot attribute a nameless artifact, but the library's
+    own binary, whose name agrees, must still be identified from them.
+    """
+    db_file = tmp_path / "embedders.db"
+    zlib_names = ["deflate", "inflate", "crc32", "adler32"]
+    _create_typed_blintdb(
+        db_file,
+        [
+            ("libz.1.dylib", "MachO", "zlib", "pkg:generic/zlib@1.3.2", zlib_names),
+            ("libpng16.dylib", "MachO", "libpng", "pkg:generic/libpng@1.6.58", zlib_names + ["png_read"]),
+            ("libcurl.dylib", "MachO", "curl", "pkg:generic/curl@8.16.0", zlib_names + ["curl_easy_init"]),
+        ],
+    )
+    libz = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "libz.1.dylib"}
+    matches = lookup_project_matches(
+        {"symtab_symbols": zlib_names}, binary_metadata=libz, db_file=str(db_file)
+    )
+    assert [m["project_purl"] for m in matches] == ["pkg:generic/zlib@1.3.2"]
+    # The same names on an unrelated artifact attribute nothing: they cannot
+    # say which of the three projects the code came from.
+    other = dict(libz, name="someapp")
+    assert lookup_project_matches(
+        {"symtab_symbols": zlib_names}, binary_metadata=other, db_file=str(db_file)
+    ) == []
+
+
+def test_toolchain_names_never_corroborate_a_name_match(tmp_path):
+    """/usr/bin/fmt shares a name with the fmt project and nothing else:
+    _main alone must not turn the name agreement into an attribution."""
+    db_file = tmp_path / "fmt.db"
+    _create_typed_blintdb(
+        db_file,
+        [("fmt", "MachO", "fmt", "pkg:generic/fmt@12.1.0", ["_main", "_ZN3fmt2v126detail9vformatE"])],
+    )
+    usr_bin_fmt = {"binary_type": "MachO", "llvm_target_tuple": "aarch64-apple-darwin", "name": "fmt"}
+    assert lookup_project_matches(
+        {"symtab_symbols": ["_main", "_usage"]}, binary_metadata=usr_bin_fmt, db_file=str(db_file)
+    ) == []
