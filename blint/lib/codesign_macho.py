@@ -658,6 +658,12 @@ def parse_superblob(blob: bytes) -> dict:
     if cms_der is not None:
         detail["cms"] = _parse_cms_signature(cms_der)
     detail["provenance"] = _provenance(primary_flags_raw, detail["cms"])
+    # The cdhash this signature is known by (codesign's CDHash line): the
+    # strongest directory's, which is not code_directories[0] when a SHA-1
+    # directory is kept for old systems beside a SHA-256 alternate.
+    if strongest := strongest_code_directory(detail["code_directories"]):
+        detail["effective_cdhash"] = strongest["cdhash"]
+        detail["effective_cdhash_slot"] = strongest.get("slot_type")
     detail["parse_status"] = "parsed"
     return detail
 

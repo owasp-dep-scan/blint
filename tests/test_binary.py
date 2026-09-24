@@ -3949,3 +3949,40 @@ def test_every_slice_cdhash_matches_codesign_for_that_arch(system_binary):
             if line.startswith("CDHash=")
         )
         assert entry["code_signature"]["cdhash"] == expected, entry["arch"]
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("codesign") is None, reason="codesign is macOS-only"
+)
+def test_thin_arm64e_x1_slice_signature_and_disassembly(tmp_path):
+    """A thin arm64e.x1 image (lipo -thin from a macOS 27 system binary):
+    its effective cdhash matches codesign, and PAuth_LR prologues decode."""
+    source = "/System/Applications/Automator.app/Contents/MacOS/Automator"
+    if not os.path.exists(source) or "arm64e.x1" not in subprocess.run(
+        ["lipo", "-archs", source], capture_output=True, text=True
+    ).stdout.split():
+        pytest.skip("no arm64e.x1 slice on this system")
+    thin = tmp_path / "automator-x1"
+    subprocess.run(["lipo", "-thin", "arm64e.x1", source, "-output", str(thin)], check=True)
+    expected = next(
+        line.split("=", 1)[1].strip().lower()
+        for line in subprocess.run(
+            ["codesign", "-dvvv", str(thin)], capture_output=True, text=True
+        ).stderr.splitlines()
+        if line.startswith("CDHash=")
+    )
+    metadata = parse(str(thin))
+    assert metadata["code_signature"]["superblob"]["effective_cdhash"] == expected
+    assert metadata["security_properties"]["pac"] is True
+    from blint.lib.disassembler import NYXSTONE_AVAILABLE
+
+    if not NYXSTONE_AVAILABLE:
+        return
+    deep = parse(str(thin), disassemble=True)
+    decoded = [
+        v for v in (deep.get("disassembled_functions") or {}).values() if v.get("instruction_count")
+    ]
+    # A function that fails to decode never enters disassembled_functions, so
+    # coverage is measured against the function list: without +pauth-lr two
+    # thirds failed at their first instruction (pacibsppc) and were dropped.
+    assert len(decoded) >= 0.9 * len(deep.get("functions") or [])

@@ -595,6 +595,9 @@ def test_summary_cdhash_is_the_strongest_code_directory():
     assert summary["hash_type"] == "sha256"
     assert summary["cdhash_slot"] == "alternate_code_directory_0x1000"
     assert summary["identifier"] == "com.example.dual"
+    detail = parse_superblob(_superblob([(0, primary), (0x1000, alternate)]))
+    assert detail["effective_cdhash"] == summary["cdhash"]
+    assert detail["effective_cdhash_slot"] == "alternate_code_directory_0x1000"
     # One directory: unchanged, whatever its hash type.
     single = signature_summary(parse_superblob(_superblob([(0, primary)])))
     assert single["cdhash"] == hashlib.sha1(primary).hexdigest()[:40]

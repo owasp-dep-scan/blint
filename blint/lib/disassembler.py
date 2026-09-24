@@ -2036,10 +2036,14 @@ def disassemble_functions(
         )
         return disassembly_results
     if "aarch64" in arch_target.lower() or "arm64" in arch_target.lower():
-        if not features:
-            features = "+pauth"
-        elif "+pauth" not in features:
-            features += ",+pauth"
+        # pauth-lr (FEAT_PAuth_LR, Armv9.5) decodes pacibsppc/retabsppc and
+        # friends: the arm64e.x1 slice macOS 27 ships prefixes nearly every
+        # function with them, and without the feature two thirds of its
+        # functions failed to decode. Both encodings sit in space that was
+        # unallocated before, so enabling them changes no other decode.
+        for feature in ("+pauth", "+pauth-lr"):
+            if feature not in (features or "").split(","):
+                features = f"{features},{feature}" if features else feature
     # Nyxstone's LLVM backend only supports the ELF object format, so MachO and
     # PE triples must be remapped to an ELF-compatible triple for initialization.
     # The original arch_target is retained for the architecture-specific decode
