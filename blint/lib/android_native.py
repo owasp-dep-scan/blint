@@ -275,9 +275,11 @@ def _scan_one_apk(
         if not budget.note_entry():
             break
         name = info.filename
-        problems = safe_name_problems(name)
+        # orig_filename is the stored name; on Windows zipfile rewrites
+        # backslashes in .filename to "/".
+        problems = safe_name_problems(info.orig_filename)
         if problems:
-            unsafe.append({"entry": name, "problems": sorted(problems)})
+            unsafe.append({"entry": info.orig_filename, "problems": sorted(problems)})
             continue
         abi, kind = classify_entry(name, aab=aab)
         if kind == "other":
