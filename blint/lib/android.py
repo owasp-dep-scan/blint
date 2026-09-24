@@ -11,9 +11,15 @@ from xml.etree import ElementTree
 from custom_json_diff.lib.utils import file_read
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import fromstring as defused_fromstring
+from packageurl import PackageURL
 
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
+from blint.lib.android_native import (
+    read_bundle_member_bytes,
+    read_library_bytes,
+    scan_android_native,
+)
 from blint.lib.binary import parse, parse_dex
 from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
 from blint.lib.utils import (
@@ -513,25 +519,171 @@ def parse_file_name(file_name: str, group: str) -> tuple[str, str]:
     return group, name
 
 
-def collect_so_files_metadata(app_file: str, app_temp_dir: str) -> list[Component]:
+# NDK stable-API runtime libraries (NDK docs apis.html, "Stable APIs" table,
+# cross-checked against NDK r27.3/r28.2) plus the bionic runtime pair the
+# linker itself provides. A DT_NEEDED on one of these is satisfied by the
+# platform at load time, so it is a platform fact, never a component.
+NDK_PLATFORM_LIBRARIES = frozenset({
+    "libaaudio.so", "libamidi.so", "libandroid.so", "libbinder_ndk.so",
+    "libc.so", "libcamera2ndk.so", "libdl.so", "libEGL.so", "libGLESv1_CM.so",
+    "libGLESv2.so", "libGLESv3.so", "libjnigraphics.so", "liblog.so",
+    "libm.so", "libmediandk.so", "libnativewindow.so", "libneuralnetworks.so",
+    "libopenmax.so", "libOpenMAXAL.so", "libOpenSLES.so", "libstdc++.so",
+    "libvulkan.so", "libz.so",
+})
+
+
+def _so_member_bytes(app_file: str, lib: dict) -> bytes | None:
+    """Read one model library's bytes from its primary location."""
+    loc = (lib.get("locations") or [{}])[0]
+    if not loc:
+        return None
+    if loc.get("split"):
+        inner = read_bundle_member_bytes(app_file, loc["split"])
+        if inner is None:
+            return None
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(inner) as zf:
+                return zf.read(loc["entry_name"])
+        except (KeyError, zipfile.BadZipFile, OSError):
+            return None
+    return read_library_bytes(app_file, loc["entry_name"])
+
+
+def _so_version_and_build_id(so_metadata: dict) -> tuple[str | None, str | None]:
+    """Split the notes into a real version and a build-id.
+
+    The build-id is a content hash; reporting it as a version was V4 (84%
+    of tier-2 components carried one). A note version counts only when it
+    is not a bare hex digest.
     """
-    Collects metadata for shared object (`.so`) files.
+    version = None
+    build_id = None
+    for anote in so_metadata.get("notes", []):
+        if anote.get("build_id") and not build_id:
+            build_id = str(anote["build_id"])
+        note_version = anote.get("version")
+        if note_version and not version:
+            text = str(note_version).strip()
+            is_hex = all(c in "0123456789abcdefABCDEF" for c in text)
+            if text and not (is_hex and len(text) >= 16):
+                version = text
+    return version, build_id
 
-    Args:
-        app_file (str): The path to the app file.
-        app_temp_dir (str): The path to the app temporary directory.
 
-    Returns:
-        list: A list of Component objects.
+def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) -> list[Component]:
+    """Collect SBOM components for the app's native libraries (A1.3, 01/D).
+
+    Reads the libraries through the A1.1 container model (zip in place,
+    ABI directories, split/bundle provenance) and emits ONE component per
+    ``(name, version)`` with per-ABI occurrences - a five-ABI app is five
+    evidence lines on one component, not five near-duplicates, and a
+    single-ABI app's count does not grow. The build-id never masquerades
+    as the version (V4): it rides the ``blint:build_id`` property keyed
+    by ABI. purls are built with PackageURL (V5: ``c++_shared`` encodes,
+    names keep their ``lib`` prefix so libapp/libdata stop colliding as
+    "app"/"data"), and the ABI is a qualifier. DT_NEEDED platform
+    libraries are recorded as the ``blint:platform_needed`` fact on the
+    needing component, never emitted as components.
     """
-    file_components = []
-    # Parse all .so files
-    so_files = find_files(app_temp_dir, [".so"])
-    for sof in so_files:
-        component = parse_so_file(app_file, app_temp_dir, sof)
-        file_components.append(component)
-    return file_components
-
+    model = scan_android_native(app_file)
+    parsed: dict[str, dict] = {}
+    with tempfile.TemporaryDirectory(prefix="blint_android_so") as temp_dir:
+        for lib in model["libraries"]:
+            data = _so_member_bytes(app_file, lib)
+            if not data:
+                continue
+            member = os.path.join(temp_dir, lib["name"])
+            with open(member, "wb") as fh:
+                fh.write(data)
+            try:
+                parsed[lib["sha256"]] = parse(member)
+            except Exception as e:  # one unreadable library must not sink the app
+                LOG.debug(f"Failed to parse {lib['name']} from {app_file}: {e}")
+    # Group by (name, version): per-ABI builds of the same library merge.
+    groups: dict[tuple[str, str], list[tuple[dict, dict]]] = {}
+    for lib in model["libraries"]:
+        so_metadata = parsed.get(lib["sha256"])
+        if so_metadata is None:
+            continue
+        version, _build = _so_version_and_build_id(so_metadata)
+        groups.setdefault((lib["name"], version or ""), []).append((lib, so_metadata))
+    components: list[Component] = []
+    for (name, version), members in sorted(groups.items()):
+        abis = sorted({
+            loc.get("abi")
+            for lib, _meta in members
+            for loc in lib.get("locations") or []
+            if loc.get("abi")
+        })
+        src_files = sorted({
+            loc["entry_name"]
+            for lib, _meta in members
+            for loc in lib.get("locations") or []
+        })
+        build_ids = sorted({
+            f"{abi}:{build}"
+            for (abi, build) in {
+                loc.get("abi"): build
+                for lib, meta in members
+                for loc in lib.get("locations") or []
+                for build in [_so_version_and_build_id(meta)[1]]
+                if build
+            }.items()
+            if abi
+        })
+        functions = sorted({
+            f.get("name")
+            for _lib, meta in members
+            for f in meta.get("functions", [])
+            if f.get("name") and not f.get("name").startswith("_")
+        })
+        needed = sorted({
+            entry.get("name")
+            for _lib, meta in members
+            for entry in meta.get("dynamic_entries", [])
+            if entry.get("tag") == "NEEDED" and entry.get("name")
+        })
+        platform_needed = sorted(
+            n for n in needed if n in NDK_PLATFORM_LIBRARIES
+        )
+        purl = PackageURL(
+            type="android",
+            name=name,
+            version=version or None,
+            qualifiers={"abi": ",".join(abis)} if abis else {},
+        ).to_string()
+        properties = [
+            Property(name="internal:srcFile", value="\n".join(src_files)),
+            Property(name="internal:appFile", value=app_file),
+            Property(name="internal:abis", value=",".join(abis)),
+            Property(name="internal:functions", value=SYMBOL_DELIMITER.join(functions)),
+        ]
+        if build_ids:
+            properties.append(
+                Property(name="blint:build_id", value=",".join(build_ids))
+            )
+        if platform_needed:
+            properties.append(
+                Property(
+                    name="blint:platform_needed",
+                    value=",".join(platform_needed),
+                )
+            )
+        component = Component(
+            type=Type.library,
+            name=name,
+            version=version or None,
+            purl=purl,
+            scope=Scope.required,
+            evidence=create_component_evidence(src_files[0] if src_files else app_file, 0.6),
+            properties=properties,
+        )
+        component.bom_ref = RefType(purl)
+        components.append(component)
+    return components
 
 def parse_so_file(app_file: str, app_temp_dir: str, sof: str) -> Component:
     """Parses the given shared object (SO) file and generates metadata for it.
@@ -892,7 +1044,9 @@ def collect_files_metadata(
     app_temp_dir = tempfile.mkdtemp(prefix="blint_android_app")
     unzip_unsafe(unpack_target or app_file, app_temp_dir)
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
-    file_components += collect_so_files_metadata(app_file, app_temp_dir)
+    # Native libraries come from the zip in place (A1.1 model), not from
+    # the unzip tree.
+    file_components += collect_so_files_metadata(app_file)
     if deep_mode:
         file_components += collect_dex_files_metadata(app_file, parent_component, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)

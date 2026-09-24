@@ -326,15 +326,23 @@ def _scan_one_apk(
 
 
 def _dedupe(libraries: list[NativeLibrary]) -> list[NativeLibrary]:
-    """Merge same-bytes libraries across splits, keeping every location."""
-    by_sha: dict[str, NativeLibrary] = {}
+    """Merge same-name same-bytes libraries across splits, keeping every
+    location.
+
+    Identity is (name, sha256), not sha256 alone: the same library
+    shipped in several splits is one logical library, but a byte-identical
+    copy under a different file name is a second entry point the app can
+    load, and it keeps its own identity.
+    """
+    by_key: dict[tuple[str, str], NativeLibrary] = {}
     for lib in libraries:
-        existing = by_sha.get(lib.sha256)
+        key = (lib.name, lib.sha256)
+        existing = by_key.get(key)
         if existing is None:
-            by_sha[lib.sha256] = lib
+            by_key[key] = lib
         else:
             existing.locations.extend(lib.locations)
-    return list(by_sha.values())
+    return list(by_key.values())
 
 
 def abi_coverage(libraries: list[NativeLibrary]) -> dict[str, Any]:

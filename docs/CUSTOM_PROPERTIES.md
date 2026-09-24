@@ -60,6 +60,26 @@ These properties appear on the components that represent the files inside the ap
 | `internal:functions` | dex or shared object component | delimited list | In deep mode for dex, and for shared objects | The method or function names extracted from the artifact. For dex this is the smali style method signature.        |
 | `internal:classes`   | dex component                  | delimited list | In deep mode for dex files                   | The class names defined in the dex file. This is the signal that service detection and behavioural review consume. |
 
+## Android native library properties
+
+Native libraries are components read from the app's zip in place (A1, the
+container model in `blint/lib/android_native.py`). There is one component
+per `(library name, version)` per logical app: every ABI the app ships for
+that library is an occurrence on the same component, so a five-ABI app does
+not grow the component count, and the purl carries the ABI list as a
+qualifier (`pkg:android/libhello.so?abi=arm64-v8a,armeabi-v7a`). Component
+names keep the file's own name (`libapp.so`, `libc++_shared.so` - encoded
+by PackageURL in the purl), which is why `libapp`/`libdata` from different
+vendors no longer collide as `app`/`data`. A library's build-id is never
+its version.
+
+| Property                   | Object                 | Value type   | When emitted                                       | What it captures                                                                                                                             |
+| -------------------------- | ---------------------- | ------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal:abis`            | native library component | comma list | Always                                             | The ABIs the app ships this library for. Same list as the purl's `abi` qualifier.                                                             |
+| `internal:srcFile`         | native library component | newline list | Always                                             | Every zip entry the library's bytes were found at, across splits and bundles (deduplicated by `(name, sha256)`).                              |
+| `blint:build_id`           | native library component | per-ABI list | When the ELF carries `.note.gnu.build-id`          | `abi:build-id` pairs, comma separated. A content hash, not a version - it identifies the exact bytes per ABI, never the component version.    |
+| `blint:platform_needed`    | native library component | comma list   | When a DT_NEEDED names an NDK stable-API library   | Platform runtime dependencies (`libc.so`, `liblog.so`, ...). The platform satisfies them at load time; they are facts, never components.        |
+
 ## NuGet component properties
 
 These properties appear on `pkg:nuget` components (W3.5). A `pkg:nuget` purl is emitted only where blint has evidence a NuGet consumer can match: a CLI-header assembly identity for a managed binary, a `.deps.json` overlay for a published application, or the `.nuspec` inside a `.nupkg` archive input. A `.dll` filename alone produces `pkg:generic` — over corpus tiers 0/1/5, 217 of 219 `pkg:nuget` parents the old filename heuristic produced sat on native DLLs with no CLI header (`pkg:nuget/python313`, `pkg:nuget/libcrypto-3`), none of them a NuGet package id.
