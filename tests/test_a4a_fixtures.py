@@ -113,11 +113,13 @@ def test_stripped_twins_keep_only_the_export() -> None:
     assert "thumb_dispatcher" not in table and "arm_leaf" not in table
 
 
-@pytest.mark.skipif(not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)")
+@pytest.mark.skipif(
+    not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)"
+)
 @pytest.mark.usefixtures("no_cover")
-def test_probe_before_state_r1_thumb() -> None:
-    """Before T2: every v7a function decodes in the wrong mode and no direct
-    edge resolves. T2 replaces these assertions with full agreement."""
+def test_probe_after_thumb_fix_r1_thumb() -> None:
+    """After T2: every function matched, modes/boundaries/counts/mnemonics
+    exact. Direct edges are T3's deliverable and still resolve to none."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -125,16 +127,23 @@ def test_probe_before_state_r1_thumb() -> None:
         code = native_probe.main([str(R1_THUMB), "--json", str(report_json)])
         summary = json.loads(report_json.read_text())["summary"]
     assert code == 1
-    assert summary["oracle_functions"] == 17
-    assert summary["mode_mismatch"] == summary["matched"]
+    assert summary["missing"] == 0 and summary["extra"] == 0
+    assert summary["matched"] == summary["blint_functions"] == summary["oracle_functions"]
+    assert summary["mode_mismatch"] == 0
+    assert summary["boundary_mismatch"] == 0
+    assert summary["count_mismatch"] == 0
+    assert summary["mnemonic_mismatch"] == 0
     assert summary["edge_recall"] == 0.0
 
 
-@pytest.mark.skipif(not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)")
+@pytest.mark.skipif(
+    not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)"
+)
 @pytest.mark.usefixtures("no_cover")
-def test_probe_before_state_r2_interworking() -> None:
-    """Before T2 the interworking rung shows its cost: 20 of 47 oracle
-    functions missing and every match in the wrong mode."""
+def test_probe_after_thumb_fix_r2_interworking() -> None:
+    """The interworking rung: all 46 functions matched exactly across
+    ARM/Thumb modes, tbb/tbh tables and literal pools excluded on both
+    sides; only the bl/blx edges are still missing (T3)."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -142,11 +151,18 @@ def test_probe_before_state_r2_interworking() -> None:
         code = native_probe.main([str(R2), "--json", str(report_json)])
         summary = json.loads(report_json.read_text())["summary"]
     assert code == 1
-    assert summary["missing"] >= 15
-    assert summary["mode_mismatch"] == summary["matched"]
+    assert summary["missing"] == 0 and summary["extra"] == 0
+    assert summary["matched"] == summary["blint_functions"] == summary["oracle_functions"]
+    assert summary["mode_mismatch"] == 0
+    assert summary["boundary_mismatch"] == 0
+    assert summary["count_mismatch"] == 0
+    assert summary["mnemonic_mismatch"] == 0
+    assert summary["edge_recall"] == 0.0
 
 
-@pytest.mark.skipif(not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)")
+@pytest.mark.skipif(
+    not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)"
+)
 @pytest.mark.usefixtures("no_cover")
 def test_probe_r2_oracle_has_interworking_and_jump_tables() -> None:
     """The oracle side of the R2 rung: tbb/tbh tables, Thumb->ARM blx and
@@ -155,9 +171,16 @@ def test_probe_r2_oracle_has_interworking_and_jump_tables() -> None:
     functions, mapping = native_probe.parse_readelf_symbols(
         native_probe._run(bin_dir / "llvm-readelf", ["--symbols", "--wide"], R2)
     )
-    assert any(mode == "thumb" for mode in native_probe.function_modes(functions, mapping).values())
-    assert any(mode == "arm" for mode in native_probe.function_modes(functions, mapping).values())
-    assert set(mapping.values()) >= {"arm", "thumb", "data"}
+    sections = native_probe.parse_readelf_sections(
+        native_probe._run(bin_dir / "llvm-readelf", ["--sections"], R2)
+    )
+    labels_by_shndx: dict[int, dict[int, str]] = {}
+    for label_addr, (label_mode, shndx) in mapping.items():
+        labels_by_shndx.setdefault(shndx, {})[label_addr] = label_mode
+    modes = native_probe.function_modes(functions, labels_by_shndx, sections)
+    assert any(mode == "thumb" for mode in modes.values())
+    assert any(mode == "arm" for mode in modes.values())
+    assert {mode for _addr, (mode, _shndx) in mapping.items()} >= {"arm", "thumb", "data"}
     timeline = native_probe.parse_objdump_timeline(
         native_probe._run(
             bin_dir / "llvm-objdump",
@@ -169,7 +192,9 @@ def test_probe_r2_oracle_has_interworking_and_jump_tables() -> None:
     assert {"tbb", "tbh", "blx"} <= mnemonics
 
 
-@pytest.mark.skipif(not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)")
+@pytest.mark.skipif(
+    not _tools_available(), reason="needs NDK llvm tools (llvm-objdump/llvm-readelf)"
+)
 @pytest.mark.usefixtures("no_cover")
 def test_probe_controls_agree_on_other_abis() -> None:
     assert native_probe.main([str(R1_ARM64)]) == 0

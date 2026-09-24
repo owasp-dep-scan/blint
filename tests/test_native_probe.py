@@ -25,6 +25,16 @@ CORPUS_V7A = (
     / "armeabi-v7a"
     / "libhello.so"
 )
+CORPUS_V7A_UNSTRIPPED = (
+    Path.home()
+    / "sandbox"
+    / "android-corpus"
+    / "tier1-ndk"
+    / "r28"
+    / "armeabi-v7a"
+    / "unstripped"
+    / "libhello.so"
+)
 CORPUS_ARM64 = (
     Path.home() / "sandbox" / "android-corpus" / "tier1-ndk" / "r28" / "arm64-v8a" / "libhello.so"
 )
@@ -84,18 +94,30 @@ def test_readelf_unwind_starts_are_even_and_complete() -> None:
     assert all(start % 2 == 0 for start in starts)
 
 
+# One mapped section (.text is shndx 11 at 0x135c) and one empty section
+# table, both derived from the recorded readelf output.
+SECTIONS = [(11, 0x135C, 0x1C0)]
+
+
 def test_function_modes_parity_and_mapping_override() -> None:
     functions = {0x50C: {"thumb": True, "name": "a"}, 0x600: {"thumb": False, "name": "b"}}
-    modes = native_probe.function_modes(functions, {})
+    modes = native_probe.function_modes(functions, {}, [])
     assert modes == {0x50C: "thumb", 0x600: "arm"}
-    # A $a mapping symbol covering 0x50c wins over the symbol parity, and a
-    # $d island never names a code mode.
-    mapped = native_probe.function_modes(functions, {0x4C8: "arm", 0x510: "data"})
-    assert mapped == {0x50C: "arm", 0x600: "arm"}
+    # A same-section $a mapping symbol covering 0x1500+0x50c-style start wins
+    # over the symbol parity; a $d island names data, never a code mode.
+    functions = {0x1364: {"thumb": True, "name": "a"}, 0x1400: {"thumb": False, "name": "b"}}
+    labels = {11: {0x135C: "arm", 0x1368: "data", 0x1380: "thumb"}}
+    mapped = native_probe.function_modes(functions, labels, SECTIONS)
+    assert mapped == {0x1364: "arm", 0x1400: "thumb"}
+    labels = {11: {0x135C: "data"}}
+    assert native_probe.function_modes(functions, labels, SECTIONS) == {
+        0x1364: "data",
+        0x1400: "data",
+    }
 
 
 def test_function_modes_unknown_without_symbol() -> None:
-    modes = native_probe.function_modes({0x4C8: {"thumb": None, "name": ""}}, {})
+    modes = native_probe.function_modes({0x4C8: {"thumb": None, "name": ""}}, {}, [])
     assert modes == {0x4C8: "unknown"}
 
 
@@ -109,11 +131,11 @@ def test_objdump_thumb_timeline_and_unknown_words() -> None:
     # java_add_left starts here in Thumb: push {r4, r5, r7, lr}-shaped prologue.
     by_address = {instr["address"]: instr for instr in timeline}
     assert by_address[0x514]["mnemonic"] == "push"
-    # A literal-pool word inside an extent decodes to <unknown>, stays in the
-    # timeline (as data, not an instruction), and carries no operands.
-    unknowns = [instr for instr in timeline if instr["mnemonic"] == "<unknown>"]
-    assert unknowns, "literal pools decode to <unknown> in the recorded output"
-    assert all(instr["operands"] == "" for instr in unknowns)
+    # Literal-pool words decode to <unknown> or .word lines in the recorded
+    # output; the timeline drops both as data, exactly as blint's label-driven
+    # spans skip them.
+    assert all(instr["mnemonic"] not in native_probe.OBJDUMP_DATA_MNEMONICS for instr in timeline)
+    assert "<unknown>" not in {instr["mnemonic"] for instr in timeline}
     # The '@ imm = ...' comment is stripped from operands.
     assert by_address[0x54A]["mnemonic"] == "blx"
     assert by_address[0x54A]["operands"] == "0x5f0"
@@ -282,22 +304,40 @@ def test_compare_mode_only_gates_on_stated_oracle_mode() -> None:
 
 
 @pytest.mark.skipif(
+    not _nyxstone_available() or not _tools_available() or not CORPUS_V7A_UNSTRIPPED.exists(),
+    reason="needs nyxstone, NDK llvm tools and the tier-1 corpus fixture",
+)
+def test_probe_v7a_unstripped_boundaries_agree_after_thumb_fix() -> None:
+    """The unstripped twin after T2: every function matched, zero mode,
+    boundary, count and mnemonic mismatches. The exit code stays 1 only
+    because direct edges are still unresolved - T3's deliverable."""
+    report_json = FIXTURE_DIR / "probe-v7a-report.json"
+    code = native_probe.main([str(CORPUS_V7A_UNSTRIPPED), "--json", str(report_json)])
+    summary = __import__("json").loads(report_json.read_text())["summary"]
+    assert code == 1
+    assert summary["missing"] == 0 and summary["extra"] == 0
+    assert summary["mode_mismatch"] == 0
+    assert summary["boundary_mismatch"] == 0
+    assert summary["count_mismatch"] == 0
+    assert summary["mnemonic_mismatch"] == 0
+    assert summary["edge_recall"] == 0.0
+    report_json.unlink()
+
+
+@pytest.mark.skipif(
     not _nyxstone_available() or not _tools_available() or not CORPUS_V7A.exists(),
     reason="needs nyxstone, NDK llvm tools and the tier-1 corpus fixture",
 )
-def test_probe_v7a_reports_the_thumb_before_state() -> None:
-    """armeabi-v7a disagrees today (no per-function Thumb mode): exit 1.
-
-    T2 flips this test to assert agreement once blint decodes per-function
-    modes; the ladder's R1 rung is exactly this fixture.
-    """
-    report_json = FIXTURE_DIR / "probe-v7a-report.json"
+def test_probe_v7a_stripped_state_recorded_for_t4() -> None:
+    """The stripped twin: functions all found, but with no mapping symbols
+    and no parity evidence a few PLT-veneer entries decode in a guessed
+    mode. Recorded as the before-picture for T4's discovery rung."""
+    report_json = FIXTURE_DIR / "probe-v7a-stripped.json"
     code = native_probe.main([str(CORPUS_V7A), "--json", str(report_json)])
     summary = __import__("json").loads(report_json.read_text())["summary"]
     assert code == 1
-    assert summary["missing"] >= 1
-    assert summary["mode_mismatch"] >= 1
-    assert summary["agreement"] is False
+    assert summary["missing"] == 0 and summary["extra"] == 0
+    assert summary["boundary_recall"] == 1.0
     report_json.unlink()
 
 

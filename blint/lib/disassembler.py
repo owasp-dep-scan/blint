@@ -521,6 +521,104 @@ def _to_nyxstone_triple(arch_target: str) -> str:
     return f"{arch}-unknown-linux-gnu"
 
 
+def _is_arm32_target(arch_target: str) -> bool:
+    """True for 32-bit ARM triples (arm*/thumb*, never aarch64/arm64)."""
+    arch = (arch_target or "").lower().split("-", 1)[0]
+    return arch.startswith(("arm", "thumb")) and not arch.startswith(("aarch64", "arm64"))
+
+
+def _arm32_mode_triples(arch_target: str) -> tuple[str, str]:
+    """The (arm, thumb) triple pair that decodes a 32-bit ARM binary.
+
+    nyxstone initializes ``arm-unknown-linux-android`` (the tuple blint
+    constructs for armeabi-v7a) but then fails to decode core instructions in
+    it — ``bx lr`` among them — while the ``armv7``/``thumbv7`` spellings of
+    the same environment decode correctly (measured against nyxstone 0.1.8 /
+    LLVM 18 and the NDK r28c llvm-objdump oracle; see docs/DISASSEMBLE.md).
+    The arch token is therefore upgraded to v7 with the rest of the tuple
+    kept intact; big-endian ``armeb``/``thumbeb`` stay on today's single
+    instance (no fixture exercises them).
+    """
+    parts = (arch_target or "").split("-", 1)
+    rest = f"-{parts[1]}" if len(parts) > 1 else ""
+    return f"armv7{rest}", f"thumbv7{rest}"
+
+
+# ARM ELF mapping symbols ($a code-ARM, $t code-Thumb, $d data; the assembler
+# appends .N suffixes per section). They are STT_NOTYPE, so nothing else in
+# blint's symbol pipeline looks at them.
+_ARM32_MAPPING_SYMBOL_RE = re.compile(r"^\$[atd](\.\d+)?$")
+_ARM32_MAPPING_MODES = {"a": "arm", "t": "thumb", "d": "data"}
+
+
+def _arm32_mapping_symbol_modes(parsed_obj) -> dict[int, list[tuple[int, str]]]:
+    """Per-section sorted ``{shndx: [(address, mode)]}`` from ``$a/$t/$d``.
+
+    Mapping labels are section-local: a ``.text`` label says nothing about
+    ``.plt`` bytes, so the table is keyed by section index and mode lookup
+    uses only the function's own section. Only ELF symtabs carry these
+    symbols, so a stripped binary gets an empty table and mode selection
+    falls back to the symbol's Thumb bit.
+    """
+    modes = {}
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        symbols = parsed_obj.symtab_symbols
+        if symbols and not isinstance(symbols, lief.lief_errors):
+            for symbol in symbols:
+                name = symbol.name or ""
+                if _ARM32_MAPPING_SYMBOL_RE.match(name):
+                    modes.setdefault(int(symbol.shndx), []).append(
+                        (int(symbol.value) & ~1, _ARM32_MAPPING_MODES[name[1]])
+                    )
+    for section_modes in modes.values():
+        section_modes.sort()
+    return modes
+
+
+def _arm32_mode_at(modes: list[tuple[int, str]], address: int) -> str | None:
+    """The mapping-symbol mode covering ``address``, or None when absent."""
+    index = bisect.bisect_right(modes, (address, "zz")) - 1
+    if index >= 0:
+        return modes[index][1]
+    return None
+
+
+def _arm32_section_for_address(parsed_obj, address: int) -> int | None:
+    """The section index containing ``address`` (mapping labels are scoped).
+
+    LIEF exposes no shndx on sections, but its ``sections`` list follows the
+    section-header table, so the enumeration index is the section index the
+    symbol table's shndx values refer to.
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for shndx, section in enumerate(parsed_obj.sections):
+            start = int(section.virtual_address)
+            size = int(section.size)
+            if start and size and start <= address < start + size:
+                return shndx
+    return None
+
+
+def _arm32_function_mode(
+    original_func_addr: int, modes: list[tuple[int, str]], has_symbol: bool
+) -> str | None:
+    """Per-function ARM32 instruction set state, or None when unknown.
+
+    Mapping symbols are the stronger source (the assembler states the mode
+    per range, which survives where a symbol's parity cannot be recorded);
+    otherwise the ELF convention that ``st_value & 1`` marks a Thumb function
+    decides. Entries with neither evidence — unwinding-table discoveries and
+    promoted call targets in stripped binaries — return None and the caller
+    tries Thumb before ARM, the order NDK armeabi-v7a code justifies.
+    """
+    mapped = _arm32_mode_at(modes, original_func_addr & ~1)
+    if mapped is not None:
+        return mapped
+    if has_symbol:
+        return "thumb" if original_func_addr & 1 else "arm"
+    return None
+
+
 class ParsedInstruction(NamedTuple):
     mnemonic: str
     operand_text: str
@@ -2122,6 +2220,137 @@ def _try_disassemble(instance, byte_list, address: int, inst_count: int = 0) -> 
         return None
 
 
+def _longest_decodable_prefix(instance, byte_list, address: int) -> list:
+    """The largest instruction prefix of ``byte_list`` nyxstone can decode.
+
+    A full-call failure hides how far decoding got, so probe with rising
+    instruction counts (the call succeeds whenever the bad word sits beyond
+    the requested count) and binary-search the boundary they bracket.
+    """
+    lower, upper = 0, 1
+    instructions = []
+    while True:
+        probe = _try_disassemble(instance, byte_list, address, upper)
+        if probe is None or len(probe) < upper:
+            instructions = probe or []
+            break
+        if upper >= (1 << 20):
+            return probe
+        lower, upper = upper, upper * 2
+    if len(instructions) == upper:
+        return instructions
+    good = _try_disassemble(instance, byte_list, address, lower) or []
+    # Binary search the largest count that still decodes cleanly.
+    while lower + 1 < upper:
+        mid = (lower + upper) // 2
+        probe = _try_disassemble(instance, byte_list, address, mid)
+        if probe is not None and len(probe) == mid:
+            lower, good = mid, probe
+        else:
+            upper = mid
+    return good
+
+
+def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
+    """Decode one code span, resuming past words nyxstone cannot decode.
+
+    ARM32 functions carry literal pools and jump tables inline; objdump
+    prints those as ``.word``/``<unknown>`` and carries on, while a nyxstone
+    call raises and would otherwise truncate the function at the pool. The
+    resume skips one instruction width (4 bytes in ARM state; 4 then 2 in
+    Thumb, where pool entries are 4-byte aligned but 16-bit code may sit at
+    a 2-byte offset), bounded so a genuinely bad stream cannot loop.
+    """
+    instructions: list = []
+    cursor = 0
+    total = len(byte_list)
+    skips = 0
+    while cursor < total:
+        chunk = _try_disassemble(instance, byte_list[cursor:], address + cursor)
+        if chunk:
+            instructions.extend(chunk)
+            cursor += sum(len(instr.bytes) for instr in chunk)
+            skips = 0
+            continue
+        prefix = _longest_decodable_prefix(instance, byte_list[cursor:], address + cursor)
+        if not prefix:
+            if skips >= 8:
+                break
+            skips += 1
+            cursor += 4
+            continue
+        instructions.extend(prefix)
+        consumed = sum(len(instr.bytes) for instr in prefix)
+        cursor += consumed
+        if cursor < total and skips < 8:
+            skips += 1
+            cursor += 4
+    return instructions
+
+
+def _arm32_code_spans(
+    start: int, size: int, mapping_modes: list[tuple[int, str]]
+) -> list[tuple[int, int]]:
+    """Code sub-spans of ``[start, start+size)``, from ``$a``/``$t`` labels.
+
+    With mapping symbols present, only labeled code regions are decoded -
+    the same rule objdump applies with mapping-symbol knowledge - so ``$d``
+    islands and un-labeled filler (the bytes between sections and before the
+    first label) are never disassembled. A span's label also names its
+    instruction set state, so ARM and Thumb islands inside one function each
+    decode in their own mode. An empty mapping table yields the whole extent
+    as one span.
+    """
+    end = start + size
+    if size <= 0:
+        return []
+    if not mapping_modes:
+        return [(start, size)]
+    spans: list[tuple[int, int]] = []
+    # The label covering the extent start (a function usually begins inside
+    # the region its own opening label named, not at a fresh label).
+    covering_index = bisect.bisect_right(mapping_modes, (start, "zz")) - 1
+    if covering_index >= 0:
+        covering_addr, covering_mode = mapping_modes[covering_index]
+        if covering_mode != "data" and covering_addr <= start < end:
+            next_label = (
+                mapping_modes[covering_index + 1][0]
+                if covering_index + 1 < len(mapping_modes)
+                else end
+            )
+            span_end = min(next_label, end)
+            if span_end > start:
+                spans.append((start, span_end - start))
+    for index, (addr, mode) in enumerate(mapping_modes):
+        if mode == "data" or addr <= start or addr >= end:
+            continue
+        next_label = mapping_modes[index + 1][0] if index + 1 < len(mapping_modes) else end
+        span_end = min(next_label, end)
+        if span_end > addr:
+            spans.append((addr, span_end - addr))
+    if not spans:
+        # No code label covers or intersects the extent (an exidx start
+        # pointing into label-less filler, or hand-built code); the
+        # parity/arbiter path takes over rather than dropping the function.
+        return [(start, size)]
+    return spans
+
+
+def _arm32_skipped_regions(
+    start: int, size: int, code_spans: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Byte ranges inside ``[start, start+size)`` no code span covers."""
+    regions: list[tuple[int, int]] = []
+    cursor = start
+    for span_start, span_len in code_spans:
+        if span_start > cursor:
+            regions.append((cursor, span_start - cursor))
+        cursor = max(cursor, span_start + span_len)
+    if start + size > cursor:
+        regions.append((cursor, start + size - cursor))
+    return regions
+
+
 def disassemble_functions(
     parsed_obj,
     metadata: dict,
@@ -2204,6 +2433,37 @@ def disassemble_functions(
             )
         except ValueError as e:
             LOG.warning(f"Failed to initialize microMIPS disassembler: {e}")
+    # 32-bit ARM binaries mix ARM and Thumb functions (and NDK-built
+    # armeabi-v7a code is mostly Thumb), so a second instance decodes the
+    # other instruction set state; per-function mode selection happens in the
+    # worklist loop below.
+    arm32_thumb_nyxstone_instance = None
+    is_arm32 = _is_arm32_target(arch_target)
+    if is_arm32:
+        arm_triple, thumb_triple = _arm32_mode_triples(nyxstone_triple)
+        if thumb_triple != nyxstone_triple:
+            try:
+                arm32_thumb_nyxstone_instance = Nyxstone(
+                    target_triple=thumb_triple,
+                    cpu=cpu,
+                    features=features,
+                    immediate_style=immediate_style,
+                )
+                # The ARM-state instance must also come from the decode-capable
+                # v7 spelling: nyxstone accepts the plain ``arm-`` tuple but
+                # then fails core instructions (bx lr) mid-stream.
+                nyxstone_instance = Nyxstone(
+                    target_triple=arm_triple,
+                    cpu=cpu,
+                    features=features,
+                    immediate_style=immediate_style,
+                )
+            except ValueError as e:
+                LOG.warning(
+                    f"Failed to initialize Thumb disassembler for '{thumb_triple}', "
+                    f"ARM-mode fallback only: {e}"
+                )
+    arm32_mapping_modes = _arm32_mapping_symbol_modes(parsed_obj) if is_arm32 else {}
     # Resolve MachO import slot/stub addresses once and surface them on the
     # metadata so the callgraph builder can classify these as external import
     # edges instead of misattributing them to internal range-containment nodes.
@@ -2213,6 +2473,11 @@ def disassemble_functions(
     all_func_addrs = []
     for func_list_key in FUNCTION_SYMBOLS:
         for func_entry in metadata.get(func_list_key, []):
+            # ARM32 mapping symbols are mode labels, not function starts;
+            # symtab buckets carry them, and letting them into this set
+            # truncates the size-less windows at every literal pool.
+            if is_arm32 and _ARM32_MAPPING_SYMBOL_RE.match(func_entry.get("name") or ""):
+                continue
             addr_str = func_entry.get("address") or func_entry.get("rva_start")
             if addr_str:
                 try:
@@ -2263,7 +2528,14 @@ def disassemble_functions(
     for func_list_key in FUNCTION_SYMBOLS:
         if _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key):
             continue
-        all_funcs.extend(metadata.get(func_list_key, []))
+        bucket = metadata.get(func_list_key, [])
+        if is_arm32:
+            bucket = [
+                entry
+                for entry in bucket
+                if not _ARM32_MAPPING_SYMBOL_RE.match(entry.get("name") or "")
+            ]
+        all_funcs.extend(bucket)
     # A binary whose symbol + unwind discovery produced almost nothing gets a
     # prologue scan so stripped Go ELF binaries and export-less PEs still gain
     # a function set; dense binaries are left untouched.
@@ -2329,8 +2601,39 @@ def disassemble_functions(
         if isinstance(parsed_obj, lief.MachO.Binary) and _is_macos_system_symbol_name(func_name):
             continue
         func_addr = original_func_addr
-        if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
+        if (is_mips or is_arm32) and (func_addr & 1):
             func_addr = func_addr & ~1
+        # ARM32: which instruction set state this function decodes in. A
+        # mapping symbol naming a data island says the entry is not code at
+        # all (a literal pool or jump table the symbol pipeline offered as a
+        # function) and is skipped rather than decoded as garbage.
+        arm32_mode = None
+        arm32_data_spans: list[tuple[int, int]] = []
+        arm32_section_modes: list[tuple[int, str]] = []
+        if is_arm32:
+            func_shndx = _arm32_section_for_address(parsed_obj, func_addr)
+            if func_shndx is None:
+                # An exidx entry can name the inter-section padding after
+                # .text; bytes in no section are not code and decoding them
+                # reads into the neighbour section's stubs.
+                LOG.debug(
+                    f"Skipping '{func_name}' at {func_addr_str}: address lies in no section."
+                )
+                continue
+            # Mapping labels are section-local; only this function's section
+            # has a say in its modes and spans.
+            arm32_section_modes = arm32_mapping_modes.get(func_shndx, [])
+            has_symbol = bool(func_entry.get("name") and not func_entry.get("discovered")) or bool(
+                original_func_addr & 1
+            )
+            arm32_mode = _arm32_function_mode(
+                original_func_addr, arm32_section_modes, has_symbol=has_symbol
+            )
+            if arm32_mode == "data":
+                LOG.debug(
+                    f"Skipping '{func_name}' at {func_addr_str}: mapping symbol marks a data island."
+                )
+                continue
         size_to_disasm = func_entry.get("size") or func_entry.get("length")
         has_exact_size = True
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
@@ -2391,6 +2694,7 @@ def disassemble_functions(
         )
         try:
             instr_list = None
+            used_arm32_mode = None
             disassemblers_to_try = [(nyxstone_instance, arch_target)]
             if mips16_nyxstone_instance:
                 disassemblers_to_try.append((mips16_nyxstone_instance, "MIPS16"))
@@ -2411,37 +2715,115 @@ def disassemble_functions(
                 if prefer_rebased
                 else [(original_bytes_list, "original"), (rebased_bytes_list, "rebased")]
             )
-            for offset in range(4):
-                original_len = _mem_bytes_len(original_bytes_list)
-                rebased_len = _mem_bytes_len(rebased_bytes_list)
-                if (
-                    original_len is not None
-                    and rebased_len is not None
-                    and offset >= original_len
-                    and offset >= rebased_len
-                ):
-                    break
-                addr_to_try = func_addr_va + offset
-                for instance, mode_name in disassemblers_to_try:
-                    for byte_source, source_name in bytes_sets:
+            if is_arm32 and arm32_thumb_nyxstone_instance:
+                # ARM32 decodes through its own path: per-span modes (a
+                # function may interleave ARM and Thumb islands), $d data
+                # islands never disassembled, and recovery past words nyxstone
+                # cannot decode instead of the count-based truncation.
+                instr_list = []
+                arm32_spans = _arm32_code_spans(func_addr, size_to_disasm, arm32_section_modes)
+                arm32_data_spans = _arm32_skipped_regions(func_addr, size_to_disasm, arm32_spans)
+                for span_start, span_len in arm32_spans:
+                    span_offset = span_start - func_addr
+                    span_bytes = None
+                    for byte_source, _source_name in bytes_sets:
                         source_len = _mem_bytes_len(byte_source)
-                        if source_len is not None and offset >= source_len:
-                            continue
-                        bytes_to_try = byte_source[offset:]
-                        instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)
-                        if not instr_list:
-                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 12)
-                        if not instr_list:
-                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 2)
-                        if instr_list:
-                            LOG.debug(
-                                f"Disassembled '{func_name}' in {mode_name} mode at offset +{offset} using {source_name} bytes."
+                        if source_len is not None and span_offset < source_len:
+                            span_bytes = byte_source[span_offset : span_offset + span_len]
+                            break
+                    if not span_bytes:
+                        continue
+                    span_va = func_addr_va + span_offset
+                    span_mode = _arm32_mode_at(arm32_section_modes, span_start) or arm32_mode
+                    if span_mode == "arm":
+                        instance_order = [
+                            (nyxstone_instance, "arm"),
+                            (arm32_thumb_nyxstone_instance, "thumb"),
+                        ]
+                    else:
+                        instance_order = [
+                            (arm32_thumb_nyxstone_instance, "thumb"),
+                            (nyxstone_instance, "arm"),
+                        ]
+                    span_instrs: list | None = None
+                    span_used = None
+                    if span_mode is None and len(instance_order) == 2:
+                        # No stated mode: the decode whose last instruction
+                        # lands exactly on the span end is the right one; ties
+                        # fall back to Thumb, the NDK armeabi-v7a default.
+                        decoded = [
+                            (
+                                mode_name,
+                                _disassemble_arm32_span(instance, span_bytes, span_va),
                             )
+                            for instance, mode_name in instance_order
+                        ]
+                        for mode_name, candidate in decoded:
+                            if (
+                                candidate
+                                and candidate[-1].address + len(candidate[-1].bytes)
+                                == span_va + span_len
+                            ):
+                                span_instrs, span_used = candidate, mode_name
+                                break
+                        if span_instrs is None:
+                            for mode_name, candidate in decoded:
+                                if candidate:
+                                    span_instrs, span_used = candidate, mode_name
+                                    break
+                    else:
+                        for instance, mode_name in instance_order:
+                            candidate = _disassemble_arm32_span(instance, span_bytes, span_va)
+                            if candidate:
+                                span_instrs, span_used = candidate, mode_name
+                                break
+                    if span_instrs:
+                        instr_list.extend(span_instrs)
+                        if used_arm32_mode is None:
+                            used_arm32_mode = span_used
+                LOG.debug(
+                    f"Disassembled '{func_name}' in {used_arm32_mode or 'unknown'} mode"
+                    f" across {len(instr_list)} instructions."
+                )
+            else:
+                # ARM32 starts are 2-byte aligned (Thumb) or 4-byte (ARM), so the
+                # 1-3 byte probes that recover misaligned symbols elsewhere would
+                # decode mid-instruction garbage here.
+                for offset in range(1 if is_arm32 else 4):
+                    original_len = _mem_bytes_len(original_bytes_list)
+                    rebased_len = _mem_bytes_len(rebased_bytes_list)
+                    if (
+                        original_len is not None
+                        and rebased_len is not None
+                        and offset >= original_len
+                        and offset >= rebased_len
+                    ):
+                        break
+                    addr_to_try = func_addr_va + offset
+                    for instance, mode_name in disassemblers_to_try:
+                        for byte_source, source_name in bytes_sets:
+                            source_len = _mem_bytes_len(byte_source)
+                            if source_len is not None and offset >= source_len:
+                                continue
+                            bytes_to_try = byte_source[offset:]
+                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)
+                            if not instr_list:
+                                instr_list = _try_disassemble(
+                                    instance, bytes_to_try, addr_to_try, 12
+                                )
+                            if not instr_list:
+                                instr_list = _try_disassemble(
+                                    instance, bytes_to_try, addr_to_try, 2
+                                )
+                            if instr_list:
+                                LOG.debug(
+                                    f"Disassembled '{func_name}' in {mode_name} mode at offset +{offset} using {source_name} bytes."
+                                )
+                                break
+                        if instr_list:
                             break
                     if instr_list:
                         break
-                if instr_list:
-                    break
             if not instr_list:
                 LOG.debug(
                     f"Could not find valid instructions for function '{func_name}' {func_addr_va} {inst_count}."
@@ -2526,7 +2908,7 @@ def disassemble_functions(
                 has_system_call,
                 has_indirect_call,
             )
-            disassembly_results[f"{func_addr_va_hex}::{func_name}"] = {
+            function_result = {
                 "name": func_name,
                 "address": func_addr_va_hex,
                 "rvaOrAddress": func_addr_str,
@@ -2553,6 +2935,24 @@ def disassemble_functions(
                 "proprietary_instructions": proprietary_instructions,
                 "sreg_interactions": sreg_interactions,
             }
+            if is_arm32:
+                # The instruction set state these bytes were decoded in
+                # ("thumb"/"arm"), from the mapping symbol or the symbol's
+                # st_value parity (docs/DISASSEMBLE.md); when neither source
+                # states a mode, the fallback order's winning instance lands
+                # here. Absent on every other architecture.
+                function_result["instruction_mode"] = used_arm32_mode
+                if arm32_data_spans:
+                    # $d islands skipped inside the extent. The
+                    # instruction_lengths prefix sum no longer reconstructs
+                    # line addresses on its own: these spans sit between the
+                    # instructions, and a reader must add their sizes once
+                    # the running offset passes each span's address.
+                    function_result["data_spans"] = [
+                        {"address": hex(region_start), "size": region_len}
+                        for region_start, region_len in arm32_data_spans
+                    ]
+            disassembly_results[f"{func_addr_va_hex}::{func_name}"] = function_result
             # Structural block graph for the truncated instruction list. This
             # is computed after the flat metrics above and is additive: it
             # describes the function's shape without altering any of them.

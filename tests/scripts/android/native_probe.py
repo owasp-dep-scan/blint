@@ -75,6 +75,11 @@ DIRECT_CALL_MNEMONICS = {
 # two streams are comparable. The oracle's decode stays the named tool's.
 from blint.lib.disassembler import PADDING_TRAP_MNEMONICS
 
+# blint's documented blind window for a function with no known size and no
+# known successor (DEFAULT_FUNCTION_SPAN); the oracle slices size-less last
+# entries with the same bound so the two sides compare like for like.
+from blint.lib.funcdisc.complete import DEFAULT_FUNCTION_SPAN
+
 PADDING_MNEMONICS = PADDING_TRAP_MNEMONICS
 
 READELF_SYMBOL_RE = re.compile(
@@ -177,16 +182,17 @@ def detect_abi(metadata: dict, override: str | None) -> str:
 # ---------------------------------------------------------------- readelf side
 
 
-def parse_readelf_symbols(output: str) -> tuple[dict[int, dict], dict[int, str]]:
-    """Readelf symbol table -> (defined FUNC symbols by aligned start, modes).
+def parse_readelf_symbols(output: str) -> tuple[dict[int, dict], dict[int, tuple[str, int]]]:
+    """Readelf symbol table -> (defined FUNC symbols, mapping labels).
 
     FUNC symbols: ``{name, start, size, thumb}`` where ``thumb`` is the raw
     st_value bit 0. Mapping symbols (``$a``/``$t``/``$d`` and their ``.N``
-    suffixed forms) become a sorted ``{address: mode}`` map, ``data``
-    included so callers can see data islands too.
+    suffixed forms) become a sorted ``{address: (mode, shndx)}`` map, ``data``
+    included so callers can see data islands; the section index keeps labels
+    section-local, the way the assembler emits them.
     """
     functions: dict[int, dict] = {}
-    mapping: dict[int, str] = {}
+    mapping: dict[int, tuple[str, int]] = {}
     for line in output.splitlines():
         match = READELF_SYMBOL_RE.match(line)
         if not match:
@@ -210,8 +216,54 @@ def parse_readelf_symbols(output: str) -> tuple[dict[int, dict], dict[int, str]]
                 entry["name"] = name
         elif sym_type == "NOTYPE" and MAPPING_SYMBOL_RE.match(name):
             mode_char = name[1]
-            mapping[value] = {"a": "arm", "t": "thumb", "d": "data"}[mode_char]
+            mode = {"a": "arm", "t": "thumb", "d": "data"}[mode_char]
+            try:
+                shndx = int(ndx)
+            except ValueError:
+                shndx = -1
+            mapping[value] = (mode, shndx)
     return functions, dict(sorted(mapping.items()))
+
+
+def parse_readelf_sections(output: str) -> list[tuple[int, int, int]]:
+    """Section headers as sorted ``[(shndx, vaddr, size)]`` for address lookup."""
+    sections: list[tuple[int, int, int]] = []
+    match_re = re.compile(
+        r"^\s*\[\s*(\d+)\]\s+(\S+)\s+\S+\s+([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+([0-9a-fA-F]+)\s+"
+    )
+    for line in output.splitlines():
+        section = match_re.match(line)
+        if not section:
+            continue
+        shndx = int(section.group(1))
+        vaddr = int(section.group(3), 16)
+        size = int(section.group(4), 16)
+        # Non-ALLOC sections (.debug_*, .symtab, ...) carry address 0; they
+        # would swallow every lookup, so only mapped sections count.
+        if vaddr:
+            sections.append((shndx, vaddr, size))
+    return sorted(sections, key=lambda entry: entry[1])
+
+
+def section_for_address(sections: list[tuple[int, int, int]], address: int) -> int | None:
+    """The section index containing ``address``."""
+    for shndx, vaddr, size in sections:
+        if vaddr <= address < vaddr + size:
+            return shndx
+        if vaddr > address:
+            break
+    return None
+
+
+def mapping_mode_at(mapping: dict[int, str], address: int) -> str | None:
+    """The mapping-symbol mode covering ``address`` (labels run to the next)."""
+    covering = None
+    for label_addr, mode in mapping.items():
+        if label_addr <= address:
+            covering = mode
+        else:
+            break
+    return covering
 
 
 def parse_readelf_unwind(output: str) -> set[int]:
@@ -237,25 +289,24 @@ def parse_readelf_unwind(output: str) -> set[int]:
     return starts
 
 
-def function_modes(functions: dict[int, dict], mapping: dict[int, str]) -> dict[int, str]:
-    """Per-function ARM32 mode: mapping symbols win, else the symbol's bit 0."""
-    if not mapping:
-        return {
-            start: (
-                "unknown" if entry["thumb"] is None else ("thumb" if entry["thumb"] else "arm")
-            )
-            for start, entry in functions.items()
-        }
-    starts = sorted(mapping)
+def function_modes(
+    functions: dict[int, dict],
+    labels_by_shndx: dict[int, dict[int, str]],
+    sections: list[tuple[int, int, int]],
+) -> dict[int, str]:
+    """Per-function ARM32 mode: same-section mapping symbols win, else bit 0."""
     modes = {}
     for start, entry in functions.items():
-        if entry["thumb"] is None:
-            mode = "unknown"
-        else:
-            mode = "thumb" if entry["thumb"] else "arm"
-        idx = bisect.bisect_right(starts, start) - 1
-        if idx >= 0 and mapping[starts[idx]] != "data":
-            mode = mapping[starts[idx]]
+        labels = labels_by_shndx.get(section_for_address(sections, start) or -1, {})
+        mode = "unknown" if entry["thumb"] is None else ("thumb" if entry["thumb"] else "arm")
+        covering = None
+        for label_addr, label_mode in labels.items():
+            if label_addr <= start:
+                covering = label_mode
+            else:
+                break
+        if covering is not None:
+            mode = covering
         modes[start] = mode
     return modes
 
@@ -263,12 +314,32 @@ def function_modes(functions: dict[int, dict], mapping: dict[int, str]) -> dict[
 # --------------------------------------------------------------- objdump side
 
 
+# Words objdump prints as data rather than instructions: the ``.word``/``.byte``
+# forms carry a raw-byte column where a mnemonic would be, and undecodable
+# words in a forced-triple run print as ``<unknown>``. blint skips both
+# classes, so the oracle must too or the streams are incomparable.
+OBJDUMP_DATA_MNEMONICS = {
+    "<unknown>",
+    ".word",
+    ".byte",
+    ".short",
+    ".long",
+    ".quad",
+    ".data",
+    ".inst",
+    ".ascii",
+}
+_BYTE_RUN_RE = re.compile(r"^[0-9a-f]{2}( [0-9a-f]{2})*$")
+
+
 def parse_objdump_timeline(output: str) -> list[dict]:
     """One objdump -d pass -> the linear instruction timeline of the file.
 
-    Each entry: ``{address, mnemonic, operands}``; ``<unknown>`` words decode
-    to mnemonic ``"<unknown>"`` (data or a failed decode) and stay in the
-    timeline so extents keep their positions.
+    Each entry: ``{address, mnemonic, operands}``. Data words — ``.word``
+    lines under a ``$d`` mapping symbol, with their raw-byte column, and
+    ``<unknown>`` where the forced-triple run cannot decode — are dropped:
+    blint's disassembler skips them, so the oracle's instruction stream must
+    skip them alike.
     """
     timeline: list[dict] = []
     for line in output.splitlines():
@@ -282,6 +353,8 @@ def parse_objdump_timeline(output: str) -> list[dict]:
         parts = text.split(None, 1)
         mnemonic = parts[0] if parts else ""
         operands = parts[1].strip() if len(parts) > 1 else ""
+        if mnemonic in OBJDUMP_DATA_MNEMONICS or _BYTE_RUN_RE.match(mnemonic or ""):
+            continue
         timeline.append({"address": address, "mnemonic": mnemonic, "operands": operands})
     timeline.sort(key=lambda instr: instr["address"])
     return timeline
@@ -311,6 +384,81 @@ def direct_call_targets(
     return targets
 
 
+def _instruction_size(instr: dict) -> int:
+    """The byte width objdump printed for one instruction, from its neighbors.
+
+    The ``--no-show-raw-insn`` form hides sizes, so the width is the gap to
+    the following instruction in the same timeline (4 for the last word of a
+    span, which is the only use here).
+    """
+    return int(instr.get("_size") or 4)
+
+
+def decode_arm32_extent(
+    timelines: dict[str, tuple[list[dict], list[int]]],
+    section_labels: dict[int, str],
+    start: int,
+    end: int,
+    fallback_mode: str,
+) -> list[dict]:
+    """Decode one ARM32 extent per label region, each in its own mode.
+
+    The span rule mirrors blint's ``_arm32_code_spans``: the label covering
+    the extent start claims the head, later ``$a``/``$t`` labels claim their
+    own regions, ``$d`` regions are never decoded. No labels at all decodes
+    the whole extent in ``fallback_mode`` (parity-derived or the section's
+    covering label). Instruction streams come from the pre-parsed per-triple
+    timelines.
+    """
+    if not section_labels:
+        # No labels (stripped): decode both states and prefer the one whose
+        # last instruction lands exactly on the extent end, ties to Thumb -
+        # the same arbiter blint documents for evidence-less entries. A bare
+        # ARM default decodes Thumb libraries as garbage.
+        if fallback_mode == "unknown":
+            candidates = []
+            for triple in (THUMB_TRIPLE, ARM_TRIPLE):
+                timeline, addresses = timelines[triple]
+                decoded = slice_timeline(timeline, addresses, start, end)
+                if decoded and decoded[-1]["address"] + _instruction_size(decoded[-1]) == end:
+                    return decoded
+                candidates.append(decoded)
+            return candidates[0]
+        timeline, addresses = timelines[THUMB_TRIPLE if fallback_mode == "thumb" else ARM_TRIPLE]
+        return slice_timeline(timeline, addresses, start, end)
+    spans: list[tuple[int, int, str]] = []
+    covering = None
+    for label_addr, label_mode in section_labels.items():
+        if label_addr <= start:
+            covering = (label_addr, label_mode)
+        else:
+            break
+    if covering and covering[1] != "data":
+        next_label = next(
+            (addr for addr in section_labels if addr > start),
+            end,
+        )
+        spans.append((start, min(next_label, end), covering[1]))
+    for label_addr, label_mode in section_labels.items():
+        if label_mode == "data" or label_addr <= start or label_addr >= end:
+            continue
+        next_label = next(
+            (addr for addr in section_labels if addr > label_addr),
+            end,
+        )
+        span_end = min(next_label, end)
+        if span_end > label_addr:
+            spans.append((label_addr, span_end, label_mode))
+    if not spans:
+        timeline, addresses = timelines[THUMB_TRIPLE if fallback_mode == "thumb" else ARM_TRIPLE]
+        return slice_timeline(timeline, addresses, start, end)
+    instructions: list[dict] = []
+    for span_start, span_end, span_mode in spans:
+        timeline, addresses = timelines[THUMB_TRIPLE if span_mode == "thumb" else ARM_TRIPLE]
+        instructions.extend(slice_timeline(timeline, addresses, span_start, span_end))
+    return instructions
+
+
 def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], dict]:
     """Run readelf + objdump and assemble per-function oracle records."""
     functions, mapping = parse_readelf_symbols(
@@ -319,6 +467,10 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
     unwind_starts = parse_readelf_unwind(_run(bin_dir / "llvm-readelf", ["--unwind"], so))
     for start in unwind_starts:
         functions.setdefault(start, {"name": "", "start": start, "size": 0, "thumb": None})
+    sections = parse_readelf_sections(_run(bin_dir / "llvm-readelf", ["--sections"], so))
+    labels_by_shndx: dict[int, dict[int, str]] = {}
+    for label_addr, (label_mode, shndx) in mapping.items():
+        labels_by_shndx.setdefault(shndx, {})[label_addr] = label_mode
     timelines: dict[str, tuple[list[dict], list[int]]] = {}
     for triple in ABI_TRIPLES[abi]:
         # objdump defaults to AT&T syntax on x86; blint's nyxstone renders
@@ -331,11 +483,16 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
         )
         timeline = parse_objdump_timeline(output)
         timelines[triple] = (timeline, [instr["address"] for instr in timeline])
-    modes = function_modes(functions, mapping) if abi in ARM32_ABIS else {}
+    modes = function_modes(functions, labels_by_shndx, sections) if abi in ARM32_ABIS else {}
     call_mnemonics = DIRECT_CALL_MNEMONICS[
         "arm32" if abi in ARM32_ABIS else ("arm64" if abi == "arm64-v8a" else "default")
     ]
-    starts = sorted(functions)
+    starts = sorted(
+        start
+        for start in functions
+        if modes.get(start) != "data"
+        and not (abi in ARM32_ABIS and section_for_address(sections, start) is None)
+    )
     oracle: dict[int, dict] = {}
     for index, start in enumerate(starts):
         entry = functions[start]
@@ -344,14 +501,21 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
         elif index + 1 < len(starts):
             end = starts[index + 1]
         else:
-            end = start + (1 << 20)
+            end = start + DEFAULT_FUNCTION_SPAN
         mode = modes.get(start, "arm") if abi in ARM32_ABIS else "n/a"
-        timeline, addresses = (
-            timelines[THUMB_TRIPLE if mode == "thumb" else ARM_TRIPLE]
-            if abi in ARM32_ABIS
-            else timelines[ABI_TRIPLES[abi][0]]
-        )
-        instructions = slice_timeline(timeline, addresses, start, end)
+        if abi in ARM32_ABIS:
+            # Per-span decode, mirroring blint's label rule: each $a/$t label
+            # region inside the extent decodes in its own mode from its own
+            # triple, and $d islands are never decoded. A single forced-triple
+            # pass over a mixed extent decodes the second island's bytes as
+            # garbage (2x count differences on real libraries).
+            section_labels = labels_by_shndx.get(section_for_address(sections, start) or -1, {})
+            instructions = decode_arm32_extent(
+                timelines, section_labels, start, end, mode
+            )
+        else:
+            timeline, addresses = timelines[ABI_TRIPLES[abi][0]]
+            instructions = slice_timeline(timeline, addresses, start, end)
         trimmed = trim_padding([f"{i['mnemonic']} {i['operands']}".strip() for i in instructions])
         trimmed_last = instructions[len(trimmed) - 1]["address"] if trimmed else start
         oracle[start] = {
@@ -367,7 +531,7 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
         "objdump_version": tool_version(bin_dir, "llvm-objdump"),
         "readelf_version": tool_version(bin_dir, "llvm-readelf"),
         "triples": list(ABI_TRIPLES[abi]),
-        "mapping_symbols": {hex(addr): mode for addr, mode in mapping.items()},
+        "mapping_symbols": {hex(addr): mode for addr, (mode, _shndx) in mapping.items()},
     }
     return oracle, provenance
 
@@ -410,6 +574,7 @@ def collect_blint(metadata: dict, abi: str) -> dict[int, dict]:
             "start": address,
             "raw_count": raw_count,
             "lengths": lengths,
+            "data_spans": func.get("data_spans") or [],
             "lines": assembly_lines,
             "mode": mode,
             "targets": targets,
@@ -438,14 +603,38 @@ def trim_padding(lines: list[str]) -> list[str]:
     return lines[:index]
 
 
+def _blint_instruction_addresses(func: dict) -> list[int]:
+    """Reconstruct each instruction's address from lengths + data spans.
+
+    Without spans the prefix sum of instruction_lengths is the address; a
+    $d island skipped inside the extent adds its size to every instruction
+    after the point the running offset passes it.
+    """
+    start = func["start"]
+    lengths = func.get("lengths") or []
+    gaps: list[tuple[int, int]] = []
+    for span in func.get("data_spans") or []:
+        gap_start = int(span.get("address", "0x0"), 16)
+        gaps.append((gap_start - start, int(span.get("size", 0))))
+    gaps.sort()
+    addresses: list[int] = []
+    code_bytes = 0
+    gap_bytes = 0
+    for length in lengths:
+        addresses.append(start + code_bytes + gap_bytes)
+        code_bytes += length
+        while gaps and gaps[0][0] <= code_bytes + gap_bytes:
+            gap_bytes += gaps.pop(0)[1]
+    return addresses
+
+
 def prepare_blint(blint_funcs: dict[int, dict]) -> dict[int, dict]:
     """Attach trimmed lines and last-kept-instruction addresses."""
     for func in blint_funcs.values():
         func["trimmed"] = trim_padding(func["lines"])
         keep = len(func["trimmed"])
-        func["trimmed_last"] = (
-            func["start"] + sum(func["lengths"][: keep - 1]) if keep else func["start"]
-        )
+        addresses = _blint_instruction_addresses(func)
+        func["trimmed_last"] = addresses[keep - 1] if keep else func["start"]
     return blint_funcs
 
 
