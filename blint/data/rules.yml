@@ -789,7 +789,11 @@
     GNU_PROPERTY_AARCH64_FEATURE_1_AND property exists on arm64 only, and a
     rule that cannot apply to an ABI does not run on it (ground rule 35) —
     arm32, x86 and riscv64 files never see this check.
-  severity: medium
+    Severity is low because the NDK does not enable branch protection by
+    default: the gap is near-universal (5229 of 5364 tier-0 system libraries,
+    every arm64 library in the sampled F-Droid apps), a posture fact rather
+    than a defect in the library.
+  severity: low
 - id: CHECK_ANDROID_MEMTAG
   title: MTE tagging posture of an arm64 library (informational)
   description: |

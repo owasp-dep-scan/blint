@@ -75,6 +75,11 @@ def test_textrel_conditional_on_target_sdk() -> None:
     fired = findings_for(DATA / "libhello_textrels.so", min_sdk=21, target_sdk=35)
     assert "CHECK_ANDROID_TEXTREL" in android_ids(fired)
     assert "refuses this app (targets API 35 >= 23)" in fired[0]["title"]
+    # No targetSdkVersion: the app targets its minSdkVersion.
+    assert android_ids(findings_for(DATA / "libhello_textrels.so",
+                                    min_sdk=21, target_sdk=None)) == []
+    fired = findings_for(DATA / "libhello_textrels.so", min_sdk=24, target_sdk=None)
+    assert "targets API 24 >= 23" in fired[0]["title"]
 
 
 def test_page_16k_conditional_on_target_sdk() -> None:

@@ -1207,11 +1207,6 @@ def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> 
 # the loader enforces it; a standalone .so has no app context, so its
 # finding states the enforcement level without assuming one.
 
-_ENFORCED = (
-    "android-changes-for-ndk-developers.md, {section!r}"
-)
-
-
 def _android_facts(metadata: dict[str, Any]) -> dict[str, Any] | None:
     """The bionic facts block, or None for a file that is not Android's."""
     if str(metadata.get("binary_type") or "").upper() != "ELF":
@@ -1223,13 +1218,18 @@ def _android_facts(metadata: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _app_context(metadata: dict[str, Any]) -> dict[str, Any]:
-    """The app manifest facts, or an empty dict when there is no app."""
+    """The app manifest facts, or an empty dict when there is no app.
+
+    An app that declares no targetSdkVersion targets its minSdkVersion,
+    which is the level the loader then applies its compatibility rules at.
+    """
     container = metadata.get("container") or {}
     if container.get("role") != "apk-so-member":
         return {}
+    target_sdk = container.get("target_sdk")
     return {
         "min_sdk": container.get("min_sdk"),
-        "target_sdk": container.get("target_sdk"),
+        "target_sdk": target_sdk if target_sdk is not None else container.get("min_sdk"),
         "extract_native_libs": (container.get("extract_native_libs") or {}).get("value"),
     }
 
@@ -1405,22 +1405,18 @@ def check_android_extract_native_libs(
     if context["extract_native_libs"] is not False:
         return True
     container = metadata.get("container") or {}
-    location = {
-        "compression": container.get("location_kind"),
-    }
-    # The compression and alignment facts come from the A1.1 zip scan and
-    # ride the container's locations; the primary member is this unit's.
-    compressed = (container.get("compression") or "") != "stored"
-    unaligned = container.get("offset_mod_4096") not in (0, None)
-    if not compressed and not unaligned:
+    # The compression and alignment facts come from the zip scan of this
+    # unit's primary member.
+    if container.get("compression") != "stored":
+        what = f"{container.get('compression') or 'compressed'} (not stored)"
+    elif container.get("offset_mod_4096"):
+        what = f"stored {container['offset_mod_4096']} bytes past a 4096 boundary"
+    else:
         return True
-    what = "compressed" if compressed else "not page-aligned"
-    detail = (
-        f"extractNativeLibs=false but {what} .so ({location['compression']}); "
-        "the loader loads it straight from the APK only when stored and "
-        "page-aligned"
+    return (
+        f"extractNativeLibs=false but the .so is {what}; the loader loads it "
+        "straight from the APK only when stored and page-aligned"
     )
-    return detail
 
 
 def check_android_bti_pac(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
