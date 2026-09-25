@@ -57,6 +57,11 @@
     - dotnetbinary
     - MachO
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_OBJC_LOAD_METHODS
   title: Objective-C +load Methods Run Before Main
   description: |
@@ -163,6 +168,11 @@
     - dotnetbinary
     - MachO
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
   description: |
@@ -187,6 +197,11 @@
     - x86_64-exec
     - gobinary
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_CANARY
   title: Missing Canary Protection
   description: |
@@ -205,6 +220,11 @@
     - x86_64-executable
     - x86_64-exec
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
     # W3.1 (rule-15 exception): dotnetbinary left the scope. has_canary on
     # PE comes from native CRT marker symbols or the load-config guard
     # flag; a pure-IL assembly carries neither by construction, so the
@@ -760,3 +780,24 @@
     needs the app context (the manifest fact): a standalone .so run has no
     manifest to read, so it never fires there.
   severity: high
+- id: CHECK_ANDROID_BTI_PAC
+  title: arm64 library without BTI/PAC branch protection
+  description: |
+    The arm64 .so carries no AArch64 GNU property note with BTI or PAC, so
+    its indirect branches are not protected (rebuild with
+    -mbranch-protection=standard). AArch64-only by construction: the
+    GNU_PROPERTY_AARCH64_FEATURE_1_AND property exists on arm64 only, and a
+    rule that cannot apply to an ABI does not run on it (ground rule 35) —
+    arm32, x86 and riscv64 files never see this check.
+  severity: medium
+- id: CHECK_ANDROID_MEMTAG
+  title: MTE tagging posture of an arm64 library (informational)
+  description: |
+    The .so declares its Memory Tagging Extension posture in
+    .note.android.memtag: which memory (heap/stack) the loader must prepare
+    for MTE and in which tag-check mode (async/sync; LLVM ELF.h
+    NT_ANDROID_TYPE_MEMTAG bits, decoded per the tags named in B0's
+    constants table). Informational and arm64-only (rule 35): presence is
+    the finding — a positive hardening posture fact like FORTIFIED_LIBC_IN_USE
+    — and absence is the Android norm today, which fires nowhere.
+  severity: info

@@ -1421,3 +1421,44 @@ def check_android_extract_native_libs(
         "page-aligned"
     )
     return detail
+
+
+def check_android_bti_pac(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """arm64 library built without BTI/PAC (hardening gap, rule 35).
+
+    Branch protection is an AArch64-only property (LLVM
+    GNU_PROPERTY_AARCH64_FEATURE_1_AND); on arm32/x86 this rule never
+    runs. NDK builds opt in with ``-mbranch-protection=standard``; the
+    Android platform builds its own arm64 libraries with BTI/PAC.
+    """
+    facts = _android_facts(metadata)
+    if not facts or str(metadata.get("machine_type") or "").upper() != "AARCH64":
+        return True
+    if facts.get("aarch64_features"):
+        return True
+    return "no .note.gnu.property BTI/PAC; arm64 code is not branch-protected (rebuild with -mbranch-protection=standard)"
+
+
+def check_android_memtag(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """MTE posture of an arm64 library, informational (rule 35).
+
+    The .note.android.memtag note says the loader must prepare heap and/or
+    stack tagging and in which mode (bionic reads it at load; LLVM's
+    --android-memtag-mode writes it). A positive posture fact like
+    FORTIFIED_LIBC_IN_USE: its presence is the finding, its absence is the
+    Android norm today and fires nowhere.
+    """
+    facts = _android_facts(metadata)
+    memtag = (facts or {}).get("memtag")
+    if not memtag or str(metadata.get("machine_type") or "").upper() != "AARCH64":
+        return True
+    targets = []
+    if memtag.get("heap"):
+        targets.append("heap")
+    if memtag.get("stack"):
+        targets.append("stack")
+    detail = " + ".join(targets) if targets else "no memory selected"
+    return (
+        f"MTE note: {memtag['level']} tag checking on {detail}; the loader "
+        "prepares tagged memory at load time"
+    )

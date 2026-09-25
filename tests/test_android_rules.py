@@ -1,4 +1,5 @@
-"""A3/C1 — bionic loader rule tests (02/B, ground rule 37).
+"""A3 — bionic loader rule tests (C1, 02/B, ground rule 37) and the
+per-ABI hardening rules (C2).
 
 Every planted defect is a real NDK r28.2.13676358 build (commands and
 same-run readelf ground truth in ``tests/data/android/a2-fixtures-manifest.json``);
@@ -11,12 +12,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from blint.lib.analysis import run_checks
 from blint.lib.binary import parse
 
 DATA = Path(__file__).parent / "data" / "android"
 
 CLEAN = DATA / "libhello.so"
+ARM32 = DATA / "liba4a_r1_arm.so"
+# The C1 loader rules; the C2 hardening rules (BTI/MTE) are asserted in
+# their own tests because the plain NDK build fires BTI_PAC by design.
+LOADER_RULES = {
+    "CHECK_ANDROID_TEXTREL", "CHECK_ANDROID_WX_LOAD", "CHECK_ANDROID_NO_SONAME",
+    "CHECK_ANDROID_ABS_NEEDED", "CHECK_ANDROID_PAGE_16K",
+    "CHECK_ANDROID_EXTRACT_NATIVE_LIBS",
+}
 
 
 def findings_for(path: Path, **container) -> list[dict]:
@@ -27,7 +38,7 @@ def findings_for(path: Path, **container) -> list[dict]:
 
 
 def android_ids(findings: list[dict]) -> list[str]:
-    return [f["id"] for f in findings if f["id"].startswith("CHECK_ANDROID_")]
+    return [f["id"] for f in findings if f["id"] in LOADER_RULES]
 
 
 def test_clean_twin_stays_silent() -> None:
@@ -131,3 +142,47 @@ def test_extract_native_libs_rule() -> None:
     assert "CHECK_ANDROID_EXTRACT_NATIVE_LIBS" not in android_ids(clean)
     # No app context: the manifest fact cannot exist, the rule never fires.
     assert "CHECK_ANDROID_EXTRACT_NATIVE_LIBS" not in android_ids(findings_for(CLEAN))
+
+
+def _all_ids(findings: list[dict]) -> list[str]:
+    return [f["id"] for f in findings]
+
+
+def test_bti_pac_arm64_only() -> None:
+    # Planted without branch protection: the gap is reported.
+    fired = findings_for(DATA / "libhello.so")
+    assert "CHECK_ANDROID_BTI_PAC" in _all_ids(fired)
+    # The -mbranch-protection=standard twin is silent.
+    assert android_ids(findings_for(DATA / "libhello_bti.so")) == []
+    # Rule 35: the check never runs on arm32 — the arm32 twin (also raw
+    # clang, also without branch protection) gets no BTI finding.
+    fired = findings_for(ARM32)
+    assert "CHECK_ANDROID_BTI_PAC" not in _all_ids(fired)
+
+
+def test_memtag_informational_arm64_only() -> None:
+    fired = findings_for(DATA / "libhello_memtag.so")
+    memtag = [f for f in fired if f["id"] == "CHECK_ANDROID_MEMTAG"]
+    assert memtag and memtag[0]["severity"] == "info"
+    assert "sync" in memtag[0]["title"] and "stack" in memtag[0]["title"]
+    # Absence fires nowhere (the Android norm), on any ABI.
+    assert "CHECK_ANDROID_MEMTAG" not in _all_ids(findings_for(DATA / "libhello_bti.so"))
+    assert "CHECK_ANDROID_MEMTAG" not in _all_ids(findings_for(ARM32))
+
+
+def test_pie_rule_covers_android_executables() -> None:
+    # hello_static is a static non-PIE executable: PIE is a meaningful
+    # question for it (main executable, not a DYN library).
+    metadata = parse(str(DATA / "hello_static")) if (DATA / "hello_static").exists() else None
+    if metadata is None:
+        pytest.skip("static executable fixture not committed")
+    assert metadata["elf_type"] == "EXEC"
+    assert metadata["is_pie"] is False
+
+
+def test_canary_rule_covers_android() -> None:
+    # CHECK_CANARY (existing rule) applies per-ABI unchanged: the
+    # -fno-stack-protector twin fires, the default build stays silent.
+    fired = findings_for(DATA / "libhello_nocanary.so")
+    assert "CHECK_CANARY" in _all_ids(fired)
+    assert "CHECK_CANARY" not in _all_ids(findings_for(CLEAN))

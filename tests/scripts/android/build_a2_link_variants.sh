@@ -76,6 +76,12 @@ for tag in r27 r28; do
         ;;
     esac
 
+    # hello_nocanary: -fno-stack-protector, so no __stack_chk_fail import —
+    # the planted CHECK_CANARY defect twin of hello.
+    "$cc" -O2 -fPIC -fno-stack-protector -shared \
+      "$here/jni_sources/hello.c" "$here/jni_sources/blint_sink.c" \
+      -o "$out/libhello_nocanary.so"
+
     # hello_absneeded: link against a soname-less helper by a path (which
     # lld records verbatim as DT_NEEDED). The helper is linked in a fixed
     # work dir and named with a leading ./ so the recorded NEEDED is

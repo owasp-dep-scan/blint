@@ -25,7 +25,9 @@ from blint.lib import pe_constants
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
     check_android_abs_needed,  # noqa: F401
+    check_android_bti_pac,  # noqa: F401
     check_android_extract_native_libs,  # noqa: F401
+    check_android_memtag,  # noqa: F401
     check_android_no_soname,  # noqa: F401
     check_android_page_16k,  # noqa: F401
     check_android_textrel,  # noqa: F401
