@@ -289,15 +289,21 @@ def _memtag_value_decoded(note: dict) -> dict | None:
     }
 
 
-def oracle_aarch64_features(facts: dict) -> list[str]:
-    """BTI/PAC from the .note.gnu.property AArch64 feature word."""
+def oracle_aarch64_features(facts: dict) -> list[str] | None:
+    """BTI/PAC from the .note.gnu.property AArch64 feature word.
+
+    None when the file has no AArch64 feature property at all (no note, or
+    a note without GNU_PROPERTY_AARCH64_FEATURE_1_AND) — the same absence
+    blint reports by not emitting the key. The x86 feature line ("x86
+    feature: IBT") is not this fact.
+    """
     for note in facts["notes"]:
         if "NT_GNU_PROPERTY_TYPE_0" not in note["type"]:
             continue
         for line in note["decoded"]:
-            if "feature" in line.lower() and "Properties:" in line:
+            if "aarch64 feature" in line.lower() and "Properties:" in line:
                 return [f.strip().upper() for f in line.rsplit(":", 1)[1].split(",")]
-    return []
+    return None
 
 
 def oracle_packed_relocations(facts: dict) -> list[dict] | None:
@@ -309,12 +315,26 @@ def oracle_packed_relocations(facts: dict) -> list[dict] | None:
     dyn = facts["dyn"]
     kinds = []
     if "ANDROID_REL" in dyn or "ANDROID_RELA" in dyn:
-        kinds.append({"kind": "aps2", "entry_count": _count(dyn, "ANDROID_RELSZ", 8)
-                      or _count(dyn, "ANDROID_RELASZ", 8)})
+        kind = {"kind": "aps2"}
+        for size_tag in ("ANDROID_RELSZ", "ANDROID_RELASZ"):
+            if sizes := dyn.get(size_tag):
+                kind["size_bytes"] = int(sizes[0].split()[0], 0)
+                break
+        kinds.append(kind)
     if "RELR" in dyn:
-        kinds.append({"kind": "relr", "entry_count": _count(dyn, "RELRSZ", None)})
+        kind = {"kind": "relr"}
+        if sizes := dyn.get("RELRSZ"):
+            kind["size_bytes"] = int(sizes[0].split()[0], 0)
+            if ents := dyn.get("RELRENT"):
+                kind["entry_count"] = kind["size_bytes"] // int(ents[0].split()[0], 0)
+        kinds.append(kind)
     if "ANDROID_RELR" in dyn:
-        kinds.append({"kind": "android_relr", "entry_count": _count(dyn, "ANDROID_RELRSZ", None)})
+        kind = {"kind": "android_relr"}
+        if sizes := dyn.get("ANDROID_RELRSZ"):
+            kind["size_bytes"] = int(sizes[0].split()[0], 0)
+            if ents := dyn.get("ANDROID_RELRENT"):
+                kind["entry_count"] = kind["size_bytes"] // int(ents[0].split()[0], 0)
+        kinds.append(kind)
     return kinds or None
 
 
@@ -432,24 +452,12 @@ def android_fact(metadata: dict, key: str):
     return block.get(key)
 
 
-def blint_android_ident(metadata: dict) -> dict | None:
-    for note in metadata.get("notes") or []:
-        if note.get("type") == "ANDROID_IDENT":
-            return {
-                "min_api": note.get("sdk_version"),
-                "ndk_version": note.get("ndk_version") or None,
-                "ndk_build_number": note.get("ndk_build_number") or None,
-            }
-    return None
-
-
-def blint_soname(metadata: dict):
-    if "dynamic_entries" not in metadata:
-        return MISSING
-    for entry in metadata.get("dynamic_entries") or []:
-        if entry.get("tag") == "SONAME":
-            return entry.get("name")
-    return None
+def android_ident_fact(metadata: dict, key: str):
+    """min_api / ndk_version / ndk_build_number from the nested block."""
+    ident = android_fact(metadata, "android_ident")
+    if ident is MISSING or not isinstance(ident, dict):
+        return ident
+    return ident.get(key)
 
 
 def blint_wx_segments(metadata: dict):
@@ -480,12 +488,12 @@ FACTS = [
      lambda md: md.get("is_targeting_android"),
      lambda orc: any(n["type"].startswith(NT_ANDROID_TYPE_IDENT) for n in orc["notes"]),
      _eq),
-    ("android_ident.min_api", "shipped",
-     lambda md: (blint_android_ident(md) or {}).get("min_api"),
+    ("android_ident.min_api", "B1",
+     lambda md: android_ident_fact(md, "min_api"),
      lambda orc: (oracle_android_ident(orc) or {}).get("min_api"),
      _eq),
-    ("android_ident.ndk_version", "shipped",
-     lambda md: (blint_android_ident(md) or {}).get("ndk_version"),
+    ("android_ident.ndk_version", "B1",
+     lambda md: android_ident_fact(md, "ndk_version"),
      lambda orc: (oracle_android_ident(orc) or {}).get("ndk_version"),
      _eq),
     ("packed_relocations", "B1",
@@ -500,7 +508,7 @@ FACTS = [
     ("text_relocations", "B1",
      lambda md: android_fact(md, "text_relocations"),
      oracle_text_relocations, _eq),
-    ("soname", "shipped", blint_soname, oracle_soname, _eq),
+    ("soname", "B1", lambda md: android_fact(md, "soname"), oracle_soname, _eq),
     ("needed_absolute", "B1",
      lambda md: android_fact(md, "needed_absolute"),
      lambda orc: any("/" in name for name in oracle_needed(orc)), _eq),
@@ -524,6 +532,19 @@ FACTS = [
 ]
 
 
+# Fact names implemented by the current blint version, versioned with the
+# code: each packet adds its names in the same commit. A None blint value
+# for a fact outside this set means "not implemented yet" (blint-missing);
+# a None value for an implemented fact is a real absence and compares
+# against the oracle normally.
+IMPLEMENTED = {
+    "is_targeting_android", "wx_segments",
+    "android_ident.min_api", "android_ident.ndk_version",
+    "packed_relocations", "memtag", "aarch64_features",
+    "text_relocations", "soname", "needed_absolute", "tls_segment",
+}
+
+
 def probe_file(exe_file: str, readelf: str, strict: bool) -> tuple[bool, dict]:
     """One file: blint parse + one readelf pass, then the fact comparisons."""
     from blint.lib.binary import parse
@@ -541,7 +562,9 @@ def probe_file(exe_file: str, readelf: str, strict: bool) -> tuple[bool, dict]:
             rows.append({"fact": name, "verdict": "no-oracle", "packet": packet})
             continue
         oracle_value = oracle_reader(oracle)
-        if blint_value is MISSING:
+        if blint_value is MISSING or (
+            blint_value is None and name not in IMPLEMENTED
+        ):
             rows.append(
                 {"fact": name, "verdict": "blint-missing", "packet": packet,
                  "oracle": oracle_value}
@@ -562,7 +585,7 @@ def probe_file(exe_file: str, readelf: str, strict: bool) -> tuple[bool, dict]:
     return ok, {"file": exe_file, "facts": rows}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("files", nargs="+", help=".so files to probe")
     parser.add_argument("--strict", action="store_true",
@@ -570,7 +593,7 @@ def main() -> int:
     parser.add_argument("--readelf", default=default_readelf(),
                         help="llvm-readelf binary (default: newest NDK)")
     parser.add_argument("--json", dest="json_path", help="write the report as JSON")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not (os.path.exists(args.readelf) or shutil.which(args.readelf)):
         print(f"llvm-readelf not found: {args.readelf}", file=sys.stderr)
         return 3
