@@ -1294,6 +1294,15 @@ class AnalysisRunner:
                             for loc in locations
                         ],
                         "abi_mismatch": lib["abi_mismatch"],
+                        # Manifest facts the loader rules condition on
+                        # (ground rule 37): standalone .so runs have no
+                        # app context and their findings say so instead.
+                        "min_sdk": (native.get("manifest") or {}).get("min_sdk"),
+                        "target_sdk": (native.get("manifest") or {}).get("target_sdk"),
+                        "extract_native_libs": native.get("extract_native_libs") or {},
+                        "compression": primary["compression"],
+                        "offset_mod_4096": primary["offset_mod_4096"],
+                        "offset_mod_16384": primary["offset_mod_16384"],
                     }
                     member_metadata["name"] = flat_name
                     member_metadata["file_path"] = display

@@ -552,6 +552,23 @@ def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
     }
 
 
+def manifest_sdk_fact(manifest_attrs: dict[str, Any]) -> dict[str, int | None]:
+    """minSdkVersion/targetSdkVersion as ints, None when absent or not numeric.
+
+    The loader rules (A3, ground rule 37) condition on these: a rule whose
+    enforcement the loader only applies to apps targeting some API level
+    stays silent when the app's targetSdk predates it.
+    """
+    def to_int(raw: Any) -> int | None:
+        text = str(raw or "").strip()
+        return int(text) if text.isdigit() else None
+
+    return {
+        "min_sdk": to_int(manifest_attrs.get("minSdkVersion")),
+        "target_sdk": to_int(manifest_attrs.get("targetSdkVersion")),
+    }
+
+
 def extract_native_libs_fact(manifest_attrs: dict[str, Any]) -> dict[str, Any]:
     """The ``extractNativeLibs`` fact with its provenance (01/A.2).
 
@@ -643,6 +660,7 @@ def scan_android_native(app_file: str, manifest_attrs: dict[str, Any] | None = N
         "libraries": [lib.to_dict() for lib in deduped],
         "abi_coverage": abi_coverage(deduped),
         "page_size_16k": page_size_16k_verdict(deduped),
+        "manifest": manifest_sdk_fact(manifest_attrs or {}),
         "extract_native_libs": extract_native_libs_fact(manifest_attrs or {}),
         "unsafe_names": unsafe,
         "refusals": sorted(set(refusals) | set(budget.refusals)),

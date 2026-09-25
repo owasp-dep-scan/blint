@@ -61,6 +61,21 @@ for tag in r27 r28; do
         "$out/libhello_scs.so.unstripped"
     fi
 
+    # hello_rwx: --omagic marks the text segment writable, so the LOAD
+    # segment is RWE — the planted W+X defect (bionic refuses from API 26).
+    # Planted on arm64 only: arm32/x86 fail to link with omagic (lld cannot
+    # resolve the versioned builtins against the low text address) and
+    # riscv64 fails on r27 (static libc dispatch objects).
+    case "$abi" in
+      arm64-v8a)
+        "$cc" -O2 -fPIC -fstack-protector-strong -shared \
+          "$here/jni_sources/hello.c" "$here/jni_sources/blint_sink.c" \
+          -Wl,--omagic -o "$out/libhello_rwx.so.unstripped"
+        "$toolchain/llvm-strip" -o "$out/libhello_rwx.so" \
+          "$out/libhello_rwx.so.unstripped"
+        ;;
+    esac
+
     # hello_absneeded: link against a soname-less helper by a path (which
     # lld records verbatim as DT_NEEDED). The helper is linked in a fixed
     # work dir and named with a leading ./ so the recorded NEEDED is

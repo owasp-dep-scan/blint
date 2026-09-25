@@ -58,7 +58,11 @@ def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool
 def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     # A mapping that is writable and executable at the same time turns any
     # memory-write primitive into direct code execution, so the offending
-    # segments are reported by name.
+    # segments are reported by name. On a bionic binary the finding belongs
+    # to CHECK_ANDROID_WX_LOAD, which carries the loader's API-26
+    # enforcement context (ground rule 37) — reporting both would be noise.
+    if metadata.get("is_targeting_android"):
+        return True
     names = [
         entry.get("name")
         for entry in metadata.get("wx_segments") or []
@@ -1193,3 +1197,227 @@ def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> 
     findings = packing.get("findings") or []
     detail = ", ".join(packers) if packers else ", ".join(findings[:5])
     return f"packing evidence ({likelihood}): {detail}" if detail else True
+
+
+# --- A3 (02/B): the bionic loader's own rules (ground rule 37) ---------------
+#
+# Every rule in this family is bionic's behaviour, quoted at a named tag of
+# android-changes-for-ndk-developers.md, and each states the API level the
+# loader enforces it from. A rule fires only when the app's targetSdk means
+# the loader enforces it; a standalone .so has no app context, so its
+# finding states the enforcement level without assuming one.
+
+_ENFORCED = (
+    "android-changes-for-ndk-developers.md, {section!r}"
+)
+
+
+def _android_facts(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """The bionic facts block, or None for a file that is not Android's."""
+    if str(metadata.get("binary_type") or "").upper() != "ELF":
+        return None
+    if not metadata.get("is_targeting_android"):
+        return None
+    facts = metadata.get("android")
+    return facts if isinstance(facts, dict) else None
+
+
+def _app_context(metadata: dict[str, Any]) -> dict[str, Any]:
+    """The app manifest facts, or an empty dict when there is no app."""
+    container = metadata.get("container") or {}
+    if container.get("role") != "apk-so-member":
+        return {}
+    return {
+        "min_sdk": container.get("min_sdk"),
+        "target_sdk": container.get("target_sdk"),
+        "extract_native_libs": (container.get("extract_native_libs") or {}).get("value"),
+    }
+
+
+def _target_sdk_at_least(context: dict[str, Any], level: int) -> bool | None:
+    """Whether the loader enforces for this app, or None without a manifest."""
+    target_sdk = context.get("target_sdk")
+    if target_sdk is None:
+        return None
+    return target_sdk >= level
+
+
+def check_android_textrel(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Text relocations: bionic refuses to load for apps targeting API 23+.
+
+    android-changes-for-ndk-developers.md, "Text Relocations (Enforced for
+    API level >= 23)": "Apps with a target API level >= 23 cannot load
+    shared objects that contain text relocations ... This was only a change
+    for 32-bit, because 64-bit never supported text relocations." The
+    linker warned from API 19 and refuses from API 23 (bionic linker reads
+    DT_TEXTREL/DF_TEXTREL; the doc notes the flag alone is decisive).
+    """
+    facts = _android_facts(metadata)
+    if not facts or not facts.get("text_relocations"):
+        return True
+    context = _app_context(metadata)
+    enforced = _target_sdk_at_least(context, 23)
+    if enforced is False:
+        return True
+    detail = "DT_TEXTREL or DF_TEXTREL present; code pages must be writable during relocation"
+    if enforced is None:
+        return f"{detail}; the loader refuses from API 23"
+    return f"{detail}; the loader refuses this app (targets API {context['target_sdk']} >= 23)"
+
+
+def check_android_wx_load(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """W+X LOAD segments: bionic refuses for apps targeting API 26+.
+
+    android-changes-for-ndk-developers.md, "Writable and Executable
+    Segments (Enforced for API level >= 26)": "For security, data shouldn't
+    be executable and code shouldn't be writable. This means that the W ...
+    and E ... flags should be mutually exclusive. This wasn't historically
+    enforced, but is now." CHECK_WX_SEGMENTS skips bionic binaries so this
+    rule owns the case with the enforcement context instead of
+    double-reporting it.
+    """
+    facts = _android_facts(metadata)
+    if not facts:
+        return True
+    wx = metadata.get("wx_segments") or []
+    if not wx:
+        return True
+    context = _app_context(metadata)
+    enforced = _target_sdk_at_least(context, 26)
+    if enforced is False:
+        return True
+    names = ", ".join(
+        entry.get("name") for entry in wx[:5] if entry.get("name")
+    )
+    detail = f"writable+executable LOAD segments ({names})"
+    if enforced is None:
+        return f"{detail}; the loader refuses from API 26"
+    return f"{detail}; the loader refuses this app (targets API {context['target_sdk']} >= 26)"
+
+
+def check_android_no_soname(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Missing DT_SONAME: enforced from API level >= 23.
+
+    android-changes-for-ndk-developers.md, "Missing SONAME (Enforced for
+    API level >= 23)": "Each ELF shared object ('native library') must have
+    a SONAME ... A missing SONAME may lead to runtime issues such as the
+    wrong library being loaded: the filename is used instead when this
+    attribute is missing."
+    """
+    facts = _android_facts(metadata)
+    if not facts or facts.get("soname"):
+        return True
+    context = _app_context(metadata)
+    enforced = _target_sdk_at_least(context, 23)
+    if enforced is False:
+        return True
+    detail = "no DT_SONAME; the loader falls back to the file name"
+    if enforced is None:
+        return f"{detail}; required from API 23"
+    return f"{detail}; required for this app (targets API {context['target_sdk']} >= 23)"
+
+
+def check_android_abs_needed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Absolute DT_NEEDED: bionic honours the path from API 23 and fails.
+
+    android-changes-for-ndk-developers.md, "Invalid DT_NEEDED Entries
+    (Enforced for API level >= 23)": "Before API level 23, Android's
+    dynamic linker ignored the full path ... Since API level 23 the runtime
+    linker will honor the DT_NEEDED exactly and so it won't be able to load
+    the library if it is not present in that exact location on the device."
+    Some build systems insert a build-host path, which can never exist on
+    the device.
+    """
+    facts = _android_facts(metadata)
+    if not facts or not facts.get("needed_absolute"):
+        return True
+    context = _app_context(metadata)
+    enforced = _target_sdk_at_least(context, 23)
+    if enforced is False:
+        return True
+    needed = [
+        entry.get("name") for entry in metadata.get("dynamic_entries") or []
+        if entry.get("tag") == "NEEDED" and "/" in (entry.get("name") or "")
+    ]
+    detail = f"DT_NEEDED carries a path ({needed[:2]}); it can never resolve on the device"
+    if enforced is None:
+        return f"{detail}; honoured literally from API 23"
+    return f"{detail}; the loader honours it literally for this app (targets API {context['target_sdk']} >= 23)"
+
+
+def check_android_page_16k(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """64-bit library not 16 KB compatible: the Google Play requirement.
+
+    Policy page as fetched 2026-09-25
+    (developer.android.com/guide/practices/page-sizes): "all apps targeting
+    Android 15 (API level 35) and higher must support 16 KB memory page
+    sizes on 64-bit devices on Google Play. Starting February 1, 2027, if
+    your app updates don't support 16 KB memory page sizes, you won't be
+    able to release these updates." 32-bit ABIs are exempt (rule 35).
+    """
+    facts = _android_facts(metadata)
+    page = (facts or {}).get("page_alignment")
+    if page is None:
+        return True
+    machine = str(metadata.get("machine_type") or "").upper()
+    # LIEF renders the riscv64 machine as RISCV; the ELF class decides
+    # 64-bit-ness (LIEF 1.0 exposes no is_64 header attribute). The 32-bit
+    # ABIs (armeabi-v7a, x86) are exempt and never flagged (rule 35).
+    if machine not in ("AARCH64", "X86_64", "RISCV") or metadata.get("class") != "ELF64":
+        return True
+    incompatible = page["min_load_align"] < 16384 or page["mod_16384_incongruent"]
+    if not incompatible:
+        return True
+    context = _app_context(metadata)
+    enforced = _target_sdk_at_least(context, 35)
+    if enforced is False:
+        return True
+    reasons = [f"min PT_LOAD p_align {page['min_load_align']}"]
+    if page["mod_16384_incongruent"]:
+        reasons.append(
+            f"{len(page['mod_16384_incongruent'])} LOAD segment(s) with "
+            "p_offset != p_vaddr mod 16384"
+        )
+    detail = "not 16 KB-page compatible: " + "; ".join(reasons)
+    if enforced is None:
+        return f"{detail}; Play requires 16 KB support from targetSdk 35"
+    return f"{detail}; Play requires it for this app (targets API {context['target_sdk']} >= 35)"
+
+
+def check_android_extract_native_libs(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Compressed or unaligned .so while extractNativeLibs=false.
+
+    android-changes-for-ndk-developers.md, "Opening shared libraries
+    directly from an APK": with ``android:extractNativeLibs="false"``, "Any
+    .so file that you want to load directly from your APK must be page
+    aligned (on a 4096-byte boundary) in the zip file and stored
+    uncompressed" — the loader enforces this from API level 23. Needs the
+    app context: a standalone .so run has no manifest to read.
+    """
+    facts = _android_facts(metadata)
+    if not facts:
+        return True
+    context = _app_context(metadata)
+    if not context:
+        return True  # no manifest fact, nothing to enforce against
+    if context["extract_native_libs"] is not False:
+        return True
+    container = metadata.get("container") or {}
+    location = {
+        "compression": container.get("location_kind"),
+    }
+    # The compression and alignment facts come from the A1.1 zip scan and
+    # ride the container's locations; the primary member is this unit's.
+    compressed = (container.get("compression") or "") != "stored"
+    unaligned = container.get("offset_mod_4096") not in (0, None)
+    if not compressed and not unaligned:
+        return True
+    what = "compressed" if compressed else "not page-aligned"
+    detail = (
+        f"extractNativeLibs=false but {what} .so ({location['compression']}); "
+        "the loader loads it straight from the APK only when stored and "
+        "page-aligned"
+    )
+    return detail

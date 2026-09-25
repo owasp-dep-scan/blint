@@ -24,6 +24,12 @@ from blint.lib import pe_constants
 # pylint: disable-next=unused-import
 from blint.lib.checks import (
     check_abi_floor,  # noqa: F401
+    check_android_abs_needed,  # noqa: F401
+    check_android_extract_native_libs,  # noqa: F401
+    check_android_no_soname,  # noqa: F401
+    check_android_page_16k,  # noqa: F401
+    check_android_textrel,  # noqa: F401
+    check_android_wx_load,  # noqa: F401
     check_audio_plugin_network,  # noqa: F401
     check_authenticode,  # noqa: F401
     check_boot_start_integritycheck,  # noqa: F401
