@@ -126,6 +126,45 @@ the tuple's `armv7`/`thumbv7` spellings (environment preserved: `-android`,
 `-androideabi`, `-gnu` all behave the same way) and picks per span. Immediates
 print decimal (`mov r0, #1`), nyxstone's default style, in both states.
 
+### ARM32 call and control-flow semantics (03/T3)
+
+All rules are text tables over nyxstone's rendering, measured against the
+NDK r28c `llvm-objdump` oracle on the A4a fixtures:
+
+- **Calls.** `bl`/`blx` with an immediate operand are direct calls; `blx rN`
+  is an indirect call through the register. The immediate is a signed
+  PC-relative delta relative to: `addr+4` for Thumb `bl`; `Align(addr+4, 4)`
+  for Thumb `blx #imm` (the interworking form targets a 4-aligned ARM
+  address and the architecture rounds the base); `addr+8` in ARM state. A
+  Thumb callee's address carries the interworking bit in the encoding; the
+  resolved target is masked to the aligned start. Immediates parse in every
+  IntegerBase style nyxstone can print (`#50`, `#0x32`, `#32h`).
+- **Returns.** `bx lr` (any condition code), `pop {…, pc}` and the
+  post-indexed `ldr pc, [sp], #4` end a function's linear flow — the
+  size-less-window truncation consults them, which is what stops a blind
+  window from absorbing the next function's leading bytes.
+- **Tail calls.** A trailing unconditional `b #imm` whose target lies
+  outside the function's extent is a tail call (PLT thunks, `-Oz` tail
+  merging); a target inside is a local branch and creates no edge.
+- **Jump tables.** `tbb [pc, rN]`, `tbh [pc, rN, lsl #1]` and
+  `ldr pc, [pc, rN, lsl #2]` are intra-function dispatch: counted as
+  conditional control flow, never as calls or jumps to outside targets.
+- **PC-relative literal materialisation.** `ldr rN, [pc, #imm]` reads a
+  literal word (Thumb PC `Align(addr+4,4)`, ARM `addr+8`); `add rN, pc`
+  completes it to an absolute address; `ldr rM, [rN, #off]` through the
+  completed base records the slot address. `blx` through such a register
+  reports an `indirect_hint` named from the slot when the slot is a GOT
+  entry with a relocation, and an unnamed hint when it is a vtable level
+  (JNIEnv-style double indirection resolves no name — that is the JNI
+  wave's model, not a guess).
+- **PLT thunks.** A direct call or tail call to a `.plt` stub resolves the
+  stub's exact address; the imported name is a relocation, so the edge
+  surfaces in the callgraph as an external edge rather than a named target.
+- **Function identity.** ARM32 function identity is the 2-byte-aligned
+  address: symbol `st_value`s carry the Thumb bit, resolved call targets do
+  not, and the discovery/promotion/window sets all work in the aligned
+  space so a Thumb callee is never re-discovered as its own twin.
+
 
 ### `instruction_metrics` Sub-structure
 

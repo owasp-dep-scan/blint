@@ -126,14 +126,10 @@ def test_probe_after_thumb_fix_r1_thumb() -> None:
         report_json = Path(td) / "r.json"
         code = native_probe.main([str(R1_THUMB), "--json", str(report_json)])
         summary = json.loads(report_json.read_text())["summary"]
-    assert code == 1
-    assert summary["missing"] == 0 and summary["extra"] == 0
+    assert code == 0
+    assert summary["agreement"] is True
     assert summary["matched"] == summary["blint_functions"] == summary["oracle_functions"]
-    assert summary["mode_mismatch"] == 0
-    assert summary["boundary_mismatch"] == 0
-    assert summary["count_mismatch"] == 0
-    assert summary["mnemonic_mismatch"] == 0
-    assert summary["edge_recall"] == 0.0
+    assert summary["edge_precision"] == 1.0 and summary["edge_recall"] == 1.0
 
 
 @pytest.mark.skipif(
@@ -150,14 +146,11 @@ def test_probe_after_thumb_fix_r2_interworking() -> None:
         report_json = Path(td) / "r.json"
         code = native_probe.main([str(R2), "--json", str(report_json)])
         summary = json.loads(report_json.read_text())["summary"]
-    assert code == 1
-    assert summary["missing"] == 0 and summary["extra"] == 0
-    assert summary["matched"] == summary["blint_functions"] == summary["oracle_functions"]
-    assert summary["mode_mismatch"] == 0
-    assert summary["boundary_mismatch"] == 0
-    assert summary["count_mismatch"] == 0
-    assert summary["mnemonic_mismatch"] == 0
-    assert summary["edge_recall"] == 0.0
+    # Full agreement: functions, modes, boundaries, counts, mnemonics and
+    # every direct bl/blx edge - the R2 gate of the semantics packet.
+    assert code == 0
+    assert summary["agreement"] is True
+    assert summary["edge_precision"] == 1.0 and summary["edge_recall"] == 1.0
 
 
 @pytest.mark.skipif(

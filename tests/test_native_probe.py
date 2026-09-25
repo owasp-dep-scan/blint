@@ -307,20 +307,15 @@ def test_compare_mode_only_gates_on_stated_oracle_mode() -> None:
     not _nyxstone_available() or not _tools_available() or not CORPUS_V7A_UNSTRIPPED.exists(),
     reason="needs nyxstone, NDK llvm tools and the tier-1 corpus fixture",
 )
-def test_probe_v7a_unstripped_boundaries_agree_after_thumb_fix() -> None:
-    """The unstripped twin after T2: every function matched, zero mode,
-    boundary, count and mnemonic mismatches. The exit code stays 1 only
-    because direct edges are still unresolved - T3's deliverable."""
+def test_probe_v7a_unstripped_agrees_after_semantics() -> None:
+    """The unstripped twin after T3: full agreement - functions, modes,
+    boundaries, counts, mnemonics and every direct bl/blx edge."""
     report_json = FIXTURE_DIR / "probe-v7a-report.json"
     code = native_probe.main([str(CORPUS_V7A_UNSTRIPPED), "--json", str(report_json)])
     summary = __import__("json").loads(report_json.read_text())["summary"]
-    assert code == 1
-    assert summary["missing"] == 0 and summary["extra"] == 0
-    assert summary["mode_mismatch"] == 0
-    assert summary["boundary_mismatch"] == 0
-    assert summary["count_mismatch"] == 0
-    assert summary["mnemonic_mismatch"] == 0
-    assert summary["edge_recall"] == 0.0
+    assert code == 0
+    assert summary["agreement"] is True
+    assert summary["edge_precision"] == 1.0 and summary["edge_recall"] == 1.0
     report_json.unlink()
 
 
