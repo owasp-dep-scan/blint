@@ -72,6 +72,27 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
     - **Content**: This attribute parses the embedded JSON note to list these "hidden" dependencies, including the library name (`soname`), its necessity (`required`, `recommended`, or `suggested`), and the specific application feature it enables.
     - **Use Case**: Critical for discovering the full dependency tree of modular applications (like media players or system daemons) that would otherwise appear to have very few dependencies during static analysis.
 
+- **Android bionic facts (`android`, optional):** One nested block, emitted only for ELF files that target Android (`.note.android.ident` present); every key inside is additive and mirrors what `llvm-readelf -a --notes` reports for the same file (the `tests/scripts/android/elf_facts_probe.py` oracle compares them on every fixture). Arm64-only facts are emitted only for AArch64 binaries — absent means "not applicable", never "not checked".
+  - `android_ident`: `{min_api, ndk_version, ndk_build_number}` from the Android ident note; `min_api` is an int (the minimum API level the build targets).
+  - `packed_relocations`: list of packed-relocation tables, each `{kind, size_bytes}` with `entry_count` added for RELR (whose entry size the file declares). `kind` is `aps2` (`DT_ANDROID_REL[A]`, bionic reads from API 23), `relr` (standard `DT_RELR`, API 30+), or `android_relr` (Android's obsolete pre-API-30 RELR spelling). Presence is recorded even when the table itself cannot be decoded.
+  - `memtag` (arm64): `{level, heap, stack}` decoded from `.note.android.memtag` — `level` is `none`/`async`/`sync`, and the booleans say which memory the loader must prepare for MTE.
+  - `aarch64_features` (arm64): named AArch64 GNU-property bits found in `.note.gnu.property` (`BTI`, `PAC`, `GCS`); absent when the file carries no such property.
+  - `text_relocations`: true when `DT_TEXTREL` is present or `DF_TEXTREL` is set — text segments need write access during relocation.
+  - `soname`: the `DT_SONAME` string, or null when the file has none (the loader derives the name from the path in that case).
+  - `needed_absolute`: true when any `DT_NEEDED` entry contains a `/` (a path was recorded instead of a SONAME).
+  - `tls_segment` (optional): `{align, vaddr}` of the `PT_TLS` segment when one exists.
+  - `page_alignment`: `{min_load_align, mod_16384_incongruent}` — the minimum `PT_LOAD` `p_align` and the list of LOAD segments whose `p_offset` and `p_vaddr` are not congruent modulo 16384 (the two facts the 16 KB page-size verdict is built from). Emitted for every Android ELF; the app-level verdict below is 64-bit-only.
+
+- **App 16 KB page-size verdict (`android_native.page_size_16k`, apk-so-member apps):** the per-ABI aggregation of the library facts above plus each stored zip location's `offset % 16384` (01/B). 32-bit ABIs are exempt and never flagged (rule 35); assets never feed the verdict.
+  - `compatible`: true/false over the 64-bit ABIs present; null when no 64-bit ABI ships (nothing was judged).
+  - `compatible_abis` / `incompatible_abis` / `exempt_abis`: every ABI is named — never first-or-best (rule 36).
+  - `summary`: one string, e.g. "16 KB page-size compatible on 2 of 3 64-bit ABIs".
+  - `per_abi.<abi>.libraries.<name>`: `{elf_16k, locations, reasons}` — `elf_16k` is the library's ELF-layout verdict, `locations` carry `{entry, split, compression, offset_mod_16384, zip_16k}` (`zip_16k` is null for deflated entries, which `zipalign -c -P 16` does not judge), and `reasons` names the failure in words. Verified per app against `zipalign -v -c -P 16 4` and Google's `check_elf_alignment.sh` (see `tests/scripts/android/verify_16k_verdict.py`).
+  - `sanitizers` (optional): sanitizer runtime markers in the dynamic symbol table — `{sanitizers: ["hwasan"|"asan"|"ubsan"|"tsan"|"msan", ...], cfi}` where `cfi` reports the `__cfi_check` entry point. The NDK links the runtime statically, so markers appear as imports or exports.
+  - `fortify` (optional): `{symbols: [...]}` — the bionic `__*_chk` imports (`__memcpy_chk`, `__read_chk`, ...; the NDK r28 sysroot headers declare 37). `__stack_chk_*` is the canary's signal and is deliberately not here.
+  - `unwind` (optional): `{eh_frame, arm_exidx, gnu_debugdata}` — unwind-table presence (`.eh_frame` everywhere, `.ARM.exidx` on arm32) and the stripped mini-debuginfo.
+  - `shadow_call_stack` (optional, `--disassemble` only): `{functions, function_count}` — functions whose disassembly text shows the arm64 shadow-call-stack `x18` push/pop pair (`str x30, [x18], #8` / `ldr x30, [x18, #-8]!`).
+
 - **ABI Requirements (`abi_analysis`):** The runtime the binary requires and the ABI features that constrain where it can run. See [`abi_analysis`](#abi_analysis) below.
 
 - **Runtime Loading (`runtime_loading`, `recovered_dependencies`):** Libraries the binary opens at runtime rather than linking against, recovered from the image itself rather than from a declarative note. See [`runtime_loading` and `recovered_dependencies`](#runtime_loading-and-recovered_dependencies) below.

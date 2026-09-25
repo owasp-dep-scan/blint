@@ -57,6 +57,11 @@
     - dotnetbinary
     - MachO
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_OBJC_LOAD_METHODS
   title: Objective-C +load Methods Run Before Main
   description: |
@@ -163,6 +168,11 @@
     - dotnetbinary
     - MachO
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_RELRO
   title: Missing Relocation Read-Only (RELRO) Protection
   description: |
@@ -187,6 +197,11 @@
     - x86_64-exec
     - gobinary
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
 - id: CHECK_CANARY
   title: Missing Canary Protection
   description: |
@@ -205,6 +220,11 @@
     - x86_64-executable
     - x86_64-exec
     - mips-executable
+    - aarch64-dyn
+    - arm-dyn
+    - x86_64-dyn
+    - x86-dyn
+    - riscv-dyn
     # W3.1 (rule-15 exception): dotnetbinary left the scope. has_canary on
     # PE comes from native CRT marker symbols or the load-config guard
     # flag; a pure-IL assembly carries neither by construction, so the
@@ -675,3 +695,113 @@
     # this check away from them silently; restoring the scope costs
     # nothing, as all 62 managed corpus files score packed_likelihood low.
     - dotnetbinary
+- id: CHECK_ANDROID_TEXTREL
+  title: Android text relocations (loader refuses from API 23)
+  description: |
+    The .so declares text relocations (DT_TEXTREL entry or DF_TEXTREL flag), so
+    its code pages must be writable during relocation. bionic refuses to load
+    such libraries for apps targeting API 23 and above:
+    android-changes-for-ndk-developers.md, "Text Relocations (Enforced for API
+    level >= 23)": "Apps with a target API level >= 23 cannot load shared
+    objects that contain text relocations ... This was only a change for
+    32-bit, because 64-bit never supported text relocations." The linker warned
+    from API 19 and refuses from API 23; the doc notes the flag alone is
+    decisive ("the Android dynamic linker trusts the entry/flag").
+    Enforcement is conditional on the app's targetSdk (rule 37): with app
+    context the rule stays silent while targetSdk < 23, and without app context
+    the finding states the API level instead of assuming one.
+  severity: high
+- id: CHECK_ANDROID_WX_LOAD
+  title: Android writable+executable LOAD segments (loader refuses from API 26)
+  description: |
+    A LOAD segment mapped writable and executable turns any memory-write
+    primitive into code execution. bionic refuses these for apps targeting API
+    26 and above: android-changes-for-ndk-developers.md, "Writable and
+    Executable Segments (Enforced for API level >= 26)": "For security, data
+    shouldn't be executable and code shouldn't be writable. This means that the
+    W (for Writable) and E (for Executable) flags should be mutually exclusive.
+    This wasn't historically enforced, but is now." CHECK_WX_SEGMENTS skips
+    bionic binaries so this rule owns the case with the enforcement context.
+    Conditional on targetSdk (rule 37); without app context the finding states
+    the API level.
+  severity: high
+- id: CHECK_ANDROID_NO_SONAME
+  title: Android library without DT_SONAME (required from API 23)
+  description: |
+    The .so has no DT_SONAME. android-changes-for-ndk-developers.md, "Missing
+    SONAME (Enforced for API level >= 23)": "Each ELF shared object ('native
+    library') must have a SONAME (Shared Object Name) attribute. The NDK build
+    systems add this attribute by default, so its absence (or an incorrect
+    soname) indicates a misconfiguration in your build system. A missing SONAME
+    may lead to runtime issues such as the wrong library being loaded: the
+    filename is used instead when this attribute is missing."
+    Conditional on targetSdk (rule 37); without app context the finding states
+    the API level.
+  severity: medium
+- id: CHECK_ANDROID_ABS_NEEDED
+  title: Android DT_NEEDED carries a path (loader honours it literally from API 23)
+  description: |
+    A DT_NEEDED dependency is a path (contains '/'), which cannot resolve on a
+    device. android-changes-for-ndk-developers.md, "Invalid DT_NEEDED Entries
+    (Enforced for API level >= 23)": "Before API level 23, Android's dynamic
+    linker ignored the full path, and used only the basename (the part after
+    the last '/') ... Since API level 23 the runtime linker will honor the
+    DT_NEEDED exactly and so it won't be able to load the library if it is not
+    present in that exact location on the device." The doc also names broken
+    third-party build systems that insert a build-host path.
+    Conditional on targetSdk (rule 37); without app context the finding states
+    the API level.
+  severity: high
+- id: CHECK_ANDROID_PAGE_16K
+  title: Android 64-bit library not 16 KB-page compatible (Play requires it from targetSdk 35)
+  description: |
+    A 64-bit library's ELF layout is not 16 KB-page compatible: the minimum
+    PT_LOAD p_align is below 16384, or some LOAD segment's p_offset and p_vaddr
+    are not congruent modulo 16384, so the library cannot be mapped correctly
+    by a kernel running 16 KB pages. Google Play policy page as fetched
+    2026-09-25 (developer.android.com/guide/practices/page-sizes): "all apps
+    targeting Android 15 (API level 35) and higher must support 16 KB memory
+    page sizes on 64-bit devices on Google Play. Starting February 1, 2027, if
+    your app updates don't support 16 KB memory page sizes, you won't be able
+    to release these updates." 32-bit ABIs are exempt and never flagged
+    (rule 35). Conditional on targetSdk (rule 37); without app context the
+    finding states the policy level.
+  severity: high
+- id: CHECK_ANDROID_EXTRACT_NATIVE_LIBS
+  title: Compressed or unaligned .so with extractNativeLibs=false (loader refuses from API 23)
+  description: |
+    The app sets android:extractNativeLibs="false" (manifest or the AGP default
+    for minSdk >= 23), so the loader loads the .so directly out of the APK
+    without extracting it - and refuses anything but a stored, page-aligned
+    member. android-changes-for-ndk-developers.md, "Opening shared libraries
+    directly from an APK": "Any .so file that you want to load directly from
+    your APK must be page aligned (on a 4096-byte boundary) in the zip file and
+    stored uncompressed." Enforced by the loader from API level 23. This rule
+    needs the app context (the manifest fact): a standalone .so run has no
+    manifest to read, so it never fires there.
+  severity: high
+- id: CHECK_ANDROID_BTI_PAC
+  title: arm64 library without BTI/PAC branch protection
+  description: |
+    The arm64 .so carries no AArch64 GNU property note with BTI or PAC, so
+    its indirect branches are not protected (rebuild with
+    -mbranch-protection=standard). AArch64-only by construction: the
+    GNU_PROPERTY_AARCH64_FEATURE_1_AND property exists on arm64 only, and a
+    rule that cannot apply to an ABI does not run on it (ground rule 35) —
+    arm32, x86 and riscv64 files never see this check.
+    Severity is low because the NDK does not enable branch protection by
+    default: the gap is near-universal (5229 of 5364 tier-0 system libraries,
+    every arm64 library in the sampled F-Droid apps), a posture fact rather
+    than a defect in the library.
+  severity: low
+- id: CHECK_ANDROID_MEMTAG
+  title: MTE tagging posture of an arm64 library (informational)
+  description: |
+    The .so declares its Memory Tagging Extension posture in
+    .note.android.memtag: which memory (heap/stack) the loader must prepare
+    for MTE and in which tag-check mode (async/sync; LLVM ELF.h
+    NT_ANDROID_TYPE_MEMTAG bits, decoded per the tags named in B0's
+    constants table). Informational and arm64-only (rule 35): presence is
+    the finding — a positive hardening posture fact like FORTIFIED_LIBC_IN_USE
+    — and absence is the Android norm today, which fires nowhere.
+  severity: info

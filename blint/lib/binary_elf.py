@@ -8,6 +8,7 @@ orchestrator that imports it.
 # pylint: disable=too-many-lines,consider-using-f-string
 import contextlib
 import os
+import struct
 import warnings
 
 import lief
@@ -103,6 +104,45 @@ from blint.lib.utils import (
     enum_to_str,
 )
 from blint.logger import LOG
+
+# Bionic ELF facts (02/A). Every constant is confirmed at a named tag, not
+# copied: the DT_ANDROID_* tags from bionic's elf.h (NDK r28.2 sysroot
+# usr/include/elf.h lines 235-253, identical in AOSP bionic
+# libc/include/elf.h), the memtag note bits and the AArch64 GNU-property
+# bits from LLVM llvm/include/llvm/BinaryFormat/ELF.h lines 1826-1873,
+# which is what lld encodes from and llvm-readelf decodes with.
+GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xC0000000
+GNU_PROPERTY_AARCH64_FEATURE_1_BTI = 1 << 0
+GNU_PROPERTY_AARCH64_FEATURE_1_PAC = 1 << 1
+GNU_PROPERTY_AARCH64_FEATURE_1_GCS = 1 << 2
+NT_MEMTAG_LEVEL_NONE = 0
+NT_MEMTAG_LEVEL_ASYNC = 1
+NT_MEMTAG_LEVEL_SYNC = 2
+NT_MEMTAG_LEVEL_MASK = 3
+NT_MEMTAG_HEAP = 4
+NT_MEMTAG_STACK = 8
+DF_TEXTREL = 0x4
+PAGE_16K = 16384
+
+# Sanitizer runtime evidence (02/A): the NDK links the sanitizer runtime
+# statically into the shipped .so, so the markers appear both as imports
+# (__hwasan_init) and defined exports (__asan_report_*); matching the
+# dynamic symbol table either way is the fact. __cfi_check is the CFI
+# instrumentation entry point a -fsanitize-cfi build defines.
+SANITIZER_PREFIXES = {
+    "hwasan": "__hwasan_",
+    "asan": "__asan_",
+    "ubsan": "__ubsan_",
+    "tsan": "__tsan_",
+    "msan": "__msan_",
+}
+CFI_SYMBOL = "__cfi_check"
+
+_AARCH64_FEATURE_NAMES = {
+    GNU_PROPERTY_AARCH64_FEATURE_1_BTI: "BTI",
+    GNU_PROPERTY_AARCH64_FEATURE_1_PAC: "PAC",
+    GNU_PROPERTY_AARCH64_FEATURE_1_GCS: "GCS",
+}
 
 
 def parse_elf_wx_segments(parsed_obj: lief.ELF.Binary) -> list[dict]:
@@ -396,6 +436,284 @@ def _elf_has_canary(parsed_obj: lief.ELF.Binary) -> bool | None:
     return False if seen_named_symbol else None
 
 
+def _is_aarch64(metadata: dict) -> bool:
+    """Whether this ELF is arm64 — the only ABI with MTE and BTI/PAC.
+
+    Arm64-only facts are emitted only for arm64 (ground rule 35): a rule
+    or fact that cannot apply to an ABI must not be present for it, because
+    a reader cannot tell "absent" from "not applicable" otherwise.
+    """
+    return str(metadata.get("machine_type") or "").upper() == "AARCH64"
+
+
+def _decode_android_ident(note: dict) -> dict:
+    sdk_version = note.get("sdk_version")
+    with contextlib.suppress(TypeError, ValueError):
+        sdk_version = int(sdk_version)
+    return {
+        "min_api": sdk_version,
+        "ndk_version": note.get("ndk_version") or None,
+        "ndk_build_number": note.get("ndk_build_number") or None,
+    }
+
+
+def _decode_memtag_note(note) -> dict:
+    """Level and target bits of the ``.note.android.memtag`` payload.
+
+    The note description is one u32 word: the low ``NT_MEMTAG_LEVEL_MASK``
+    bits are the tag-check mode, ``NT_MEMTAG_HEAP``/``NT_MEMTAG_STACK``
+    say which memory the loader must prepare for MTE (LLVM ELF.h,
+    lld's ``--android-memtag-mode/heap/stack`` encoding).
+    """
+    description = bytes(note.description)
+    value = int.from_bytes(description[:4], "little") if len(description) >= 4 else 0
+    level = {
+        NT_MEMTAG_LEVEL_ASYNC: "async",
+        NT_MEMTAG_LEVEL_SYNC: "sync",
+    }.get(value & NT_MEMTAG_LEVEL_MASK, "none")
+    return {
+        "level": level,
+        "heap": bool(value & NT_MEMTAG_HEAP),
+        "stack": bool(value & NT_MEMTAG_STACK),
+    }
+
+
+def _decode_aarch64_property_note(note) -> list[str]:
+    """BTI/PAC/GCS names from a ``.note.gnu.property`` description.
+
+    The note payload is a sequence of property entries
+    ``(u32 type, u32 datasz, data, padding to 8 bytes)``; only
+    ``GNU_PROPERTY_AARCH64_FEATURE_1_AND`` is decoded, and only the bits
+    LLVM names (BTI, PAC, GCS). Unknown entries are skipped — the note
+    carries other properties (stack size, no-copy-on-protected) that are
+    not Android facts.
+    """
+    data = bytes(note.description)
+    features: list[str] = []
+    offset = 0
+    with contextlib.suppress(struct.error):
+        while offset + 8 <= len(data):
+            prop_type, data_size = struct.unpack_from("<II", data, offset)
+            offset += 8
+            if prop_type == GNU_PROPERTY_AARCH64_FEATURE_1_AND and data_size >= 4:
+                value = int.from_bytes(data[offset : offset + 4], "little")
+                features = [
+                    name for bit, name in _AARCH64_FEATURE_NAMES.items() if value & bit
+                ]
+                break
+            offset += data_size + (8 - (data_size % 8)) % 8
+    return features
+
+
+def parse_android_sanitizers(symbol_names: set[str]) -> dict | None:
+    """Sanitizer runtime markers in the dynamic symbol table (02/A)."""
+    found = sorted(
+        kind for kind, prefix in SANITIZER_PREFIXES.items()
+        if any(name.startswith(prefix) for name in symbol_names)
+    )
+    result = {"sanitizers": found, "cfi": CFI_SYMBOL in symbol_names}
+    return result if (found or result["cfi"]) else None
+
+
+def parse_android_fortify(symbol_names: set[str]) -> dict | None:
+    """bionic ``__*_chk`` imports (02/A).
+
+    The FORTIFY annotation (FORTIFIED_LIBC_IN_USE) reviews the same
+    evidence; the fact records the names. ``__stack_chk_*`` is the canary,
+    deliberately excluded here as there.
+    """
+    fortified = sorted(
+        name for name in symbol_names
+        if name.startswith("__") and name.endswith("_chk")
+        and not name.startswith("__stack_chk")
+    )
+    return {"symbols": fortified} if fortified else None
+
+
+def parse_android_unwind(parsed_obj: lief.ELF.Binary) -> dict | None:
+    """Unwind-table presence (02/A): .eh_frame / .ARM.exidx / .gnu_debugdata.
+
+    ``.eh_frame`` on every ABI, ``.ARM.exidx`` on arm32; ``.gnu_debugdata``
+    is the mini-debuginfo a release build ships alongside a stripped
+    symbol table. Only present sections are named.
+    """
+    with contextlib.suppress(AttributeError, TypeError):
+        names = {section.name for section in parsed_obj.sections}
+        result = {
+            "eh_frame": ".eh_frame" in names,
+            "arm_exidx": ".ARM.exidx" in names,
+            "gnu_debugdata": ".gnu_debugdata" in names,
+        }
+        if any(result.values()):
+            return result
+    return None
+
+
+def parse_shadow_call_stack(metadata: dict) -> dict | None:
+    """arm64 shadow-call-stack prologue/epilogue evidence (02/A), text-based.
+
+    A ``-fsanitize=shadow-call-stack`` function keeps its return address on
+    a separate stack held in x18, so the disassembly shows a store through
+    ``[x18`` in the prologue and a load through ``[x18`` before the return
+    (measured on an NDK r28 build: ``str x30, [x18], #0x8`` /
+    ``ldr x30, [x18, #-0x8]!``). Nyxstone provides no register metadata
+    (AGENTS.md), so this is a match on the assembly text of each
+    disassembled function, and it only runs when ``--disassemble`` did.
+    """
+    disassembled = metadata.get("disassembled_functions")
+    if not isinstance(disassembled, dict) or not disassembled:
+        return None
+    functions = []
+    for func_key, func_data in disassembled.items():
+        assembly = func_data.get("assembly") if isinstance(func_data, dict) else None
+        if not assembly:
+            continue
+        has_store = False
+        has_load = False
+        for line in str(assembly).splitlines():
+            parts = line.split(maxsplit=1)
+            if len(parts) != 2 or "[x18" not in parts[1]:
+                continue
+            mnemonic = parts[0].strip()
+            if not parts[1].startswith("x30"):
+                continue
+            if mnemonic in ("str", "stur"):
+                has_store = True
+            elif mnemonic in ("ldr", "ldur"):
+                has_load = True
+        if has_store and has_load:
+            functions.append(func_data.get("name") or func_key)
+    if not functions:
+        return None
+    return {"functions": sorted(functions)[:64], "function_count": len(functions)}
+
+
+def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | None:
+    """Collects the bionic-specific ELF facts (02/A) under one nested key.
+
+    The block is emitted only for binaries that target Android
+    (``.note.android.ident`` present), and the arm64-only facts (memtag,
+    aarch64_features) only for AArch64 — a fact that cannot apply to an
+    ABI is not present for it, so "absent" never means "not checked"
+    (ground rule 35). Everything here is additive: the notes, dynamic
+    entries and segments it reads are parsed once by the existing paths.
+
+    The fact shapes mirror what ``llvm-readelf -a --notes`` reports for
+    the same file (the ``elf_facts_probe.py`` oracle), so a disagreement
+    is a bug by definition, not a formatting difference.
+    """
+    if not metadata.get("is_targeting_android"):
+        return None
+    facts: dict = {}
+    for note in metadata.get("notes") or []:
+        if note.get("type") == "ANDROID_IDENT" and "android_ident" not in facts:
+            facts["android_ident"] = _decode_android_ident(note)
+    # The memtag and GNU-property payloads are decoded from the LIEF note
+    # objects directly: the metadata notes dict carries a truncated
+    # description string, and these payloads must not depend on that cap.
+    with contextlib.suppress(AttributeError, TypeError):
+        for note in parsed_obj.notes:
+            note_type = str(getattr(note, "type", ""))
+            if "ANDROID_MEMTAG" in note_type and _is_aarch64(metadata):
+                facts["memtag"] = _decode_memtag_note(note)
+            elif "GNU_PROPERTY_TYPE_0" in note_type and _is_aarch64(metadata):
+                if features := _decode_aarch64_property_note(note):
+                    facts["aarch64_features"] = features
+    packed: dict[str, dict] = {}
+    text_relocations = False
+    needed_absolute = False
+    soname = None
+    dynamic_entries = getattr(parsed_obj, "dynamic_entries", None)
+    if dynamic_entries and not isinstance(dynamic_entries, lief.lief_errors):
+        sizes: dict[str, int] = {}
+        for entry in dynamic_entries:
+            tag = entry.tag
+            name = str(tag).removeprefix("TAG.")
+            if name in (
+                "ANDROID_REL", "ANDROID_RELA", "RELR", "ANDROID_RELR",
+            ):
+                packed.setdefault(name, {})
+            elif name in ("ANDROID_RELSZ", "ANDROID_RELASZ", "RELRSZ", "ANDROID_RELRSZ"):
+                sizes[name] = int(entry.value)
+            elif name in ("RELRENT", "ANDROID_RELRENT"):
+                sizes.setdefault("_entry_size", int(entry.value))
+            elif tag == lief.ELF.DynamicEntry.TAG.TEXTREL:
+                text_relocations = True
+            elif tag == lief.ELF.DynamicEntry.TAG.FLAGS:
+                text_relocations = text_relocations or bool(int(entry.value) & DF_TEXTREL)
+            elif tag == lief.ELF.DynamicEntry.TAG.NEEDED:
+                if "/" in (entry.name or ""):
+                    needed_absolute = True
+            elif tag == lief.ELF.DynamicEntry.TAG.SONAME and not soname:
+                soname = entry.name or None
+    if packed:
+        # The APS2 table has no entry-size tag (bionic decodes the packed
+        # stream itself), so the honest fact is the table size in bytes;
+        # RELR carries DT_RELRENT and a count is derived from it.
+        kind_names = {
+            "ANDROID_REL": "aps2", "ANDROID_RELA": "aps2",
+            "RELR": "relr", "ANDROID_RELR": "android_relr",
+        }
+        size_tags = {
+            "aps2": ("ANDROID_RELSZ", "ANDROID_RELASZ"),
+            "relr": ("RELRSZ",),
+            "android_relr": ("ANDROID_RELRSZ",),
+        }
+        result: list[dict] = []
+        for raw_kind, kind in kind_names.items():
+            if raw_kind not in packed:
+                continue
+            kind_fact = {"kind": kind}
+            for size_tag in size_tags[kind]:
+                if size_tag in sizes:
+                    kind_fact["size_bytes"] = sizes[size_tag]
+                    break
+            if kind_fact["kind"] != "aps2" and sizes.get("_entry_size"):
+                kind_fact["entry_count"] = kind_fact.get("size_bytes", 0) // sizes["_entry_size"]
+            result.append(kind_fact)
+        facts["packed_relocations"] = result
+    facts["text_relocations"] = text_relocations
+    facts["soname"] = soname
+    facts["needed_absolute"] = needed_absolute
+    segments = getattr(parsed_obj, "segments", None)
+    if segments and not isinstance(segments, lief.lief_errors):
+        loads = [s for s in segments if s.type == lief.ELF.Segment.TYPE.LOAD]
+        if loads:
+            # 16 KB page-size fact (01/B): the minimum PT_LOAD p_align and
+            # whether every LOAD's p_offset and p_vaddr are congruent
+            # modulo 16384. The fact is emitted for every Android ELF; the
+            # 16 KB *verdict* is 64-bit-only, and lives in the app summary.
+            min_align = min(int(s.alignment) for s in loads)
+            incongruent = [
+                {"offset": int(s.file_offset), "vaddr": int(s.virtual_address)}
+                for s in loads
+                if (int(s.file_offset) - int(s.virtual_address)) % PAGE_16K
+            ]
+            facts["page_alignment"] = {
+                "min_load_align": min_align,
+                "mod_16384_incongruent": incongruent,
+            }
+        for segment in segments:
+            if segment.type == lief.ELF.Segment.TYPE.TLS:
+                facts["tls_segment"] = {
+                    "align": int(segment.alignment),
+                    "vaddr": int(segment.virtual_address),
+                }
+                break
+    symbol_names = {
+        entry.get("name")
+        for entry in metadata.get("dynamic_symbols") or []
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    if sanitizers := parse_android_sanitizers(symbol_names):
+        facts["sanitizers"] = sanitizers
+    if fortify := parse_android_fortify(symbol_names):
+        facts["fortify"] = fortify
+    if unwind := parse_android_unwind(parsed_obj):
+        facts["unwind"] = unwind
+    return facts
+
+
 def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary) -> dict:
     """Adds ELF metadata to the given metadata dictionary.
 
@@ -480,6 +798,13 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
+    # Bionic-specific facts (02/A), one nested key, Android-targeting ELFs
+    # only (arm64-only facts gated again inside); None on other binaries.
+    # Runs after the dynamic symbol tables are in metadata because the
+    # sanitizer and fortify facts read their names.
+    android_facts = parse_android_facts(parsed_obj, metadata)
+    if android_facts is not None:
+        metadata["android"] = android_facts
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dtor_functions"] = parse_functions(parsed_obj.dtor_functions)

@@ -1294,6 +1294,15 @@ class AnalysisRunner:
                             for loc in locations
                         ],
                         "abi_mismatch": lib["abi_mismatch"],
+                        # Manifest facts the loader rules condition on
+                        # (ground rule 37): standalone .so runs have no
+                        # app context and their findings say so instead.
+                        "min_sdk": (native.get("manifest") or {}).get("min_sdk"),
+                        "target_sdk": (native.get("manifest") or {}).get("target_sdk"),
+                        "extract_native_libs": native.get("extract_native_libs") or {},
+                        "compression": primary["compression"],
+                        "offset_mod_4096": primary["offset_mod_4096"],
+                        "offset_mod_16384": primary["offset_mod_16384"],
                     }
                     member_metadata["name"] = flat_name
                     member_metadata["file_path"] = display
@@ -1352,6 +1361,7 @@ def _android_native_summary(native: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "counts": native.get("counts") or {},
         "abi_coverage": native.get("abi_coverage") or {},
+        "page_size_16k": native.get("page_size_16k") or {},
         "extract_native_libs": native.get("extract_native_libs") or {},
         "refusals": native.get("refusals") or [],
         "unsafe_names": native.get("unsafe_names") or [],

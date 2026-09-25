@@ -122,6 +122,7 @@ from blint.lib.binary_elf import (  # noqa: F401
     parse_elf_layout_anomalies,
     parse_elf_segments_summary,
     parse_elf_wx_segments,
+    parse_shadow_call_stack,
 )
 from blint.lib.binary_macho import (  # noqa: F401
     _macho_address_to_virtual,
@@ -1406,6 +1407,14 @@ def parse(
         ):
             metadata["disassembled_functions"] = disassemble_functions(parsed_obj, metadata)
             attach_function_hashes(metadata.get("disassembled_functions"))
+            if isinstance(parsed_obj, lief.ELF.Binary) and isinstance(
+                metadata.get("android"), dict
+            ):
+                # Shadow-call-stack evidence exists only in the instruction
+                # stream, so it attaches after disassembly (--disassemble
+                # only; AGENTS.md: text-based, no register metadata).
+                if scs := parse_shadow_call_stack(metadata):
+                    metadata["android"]["shadow_call_stack"] = scs
             if isinstance(parsed_obj, lief.PE.Binary) and metadata.get("pre_main_execution"):
                 # W1.4: with disassembly available, the pre-main summary
                 # refreshes so the anti-debug reachability fact can read the
