@@ -17,8 +17,10 @@ import pytest
 from blint.lib.binary import parse
 from blint.lib.disassembler import (
     _arm32_code_spans,
+    _arm32_data_pointer_modes,
     _arm32_function_mode,
     _arm32_mapping_symbol_modes,
+    _arm32_mode_at,
     _arm32_mode_triples,
     _arm32_section_for_address,
     _arm32_skipped_regions,
@@ -69,15 +71,34 @@ def test_mapping_symbol_table_is_section_local() -> None:
 
 
 def test_function_mode_sources() -> None:
-    # Mapping symbol wins over parity; parity wins when no label; no
-    # evidence at all yields None for the caller's arbiter.
+    # Mapping symbol wins over parity; parity wins when no label; call and
+    # data-pointer evidence follow; nothing at all yields (None, None) for
+    # the caller's arbiter. The second element names the deciding source.
     labels = [(0x100, "arm"), (0x104, "data"), (0x108, "thumb")]
-    assert _arm32_function_mode(0x102, labels, has_symbol=True) == "arm"
-    assert _arm32_function_mode(0x105, labels, has_symbol=True) == "data"
-    assert _arm32_function_mode(0x10A, labels, has_symbol=True) == "thumb"
-    assert _arm32_function_mode(0x10C, [], has_symbol=True) == "arm"
-    assert _arm32_function_mode(0x10D, [], has_symbol=True) == "thumb"
-    assert _arm32_function_mode(0x200, [], has_symbol=False) is None
+    assert _arm32_function_mode(0x102, labels, has_symbol=True) == ("arm", "mapping_symbol")
+    assert _arm32_function_mode(0x105, labels, has_symbol=True) == ("data", "mapping_symbol")
+    assert _arm32_function_mode(0x10A, labels, has_symbol=True) == ("thumb", "mapping_symbol")
+    assert _arm32_function_mode(0x10C, [], has_symbol=True) == ("arm", "symbol_parity")
+    assert _arm32_function_mode(0x10D, [], has_symbol=True) == ("thumb", "symbol_parity")
+    assert _arm32_function_mode(0x200, [], has_symbol=False) == (None, None)
+    # A symbol-less start with call evidence: bl states the caller's mode,
+    # and evidence is consulted only when parity could not decide.
+    assert _arm32_function_mode(0x200, [], has_symbol=False, call_modes={0x200: "arm"}) == (
+        "arm",
+        "call",
+    )
+    assert _arm32_function_mode(0x10C, [], has_symbol=True, call_modes={0x10C: "thumb"}) == (
+        "arm",
+        "symbol_parity",
+    )
+    assert _arm32_function_mode(0x204, [], has_symbol=False, pointer_modes={0x204: "thumb"}) == (
+        "thumb",
+        "data_pointer",
+    )
+    # Call evidence outranks pointer evidence (decoded code over data words).
+    assert _arm32_function_mode(
+        0x208, [], has_symbol=False, call_modes={0x208: "arm"}, pointer_modes={0x208: "thumb"}
+    ) == ("arm", "call")
 
 
 def test_code_spans_follow_labels_and_cover_the_start() -> None:
@@ -377,6 +398,101 @@ class _FakeInstr:
         self.bytes = b""
 
 
+# -------------------------------------------------------------- A4b D1 arbiter
+
+
+def test_arm32_stream_terminates_classifier() -> None:
+    """The arbiter's terminator forms on real instruction spellings: the
+    return forms, the PLT slot's indirect tail (``ldr pc, [lr, #…]!``),
+    ``bx rN`` tail branches, tail ``b``/``blx`` out of the span, and the
+    non-terminators a wrong-mode decode ends in."""
+    from blint.lib.disassembler import _arm32_stream_terminates
+
+    def stream(*lines):
+        return [_FakeTextInstr(0x1000 + 4 * i, text) for i, text in enumerate(lines)]
+
+    # Trailing filler (ARM andeq pool word, Thumb zero halfword, nop) is
+    # skipped before the check.
+    assert _arm32_stream_terminates(
+        stream("ldr r0, [pc, #4]", "bx lr", "andeq r1, r0, r0, asr sp"), 0x1000, 0x1040, "arm"
+    )
+    assert _arm32_stream_terminates(
+        stream("adds r0, #3", "pop {r4, pc}", "movs r0, r0", "nop"), 0x1000, 0x1040, "thumb"
+    )
+    # The PLT slot: ldr pc through a non-sp, non-pc base is a tail branch.
+    assert _arm32_stream_terminates(
+        stream("add lr, pc, #0", "ldr pc, [lr, #400]!"), 0x1000, 0x1040, "arm"
+    )
+    assert _arm32_stream_terminates(stream("bx r3"), 0x1000, 0x1040, "thumb")
+    # A tail b/blx whose target leaves the span.
+    assert _arm32_stream_terminates(stream("ldr r0, [pc, #12]", "b #3000"), 0x1000, 0x1040, "arm")
+    assert not _arm32_stream_terminates(
+        stream("adds r0, #1", "b #-6"), 0x1000, 0x1040, "arm"
+    )  # in-span branch: a loop, not an end
+    # Non-terminators: the shapes a wrong-mode decode ends in.
+    assert not _arm32_stream_terminates(
+        stream("vrhadd.u16 d14, d14, d31"), 0x1000, 0x1040, "thumb"
+    )
+    assert not _arm32_stream_terminates(
+        stream("and.w pc, r0, r0, asr #31"), 0x1000, 0x1040, "thumb"
+    )
+    assert not _arm32_stream_terminates(
+        stream("ldr pc, [pc, r2, lsl #2]"), 0x1000, 0x1040, "arm"
+    )  # dispatch, not a tail
+    assert not _arm32_stream_terminates([], 0x1000, 0x1040, "arm")
+
+
+class _FakeTextInstr:
+    def __init__(self, address, text, size=4):
+        self.address = address
+        self.assembly = text
+        self.bytes = b"\x00" * size
+
+
+def test_arm32_arbiter_prefers_terminator_over_landing_on_end() -> None:
+    """Two candidate streams for the same 4-byte span: the Thumb mis-decode
+    (`vrhadd.u16`, lands exactly on the span end) against the ARM decode
+    (`bx lr`, return) - the +2 terminator score must outrank +1 exact
+    landing, the pre-D1 rule that defaulted these CRT helpers to Thumb."""
+    from blint.lib.disassembler import _arm32_arbiter_pick
+
+    thumb = [_FakeTextInstr(0x1384, "vrhadd.u16 d14, d14, d31")]
+    arm = [_FakeTextInstr(0x1384, "bx lr")]
+    picked = _arm32_arbiter_pick(
+        [("thumb", thumb), ("arm", arm)], 0x1384, 4, [(0x1000, 0x2000)], set()
+    )
+    assert picked == ("arm", arm)
+
+
+def test_arm32_arbiter_counts_implausible_branch_targets() -> None:
+    """The branch-plausibility vote: a stream whose immediate branches name
+    known starts scores above one whose branches leave the executable
+    ranges, even when both land short of the span end (the PLT-entry shape
+    from the R2 grid: ARM `ldr pc` tail with d4 padding vs a Thumb spray of
+    nonsense targets)."""
+    from blint.lib.disassembler import _arm32_arbiter_pick
+
+    arm = [
+        _FakeTextInstr(0x880, "str lr, [sp, #-4]!"),
+        _FakeTextInstr(0x884, "add lr, pc, #0"),
+        _FakeTextInstr(0x888, "ldr pc, [lr, #400]!"),
+        _FakeTextInstr(0x88C, "ldrble sp, [r4], #1236"),
+    ]
+    thumb = [
+        _FakeTextInstr(0x880, "b #204", size=2),  # 0x2e0: below .text
+        _FakeTextInstr(0x882, "b #1160", size=2),  # 0xd08: past .plt
+        _FakeTextInstr(0x884, "and.w r2, r1, lr"),
+        _FakeTextInstr(0x888, "blx #300", size=4),  # far outside
+        _FakeTextInstr(0x88C, "bmi #56", size=2),
+        _FakeTextInstr(0x88E, "bmi #58", size=2),
+    ]
+    exec_ranges = [(0x880, 0x8B0)]
+    picked = _arm32_arbiter_pick(
+        [("thumb", thumb), ("arm", arm)], 0x880, 0x20, exec_ranges, {0x8A0}
+    )
+    assert picked[0] == "arm"
+
+
 # ------------------------------------------------------------ T4 discovery
 
 
@@ -446,3 +562,115 @@ def test_no_eh_frame_regression_for_other_abis() -> None:
     metadata = parse(str(R2.parent / "liba4a_r1_arm64-v8a.so"))
     sources = (metadata.get("function_discovery") or {}).get("sources") or {}
     assert "arm_exidx" not in sources
+
+
+# -------------------------------------------------------------- A4b D1 modes
+
+R2_STRIPPED = R2.parent / "liba4a_r2_stripped.so"
+
+
+def test_data_pointer_modes_read_fini_array_words() -> None:
+    """The stripped R2 twin's .fini_array holds 0x1374 and 0x1388 in
+    R_ARM_RELATIVE slots (llvm-readelf -x .fini_array in the same run shows
+    `88130000 74130000`), both with the Thumb bit clear: ARM evidence for
+    exactly those two starts, and nothing for any other candidate."""
+    binary = lief.parse(str(R2_STRIPPED))
+    modes = _arm32_data_pointer_modes(binary, {0x1374, 0x1388, 0x13C8, 0x1434})
+    assert modes == {0x1374: "arm", 0x1388: "arm"}
+
+
+def test_data_pointer_modes_ignore_non_functions() -> None:
+    """A word that names no candidate start contributes nothing - the
+    .data.rel.ro self-pointer (0x3100 -> 0x3100) cannot invent evidence."""
+    binary = lief.parse(str(R2_STRIPPED))
+    assert _arm32_data_pointer_modes(binary, {0x1398}) == {}
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_arbiter_picks_arm_for_atexit_pool_bytes() -> None:
+    """Real bytes from the stripped twin: atexit's extent [0x1398, 0x13b8)
+    decodes to a coherent ARM stream (ends `b` out to the PLT, then pool)
+    and a garbage Thumb stream; the arbiter must score ARM higher even with
+    no known starts to vouch for targets."""
+    from nyxstone import Nyxstone
+
+    from blint.lib.disassembler import _arm32_arbiter_pick, executable_ranges
+
+    binary = lief.parse(str(R2_STRIPPED))
+    raw = list(binary.get_content_from_virtual_address(0x1398, 0x13B8 - 0x1398))
+    arm = Nyxstone(target_triple="armv7-unknown-linux-android")
+    thumb = Nyxstone(target_triple="thumbv7-unknown-linux-android")
+    picked = _arm32_arbiter_pick(
+        [
+            ("thumb", _disassemble_arm32_span(thumb, raw, 0x1398)),
+            ("arm", _disassemble_arm32_span(arm, raw, 0x1398)),
+        ],
+        0x1398,
+        len(raw),
+        executable_ranges(binary),
+        set(),
+    )
+    assert picked[0] == "arm"
+    # The same call with the candidates swapped keeps ARM: order cannot
+    # change the decision, only break ties.
+    swapped = _arm32_arbiter_pick(
+        [
+            ("arm", _disassemble_arm32_span(arm, raw, 0x1398)),
+            ("thumb", _disassemble_arm32_span(thumb, raw, 0x1398)),
+        ],
+        0x1398,
+        len(raw),
+        executable_ranges(binary),
+        set(),
+    )
+    assert swapped[0] == "arm"
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_stripped_twin_modes_match_unstripped_mapping_symbols() -> None:
+    """D1's R1 gate: every function the stripped twin decodes carries the
+    mode the unstripped twin's $a/$t mapping symbols state for its address
+    (the twin's symbol table is the mode oracle; the bytes are identical)."""
+    metadata = parse(str(R2_STRIPPED), disassemble=True)
+    twin = lief.parse(str(R2))
+    text_index = _arm32_section_for_address(twin, 0x1374)
+    labels = _arm32_mapping_symbol_modes(twin)[text_index]
+    disassembled = metadata["disassembled_functions"]
+    assert len(disassembled) >= 44
+    for entry in disassembled.values():
+        addr = int(entry["address"], 16) & ~1
+        expected = _arm32_mode_at(labels, addr)
+        assert entry["instruction_mode"] == expected, hex(addr)
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_instruction_mode_source_names_the_deciding_evidence() -> None:
+    """The stripped twin's mode decisions record their source: the surviving
+    dynsym export decides by parity, the .fini_array rows by parity too
+    (LIEF surfaces them as synthetic ``__dt_fini_array`` functions whose
+    even address states ARM - a Thumb entry would arrive odd), the blx
+    targets by call evidence, the rest by the decode arbiter."""
+    metadata = parse(str(R2_STRIPPED), disassemble=True)
+    by_name = {e.get("name"): e for e in metadata["disassembled_functions"].values()}
+    assert by_name["a4a_r2_run"]["instruction_mode_source"] == "symbol_parity"
+    by_addr = {int(e["address"], 16) & ~1: e for e in metadata["disassembled_functions"].values()}
+    assert by_addr[0x1374]["instruction_mode"] == "arm"
+    assert by_addr[0x1388]["instruction_mode"] == "arm"
+    # arm_state_step is reached by blx from the Thumb a4a_r2_run (ARM at the
+    # target) and pool_reader is reached the same way.
+    assert by_addr[0x1434]["instruction_mode_source"] == "call"
+    assert by_addr[0x1FB0]["instruction_mode_source"] == "call"
+    # atexit has no caller and no pointer: the arbiter decided.
+    assert by_addr[0x1398]["instruction_mode_source"] == "arbiter"
+    # Every entry states a source; other architectures carry none of this.
+    for entry in metadata["disassembled_functions"].values():
+        assert entry["instruction_mode_source"] in {
+            "mapping_symbol",
+            "symbol_parity",
+            "call",
+            "data_pointer",
+            "arbiter",
+        }
+    arm64 = parse(str(R2.parent / "liba4a_r1_arm64-v8a.so"), disassemble=True)
+    for entry in arm64["disassembled_functions"].values():
+        assert "instruction_mode_source" not in entry
