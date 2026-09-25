@@ -77,3 +77,42 @@ LOCAL_MODULE := hello_static
 LOCAL_SRC_FILES := hello_static.c
 LOCAL_LDFLAGS := -static
 include $(BUILD_EXECUTABLE)
+
+# --- A2 additions (feat/an-a2-a3, B0/B1): relocation-packing, SONAME and
+# FORTIFY variants. Every module's flags ARE the expected fact, same rule
+# as the original tier-1 modules above. hello_nosoname and
+# hello_absneeded need a link line ndk-build cannot express (it always
+# passes -Wl,-soname), so they are built by build_a2_link_variants.sh with
+# the NDK clang driver directly.
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := hello_relr
+LOCAL_SRC_FILES := $(HELLO_SRC)
+# Standard DT_RELR relative-relocation packing; bionic reads it from API 30.
+LOCAL_LDFLAGS := -Wl,-z,pack-relative-relocs
+include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := hello_aps2
+LOCAL_SRC_FILES := $(HELLO_SRC)
+# APS2 (Android packed relocations, DT_ANDROID_REL[A]); bionic reads it
+# from API 23.
+LOCAL_LDFLAGS := -Wl,--pack-dyn-relocs=android
+include $(BUILD_SHARED_LIBRARY)
+
+FORTIFY_SRC := hello.c blint_sink.c fortify_calls.c
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := hello_fortify
+LOCAL_SRC_FILES := $(FORTIFY_SRC)
+# FORTIFY explicitly on: the __*_chk imports are the expected fact.
+LOCAL_CFLAGS := -D_FORTIFY_SOURCE=2
+include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := hello_nofortify
+LOCAL_SRC_FILES := $(FORTIFY_SRC)
+# FORTIFY explicitly off: the plain sprintf/strcpy/memcpy/read imports are
+# the expected fact.
+LOCAL_CFLAGS := -U_FORTIFY_SOURCE
+include $(BUILD_SHARED_LIBRARY)

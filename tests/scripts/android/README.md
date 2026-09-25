@@ -83,3 +83,16 @@ in the A0.2 commit with the extraction log.
 | 3 frameworks | React Native 0.76.9 hello app built locally (`com.blint.rnhello_1.apk`, 4 ABIs, Hermes) | Unity: no Unity editor/licence on this machine — not collected. .NET: `dotnet workload install` needs elevation on this machine (root-owned SDK manifest at /usr/local/share/dotnet, and `--to-path` still requires it) — not collected, no sudo available |
 | 4 hostile | 9 fixtures, generated from a real NDK `libhello.so` base | the ≤100 KB subset is committed under `tests/data/android/` |
 
+| `native_probe.py` | A4a per-function disassembly accuracy probe vs the NDK llvm tools |
+| `elf_facts_probe.py` | A2 fact probe: blint's bionic ELF facts next to `llvm-readelf -a --notes` on the same file, same run; exits non-zero on disagreement, `--strict` also fails facts blint does not emit yet |
+| `build_a2_link_variants.sh` | A2 tier-1 link variants ndk-build cannot express (`libhello_nosoname.so`, `libhello_absneeded.so`), raw NDK clang invocations |
+
+## A2 additions (2026-09-25, feat/an-a2-a3)
+
+Tier 1 grew by four ndk-build modules (`hello_relr` `-Wl,-z,pack-relative-relocs`,
+`hello_aps2` `-Wl,--pack-dyn-relocs=android`, `hello_fortify` `-D_FORTIFY_SOURCE=2`,
+`hello_nofortify` `-U_FORTIFY_SOURCE`; sources in `jni_sources/`, built for 5 ABIs ×
+r27/r28) plus the two raw-clang link variants from `build_a2_link_variants.sh`, all
+copied into `tier1-ndk` and recorded in `MANIFEST.json` with `llvm-readelf` ground
+truth from the same NDK. The `.DS_Store` files under `tier1-ndk` were removed before
+the manifest was regenerated.
