@@ -1,0 +1,32 @@
+tests/test_disassembler_arm32.py
+  s_3ce4fa53ecd7da::t_54df33dba77734 124-138
+  s_0766c78faa0ee3::t_6e22f83f62da18 123
+blint/lib/disassembler.py
+  s_3ce4fa53ecd7da::t_a82fa65428b55a 5,1383,1439,2137,2442-2443,2448-2449,2661-2663,2684-2685,2970-2974,3033
+blint/lib/funcdisc/unwind.py
+  s_3ce4fa53ecd7da::t_a82fa65428b55a 473
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a52a939a78db4ad7a3e2265d3e88837e5686a4fe",
+  "prompts": {},
+  "sessions": {
+    "s_0766c78faa0ee3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1854c4b8-e5fe-41f6-88b4-dd514033efc1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
