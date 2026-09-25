@@ -92,6 +92,11 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
   - `fortify` (optional): `{symbols: [...]}` — the bionic `__*_chk` imports (`__memcpy_chk`, `__read_chk`, ...; the NDK r28 sysroot headers declare 37). `__stack_chk_*` is the canary's signal and is deliberately not here.
   - `unwind` (optional): `{eh_frame, arm_exidx, gnu_debugdata}` — unwind-table presence (`.eh_frame` everywhere, `.ARM.exidx` on arm32) and the stripped mini-debuginfo.
   - `shadow_call_stack` (optional, `--disassemble` only): `{functions, function_count}` — functions whose disassembly text shows the arm64 shadow-call-stack `x18` push/pop pair (`str x30, [x18], #8` / `ldr x30, [x18, #-8]!`).
+  - `jni` (optional, A5.1): the statically registered JNI surface, decoded from the defined dynamic `FUNC` symbols (so an unstripped and a stripped twin of the same build carry an identical block). Absent when the library has no `Java_*` export and neither lifecycle hook — which for this fact is the whole answer.
+    - `static_methods`: one entry per `Java_*` export, `{symbol, class, method, address}` with `signature` present only when the name carries the spec's overloaded `__<parameters>` form (the decoded parameter descriptors, e.g. `I`, `Ljava/lang/String;`, `[I`); a name that does not decode keeps `{symbol, address, decode_error}` — never dropped silently.
+    - `on_load` / `on_unload`: `{symbol, address}` for `JNI_OnLoad`/`JNI_OnUnload`, or null.
+    - `counts`: `{java_exports, decoded, decode_errors}`.
+    The decoding follows the JNI specification's "Resolving Native Method Names" (Java SE 24); `tests/scripts/android/jni_probe.py` compares the block against `llvm-nm -D` plus the spec decode on every fixture.
 
 - **ABI Requirements (`abi_analysis`):** The runtime the binary requires and the ABI features that constrain where it can run. See [`abi_analysis`](#abi_analysis) below.
 

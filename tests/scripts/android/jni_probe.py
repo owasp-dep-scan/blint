@@ -109,122 +109,9 @@ def run_tool(tool: Path, args: list[str]) -> str:
 
 
 # ------------------------------------------------------------ name decoding
-
-
-def _unescape(
-    text: str, bare_underscore: str, *, strict_bare: bool = False
-) -> tuple[str, str | None]:
-    """Decode one escaped component; ``bare_underscore`` is what a plain
-    ``_`` means there (``/`` for class names and descriptors). Method names
-    never carry a bare ``_`` (a literal underscore encodes as ``_1``), so
-    ``strict_bare`` makes one a decode error instead."""
-    out: list[str] = []
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if char != "_":
-            out.append(char)
-            index += 1
-            continue
-        if index + 1 >= len(text):
-            return "".join(out), "trailing_escape"
-        nxt = text[index + 1]
-        if nxt in _ESCAPES:
-            out.append(_ESCAPES[nxt])
-            index += 2
-        elif nxt == "0":
-            hex4 = text[index + 2 : index + 6]
-            if not _HEX4_RE.match(hex4):
-                return "".join(out), f"bad_unicode_escape_at_{index}"
-            out.append(chr(int(hex4, 16)))
-            index += 6
-        elif strict_bare:
-            return "".join(out), "bare_underscore_in_method_name"
-        else:
-            out.append(bare_underscore)
-            index += 1
-    return "".join(out), None
-
-
-def _valid_param_descriptors(text: str) -> bool:
-    """True when ``text`` is a concatenation of field descriptors."""
-    index, depth = 0, 0
-    seen = 0
-    while index < len(text):
-        char = text[index]
-        if char == "[":
-            index += 1
-            depth += 1
-            if depth > 255:
-                return False
-            continue
-        if char == "L":
-            end = text.find(";", index)
-            if end < 0:
-                return False
-            index = end + 1
-        elif char in "BCSIJFDZ":
-            index += 1
-        else:
-            return False
-        seen += 1
-        depth = 0
-    return True
-
-
-def decode_jni_symbol(symbol: str) -> dict:
-    """Decode one ``Java_*`` export name into (class, method, signature?).
-
-    The class/method separator is the last ``_`` that does not start an
-    escape, and the overload suffix is the first ``__`` whose tail decodes
-    to a valid parameter-descriptor run - the two rules that make the
-    spec's encoding reversible for every name the spec can produce
-    (literal ``_`` encodes as ``_1``, so a bare ``__`` can only be the
-    suffix, except when the tail is not a descriptor, which is then the
-    ``class _ method-_`` shape).
-    """
-    if not symbol.startswith("Java_"):
-        return {"symbol": symbol, "decode_error": "missing_Java_prefix"}
-    rest = symbol[len("Java_") :]
-
-    def attempt(text: str) -> dict:
-        head, sep, tail = text.partition("__")
-        cut = -1
-        for index in range(len(head) - 1):
-            if head[index] == "_" and (index + 1 >= len(head) or head[index + 1] not in "0123"):
-                cut = index
-        if head.endswith("_"):
-            cut = len(head) - 1
-        if cut < 1 or cut + 1 >= len(head):
-            return {"symbol": symbol, "decode_error": "no_class_method_separator"}
-        mangled_class, mangled_method = head[:cut], head[cut + 1 :]
-        class_name, class_err = _unescape(mangled_class, "/")
-        method_name, method_err = _unescape(mangled_method, "", strict_bare=True)
-        if method_err:
-            return {"symbol": symbol, "decode_error": method_err}
-        if class_err:
-            return {"symbol": symbol, "decode_error": class_err}
-        result = {
-            "symbol": symbol,
-            "class": class_name.replace("/", "."),
-            "method": method_name,
-        }
-        if sep:
-            signature, sig_err = _unescape(tail, "/")
-            if sig_err or not _valid_param_descriptors(signature):
-                return {"symbol": symbol, "decode_error": f"bad_signature_suffix_{tail}"}
-            result["signature"] = signature
-        return result
-
-    primary = attempt(rest)
-    # A `__` whose tail is not a descriptor is the `_` + `_1`-escape shape:
-    # retry as a plain class_method split before reporting a decode error.
-    if "decode_error" in primary and "__" in rest:
-        fallback = attempt(rest.replace("__", "_11", 1))
-        if "decode_error" not in fallback:
-            return fallback
-    return primary
-
+# The decoder lives in blint.lib.jni (E1) and is imported here so the
+# probe's oracle decode and the metadata block can never drift apart.
+from blint.lib.jni import decode_jni_symbol
 
 # ------------------------------------------------------------------ oracles
 
@@ -449,7 +336,13 @@ def decode_join(export_names: set[str], dex_natives: list[dict]) -> dict:
 
 
 def probe_so(so: Path, nm: Path) -> dict:
-    """One .so: decoded exports vs llvm-nm -D, OnLoad/OnUnload presence."""
+    """One .so: decoded exports vs llvm-nm -D, OnLoad/OnUnload presence.
+
+    From E1 on, blint's own ``metadata["android"]["jni"]`` block is
+    compared against the same oracle: same Java_* set, same decode, same
+    lifecycle facts. A ``Java_`` export that does not decode must carry
+    ``decode_error`` in the block - never be dropped.
+    """
     oracle = oracle_nm_exports(nm, so)
     blint_names, _ = blint_so_java_exports(so)
     java_exports = sorted(n for n in oracle if n.startswith("Java_"))
@@ -473,6 +366,55 @@ def probe_so(so: Path, nm: Path) -> dict:
             f"blint JNI names differ from llvm-nm -D: only-blint={sorted(blint_jni - oracle_jni)} "
             f"only-nm={sorted(oracle_jni - blint_jni)}"
         )
+    # E1: the metadata jni block against the same-run decode + oracle.
+    from blint.lib.binary import parse
+
+    metadata = parse(str(so))
+    jni_block = (metadata.get("android") or {}).get("jni")
+    if oracle_jni and jni_block is None:
+        report["diffs"].append(
+            "blint android.jni block absent but the library exports JNI symbols"
+        )
+    elif not oracle_jni and jni_block is not None:
+        report["diffs"].append(
+            "blint android.jni block present but llvm-nm -D shows no JNI symbols"
+        )
+    elif jni_block is not None:
+        block_symbols = {entry.get("symbol") for entry in jni_block.get("static_methods") or []}
+        if block_symbols != set(java_exports):
+            report["diffs"].append(
+                f"android.jni static_methods symbols differ: only-blint={sorted(block_symbols - set(java_exports))} "
+                f"only-nm={sorted(set(java_exports) - block_symbols)}"
+            )
+        for entry in jni_block.get("static_methods") or []:
+            expected = decode_jni_symbol(entry.get("symbol") or "")
+            if "decode_error" in expected:
+                if "decode_error" not in entry:
+                    report["diffs"].append(
+                        f"android.jni entry {entry.get('symbol')} missing decode_error"
+                    )
+            elif "decode_error" in entry:
+                report["diffs"].append(
+                    f"android.jni entry {entry.get('symbol')} carries decode_error but the name decodes"
+                )
+            elif (
+                entry.get("class") != expected.get("class")
+                or entry.get("method") != expected.get("method")
+                or entry.get("signature") != expected.get("signature")
+            ):
+                report["diffs"].append(
+                    f"android.jni decode differs for {entry.get('symbol')}: "
+                    f"blint={entry.get('class')}#{entry.get('method')}({entry.get('signature')}) "
+                    f"spec={expected.get('class')}#{expected.get('method')}({expected.get('signature')})"
+                )
+        if bool(jni_block.get("on_load")) != report["on_load"]:
+            report["diffs"].append(
+                f"android.jni on_load={bool(jni_block.get('on_load'))} vs nm {report['on_load']}"
+            )
+        if bool(jni_block.get("on_unload")) != report["on_unload"]:
+            report["diffs"].append(
+                f"android.jni on_unload={bool(jni_block.get('on_unload'))} vs nm {report['on_unload']}"
+            )
     return report
 
 

@@ -33,6 +33,7 @@ from blint.lib.binary_common import (
     parse_strings,
     parse_symbols,
 )
+from blint.lib.jni import parse_static_jni_surface
 from blint.lib.binary_macho import (  # noqa: F401
     _macho_address_to_virtual,
     _macho_arch_name,
@@ -711,6 +712,10 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
         facts["fortify"] = fortify
     if unwind := parse_android_unwind(parsed_obj):
         facts["unwind"] = unwind
+    # Static JNI surface (A5.1): Java_* exports and the lifecycle hooks,
+    # decoded from the dynamic symbols both twins of a build carry.
+    if jni_surface := parse_static_jni_surface(metadata.get("dynamic_symbols")):
+        facts["jni"] = jni_surface
     return facts
 
 
