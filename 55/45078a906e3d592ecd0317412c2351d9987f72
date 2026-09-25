@@ -1,0 +1,25 @@
+blint/lib/binary_elf.py
+  s_4b70c6697bebd0::t_f72bdc541a75e6 125,583-598
+blint/lib/runners.py
+  s_4b70c6697bebd0::t_7c5d034c7a7452 1355
+tests/data/android/a2-fixtures-manifest.json
+  s_4b70c6697bebd0::t_18a8f09509dbdf 77-94
+tests/scripts/android/elf_facts_probe.py
+  s_4b70c6697bebd0::t_02aae4d5cadd05 518,545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5545078a906e3d592ecd0317412c2351d9987f72",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
