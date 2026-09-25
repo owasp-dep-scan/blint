@@ -97,6 +97,58 @@ def test_aarch64_features_arm64() -> None:
     assert "aarch64_features" not in android_facts(CLEAN)
 
 
+def test_page_alignment_fact() -> None:
+    assert android_facts(CLEAN)["page_alignment"] == {
+        "min_load_align": 16384, "mod_16384_incongruent": [],
+    }
+    fourk = android_facts(DATA / "libhello_page4k.so")["page_alignment"]
+    assert fourk["min_load_align"] == 4096
+    assert len(fourk["mod_16384_incongruent"]) == 2
+    assert android_facts(DATA / "libhello_page16k.so")["page_alignment"] == {
+        "min_load_align": 16384, "mod_16384_incongruent": [],
+    }
+
+
+def test_app_16k_verdict_stored_aligned() -> None:
+    from blint.lib.android_native import scan_android_native
+
+    verdict = scan_android_native(
+        str(DATA / "tier1_singleabi_stored16k.apk")
+    )["page_size_16k"]
+    assert verdict["compatible"] is True
+    assert verdict["summary"] == "16 KB page-size compatible on 1 of 1 64-bit ABIs"
+    rec = verdict["per_abi"]["arm64-v8a"]["libraries"]["libhello.so"]
+    assert rec["elf_16k"] is True
+    assert rec["locations"][0]["zip_16k"] is True
+
+
+def test_app_16k_verdict_multiabi_per_abi() -> None:
+    from blint.lib.android_native import scan_android_native
+
+    verdict = scan_android_native(str(DATA / "tier1_multiabi.xapk"))["page_size_16k"]
+    # Rule 36: the aggregation names every 64-bit ABI, never first-or-best.
+    assert verdict["incompatible_abis"] == ["riscv64"]
+    assert verdict["compatible_abis"] == ["arm64-v8a", "x86_64"]
+    assert "armeabi-v7a" in verdict["exempt_abis"]
+    assert "x86" in verdict["exempt_abis"]
+    assert verdict["summary"] == "16 KB page-size compatible on 2 of 3 64-bit ABIs"
+    riscv = verdict["per_abi"]["riscv64"]["libraries"]["libhello.so"]
+    assert riscv["elf_16k"] is False
+    assert any("min_load_align=4096" in reason for reason in riscv["reasons"])
+
+
+def test_deflated_locations_not_zip_judged() -> None:
+    from blint.lib.android_native import scan_android_native
+
+    verdict = scan_android_native(
+        str(DATA / "tier1_singleabi_deflated.apk")
+    )["page_size_16k"]
+    rec = verdict["per_abi"]["arm64-v8a"]["libraries"]["libhello.so"]
+    assert rec["locations"][0]["compression"] == "deflated"
+    assert rec["locations"][0]["zip_16k"] is None
+    assert rec["elf_16k"] is True
+
+
 def test_arm64_only_facts_absent_on_arm32() -> None:
     """Rule 35: MTE/BTI-PAC facts do not exist for a 32-bit Android ELF."""
     metadata = parse(str(ARM32))
@@ -120,7 +172,8 @@ def test_probe_agrees_with_readelf_on_fixtures(tmp_path: Path) -> None:
     """The B0 probe (oracle: llvm-readelf, same run) on every committed R1
     fixture: no disagreements. B2/B3 facts are not implemented yet, so the
     run is non-strict."""
-    fixtures = [CLEAN, TEXTRELS, RELR, APS2, NOSONAME, ABSNEEDED, MEMTAG, BTI]
+    fixtures = [CLEAN, TEXTRELS, RELR, APS2, NOSONAME, ABSNEEDED, MEMTAG, BTI,
+                DATA / "libhello_page4k.so", DATA / "libhello_page16k.so"]
     out = tmp_path / "probe.json"
     code = elf_facts_probe.main(
         [str(f) for f in fixtures] + ["--json", str(out)]

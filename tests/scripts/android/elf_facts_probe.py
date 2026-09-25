@@ -515,7 +515,7 @@ FACTS = [
     ("tls_segment", "B1",
      lambda md: android_fact(md, "tls_segment"),
      oracle_tls_segment, _eq),
-    ("page_alignment", "B2",
+    ("page_alignment", "shipped",
      lambda md: android_fact(md, "page_alignment"),
      oracle_page_alignment, _eq),
     ("wx_segments", "shipped", blint_wx_segments, oracle_wx_segments, _eq),
@@ -542,6 +542,7 @@ IMPLEMENTED = {
     "android_ident.min_api", "android_ident.ndk_version",
     "packed_relocations", "memtag", "aarch64_features",
     "text_relocations", "soname", "needed_absolute", "tls_segment",
+    "page_alignment",
 }
 
 

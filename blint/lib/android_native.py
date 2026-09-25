@@ -69,6 +69,14 @@ MAX_ZIP_ENTRIES = 65536
 
 BUNDLE_EXTENSIONS = (".apks", ".xapk", ".apkm")
 ELF_MAGIC = b"\x7fELF"
+# 16 KB page-size work (01/B): the 64-bit ABIs a 16 KB-page device judges;
+# 32-bit ABIs are exempt and never flagged (rule 35).
+BIT64_ABIS = frozenset({"arm64-v8a", "x86_64", "riscv64"})
+PAGE_16K = 16384
+# PT_LOAD (System V ABI / LLVM ELF.h) and a cap on how many phdrs the scan
+# window decodes — the per-member parse later reads the real table whole.
+PT_LOAD = 1
+MAX_PHDRS_READ = 128
 
 
 @dataclass
@@ -102,6 +110,8 @@ class NativeLibrary:
     e_type: int = 0
     abi_mismatch: list[str] = field(default_factory=list)
     not_elf: bool = False
+    # 16 KB page facts from the raw phdrs (01/B); None when unreadable.
+    page_alignment: dict[str, Any] | None = None
     locations: list[LibLocation] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -290,10 +300,12 @@ def _scan_one_apk(
         head = b""
         with zf.open(info) as fh:
             # Bounded read: the entry cap bounds the loop; head is kept for
-            # the ELF facts, the digest runs over the whole member.
+            # the ELF facts (a 64 KiB window so the program header table is
+            # inside it for every toolchain-produced library), the digest
+            # runs over the whole member.
             while chunk := fh.read(1 << 20):
                 if not head:
-                    head = chunk[:64]
+                    head = chunk[:65536]
                 sha256.update(chunk)
         facts = elf_header_facts(head)
         data_offset = local_data_offset(zf, info)
@@ -308,6 +320,7 @@ def _scan_one_apk(
                 e_type=facts.get("e_type", 0),
                 abi_mismatch=abi_mismatch_reasons(abi, facts),
                 not_elf=bool(head) and not facts,
+                page_alignment=elf_page_facts(head),
                 locations=[
                     LibLocation(
                         container=container,
@@ -384,6 +397,158 @@ def abi_coverage(libraries: list[NativeLibrary]) -> dict[str, Any]:
         # not judged (rule 34: the policy date belongs to a rule, A3).
         "requires_64_bit_coverage": has_32 and not has_64,
         "abi_retired": sorted(retired),
+    }
+
+
+def elf_page_facts(data: bytes) -> dict[str, Any] | None:
+    """Minimum ``PT_LOAD`` p_align and 16 KB congruence, from raw phdrs.
+
+    Reads the program header table straight out of the member's leading
+    bytes (the same structures ``readelf -l`` prints, per the System V
+    ABI: ELF64 ``Phdr`` p_offset/p_vaddr/p_align at 8/16/48, ELF32 at
+    4/8/28; ``PT_LOAD`` is 1 per LLVM's ELF.h) so the zip scan can judge
+    16 KB compatibility without a full parse, which happens later per
+    member. Returns None when the facts cannot be read from the window:
+    the caller records unreadability rather than guessing, and the
+    per-member parse still lands the full fact.
+    """
+    if len(data) < 64 or data[:4] != ELF_MAGIC or data[5] != 1:  # little-endian
+        return None
+    elf_class = data[4]
+    try:
+        if elf_class == 2:
+            (phoff,) = struct.unpack_from("<Q", data, 32)
+            phentsize, phnum = struct.unpack_from("<HH", data, 54)
+            fields = ("<Q", "<Q", "<Q")
+            offset_off, vaddr_off, align_off = 8, 16, 48
+        elif elf_class == 1:
+            (phoff,) = struct.unpack_from("<I", data, 28)
+            phentsize, phnum = struct.unpack_from("<HH", data, 42)
+            fields = ("<I", "<I", "<I")
+            offset_off, vaddr_off, align_off = 4, 8, 28
+        else:
+            return None
+    except struct.error:
+        return None
+    if not phnum or not phentsize:
+        return None
+    loads = []
+    for index in range(min(phnum, MAX_PHDRS_READ)):
+        base = phoff + index * phentsize
+        if base + align_off + (8 if elf_class == 2 else 4) > len(data):
+            return None
+        try:
+            (p_type,) = struct.unpack_from("<I", data, base)
+            if p_type != PT_LOAD:
+                continue
+            p_offset = struct.unpack_from(fields[0], data, base + offset_off)[0]
+            p_vaddr = struct.unpack_from(fields[1], data, base + vaddr_off)[0]
+            p_align = struct.unpack_from(fields[2], data, base + align_off)[0]
+        except struct.error:
+            return None
+        loads.append((p_offset, p_vaddr, p_align))
+    if not loads:
+        return None
+    incongruent = [
+        {"offset": offset, "vaddr": vaddr}
+        for offset, vaddr, _align in loads
+        if (offset - vaddr) % PAGE_16K
+    ]
+    return {
+        "min_load_align": min(align for _o, _v, align in loads),
+        "mod_16384_incongruent": incongruent,
+    }
+
+
+def is_16k_elf_compatible(page_facts: dict[str, Any] | None) -> bool | None:
+    """The ELF half of the 16 KB verdict, or None when unreadable."""
+    if page_facts is None:
+        return None
+    return page_facts["min_load_align"] >= PAGE_16K and not page_facts["mod_16384_incongruent"]
+
+
+def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
+    """The app-level 16 KB page-size verdict (01/B), per ABI (rule 36).
+
+    Only 64-bit ABIs are judged — 32-bit ABIs are exempt on 16 KB-page
+    devices and are never flagged (rule 35); assets never feed ABI
+    coverage (01/A.3). A library is compatible when its ELF layout is
+    (min ``PT_LOAD`` p_align >= 16384 and every LOAD congruent modulo
+    16384) and every *stored* zip location sits at a 16384-aligned
+    offset. Deflated locations are not zip-judged: ``zipalign -c -P 16``
+    does not require alignment for them (a compressed-but-unaligned .so
+    with ``extractNativeLibs=false`` is the loader rule, C1, not this
+    verdict). The verdict matches the two ground-truth tools rung for
+    rung: the ELF half against ``check_elf_alignment.sh``, the zip half
+    against ``zipalign -c -P 16 -v 4``.
+    """
+    per_abi: dict[str, dict[str, Any]] = {}
+    for lib in libraries:
+        for loc in lib.locations:
+            if loc.location_kind != "lib_dir" or not loc.abi:
+                continue
+            if loc.abi not in BIT64_ABIS:
+                continue
+            abi_entry = per_abi.setdefault(loc.abi, {})
+            rec = abi_entry.setdefault(
+                lib.name,
+                {"elf_16k": None, "locations": [], "reasons": []},
+            )
+            rec["elf_16k"] = is_16k_elf_compatible(lib.page_alignment)
+            if rec["elf_16k"] is None:
+                rec["reasons"].append("elf_page_facts_unreadable")
+            elif rec["elf_16k"] is False:
+                reasons = []
+                if lib.page_alignment["min_load_align"] < PAGE_16K:
+                    reasons.append(
+                        f"min_load_align={lib.page_alignment['min_load_align']}"
+                    )
+                if lib.page_alignment["mod_16384_incongruent"]:
+                    reasons.append(
+                        f"{len(lib.page_alignment['mod_16384_incongruent'])} LOAD "
+                        "segment(s) with p_offset != p_vaddr mod 16384"
+                    )
+                rec["reasons"].append("; ".join(reasons) or "elf_layout_not_16k")
+            rec["locations"].append(
+                {
+                    "entry": loc.entry_name,
+                    "split": loc.split or None,
+                    "compression": loc.compression,
+                    "offset_mod_16384": loc.offset_mod_16384,
+                    "zip_16k": None if loc.compression != "stored" else loc.offset_mod_16384 == 0,
+                }
+            )
+            if loc.compression == "stored" and loc.offset_mod_16384:
+                rec["reasons"].append(
+                    f"stored zip data offset {loc.data_offset} is {loc.offset_mod_16384} "
+                    "bytes past a 16384 boundary"
+                )
+    verdict_abis = {}
+    for abi in sorted(per_abi):
+        compatible = all(
+            rec["elf_16k"] is True
+            and all(loc["zip_16k"] is not False for loc in rec["locations"])
+            for rec in per_abi[abi].values()
+        )
+        verdict_abis[abi] = {"compatible": compatible, "libraries": per_abi[abi]}
+    compatible_abis = [abi for abi, v in verdict_abis.items() if v["compatible"]]
+    incompatible_abis = sorted(set(verdict_abis) - set(compatible_abis))
+    total = len(verdict_abis)
+    return {
+        "exempt_abis": sorted(
+            {loc.abi for lib in libraries for loc in lib.locations
+             if loc.location_kind == "lib_dir" and loc.abi and loc.abi not in BIT64_ABIS}
+        ),
+        # None when no 64-bit ABI ships: nothing was judged, so a
+        # 32-bit-only app is exempt and never flagged (rule 35).
+        "compatible": (not incompatible_abis) if verdict_abis else None,
+        "compatible_abis": compatible_abis,
+        "incompatible_abis": incompatible_abis,
+        "summary": (
+            f"16 KB page-size compatible on {len(compatible_abis)} of {total} "
+            "64-bit ABIs" if verdict_abis else "no 64-bit ABI libraries"
+        ),
+        "per_abi": verdict_abis,
     }
 
 
@@ -477,6 +642,7 @@ def scan_android_native(app_file: str, manifest_attrs: dict[str, Any] | None = N
         "containers": containers,
         "libraries": [lib.to_dict() for lib in deduped],
         "abi_coverage": abi_coverage(deduped),
+        "page_size_16k": page_size_16k_verdict(deduped),
         "extract_native_libs": extract_native_libs_fact(manifest_attrs or {}),
         "unsafe_names": unsafe,
         "refusals": sorted(set(refusals) | set(budget.refusals)),

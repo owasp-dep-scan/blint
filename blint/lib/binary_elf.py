@@ -122,6 +122,7 @@ NT_MEMTAG_LEVEL_MASK = 3
 NT_MEMTAG_HEAP = 4
 NT_MEMTAG_STACK = 8
 DF_TEXTREL = 0x4
+PAGE_16K = 16384
 
 _AARCH64_FEATURE_NAMES = {
     GNU_PROPERTY_AARCH64_FEATURE_1_BTI: "BTI",
@@ -579,6 +580,22 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
     facts["needed_absolute"] = needed_absolute
     segments = getattr(parsed_obj, "segments", None)
     if segments and not isinstance(segments, lief.lief_errors):
+        loads = [s for s in segments if s.type == lief.ELF.Segment.TYPE.LOAD]
+        if loads:
+            # 16 KB page-size fact (01/B): the minimum PT_LOAD p_align and
+            # whether every LOAD's p_offset and p_vaddr are congruent
+            # modulo 16384. The fact is emitted for every Android ELF; the
+            # 16 KB *verdict* is 64-bit-only, and lives in the app summary.
+            min_align = min(int(s.alignment) for s in loads)
+            incongruent = [
+                {"offset": int(s.file_offset), "vaddr": int(s.virtual_address)}
+                for s in loads
+                if (int(s.file_offset) - int(s.virtual_address)) % PAGE_16K
+            ]
+            facts["page_alignment"] = {
+                "min_load_align": min_align,
+                "mod_16384_incongruent": incongruent,
+            }
         for segment in segments:
             if segment.type == lief.ELF.Segment.TYPE.TLS:
                 facts["tls_segment"] = {

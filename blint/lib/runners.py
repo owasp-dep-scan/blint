@@ -1352,6 +1352,7 @@ def _android_native_summary(native: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "counts": native.get("counts") or {},
         "abi_coverage": native.get("abi_coverage") or {},
+        "page_size_16k": native.get("page_size_16k") or {},
         "extract_native_libs": native.get("extract_native_libs") or {},
         "refusals": native.get("refusals") or [],
         "unsafe_names": native.get("unsafe_names") or [],
