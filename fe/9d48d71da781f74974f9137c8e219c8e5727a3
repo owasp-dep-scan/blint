@@ -1,0 +1,19 @@
+blint/lib/checks.py
+  s_84f0b29270f60d::t_c407a1f9810b3f 61-65,1200-1423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe9d48d71da781f74974f9137c8e219c8e5727a3",
+  "prompts": {},
+  "sessions": {
+    "s_84f0b29270f60d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f6d8227-d0fa-4f04-a80a-c61d02009dc7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
