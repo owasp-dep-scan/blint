@@ -139,12 +139,19 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 0,
-        "external_reason_buckets": {},
-        "functions_total": 24456,
-        "functions_with_direct_targets": 0,
-        "internal_edge_kinds": {},
-        "internal_edges": 0
+        "external_edges": 7257,
+        "external_reason_buckets": {
+          "address_space_miss": 4799,
+          "address_space_miss:tailcall": 2,
+          "unresolved:indirect_hint": 2456
+        },
+        "functions_total": 26024,
+        "functions_with_direct_targets": 22497,
+        "internal_edge_kinds": {
+          "direct": 88917,
+          "tailcall": 3687
+        },
+        "internal_edges": 92604
       }
     },
     "i686-unknown-linux-android": {
