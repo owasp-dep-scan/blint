@@ -64,6 +64,7 @@ _INDEX_ENTRY_SIZE = struct.calcsize(_INDEX_ENTRY_FMT)
 # ELF sections consulted for eh_frame discovery.
 ELF_EH_FRAME_HDR = ".eh_frame_hdr"
 ELF_EH_FRAME = ".eh_frame"
+ELF_ARM_EXIDX = ".ARM.exidx"
 ELF_TEXT = ".text"
 
 # Discovery is expected to be exact, so malformed structures degrade to
@@ -467,12 +468,53 @@ def _skip_uleb128(data: bytes, offset: int | None, end: int) -> int | None:
     return offset
 
 
+def _decode_prel31(value: int) -> int:
+    """Sign-extend a PREL31 field (bit 30 is the sign bit; bit 31 reserved)."""
+    value &= 0x7FFFFFFF
+    if value & 0x40000000:
+        return value - (1 << 31)
+    return value
+
+
+def discover_elf_arm_exidx_functions(parsed_obj) -> list[dict]:
+    """Parse ``.ARM.exidx`` (EHABI) into function entries.
+
+    Every 8-byte table row starts a function: word 0 is a PREL31 offset to
+    the function's start (relative to the row's own address, Thumb bit
+    meaningful and masked), word 1 the unwind model (irrelevant to
+    discovery). Android armeabi-v7a binaries carry this table instead of
+    ``.eh_frame``, and it survives ``strip`` — one row per function the
+    runtime can unwind, which is why it runs before any heuristic. Sizes
+    are 0 (EHABI stores no extents); disassembly bounds these entries with
+    the next-symbol window like every other size-less start.
+    """
+    exidx_va, data = _section_bytes(parsed_obj, ELF_ARM_EXIDX)
+    if not data:
+        return []
+    entries: dict[int, int] = {}
+    count = min(len(data) // 8, MAX_FUNCTION_ENTRIES)
+    for index in range(count):
+        word0, _word1 = struct.unpack_from("<II", data, index * 8)
+        start = (exidx_va + index * 8 + _decode_prel31(word0)) & ~1
+        if start:
+            entries[start] = 0
+    return [
+        {"address": address, "size": size, "source": "arm_exidx"}
+        for address, size in sorted(entries.items())
+    ]
+
+
 def discover_functions(parsed_obj) -> list[dict]:
     """Discover functions from the unwind tables the parsed object carries."""
     if isinstance(parsed_obj, lief.MachO.Binary):
         return discover_macho_unwind_functions(parsed_obj)
     if isinstance(parsed_obj, lief.ELF.Binary):
-        return discover_elf_eh_frame_functions(parsed_obj)
+        discovered = discover_elf_eh_frame_functions(parsed_obj)
+        if parsed_obj.header.machine_type == lief.ELF.ARCH.ARM:
+            # ARM EHABI: the exidx table is the unwind source on 32-bit ARM
+            # (there is no .eh_frame to read) and it survives strip.
+            discovered += discover_elf_arm_exidx_functions(parsed_obj)
+        return discovered
     # PE x64 discovery comes from .pdata via parse_pe_exceptions; 32-bit PE
     # has no unwind tables, so prologue scanning (funcdisc.complete) covers it.
     return []

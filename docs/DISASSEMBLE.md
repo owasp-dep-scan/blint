@@ -73,12 +73,98 @@ Block-graph metrics computed from the truncated instruction list after the flat 
 Function addresses come from three cooperating sources, tried in order of confidence:
 
 1. **Symbols and load commands** — symbol tables, exports, `LC_FUNCTION_STARTS`, `.pdata` (x64 PE), ObjC method IMPs.
-2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values.
+2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values. 32-bit ARM ELF carries `.ARM.exidx` (ARM EHABI) instead of `.eh_frame`: one PREL31-decoded row per function, starts only (no extents), read before any heuristic.
 3. **Completion passes**:
    - **Prologue scan** (only when symbols + unwind produced fewer than 32 functions): scans executable bytes for compiler frame setups — `push rbp; mov rbp, rsp`, `endbr64` + frame setup and Go's stack-guard prologues on x86-64; `paciasp`, the `stp x29, x30, [sp, #-N]!` frame-push and Go's `ldr x16, [x28+16]` guard on ARM64. Candidates are tagged `source: "prologue"` (lowest confidence).
    - **Call-site promotion** (bounded to a fixpoint): a resolved _direct_-call target that sits in executable memory outside every known function extent (unwind sizes and completed disassemblies) is promoted into a new function and disassembled in turn. Tagged `source: "callsite"`.
 
 On a stripped Go ELF binary — no symbols, no `.eh_frame` — the completion passes recover a working function set (prologue precision measured at 1.00 against the unstripped symbol table on the evaluation corpus).
+
+## ARM32 (armeabi-v7a): per-function Thumb/ARM mode
+
+A 32-bit ARM binary mixes ARM and Thumb functions (NDK-built armeabi-v7a code
+is mostly Thumb, its PLT veneers are ARM), so one disassembler instance in one
+instruction set state cannot decode the file. Per function, the mode comes
+from, in order of confidence:
+
+1. **Mapping symbols** (`$a` ARM code / `$t` Thumb code / `$d` data, with
+   `.N` suffixes) from `.symtab`, scoped to the function's own section — a
+   `.text` label says nothing about `.plt` bytes. These also drive the span
+   rules below. Only present on unstripped builds.
+2. **The symbol's Thumb bit**: `st_value & 1` marks a Thumb function and the
+   address is `st_value & ~1`.
+3. **Neither evidence** (stripped, or unwind-table discoveries): both states
+   are decoded and the one whose last instruction lands exactly on the span
+   end wins; ties fall back to Thumb, the NDK default.
+
+Within a function extent, only `$a`/`$t`-labeled code regions are decoded —
+the rule `llvm-objdump` itself applies with mapping-symbol knowledge — so `$d`
+literal pools, jump tables and un-labeled inter-section filler are never
+disassembled. The skipped ranges are recorded per function as `data_spans`
+(see `docs/METADATA.md`); a `instruction_lengths` prefix sum alone no longer
+reconstructs line addresses on functions that carry them. Words nyxstone
+cannot decode (a literal that forms no valid encoding) are skipped with a
+resume on the next word rather than truncating the function at the pool, and
+an entry whose address lies in no section at all (an `.ARM.exidx` row naming
+inter-section padding) is skipped outright. The 1–3 byte offset probes used
+elsewhere are disabled for ARM32: starts are 2/4-byte aligned and a mid-
+instruction probe only produces garbage.
+
+### nyxstone triples for 32-bit ARM (measured, nyxstone 0.1.8 / LLVM 18)
+
+| triple                              | ARM state                     | Thumb state                     |
+| :---------------------------------- | :---------------------------- | :------------------------------ |
+| `arm-unknown-linux-android`         | partial — `bx lr` FAILS       | n/a (ARM triple)                |
+| `armv7-unknown-linux-android`       | correct (`mov r0, #1; bx lr`) | fails at first instruction      |
+| `thumbv7-unknown-linux-android`     | garbage (`movs r1, r0`, ...)  | correct (`movs r0, #1; bx lr`)  |
+| `armv7/thumbv7-…-linux-androideabi` | each correct in its own state | each correct in its own state   |
+
+No single `*-linux-android` triple decodes both states, and blint's
+constructed tuple for this ABI (`arm-unknown-linux-android`) cannot decode
+core ARM instructions at all — so the disassembler builds two instances from
+the tuple's `armv7`/`thumbv7` spellings (environment preserved: `-android`,
+`-androideabi`, `-gnu` all behave the same way) and picks per span. Immediates
+print decimal (`mov r0, #1`), nyxstone's default style, in both states.
+
+### ARM32 call and control-flow semantics (03/T3)
+
+All rules are text tables over nyxstone's rendering, measured against the
+NDK r28c `llvm-objdump` oracle on the A4a fixtures:
+
+- **Calls.** `bl`/`blx` with an immediate operand are direct calls; `blx rN`
+  is an indirect call through the register. The immediate is a signed
+  PC-relative delta relative to: `addr+4` for Thumb `bl`; `Align(addr+4, 4)`
+  for Thumb `blx #imm` (the interworking form targets a 4-aligned ARM
+  address and the architecture rounds the base); `addr+8` in ARM state. A
+  Thumb callee's address carries the interworking bit in the encoding; the
+  resolved target is masked to the aligned start. Immediates parse in every
+  IntegerBase style nyxstone can print (`#50`, `#0x32`, `#32h`).
+- **Returns.** `bx lr` (any condition code), `pop {…, pc}` and the
+  post-indexed `ldr pc, [sp], #4` end a function's linear flow — the
+  size-less-window truncation consults them, which is what stops a blind
+  window from absorbing the next function's leading bytes.
+- **Tail calls.** A trailing unconditional `b #imm` whose target lies
+  outside the function's extent is a tail call (PLT thunks, `-Oz` tail
+  merging); a target inside is a local branch and creates no edge.
+- **Jump tables.** `tbb [pc, rN]`, `tbh [pc, rN, lsl #1]` and
+  `ldr pc, [pc, rN, lsl #2]` are intra-function dispatch: counted as
+  conditional control flow, never as calls or jumps to outside targets.
+- **PC-relative literal materialisation.** `ldr rN, [pc, #imm]` reads a
+  literal word (Thumb PC `Align(addr+4,4)`, ARM `addr+8`); `add rN, pc`
+  completes it to an absolute address; `ldr rM, [rN, #off]` through the
+  completed base records the slot address. `blx` through such a register
+  reports an `indirect_hint` named from the slot when the slot is a GOT
+  entry with a relocation, and an unnamed hint when it is a vtable level
+  (JNIEnv-style double indirection resolves no name — that is the JNI
+  wave's model, not a guess).
+- **PLT thunks.** A direct call or tail call to a `.plt` stub resolves the
+  stub's exact address; the imported name is a relocation, so the edge
+  surfaces in the callgraph as an external edge rather than a named target.
+- **Function identity.** ARM32 function identity is the 2-byte-aligned
+  address: symbol `st_value`s carry the Thumb bit, resolved call targets do
+  not, and the discovery/promotion/window sets all work in the aligned
+  space so a Thumb callee is never re-discovered as its own twin.
+
 
 ### `instruction_metrics` Sub-structure
 

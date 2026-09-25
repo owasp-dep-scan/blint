@@ -1,0 +1,100 @@
+
+/Users/prabhu/sandbox/android-corpus/tier1-ndk/r28/armeabi-v7a/libhello.so:	file format elf32-littlearm
+
+Disassembly of section .text:
+
+000004c8 <.text>:
+     4c8:      	ldr	r0, [pc, #0x4]          @ 0x4d4 <.text+0xc>
+     4cc:      	add	r0, pc, r0
+     4d0:      	b	0x5d0                   @ imm = #0xf8
+     4d4:      	andeq	r1, r0, r12, lsr r1
+     4d8:      	bx	lr
+     4dc:      	b	0x4d8 <.text+0x10>      @ imm = #-0xc
+     4e0:      	cmp	r0, #0
+     4e4:      	bxeq	lr
+     4e8:      	bx	r0
+     4ec:      	mov	r1, r0
+     4f0:      	ldr	r0, [pc, #0xc]          @ 0x504 <.text+0x3c>
+     4f4:      	ldr	r2, [pc, #0xc]          @ 0x508 <.text+0x40>
+     4f8:      	add	r0, pc, r0
+     4fc:      	add	r2, pc, r2
+     500:      	b	0x5e0                   @ imm = #0xd8
+     504:      	<unknown>
+     508:      	andeq	r1, r0, r12, lsl #2
+
+0000050c <JNI_OnLoad>:
+     50c:      	ldrbmi	r4, [r0, -r0, lsl #16]!
+     510:      	andeq	r0, r1, r6
+
+00000514 <java_add_left>:
+     514:      	strbtmi	r11, [pc], -r0, lsl #11
+     518:      	bmi	0x52c768                @ imm = #0x52c248
+     51c:      	svc	#0xc04408
+     520:      	ldrbtmi	r0, [r10], #-80
+     524:      	ldmdavs	r2, {r1, r4, r11, sp, lr}
+     528:      	andhs	r9, pc, #268435457
+     52c:      	stmdage	r1, {r12, pc}
+     530:      	<unknown>
+     534:      	<unknown>
+     538:      	<unknown>
+     53c:      	<unknown>
+     540:      	stmdbls	r0, {r0, r1, r2, r3, r9, r11}
+     544:      	andne	pc, r4, sp, lsl #17
+     548:      	<unknown>
+     54c:      	<unknown>
+     550:      	stmdbls	r0, {r2}
+     554:      	blmi	0x1a6da0                @ imm = #0x1a6844
+     558:      	ldmdavs	r11, {r0, r1, r3, r4, r5, r6, r10, lr}
+     55c:      	addsmi	r6, r3, #1769472
+     560:      	strmi	r11, [r8], #-3842
+     564:      	stclt	p0, c11, [r0, #72]
+     568:      	stmda	r10, {r12, sp, lr, pc} ^
+     56c:      	andeq	r1, r0, r6, asr #3
+     570:      	muleq	r0, r0, r1
+
+00000574 <Java_com_example_blint_fixtures_Hello_stringFromJNI>:
+     574:      	svcge	#0x2b5d0
+     578:      	ldrbtmi	r4, [r12], #-3078
+     57c:      	ldmdblt	r9!, {r0, r5, r11, sp, lr}
+     580:      	<unknown>
+     584:      	stmdbmi	r4, {r2, r3, r4, r7, r9, sp}
+     588:      	<unknown>
+     58c:      	eorvs	r4, r0, r1, lsl #12
+     590:      	ldcllt	p6, c4, [r0, #32]
+     594:      	andeq	r2, r0, lr, lsl #3
+     598:      	<unknown>
+
+0000059c <blint_sink>:
+     59c:      	strmi	r11, [r8], #-129
+     5a0:      	<unknown>
+     5a4:      	andeq	pc, r3, sp, lsl #17
+     5a8:      	muleq	r3, sp, r8
+     5ac:      	ldrbmi	r11, [r0, -r1]!
+
+Disassembly of section .plt:
+
+000005b0 <.plt>:
+     5b0:      	str	lr, [sp, #-0x4]!
+     5b4:      	add	lr, pc, #0, #12
+     5b8:      	add	lr, lr, #4096
+     5bc:      	ldr	pc, [lr, #0x13c]!
+     5c0:      	ldrble	sp, [r4], #1236
+     5c4:      	ldrble	sp, [r4], #1236
+     5c8:      	ldrble	sp, [r4], #1236
+     5cc:      	ldrble	sp, [r4], #1236
+     5d0:      	add	r12, pc, #0, #12
+     5d4:      	add	r12, r12, #4096
+     5d8:      	ldr	pc, [r12, #0x124]!
+     5dc:      	ldrble	sp, [r4], #1236
+     5e0:      	add	r12, pc, #0, #12
+     5e4:      	add	r12, r12, #4096
+     5e8:      	ldr	pc, [r12, #0x118]!
+     5ec:      	ldrble	sp, [r4], #1236
+     5f0:      	add	r12, pc, #0, #12
+     5f4:      	add	r12, r12, #4096
+     5f8:      	ldr	pc, [r12, #0x10c]!
+     5fc:      	ldrble	sp, [r4], #1236
+     600:      	add	r12, pc, #0, #12
+     604:      	add	r12, r12, #4096
+     608:      	ldr	pc, [r12, #0x100]!
+     60c:      	ldrble	sp, [r4], #1236

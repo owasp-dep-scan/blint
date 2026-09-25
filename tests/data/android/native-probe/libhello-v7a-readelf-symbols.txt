@@ -1,0 +1,12 @@
+
+Symbol table '.dynsym' contains 9 entries:
+   Num:    Value  Size Type    Bind   Vis       Ndx Name
+     0: 00000000     0 NOTYPE  LOCAL  DEFAULT   UND 
+     1: 00000000     0 FUNC    GLOBAL DEFAULT   UND __cxa_finalize@LIBC
+     2: 00000000     0 FUNC    GLOBAL DEFAULT   UND __cxa_atexit@LIBC
+     3: 00000000     0 FUNC    GLOBAL DEFAULT   UND __stack_chk_fail@LIBC
+     4: 00000000     0 OBJECT  GLOBAL DEFAULT   UND __stack_chk_guard@LIBC
+     5: 0000050d     8 FUNC    GLOBAL DEFAULT    14 JNI_OnLoad
+     6: 00000515    96 FUNC    GLOBAL DEFAULT    14 java_add_left
+     7: 0000059d    20 FUNC    GLOBAL DEFAULT    14 blint_sink
+     8: 00000575    40 FUNC    GLOBAL DEFAULT    14 Java_com_example_blint_fixtures_Hello_stringFromJNI

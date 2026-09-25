@@ -1,0 +1,155 @@
+
+/Users/prabhu/sandbox/android-corpus/tier1-ndk/r28/armeabi-v7a/libhello.so:	file format elf32-littlearm
+
+Disassembly of section .text:
+
+000004c8 <.text>:
+     4c8:      	movs	r4, r0
+     4ca:      	b	0xc                     @ imm = #-0x4c2
+     4cc:      	movs	r0, r0
+     4ce:      	b	0x5f0                   @ imm = #0x11e
+     4d0:      	movs	r6, r7
+     4d2:      	and.w	r1, r0, r12, ror #4
+     4d6:      	movs	r0, r0
+     4d8:      	vrhadd.u16	d14, d14, d31
+     4dc:      	<unknown>
+     4e0:      	movs	r0, r0
+     4e2:      	b	0xb86                   @ imm = #0x6a0
+     4e4:      	vrhadd.u16	d0, d14, d31
+     4e8:      	vrhadd.u16	d14, d0, d31
+     4ec:      	asrs	r0, r0, #0x20
+     4ee:      	b	0x832                   @ imm = #0x340
+     4f0:      	movs	r4, r1
+     4f2:      	b	0x34                    @ imm = #-0x4c2
+     4f4:      	movs	r0, #0xc
+     4f6:      	b	0x38                    @ imm = #-0x4c2
+     4f8:      	movs	r0, r0
+     4fa:      	b	0x61c                   @ imm = #0x11e
+     4fc:      	movs	r0, #0x2
+     4fe:      	b	0x620                   @ imm = #0x11e
+     500:      	movs	r6, r6
+     502:      	and.w	pc, r0, r0, asr #31
+     506:      	<unknown>
+     50a:      	movs	r0, r0
+
+0000050c <JNI_OnLoad>:
+     50c:      	ldr	r0, [pc, #0x0]          @ 0x510 <JNI_OnLoad+0x4>
+     50e:      	bx	lr
+     510:      	movs	r6, r0
+     512:      	movs	r1, r0
+
+00000514 <java_add_left>:
+     514:      	push	{r7, lr}
+     516:      	mov	r7, sp
+     518:      	sub	sp, #0x48
+     51a:      	ldr	r2, [pc, #0x50]         @ 0x56c <java_add_left+0x58>
+     51c:      	add	r0, r1
+     51e:      	vmov.i32	q8, #0x0
+     522:      	add	r2, pc
+     524:      	ldr	r2, [r2]
+     526:      	ldr	r2, [r2]
+     528:      	str	r2, [sp, #0x44]
+     52a:      	movs	r2, #0xf
+     52c:      	str	r0, [sp]
+     52e:      	add	r0, sp, #0x4
+     530:      	adds	r1, r0, #0x1
+     532:      	vst1.8	{d16, d17}, [r1]!
+     536:      	vst1.8	{d16, d17}, [r1]!
+     53a:      	vst1.8	{d16, d17}, [r1], r2
+     53e:      	vst1.8	{d16, d17}, [r1]
+     542:      	ldr	r1, [sp]
+     544:      	strb.w	r1, [sp, #0x4]
+     548:      	movs	r1, #0x40
+     54a:      	blx	0x5f0                   @ imm = #0xa4
+     54e:      	ldrb.w	r0, [sp, #0x4]
+     552:      	ldr	r1, [sp]
+     554:      	ldr	r2, [sp, #0x44]
+     556:      	ldr	r3, [pc, #0x18]         @ 0x570 <java_add_left+0x5c>
+     558:      	add	r3, pc
+     55a:      	ldr	r3, [r3]
+     55c:      	ldr	r3, [r3]
+     55e:      	cmp	r3, r2
+     560:      	ittt	eq
+     562:      	addeq	r0, r1
+     564:      	addeq	sp, #0x48
+     566:      	popeq	{r7, pc}
+     568:      	blx	0x600                   @ imm = #0x94
+     56c:      	asrs	r6, r0, #0x7
+     56e:      	movs	r0, r0
+     570:      	asrs	r0, r2, #0x6
+     572:      	movs	r0, r0
+
+00000574 <Java_com_example_blint_fixtures_Hello_stringFromJNI>:
+     574:      	push	{r4, r6, r7, lr}
+     576:      	add	r7, sp, #0x8
+     578:      	ldr	r4, [pc, #0x18]         @ 0x594 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x20>
+     57a:      	add	r4, pc
+     57c:      	ldr	r1, [r4]
+     57e:      	cbnz	r1, 0x590 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x1c> @ imm = #0xe
+     580:      	ldr	r1, [r0]
+     582:      	ldr.w	r2, [r1, #0x29c]
+     586:      	ldr	r1, [pc, #0x10]         @ 0x598 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x24>
+     588:      	add	r1, pc
+     58a:      	blx	r2
+     58c:      	mov	r1, r0
+     58e:      	str	r0, [r4]
+     590:      	mov	r0, r1
+     592:      	pop	{r4, r6, r7, pc}
+     594:      	movs	r1, #0x8e
+     596:      	movs	r0, r0
+     598:      	<unknown>
+
+0000059c <blint_sink>:
+     59c:      	sub	sp, #0x4
+     59e:      	add	r0, r1
+     5a0:      	ldrb	r0, [r0, #-1]
+     5a4:      	strb.w	r0, [sp, #0x3]
+     5a8:      	ldrb.w	r0, [sp, #0x3]
+     5ac:      	add	sp, #0x4
+     5ae:      	bx	lr
+
+Disassembly of section .plt:
+
+000005b0 <.plt>:
+     5b0:      	b	0x5bc <.plt+0xc>        @ imm = #0x8
+     5b2:      	b	0x10                    @ imm = #-0x5a6
+     5b4:      	b	0x1b8                   @ imm = #-0x400
+     5b6:      	b	0xad8 <.plt+0x528>      @ imm = #0x51e
+     5b8:      	and.w	r2, r1, lr, lsl #26
+     5bc:      	blx	0x53d13c                @ imm = #0x53cb7c
+     5c0:      	bmi	0x56c <java_add_left+0x58> @ imm = #-0x58
+     5c2:      	bmi	0x56e <java_add_left+0x5a> @ imm = #-0x58
+     5c4:      	bmi	0x570 <java_add_left+0x5c> @ imm = #-0x58
+     5c6:      	bmi	0x572 <java_add_left+0x5e> @ imm = #-0x58
+     5c8:      	bmi	0x574 <Java_com_example_blint_fixtures_Hello_stringFromJNI> @ imm = #-0x58
+     5ca:      	bmi	0x576 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x2> @ imm = #-0x58
+     5cc:      	bmi	0x578 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x4> @ imm = #-0x58
+     5ce:      	bmi	0x57a <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x6> @ imm = #-0x58
+     5d0:      	<unknown>
+     5d2:      	b	0xaf4 <.plt+0x544>      @ imm = #0x51e
+     5d4:      	ldm	r2!, {r0}
+     5d6:      	b	0xaf2 <.plt+0x542>      @ imm = #0x518
+     5d8:      	blx	0x525154                @ imm = #0x524b78
+     5dc:      	bmi	0x588 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x14> @ imm = #-0x58
+     5de:      	bmi	0x58a <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x16> @ imm = #-0x58
+     5e0:      	<unknown>
+     5e2:      	b	0xb04 <.plt+0x554>      @ imm = #0x51e
+     5e4:      	ldm	r2!, {r0}
+     5e6:      	b	0xb02 <.plt+0x552>      @ imm = #0x518
+     5e8:      	blx	0x519164                @ imm = #0x518b78
+     5ec:      	bmi	0x598 <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x24> @ imm = #-0x58
+     5ee:      	bmi	0x59a <Java_com_example_blint_fixtures_Hello_stringFromJNI+0x26> @ imm = #-0x58
+     5f0:      	<unknown>
+     5f2:      	b	0xb14 <.plt+0x564>      @ imm = #0x51e
+     5f4:      	ldm	r2!, {r0}
+     5f6:      	b	0xb12 <.plt+0x562>      @ imm = #0x518
+     5f8:      	blx	0x50d174                @ imm = #0x50cb78
+     5fc:      	bmi	0x5a8 <blint_sink+0xc>  @ imm = #-0x58
+     5fe:      	bmi	0x5aa <blint_sink+0xe>  @ imm = #-0x58
+     600:      	<unknown>
+     602:      	b	0xb24 <.plt+0x574>      @ imm = #0x51e
+     604:      	ldm	r2!, {r0}
+     606:      	b	0xb22 <.plt+0x572>      @ imm = #0x518
+     608:      	blx	0x501184                @ imm = #0x500b78
+     60c:      	bmi	0x5b8 <.plt+0x8>        @ imm = #-0x58
+     60e:      	bmi	0x5ba <.plt+0xa>        @ imm = #-0x58

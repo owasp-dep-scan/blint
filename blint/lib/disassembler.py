@@ -2,6 +2,7 @@ import bisect
 import contextlib
 import hashlib
 import re
+import struct
 from collections import deque
 from functools import cache, lru_cache
 from typing import NamedTuple
@@ -208,6 +209,40 @@ ARM64_PAC_INST = {
 ARM64_PAC_HINTS = {"25", "27", "29", "31"}
 MIPS_RET_INST = {"jr"}
 MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
+# 32-bit ARM mnemonic tables. nyxstone prints branch/call immediates as
+# PC-relative signed deltas ("bl #50", "b #-12"); the target is
+# addr + 4 + imm in Thumb state and addr + 8 + imm in ARM state (measured
+# against the NDK r28c llvm-objdump oracle over the A4a fixtures; see
+# docs/DISASSEMBLE.md). The .w suffixed spellings are Thumb wide encodings.
+ARM32_CALL_INST = {"bl", "bl.w", "blx", "blx.w"}
+ARM32_UNCONDITIONAL_JMP_INST = {"b", "b.w"}
+ARM32_COND_SUFFIXES = (
+    "eq",
+    "ne",
+    "cs",
+    "hs",
+    "cc",
+    "lo",
+    "mi",
+    "pl",
+    "vs",
+    "vc",
+    "hi",
+    "ls",
+    "ge",
+    "lt",
+    "gt",
+    "le",
+)
+ARM32_CONDITIONAL_JMP_INST = {f"b{s}" for s in ARM32_COND_SUFFIXES} | {
+    f"b{s}.w" for s in ARM32_COND_SUFFIXES
+}
+# Jump-table dispatch reads its destination from memory: tbb/tbh index a
+# PC-relative byte/halfword table, and `ldr pc, [pc, rN, lsl #2]` indexes a
+# word table. These are intra-function control flow, never calls.
+ARM32_TABLE_DISPATCH_INST = {"tbb", "tbh"}
+ARM32_BX_RE = re.compile(r"^bx(" + "|".join(ARM32_COND_SUFFIXES) + r")?$")
+ARM32_GPR_TOKEN_RE = re.compile(r"^(r\d\d?|sp|lr|pc|ip|fp|sl)$")
 TERMINATING_INST = X86_RET_INST | ARM64_RET_INST | MIPS_RET_INST
 UNCONDITIONAL_JMP_INST_ALL = (
     X86_UNCONDITIONAL_JMP_INST | ARM64_UNCONDITIONAL_JMP_INST | MIPS_UNCONDITIONAL_JMP_INST
@@ -521,6 +556,197 @@ def _to_nyxstone_triple(arch_target: str) -> str:
     return f"{arch}-unknown-linux-gnu"
 
 
+def _is_arm32_target(arch_target: str) -> bool:
+    """True for 32-bit ARM triples (arm*/thumb*, never aarch64/arm64)."""
+    arch = (arch_target or "").lower().split("-", 1)[0]
+    return arch.startswith(("arm", "thumb")) and not arch.startswith(("aarch64", "arm64"))
+
+
+def _arm32_mode_triples(arch_target: str) -> tuple[str, str]:
+    """The (arm, thumb) triple pair that decodes a 32-bit ARM binary.
+
+    nyxstone initializes ``arm-unknown-linux-android`` (the tuple blint
+    constructs for armeabi-v7a) but then fails to decode core instructions in
+    it — ``bx lr`` among them — while the ``armv7``/``thumbv7`` spellings of
+    the same environment decode correctly (measured against nyxstone 0.1.8 /
+    LLVM 18 and the NDK r28c llvm-objdump oracle; see docs/DISASSEMBLE.md).
+    The arch token is therefore upgraded to v7 with the rest of the tuple
+    kept intact; big-endian ``armeb``/``thumbeb`` stay on today's single
+    instance (no fixture exercises them).
+    """
+    parts = (arch_target or "").split("-", 1)
+    rest = f"-{parts[1]}" if len(parts) > 1 else ""
+    return f"armv7{rest}", f"thumbv7{rest}"
+
+
+# ARM ELF mapping symbols ($a code-ARM, $t code-Thumb, $d data; the assembler
+# appends .N suffixes per section). They are STT_NOTYPE, so nothing else in
+# blint's symbol pipeline looks at them.
+_ARM32_MAPPING_SYMBOL_RE = re.compile(r"^\$[atd](\.\d+)?$")
+_ARM32_MAPPING_MODES = {"a": "arm", "t": "thumb", "d": "data"}
+
+
+def _arm32_mapping_symbol_modes(parsed_obj) -> dict[int, list[tuple[int, str]]]:
+    """Per-section sorted ``{shndx: [(address, mode)]}`` from ``$a/$t/$d``.
+
+    Mapping labels are section-local: a ``.text`` label says nothing about
+    ``.plt`` bytes, so the table is keyed by section index and mode lookup
+    uses only the function's own section. Only ELF symtabs carry these
+    symbols, so a stripped binary gets an empty table and mode selection
+    falls back to the symbol's Thumb bit.
+    """
+    modes = {}
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        symbols = parsed_obj.symtab_symbols
+        if symbols and not isinstance(symbols, lief.lief_errors):
+            for symbol in symbols:
+                name = symbol.name or ""
+                if _ARM32_MAPPING_SYMBOL_RE.match(name):
+                    modes.setdefault(int(symbol.shndx), []).append(
+                        (int(symbol.value) & ~1, _ARM32_MAPPING_MODES[name[1]])
+                    )
+    for section_modes in modes.values():
+        section_modes.sort()
+    return modes
+
+
+def _arm32_mode_at(modes: list[tuple[int, str]], address: int) -> str | None:
+    """The mapping-symbol mode covering ``address``, or None when absent."""
+    index = bisect.bisect_right(modes, (address, "zz")) - 1
+    if index >= 0:
+        return modes[index][1]
+    return None
+
+
+def _arm32_section_for_address(parsed_obj, address: int) -> int | None:
+    """The section index containing ``address`` (mapping labels are scoped).
+
+    LIEF exposes no shndx on sections, but its ``sections`` list follows the
+    section-header table, so the enumeration index is the section index the
+    symbol table's shndx values refer to.
+    """
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        for shndx, section in enumerate(parsed_obj.sections):
+            start = int(section.virtual_address)
+            size = int(section.size)
+            if start and size and start <= address < start + size:
+                return shndx
+    return None
+
+
+def _arm32_function_mode(
+    original_func_addr: int, modes: list[tuple[int, str]], has_symbol: bool
+) -> str | None:
+    """Per-function ARM32 instruction set state, or None when unknown.
+
+    Mapping symbols are the stronger source (the assembler states the mode
+    per range, which survives where a symbol's parity cannot be recorded);
+    otherwise the ELF convention that ``st_value & 1`` marks a Thumb function
+    decides. Entries with neither evidence — unwinding-table discoveries and
+    promoted call targets in stripped binaries — return None and the caller
+    tries Thumb before ARM, the order NDK armeabi-v7a code justifies.
+    """
+    mapped = _arm32_mode_at(modes, original_func_addr & ~1)
+    if mapped is not None:
+        return mapped
+    if has_symbol:
+        return "thumb" if original_func_addr & 1 else "arm"
+    return None
+
+
+def _is_arm32_return(mnemonic: str, operand_text: str) -> bool:
+    """True for the ARM32 return forms: ``bx lr`` (with any condition code),
+    ``pop {…, pc}`` and the post-indexed stack-slot form ``ldr pc, [sp], #4``.
+
+    A ``bx`` to any register other than ``lr`` is a tail branch, not a
+    return; ``ldr pc, [pc, …]`` forms are table dispatches, handled
+    separately.
+    """
+    if ARM32_BX_RE.match(mnemonic):
+        return operand_text.split(",")[0].strip().lower() == "lr"
+    if mnemonic in ("pop", "pop.w", "ldm", "ldmia", "ldmfd"):
+        return "pc" in (operand_text or "")
+    if mnemonic in ("ldr", "ldr.w"):
+        compact = (operand_text or "").replace(" ", "")
+        return compact.startswith("pc,[sp")
+    return False
+
+
+def _is_arm32_table_dispatch(mnemonic: str, operand_text: str) -> bool:
+    """True for intra-function jump-table dispatch: ``tbb``/``tbh`` and the
+    word-table form ``ldr pc, [pc, rN, lsl #2]``."""
+    if mnemonic in ARM32_TABLE_DISPATCH_INST:
+        return True
+    if mnemonic in ("ldr", "ldr.w"):
+        compact = (operand_text or "").replace(" ", "")
+        return compact.startswith("pc,[pc")
+    return False
+
+
+def _arm32_parse_immediate(token: str) -> int | None:
+    """Parse one ARM32 immediate token in every IntegerBase style nyxstone
+    can print: ``#50`` (Dec), ``#0x32`` (HexPrefix), ``#32h`` (HexSuffix)."""
+    token = (token or "").strip().lstrip("#")
+    if not token:
+        return None
+    negative = token.startswith("-")
+    if negative:
+        token = token[1:]
+    lowered = token.lower()
+    value = None
+    with contextlib.suppress(ValueError):
+        if lowered.startswith("0x"):
+            value = int(lowered, 16)
+        elif lowered.endswith("h"):
+            value = int(lowered[:-1], 16)
+        elif lowered.isdigit():
+            value = int(lowered, 10)
+    return -value if (value is not None and negative) else value
+
+
+def _arm32_pc_base(address: int, mode: str | None, mnemonic: str = "") -> int:
+    """The PC value a PC-relative ARM32 operand is relative to.
+
+    Thumb state: ``addr+4``, except ``blx #imm`` whose immediate is relative
+    to ``Align(addr+4, 4)`` — the interworking form always targets a 4-byte
+    aligned ARM address and the architecture rounds the base (measured:
+    ``blx #88`` at 0x13da targets 0x13dc+88 = 0x1434, not 0x13de+88).
+    ARM state: ``addr+8``.
+    """
+    if mode == "arm":
+        return address + 8
+    base = address + 4
+    if mnemonic in ("blx", "blx.w"):
+        base &= ~3
+    return base
+
+
+def _arm32_branch_target(instr, operand: str, mode: str | None, mnemonic: str = "") -> int | None:
+    """Resolve ``bl``/``blx``/``b #imm`` to the absolute target address."""
+    imm = _arm32_parse_immediate(operand)
+    if imm is None:
+        return None
+    return _arm32_pc_base(instr.address, mode, mnemonic) + imm
+
+
+def _arm32_literal_address(instr, operand: str, mode: str | None) -> int | None:
+    """Resolve ``ldr rN, [pc, #imm]`` to the address the literal word lives at.
+
+    Thumb's PC is Align(addr+4, 4); ARM's is addr+8 (instructions are
+    4-aligned so no rounding is needed there).
+    """
+    match = re.match(r"^\[pc\s*,\s*(#[^\]]+)\]$", (operand or "").strip())
+    if not match:
+        return None
+    offset = _arm32_parse_immediate(match.group(1))
+    if offset is None:
+        return None
+    base = _arm32_pc_base(instr.address, mode)
+    if mode != "arm":
+        base &= ~3
+    return base + offset
+
+
 class ParsedInstruction(NamedTuple):
     mnemonic: str
     operand_text: str
@@ -708,7 +934,9 @@ def _addr_in_exec_ranges(addr: int, exec_ranges: list) -> bool:
     return any(start <= addr < end for start, end in exec_ranges)
 
 
-def _find_function_end_index(instr_list: list, has_exact_size: bool = False) -> int:
+def _find_function_end_index(
+    instr_list: list, has_exact_size: bool = False, arch_target: str = ""
+) -> int:
     """
     Scans a list of instructions to find the true end of a function.
     If exact size is known, it strips trailing compiler padding/traps.
@@ -724,10 +952,27 @@ def _find_function_end_index(instr_list: list, has_exact_size: bool = False) -> 
                 return i
         return 0
 
+    is_arm32 = _is_arm32_target(arch_target)
+
+    def _parts(index: int) -> tuple[str, str]:
+        pieces = instr_list[index].assembly.split(None, 1)
+        return pieces[0].lower(), pieces[1] if len(pieces) > 1 else ""
+
+    def _terminates(index: int) -> bool:
+        mnemonic, operand = _parts(index)
+        if mnemonic in TERMINATING_INST or mnemonic in UNCONDITIONAL_JMP_INST_ALL:
+            return True
+        if is_arm32:
+            # ARM32 returns (`bx lr`, `pop {…, pc}`, `ldr pc, [sp], #4`) are
+            # not in the shared terminating set; without them a size-less
+            # window keeps the next function's leading bytes as trailing
+            # junk on real libraries.
+            return _is_arm32_return(mnemonic, operand)
+        return False
+
     # Fallback heuristic: the size was a blind guess (e.g., 4096 bytes),
     for i, instr in enumerate(instr_list):
-        mnemonic = instr.assembly.split(None, 1)[0].lower()
-        if mnemonic in TERMINATING_INST or mnemonic in UNCONDITIONAL_JMP_INST_ALL:
+        if _terminates(i):
             if i + 1 >= len(instr_list):
                 return i
             next_mnemonic = instr_list[i + 1].assembly.split(None, 1)[0].lower()
@@ -1068,6 +1313,7 @@ def _analyze_instructions(
     parsed_obj=None,
     arch_target: str = "",
     parsed_instrs: list | None = None,
+    arm32_context: dict | None = None,
 ) -> tuple[
     dict,
     list[str],
@@ -1085,18 +1331,30 @@ def _analyze_instructions(
     lower_arch = _normalize_arch_target(arch_target)
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
     is_mips = "mips" in lower_arch
+    is_arm32 = _is_arm32_target(lower_arch)
     if is_aarch64:
         CALL_INST = ARM64_CALL_INST
         UNCONDITIONAL_JMP_INST = ARM64_UNCONDITIONAL_JMP_INST
         RET_INST = ARM64_RET_INST
+        CONDITIONAL_JMP_SET = set(ARM64_CONDITIONAL_JMP_INST)
     elif is_mips:
         CALL_INST = MIPS_CALL_INST
         UNCONDITIONAL_JMP_INST = MIPS_UNCONDITIONAL_JMP_INST
         RET_INST = MIPS_RET_INST
+        CONDITIONAL_JMP_SET = set(CONDITIONAL_JMP_INST_X86)
+    elif is_arm32:
+        CALL_INST = ARM32_CALL_INST
+        UNCONDITIONAL_JMP_INST = ARM32_UNCONDITIONAL_JMP_INST
+        # ARM32 returns are operand-shaped (`bx lr`, `pop {…, pc}`), so the
+        # mnemonic-set check below consults the helper instead of RET_INST.
+        RET_INST = frozenset()
+        CONDITIONAL_JMP_SET = ARM32_CONDITIONAL_JMP_INST
     else:
         CALL_INST = X86_CALL_INST
         UNCONDITIONAL_JMP_INST = X86_UNCONDITIONAL_JMP_INST
         RET_INST = X86_RET_INST
+        CONDITIONAL_JMP_SET = set(CONDITIONAL_JMP_INST_X86)
+    arm32_line_modes = arm32_context.get("modes") if arm32_context else None
     instruction_mnemonics = []
     instruction_metrics = {
         "call_count": 0,
@@ -1122,7 +1380,7 @@ def _analyze_instructions(
     is_apple_silicon = "aarch64" in lower_arch and isinstance(parsed_obj, lief.MachO.Binary)
     if parsed_instrs is None:
         parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
-    for instr, parsed_instr in zip(instr_list, parsed_instrs):
+    for line_index, (instr, parsed_instr) in enumerate(zip(instr_list, parsed_instrs)):
         instr_assembly = instr.assembly
         if not parsed_instr.mnemonic:
             continue
@@ -1155,7 +1413,11 @@ def _analyze_instructions(
                 has_pac = True
         if mnemonic in CALL_INST:
             instruction_metrics["call_count"] += 1
-        elif mnemonic in CONDITIONAL_JMP_INST:
+        elif is_arm32 and _is_arm32_table_dispatch(mnemonic, operand_text):
+            # tbb/tbh and `ldr pc, [pc, rN, lsl #2]` dispatch within the
+            # function; they are control flow, never calls.
+            instruction_metrics["conditional_jump_count"] += 1
+        elif mnemonic in CONDITIONAL_JMP_SET or mnemonic in CONDITIONAL_JMP_INST:
             instruction_metrics["conditional_jump_count"] += 1
             if operand_text:
                 target_part = operand_text
@@ -1170,6 +1432,22 @@ def _analyze_instructions(
                             has_loop = True
                     except ValueError:
                         continue
+                elif is_arm32 and target_part.startswith("#"):
+                    # ARM32 conditional branches print a PC-relative delta;
+                    # Thumb PC is addr+4, ARM PC is addr+8.
+                    mode = (
+                        arm32_line_modes[line_index]
+                        if arm32_line_modes and len(arm32_line_modes) == len(instr_list)
+                        else None
+                    )
+                    target_addr = _arm32_branch_target(instr, target_part, mode)
+                    if (
+                        target_addr is not None
+                        and func_addr <= target_addr < next_func_addr_in_sec
+                        and target_addr < instr.address
+                        and target_addr in instr_address_set
+                    ):
+                        has_loop = True
         elif mnemonic in UNCONDITIONAL_JMP_INST:
             instruction_metrics["jump_count"] += 1
         elif mnemonic == "xor":
@@ -1178,7 +1456,7 @@ def _analyze_instructions(
             instruction_metrics["shift_count"] += 1
         elif mnemonic in ARITH_INST:
             instruction_metrics["arith_count"] += 1
-        elif mnemonic in RET_INST:
+        elif mnemonic in RET_INST or (is_arm32 and _is_arm32_return(mnemonic, operand_text)):
             instruction_metrics["ret_count"] += 1
         # Check for ARM64 indirect calls and jumps
         if mnemonic in (CALL_INST | UNCONDITIONAL_JMP_INST):
@@ -1187,6 +1465,9 @@ def _analyze_instructions(
                 operand = parsed_instr.operand_text_lower
                 reg_token = _extract_register_token(operand, arch_reg_set)
                 if reg_token or "[" in operand and "]" in operand:
+                    is_indirect = True
+                elif is_arm32 and ARM32_GPR_TOKEN_RE.match(operand.split(",")[0].strip()):
+                    # `blx rN` (and `bx rN`): the callee is in a register.
                     is_indirect = True
             if is_indirect:
                 has_indirect_call = True
@@ -1254,6 +1535,10 @@ def _build_addr_to_name_map(metadata: dict, parsed_obj=None) -> dict[int, str]:
         for func_entry in metadata.get(func_list_key, []):
             addr_str = func_entry.get("address", "")
             name = func_entry.get("name", "")
+            if _ARM32_MAPPING_SYMBOL_RE.match(name or ""):
+                # $a/$t/$d are mode labels; a callee named "$a.3" names
+                # nothing. They share symtab buckets with real symbols.
+                continue
             if addr_str and name:
                 try:
                     addr_int = int(addr_str, 16)
@@ -1811,11 +2096,57 @@ def _update_register_target(
     reg_targets.pop(dst_reg, None)
 
 
+def _arm32_extract_literals(
+    truncated_instr_list: list,
+    parsed_instrs: list,
+    line_modes: list[str | None],
+    default_mode: str | None,
+    parsed_obj,
+    base_delta: int,
+) -> dict[str, int]:
+    """Read the PC-relative literal words a function's ``ldr rN, [pc, #imm]``
+    instructions point at, as ``{hex(address): signed_value}``.
+
+    The values are the offset halves of position-independent address
+    materialisation (`ldr rN, [pc, #x]` + `add rN, pc`), so the register
+    tracker in the call resolver can complete them. Reads go through LIEF
+    with the same rebased lookup the function bytes used.
+    """
+    literals: dict[str, int] = {}
+    for index, (instr, parsed) in enumerate(zip(truncated_instr_list, parsed_instrs)):
+        mnemonic = parsed.mnemonic
+        if mnemonic not in ("ldr", "ldr.w") or len(parsed.operands_lower) < 2:
+            continue
+        mode = (
+            line_modes[index]
+            if line_modes and len(line_modes) == len(truncated_instr_list)
+            else default_mode
+        )
+        literal_addr = _arm32_literal_address(instr, parsed.operands_lower[1], mode)
+        if literal_addr is None or hex(literal_addr) in literals:
+            continue
+        with contextlib.suppress(Exception):
+            content = parsed_obj.get_content_from_virtual_address(literal_addr + base_delta, 4)
+            if content is None or isinstance(content, lief.lief_errors):
+                content = parsed_obj.get_content_from_virtual_address(literal_addr, 4)
+            if content is None or isinstance(content, lief.lief_errors):
+                continue
+            raw = bytes(content)
+            if len(raw) < 4:
+                continue
+            value = struct.unpack("<I", raw[:4])[0]
+            if value >= 0x80000000:
+                value -= 1 << 32
+            literals[hex(literal_addr)] = value
+    return literals
+
+
 def _resolve_direct_calls(
     instr_list: list,
     addr_to_name_map: dict[int, str],
     arch_target: str = "",
     parsed_instrs: list | None = None,
+    arm32_context: dict | None = None,
 ) -> tuple[list, list]:
     """Identifies direct calls and returns both legacy names and rich call targets."""
     potential_callees: list[str] = []
@@ -1824,12 +2155,82 @@ def _resolve_direct_calls(
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
     is_mips = "mips" in lower_arch
     is_windows = "windows" in lower_arch
+    is_arm32 = _is_arm32_target(lower_arch)
     arch_reg_set = get_arch_reg_set(lower_arch)
     reg_targets: dict = {}
+    arm32_line_modes = arm32_context.get("modes") if arm32_context else None
+    arm32_literals = arm32_context.get("literals") if arm32_context else None
+    arm32_reg_state: dict[str, tuple[str, int]] = {}
     if parsed_instrs is None:
         parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
 
-    for instr, parsed_instr in zip(instr_list, parsed_instrs):
+    def _line_mode(index: int) -> str | None:
+        if arm32_line_modes and len(arm32_line_modes) == len(instr_list):
+            return arm32_line_modes[index]
+        return arm32_context.get("default_mode") if arm32_context else None
+
+    def _arm32_track(line_index: int, instr, parsed) -> None:
+        """Track the ARM32 pointer-materialisation idioms textually.
+
+        ``ldr rN, [pc, #imm]`` loads a PC-relative literal (the offset half
+        of a symbol address), ``add rN, pc`` completes it, and ``ldr rM,
+        [rN, #off]`` loads through the completed base — the shape
+        position-independent ARM32 code uses for GOT-resolved callees. Any
+        other write to a tracked register clears it.
+        """
+        mnemonic = parsed.mnemonic
+        operands = parsed.operands_lower
+        if mnemonic in ("ldr", "ldr.w") and len(operands) >= 2:
+            dst = operands[0].strip()
+            if ARM32_GPR_TOKEN_RE.match(dst):
+                literal_addr = _arm32_literal_address(instr, operands[1], _line_mode(line_index))
+                if literal_addr is not None and arm32_literals:
+                    value = arm32_literals.get(hex(literal_addr))
+                    if value is not None:
+                        arm32_reg_state[dst] = ("literal_offset", value)
+                        return
+                # A load through a completed base (the GOT-slot read of the
+                # ldr+add pc idiom): the slot address is known even though
+                # the loaded pointer is not.
+                match = re.match(r"^\[([a-z0-9]+)\s*(?:,\s*(#[^\]]+))?\]$", operands[1].strip())
+                if match and match.group(1) in arm32_reg_state:
+                    base_state = arm32_reg_state[match.group(1)]
+                    if base_state[0] == "absolute":
+                        offset = _arm32_parse_immediate(match.group(2) or "#0") or 0
+                        arm32_reg_state[dst] = ("memory", base_state[1] + offset)
+                        return
+                arm32_reg_state.pop(dst, None)
+            return
+        if mnemonic in ("add", "add.w", "adds", "adds.w") and operands:
+            dst = operands[0].strip()
+            if ARM32_GPR_TOKEN_RE.match(dst):
+                src = operands[1].strip() if len(operands) > 1 else ""
+                if src == "pc":
+                    state = arm32_reg_state.get(dst)
+                    if state and state[0] == "literal_offset":
+                        arm32_reg_state[dst] = (
+                            "absolute",
+                            state[1] + _arm32_pc_base(instr.address, _line_mode(line_index)),
+                        )
+                        return
+                elif src in arm32_reg_state and len(operands) > 2:
+                    imm = _arm32_parse_immediate(operands[2])
+                    state = arm32_reg_state[src]
+                    if imm is not None and state[0] == "absolute":
+                        arm32_reg_state[dst] = (
+                            "absolute",
+                            state[1] + (imm if mnemonic.startswith("add") else -imm),
+                        )
+                        return
+                arm32_reg_state.pop(dst, None)
+            return
+        # First-operand write outside the tracked idioms clears the register.
+        if operands:
+            dst = operands[0].strip()
+            if ARM32_GPR_TOKEN_RE.match(dst):
+                arm32_reg_state.pop(dst, None)
+
+    for line_index, (instr, parsed_instr) in enumerate(zip(instr_list, parsed_instrs)):
         if not parsed_instr.mnemonic:
             continue
         mnemonic = parsed_instr.mnemonic
@@ -1843,12 +2244,19 @@ def _resolve_direct_calls(
             is_windows=is_windows,
             parsed_instr=parsed_instr,
         )
+        if is_arm32:
+            _arm32_track(line_index, instr, parsed_instr)
         is_direct_call = False
         is_indirect_call = False
         if (
             (is_aarch64 and mnemonic == "bl")
             or (is_mips and mnemonic in MIPS_CALL_INST)
             or (not is_aarch64 and not is_mips and mnemonic.startswith("call"))
+            or (
+                is_arm32
+                and mnemonic in ARM32_CALL_INST
+                and (operand_text or "").lstrip().startswith("#")
+            )
         ):
             is_direct_call = True
         if operand_text:
@@ -1862,6 +2270,72 @@ def _resolve_direct_calls(
             ):
                 is_indirect_call = True
                 is_direct_call = False
+            elif (
+                is_arm32
+                and mnemonic in ARM32_CALL_INST
+                and ARM32_GPR_TOKEN_RE.match(operand_text.split(",")[0].strip().lower())
+            ):
+                # blx rN: interworking call through a register.
+                is_indirect_call = True
+                is_direct_call = False
+
+        if is_arm32 and is_direct_call and operand_text:
+            target_addr = _arm32_branch_target(
+                instr, operand_text, _line_mode(line_index), mnemonic
+            )
+            if target_addr is not None:
+                # A Thumb callee's address carries the interworking bit;
+                # the callgraph node is the aligned start.
+                target_addr &= ~1
+                target_addrs = [target_addr]
+                target_name = _lookup_target_name(target_addrs, addr_to_name_map)
+                if target_name:
+                    potential_callees.append(target_name)
+                if not target_name:
+                    target_name = _extract_symbol_from_operand(operand_text, arch_reg_set)
+                    if target_name:
+                        potential_callees.append(target_name)
+                _append_call_target(
+                    direct_call_targets,
+                    kind="direct",
+                    target_name=target_name,
+                    target_addr=target_addr,
+                    target_addrs=target_addrs,
+                    raw_operand=_raw_operand_text(operand_text),
+                )
+            continue
+
+        if is_arm32 and is_indirect_call and operand_text:
+            reg = operand_text.split(",")[0].strip().lower()
+            state = arm32_reg_state.get(reg)
+            if state and state[0] == "absolute":
+                target_addrs = [state[1]]
+                target_name = _lookup_target_name(target_addrs, addr_to_name_map)
+                _append_call_target(
+                    direct_call_targets,
+                    kind="indirect_hint",
+                    target_name=target_name,
+                    target_addr=state[1],
+                    target_addrs=target_addrs,
+                    raw_operand=reg,
+                )
+                continue
+            if state and state[0] == "memory":
+                target_name = _lookup_target_name([state[1]], addr_to_name_map)
+                _append_call_target(
+                    direct_call_targets,
+                    kind="indirect_hint",
+                    target_name=target_name,
+                    raw_operand=reg,
+                )
+                continue
+            _append_call_target(
+                direct_call_targets,
+                kind="indirect_hint",
+                target_name="",
+                raw_operand=reg,
+            )
+            continue
 
         if is_indirect_call and operand_text:
             operand = operand_text.strip()
@@ -1956,9 +2430,34 @@ def _resolve_direct_calls(
                 if is_aarch64
                 else MIPS_UNCONDITIONAL_JMP_INST
                 if is_mips
+                else ARM32_UNCONDITIONAL_JMP_INST
+                if is_arm32
                 else X86_UNCONDITIONAL_JMP_INST
             )
-            if mnemonic in jump_set and parsed_tail.operand_text:
+            if is_arm32 and mnemonic in ARM32_UNCONDITIONAL_JMP_INST and parsed_tail.operand_text:
+                # A trailing unconditional `b #imm` whose target lies outside
+                # the function is a tail call (PLT thunks and -Oz tail
+                # merging); a target inside the extent is a local branch.
+                operand = parsed_tail.operand_text.strip()
+                target_addr = _arm32_branch_target(
+                    tail_instr, operand, _line_mode(len(instr_list) - 1), mnemonic
+                )
+                func_start = instr_list[0].address
+                last = instr_list[-1]
+                func_end = last.address + len(last.bytes)
+                if target_addr is not None:
+                    target_addr &= ~1
+                if target_addr is not None and not (func_start <= target_addr < func_end):
+                    target_name = _lookup_target_name([target_addr], addr_to_name_map)
+                    _append_call_target(
+                        direct_call_targets,
+                        kind="tailcall",
+                        target_name=target_name,
+                        target_addr=target_addr,
+                        target_addrs=[target_addr],
+                        raw_operand=_raw_operand_text(operand),
+                    )
+            elif mnemonic in jump_set and parsed_tail.operand_text:
                 operand = parsed_tail.operand_text.strip()
                 reg_token = _extract_register_token(operand, arch_reg_set)
                 if reg_token and reg_token in reg_targets:
@@ -2122,6 +2621,134 @@ def _try_disassemble(instance, byte_list, address: int, inst_count: int = 0) -> 
         return None
 
 
+def _longest_decodable_prefix(instance, byte_list, address: int) -> list:
+    """The largest instruction prefix of ``byte_list`` nyxstone can decode.
+
+    A full-call failure hides how far decoding got, so probe with rising
+    instruction counts (the call succeeds whenever the bad word sits beyond
+    the requested count) and binary-search the boundary they bracket.
+    """
+    lower, upper = 0, 1
+    instructions = []
+    while True:
+        probe = _try_disassemble(instance, byte_list, address, upper)
+        if probe is None or len(probe) < upper:
+            instructions = probe or []
+            break
+        if upper >= (1 << 20):
+            return probe
+        lower, upper = upper, upper * 2
+    if len(instructions) == upper:
+        return instructions
+    good = _try_disassemble(instance, byte_list, address, lower) or []
+    # Binary search the largest count that still decodes cleanly.
+    while lower + 1 < upper:
+        mid = (lower + upper) // 2
+        probe = _try_disassemble(instance, byte_list, address, mid)
+        if probe is not None and len(probe) == mid:
+            lower, good = mid, probe
+        else:
+            upper = mid
+    return good
+
+
+def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
+    """Decode one code span, resuming past words nyxstone cannot decode.
+
+    ARM32 functions carry literal pools and jump tables inline; objdump
+    prints those as ``.word``/``<unknown>`` and carries on, while a nyxstone
+    call raises and would otherwise truncate the function at the pool. The
+    resume skips one 4-byte word (pool entries are word-sized in both
+    states). Every iteration advances the cursor, and eight consecutive
+    undecodable words end the span.
+    """
+    instructions: list = []
+    cursor = 0
+    total = len(byte_list)
+    skips = 0
+    while cursor < total:
+        chunk = _try_disassemble(instance, byte_list[cursor:], address + cursor)
+        if chunk:
+            instructions.extend(chunk)
+            cursor += sum(len(instr.bytes) for instr in chunk)
+            skips = 0
+            continue
+        prefix = _longest_decodable_prefix(instance, byte_list[cursor:], address + cursor)
+        if not prefix:
+            if skips >= 8:
+                break
+            skips += 1
+            cursor += 4
+            continue
+        instructions.extend(prefix)
+        cursor += sum(len(instr.bytes) for instr in prefix) + 4
+        skips = 1
+    return instructions
+
+
+def _arm32_code_spans(
+    start: int, size: int, mapping_modes: list[tuple[int, str]]
+) -> list[tuple[int, int]]:
+    """Code sub-spans of ``[start, start+size)``, from ``$a``/``$t`` labels.
+
+    With mapping symbols present, only labeled code regions are decoded -
+    the same rule objdump applies with mapping-symbol knowledge - so ``$d``
+    islands and un-labeled filler (the bytes between sections and before the
+    first label) are never disassembled. A span's label also names its
+    instruction set state, so ARM and Thumb islands inside one function each
+    decode in their own mode. An empty mapping table yields the whole extent
+    as one span.
+    """
+    end = start + size
+    if size <= 0:
+        return []
+    if not mapping_modes:
+        return [(start, size)]
+    spans: list[tuple[int, int]] = []
+    # The label covering the extent start (a function usually begins inside
+    # the region its own opening label named, not at a fresh label).
+    covering_index = bisect.bisect_right(mapping_modes, (start, "zz")) - 1
+    if covering_index >= 0:
+        covering_addr, covering_mode = mapping_modes[covering_index]
+        if covering_mode != "data" and covering_addr <= start < end:
+            next_label = (
+                mapping_modes[covering_index + 1][0]
+                if covering_index + 1 < len(mapping_modes)
+                else end
+            )
+            span_end = min(next_label, end)
+            if span_end > start:
+                spans.append((start, span_end - start))
+    for index, (addr, mode) in enumerate(mapping_modes):
+        if mode == "data" or addr <= start or addr >= end:
+            continue
+        next_label = mapping_modes[index + 1][0] if index + 1 < len(mapping_modes) else end
+        span_end = min(next_label, end)
+        if span_end > addr:
+            spans.append((addr, span_end - addr))
+    if not spans:
+        # No code label covers or intersects the extent (an exidx start
+        # pointing into label-less filler, or hand-built code); the
+        # parity/arbiter path takes over rather than dropping the function.
+        return [(start, size)]
+    return spans
+
+
+def _arm32_skipped_regions(
+    start: int, size: int, code_spans: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Byte ranges inside ``[start, start+size)`` no code span covers."""
+    regions: list[tuple[int, int]] = []
+    cursor = start
+    for span_start, span_len in code_spans:
+        if span_start > cursor:
+            regions.append((cursor, span_start - cursor))
+        cursor = max(cursor, span_start + span_len)
+    if start + size > cursor:
+        regions.append((cursor, start + size - cursor))
+    return regions
+
+
 def disassemble_functions(
     parsed_obj,
     metadata: dict,
@@ -2204,6 +2831,37 @@ def disassemble_functions(
             )
         except ValueError as e:
             LOG.warning(f"Failed to initialize microMIPS disassembler: {e}")
+    # 32-bit ARM binaries mix ARM and Thumb functions (and NDK-built
+    # armeabi-v7a code is mostly Thumb), so a second instance decodes the
+    # other instruction set state; per-function mode selection happens in the
+    # worklist loop below.
+    arm32_thumb_nyxstone_instance = None
+    is_arm32 = _is_arm32_target(arch_target)
+    if is_arm32:
+        arm_triple, thumb_triple = _arm32_mode_triples(nyxstone_triple)
+        if thumb_triple != nyxstone_triple:
+            try:
+                arm32_thumb_nyxstone_instance = Nyxstone(
+                    target_triple=thumb_triple,
+                    cpu=cpu,
+                    features=features,
+                    immediate_style=immediate_style,
+                )
+                # The ARM-state instance must also come from the decode-capable
+                # v7 spelling: nyxstone accepts the plain ``arm-`` tuple but
+                # then fails core instructions (bx lr) mid-stream.
+                nyxstone_instance = Nyxstone(
+                    target_triple=arm_triple,
+                    cpu=cpu,
+                    features=features,
+                    immediate_style=immediate_style,
+                )
+            except ValueError as e:
+                LOG.warning(
+                    f"Failed to initialize Thumb disassembler for '{thumb_triple}', "
+                    f"ARM-mode fallback only: {e}"
+                )
+    arm32_mapping_modes = _arm32_mapping_symbol_modes(parsed_obj) if is_arm32 else {}
     # Resolve MachO import slot/stub addresses once and surface them on the
     # metadata so the callgraph builder can classify these as external import
     # edges instead of misattributing them to internal range-containment nodes.
@@ -2213,10 +2871,20 @@ def disassemble_functions(
     all_func_addrs = []
     for func_list_key in FUNCTION_SYMBOLS:
         for func_entry in metadata.get(func_list_key, []):
+            # ARM32 mapping symbols are mode labels, not function starts;
+            # symtab buckets carry them, and letting them into this set
+            # truncates the size-less windows at every literal pool.
+            if is_arm32 and _ARM32_MAPPING_SYMBOL_RE.match(func_entry.get("name") or ""):
+                continue
             addr_str = func_entry.get("address") or func_entry.get("rva_start")
             if addr_str:
                 try:
-                    all_func_addrs.append(int(addr_str, 16))
+                    addr = int(addr_str, 16)
+                    # ARM32 identity is the aligned address: symbols carry
+                    # the Thumb bit in st_value, resolved call targets do
+                    # not, and mixing the two makes every Thumb callee look
+                    # unknown to promotion and the window index.
+                    all_func_addrs.append(addr & ~1 if is_arm32 else addr)
                 except ValueError:
                     pass
     all_func_addrs_sorted = sorted(set(all_func_addrs))
@@ -2263,7 +2931,14 @@ def disassemble_functions(
     for func_list_key in FUNCTION_SYMBOLS:
         if _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key):
             continue
-        all_funcs.extend(metadata.get(func_list_key, []))
+        bucket = metadata.get(func_list_key, [])
+        if is_arm32:
+            bucket = [
+                entry
+                for entry in bucket
+                if not _ARM32_MAPPING_SYMBOL_RE.match(entry.get("name") or "")
+            ]
+        all_funcs.extend(bucket)
     # A binary whose symbol + unwind discovery produced almost nothing gets a
     # prologue scan so stripped Go ELF binaries and export-less PEs still gain
     # a function set; dense binaries are left untouched.
@@ -2288,6 +2963,16 @@ def disassemble_functions(
                 for a in new_addrs
             )
     visited_addrs = set()
+    # Named symbol entries first (stable): several buckets can claim one
+    # address (a dynsym FUNC and a nameless unwind-table row), and after
+    # ARM32 alignment merges them into one identity the first processed
+    # entry's name wins - it must be the real symbol, not the sub_ twin.
+    if is_arm32:
+        all_funcs.sort(
+            key=lambda entry: (
+                0 if entry.get("name") and not str(entry.get("name")).startswith("sub_") else 1
+            )
+        )
     # Worklist instead of a plain list so direct-call promotion can append
     # newly discovered functions; initial entries keep their existing order.
     worklist: deque = deque(all_funcs)
@@ -2321,6 +3006,11 @@ def disassemble_functions(
                 f"Could not parse address '{func_addr_str}' for function '{func_name}'. Skipping."
             )
             continue
+        # The raw address carries ARM32's Thumb parity evidence; identity,
+        # windows and byte reads use the aligned address.
+        arm32_raw_func_addr = original_func_addr
+        if is_arm32:
+            original_func_addr &= ~1
         if original_func_addr in visited_addrs:
             continue
         visited_addrs.add(original_func_addr)
@@ -2329,8 +3019,45 @@ def disassemble_functions(
         if isinstance(parsed_obj, lief.MachO.Binary) and _is_macos_system_symbol_name(func_name):
             continue
         func_addr = original_func_addr
-        if (is_mips or "arm" in arch_target.lower()) and (func_addr & 1):
+        if (is_mips or is_arm32) and (func_addr & 1):
             func_addr = func_addr & ~1
+        # ARM32: which instruction set state this function decodes in. A
+        # mapping symbol naming a data island says the entry is not code at
+        # all (a literal pool or jump table the symbol pipeline offered as a
+        # function) and is skipped rather than decoded as garbage.
+        arm32_mode = None
+        arm32_data_spans: list[tuple[int, int]] = []
+        arm32_section_modes: list[tuple[int, str]] = []
+        if is_arm32:
+            func_shndx = _arm32_section_for_address(parsed_obj, func_addr)
+            if func_shndx is None and isinstance(parsed_obj, lief.ELF.Binary):
+                # An exidx entry can name the inter-section padding after
+                # .text; bytes in no section are not code and decoding them
+                # reads into the neighbour section's stubs.
+                LOG.debug(
+                    f"Skipping '{func_name}' at {func_addr_str}: address lies in no section."
+                )
+                continue
+            # Mapping labels are section-local; only this function's section
+            # has a say in its modes and spans.
+            arm32_section_modes = arm32_mapping_modes.get(func_shndx, [])
+            # Synthetic sub_ names (the merge's readability rename for
+            # nameless claims) are not symbol evidence: trusting them makes
+            # even-aligned exidx rows decode as ARM and produces garbage.
+            real_name = func_entry.get("name")
+            if real_name and str(real_name).startswith("sub_"):
+                real_name = None
+            has_symbol = bool(real_name and not func_entry.get("discovered")) or bool(
+                arm32_raw_func_addr & 1
+            )
+            arm32_mode = _arm32_function_mode(
+                arm32_raw_func_addr, arm32_section_modes, has_symbol=has_symbol
+            )
+            if arm32_mode == "data":
+                LOG.debug(
+                    f"Skipping '{func_name}' at {func_addr_str}: mapping symbol marks a data island."
+                )
+                continue
         size_to_disasm = func_entry.get("size") or func_entry.get("length")
         has_exact_size = True
         if not isinstance(size_to_disasm, int) or size_to_disasm <= 0:
@@ -2338,6 +3065,19 @@ def disassemble_functions(
             if current_index is not None and current_index + 1 < len(all_func_addrs_sorted):
                 next_func_addr = all_func_addrs_sorted[current_index + 1]
                 size_to_disasm = next_func_addr - func_addr
+            elif is_arm32 and func_entry.get("discovered") == "callsite":
+                # An ARM32 promoted mid-function entry: window to the next
+                # known start (promotions included), never the 4096-byte
+                # blind window that swallows the following functions whole.
+                # Other architectures keep the blind window their KPI
+                # baselines were calibrated against (measured: bounding
+                # them here cost PE 48 direct edges).
+                next_index = bisect.bisect_right(known_starts, func_addr)
+                if next_index < len(known_starts):
+                    size_to_disasm = known_starts[next_index] - func_addr
+                else:
+                    size_to_disasm = 4096
+                has_exact_size = False
             else:
                 size_to_disasm = 4096
                 has_exact_size = False
@@ -2391,6 +3131,8 @@ def disassemble_functions(
         )
         try:
             instr_list = None
+            used_arm32_mode = None
+            arm32_line_modes: list[str | None] = []
             disassemblers_to_try = [(nyxstone_instance, arch_target)]
             if mips16_nyxstone_instance:
                 disassemblers_to_try.append((mips16_nyxstone_instance, "MIPS16"))
@@ -2411,44 +3153,126 @@ def disassemble_functions(
                 if prefer_rebased
                 else [(original_bytes_list, "original"), (rebased_bytes_list, "rebased")]
             )
-            for offset in range(4):
-                original_len = _mem_bytes_len(original_bytes_list)
-                rebased_len = _mem_bytes_len(rebased_bytes_list)
-                if (
-                    original_len is not None
-                    and rebased_len is not None
-                    and offset >= original_len
-                    and offset >= rebased_len
-                ):
-                    break
-                addr_to_try = func_addr_va + offset
-                for instance, mode_name in disassemblers_to_try:
-                    for byte_source, source_name in bytes_sets:
+            if is_arm32 and arm32_thumb_nyxstone_instance:
+                # ARM32 decodes through its own path: per-span modes (a
+                # function may interleave ARM and Thumb islands), $d data
+                # islands never disassembled, and recovery past words nyxstone
+                # cannot decode instead of the count-based truncation.
+                instr_list = []
+                arm32_line_modes: list[str | None] = []
+                arm32_spans = _arm32_code_spans(func_addr, size_to_disasm, arm32_section_modes)
+                arm32_data_spans = _arm32_skipped_regions(func_addr, size_to_disasm, arm32_spans)
+                for span_start, span_len in arm32_spans:
+                    span_offset = span_start - func_addr
+                    span_bytes = None
+                    for byte_source, _source_name in bytes_sets:
                         source_len = _mem_bytes_len(byte_source)
-                        if source_len is not None and offset >= source_len:
-                            continue
-                        bytes_to_try = byte_source[offset:]
-                        instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)
-                        if not instr_list:
-                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 12)
-                        if not instr_list:
-                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try, 2)
-                        if instr_list:
-                            LOG.debug(
-                                f"Disassembled '{func_name}' in {mode_name} mode at offset +{offset} using {source_name} bytes."
+                        if source_len is not None and span_offset < source_len:
+                            span_bytes = byte_source[span_offset : span_offset + span_len]
+                            break
+                    if not span_bytes:
+                        continue
+                    span_va = func_addr_va + span_offset
+                    span_mode = _arm32_mode_at(arm32_section_modes, span_start) or arm32_mode
+                    if span_mode == "arm":
+                        instance_order = [
+                            (nyxstone_instance, "arm"),
+                            (arm32_thumb_nyxstone_instance, "thumb"),
+                        ]
+                    else:
+                        instance_order = [
+                            (arm32_thumb_nyxstone_instance, "thumb"),
+                            (nyxstone_instance, "arm"),
+                        ]
+                    span_instrs: list | None = None
+                    span_used = None
+                    if span_mode is None and len(instance_order) == 2:
+                        # No stated mode: the decode whose last instruction
+                        # lands exactly on the span end is the right one; ties
+                        # fall back to Thumb, the NDK armeabi-v7a default.
+                        decoded = [
+                            (
+                                mode_name,
+                                _disassemble_arm32_span(instance, span_bytes, span_va),
                             )
+                            for instance, mode_name in instance_order
+                        ]
+                        for mode_name, candidate in decoded:
+                            if (
+                                candidate
+                                and candidate[-1].address + len(candidate[-1].bytes)
+                                == span_va + span_len
+                            ):
+                                span_instrs, span_used = candidate, mode_name
+                                break
+                        if span_instrs is None:
+                            for mode_name, candidate in decoded:
+                                if candidate:
+                                    span_instrs, span_used = candidate, mode_name
+                                    break
+                    else:
+                        for instance, mode_name in instance_order:
+                            candidate = _disassemble_arm32_span(instance, span_bytes, span_va)
+                            if candidate:
+                                span_instrs, span_used = candidate, mode_name
+                                break
+                    if span_instrs:
+                        instr_list.extend(span_instrs)
+                        arm32_line_modes.extend([span_used] * len(span_instrs))
+                        if used_arm32_mode is None:
+                            used_arm32_mode = span_used
+                LOG.debug(
+                    f"Disassembled '{func_name}' in {used_arm32_mode or 'unknown'} mode"
+                    f" across {len(instr_list)} instructions."
+                )
+            else:
+                # ARM32 starts are 2-byte aligned (Thumb) or 4-byte (ARM), so the
+                # 1-3 byte probes that recover misaligned symbols elsewhere would
+                # decode mid-instruction garbage here.
+                for offset in range(1 if is_arm32 else 4):
+                    original_len = _mem_bytes_len(original_bytes_list)
+                    rebased_len = _mem_bytes_len(rebased_bytes_list)
+                    if (
+                        original_len is not None
+                        and rebased_len is not None
+                        and offset >= original_len
+                        and offset >= rebased_len
+                    ):
+                        break
+                    addr_to_try = func_addr_va + offset
+                    for instance, mode_name in disassemblers_to_try:
+                        for byte_source, source_name in bytes_sets:
+                            source_len = _mem_bytes_len(byte_source)
+                            if source_len is not None and offset >= source_len:
+                                continue
+                            bytes_to_try = byte_source[offset:]
+                            instr_list = _try_disassemble(instance, bytes_to_try, addr_to_try)
+                            if not instr_list:
+                                instr_list = _try_disassemble(
+                                    instance, bytes_to_try, addr_to_try, 12
+                                )
+                            if not instr_list:
+                                instr_list = _try_disassemble(
+                                    instance, bytes_to_try, addr_to_try, 2
+                                )
+                            if instr_list:
+                                LOG.debug(
+                                    f"Disassembled '{func_name}' in {mode_name} mode at offset +{offset} using {source_name} bytes."
+                                )
+                                break
+                        if instr_list:
                             break
                     if instr_list:
                         break
-                if instr_list:
-                    break
             if not instr_list:
                 LOG.debug(
                     f"Could not find valid instructions for function '{func_name}' {func_addr_va} {inst_count}."
                 )
                 continue
-            end_index = _find_function_end_index(instr_list, has_exact_size)
+            end_index = _find_function_end_index(instr_list, has_exact_size, arch_target)
             truncated_instr_list = instr_list[: end_index + 1] if end_index != -1 else instr_list
+            if is_arm32 and arm32_line_modes:
+                arm32_line_modes = arm32_line_modes[: len(truncated_instr_list)]
             if not truncated_instr_list:
                 LOG.debug(
                     f"Instruction list for '{func_name}' became empty after truncation. Skipping."
@@ -2476,6 +3300,20 @@ def disassemble_functions(
                 _parse_instruction_text(instr.assembly) for instr in truncated_instr_list
             ]
             instr_addresses = [instr.address for instr in truncated_instr_list]
+            arm32_context = None
+            if is_arm32:
+                arm32_context = {
+                    "modes": arm32_line_modes or None,
+                    "default_mode": used_arm32_mode,
+                    "literals": _arm32_extract_literals(
+                        truncated_instr_list,
+                        parsed_instrs,
+                        arm32_line_modes,
+                        used_arm32_mode,
+                        parsed_obj,
+                        base_delta,
+                    ),
+                }
             next_func_boundary = func_addr_va + size_to_disasm
             (
                 instruction_metrics,
@@ -2497,9 +3335,14 @@ def disassemble_functions(
                 parsed_obj,
                 arch_target,
                 parsed_instrs,
+                arm32_context if is_arm32 else None,
             )
             direct_calls, direct_call_targets = _resolve_direct_calls(
-                truncated_instr_list, addr_to_name_map, arch_target, parsed_instrs
+                truncated_instr_list,
+                addr_to_name_map,
+                arch_target,
+                parsed_instrs,
+                arm32_context if is_arm32 else None,
             )
             joined_mnemonics = "\n".join(instruction_mnemonics)
             instruction_hash = hashlib.sha256(joined_mnemonics.encode("utf-8")).hexdigest()
@@ -2526,7 +3369,7 @@ def disassemble_functions(
                 has_system_call,
                 has_indirect_call,
             )
-            disassembly_results[f"{func_addr_va_hex}::{func_name}"] = {
+            function_result = {
                 "name": func_name,
                 "address": func_addr_va_hex,
                 "rvaOrAddress": func_addr_str,
@@ -2553,6 +3396,24 @@ def disassemble_functions(
                 "proprietary_instructions": proprietary_instructions,
                 "sreg_interactions": sreg_interactions,
             }
+            if is_arm32:
+                # The instruction set state these bytes were decoded in
+                # ("thumb"/"arm"), from the mapping symbol or the symbol's
+                # st_value parity (docs/DISASSEMBLE.md); when neither source
+                # states a mode, the fallback order's winning instance lands
+                # here. Absent on every other architecture.
+                function_result["instruction_mode"] = used_arm32_mode
+                if arm32_data_spans:
+                    # $d islands skipped inside the extent. The
+                    # instruction_lengths prefix sum no longer reconstructs
+                    # line addresses on its own: these spans sit between the
+                    # instructions, and a reader must add their sizes once
+                    # the running offset passes each span's address.
+                    function_result["data_spans"] = [
+                        {"address": hex(region_start), "size": region_len}
+                        for region_start, region_len in arm32_data_spans
+                    ]
+            disassembly_results[f"{func_addr_va_hex}::{func_name}"] = function_result
             # Structural block graph for the truncated instruction list. This
             # is computed after the flat metrics above and is additive: it
             # describes the function's shape without altering any of them.
@@ -2580,6 +3441,11 @@ def disassemble_functions(
                     is_aarch64="aarch64" in arch_target.lower() or "arm64" in arch_target.lower(),
                 )
                 for promoted_addr in promoted:
+                    # Promoted starts join known_starts: they bound each
+                    # other's windows (a promoted mid-function entry runs to
+                    # the next known thing) without shrinking the
+                    # discovery-derived windows of the functions containing
+                    # them.
                     bisect.insort(known_starts, promoted_addr)
                     worklist.append(
                         {

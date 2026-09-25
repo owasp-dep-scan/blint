@@ -260,6 +260,134 @@
           "note": "Guardrail for obvious false-positive external edge"
         }
       ]
+    },
+    "aarch64-unknown-linux-android": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x40a800",
+          "dst": "<wasm_tools::dump::Dump>::print_@0x4139a8",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x40a800",
+          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x550c28",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x40a800",
+          "dst": "<anyhow::Error>::construct::<wasmparser::binary_reader::BinaryReaderError>@0x518e1c",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x40a800",
+          "dst": "<wasmparser::readers::core::branch_hinting::BranchHintFunction as wasmparser::readers::FromReader>::from_reader@0xd86b84",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        }
+      ]
+    },
+    "x86_64-unknown-linux-android": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x42f1e0",
+          "dst": "<wasm_tools::dump::Dump>::print_@0x43a5a0",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x42f1e0",
+          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x541a90",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x42f1e0",
+          "dst": "<anyhow::Error>::construct::<wasmparser::binary_reader::BinaryReaderError>@0x58a640",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x42f1e0",
+          "dst": "<wasmparser::readers::core::branch_hinting::BranchHintFunction as wasmparser::readers::FromReader>::from_reader@0xedb030",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        }
+      ]
+    },
+    "i686-unknown-linux-android": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x5defa0",
+          "dst": "<wasm_tools::dump::Dump>::print_@0x5ea950",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x5defa0",
+          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x6cb820",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x5defa0",
+          "dst": "<anyhow::Error>::construct::<wasmparser::binary_reader::BinaryReaderError>@0x65bba0",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x5defa0",
+          "dst": "<wasmparser::readers::core::branch_hinting::BranchHintFunction as wasmparser::readers::FromReader>::from_reader@0x1058030",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c 28.2.13676358): the same print_iter dispatch family the other platforms' labels use, with node addresses from this build's symbolized callgraph in the same run."
+        }
+      ]
+    },
+    "arm-unknown-linux-android": {
+      "assertions": [
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x1c389c",
+          "dst": "<wasm_tools::dump::Dump>::print_@0x1ca8e4",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk armeabi-v7a build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c). Node names and addresses come from the build's llvm-nm symbol table (Thumb bit cleared); the calls exist in the source. expect_present is true even though today this platform resolves no direct edges at all (KPI internal_edges = 0) - that zero is the defect A4a measures and fixes, and these assertions turn from false negatives into present edges as T2/T3 land."
+        },
+        {
+          "type": "internal",
+          "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x1c389c",
+          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x7ef05e",
+          "kind": "direct",
+          "expect_present": true,
+          "note": "Recorded for A4a T1 from the cargo-ndk armeabi-v7a build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c). Node names and addresses come from the build's llvm-nm symbol table (Thumb bit cleared); the calls exist in the source. expect_present is true even though today this platform resolves no direct edges at all (KPI internal_edges = 0) - that zero is the defect A4a measures and fixes, and these assertions turn from false negatives into present edges as T2/T3 land."
+        }
+      ]
     }
   }
 }
