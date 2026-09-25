@@ -143,8 +143,13 @@ def parse_readelf(text: str) -> dict:
 
 def _parse_program_headers(lines: list[str], start: int, facts: dict) -> int:
     idx = start
+    # Rows stop on an empty line OR a non-row: llvm-readelf does not always
+    # separate tables with blank lines (seen with --omagic layouts), so a
+    # shape check is what keeps one table from swallowing the rest.
     while idx < len(lines) and lines[idx].strip():
-        if match := PHDR_RE.match(lines[idx]):
+        if not (match := PHDR_RE.match(lines[idx])):
+            break
+        if match:
             segment = {
                 "type": match.group(1),
                 "offset": int(match.group(2), 16),
@@ -163,19 +168,23 @@ def _parse_program_headers(lines: list[str], start: int, facts: dict) -> int:
 def _parse_dynamic(lines: list[str], start: int, facts: dict) -> int:
     idx = start
     while idx < len(lines) and lines[idx].strip():
-        if match := DYN_RE.match(lines[idx]):
-            facts["dyn"].setdefault(match.group(1), []).append(match.group(2).strip())
+        if not (match := DYN_RE.match(lines[idx])):
+            break
+        facts["dyn"].setdefault(match.group(1), []).append(match.group(2).strip())
         idx += 1
     return idx
 
 
 def _parse_symbols(lines: list[str], start: int, facts: dict) -> int:
     idx = start
+    if idx < len(lines) and lines[idx].lstrip().startswith("Num:"):
+        idx += 1  # the table's "Num: Value Size Type ..." header row
     while idx < len(lines) and lines[idx].strip():
-        if match := SYMBOL_RE.match(lines[idx]):
-            name = match.group(5).split("@", 1)[0]
-            if name and name != "UND":
-                facts["symbol_names"].add(name)
+        if not (match := SYMBOL_RE.match(lines[idx])):
+            break
+        name = match.group(5).split("@", 1)[0]
+        if name and name != "UND":
+            facts["symbol_names"].add(name)
         idx += 1
     return idx
 
