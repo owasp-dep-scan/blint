@@ -382,10 +382,10 @@
         {
           "type": "internal",
           "src": "<wasm_tools::dump::Dump>::print_iter::<wasmparser::readers::core::branch_hinting::BranchHintFunction, <wasm_tools::dump::Dump>::print_module::{closure#22}>@0x1c389c",
-          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x7ef05e",
+          "dst": "<wasmparser::binary_reader::BinaryReaderError>::new::<&str>@0x26a718",
           "kind": "direct",
           "expect_present": true,
-          "note": "Recorded for A4a T1 from the cargo-ndk armeabi-v7a build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c). Node names and addresses come from the build's llvm-nm symbol table (Thumb bit cleared); the calls exist in the source. expect_present is true even though today this platform resolves no direct edges at all (KPI internal_edges = 0) - that zero is the defect A4a measures and fixes, and these assertions turn from false negatives into present edges as T2/T3 land."
+          "note": "Recorded for A4a T1 from the cargo-ndk armeabi-v7a build of wasm-tools 1.247.0 (rustc 1.98.0, NDK r28c). Node names and addresses come from the build's llvm-nm symbol table (Thumb bit cleared). D2 correction: the A4a recording paired this name with the wrong monomorphization copy - llvm-nm in the D2 run shows 0x7ef05e is `BinaryReaderError3newRNtNt...alloc6string6String` (new::<&String>), while new::<&str> lives at 0x26a718 (`...3newReECsf1efNuoM7P4_10wasm_tools`), and llvm-objdump -d over print_iter's extent 0x1c389c-0x1c3ae8 shows its three bl sites (0x1c3aae, 0x1c3c38, 0x1c3e96) all target 0x26a718. blint already resolved those edges; only the label's address was wrong (the recall 0.5 was a label defect, not a resolver miss)."
         }
       ]
     }
