@@ -149,6 +149,42 @@ def test_deflated_locations_not_zip_judged() -> None:
     assert rec["elf_16k"] is True
 
 
+def test_sanitizer_fact() -> None:
+    facts = android_facts(DATA / "libhello_hwasan.so")
+    assert facts["sanitizers"] == {"sanitizers": ["hwasan"], "cfi": False}
+    assert "sanitizers" not in android_facts(CLEAN)
+
+
+def test_fortify_fact() -> None:
+    fortified = android_facts(DATA / "libhello_fortify.so")["fortify"]["symbols"]
+    assert "__memcpy_chk" in fortified and "__read_chk" in fortified
+    assert "__stack_chk_fail" not in fortified  # canary, not FORTIFY
+    # The -U_FORTIFY_SOURCE twin keeps the plain imports, no _chk set.
+    assert "fortify" not in android_facts(DATA / "libhello_nofortify.so")
+
+
+def test_unwind_fact() -> None:
+    facts = android_facts(CLEAN)["unwind"]
+    assert facts == {"eh_frame": True, "arm_exidx": False, "gnu_debugdata": False}
+    # arm32 unwind tables live in .ARM.exidx (A4a fixture, real NDK build).
+    exidx = android_facts(ARM32)["unwind"]
+    assert exidx["arm_exidx"] is True and exidx["eh_frame"] is False
+
+
+def test_shadow_call_stack_fact() -> None:
+    metadata = parse(str(DATA / "libhello_scs.so"), disassemble=True)
+    if not metadata.get("disassembled_functions"):
+        pytest.skip("disassembly unavailable (no nyxstone)")
+    scs = metadata["android"]["shadow_call_stack"]
+    assert scs["function_count"] == 2
+    assert "java_add_left" in scs["functions"]
+    # The clean twin has no x18 store/load pair anywhere.
+    clean = parse(str(CLEAN), disassemble=True)
+    if not clean.get("disassembled_functions"):
+        pytest.skip("disassembly unavailable (no nyxstone)")
+    assert "shadow_call_stack" not in clean["android"]
+
+
 def test_arm64_only_facts_absent_on_arm32() -> None:
     """Rule 35: MTE/BTI-PAC facts do not exist for a 32-bit Android ELF."""
     metadata = parse(str(ARM32))
@@ -173,7 +209,9 @@ def test_probe_agrees_with_readelf_on_fixtures(tmp_path: Path) -> None:
     fixture: no disagreements. B2/B3 facts are not implemented yet, so the
     run is non-strict."""
     fixtures = [CLEAN, TEXTRELS, RELR, APS2, NOSONAME, ABSNEEDED, MEMTAG, BTI,
-                DATA / "libhello_page4k.so", DATA / "libhello_page16k.so"]
+                DATA / "libhello_page4k.so", DATA / "libhello_page16k.so",
+                DATA / "libhello_hwasan.so", DATA / "libhello_fortify.so",
+                DATA / "libhello_nofortify.so"]
     out = tmp_path / "probe.json"
     code = elf_facts_probe.main(
         [str(f) for f in fixtures] + ["--json", str(out)]

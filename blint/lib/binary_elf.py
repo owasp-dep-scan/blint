@@ -124,6 +124,20 @@ NT_MEMTAG_STACK = 8
 DF_TEXTREL = 0x4
 PAGE_16K = 16384
 
+# Sanitizer runtime evidence (02/A): the NDK links the sanitizer runtime
+# statically into the shipped .so, so the markers appear both as imports
+# (__hwasan_init) and defined exports (__asan_report_*); matching the
+# dynamic symbol table either way is the fact. __cfi_check is the CFI
+# instrumentation entry point a -fsanitize-cfi build defines.
+SANITIZER_PREFIXES = {
+    "hwasan": "__hwasan_",
+    "asan": "__asan_",
+    "ubsan": "__ubsan_",
+    "tsan": "__tsan_",
+    "msan": "__msan_",
+}
+CFI_SYMBOL = "__cfi_check"
+
 _AARCH64_FEATURE_NAMES = {
     GNU_PROPERTY_AARCH64_FEATURE_1_BTI: "BTI",
     GNU_PROPERTY_AARCH64_FEATURE_1_PAC: "PAC",
@@ -491,6 +505,89 @@ def _decode_aarch64_property_note(note) -> list[str]:
     return features
 
 
+def parse_android_sanitizers(symbol_names: set[str]) -> dict | None:
+    """Sanitizer runtime markers in the dynamic symbol table (02/A)."""
+    found = sorted(
+        kind for kind, prefix in SANITIZER_PREFIXES.items()
+        if any(name.startswith(prefix) for name in symbol_names)
+    )
+    result = {"sanitizers": found, "cfi": CFI_SYMBOL in symbol_names}
+    return result if (found or result["cfi"]) else None
+
+
+def parse_android_fortify(symbol_names: set[str]) -> dict | None:
+    """bionic ``__*_chk`` imports (02/A).
+
+    The FORTIFY annotation (FORTIFIED_LIBC_IN_USE) reviews the same
+    evidence; the fact records the names. ``__stack_chk_*`` is the canary,
+    deliberately excluded here as there.
+    """
+    fortified = sorted(
+        name for name in symbol_names
+        if name.startswith("__") and name.endswith("_chk")
+        and not name.startswith("__stack_chk")
+    )
+    return {"symbols": fortified} if fortified else None
+
+
+def parse_android_unwind(parsed_obj: lief.ELF.Binary) -> dict | None:
+    """Unwind-table presence (02/A): .eh_frame / .ARM.exidx / .gnu_debugdata.
+
+    ``.eh_frame`` on every ABI, ``.ARM.exidx`` on arm32; ``.gnu_debugdata``
+    is the mini-debuginfo a release build ships alongside a stripped
+    symbol table. Only present sections are named.
+    """
+    with contextlib.suppress(AttributeError, TypeError):
+        names = {section.name for section in parsed_obj.sections}
+        result = {
+            "eh_frame": ".eh_frame" in names,
+            "arm_exidx": ".ARM.exidx" in names,
+            "gnu_debugdata": ".gnu_debugdata" in names,
+        }
+        if any(result.values()):
+            return result
+    return None
+
+
+def parse_shadow_call_stack(metadata: dict) -> dict | None:
+    """arm64 shadow-call-stack prologue/epilogue evidence (02/A), text-based.
+
+    A ``-fsanitize=shadow-call-stack`` function keeps its return address on
+    a separate stack held in x18, so the disassembly shows a store through
+    ``[x18`` in the prologue and a load through ``[x18`` before the return
+    (measured on an NDK r28 build: ``str x30, [x18], #0x8`` /
+    ``ldr x30, [x18, #-0x8]!``). Nyxstone provides no register metadata
+    (AGENTS.md), so this is a match on the assembly text of each
+    disassembled function, and it only runs when ``--disassemble`` did.
+    """
+    disassembled = metadata.get("disassembled_functions")
+    if not isinstance(disassembled, dict) or not disassembled:
+        return None
+    functions = []
+    for func_key, func_data in disassembled.items():
+        assembly = func_data.get("assembly") if isinstance(func_data, dict) else None
+        if not assembly:
+            continue
+        has_store = False
+        has_load = False
+        for line in str(assembly).splitlines():
+            parts = line.split(maxsplit=1)
+            if len(parts) != 2 or "[x18" not in parts[1]:
+                continue
+            mnemonic = parts[0].strip()
+            if not parts[1].startswith("x30"):
+                continue
+            if mnemonic in ("str", "stur"):
+                has_store = True
+            elif mnemonic in ("ldr", "ldur"):
+                has_load = True
+        if has_store and has_load:
+            functions.append(func_data.get("name") or func_key)
+    if not functions:
+        return None
+    return {"functions": sorted(functions)[:64], "function_count": len(functions)}
+
+
 def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | None:
     """Collects the bionic-specific ELF facts (02/A) under one nested key.
 
@@ -603,6 +700,17 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
                     "vaddr": int(segment.virtual_address),
                 }
                 break
+    symbol_names = {
+        entry.get("name")
+        for entry in metadata.get("dynamic_symbols") or []
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    if sanitizers := parse_android_sanitizers(symbol_names):
+        facts["sanitizers"] = sanitizers
+    if fortify := parse_android_fortify(symbol_names):
+        facts["fortify"] = fortify
+    if unwind := parse_android_unwind(parsed_obj):
+        facts["unwind"] = unwind
     return facts
 
 
@@ -680,11 +788,6 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata = add_elf_symbols(metadata, parsed_obj)
     metadata["notes"] = parse_notes(parsed_obj)
     metadata["dlopen_dependencies"] = consolidate_dlopen_dependencies(metadata["notes"])
-    # Bionic-specific facts (02/A), one nested key, Android-targeting ELFs
-    # only (arm64-only facts gated again inside); None on other binaries.
-    android_facts = parse_android_facts(parsed_obj, metadata)
-    if android_facts is not None:
-        metadata["android"] = android_facts
     metadata["strings"] = parse_strings(parsed_obj)
     metadata["symtab_symbols"], exe_type = parse_symbols(symtab_symbols)
     rdata_section = parsed_obj.get_section(".rodata")
@@ -695,6 +798,13 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
+    # Bionic-specific facts (02/A), one nested key, Android-targeting ELFs
+    # only (arm64-only facts gated again inside); None on other binaries.
+    # Runs after the dynamic symbol tables are in metadata because the
+    # sanitizer and fortify facts read their names.
+    android_facts = parse_android_facts(parsed_obj, metadata)
+    if android_facts is not None:
+        metadata["android"] = android_facts
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dtor_functions"] = parse_functions(parsed_obj.dtor_functions)

@@ -519,13 +519,13 @@ FACTS = [
      lambda md: android_fact(md, "page_alignment"),
      oracle_page_alignment, _eq),
     ("wx_segments", "shipped", blint_wx_segments, oracle_wx_segments, _eq),
-    ("sanitizers", "B3",
+    ("sanitizers", "shipped",
      lambda md: android_fact(md, "sanitizers"),
      oracle_sanitizers, _eq),
-    ("fortify", "B3",
+    ("fortify", "shipped",
      lambda md: android_fact(md, "fortify"),
      oracle_fortify, _eq),
-    ("unwind", "B3",
+    ("unwind", "shipped",
      lambda md: android_fact(md, "unwind"),
      oracle_unwind, _eq),
     ("shadow_call_stack", "B3", None, None, None),
@@ -542,7 +542,7 @@ IMPLEMENTED = {
     "android_ident.min_api", "android_ident.ndk_version",
     "packed_relocations", "memtag", "aarch64_features",
     "text_relocations", "soname", "needed_absolute", "tls_segment",
-    "page_alignment",
+    "page_alignment", "sanitizers", "fortify", "unwind",
 }
 
 
