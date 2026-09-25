@@ -459,15 +459,28 @@ def decode_arm32_extent(
     return instructions
 
 
-def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], dict]:
-    """Run readelf + objdump and assemble per-function oracle records."""
+def build_oracle(
+    so: Path, bin_dir: Path, abi: str, twin: Path | None = None
+) -> tuple[dict[int, dict], dict]:
+    """Run readelf + objdump and assemble per-function oracle records.
+
+    With ``twin`` (the R3 rung), the oracle's function set, sizes and
+    mapping labels come from the unstripped twin's symbol table while the
+    instruction timelines still decode the stripped file's bytes - the
+    ladder's definition of the stripped-binary oracle.
+    """
+    symbols_source = twin or so
     functions, mapping = parse_readelf_symbols(
-        _run(bin_dir / "llvm-readelf", ["--symbols", "--wide"], so)
+        _run(bin_dir / "llvm-readelf", ["--symbols", "--wide"], symbols_source)
     )
-    unwind_starts = parse_readelf_unwind(_run(bin_dir / "llvm-readelf", ["--unwind"], so))
+    unwind_starts = parse_readelf_unwind(
+        _run(bin_dir / "llvm-readelf", ["--unwind"], symbols_source)
+    )
     for start in unwind_starts:
         functions.setdefault(start, {"name": "", "start": start, "size": 0, "thumb": None})
-    sections = parse_readelf_sections(_run(bin_dir / "llvm-readelf", ["--sections"], so))
+    sections = parse_readelf_sections(
+        _run(bin_dir / "llvm-readelf", ["--sections"], symbols_source)
+    )
     labels_by_shndx: dict[int, dict[int, str]] = {}
     for label_addr, (label_mode, shndx) in mapping.items():
         labels_by_shndx.setdefault(shndx, {})[label_addr] = label_mode
@@ -510,9 +523,7 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
             # pass over a mixed extent decodes the second island's bytes as
             # garbage (2x count differences on real libraries).
             section_labels = labels_by_shndx.get(section_for_address(sections, start) or -1, {})
-            instructions = decode_arm32_extent(
-                timelines, section_labels, start, end, mode
-            )
+            instructions = decode_arm32_extent(timelines, section_labels, start, end, mode)
         else:
             timeline, addresses = timelines[ABI_TRIPLES[abi][0]]
             instructions = slice_timeline(timeline, addresses, start, end)
@@ -524,9 +535,11 @@ def build_oracle(so: Path, bin_dir: Path, abi: str) -> tuple[dict[int, dict], di
             "raw_count": len(instructions),
             "trimmed": trimmed,
             "trimmed_last": trimmed_last,
+            "extent_end": end,
             "targets": direct_call_targets(instructions, call_mnemonics, abi in ARM32_ABIS),
         }
     provenance = {
+        "twin": str(twin) if twin else None,
         "llvm_bin": str(bin_dir),
         "objdump_version": tool_version(bin_dir, "llvm-objdump"),
         "readelf_version": tool_version(bin_dir, "llvm-readelf"),
@@ -629,12 +642,18 @@ def _blint_instruction_addresses(func: dict) -> list[int]:
 
 
 def prepare_blint(blint_funcs: dict[int, dict]) -> dict[int, dict]:
-    """Attach trimmed lines and last-kept-instruction addresses."""
+    """Attach trimmed lines, last-kept-instruction addresses and extent ends."""
     for func in blint_funcs.values():
         func["trimmed"] = trim_padding(func["lines"])
         keep = len(func["trimmed"])
         addresses = _blint_instruction_addresses(func)
         func["trimmed_last"] = addresses[keep - 1] if keep else func["start"]
+        # The extent end: the last kept instruction's end, using its own
+        # length (the final line's size from instruction_lengths).
+        lengths = func.get("lengths") or []
+        func["trimmed_end"] = (
+            func["trimmed_last"] + lengths[keep - 1] if keep and lengths else func["start"]
+        )
     return blint_funcs
 
 
@@ -646,6 +665,7 @@ def compare(blint_funcs: dict[int, dict], oracle_funcs: dict[int, dict], abi: st
     report: dict = {"abi": abi, "functions": [], "summary": {}}
     diffs: list[str] = []
     matched = missing = extra = boundary = counts = mnemonics = mode_diff = 0
+    overshoot = 0
     edge_matches = blint_edges_total = oracle_edges_total = 0
     for start in sorted(set(blint_funcs) | set(oracle_funcs)):
         bl = blint_funcs.get(start)
@@ -701,6 +721,12 @@ def compare(blint_funcs: dict[int, dict], oracle_funcs: dict[int, dict], abi: st
                 diffs.append(
                     f"mode {hex(start)} ({orac['name']}): blint {bl.get('mode')} vs oracle {orac.get('mode')}"
                 )
+            if bl.get("trimmed_end", 0) > orac.get("extent_end", 0):
+                # The gate metric for stripped rungs: claiming bytes beyond
+                # the extent (the next function's leading bytes) is the harm;
+                # stopping inside one's own literal pool is not.
+                overshoot += 1
+                entry["extent_overshoot"] = True
             if bl["trimmed_last"] != orac["trimmed_last"]:
                 boundary += 1
                 entry["verdict"] = "boundary"
@@ -747,6 +773,7 @@ def compare(blint_funcs: dict[int, dict], oracle_funcs: dict[int, dict], abi: st
         "count_mismatch": counts,
         "mnemonic_mismatch": mnemonics,
         "mode_mismatch": mode_diff,
+        "extent_overshoot": overshoot,
         "edge_precision": (edge_matches / blint_edges_total) if blint_edges_total else None,
         "edge_recall": (edge_matches / oracle_edges_total) if oracle_edges_total else None,
         "boundary_precision": (matched / len(blint_funcs)) if blint_funcs else None,
@@ -809,6 +836,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--function", help="filter the per-function table by substring")
     parser.add_argument("--abi", choices=sorted(ABI_TRIPLES), help="override ABI detection")
     parser.add_argument("--llvm-bin", help="directory with llvm-objdump/llvm-readelf")
+    parser.add_argument(
+        "--twin",
+        type=Path,
+        help="unstripped twin: the oracle's symbols/sizes/labels come from it, the decode from the primary file (R3 rung)",
+    )
     parser.add_argument("--json", type=Path, help="write the full report JSON here")
     args = parser.parse_args(argv)
 
@@ -818,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
 
         metadata = parse(str(args.so), disassemble=True)
         abi = detect_abi(metadata, args.abi)
-        oracle, provenance = build_oracle(args.so, bin_dir, abi)
+        oracle, provenance = build_oracle(args.so, bin_dir, abi, twin=args.twin)
         provenance["llvm_bin_source"] = llvm_provenance
         blint_funcs = prepare_blint(collect_blint(metadata, abi))
         report = compare(blint_funcs, oracle, abi)

@@ -577,6 +577,7 @@ Recovered function starts for binaries whose symbol tables are stripped or incom
 - **`discovered_functions`**: every function start recovered from the structures the runtime itself depends on, which survive `strip`:
   - **Mach-O `__TEXT,__unwind_info`** (compact unwind): `source: "unwind"`, with exact function sizes derived from the sorted offset table and its sentinel entry.
   - **ELF `.eh_frame_hdr` / `.eh_frame`**: `source: "eh_frame"`. Starts come from the binary-search table when present; sizes come from the exact FDE `pc_range` values. A CIE/FDE walk covers binaries whose header table is missing or malformed.
+  - **ELF `.ARM.exidx` (ARM EHABI, 32-bit ARM only)**: `source: "arm_exidx"`. One row per function the runtime can unwind, decoded from PREL31 offsets; the table replaces `.eh_frame` on armeabi-v7a and survives `strip`. EHABI stores no extents, so sizes are 0 and disassembly bounds these entries with the next-known-start window.
   - Each entry carries `name` (the real symbol name when one exists, `sub_<address>` otherwise), `address`, `size` and `source`. Addresses already claimed by a symbol bucket enrich the existing entry with the exact unwind size when its size was unknown.
 - **`function_discovery`**: summary of the merge — `sources` (per-source counts) and `merged_count` (addresses that were genuinely new, i.e. not claimed by any symbol bucket).
 

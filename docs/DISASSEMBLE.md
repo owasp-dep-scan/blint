@@ -73,7 +73,7 @@ Block-graph metrics computed from the truncated instruction list after the flat 
 Function addresses come from three cooperating sources, tried in order of confidence:
 
 1. **Symbols and load commands** — symbol tables, exports, `LC_FUNCTION_STARTS`, `.pdata` (x64 PE), ObjC method IMPs.
-2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values.
+2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values. 32-bit ARM ELF carries `.ARM.exidx` (ARM EHABI) instead of `.eh_frame`: one PREL31-decoded row per function, starts only (no extents), read before any heuristic.
 3. **Completion passes**:
    - **Prologue scan** (only when symbols + unwind produced fewer than 32 functions): scans executable bytes for compiler frame setups — `push rbp; mov rbp, rsp`, `endbr64` + frame setup and Go's stack-guard prologues on x86-64; `paciasp`, the `stp x29, x30, [sp, #-N]!` frame-push and Go's `ldr x16, [x28+16]` guard on ARM64. Candidates are tagged `source: "prologue"` (lowest confidence).
    - **Call-site promotion** (bounded to a fixpoint): a resolved _direct_-call target that sits in executable memory outside every known function extent (unwind sizes and completed disassemblies) is promoted into a new function and disassembled in turn. Tagged `source: "callsite"`.

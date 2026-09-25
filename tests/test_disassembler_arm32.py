@@ -7,6 +7,8 @@ span/mode helpers run everywhere; the decode-level tests need nyxstone.
 
 from __future__ import annotations
 
+import re
+import shutil
 from pathlib import Path
 
 import lief
@@ -357,3 +359,74 @@ class _FakeInstr:
         self.address = address
         self.assembly = ""
         self.bytes = b""
+
+
+# ------------------------------------------------------------ T4 discovery
+
+
+def test_prel31_decode() -> None:
+    from blint.lib.funcdisc.unwind import _decode_prel31
+
+    assert _decode_prel31(0x00000010) == 16
+    # A 31-bit field signed at bit 30 with bit 31 reserved-clear (real
+    # .ARM.exidx words): 0x3FFFFFFF is the maximum positive, 0x40000000 is
+    # the most negative, 0x7FFFFFC0 is -64.
+    assert _decode_prel31(0x3FFFFFFF) == 0x3FFFFFFF
+    assert _decode_prel31(0x40000000) == -(1 << 30)
+    assert _decode_prel31(0x7FFFFFC0) == -64
+
+
+def test_arm_exidx_discovery_on_stripped_fixture() -> None:
+    """The committed stripped R1 twin: .ARM.exidx rows become
+    discovered_functions with source arm_exidx (no symtab exists to claim
+    them through any other bucket)."""
+    stripped = R2.parent / "liba4a_r1_thumb_stripped.so"
+    metadata = parse(str(stripped))
+    discovered = metadata.get("discovered_functions") or []
+    exidx = [entry for entry in discovered if entry.get("source") == "arm_exidx"]
+    assert len(exidx) == 7
+    assert {entry["address"] for entry in exidx} >= {
+        "0x135c",
+        "0x136c",
+        "0x1370",
+        "0x1374",
+        "0x1380",
+        "0x13a0",
+    }
+    assert metadata["function_discovery"]["sources"]["arm_exidx"] == 7
+
+
+def test_arm_exidx_matches_readelf_unwind() -> None:
+    """Same-run oracle: the parser's starts equal llvm-readelf --unwind's
+    FunctionAddress set over the same file."""
+    stripped = R2.parent / "liba4a_r1_thumb_stripped.so"
+    metadata = parse(str(stripped))
+    starts = {
+        int(entry["address"], 16)
+        for entry in (metadata.get("discovered_functions") or [])
+        if entry.get("source") == "arm_exidx"
+    }
+    import subprocess
+
+    readelf = shutil.which("llvm-readelf")
+    if readelf is None:
+        bin_dir = Path.home() / "Android" / "sdk" / "ndk"
+        candidates = sorted(bin_dir.glob("*/toolchains/llvm/prebuilt/*/bin/llvm-readelf"))
+        if not candidates:
+            pytest.skip("llvm-readelf not available for the same-run oracle")
+        readelf = str(candidates[-1])
+    out = subprocess.run(
+        [readelf, "--unwind", str(stripped)], capture_output=True, text=True, check=False
+    ).stdout
+    expected = {
+        int(token, 16) & ~1 for token in re.findall(r"FunctionAddress:\s*(0x[0-9a-fA-F]+)", out)
+    }
+    assert starts == expected
+
+
+def test_no_eh_frame_regression_for_other_abis() -> None:
+    """arm64's .eh_frame path is untouched: the same discovery runs and
+    reports eh_frame, never arm_exidx."""
+    metadata = parse(str(R2.parent / "liba4a_r1_arm64-v8a.so"))
+    sources = (metadata.get("function_discovery") or {}).get("sources") or {}
+    assert "arm_exidx" not in sources

@@ -953,13 +953,15 @@ def _find_function_end_index(
 
     is_arm32 = _is_arm32_target(arch_target)
 
+    def _parts(index: int) -> tuple[str, str]:
+        pieces = instr_list[index].assembly.split(None, 1)
+        return pieces[0].lower(), pieces[1] if len(pieces) > 1 else ""
+
     def _terminates(index: int) -> bool:
-        mnemonic = instr_list[index].assembly.split(None, 1)[0].lower()
+        mnemonic, operand = _parts(index)
         if mnemonic in TERMINATING_INST or mnemonic in UNCONDITIONAL_JMP_INST_ALL:
             return True
         if is_arm32:
-            parts = instr_list[index].assembly.split(None, 1)
-            operand = parts[1] if len(parts) > 1 else ""
             # ARM32 returns (`bx lr`, `pop {…, pc}`, `ldr pc, [sp], #4`) are
             # not in the shared terminating set; without them a size-less
             # window keeps the next function's leading bytes as trailing
@@ -2970,7 +2972,11 @@ def disassemble_functions(
     # address (a dynsym FUNC and a nameless unwind-table row), and after
     # ARM32 alignment merges them into one identity the first processed
     # entry's name wins - it must be the real symbol, not the sub_ twin.
-    all_funcs.sort(key=lambda entry: 0 if entry.get("name") else 1)
+    all_funcs.sort(
+        key=lambda entry: (
+            0 if entry.get("name") and not str(entry.get("name")).startswith("sub_") else 1
+        )
+    )
     # Worklist instead of a plain list so direct-call promotion can append
     # newly discovered functions; initial entries keep their existing order.
     worklist: deque = deque(all_funcs)
@@ -3039,7 +3045,13 @@ def disassemble_functions(
             # Mapping labels are section-local; only this function's section
             # has a say in its modes and spans.
             arm32_section_modes = arm32_mapping_modes.get(func_shndx, [])
-            has_symbol = bool(func_entry.get("name") and not func_entry.get("discovered")) or bool(
+            # Synthetic sub_ names (the merge's readability rename for
+            # nameless claims) are not symbol evidence: trusting them makes
+            # even-aligned exidx rows decode as ARM and produces garbage.
+            real_name = func_entry.get("name")
+            if real_name and str(real_name).startswith("sub_"):
+                real_name = None
+            has_symbol = bool(real_name and not func_entry.get("discovered")) or bool(
                 arm32_raw_func_addr & 1
             )
             arm32_mode = _arm32_function_mode(
@@ -3057,6 +3069,19 @@ def disassemble_functions(
             if current_index is not None and current_index + 1 < len(all_func_addrs_sorted):
                 next_func_addr = all_func_addrs_sorted[current_index + 1]
                 size_to_disasm = next_func_addr - func_addr
+            elif is_arm32 and func_entry.get("discovered") == "callsite":
+                # An ARM32 promoted mid-function entry: window to the next
+                # known start (promotions included), never the 4096-byte
+                # blind window that swallows the following functions whole.
+                # Other architectures keep the blind window their KPI
+                # baselines were calibrated against (measured: bounding
+                # them here cost PE 48 direct edges).
+                next_index = bisect.bisect_right(known_starts, func_addr)
+                if next_index < len(known_starts):
+                    size_to_disasm = known_starts[next_index] - func_addr
+                else:
+                    size_to_disasm = 4096
+                has_exact_size = False
             else:
                 size_to_disasm = 4096
                 has_exact_size = False
@@ -3420,6 +3445,11 @@ def disassemble_functions(
                     is_aarch64="aarch64" in arch_target.lower() or "arm64" in arch_target.lower(),
                 )
                 for promoted_addr in promoted:
+                    # Promoted starts join known_starts: they bound each
+                    # other's windows (a promoted mid-function entry runs to
+                    # the next known thing) without shrinking the
+                    # discovery-derived windows of the functions containing
+                    # them.
                     bisect.insort(known_starts, promoted_addr)
                     worklist.append(
                         {
