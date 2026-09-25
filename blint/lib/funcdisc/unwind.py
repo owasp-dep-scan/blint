@@ -470,6 +470,7 @@ def _skip_uleb128(data: bytes, offset: int | None, end: int) -> int | None:
 
 def _decode_prel31(value: int) -> int:
     """Sign-extend a PREL31 field (bit 30 is the sign bit; bit 31 reserved)."""
+    value &= 0x7FFFFFFF
     if value & 0x40000000:
         return value - (1 << 31)
     return value

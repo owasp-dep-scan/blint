@@ -2,6 +2,7 @@ import bisect
 import contextlib
 import hashlib
 import re
+import struct
 from collections import deque
 from functools import cache, lru_cache
 from typing import NamedTuple
@@ -1379,7 +1380,7 @@ def _analyze_instructions(
     is_apple_silicon = "aarch64" in lower_arch and isinstance(parsed_obj, lief.MachO.Binary)
     if parsed_instrs is None:
         parsed_instrs = [_parse_instruction_text(instr.assembly) for instr in instr_list]
-    for instr, parsed_instr in zip(instr_list, parsed_instrs):
+    for line_index, (instr, parsed_instr) in enumerate(zip(instr_list, parsed_instrs)):
         instr_assembly = instr.assembly
         if not parsed_instr.mnemonic:
             continue
@@ -1435,7 +1436,7 @@ def _analyze_instructions(
                     # ARM32 conditional branches print a PC-relative delta;
                     # Thumb PC is addr+4, ARM PC is addr+8.
                     mode = (
-                        arm32_line_modes[len(instruction_mnemonics) - 1]
+                        arm32_line_modes[line_index]
                         if arm32_line_modes and len(arm32_line_modes) == len(instr_list)
                         else None
                     )
@@ -2111,8 +2112,6 @@ def _arm32_extract_literals(
     tracker in the call resolver can complete them. Reads go through LIEF
     with the same rebased lookup the function bytes used.
     """
-    import struct as _struct
-
     literals: dict[str, int] = {}
     for index, (instr, parsed) in enumerate(zip(truncated_instr_list, parsed_instrs)):
         mnemonic = parsed.mnemonic
@@ -2135,7 +2134,7 @@ def _arm32_extract_literals(
             raw = bytes(content)
             if len(raw) < 4:
                 continue
-            value = _struct.unpack("<I", raw[:4])[0]
+            value = struct.unpack("<I", raw[:4])[0]
             if value >= 0x80000000:
                 value -= 1 << 32
             literals[hex(literal_addr)] = value
@@ -2440,15 +2439,14 @@ def _resolve_direct_calls(
                 # the function is a tail call (PLT thunks and -Oz tail
                 # merging); a target inside the extent is a local branch.
                 operand = parsed_tail.operand_text.strip()
-                target_addr = (
-                    _arm32_branch_target(
-                        tail_instr, operand, _line_mode(len(instr_list) - 1), mnemonic
-                    )
-                    & ~1
+                target_addr = _arm32_branch_target(
+                    tail_instr, operand, _line_mode(len(instr_list) - 1), mnemonic
                 )
                 func_start = instr_list[0].address
                 last = instr_list[-1]
                 func_end = last.address + len(last.bytes)
+                if target_addr is not None:
+                    target_addr &= ~1
                 if target_addr is not None and not (func_start <= target_addr < func_end):
                     target_name = _lookup_target_name([target_addr], addr_to_name_map)
                     _append_call_target(
@@ -2660,9 +2658,9 @@ def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
     ARM32 functions carry literal pools and jump tables inline; objdump
     prints those as ``.word``/``<unknown>`` and carries on, while a nyxstone
     call raises and would otherwise truncate the function at the pool. The
-    resume skips one instruction width (4 bytes in ARM state; 4 then 2 in
-    Thumb, where pool entries are 4-byte aligned but 16-bit code may sit at
-    a 2-byte offset), bounded so a genuinely bad stream cannot loop.
+    resume skips one 4-byte word (pool entries are word-sized in both
+    states). Every iteration advances the cursor, and eight consecutive
+    undecodable words end the span.
     """
     instructions: list = []
     cursor = 0
@@ -2683,11 +2681,8 @@ def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
             cursor += 4
             continue
         instructions.extend(prefix)
-        consumed = sum(len(instr.bytes) for instr in prefix)
-        cursor += consumed
-        if cursor < total and skips < 8:
-            skips += 1
-            cursor += 4
+        cursor += sum(len(instr.bytes) for instr in prefix) + 4
+        skips = 1
     return instructions
 
 
@@ -2972,11 +2967,12 @@ def disassemble_functions(
     # address (a dynsym FUNC and a nameless unwind-table row), and after
     # ARM32 alignment merges them into one identity the first processed
     # entry's name wins - it must be the real symbol, not the sub_ twin.
-    all_funcs.sort(
-        key=lambda entry: (
-            0 if entry.get("name") and not str(entry.get("name")).startswith("sub_") else 1
+    if is_arm32:
+        all_funcs.sort(
+            key=lambda entry: (
+                0 if entry.get("name") and not str(entry.get("name")).startswith("sub_") else 1
+            )
         )
-    )
     # Worklist instead of a plain list so direct-call promotion can append
     # newly discovered functions; initial entries keep their existing order.
     worklist: deque = deque(all_funcs)
@@ -3034,7 +3030,7 @@ def disassemble_functions(
         arm32_section_modes: list[tuple[int, str]] = []
         if is_arm32:
             func_shndx = _arm32_section_for_address(parsed_obj, func_addr)
-            if func_shndx is None:
+            if func_shndx is None and isinstance(parsed_obj, lief.ELF.Binary):
                 # An exidx entry can name the inter-section padding after
                 # .text; bytes in no section are not code and decoding them
                 # reads into the neighbour section's stubs.

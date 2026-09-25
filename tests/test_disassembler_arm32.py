@@ -121,6 +121,22 @@ def test_span_decoder_resumes_past_undecodable_words() -> None:
 
 
 @pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_span_decoder_is_not_capped_by_the_number_of_pools() -> None:
+    """The skip budget bounds consecutive undecodable words, not pools per
+    function: ten back-to-back copies of atexit's real extent (ten pools)
+    must decode through to the last copy."""
+    from nyxstone import Nyxstone
+
+    binary = lief.parse(str(R2.parent / "liba4a_r1_arm.so"))
+    arm_instance = Nyxstone(target_triple="armv7-unknown-linux-android")
+    extent = list(binary.get_content_from_virtual_address(0x1380, 32))
+    addresses = {
+        instr.address for instr in _disassemble_arm32_span(arm_instance, extent * 10, 0x1380)
+    }
+    assert 0x1380 + 9 * 32 in addresses
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
 def test_parse_records_mode_and_data_spans() -> None:
     metadata = parse(str(R2), disassemble=True)
     functions = metadata["disassembled_functions"]
