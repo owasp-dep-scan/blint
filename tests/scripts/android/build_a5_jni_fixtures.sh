@@ -47,13 +47,17 @@ javac --release 11 -d "$work/classes" \
 cp "$work/classes.dex" "$out/a5-classes.dex"
 
 # ---------------------------------------------------------------- libs
+# -funwind-tables: real RegisterNatives libraries are C++ with unwind
+# tables, and the arm32 stripped twin needs .ARM.exidx rows for the table
+# scan's fnPtr validation (leaf static C functions otherwise get no exidx
+# entry from lld and a stripped twin carries no other start evidence).
 for abi in arm64-v8a armeabi-v7a; do
   case "$abi" in
     arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
     armeabi-v7a) cc="$toolchain/armv7a-linux-androideabi24-clang" ;;
   esac
   for lib in static dynamic; do
-    "$cc" -g -O2 -fPIC -shared -o "$work/liba5_${lib}_${abi}.so" \
+    "$cc" -g -O2 -fPIC -funwind-tables -shared -o "$work/liba5_${lib}_${abi}.so" \
       "$src/jni_${lib}.c"
     cp "$work/liba5_${lib}_${abi}.so" "$out/liba5_${lib}_${abi}.so"
     "$toolchain/llvm-strip" --strip-all \

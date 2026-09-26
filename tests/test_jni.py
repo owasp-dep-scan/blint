@@ -132,8 +132,19 @@ def test_stripped_twin_gives_the_same_block() -> None:
     assert _jni_block("liba5_static_arm64-v8a.so") == _jni_block(
         "liba5_static_arm64-v8a_stripped.so"
     )
-    assert _jni_block("liba5_dynamic_armeabi-v7a.so") == _jni_block(
-        "liba5_dynamic_armeabi-v7a_stripped.so"
+
+    # For the dynamic library the F1 register_natives tables also match,
+    # except that the unstripped twin names the implementation functions.
+    def _surface_only(block: dict) -> dict:
+        stripped_block = {k: v for k, v in (block or {}).items() if k != "register_natives"}
+        for table in ((block or {}).get("register_natives") or {}).get("tables") or []:
+            for entry in table.get("entries") or []:
+                entry.pop("fn_name", None)
+        stripped_block["register_natives"] = (block or {}).get("register_natives")
+        return stripped_block
+
+    assert _surface_only(_jni_block("liba5_dynamic_armeabi-v7a.so")) == _surface_only(
+        _jni_block("liba5_dynamic_armeabi-v7a_stripped.so")
     )
 
 
@@ -261,10 +272,13 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
     summary = build_jni_join_summary(apk, scan_android_native(apk))
     assert summary["counts"] == {"dex_natives": 13, "load_library_sites": 6, "abis": 1}
     abi = summary["per_abi"]["arm64-v8a"]
+    # After F1, the five Dyn* declarations bind dynamically and only
+    # missingNative stays unbound.
     assert abi["counts"] == {
         "libraries": 2,
         "bound": 7,
-        "unbound_dex_natives": 6,
+        "bound_dynamic": 5,
+        "unbound_dex_natives": 1,
         "undeclared_exports": 1,
     }
     bound = {(b["class"], b["name"], b["library"], b["symbol"]) for b in abi["bound"]}
@@ -294,8 +308,11 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
         "Java_com_example_blint_jni_NativeEscapes_f__Ljava_lang_String_2",
     ) in bound
     unbound = {(u["class"], u["name"]) for u in abi["unbound_dex_natives"]}
-    assert ("com.example.blint.jni.Dyn", "dynA1") in unbound  # dynamic (until F1)
     assert ("com.example.blint.jni.NativeEscapes", "missingNative") in unbound
+    dyn_bound = {b["name"]: b for b in abi["bound_dynamic"]}
+    assert dyn_bound["dynA1"]["library"] == "libjnidyn.so"
+    assert dyn_bound["dynA1"]["fn_addr"] == "0x4934"  # == the unstripped symbol
+    assert dyn_bound["dynB2"]["fn_addr"] == "0x4964"
     assert [u["symbol"] for u in abi["undeclared_exports"]] == [
         "Java_com_example_blint_jni_NativeEscapes_orphan"
     ]
@@ -324,11 +341,94 @@ def test_join_listing_cap_crosses_and_flags() -> None:
         {"class": f"Lp/C{i};", "name": "m", "descriptor": "()V"}
         for i in range(JOIN_LISTING_CAP + 5)
     ]
-    result = _join_abi_lists(natives, {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
+    result = _join_abi_lists(natives, {}, {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
     assert result["counts"]["unbound_dex_natives"] == JOIN_LISTING_CAP + 5
     assert len(result["unbound_dex_natives"]) == JOIN_LISTING_CAP
     assert result["unbound_dex_natives_truncated"] is True
     # An under-cap join carries no truncation flag.
-    small = _join_abi_lists(natives[:3], {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
+    small = _join_abi_lists(natives[:3], {}, {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
     assert "unbound_dex_natives_truncated" not in small
     assert small["counts"]["unbound_dex_natives"] == 3
+
+
+# ------------------------------------------------ A5.2 F1: table recovery
+
+
+def test_register_natives_tables_match_the_fixture_source() -> None:
+    """F1's R1 gate: the recovered tables equal the fixture's source -
+    names, signatures and fnPtr equal the unstripped symbol address
+    (llvm-nm on the twin shows t dyn_a1 0x4934 ... dyn_b2 0x4964)."""
+    from blint.lib.binary import parse
+
+    metadata = parse(str(FIXTURES / "liba5_dynamic_arm64-v8a.so"))
+    tables = metadata["android"]["jni"]["register_natives"]
+    assert tables["counts"] == {"tables": 1, "entries": 5}
+    table = tables["tables"][0]
+    assert table["count"] == 5
+    entries = {e["name"]: e for e in table["entries"]}
+    assert set(entries) == {"dynA1", "dynA2", "dynA3", "dynB1", "dynB2"}
+    assert entries["dynA1"]["signature"] == "(I)I"
+    assert entries["dynA2"]["signature"] == "(Ljava/lang/String;)Ljava/lang/String;"
+    assert entries["dynB2"]["signature"] == "(J)I"
+    assert entries["dynA1"]["fn_addr"] == "0x4934"
+    assert entries["dynA2"]["fn_addr"] == "0x493c"
+    assert entries["dynB2"]["fn_addr"] == "0x4964"
+    # The unstripped build names the implementation functions.
+    assert entries["dynA1"]["fn_name"] == "dyn_a1"
+    assert not entries["dynA1"].get("thumb")
+
+
+def test_register_natives_stripped_twins_recover_the_same_tables() -> None:
+    from blint.lib.binary import parse
+
+    for abi in ("arm64-v8a", "armeabi-v7a"):
+        plain = parse(str(FIXTURES / f"liba5_dynamic_{abi}.so"))
+        stripped = parse(str(FIXTURES / f"liba5_dynamic_{abi}_stripped.so"))
+        left = plain["android"]["jni"]["register_natives"]
+        right = stripped["android"]["jni"]["register_natives"]
+        assert left["counts"] == right["counts"] == {"tables": 1, "entries": 5}
+        # Addresses identical; only the unstripped fn_name extras differ.
+        for lt, rt in zip(left["tables"], right["tables"]):
+            for le, re_ in zip(lt["entries"], rt["entries"]):
+                assert (le["name"], le["signature"], le["fn_addr"]) == (
+                    re_["name"],
+                    re_["signature"],
+                    re_["fn_addr"],
+                )
+                assert "fn_name" in le
+                assert "fn_name" not in re_
+        # The arm32 table's function pointers carry no Thumb bit in this
+        # build (llvm-nm: t dyn_a1 0x15cc, even) and still resolve.
+        if abi == "armeabi-v7a":
+            first = left["tables"][0]["entries"][0]
+            assert first["fn_addr"] == "0x15cc"
+
+
+def test_register_natives_absent_without_tables() -> None:
+    from blint.lib.binary import parse
+
+    for fixture in ("liba5_static_arm64-v8a.so", "liba5_static_arm64-v8a_stripped.so"):
+        metadata = parse(str(FIXTURES / fixture))
+        assert "register_natives" not in metadata["android"]["jni"]
+
+
+def test_signature_and_identifier_validators() -> None:
+    from blint.lib.jni import (
+        _JAVA_IDENTIFIER_RE,
+        _valid_method_signature,
+    )
+
+    assert _valid_method_signature("()V")
+    assert _valid_method_signature("(I)I")
+    assert _valid_method_signature("(ILjava/lang/String;)[I")
+    assert _valid_method_signature("([J)V")
+    assert not _valid_method_signature("(I)")  # missing return
+    assert not _valid_method_signature("I")  # missing parens
+    assert not _valid_method_signature("(Q)I")  # not a descriptor letter
+    assert not _valid_method_signature("(V)I")  # void parameter
+    assert not _valid_method_signature("(Ljava/lang/String;)V I")  # two returns
+    assert _JAVA_IDENTIFIER_RE.match("dynA1")
+    assert _JAVA_IDENTIFIER_RE.match("_private")
+    assert not _JAVA_IDENTIFIER_RE.match("1bad")
+    assert not _JAVA_IDENTIFIER_RE.match("has-dash")
+    assert not _JAVA_IDENTIFIER_RE.match("with space")

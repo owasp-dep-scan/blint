@@ -222,6 +222,7 @@ from blint.lib.import_attribution import (
     symbol_lookup_names,
 )
 from blint.lib.indicators import INFORMATIVE_STRING_CATALOGS
+from blint.lib.jni import attach_register_natives_tables
 from blint.lib.macho_objc import parse_objc_metadata
 from blint.lib.pe_driver import refresh_driver_block_after_disassembly
 from blint.lib.pe_host_plugins import classify_host_plugins
@@ -1292,6 +1293,12 @@ def parse(
                 metadata["swift_metadata"] = swift_metadata
                 metadata = merge_swift_functions(metadata)
             metadata = discover_and_merge_functions(metadata, parsed_obj)
+            # A5.2 F1: JNINativeMethod tables behind RegisterNatives, from
+            # the relative relocations. Needs every function start including
+            # the unwind-table discoveries stripped builds live on, so it
+            # runs after the merge, not inside the ELF facts pass.
+            if isinstance(parsed_obj, lief.ELF.Binary):
+                attach_register_natives_tables(metadata, parsed_obj)
         metadata = standardize_keys(metadata)
         # SDK-assisted attribution has to precede the dependency graph: it
         # fills the provider evidence the graph and link hygiene read.
@@ -1358,7 +1365,9 @@ def parse(
             # For PE the overlay numbers come from the classified residue
             # (certificate table subtracted, pe_overlay), so the packing
             # analysis never counts a signature as overlay evidence (V3).
-            pe_overlay = metadata.get("overlay_info") if isinstance(parsed_obj, lief.PE.Binary) else None
+            pe_overlay = (
+                metadata.get("overlay_info") if isinstance(parsed_obj, lief.PE.Binary) else None
+            )
             metadata["entropy"] = analyze_binary_entropy(
                 parsed_obj, _file_size, pe_overlay=pe_overlay
             )
@@ -1419,9 +1428,7 @@ def parse(
                 # W1.4: with disassembly available, the pre-main summary
                 # refreshes so the anti-debug reachability fact can read the
                 # callbacks' call targets.
-                metadata["pre_main_execution"] = parse_pre_main_execution(
-                    parsed_obj, metadata
-                )
+                metadata["pre_main_execution"] = parse_pre_main_execution(parsed_obj, metadata)
             if callgraph := build_disassembly_callgraph_metadata(metadata):
                 metadata["callgraph"] = callgraph
             # String literals a binary assembles on its stack are invisible to
@@ -1690,6 +1697,7 @@ def analyze_import_deps(metadata: dict) -> dict:
     }
     binary_type = metadata.get("binary_type")
     if binary_type == "PE":
+
         def _add_pe_dependency(lib_name: str, func_name: str) -> None:
             """Record one import-table-shaped dependency edge."""
             if lib_name not in dep_graph["libraries"]:

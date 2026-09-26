@@ -342,13 +342,34 @@ def probe_so(so: Path, nm: Path) -> dict:
     metadata = parse(str(so))
     jni_block = (metadata.get("android") or {}).get("jni")
     if oracle_jni and jni_block is None:
-        report["diffs"].append(
-            f"{so.name}: blint android.jni block absent but the library exports JNI symbols"
-        )
-    elif not oracle_jni and jni_block is not None:
+        if not metadata.get("is_targeting_android"):
+            # The whole android block is note-gated by design (B1); a
+            # library without .note.android.ident is reported, not counted
+            # as a disagreement (fennec's libjnidispatch shape).
+            report["triage"] = report.get("triage", []) + [
+                (
+                    f"{so.name}: exports JNI symbols but carries no .note.android.ident; "
+                    "the android block (jni included) is note-gated by design"
+                )
+            ]
+        else:
+            report["diffs"].append(
+                f"{so.name}: blint android.jni block absent but the library exports JNI symbols"
+            )
+    elif not oracle_jni and jni_block is not None and not jni_block.get("register_natives"):
+        # A register_natives-only block is legitimate: the library has no
+        # static JNI exports at all (fennec's libxul shape).
         report["diffs"].append(
             f"{so.name}: blint android.jni block present but llvm-nm -D shows no JNI symbols"
         )
+    elif not oracle_jni and jni_block is not None:
+        tables = jni_block.get("register_natives") or {}
+        report["triage"] = report.get("triage", []) + [
+            (
+                f"{so.name}: no static JNI exports; {tables.get('counts', {}).get('entries', 0)} "
+                "RegisterNatives entries recovered (dynamic registration)"
+            )
+        ]
     elif jni_block is not None:
         block_symbols = {entry.get("symbol") for entry in jni_block.get("static_methods") or []}
         if block_symbols != set(java_exports):
@@ -593,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  loadLibrary   in {site['method']}")
         else:
             for so_report in report["so_reports"]:
+                for note in so_report.get("triage") or []:
+                    print(f"  TRIAGE: {note}")
                 print(
                     f"  lib {so_report['entry']}: {len(so_report['java_exports'])} Java_ exports, "
                     f"OnLoad={so_report['on_load']}"
@@ -613,8 +636,13 @@ def main(argv: list[str] | None = None) -> int:
                         else f"{u['symbol']} (!{u['decode_error']})"
                     )
                     print(f"    undeclared    {label}")
+        for note in report.get("triage") or []:
+            print(f"  TRIAGE: {note}")
         for diff in report["diffs"]:
             print(f"  DIFF: {diff}")
+    all_triage = sum(len(r.get("triage") or []) for r in reports)
+    if all_triage:
+        print(f"jni probe: {all_triage} triage notes (not disagreements)")
     all_diffs = sum(len(r["diffs"]) for r in reports)
     print(f"jni probe: {len(reports)} inputs, {all_diffs} disagreements")
     if args.json:

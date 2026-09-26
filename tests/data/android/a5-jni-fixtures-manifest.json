@@ -26,11 +26,11 @@
   },
   "builds": {
     "a5-classes.dex": "javac --release 11 over java/... then d8 --release --min-api 24 --lib platforms/android-34/android.jar",
-    "liba5_static_arm64-v8a.so": "aarch64-linux-android24-clang -g -O2 -fPIC -shared jni_static.c",
+    "liba5_static_arm64-v8a.so": "aarch64-linux-android24-clang -g -O2 -fPIC -funwind-tables -shared jni_static.c",
     "liba5_static_arm64-v8a_stripped.so": "llvm-strip --strip-all of the unstripped twin",
-    "liba5_static_armeabi-v7a.so": "armv7a-linux-androideabi24-clang -g -O2 -fPIC -shared jni_static.c (plus its stripped twin)",
-    "liba5_dynamic_arm64-v8a.so": "aarch64-linux-android24-clang -g -O2 -fPIC -shared jni_dynamic.c (plus its stripped twin)",
-    "liba5_dynamic_armeabi-v7a.so": "armv7a-linux-androideabi24-clang -g -O2 -fPIC -shared jni_dynamic.c (plus its stripped twin)",
+    "liba5_static_armeabi-v7a.so": "armv7a-linux-androideabi24-clang -g -O2 -fPIC -funwind-tables -shared jni_static.c (plus its stripped twin)",
+    "liba5_dynamic_arm64-v8a.so": "aarch64-linux-android24-clang -g -O2 -fPIC -funwind-tables -shared jni_dynamic.c (plus its stripped twin)",
+    "liba5_dynamic_armeabi-v7a.so": "armv7a-linux-androideabi24-clang -g -O2 -fPIC -funwind-tables -shared jni_dynamic.c (plus its stripped twin)",
     "a5-jni-arm64-v8a.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/arm64-v8a/{libjnistat.so (from liba5_static), libjnidyn.so (from liba5_dynamic)}; zipalign -f 4. The members carry their loadable names so loadLibrary(\"jnistat\")/(\"jnidyn\") map to real zip entries.",
     "a5-jni-armeabi-v7a.apk": "same for lib/armeabi-v7a (libjnistat.so + libjnidyn.so)"
   },
@@ -47,36 +47,101 @@
       "Java_com_example_blint_jni_Nested_inner",
       "Java_com_example_blint_native_1lib_Pkg_util"
     ],
-    "dynamic_lib_exports": ["JNI_OnLoad"],
+    "dynamic_lib_exports": [
+      "JNI_OnLoad"
+    ],
     "dex_natives": 13,
     "static_bound": 7,
-    "unbound_dex_natives_in_static_lib": [
+    "undeclared_exports_in_static_lib": [
+      "Java_com_example_blint_jni_NativeEscapes_orphan"
+    ],
+    "register_natives_tables": {
+      "com.example.blint.jni.Dyn": [
+        [
+          "dynA1",
+          "(I)I"
+        ],
+        [
+          "dynA2",
+          "(Ljava/lang/String;)Ljava/lang/String;"
+        ],
+        [
+          "dynA3",
+          "(II)I"
+        ]
+      ],
+      "com.example.blint.jni.DynB": [
+        [
+          "dynB1",
+          "(I)I"
+        ],
+        [
+          "dynB2",
+          "(J)I"
+        ]
+      ]
+    },
+    "load_library_sites": [
+      [
+        "com.example.blint.jni.NativeEscapes",
+        "jnistat"
+      ],
+      [
+        "com.example.blint.jni.Nested",
+        "jnistat"
+      ],
+      [
+        "com.example.blint.jni.Nested$Inner",
+        "jnistat"
+      ],
+      [
+        "com.example.blint.jni.Dyn",
+        "jnidyn"
+      ],
+      [
+        "com.example.blint.jni.DynB",
+        "jnidyn"
+      ],
+      [
+        "com.example.blint.native_lib.Pkg",
+        "jnistat"
+      ]
+    ],
+    "register_natives": {
+      "libjnidyn.so": {
+        "tables": 1,
+        "entries": 5,
+        "fn_addrs": {
+          "dynA1": "0x4934",
+          "dynA2": "0x493c",
+          "dynA3": "0x4950",
+          "dynB1": "0x495c",
+          "dynB2": "0x4964"
+        },
+        "fn_addrs_armeabi_v7a": {
+          "dynA1": "0x15cc",
+          "dynA2": "0x15d4",
+          "dynA3": "0x15ec",
+          "dynB1": "0x15f8",
+          "dynB2": "0x1600"
+        },
+        "note": "addresses are the unstripped twins' llvm-nm symbol values (t dyn_a1 ...); stripped twins recover the same addresses without fn_name"
+      }
+    },
+    "bound_dynamic": 5,
+    "unbound_after_f1": [
+      "com.example.blint.jni.NativeEscapes#missingNative(I)I"
+    ],
+    "unbound_dex_natives_static_only": [
       "com.example.blint.jni.Dyn#dynA1(I)I",
       "com.example.blint.jni.Dyn#dynA2(Ljava/lang/String;)Ljava/lang/String;",
       "com.example.blint.jni.Dyn#dynA3(II)I",
       "com.example.blint.jni.DynB#dynB1(I)I",
       "com.example.blint.jni.DynB#dynB2(J)I",
       "com.example.blint.jni.NativeEscapes#missingNative(I)I"
-    ],
-    "undeclared_exports_in_static_lib": ["Java_com_example_blint_jni_NativeEscapes_orphan"],
-    "register_natives_tables": {
-      "com.example.blint.jni.Dyn": [
-        ["dynA1", "(I)I"],
-        ["dynA2", "(Ljava/lang/String;)Ljava/lang/String;"],
-        ["dynA3", "(II)I"]
-      ],
-      "com.example.blint.jni.DynB": [
-        ["dynB1", "(I)I"],
-        ["dynB2", "(J)I"]
-      ]
-    },
-    "load_library_sites": [
-      ["com.example.blint.jni.NativeEscapes", "jnistat"],
-      ["com.example.blint.jni.Nested", "jnistat"],
-      ["com.example.blint.jni.Nested$Inner", "jnistat"],
-      ["com.example.blint.jni.Dyn", "jnidyn"],
-      ["com.example.blint.jni.DynB", "jnidyn"],
-      ["com.example.blint.native_lib.Pkg", "jnistat"]
     ]
+  },
+  "notes": {
+    "funwind_tables": "-funwind-tables added in F1: real RegisterNatives libraries are C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows for the fnPtr validation (leaf static C functions otherwise get no exidx entry from lld, leaving a stripped twin with no start evidence at all)."
   }
 }
