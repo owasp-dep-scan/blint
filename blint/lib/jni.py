@@ -379,7 +379,14 @@ def join_static(dex_natives: list[dict], surface: dict | None) -> dict:
             )
         if chosen:
             used.add(chosen["symbol"])
-            bound.append({**native, "class": cls, "symbol": chosen["symbol"]})
+            bound.append(
+                {
+                    **native,
+                    "class": cls,
+                    "symbol": chosen["symbol"],
+                    "fn_addr": chosen.get("address"),
+                }
+            )
         else:
             unbound.append({**native, "class": cls})
     undeclared = [entry for entry in static_methods if entry["symbol"] not in used]
@@ -864,3 +871,187 @@ def attach_register_natives_tables(metadata: dict, parsed_obj) -> None:
         },
     )
     jni_block["register_natives"] = tables
+
+
+# ------------------------------------------- F2: the dex->native edges
+
+
+def extend_app_callgraph_with_jni(app_callgraph: dict, join: dict, native_units: list) -> dict:
+    """Add the JNI edges (and the native side) to an app's dex callgraph.
+
+    ``native_units`` is ``[{abi, library, callgraph}, ...]`` - the
+    disassembled apk-so-member callgraphs (--disassemble only; without
+    disassembly there is no native side and no edge is drawn, the join
+    stays a fact). Every native node merges in under a
+    ``<library>@<abi>:`` namespace so one graph can carry several ABIs'
+    builds of the same library, and each bound dex native declaration
+    gains an edge to its implementation node - ``jni_static`` for a
+    decoded export, ``jni_dynamic`` for a recovered RegisterNatives
+    entry. An edge is added only where both nodes exist; a missing dex
+    node (a declaration the dex callgraph never materialized) or a
+    missing native node is skipped, never invented.
+    """
+    if not isinstance(app_callgraph, dict) or not native_units:
+        return app_callgraph
+    nodes = list(app_callgraph.get("nodes") or [])
+    edges: list[dict] = list(app_callgraph.get("edges") or [])
+    externals: list[dict] = list(app_callgraph.get("external") or [])
+    # dex node ids by exact descriptor name; native nodes by (lib, abi, int addr)
+    dex_ids_by_name: dict[str, list[str]] = {}
+    for node in nodes:
+        name = node.get("name")
+        if isinstance(name, str) and name:
+            dex_ids_by_name.setdefault(name, []).append(node.get("id"))
+    native_addr_ids: dict[tuple[str, str, int], str] = {}
+    native_name_ids: dict[tuple[str, str, str], str] = {}
+    for unit in native_units:
+        abi = unit.get("abi") or ""
+        library = unit.get("library") or ""
+        namespace = f"{library}@{abi}"
+        member_graph = unit.get("callgraph") or {}
+        local_ids: dict[int, str] = {}
+        for node in member_graph.get("nodes") or []:
+            merged = {
+                "id": f"{namespace}:{node.get('id')}",
+                "key": f"{namespace}!{node.get('key')}",
+                "name": node.get("name"),
+                "address": node.get("address"),
+                "aliases": node.get("aliases") or [],
+                "library": library,
+                "abi": abi,
+            }
+            nodes.append(merged)
+            with contextlib.suppress(TypeError, ValueError):
+                local_ids[int(node.get("id"))] = merged["id"]
+            address = node.get("address")
+            with contextlib.suppress(TypeError, ValueError):
+                native_addr_ids[(library, abi, int(address, 16))] = merged["id"]
+            if node.get("name"):
+                native_name_ids[(library, abi, str(node["name"]))] = merged["id"]
+        for edge in member_graph.get("edges") or []:
+            src, dst = edge.get("src"), edge.get("dst")
+            if src in local_ids and dst in local_ids:
+                merged_edge = dict(edge)
+                merged_edge["src"] = local_ids[src]
+                merged_edge["dst"] = local_ids[dst]
+                edges.append(merged_edge)
+        # The unresolved calls out of the native side (PLT thunks, indirect
+        # hints) ride along so a path can leave the JNI function the way it
+        # leaves the standalone native callgraph.
+        for edge in member_graph.get("external") or []:
+            if edge.get("src") in local_ids:
+                merged_external = dict(edge)
+                merged_external["src"] = local_ids[edge["src"]]
+                externals.append(merged_external)
+    jni_edges: list[dict] = []
+    for abi, abi_join in (join.get("per_abi") or {}).items():
+        for entry in abi_join.get("bound") or []:
+            kind, target_addr = "jni_static", entry.get("fn_addr")
+            self_check = entry.get("symbol")
+            dex_name = _dex_node_name(
+                entry.get("class"), entry.get("name"), entry.get("descriptor")
+            )
+            for dex_id in dex_ids_by_name.get(dex_name, []):
+                native_id = _native_node_id(
+                    native_addr_ids,
+                    native_name_ids,
+                    entry.get("library"),
+                    abi,
+                    target_addr,
+                    self_check,
+                )
+                if native_id:
+                    jni_edges.append({"src": dex_id, "dst": native_id, "kind": kind, "count": 1})
+        for entry in abi_join.get("bound_dynamic") or []:
+            dex_name = _dex_node_name(
+                entry.get("class"), entry.get("name"), entry.get("descriptor")
+            )
+            for dex_id in dex_ids_by_name.get(dex_name, []):
+                native_id = _native_node_id(
+                    native_addr_ids,
+                    native_name_ids,
+                    entry.get("library"),
+                    abi,
+                    entry.get("fn_addr"),
+                    None,
+                )
+                if native_id:
+                    jni_edges.append(
+                        {"src": dex_id, "dst": native_id, "kind": "jni_dynamic", "count": 1}
+                    )
+    if not jni_edges:
+        return app_callgraph
+    edges.extend(jni_edges)
+    result = dict(app_callgraph)
+    result["nodes"] = nodes
+    result["edges"] = edges
+    if externals:
+        result["external"] = externals
+    result["jni_edge_count"] = len(jni_edges)
+    return result
+
+
+# DexPools renders primitives pretty (``int``) and keeps class descriptors
+# as-is (``Ljava/lang/String;``), arrays as ``elem[]`` - the dex callgraph
+# node names follow that rendering.
+_DEX_PRETTY_PRIMITIVES = {
+    "V": "void",
+    "Z": "boolean",
+    "B": "byte",
+    "S": "short",
+    "C": "char",
+    "I": "int",
+    "J": "long",
+    "F": "float",
+    "D": "double",
+}
+
+
+def _dex_pretty_descriptor(descriptor: str) -> str:
+    """Render a JVM descriptor the way the dex pools do (pretty params)."""
+    params, _, ret = descriptor[1:].partition(")")
+    out: list[str] = []
+    index = 0
+    while index < len(params):
+        depth = 0
+        while index < len(params) and params[index] == "[":
+            depth += 1
+            index += 1
+        if index >= len(params):
+            break
+        if params[index] == "L":
+            end = params.index(";", index)
+            base = params[index : end + 1]
+            index = end + 1
+        else:
+            base = _DEX_PRETTY_PRIMITIVES.get(params[index], params[index])
+            index += 1
+        out.append(base + "[]" * depth)
+    pretty_ret = _DEX_PRETTY_PRIMITIVES.get(ret[0], ret) if ret else ""
+    return f"({''.join(out)}){pretty_ret}"
+
+
+def _dex_node_name(dotted_class: str | None, method: str | None, descriptor: str | None) -> str:
+    """The dex callgraph node name for one declaration: ``Lcls;->m(pretty)``."""
+    if not dotted_class or not method or not descriptor or not descriptor.startswith("("):
+        return ""
+    internal = (
+        dotted_class[1:-1]
+        if dotted_class.startswith("L") and dotted_class.endswith(";")
+        else dotted_class
+    ).replace(".", "/")
+    return f"L{internal};->{method}{_dex_pretty_descriptor(descriptor)}"
+
+
+def _native_node_id(
+    addr_ids: dict, name_ids: dict, library: str | None, abi: str, address, symbol
+) -> str | None:
+    """The merged native node id: address first, the export symbol's name
+    as the fallback (an address the callgraph could not carry)."""
+    if not library:
+        return None
+    with contextlib.suppress(TypeError, ValueError):
+        return addr_ids.get((library, abi, int(address, 16)))
+    if symbol:
+        return name_ids.get((library, abi, str(symbol)))
+    return None

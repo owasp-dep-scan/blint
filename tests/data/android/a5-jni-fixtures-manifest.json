@@ -45,13 +45,14 @@
       "Java_com_example_blint_jni_NativeEscapes_plain_1one",
       "Java_com_example_blint_jni_Nested_00024Inner_deep",
       "Java_com_example_blint_jni_Nested_inner",
-      "Java_com_example_blint_native_1lib_Pkg_util"
+      "Java_com_example_blint_native_1lib_Pkg_util",
+      "Java_com_example_blint_jni_NativeEscapes_libcCall"
     ],
     "dynamic_lib_exports": [
       "JNI_OnLoad"
     ],
-    "dex_natives": 13,
-    "static_bound": 7,
+    "dex_natives": 14,
+    "static_bound": 8,
     "undeclared_exports_in_static_lib": [
       "Java_com_example_blint_jni_NativeEscapes_orphan"
     ],
@@ -139,9 +140,14 @@
       "com.example.blint.jni.DynB#dynB1(I)I",
       "com.example.blint.jni.DynB#dynB2(J)I",
       "com.example.blint.jni.NativeEscapes#missingNative(I)I"
-    ]
+    ],
+    "notes": {
+      "funwind_tables": "-funwind-tables added in F1: real RegisterNatives libraries are C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows for the fnPtr validation (leaf static C functions otherwise get no exidx entry from lld, leaving a stripped twin with no start evidence at all).",
+      "f2_path": "F2 adds NativeEscapes.libcCall(int) (declared, called from callThem, implemented with a direct getpid() call) so the end-to-end path demo has a real libc hop: callThem -> libcCall -> Java_..._libcCall@0x4bcc -> bl 0x4c60 <getpid@plt> (llvm-objdump, same run)."
+    }
   },
   "notes": {
-    "funwind_tables": "-funwind-tables added in F1: real RegisterNatives libraries are C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows for the fnPtr validation (leaf static C functions otherwise get no exidx entry from lld, leaving a stripped twin with no start evidence at all)."
+    "funwind_tables": "-funwind-tables added in F1: real RegisterNatives libraries are C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows for the fnPtr validation (leaf static C functions otherwise get no exidx entry from lld, leaving a stripped twin with no start evidence at all).",
+    "f2_path": "F2 adds NativeEscapes.libcCall(int) (declared, called from callThem, implemented with a direct getpid() call) so the end-to-end path demo has a real libc hop: callThem -> libcCall -> Java_..._libcCall@0x4bcc -> bl 0x4c60 <getpid@plt> (llvm-objdump, same run)."
   }
 }

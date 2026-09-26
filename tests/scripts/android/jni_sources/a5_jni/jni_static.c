@@ -1,3 +1,4 @@
+#include <unistd.h>
 /*
  * A5 E0 - statically registered JNI natives, one export per mangling
  * escape in the JNI spec's "Resolving Native Method Names" (Java SE 24):
@@ -103,6 +104,17 @@ Java_com_example_blint_native_1lib_Pkg_util(JNIEnv *env, jobject thiz, jint x)
     (void) env;
     (void) thiz;
     return x * 7;
+}
+
+/* NativeEscapes.libcCall(int) - a direct imported-libc call (getpid via
+ * the PLT), so the F2 end-to-end path demo has a real libc hop after the
+ * JNI edge: Java caller -> dex native -> this function -> getpid. */
+JNIEXPORT jint JNICALL
+Java_com_example_blint_jni_NativeEscapes_libcCall(JNIEnv *env, jobject thiz, jint x)
+{
+    (void) env;
+    (void) thiz;
+    return getpid() + x;
 }
 
 /* Exported with no dex declaration: the undeclared_exports side. */

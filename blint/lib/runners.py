@@ -29,7 +29,7 @@ from blint.lib.ios import (
     enrich_with_bundle_context,
     is_ios_app,
 )
-from blint.lib.jni import build_jni_join_summary
+from blint.lib.jni import build_jni_join_summary, extend_app_callgraph_with_jni
 from blint.lib.macos_bundle import (
     collect_macos_bundle_detailed,
     find_macos_bundles,
@@ -1223,11 +1223,32 @@ class AnalysisRunner:
         metadata["android_native"] = _android_native_summary(native)
         # The dex <-> native static JNI join (A5.2 E2), next to the native
         # summary; absent when the app declares no natives (nothing to join).
-        if jni_join := build_jni_join_summary(f, native):
+        jni_join = build_jni_join_summary(f, native)
+        if jni_join:
             metadata["android_jni"] = jni_join
+        # Members first: the app callgraph's JNI edges (A5.2 F2) point at
+        # the disassembled native nodes, which exist only after the members
+        # parse (--disassemble); without them the join stays a fact and no
+        # edge is drawn.
+        member_units = self._process_apk_so_members(
+            f, native, blint_options, wants_callgraph_outputs
+        )
+        if jni_join and metadata.get("callgraph") and member_units:
+            native_units = [
+                {
+                    "abi": unit["abi"],
+                    "library": unit["library"],
+                    "callgraph": unit["metadata"].get("callgraph"),
+                }
+                for unit in member_units
+                if unit["metadata"].get("callgraph")
+            ]
+            if native_units:
+                metadata["callgraph"] = extend_app_callgraph_with_jni(
+                    metadata["callgraph"], jni_join, native_units
+                )
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
-        self._process_apk_so_members(f, native, blint_options, wants_callgraph_outputs)
 
     def _process_apk_so_members(
         self,
@@ -1235,7 +1256,7 @@ class AnalysisRunner:
         native: dict[str, Any],
         blint_options: BlintOptions,
         wants_callgraph_outputs: bool,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """Analyze each (app, abi, library) unit of a scanned app model.
 
         Units group every location of one library in one ABI - one result
@@ -1243,9 +1264,12 @@ class AnalysisRunner:
         36). Heavy work stays behind --disassemble (the parse call gates
         it) and the --android-abi filter drops non-matching ABIs (and
         asset payloads, which never feed ABI coverage) before any unit
-        is attempted.
+        is attempted. Returns the per-unit records (abi, library,
+        metadata) so the app-level callgraph can draw JNI edges to the
+        disassembled native side (A5.2 F2).
         """
         assert self.task is not None
+        member_units: list[dict[str, Any]] = []
         android_abis = getattr(blint_options, "android_abis", None) or []
         units: dict[tuple[str, str], dict[str, Any]] = {}
         for lib in native["libraries"]:
@@ -1255,7 +1279,7 @@ class AnalysisRunner:
                 entry = units.setdefault((loc["abi"], lib["name"]), {"lib": lib, "locations": []})
                 entry["locations"].append(loc)
         if not units:
-            return
+            return member_units
         app_base = os.path.basename(f)
         with (
             bounded_temp_dir(prefix="blint_android_so_") as temp_dir,
@@ -1314,8 +1338,16 @@ class AnalysisRunner:
                         display, member_metadata, blint_options, wants_callgraph_outputs
                     )
                     self._mark_success("apk-so-member")
+                    member_units.append(
+                        {
+                            "abi": primary["abi"] or "",
+                            "library": name,
+                            "metadata": member_metadata,
+                        }
+                    )
                 except Exception as e:
                     self._record_failure(display, "apk-so-member", "process", e)
+        return member_units
 
     def _process_android_file(self, f: str) -> dict[str, Any] | None:
         """Disassemble an android app's dex bytecode into review metadata.

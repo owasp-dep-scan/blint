@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from blint.lib.binary import parse
 from blint.lib.jni import decode_jni_symbol, parse_static_jni_surface
 
@@ -100,7 +102,7 @@ def test_static_fixture_block() -> None:
     block = _jni_block("liba5_static_arm64-v8a.so")
     assert block is not None
     by_symbol = {entry["symbol"]: entry for entry in block["static_methods"]}
-    assert len(by_symbol) == 8
+    assert len(by_symbol) == 9
     f_int = by_symbol["Java_com_example_blint_jni_NativeEscapes_f__I"]
     assert (f_int["class"], f_int["method"], f_int["signature"]) == (
         "com.example.blint.jni.NativeEscapes",
@@ -124,7 +126,7 @@ def test_static_fixture_block() -> None:
     assert block["on_load"]["symbol"] == "JNI_OnLoad"
     assert block["on_load"]["address"].startswith("0x")
     assert block["on_unload"]["symbol"] == "JNI_OnUnload"
-    assert block["counts"] == {"java_exports": 8, "decoded": 8, "decode_errors": 0}
+    assert block["counts"] == {"java_exports": 9, "decoded": 9, "decode_errors": 0}
 
 
 def test_stripped_twin_gives_the_same_block() -> None:
@@ -213,7 +215,7 @@ def test_dex_native_facts_from_the_real_dex() -> None:
     assert ("Lcom/example/blint/jni/NativeEscapes;", "plain_one", "(I)I") in natives
     assert ("Lcom/example/blint/jni/Nested$Inner;", "deep", "(Ljava/lang/String;)I") in natives
     assert ("Lcom/example/blint/jni/NativeEscapes;", "missingNative", "(I)I") in natives
-    assert len(natives) == 13
+    assert len(natives) == 14
     # Every loadLibrary site carries its literal and the calling class.
     sites = {(s["class"], s["library"]) for s in facts["load_library"]}
     assert ("Lcom/example/blint/jni/NativeEscapes;", "jnistat") in sites
@@ -270,13 +272,13 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
 
     apk = str(FIXTURES / "a5-jni-arm64-v8a.apk")
     summary = build_jni_join_summary(apk, scan_android_native(apk))
-    assert summary["counts"] == {"dex_natives": 13, "load_library_sites": 6, "abis": 1}
+    assert summary["counts"] == {"dex_natives": 14, "load_library_sites": 6, "abis": 1}
     abi = summary["per_abi"]["arm64-v8a"]
     # After F1, the five Dyn* declarations bind dynamically and only
     # missingNative stays unbound.
     assert abi["counts"] == {
         "libraries": 2,
-        "bound": 7,
+        "bound": 8,
         "bound_dynamic": 5,
         "unbound_dex_natives": 1,
         "undeclared_exports": 1,
@@ -432,3 +434,226 @@ def test_signature_and_identifier_validators() -> None:
     assert not _JAVA_IDENTIFIER_RE.match("1bad")
     assert not _JAVA_IDENTIFIER_RE.match("has-dash")
     assert not _JAVA_IDENTIFIER_RE.match("with space")
+
+
+# --------------------------------------------- A5.2 F2: the callgraph edge
+
+
+def test_dex_pretty_descriptor_rendering() -> None:
+    from blint.lib.jni import _dex_node_name, _dex_pretty_descriptor
+
+    assert _dex_pretty_descriptor("(I)I") == "(int)int"
+    assert _dex_pretty_descriptor("(ILjava/lang/String;)V") == "(intLjava/lang/String;)void"
+    assert _dex_pretty_descriptor("([I)I") == "(int[])int"
+    assert _dex_pretty_descriptor("(Ljava/lang/String;)Ljava/lang/String;") == (
+        "(Ljava/lang/String;)Ljava/lang/String;"
+    )
+    assert _dex_pretty_descriptor("(II)I") == "(intint)int"
+    assert _dex_pretty_descriptor("()V") == "()void"
+    assert (
+        _dex_node_name("com.example.blint.jni.Dyn", "dynA1", "(I)I")
+        == "Lcom/example/blint/jni/Dyn;->dynA1(int)int"
+    )
+
+
+def test_extend_app_callgraph_never_invents_nodes() -> None:
+    from blint.lib.jni import extend_app_callgraph_with_jni
+
+    graph = {"nodes": [{"id": "0:1", "name": "Lp/Q;->m(int)int"}], "edges": []}
+    join = {
+        "per_abi": {
+            "arm64-v8a": {
+                "bound": [
+                    {
+                        "class": "p.Q",
+                        "name": "m",
+                        "descriptor": "(int)int",
+                        "library": "libx.so",
+                        "fn_addr": "0x10",
+                        "symbol": "Java_p_Q_m",
+                    }
+                ],
+                "bound_dynamic": [],
+            }
+        }
+    }
+    # No native side (--disassemble off): unchanged, no edge, no node.
+    assert extend_app_callgraph_with_jni(graph, join, []) == graph
+    # A native side whose callgraph lacks the target address: the dex node
+    # exists but the native one does not - no edge, and the graph only
+    # gains the merged native nodes, never a fabricated one.
+    native_units = [
+        {
+            "abi": "arm64-v8a",
+            "library": "libx.so",
+            "callgraph": {
+                "nodes": [{"id": 0, "key": "0x8::other", "name": "other", "address": "0x8"}],
+                "edges": [],
+            },
+        }
+    ]
+    extended = extend_app_callgraph_with_jni(graph, join, native_units)
+    assert "jni_edge_count" not in extended
+    assert extended is graph
+    # A dex declaration with no dex node: no edge even though the native
+    # node exists.
+    graph2 = {"nodes": [{"id": "0:1", "name": "Lp/R;->other()void"}], "edges": []}
+    native_units2 = [
+        {
+            "abi": "arm64-v8a",
+            "library": "libx.so",
+            "callgraph": {
+                "nodes": [
+                    {"id": 0, "key": "0x10::Java_p_Q_m", "name": "Java_p_Q_m", "address": "0x10"}
+                ],
+                "edges": [],
+            },
+        }
+    ]
+    assert extend_app_callgraph_with_jni(graph2, join, native_units2) is graph2
+
+
+def test_extend_app_callgraph_draws_both_edge_kinds() -> None:
+    from blint.lib.jni import extend_app_callgraph_with_jni
+
+    graph = {
+        "nodes": [
+            {"id": "0:3", "name": "Lp/Q;->m(int)int"},
+            {"id": "0:4", "name": "Lp/Q;->d(long)int"},
+        ],
+        "edges": [],
+    }
+    join = {
+        "per_abi": {
+            "arm64-v8a": {
+                "bound": [
+                    {
+                        "class": "p.Q",
+                        "name": "m",
+                        "descriptor": "(int)int",
+                        "library": "libx.so",
+                        "fn_addr": "0x1000",
+                        "symbol": "Java_p_Q_m",
+                    }
+                ],
+                "bound_dynamic": [
+                    {
+                        "class": "p.Q",
+                        "name": "d",
+                        "descriptor": "(long)int",
+                        "library": "libx.so",
+                        "fn_addr": "0x2000",
+                    }
+                ],
+            }
+        }
+    }
+    native_units = [
+        {
+            "abi": "arm64-v8a",
+            "library": "libx.so",
+            "callgraph": {
+                "nodes": [
+                    {
+                        "id": 0,
+                        "key": "0x1000::Java_p_Q_m",
+                        "name": "Java_p_Q_m",
+                        "address": "0x1000",
+                    },
+                    {"id": 1, "key": "0x2000::d_impl", "name": "d_impl", "address": "0x2000"},
+                ],
+                "edges": [],
+                "external": [
+                    {"src": 0, "target": "#28", "count": 1, "reason": "address_space_miss"}
+                ],
+            },
+        }
+    ]
+    out = extend_app_callgraph_with_jni(graph, join, native_units)
+    assert out["jni_edge_count"] == 2
+    kinds = {
+        (e["src"], e["kind"]) for e in out["edges"] if str(e.get("kind", "")).startswith("jni")
+    }
+    assert kinds == {("0:3", "jni_static"), ("0:4", "jni_dynamic")}
+    # The native external edge rides along, namespaced to the merged node.
+    assert any(
+        e["src"] == "libx.so@arm64-v8a:0" and e["target"] == "#28"
+        for e in out.get("external") or []
+    )
+
+
+def _nyxstone_available() -> bool:
+    try:
+        from blint.lib.disassembler import NYXSTONE_AVAILABLE
+
+        return NYXSTONE_AVAILABLE
+    except ImportError:
+        return False
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_r1_end_to_end_path_java_to_libc() -> None:
+    """The F2 R1 demo: a Java method -> its native declaration -> the JNI
+    function -> the imported libc call, one connected path in the app
+    callgraph, built exactly the way _process_android_app builds it."""
+    import tempfile
+
+    from blint.lib.android import analyze_android_app
+    from blint.lib.android_native import LibraryReader, scan_android_native
+    from blint.lib.binary import parse
+    from blint.lib.jni import build_jni_join_summary, extend_app_callgraph_with_jni
+    from blint.lib.runners import _materialize_apk_member
+
+    apk = str(FIXTURES / "a5-jni-arm64-v8a.apk")
+    native = scan_android_native(apk)
+    join = build_jni_join_summary(apk, native)
+    units = []
+    with tempfile.TemporaryDirectory(prefix="jni_path_") as tmp, LibraryReader(apk) as reader:
+        for lib in native["libraries"]:
+            loc = next((l for l in lib["locations"] if l["abi"] == "arm64-v8a"), None)
+            if not loc:
+                continue
+            member = parse(_materialize_apk_member(tmp, reader, loc), disassemble=True)
+            units.append(
+                {"abi": "arm64-v8a", "library": lib["name"], "callgraph": member.get("callgraph")}
+            )
+    app = analyze_android_app(apk, build_cg=True)
+    graph = extend_app_callgraph_with_jni(app["callgraph"], join, units)
+
+    # R1 gate: the jni edge count equals bound + bound_dynamic.
+    abi_join = join["per_abi"]["arm64-v8a"]
+    assert (
+        graph["jni_edge_count"]
+        == abi_join["counts"]["bound"] + abi_join["counts"]["bound_dynamic"]
+    )
+    nodes_by_id = {n["id"]: n for n in graph["nodes"]}
+    ids_by_name: dict[str, list] = {}
+    for node in graph["nodes"]:
+        ids_by_name.setdefault(node["name"], []).append(node["id"])
+
+    # Hop 1: the Java caller invokes the native declaration.
+    caller = ids_by_name["Lcom/example/blint/jni/NativeEscapes;->callThem()int"][0]
+    decl = ids_by_name["Lcom/example/blint/jni/NativeEscapes;->libcCall(int)int"][0]
+    assert any(e["src"] == caller and e["dst"] == decl for e in graph["edges"])
+    # Hop 2: the declaration -> the JNI function (jni_static).
+    jni_edge = next(
+        e for e in graph["edges"] if e["src"] == decl and e.get("kind") == "jni_static"
+    )
+    jni_node = nodes_by_id[jni_edge["dst"]]
+    assert jni_node["library"] == "libjnistat.so"
+    assert jni_node["name"] == "Java_com_example_blint_jni_NativeEscapes_libcCall"
+    # Hop 3: the JNI function -> the imported libc call (the getpid@plt
+    # thunk; llvm-objdump in the F2 run names target 0x4c60 getpid@plt -
+    # blint carries it as the external edge with the raw immediate).
+    libc_edges = [e for e in graph.get("external") or [] if e["src"] == jni_edge["dst"]]
+    assert libc_edges
+    # missingNative: declared but never implemented - no node, no edge.
+    assert (
+        "Lcom/example/blint/jni/NativeEscapes;->missingNative(int)int" not in ids_by_name
+        or not any(
+            e.get("kind", "").startswith("jni")
+            and e["src"]
+            in ids_by_name["Lcom/example/blint/jni/NativeEscapes;->missingNative(int)int"]
+            for e in graph["edges"]
+        )
+    )
