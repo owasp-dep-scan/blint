@@ -442,7 +442,9 @@ def _join_abi_lists(
     statically to a decoded export, or - for what no export answers -
     dynamically to a recovered JNINativeMethod table entry whose name and
     signature both match (the class is unknown in the table, so signature
-    equality is required). What neither answers is unbound, and each
+    equality is required, and the pair must be unique on both sides;
+    otherwise the declarations are listed as ambiguous_dynamic with the
+    number of candidate entries). What neither answers is unbound, and each
     library's unclaimed exports are its undeclared list. Counts reflect
     the full sets; the lists are capped at ``JOIN_LISTING_CAP`` with a
     ``truncated`` flag.
@@ -451,8 +453,8 @@ def _join_abi_lists(
     bound_dynamic: list[dict] = []
     unbound: list[dict] = []
     undeclared: list[dict] = []
+    ambiguous: list[dict] = []
     answered: set[tuple[str, str, str]] = set()
-    answered_dynamic: set[tuple[str, str, str]] = set()
     for name in sorted(lib_abis):
         if abi not in lib_abis[name]:
             continue
@@ -465,60 +467,69 @@ def _join_abi_lists(
         undeclared.extend(
             {**entry, "abi": abi, "library": name} for entry in result["undeclared_exports"]
         )
+    # The table carries no class, so a (name, signature) pair binds only
+    # when it is unique on both sides: one unanswered declaring class and
+    # one table entry in this ABI. fbjni-style names (disposeNative()V,
+    # initHybrid) repeat across classes; binding those would pick an
+    # arbitrary implementation.
+    pending: dict[tuple[str, str], dict[str, dict]] = {}
     for native_entry in natives:
-        key = (
-            _dotted_class(native_entry["class"]),
-            native_entry["name"],
-            native_entry["descriptor"],
-        )
-        if key in answered:
+        cls = _dotted_class(native_entry["class"])
+        if (cls, native_entry["name"], native_entry["descriptor"]) in answered:
             continue
-        match = None
-        for name in sorted(lib_abis):
-            if abi not in lib_abis[name]:
-                continue
-            for table in (register_tables.get(name) or {}).get("tables") or []:
-                for table_entry in table.get("entries") or []:
-                    if (
-                        table_entry.get("name") == native_entry["name"]
-                        and table_entry.get("signature") == native_entry["descriptor"]
-                    ):
-                        match = {**table_entry, "library": name}
-                        break
-                if match:
-                    break
-            if match:
-                break
-        if match:
-            answered_dynamic.add(key)
+        pair = (native_entry["name"], native_entry["descriptor"])
+        pending.setdefault(pair, {}).setdefault(cls, native_entry)
+    table_entries: dict[tuple[str, str], list[dict]] = {}
+    for name in sorted(lib_abis):
+        if abi not in lib_abis[name]:
+            continue
+        for table in (register_tables.get(name) or {}).get("tables") or []:
+            for table_entry in table.get("entries") or []:
+                pair = (table_entry.get("name"), table_entry.get("signature"))
+                if pair in pending:
+                    table_entries.setdefault(pair, []).append({**table_entry, "library": name})
+    for pair, classes in pending.items():
+        matches = table_entries.get(pair) or []
+        if len(matches) == 1 and len(classes) == 1:
+            cls, native_entry = next(iter(classes.items()))
+            match = matches[0]
             bound_dynamic.append(
                 {
                     **native_entry,
-                    "class": key[0],
+                    "class": cls,
                     "abi": abi,
-                    "library": match.pop("library"),
+                    "library": match["library"],
                     "fn_addr": match.get("fn_addr"),
                     **({"fn_name": match["fn_name"]} if match.get("fn_name") else {}),
                 }
             )
-        else:
-            unbound.append({**native_entry, "class": key[0], "abi": abi})
+            continue
+        for cls, native_entry in classes.items():
+            record = {**native_entry, "class": cls, "abi": abi}
+            if matches:
+                record["table_candidates"] = len(matches)
+                ambiguous.append(record)
+            else:
+                unbound.append(record)
     result = {
         "counts": {
             "libraries": sum(1 for name in lib_abis if abi in lib_abis[name]),
             "bound": len(bound),
             "bound_dynamic": len(bound_dynamic),
+            "ambiguous_dynamic": len(ambiguous),
             "unbound_dex_natives": len(unbound),
             "undeclared_exports": len(undeclared),
         },
         "bound": bound[:JOIN_LISTING_CAP],
         "bound_dynamic": bound_dynamic[:JOIN_LISTING_CAP],
+        "ambiguous_dynamic": ambiguous[:JOIN_LISTING_CAP],
         "unbound_dex_natives": unbound[:JOIN_LISTING_CAP],
         "undeclared_exports": undeclared[:JOIN_LISTING_CAP],
     }
     for key_list, full in (
         ("bound", bound),
         ("bound_dynamic", bound_dynamic),
+        ("ambiguous_dynamic", ambiguous),
         ("unbound_dex_natives", unbound),
         ("undeclared_exports", undeclared),
     ):

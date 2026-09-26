@@ -280,6 +280,7 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
         "libraries": 2,
         "bound": 9,
         "bound_dynamic": 5,
+        "ambiguous_dynamic": 0,
         "unbound_dex_natives": 1,
         "undeclared_exports": 1,
     }
@@ -323,6 +324,39 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
     assert sites["jnistat"]["member"] == "libjnistat.so"
     assert sites["jnistat"]["abis"] == ["arm64-v8a"]
     assert sites["jnidyn"]["member"] == "libjnidyn.so"
+
+
+def test_dynamic_join_refuses_ambiguous_name_and_signature() -> None:
+    """A JNINativeMethod entry has no class, so a (name, signature) pair
+    two dex classes declare cannot say which one it implements - fennec's
+    disposeNative()V across eleven org.mozilla.gecko classes is the tier-2
+    case. Those declarations are listed as ambiguous, never bound; a pair
+    unique on both sides still binds."""
+    from blint.lib.jni import _join_abi_lists
+
+    natives = [
+        {"class": "Lp/A;", "name": "disposeNative", "descriptor": "()V"},
+        {"class": "Lp/B;", "name": "disposeNative", "descriptor": "()V"},
+        {"class": "Lp/C;", "name": "only", "descriptor": "(I)I"},
+    ]
+    tables = {
+        "libx.so": {
+            "tables": [
+                {
+                    "entries": [
+                        {"name": "disposeNative", "signature": "()V", "fn_addr": "0x10"},
+                        {"name": "only", "signature": "(I)I", "fn_addr": "0x20"},
+                    ]
+                }
+            ]
+        }
+    }
+    result = _join_abi_lists(natives, {}, tables, {"libx.so": {"arm64-v8a"}}, "arm64-v8a")
+    assert [(b["class"], b["fn_addr"]) for b in result["bound_dynamic"]] == [("p.C", "0x20")]
+    assert {a["class"] for a in result["ambiguous_dynamic"]} == {"p.A", "p.B"}
+    assert all(a["table_candidates"] == 1 for a in result["ambiguous_dynamic"])
+    assert result["counts"]["ambiguous_dynamic"] == 2
+    assert result["unbound_dex_natives"] == []
 
 
 def test_app_join_absent_without_dex_natives() -> None:
