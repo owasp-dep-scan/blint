@@ -635,22 +635,96 @@ def _arm32_section_for_address(parsed_obj, address: int) -> int | None:
 
 
 def _arm32_function_mode(
-    original_func_addr: int, modes: list[tuple[int, str]], has_symbol: bool
-) -> str | None:
-    """Per-function ARM32 instruction set state, or None when unknown.
+    original_func_addr: int,
+    modes: list[tuple[int, str]],
+    has_symbol: bool,
+    call_modes: dict[int, str] | None = None,
+    pointer_modes: dict[int, str] | None = None,
+) -> tuple[str | None, str | None]:
+    """Per-function ARM32 instruction set state, or ``(None, None)`` when unknown.
 
     Mapping symbols are the stronger source (the assembler states the mode
     per range, which survives where a symbol's parity cannot be recorded);
     otherwise the ELF convention that ``st_value & 1`` marks a Thumb function
-    decides. Entries with neither evidence — unwinding-table discoveries and
-    promoted call targets in stripped binaries — return None and the caller
-    tries Thumb before ARM, the order NDK armeabi-v7a code justifies.
+    decides. A stripped binary has neither for its unwinding-table
+    discoveries, so two weaker sources follow (docs/DISASSEMBLE.md): a call
+    or tail branch into the function from already-decoded code, and a data
+    pointer whose bit 0 is the interworking Thumb bit (``.init_array`` /
+    ``.fini_array`` entries and other linker-relocated pointer slots). The
+    second return value names the source that decided the mode, for
+    ``instruction_mode_source`` on the function record.
     """
-    mapped = _arm32_mode_at(modes, original_func_addr & ~1)
+    addr = original_func_addr & ~1
+    mapped = _arm32_mode_at(modes, addr)
     if mapped is not None:
-        return mapped
+        return mapped, "mapping_symbol"
     if has_symbol:
-        return "thumb" if original_func_addr & 1 else "arm"
+        return ("thumb" if original_func_addr & 1 else "arm"), "symbol_parity"
+    if call_modes and addr in call_modes:
+        return call_modes[addr], "call"
+    if pointer_modes and addr in pointer_modes:
+        return pointer_modes[addr], "data_pointer"
+    return None, None
+
+
+def _arm32_data_pointer_modes(parsed_obj, candidate_starts: set[int]) -> dict[int, str]:
+    """Mode evidence from function pointers in data: ``{addr: mode}``.
+
+    The interworking convention sets bit 0 on a Thumb function pointer and
+    leaves it clear on an ARM one, so every word the linker treats as a
+    function address states its target's mode. Read from the two array
+    sections the loader walks (``.init_array``/``.fini_array``) and from
+    every ``R_ARM_RELATIVE`` slot (whose stored word is the pre-link
+    pointer). Only words naming a known function start contribute; a
+    coincidental data value cannot invent evidence for an address that is
+    not a function. Packed relocations LIEF cannot decode are simply absent
+    from the walk — evidence is missed, never guessed.
+    """
+    pointer_modes: dict[int, str] = {}
+    if not candidate_starts or not isinstance(parsed_obj, lief.ELF.Binary):
+        return pointer_modes
+
+    def _record_word(word: int) -> None:
+        target = word & ~1
+        if word and target in candidate_starts and target not in pointer_modes:
+            pointer_modes[target] = "thumb" if word & 1 else "arm"
+
+    for section in parsed_obj.sections:
+        try:
+            section_type = section.type
+        except (AttributeError, TypeError):
+            continue
+        if section_type not in (
+            lief.ELF.Section.TYPE.INIT_ARRAY,
+            lief.ELF.Section.TYPE.FINI_ARRAY,
+        ):
+            continue
+        try:
+            content = bytes(section.content)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        for offset in range(0, len(content) - 3, 4):
+            _record_word(struct.unpack_from("<I", content, offset)[0])
+    for relocation in parsed_obj.relocations:
+        try:
+            if relocation.type != lief.ELF.Relocation.TYPE.ARM_RELATIVE:
+                continue
+            word = _read_u32_at(parsed_obj, int(relocation.address))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if word is not None:
+            _record_word(word)
+    return pointer_modes
+
+
+def _read_u32_at(parsed_obj, address: int) -> int | None:
+    """The 4-byte little-endian word at ``address``, or None."""
+    try:
+        content = parsed_obj.get_content_from_virtual_address(address, 4)
+        if content and not isinstance(content, lief.lief_errors):
+            return struct.unpack("<I", bytes(content))[0]
+    except (SystemError, Exception):
+        pass
     return None
 
 
@@ -745,6 +819,46 @@ def _arm32_literal_address(instr, operand: str, mode: str | None) -> int | None:
     if mode != "arm":
         base &= ~3
     return base + offset
+
+
+def _arm32_record_call_evidence(
+    truncated_instr_list: list,
+    parsed_instrs: list,
+    line_modes: list,
+    default_mode: str | None,
+    call_modes: dict[int, str],
+) -> None:
+    """Feed ``call_modes`` with target modes stated by already-decoded code.
+
+    ``bl`` never changes instruction set state, so its target shares the
+    caller's mode; ``blx #imm`` exists to switch state, so its target takes
+    the opposite. Tail ``b`` shares the caller's mode like ``bl`` (a state
+    change needs ``bx``/``blx``). The per-line mode comes from the decode
+    itself, so evidence recorded here is only as good as the caller's own
+    mode decision — mapping symbols and symbol parity recorded theirs
+    exactly; an arbiter decision propagates with its uncertainty.
+    """
+    for index, instr in enumerate(truncated_instr_list):
+        parsed = parsed_instrs[index] if index < len(parsed_instrs) else None
+        if not parsed:
+            continue
+        mnemonic = parsed.mnemonic
+        is_blx = mnemonic in ("blx", "blx.w")
+        if not is_blx and mnemonic not in ARM32_CALL_INST | ARM32_UNCONDITIONAL_JMP_INST:
+            continue
+        operand = parsed.operands_lower[0] if parsed.operands_lower else ""
+        if not operand.startswith("#"):
+            # Register forms (``blx rN``) have no static target.
+            continue
+        mode = line_modes[index] if index < len(line_modes) else default_mode
+        if mode is None:
+            continue
+        target = _arm32_branch_target(instr, operand, mode, mnemonic)
+        if target is None:
+            continue
+        target &= ~1
+        if target not in call_modes:
+            call_modes[target] = ("arm" if mode == "thumb" else "thumb") if is_blx else mode
 
 
 class ParsedInstruction(NamedTuple):
@@ -2686,6 +2800,138 @@ def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
     return instructions
 
 
+# Trailing words both states decode as filler, so an evidence-less span's
+# terminator search skips past them: the shared padding set and ARM's
+# zero/pool word (``andeq …``, the ARM NOP idiom). Thumb's zero halfword
+# (``movs r0, r0``) matches by operand below; other ``movs`` are real code.
+_ARM32_ARBITER_SKIP_MNEMONICS = PADDING_TRAP_MNEMONICS | {"andeq"}
+
+
+def _arm32_stream_terminates(instrs: list, span_start: int, span_end: int, mode: str) -> bool:
+    """True when the instruction stream ends like a function in ``mode``.
+
+    The last non-filler instruction must be a return (``bx lr``, ``pop {…,
+    pc}``, ``ldr pc, [sp], #4``), an indirect tail branch (``bx rN``, a
+    ``ldr pc, [rN, …]``/``ldm``-to-pc form such as a PLT slot), or an
+    immediate ``b``/``blx``/``bl``-style branch whose target leaves the span
+    (a tail call). A wrong-mode decode of the same bytes ends in whatever
+    the mis-decode produced — NEON moves, data-processing writes to pc —
+    and loses the comparison.
+    """
+    index = len(instrs) - 1
+    while index >= 0:
+        mnemonic, operand = _split_arm32_instruction(instrs[index].assembly)
+        if mnemonic not in _ARM32_ARBITER_SKIP_MNEMONICS and not (
+            mnemonic == "movs" and operand.strip() == "r0, r0"
+        ):
+            break
+        index -= 1
+    if index < 0:
+        return False
+    mnemonic, operand = _split_arm32_instruction(instrs[index].assembly)
+    if _is_arm32_return(mnemonic, operand):
+        return True
+    if ARM32_BX_RE.match(mnemonic):
+        return True  # bx rN with N != lr: an indirect tail branch
+    compact = (operand or "").replace(" ", "")
+    if mnemonic in ("ldr", "ldr.w") and compact.startswith("pc,["):
+        # `ldr pc, [pc, …]` is a dispatch; `ldr pc, [sp…]` a return (both
+        # classified above); any other base is an indirect tail branch -
+        # the PLT slot shape.
+        return not compact.startswith("pc,[pc")
+    if _is_arm32_table_dispatch(mnemonic, operand):
+        return False
+    if mnemonic in ARM32_UNCONDITIONAL_JMP_INST or mnemonic in ("blx", "blx.w", "bl", "bl.w"):
+        target = _arm32_branch_target(instrs[index], operand.split(",")[0].strip(), mode, mnemonic)
+        return target is None or not (span_start <= target < span_end)
+    return False
+
+
+def _split_arm32_instruction(assembly: str) -> tuple[str, str]:
+    """``mnemonic, operand_text`` from one nyxstone assembly line."""
+    pieces = (assembly or "").split(None, 1)
+    return pieces[0].lower(), pieces[1] if len(pieces) > 1 else ""
+
+
+def _arm32_branch_plausibility(
+    instrs: list,
+    mode: str,
+    span_start: int,
+    exec_ranges: list,
+    known_starts: set[int],
+) -> int:
+    """Score one mode's immediate branches: coherent code vs mis-decode.
+
+    Every immediate ``b``/``bl``/``blx`` votes: +1 when its target is a
+    known function start (calls and tail calls land on entries), −1 when it
+    leaves the executable ranges entirely (no real branch does that), 0 for
+    the in-exec-but-unknown middle. A wrong-mode decode of ARM code as
+    Thumb (or the reverse) misreads halfwords into a spray of branches
+    whose targets are mostly nonsense addresses, so the sums separate the
+    states on real library code where a single function's own shape may
+    not.
+    """
+    score = 0
+    for instr in instrs:
+        parsed = _parse_instruction_text(instr.assembly)
+        mnemonic = parsed.mnemonic
+        if mnemonic not in ARM32_CALL_INST | ARM32_UNCONDITIONAL_JMP_INST:
+            continue
+        operand = parsed.operands_lower[0] if parsed.operands_lower else ""
+        if not operand.startswith("#"):
+            continue
+        target = _arm32_branch_target(instr, operand, mode, mnemonic)
+        if target is None:
+            continue
+        target &= ~1
+        if target in known_starts and target != span_start:
+            score += 1
+        elif not _addr_in_exec_ranges(target, exec_ranges):
+            score -= 1
+    return score
+
+
+def _arm32_arbiter_pick(
+    decoded: list[tuple[str, list]],
+    span_va: int,
+    span_len: int,
+    exec_ranges: list,
+    known_starts: set[int],
+) -> tuple[str, list] | None:
+    """Choose the instruction set state for an evidence-less span.
+
+    Both states' decodes are scored: +2 when the stream (minus trailing
+    filler) ends on a terminator — a return or a tail branch out of the
+    span, the shape a real function ends in; the immediate-branch
+    plausibility sum (known-start targets vs addresses outside the
+    executable ranges); and +1 when the raw stream lands exactly on the
+    span end, the previous A4a rule. Ties keep the caller's order (Thumb
+    first, the NDK armeabi-v7a default), so the new score only changes a
+    decision the old rule could not make.
+    """
+    best: tuple[int, str, list] | None = None
+    for mode_name, candidate in decoded:
+        if not candidate:
+            continue
+        score = _arm32_branch_plausibility(
+            candidate,
+            mode_name,
+            span_va,
+            exec_ranges,
+            known_starts,
+        )
+        last = candidate[-1]
+        if last.address + len(last.bytes) == span_va + span_len:
+            score += 1
+        if _arm32_stream_terminates(candidate, span_va, span_va + span_len, mode_name):
+            score += 2
+        if best is None or score > best[0]:
+            best = (score, mode_name, candidate)
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
 def _arm32_code_spans(
     start: int, size: int, mapping_modes: list[tuple[int, str]]
 ) -> list[tuple[int, int]]:
@@ -2862,6 +3108,11 @@ def disassemble_functions(
                     f"ARM-mode fallback only: {e}"
                 )
     arm32_mapping_modes = _arm32_mapping_symbol_modes(parsed_obj) if is_arm32 else {}
+    # Call evidence grows during the worklist pass (a decoded function states
+    # its targets' modes); pointer evidence is static, from data words. Both
+    # only ever name functions the discovery pass already found.
+    arm32_call_modes: dict[int, str] = {}
+    arm32_pointer_modes: dict[int, str] = {}
     # Resolve MachO import slot/stub addresses once and surface them on the
     # metadata so the callgraph builder can classify these as external import
     # edges instead of misattributing them to internal range-containment nodes.
@@ -2888,6 +3139,8 @@ def disassemble_functions(
                 except ValueError:
                     pass
     all_func_addrs_sorted = sorted(set(all_func_addrs))
+    if is_arm32:
+        arm32_pointer_modes = _arm32_data_pointer_modes(parsed_obj, set(all_func_addrs_sorted))
     # Call targets render as absolute virtual addresses, while stored function
     # addresses are image-relative for PE. Mach-O function metadata is
     # normalized to the virtual space where the list is built, so its
@@ -2978,6 +3231,8 @@ def disassemble_functions(
     worklist: deque = deque(all_funcs)
     promoted_count = 0
     known_starts = list(all_func_addrs_sorted)
+    # The arbiter's plausibility score needs membership tests, not order.
+    known_start_set = set(known_starts)
     # Sorted, non-overlapping extents of known code: unwind tables contribute
     # exact per-function sizes up front, and every completed disassembly adds
     # its own. Promotion treats these as the ground truth for what is already
@@ -3050,8 +3305,12 @@ def disassemble_functions(
             has_symbol = bool(real_name and not func_entry.get("discovered")) or bool(
                 arm32_raw_func_addr & 1
             )
-            arm32_mode = _arm32_function_mode(
-                arm32_raw_func_addr, arm32_section_modes, has_symbol=has_symbol
+            arm32_mode, arm32_mode_source = _arm32_function_mode(
+                arm32_raw_func_addr,
+                arm32_section_modes,
+                has_symbol=has_symbol,
+                call_modes=arm32_call_modes,
+                pointer_modes=arm32_pointer_modes,
             )
             if arm32_mode == "data":
                 LOG.debug(
@@ -3187,29 +3446,25 @@ def disassemble_functions(
                     span_instrs: list | None = None
                     span_used = None
                     if span_mode is None and len(instance_order) == 2:
-                        # No stated mode: the decode whose last instruction
-                        # lands exactly on the span end is the right one; ties
-                        # fall back to Thumb, the NDK armeabi-v7a default.
-                        decoded = [
-                            (
-                                mode_name,
-                                _disassemble_arm32_span(instance, span_bytes, span_va),
-                            )
-                            for instance, mode_name in instance_order
-                        ]
-                        for mode_name, candidate in decoded:
-                            if (
-                                candidate
-                                and candidate[-1].address + len(candidate[-1].bytes)
-                                == span_va + span_len
-                            ):
-                                span_instrs, span_used = candidate, mode_name
-                                break
-                        if span_instrs is None:
-                            for mode_name, candidate in decoded:
-                                if candidate:
-                                    span_instrs, span_used = candidate, mode_name
-                                    break
+                        # No stated mode: the arbiter decodes both states and
+                        # keeps the one whose stream ends like a function
+                        # (terminator beats lands-on-span-end; ties keep this
+                        # order, Thumb first — the NDK armeabi-v7a default).
+                        picked = _arm32_arbiter_pick(
+                            [
+                                (
+                                    mode_name,
+                                    _disassemble_arm32_span(instance, span_bytes, span_va),
+                                )
+                                for instance, mode_name in instance_order
+                            ],
+                            span_va,
+                            span_len,
+                            exec_ranges_true,
+                            known_start_set,
+                        )
+                        if picked:
+                            span_used, span_instrs = picked
                     else:
                         for instance, mode_name in instance_order:
                             candidate = _disassemble_arm32_span(instance, span_bytes, span_va)
@@ -3344,6 +3599,14 @@ def disassemble_functions(
                 parsed_instrs,
                 arm32_context if is_arm32 else None,
             )
+            if is_arm32:
+                _arm32_record_call_evidence(
+                    truncated_instr_list,
+                    parsed_instrs,
+                    arm32_line_modes,
+                    used_arm32_mode,
+                    arm32_call_modes,
+                )
             joined_mnemonics = "\n".join(instruction_mnemonics)
             instruction_hash = hashlib.sha256(joined_mnemonics.encode("utf-8")).hexdigest()
             has_system_call = any(
@@ -3403,6 +3666,14 @@ def disassemble_functions(
                 # states a mode, the fallback order's winning instance lands
                 # here. Absent on every other architecture.
                 function_result["instruction_mode"] = used_arm32_mode
+                # What decided that mode: mapping_symbol, symbol_parity,
+                # call (a decoded caller's bl/blx), data_pointer
+                # (.init_array/.fini_array/relative-relocation words), or
+                # arbiter (both-state decode comparison). Absent on every
+                # other architecture.
+                function_result["instruction_mode_source"] = (
+                    (arm32_mode_source or "arbiter") if used_arm32_mode else None
+                )
                 if arm32_data_spans:
                     # $d islands skipped inside the extent. The
                     # instruction_lengths prefix sum no longer reconstructs
