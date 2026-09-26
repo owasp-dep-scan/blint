@@ -188,3 +188,147 @@ def test_surface_from_symbol_entries_only() -> None:
     assert block["on_unload"] is None
     assert parse_static_jni_surface([]) is None
     assert parse_static_jni_surface(None) is None
+
+
+# --------------------------------------------------- A5.2 E2: the join
+
+
+def test_dex_native_facts_from_the_real_dex() -> None:
+    from blint.lib.binary import parse_dex
+    from blint.lib.jni import collect_dex_native_facts
+
+    facts = collect_dex_native_facts(parse_dex(str(FIXTURES / "a5-classes.dex")))
+    natives = {(n["class"], n["name"], n["descriptor"]) for n in facts["natives"]}
+    assert ("Lcom/example/blint/jni/NativeEscapes;", "plain_one", "(I)I") in natives
+    assert ("Lcom/example/blint/jni/Nested$Inner;", "deep", "(Ljava/lang/String;)I") in natives
+    assert ("Lcom/example/blint/jni/NativeEscapes;", "missingNative", "(I)I") in natives
+    assert len(natives) == 13
+    # Every loadLibrary site carries its literal and the calling class.
+    sites = {(s["class"], s["library"]) for s in facts["load_library"]}
+    assert ("Lcom/example/blint/jni/NativeEscapes;", "jnistat") in sites
+    assert ("Lcom/example/blint/jni/Nested$Inner;", "jnistat") in sites
+    assert ("Lcom/example/blint/jni/Dyn;", "jnidyn") in sites
+    assert ("Lcom/example/blint/jni/DynB;", "jnidyn") in sites
+    assert ("Lcom/example/blint/native_lib/Pkg;", "jnistat") in sites
+    assert len(sites) == 6
+
+
+def test_join_static_overload_and_signature_policy() -> None:
+    from blint.lib.jni import join_static
+
+    natives = [
+        {"class": "Lp/Q;", "name": "f", "descriptor": "(I)I"},
+        {"class": "Lp/Q;", "name": "f", "descriptor": "(Ljava/lang/String;)I"},
+        {"class": "Lp/Q;", "name": "gone", "descriptor": "(I)I"},
+    ]
+    surface = {
+        "static_methods": [
+            {"symbol": "Java_p_Q_f__I", "class": "p.Q", "method": "f", "signature": "I"},
+            {
+                "symbol": "Java_p_Q_f__Ljava_lang_String_2",
+                "class": "p.Q",
+                "method": "f",
+                "signature": "Ljava/lang/String;",
+            },
+            {"symbol": "Java_p_Q_extra", "class": "p.Q", "method": "extra"},
+        ]
+    }
+    result = join_static(natives, surface)
+    assert [(b["name"], b["symbol"]) for b in result["bound"]] == [
+        ("f", "Java_p_Q_f__I"),
+        ("f", "Java_p_Q_f__Ljava_lang_String_2"),
+    ]
+    assert [u["name"] for u in result["unbound_dex_natives"]] == ["gone"]
+    assert [u["symbol"] for u in result["undeclared_exports"]] == ["Java_p_Q_extra"]
+    # A name overloaded in the dex but exported only short-form does not
+    # bind by name alone: the signature must disambiguate.
+    short_only = {"static_methods": [{"symbol": "Java_p_Q_f", "class": "p.Q", "method": "f"}]}
+    result2 = join_static(natives, short_only)
+    assert result2["bound"] == []
+    assert all(u["name"] == "f" or u["name"] == "gone" for u in result2["unbound_dex_natives"])
+    # No surface at all: everything unbound, nothing undeclared.
+    result3 = join_static(natives, None)
+    assert len(result3["unbound_dex_natives"]) == 3
+    assert result3["undeclared_exports"] == []
+
+
+def test_app_join_summary_matches_the_fixture_source() -> None:
+    """The E2 R1 gate: bound equals the fixture's source exactly."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a5-jni-arm64-v8a.apk")
+    summary = build_jni_join_summary(apk, scan_android_native(apk))
+    assert summary["counts"] == {"dex_natives": 13, "load_library_sites": 6, "abis": 1}
+    abi = summary["per_abi"]["arm64-v8a"]
+    assert abi["counts"] == {
+        "libraries": 2,
+        "bound": 7,
+        "unbound_dex_natives": 6,
+        "undeclared_exports": 1,
+    }
+    bound = {(b["class"], b["name"], b["library"], b["symbol"]) for b in abi["bound"]}
+    assert (
+        "com.example.blint.jni.Nested$Inner",
+        "deep",
+        "libjnistat.so",
+        "Java_com_example_blint_jni_Nested_00024Inner_deep",
+    ) in bound
+    assert (
+        "com.example.blint.native_lib.Pkg",
+        "util",
+        "libjnistat.so",
+        "Java_com_example_blint_native_1lib_Pkg_util",
+    ) in bound
+    # both f overloads bind to their own __<sig> export
+    assert (
+        "com.example.blint.jni.NativeEscapes",
+        "f",
+        "libjnistat.so",
+        "Java_com_example_blint_jni_NativeEscapes_f__I",
+    ) in bound
+    assert (
+        "com.example.blint.jni.NativeEscapes",
+        "f",
+        "libjnistat.so",
+        "Java_com_example_blint_jni_NativeEscapes_f__Ljava_lang_String_2",
+    ) in bound
+    unbound = {(u["class"], u["name"]) for u in abi["unbound_dex_natives"]}
+    assert ("com.example.blint.jni.Dyn", "dynA1") in unbound  # dynamic (until F1)
+    assert ("com.example.blint.jni.NativeEscapes", "missingNative") in unbound
+    assert [u["symbol"] for u in abi["undeclared_exports"]] == [
+        "Java_com_example_blint_jni_NativeEscapes_orphan"
+    ]
+    # loadLibrary sites map to the real member names and their ABIs.
+    sites = {s["library"]: s for s in summary["load_library"]}
+    assert sites["jnistat"]["member"] == "libjnistat.so"
+    assert sites["jnistat"]["abis"] == ["arm64-v8a"]
+    assert sites["jnidyn"]["member"] == "libjnidyn.so"
+
+
+def test_app_join_absent_without_dex_natives() -> None:
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    # The no-dex tier-1 APK has no declarations to join: absent summary.
+    apk = str(FIXTURES / "tier1_no_dex.apk")
+    assert build_jni_join_summary(apk, scan_android_native(apk)) is None
+
+
+def test_join_listing_cap_crosses_and_flags() -> None:
+    """JOIN_LISTING_CAP (256) truncates the listing, not the counts, and
+    flags the truncation - the shape every bounded summary keeps."""
+    from blint.lib.jni import JOIN_LISTING_CAP, _join_abi_lists
+
+    natives = [
+        {"class": f"Lp/C{i};", "name": "m", "descriptor": "()V"}
+        for i in range(JOIN_LISTING_CAP + 5)
+    ]
+    result = _join_abi_lists(natives, {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
+    assert result["counts"]["unbound_dex_natives"] == JOIN_LISTING_CAP + 5
+    assert len(result["unbound_dex_natives"]) == JOIN_LISTING_CAP
+    assert result["unbound_dex_natives_truncated"] is True
+    # An under-cap join carries no truncation flag.
+    small = _join_abi_lists(natives[:3], {}, {"libnone.so": {"arm64-v8a"}}, "arm64-v8a")
+    assert "unbound_dex_natives_truncated" not in small
+    assert small["counts"]["unbound_dex_natives"] == 3

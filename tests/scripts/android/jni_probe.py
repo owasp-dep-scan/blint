@@ -42,13 +42,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -102,7 +102,11 @@ def sdk_bin_candidates() -> list[Path]:
 
 
 def run_tool(tool: Path, args: list[str]) -> str:
-    proc = subprocess.run([str(tool), *args], capture_output=True, text=True, check=False)
+    # errors="replace": real-app dex strings can be arbitrary bytes, and a
+    # decode error must not lose the whole oracle run.
+    proc = subprocess.run(
+        [str(tool), *args], capture_output=True, text=True, errors="replace", check=False
+    )
     if proc.returncode != 0:
         raise ProbeError(f"{tool.name} failed ({proc.returncode}): {proc.stderr[-300:]}")
     return proc.stdout
@@ -123,7 +127,8 @@ def oracle_nm_exports(nm: Path, so: Path) -> set[str]:
     for line in out.splitlines():
         parts = line.split()
         if len(parts) >= 3 and parts[1] in ("T", "W", "t", "w"):
-            names.add(parts[-1])
+            # symbol versions ("JNI_OnLoad@@NS") are not part of the name
+            names.add(parts[-1].split("@")[0])
     return names
 
 
@@ -193,43 +198,8 @@ def blint_so_java_exports(so: Path) -> tuple[set[str], set[str]]:
     return names, jni_names
 
 
-# str() of a LIEF dex type is the descriptor for class types
-# (``Ljava/lang/String;``) but pretty for primitives and arrays (``int``,
-# ``int[]``); ``value`` is the PRIMITIVES enum and ``dim`` the array depth.
-_PRIMITIVE_LETTERS = {
-    "VOID": "V",
-    "BOOLEAN": "Z",
-    "BYTE": "B",
-    "SHORT": "S",
-    "CHAR": "C",
-    "INT": "I",
-    "LONG": "J",
-    "FLOAT": "F",
-    "DOUBLE": "D",
-}
-
-
-def lief_type_descriptor(t) -> str:
-    """One LIEF dex type as its JVM descriptor (``I``, ``[I``, ``L...;``)."""
-    try:
-        dim = int(t.dim or 0)
-    except (AttributeError, TypeError, RuntimeError):
-        dim = 0
-    try:
-        value = t.value
-    except (AttributeError, TypeError, RuntimeError):
-        value = None
-    if value is not None:
-        base = _PRIMITIVE_LETTERS[str(value).split(".")[-1].upper()]
-    else:
-        rendered = str(t)
-        base = rendered if rendered.startswith("L") and rendered.endswith(";") else None
-        if base is None:
-            try:
-                return "[" * dim + lief_type_descriptor(t.underlying_array_type)
-            except (AttributeError, TypeError, RuntimeError):
-                return rendered
-    return "[" * dim + base
+# The descriptor renderer lives in blint.lib.jni alongside the decoder.
+from blint.lib.jni import lief_type_descriptor
 
 
 def blint_dex_natives(dex: Path) -> list[dict]:
@@ -373,11 +343,11 @@ def probe_so(so: Path, nm: Path) -> dict:
     jni_block = (metadata.get("android") or {}).get("jni")
     if oracle_jni and jni_block is None:
         report["diffs"].append(
-            "blint android.jni block absent but the library exports JNI symbols"
+            f"{so.name}: blint android.jni block absent but the library exports JNI symbols"
         )
     elif not oracle_jni and jni_block is not None:
         report["diffs"].append(
-            "blint android.jni block present but llvm-nm -D shows no JNI symbols"
+            f"{so.name}: blint android.jni block present but llvm-nm -D shows no JNI symbols"
         )
     elif jni_block is not None:
         block_symbols = {entry.get("symbol") for entry in jni_block.get("static_methods") or []}
@@ -444,53 +414,133 @@ def probe_dex(dex: Path, dexdump: Path) -> dict:
 
 
 def probe_apk(apk: Path, nm: Path, dexdump: Path) -> dict:
-    """One apk: per-ABI .so surfaces + the dex, then the join per ABI."""
+    """One apk (or bundle): per-ABI .so surfaces + the dex, then the join.
+
+    Members come from blint's own container model (scan_android_native +
+    LibraryReader) so bundles (xapk/apks with inner APKs) resolve exactly
+    the way the app-level join sees them; the oracle still reads the
+    materialized bytes with llvm-nm/dexdump.
+    """
+    from blint.lib.android_native import LibraryReader, scan_android_native
+
     so_reports: list[dict] = []
     dex_report = None
     join_by_abi: dict[str, dict] = {}
     export_names_by_lib: dict[str, set[str]] = {}
-    with tempfile.TemporaryDirectory(prefix="jni_probe_") as tmp:
-        with zipfile.ZipFile(apk) as zf:
-            members = zf.namelist()
-            for member in members:
-                if member == "classes.dex" or (
-                    member.startswith("lib/") and member.endswith(".so")
-                ):
-                    target = Path(tmp) / member.replace("/", "__")
-                    target.write_bytes(zf.read(member))
-        for member in members:
-            if member == "classes.dex":
-                dex_report = probe_dex(Path(tmp) / "classes.dex", dexdump)
-            elif member.startswith("lib/") and member.endswith(".so"):
-                path = Path(tmp) / member.replace("/", "__")
-                so_report = probe_so(path, nm)
-                so_report["entry"] = member
-                abi = member.split("/")[1]
+    native = scan_android_native(str(apk))
+    seen_entries: set[tuple[str, str]] = set()
+    with (
+        tempfile.TemporaryDirectory(prefix="jni_probe_") as tmp,
+        LibraryReader(str(apk)) as reader,
+    ):
+        for lib in native.get("libraries") or []:
+            for loc in lib.get("locations") or []:
+                abi = loc.get("abi") or ""
+                entry = loc.get("entry_name") or ""
+                if not abi or not entry.endswith(".so"):
+                    continue
+                if (loc.get("split"), entry) in seen_entries:
+                    continue
+                seen_entries.add((loc.get("split"), entry))
+                target = Path(tmp) / f"{abi}__{entry}".replace("/", "~")
+                data = None
+                with contextlib.suppress(Exception):
+                    data = reader.read(loc)
+                if not data:
+                    continue
+                target.write_bytes(data)
+                so_report = probe_so(target, nm)
+                so_report["entry"] = entry
                 so_report["abi"] = abi
+                if loc.get("split"):
+                    so_report["split"] = loc["split"]
                 so_reports.append(so_report)
-                export_names_by_lib[f"{abi}:{member}"] = {
+                export_names_by_lib[f"{abi}:{entry}"] = {
                     e["symbol"] for e in so_report["java_exports"]
                 }
+        # The dex: every classes.dex of the app (bundles carry one per
+        # inner APK); the oracle facts merge.
+        dex_paths: list[Path] = []
+        with contextlib.suppress(Exception):
+            from blint.lib.android import _iter_app_dex_files
+
+            for adex, _ in _iter_app_dex_files(str(apk)):
+                shutil.copy(adex, Path(tmp) / f"dex{len(dex_paths)}.dex")
+                dex_paths.append(Path(tmp) / f"dex{len(dex_paths)}.dex")
+        merged_natives: set[tuple[str, str, str]] = set()
+        for dex_path in dex_paths:
+            single = probe_dex(dex_path, dexdump)
+            if dex_report is None:
+                dex_report = single
+            else:
+                dex_report["dex_natives"] = sorted(
+                    set(dex_report["dex_natives"]) | set(single["dex_natives"])
+                )
+                dex_report["load_library_sites"] = (
+                    dex_report["load_library_sites"] + single["load_library_sites"]
+                )
+                dex_report["diffs"].extend(single["diffs"])
+            merged_natives.update(single["dex_natives"])
+        if dex_report is not None:
+            dex_report["dex_natives"] = sorted(merged_natives)
         dex_natives = dex_report["dex_natives"] if dex_report else []
-        # dexdump classes are L-descriptors; decode_join renders dotted names.
         natives = [
-            {
-                "class": c[1:-1] if c.startswith("L") else c,
-                "name": n,
-                "descriptor": d,
-            }
+            {"class": c[1:-1] if c.startswith("L") else c, "name": n, "descriptor": d}
             for c, n, d in dex_natives
         ]
         for lib_key, exports in sorted(export_names_by_lib.items()):
             join_by_abi[lib_key] = decode_join(exports, natives)
+    diffs = [d for r in so_reports for d in r["diffs"]] + (
+        dex_report["diffs"] if dex_report else []
+    )
+    # E2: blint's own app-level join (the android_jni metadata block) against
+    # this probe's per-ABI join - same bound/unbound/undeclared partition.
+    blint_join = None
+    with contextlib.suppress(Exception):
+        from blint.lib.android_native import scan_android_native
+        from blint.lib.jni import build_jni_join_summary
+
+        blint_join = build_jni_join_summary(str(apk), scan_android_native(str(apk)))
+    if blint_join is None:
+        has_join_input = bool(
+            dex_report and (dex_report["dex_natives"] or dex_report["load_library_sites"])
+        )
+        if join_by_abi and has_join_input:
+            diffs.append("blint android_jni join absent but the app has dex natives + libs")
+    else:
+        for abi, abi_join in (blint_join.get("per_abi") or {}).items():
+            probe_bound = {
+                (b["class"], b["name"], b["symbol"])
+                for lib_key, result in join_by_abi.items()
+                if lib_key.startswith(f"{abi}:")
+                for b in result["bound"]
+            }
+            probe_unbound = {
+                (u["class"], u["name"])
+                for lib_key, result in join_by_abi.items()
+                if lib_key.startswith(f"{abi}:")
+                for u in result["unbound_dex_natives"]
+            }
+            # A dex native bound by any lib in this abi is not unbound.
+            probe_unbound -= {(b[0], b[1]) for b in probe_bound}
+            blint_bound = {
+                (b["class"], b["name"], b["symbol"]) for b in abi_join.get("bound") or []
+            }
+            if blint_bound != probe_bound and not abi_join.get("bound_truncated"):
+                diffs.append(
+                    f"android_jni bound differs on {abi}: only-blint={sorted(blint_bound - probe_bound)} "
+                    f"only-probe={sorted(probe_bound - blint_bound)}"
+                )
+            if len(blint_join.get("per_abi") or {}) != len({k.split(":")[0] for k in join_by_abi}):
+                diffs.append("android_jni abi set differs from the apk's lib dirs")
     return {
         "input": str(apk),
         "kind": "apk",
         "so_reports": so_reports,
         "dex": dex_report,
         "join": join_by_abi,
-        "diffs": [d for r in so_reports for d in r["diffs"]]
-        + (dex_report["diffs"] if dex_report else []),
+        "blint_join": blint_join,
+        "diffs": diffs,
     }
 
 

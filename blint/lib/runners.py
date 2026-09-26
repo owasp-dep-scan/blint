@@ -29,6 +29,7 @@ from blint.lib.ios import (
     enrich_with_bundle_context,
     is_ios_app,
 )
+from blint.lib.jni import build_jni_join_summary
 from blint.lib.macos_bundle import (
     collect_macos_bundle_detailed,
     find_macos_bundles,
@@ -116,8 +117,7 @@ def _load_catalog_index(blint_options: BlintOptions) -> dict | None:
         raise SystemExit(2)
     index = build_catalog_index(catalog_dir)
     LOG.info(
-        "Catalog index ready: %d catalogs, %d member hashes (%d distinct), "
-        "complete=%s from %s",
+        "Catalog index ready: %d catalogs, %d member hashes (%d distinct), complete=%s from %s",
         index["catalog_count"],
         index["entry_count"],
         index["indexed_entry_count"],
@@ -885,7 +885,9 @@ class AnalysisRunner:
                 )
                 self._mark_attempted("sfx-member")
                 try:
-                    member_metadata = self._parse_with_cache(member_path, blint_options, "sfx-member")
+                    member_metadata = self._parse_with_cache(
+                        member_path, blint_options, "sfx-member"
+                    )
                     member_metadata["container"] = {
                         "kind": "sfx_7z",
                         "member_path": member_name,
@@ -1087,7 +1089,9 @@ class AnalysisRunner:
                 )
                 self._mark_attempted("cab-member")
                 try:
-                    member_metadata = self._parse_with_cache(member_path, blint_options, "cab-member")
+                    member_metadata = self._parse_with_cache(
+                        member_path, blint_options, "cab-member"
+                    )
                     member_metadata["container"] = {
                         "kind": "cab",
                         "member_path": member_name,
@@ -1217,6 +1221,10 @@ class AnalysisRunner:
                 "exe_type": "androidapp",
             }
         metadata["android_native"] = _android_native_summary(native)
+        # The dex <-> native static JNI join (A5.2 E2), next to the native
+        # summary; absent when the app declares no natives (nothing to join).
+        if jni_join := build_jni_join_summary(f, native):
+            metadata["android_jni"] = jni_join
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
         self._process_apk_so_members(f, native, blint_options, wants_callgraph_outputs)
@@ -1244,9 +1252,7 @@ class AnalysisRunner:
             for loc in lib["locations"]:
                 if android_abis and loc["abi"] not in android_abis:
                     continue
-                entry = units.setdefault(
-                    (loc["abi"], lib["name"]), {"lib": lib, "locations": []}
-                )
+                entry = units.setdefault((loc["abi"], lib["name"]), {"lib": lib, "locations": []})
                 entry["locations"].append(loc)
         if not units:
             return
@@ -1271,9 +1277,7 @@ class AnalysisRunner:
                 try:
                     member_path = _materialize_apk_member(temp_dir, reader, primary)
                     if member_path is None:
-                        raise RuntimeError(
-                            f"could not read {primary['entry_name']} from the app"
-                        )
+                        raise RuntimeError(f"could not read {primary['entry_name']} from the app")
                     member_metadata = self._parse_with_cache(
                         member_path, blint_options, "apk-so-member"
                     )
@@ -1338,7 +1342,9 @@ class AnalysisRunner:
             self.reviews += review
 
 
-def _materialize_apk_member(temp_dir: str, reader: LibraryReader, location: dict[str, Any]) -> str | None:
+def _materialize_apk_member(
+    temp_dir: str, reader: LibraryReader, location: dict[str, Any]
+) -> str | None:
     """Write one library's bytes to a temp file for parsing."""
     data = reader.read(location)
     if not data:

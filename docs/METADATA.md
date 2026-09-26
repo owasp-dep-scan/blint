@@ -98,6 +98,14 @@ ELF (Executable and Linkable Format) files are the standard for Linux, BSD, and 
     - `counts`: `{java_exports, decoded, decode_errors}`.
     The decoding follows the JNI specification's "Resolving Native Method Names" (Java SE 24); `tests/scripts/android/jni_probe.py` compares the block against `llvm-nm -D` plus the spec decode on every fixture.
 
+- **App dex↔native JNI join (`android_jni`, app-level, A5.2 E2):** the static half of the join between the app's dex `native` declarations and its libraries' `android.jni` surfaces, one result per ABI (rule 36) — never a silent first-or-best. Absent when the app declares no natives and has no loadLibrary site. Matching is by class and method name, and by parameter descriptors whenever the dex class overloads the name or the export carries the `__<sig>` form.
+  - `counts`: `{dex_natives, load_library_sites, abis}`.
+  - `load_library`: every `System.loadLibrary(<literal>)` call site as `{class, library, member, abis}` — `member` is `lib<name>.so` and `abis` the ABIs where that member actually ships (empty when the app does not carry it).
+  - `per_abi.<abi>`: `{counts: {libraries, bound, unbound_dex_natives, undeclared_exports}}` plus the three lists, each capped at 256 entries with a `<list>_truncated` flag beside (counts always reflect the full sets).
+    - `bound`: `{class, method, descriptor, abi, library, symbol}` — each dex declaration with the export that implements it.
+    - `unbound_dex_natives`: declarations no library in the ABI answers statically — likely registered dynamically (`RegisterNatives`), loaded from another library, or obfuscated.
+    - `undeclared_exports`: the ABI's `Java_*` exports no dex declaration claims (plus any that do not decode).
+
 - **ABI Requirements (`abi_analysis`):** The runtime the binary requires and the ABI features that constrain where it can run. See [`abi_analysis`](#abi_analysis) below.
 
 - **Runtime Loading (`runtime_loading`, `recovered_dependencies`):** Libraries the binary opens at runtime rather than linking against, recovered from the image itself rather than from a declarative note. See [`runtime_loading` and `recovered_dependencies`](#runtime_loading-and-recovered_dependencies) below.
