@@ -1,0 +1,19 @@
+tests/scripts/android/jni_sources/a5_jni/java/com/example/blint/jni/NativeEscapes.java
+  s_4b70c6697bebd0::t_001df1671e3fb3 14,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3004dd50381b247fec14d9338a3ce4a14966f6d5",
+  "prompts": {},
+  "sessions": {
+    "s_4b70c6697bebd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6050ea0-96eb-4a29-ae56-eab953b5cf93",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
