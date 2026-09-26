@@ -117,6 +117,17 @@ Java_com_example_blint_jni_NativeEscapes_libcCall(JNIEnv *env, jobject thiz, jin
     return getpid() + x;
 }
 
+/* NativeEscapes.flag(boolean) - boolean parameter and return, so the
+ * dex node-name rendering pins the Z case (this LIEF renders it `bool`,
+ * not `boolean`). */
+JNIEXPORT jboolean JNICALL
+Java_com_example_blint_jni_NativeEscapes_flag(JNIEnv *env, jobject thiz, jboolean b)
+{
+    (void) env;
+    (void) thiz;
+    return !b;
+}
+
 /* Exported with no dex declaration: the undeclared_exports side. */
 JNIEXPORT jint JNICALL
 Java_com_example_blint_jni_NativeEscapes_orphan(JNIEnv *env, jobject thiz, jint x)

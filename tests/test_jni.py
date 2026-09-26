@@ -102,7 +102,7 @@ def test_static_fixture_block() -> None:
     block = _jni_block("liba5_static_arm64-v8a.so")
     assert block is not None
     by_symbol = {entry["symbol"]: entry for entry in block["static_methods"]}
-    assert len(by_symbol) == 9
+    assert len(by_symbol) == 10
     f_int = by_symbol["Java_com_example_blint_jni_NativeEscapes_f__I"]
     assert (f_int["class"], f_int["method"], f_int["signature"]) == (
         "com.example.blint.jni.NativeEscapes",
@@ -126,7 +126,7 @@ def test_static_fixture_block() -> None:
     assert block["on_load"]["symbol"] == "JNI_OnLoad"
     assert block["on_load"]["address"].startswith("0x")
     assert block["on_unload"]["symbol"] == "JNI_OnUnload"
-    assert block["counts"] == {"java_exports": 9, "decoded": 9, "decode_errors": 0}
+    assert block["counts"] == {"java_exports": 10, "decoded": 10, "decode_errors": 0}
 
 
 def test_stripped_twin_gives_the_same_block() -> None:
@@ -215,7 +215,7 @@ def test_dex_native_facts_from_the_real_dex() -> None:
     assert ("Lcom/example/blint/jni/NativeEscapes;", "plain_one", "(I)I") in natives
     assert ("Lcom/example/blint/jni/Nested$Inner;", "deep", "(Ljava/lang/String;)I") in natives
     assert ("Lcom/example/blint/jni/NativeEscapes;", "missingNative", "(I)I") in natives
-    assert len(natives) == 14
+    assert len(natives) == 15
     # Every loadLibrary site carries its literal and the calling class.
     sites = {(s["class"], s["library"]) for s in facts["load_library"]}
     assert ("Lcom/example/blint/jni/NativeEscapes;", "jnistat") in sites
@@ -272,13 +272,13 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
 
     apk = str(FIXTURES / "a5-jni-arm64-v8a.apk")
     summary = build_jni_join_summary(apk, scan_android_native(apk))
-    assert summary["counts"] == {"dex_natives": 14, "load_library_sites": 6, "abis": 1}
+    assert summary["counts"] == {"dex_natives": 15, "load_library_sites": 6, "abis": 1}
     abi = summary["per_abi"]["arm64-v8a"]
     # After F1, the five Dyn* declarations bind dynamically and only
     # missingNative stays unbound.
     assert abi["counts"] == {
         "libraries": 2,
-        "bound": 8,
+        "bound": 9,
         "bound_dynamic": 5,
         "unbound_dex_natives": 1,
         "undeclared_exports": 1,
@@ -439,21 +439,37 @@ def test_signature_and_identifier_validators() -> None:
 # --------------------------------------------- A5.2 F2: the callgraph edge
 
 
-def test_dex_pretty_descriptor_rendering() -> None:
-    from blint.lib.jni import _dex_node_name, _dex_pretty_descriptor
+def test_node_name_is_the_pools_own_rendering() -> None:
+    """The join records each native's dex callgraph node name from
+    DexPools._render_method - the same function that builds the graph's
+    names - never a re-derived string (this LIEF renders Z as `bool`,
+    not `boolean`; a synthesized table missed that, caught on the R4
+    rung). A boolean-returning native is declared in the fixture to pin
+    the Z case."""
+    from blint.lib.binary import parse_dex
+    from blint.lib.dalvik import DexPools
+    from blint.lib.dalvik_callgraph import build_callgraph
+    from blint.lib.jni import collect_dex_native_facts
 
-    assert _dex_pretty_descriptor("(I)I") == "(int)int"
-    assert _dex_pretty_descriptor("(ILjava/lang/String;)V") == "(intLjava/lang/String;)void"
-    assert _dex_pretty_descriptor("([I)I") == "(int[])int"
-    assert _dex_pretty_descriptor("(Ljava/lang/String;)Ljava/lang/String;") == (
-        "(Ljava/lang/String;)Ljava/lang/String;"
-    )
-    assert _dex_pretty_descriptor("(II)I") == "(intint)int"
-    assert _dex_pretty_descriptor("()V") == "()void"
-    assert (
-        _dex_node_name("com.example.blint.jni.Dyn", "dynA1", "(I)I")
-        == "Lcom/example/blint/jni/Dyn;->dynA1(int)int"
-    )
+    md = parse_dex(str(FIXTURES / "a5-classes.dex"))
+    facts = collect_dex_native_facts(md)
+    by_name = {n["name"]: n for n in facts["natives"]}
+    # The boolean-returning native renders bool, not boolean.
+    assert by_name["flag"]["descriptor"] == "(Z)Z"
+    assert by_name["flag"]["node_name"].endswith("->flag(bool)bool")
+    # Every invoked native's node_name is exactly a name the dex callgraph
+    # emits; missingNative is declared but never invoked, so the graph has
+    # no node for it and the edge must not be drawn (never invent a node).
+    graph = build_callgraph(md)
+    node_names = {n["name"] for n in graph.get("nodes") or []}
+    for native in facts["natives"]:
+        if native["name"] == "missingNative":
+            assert native["node_name"] not in node_names
+        else:
+            assert native["node_name"] in node_names, native["node_name"]
+    # The rendering itself matches DexPools for the same method object.
+    methods = {DexPools._render_method(m): m for m in md.get("methods") or []}
+    assert by_name["dynA1"]["node_name"] in methods
 
 
 def test_extend_app_callgraph_never_invents_nodes() -> None:
@@ -531,6 +547,7 @@ def test_extend_app_callgraph_draws_both_edge_kinds() -> None:
                         "class": "p.Q",
                         "name": "m",
                         "descriptor": "(int)int",
+                        "node_name": "Lp/Q;->m(int)int",
                         "library": "libx.so",
                         "fn_addr": "0x1000",
                         "symbol": "Java_p_Q_m",
@@ -541,6 +558,7 @@ def test_extend_app_callgraph_draws_both_edge_kinds() -> None:
                         "class": "p.Q",
                         "name": "d",
                         "descriptor": "(long)int",
+                        "node_name": "Lp/Q;->d(long)int",
                         "library": "libx.so",
                         "fn_addr": "0x2000",
                     }

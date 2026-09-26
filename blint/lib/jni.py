@@ -266,6 +266,8 @@ def collect_dex_native_facts(dex_metadata: dict) -> dict:
     natives: list[dict] = []
     load_library: list[dict] = []
     methods = dex_metadata.get("methods") or []
+    from blint.lib.dalvik import DexPools
+
     for method in methods:
         try:
             if _is_native_access(method.access_flags):
@@ -277,6 +279,11 @@ def collect_dex_native_facts(dex_metadata: dict) -> dict:
                         "class": owner,
                         "name": str(method.name),
                         "descriptor": f"({params}){lief_type_descriptor(proto.return_type)}",
+                        # The dex callgraph node name for this declaration,
+                        # rendered by the same DexPools method the callgraph
+                        # builds its names from - never a re-derived string
+                        # (this LIEF renders Z as `bool`, not `boolean`).
+                        "node_name": DexPools._render_method(method),
                     }
                 )
         except (AttributeError, RuntimeError, TypeError):
@@ -287,8 +294,6 @@ def collect_dex_native_facts(dex_metadata: dict) -> dict:
     from blint.lib.dalvik_semantics import is_invoke
 
     try:
-        from blint.lib.dalvik import DexPools
-
         pools = DexPools.from_metadata(dex_metadata)
     except (AttributeError, TypeError, ValueError):
         pools = None
@@ -948,10 +953,7 @@ def extend_app_callgraph_with_jni(app_callgraph: dict, join: dict, native_units:
         for entry in abi_join.get("bound") or []:
             kind, target_addr = "jni_static", entry.get("fn_addr")
             self_check = entry.get("symbol")
-            dex_name = _dex_node_name(
-                entry.get("class"), entry.get("name"), entry.get("descriptor")
-            )
-            for dex_id in dex_ids_by_name.get(dex_name, []):
+            for dex_id in dex_ids_by_name.get(entry.get("node_name") or "", []):
                 native_id = _native_node_id(
                     native_addr_ids,
                     native_name_ids,
@@ -963,10 +965,7 @@ def extend_app_callgraph_with_jni(app_callgraph: dict, join: dict, native_units:
                 if native_id:
                     jni_edges.append({"src": dex_id, "dst": native_id, "kind": kind, "count": 1})
         for entry in abi_join.get("bound_dynamic") or []:
-            dex_name = _dex_node_name(
-                entry.get("class"), entry.get("name"), entry.get("descriptor")
-            )
-            for dex_id in dex_ids_by_name.get(dex_name, []):
+            for dex_id in dex_ids_by_name.get(entry.get("node_name") or "", []):
                 native_id = _native_node_id(
                     native_addr_ids,
                     native_name_ids,
@@ -989,58 +988,6 @@ def extend_app_callgraph_with_jni(app_callgraph: dict, join: dict, native_units:
         result["external"] = externals
     result["jni_edge_count"] = len(jni_edges)
     return result
-
-
-# DexPools renders primitives pretty (``int``) and keeps class descriptors
-# as-is (``Ljava/lang/String;``), arrays as ``elem[]`` - the dex callgraph
-# node names follow that rendering.
-_DEX_PRETTY_PRIMITIVES = {
-    "V": "void",
-    "Z": "boolean",
-    "B": "byte",
-    "S": "short",
-    "C": "char",
-    "I": "int",
-    "J": "long",
-    "F": "float",
-    "D": "double",
-}
-
-
-def _dex_pretty_descriptor(descriptor: str) -> str:
-    """Render a JVM descriptor the way the dex pools do (pretty params)."""
-    params, _, ret = descriptor[1:].partition(")")
-    out: list[str] = []
-    index = 0
-    while index < len(params):
-        depth = 0
-        while index < len(params) and params[index] == "[":
-            depth += 1
-            index += 1
-        if index >= len(params):
-            break
-        if params[index] == "L":
-            end = params.index(";", index)
-            base = params[index : end + 1]
-            index = end + 1
-        else:
-            base = _DEX_PRETTY_PRIMITIVES.get(params[index], params[index])
-            index += 1
-        out.append(base + "[]" * depth)
-    pretty_ret = _DEX_PRETTY_PRIMITIVES.get(ret[0], ret) if ret else ""
-    return f"({''.join(out)}){pretty_ret}"
-
-
-def _dex_node_name(dotted_class: str | None, method: str | None, descriptor: str | None) -> str:
-    """The dex callgraph node name for one declaration: ``Lcls;->m(pretty)``."""
-    if not dotted_class or not method or not descriptor or not descriptor.startswith("("):
-        return ""
-    internal = (
-        dotted_class[1:-1]
-        if dotted_class.startswith("L") and dotted_class.endswith(";")
-        else dotted_class
-    ).replace(".", "/")
-    return f"L{internal};->{method}{_dex_pretty_descriptor(descriptor)}"
 
 
 def _native_node_id(

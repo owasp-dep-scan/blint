@@ -11,9 +11,10 @@ public class NativeEscapes {
     public static native int g(int[] a);
     public static native int missingNative(int x);
     public static native int libcCall(int x);
+    public static native boolean flag(boolean b);
 
     public static int callThem() {
         int[] one = {1, 2, 3};
-        return plain_one(1) + f(2) + f("three") + g(one) + libcCall(4);
+        return plain_one(1) + f(2) + f("three") + g(one) + libcCall(4) + (flag(true) ? 1 : 0);
     }
 }
