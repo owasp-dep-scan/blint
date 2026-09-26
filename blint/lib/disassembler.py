@@ -707,7 +707,7 @@ def _arm32_data_pointer_modes(parsed_obj, candidate_starts: set[int]) -> dict[in
             _record_word(struct.unpack_from("<I", content, offset)[0])
     for relocation in parsed_obj.relocations:
         try:
-            if relocation.type != 23:  # R_ARM_RELATIVE
+            if relocation.type != lief.ELF.Relocation.TYPE.ARM_RELATIVE:
                 continue
             word = _read_u32_at(parsed_obj, int(relocation.address))
         except (AttributeError, TypeError, ValueError):
@@ -858,7 +858,7 @@ def _arm32_record_call_evidence(
             continue
         target &= ~1
         if target not in call_modes:
-            call_modes[target] = "arm" if is_blx else mode
+            call_modes[target] = ("arm" if mode == "thumb" else "thumb") if is_blx else mode
 
 
 class ParsedInstruction(NamedTuple):

@@ -579,6 +579,39 @@ def test_data_pointer_modes_read_fini_array_words() -> None:
     assert modes == {0x1374: "arm", 0x1388: "arm"}
 
 
+def test_data_pointer_modes_read_relative_relocation_words() -> None:
+    """The five JNINativeMethod fnPtr slots of the stripped A5 dynamic twin
+    live in .data.rel.ro behind R_ARM_RELATIVE relocations, not in an init
+    or fini array. The unstripped twin's llvm-objdump places dyn_a1..dyn_b2
+    at 0x15cc/0x15d4/0x15ec/0x15f8/0x1600 in ARM state (raw clang, no
+    -mthumb), and the stored words carry no Thumb bit."""
+    binary = lief.parse(str(R2.parent / "liba5_dynamic_armeabi-v7a_stripped.so"))
+    starts = {0x15CC, 0x15D4, 0x15EC, 0x15F8, 0x1600}
+    assert _arm32_data_pointer_modes(binary, starts) == dict.fromkeys(starts, "arm")
+
+
+@pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
+def test_blx_from_arm_state_names_a_thumb_target() -> None:
+    """arm_state_step (ARM state, 0x1434) in liba4a_r2.so calls arm_leaf
+    with `bl 0x1fd8` and thumb_leaf with `blx 0x1fe8` (llvm-objdump -d on
+    the same file). bl keeps the caller's state and blx switches it, so the
+    call evidence is ARM for 0x1fd8 and Thumb for 0x1fe8."""
+    from nyxstone import Nyxstone
+
+    from blint.lib.disassembler import _arm32_record_call_evidence, _parse_instruction_text
+
+    binary = lief.parse(str(R2))
+    size = next(s.size for s in binary.symbols if s.name == "arm_state_step")
+    raw = list(binary.get_content_from_virtual_address(0x1434, size))
+    arm = Nyxstone(target_triple="armv7-unknown-linux-android")
+    instrs = _disassemble_arm32_span(arm, raw, 0x1434)
+    parsed = [_parse_instruction_text(instr.assembly) for instr in instrs]
+    call_modes: dict[int, str] = {}
+    _arm32_record_call_evidence(instrs, parsed, ["arm"] * len(instrs), "arm", call_modes)
+    assert call_modes[0x1FD8] == "arm"
+    assert call_modes[0x1FE8] == "thumb"
+
+
 def test_data_pointer_modes_ignore_non_functions() -> None:
     """A word that names no candidate start contributes nothing - the
     .data.rel.ro self-pointer (0x3100 -> 0x3100) cannot invent evidence."""

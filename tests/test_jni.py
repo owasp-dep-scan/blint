@@ -429,6 +429,7 @@ def test_signature_and_identifier_validators() -> None:
     assert not _valid_method_signature("(Q)I")  # not a descriptor letter
     assert not _valid_method_signature("(V)I")  # void parameter
     assert not _valid_method_signature("(Ljava/lang/String;)V I")  # two returns
+    assert not _valid_method_signature("(I)II")  # two return descriptors
     assert _JAVA_IDENTIFIER_RE.match("dynA1")
     assert _JAVA_IDENTIFIER_RE.match("_private")
     assert not _JAVA_IDENTIFIER_RE.match("1bad")
@@ -600,6 +601,22 @@ def test_extend_app_callgraph_draws_both_edge_kinds() -> None:
     )
 
 
+def test_native_node_lookup_clears_thumb_bit_and_falls_back_to_name() -> None:
+    """An arm32 Thumb export's dynsym value carries bit 0 while the
+    callgraph node address does not; and an address that is not a node
+    still resolves through the export symbol's node name."""
+    from blint.lib.jni import _native_node_id
+
+    addr_ids = {("libx.so", "armeabi-v7a", 0x1000): "n0"}
+    name_ids = {("libx.so", "armeabi-v7a", "Java_p_Q_m"): "n1"}
+    assert _native_node_id(addr_ids, name_ids, "libx.so", "armeabi-v7a", "0x1001", None) == "n0"
+    assert (
+        _native_node_id(addr_ids, name_ids, "libx.so", "armeabi-v7a", "0x2000", "Java_p_Q_m")
+        == "n1"
+    )
+    assert _native_node_id(addr_ids, name_ids, "libx.so", "armeabi-v7a", "0x2000", None) is None
+
+
 def _nyxstone_available() -> bool:
     try:
         from blint.lib.disassembler import NYXSTONE_AVAILABLE
@@ -628,7 +645,7 @@ def test_r1_end_to_end_path_java_to_libc() -> None:
     units = []
     with tempfile.TemporaryDirectory(prefix="jni_path_") as tmp, LibraryReader(apk) as reader:
         for lib in native["libraries"]:
-            loc = next((l for l in lib["locations"] if l["abi"] == "arm64-v8a"), None)
+            loc = next((x for x in lib["locations"] if x["abi"] == "arm64-v8a"), None)
             if not loc:
                 continue
             member = parse(_materialize_apk_member(tmp, reader, loc), disassemble=True)

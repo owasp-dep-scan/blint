@@ -288,19 +288,28 @@ def collect_dex_native_facts(dex_metadata: dict) -> dict:
                 )
         except (AttributeError, RuntimeError, TypeError):
             continue
-    if not methods:
+    # Only a method whose bytecode names System.loadLibrary's method index
+    # can call it, so the pools and the decode are paid for those alone.
+    load_library_indices = _load_library_method_indices(methods)
+    if not load_library_indices:
         return {"natives": natives, "load_library": load_library}
+    index_patterns = [index.to_bytes(2, "little") for index in load_library_indices]
     from blint.lib.dalvik import disassemble_method
     from blint.lib.dalvik_semantics import is_invoke
 
-    try:
-        pools = DexPools.from_metadata(dex_metadata)
-    except (AttributeError, TypeError, ValueError):
-        pools = None
+    pools = None
     for method in methods:
         bytecode = getattr(method, "bytecode", None)
-        if not bytecode or pools is None:
+        if not bytecode:
             continue
+        raw = bytes(bytecode)
+        if not any(pattern in raw for pattern in index_patterns):
+            continue
+        if pools is None:
+            try:
+                pools = DexPools.from_metadata(dex_metadata)
+            except (AttributeError, TypeError, ValueError):
+                break
         try:
             instructions = disassemble_method(method, pools)
         except Exception:  # one malformed method must not drop the rest
@@ -317,6 +326,21 @@ def collect_dex_native_facts(dex_metadata: dict) -> dict:
                         owner = method.cls.fullname if getattr(method, "has_class", False) else ""
                     load_library.append({"class": owner or "", "library": pending_string})
     return {"natives": natives, "load_library": load_library}
+
+
+def _load_library_method_indices(methods: list) -> list[int]:
+    """Method-pool indices of ``java.lang.System.loadLibrary`` references."""
+    indices = []
+    for index, method in enumerate(methods):
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            if (
+                index <= 0xFFFF
+                and str(method.name) == "loadLibrary"
+                and method.has_class
+                and method.cls.fullname == "Ljava/lang/System;"
+            ):
+                indices.append(index)
+    return indices
 
 
 # ----------------------------------------------------- the static join
@@ -558,7 +582,7 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
                 if not data:
                     continue
                 try:
-                    parsed = lief.ELF.parse(list(data))
+                    parsed = lief.ELF.parse(data)
                     if parsed is None or isinstance(parsed, lief.lief_errors):
                         continue
                     entries, _ = parse_symbols(parsed.dynamic_symbols)
@@ -675,9 +699,15 @@ def _valid_method_signature(text: str) -> bool:
     params, _, ret = text[1:].partition(")")
     if not _valid_param_descriptors(params):
         return False
-    if ret == "V":
-        return True
-    return bool(ret) and _valid_param_descriptors(ret) and "V" not in ret[:1]
+    # Exactly one return descriptor: V, or one field descriptor.
+    return ret == "V" or (_valid_param_descriptors(ret) and _is_single_descriptor(ret))
+
+
+def _is_single_descriptor(text: str) -> bool:
+    body = text.lstrip("[")
+    return len(body) == 1 and body in "BCSIJFDZ" or (
+        body.startswith("L") and body.endswith(";") and body.count(";") == 1
+    )
 
 
 def relative_relocation_map(parsed_obj) -> tuple[dict[int, int], list[str]]:
@@ -998,7 +1028,11 @@ def _native_node_id(
     if not library:
         return None
     with contextlib.suppress(TypeError, ValueError):
-        return addr_ids.get((library, abi, int(address, 16)))
+        value = int(address, 16)
+        # An arm32 Thumb export carries bit 0; the node address does not.
+        for candidate in (value, value & ~1):
+            if node_id := addr_ids.get((library, abi, candidate)):
+                return node_id
     if symbol:
         return name_ids.get((library, abi, str(symbol)))
     return None
