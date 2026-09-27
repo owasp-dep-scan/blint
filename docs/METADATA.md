@@ -621,6 +621,43 @@ Recovered function starts for binaries whose symbol tables are stripped or incom
 
 Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.
 
+### Framework and runtime identification (`frameworks`, ELF only)
+
+One record per identified framework or runtime, emitted only when evidence
+named in `blint/lib/framework_ident.py` matches (rule 38): a file name alone
+is a *hint*, never a component. Absence of the key means the pass never ran
+(non-ELF); an empty result reads as no evidence, never "no frameworks":
+
+```json
+{
+  "framework": "ndk-libcxx",
+  "version": "r26-canary",
+  "evidence": [
+    {"what": ".note.android.ident NDK version", "where": "notes",
+     "value": "r26-canary"}
+  ],
+  "hints": [],
+  "static": false
+}
+```
+
+- `version` is present only when the named evidence pins one; hashes that
+  no published table maps to a version are reported as hashes in `evidence`.
+- `static: true` marks a framework found inside a host library (a nested
+  identification, carried in the host record's `nested` list).
+- In `blint sbom` on Android apps, a replace-grade identification takes
+  over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
+  for the NDK C++ runtime, for example), keeping the file's provenance
+  properties and adding one `cdx:blint:identification:evidence` property
+  per evidence entry plus `blint:hint:file_name`. Files that merely bundle
+  a framework statically keep their own component. App-level facts ride the
+  parent application component as properties (`blint:ndk_versions` — the
+  distinct NDK note versions per ABI, per ground rule 36).
+
+The committed evidence fixtures (`tests/data/android/<framework>-evidence.json`)
+carry the corpus side of every detector, with the extracting command and the
+llvm oracle read recorded in each file.
+
 ---
 
 ## Build and Dependency Information

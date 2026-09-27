@@ -18,6 +18,7 @@ from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
 from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import parse, parse_dex
 from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
+from blint.lib.framework_ident import framework_identity
 from blint.lib.utils import (
     check_command,
     create_component_evidence,
@@ -89,8 +90,33 @@ def collect_app_metadata(
     if app_file.endswith(BUNDLE_EXTENSIONS):
         return collect_bundle_metadata(app_file, deep_mode)
     parent_component = apk_parent_component(app_file)
-    components = collect_files_metadata(app_file, parent_component, deep_mode)
+    app_facts: dict = {}
+    components = collect_files_metadata(
+        app_file, parent_component, deep_mode, app_facts=app_facts
+    )
+    attach_app_framework_facts(parent_component, app_facts)
     return parent_component, components
+
+
+def attach_app_framework_facts(parent_component: Component | None, app_facts: dict) -> None:
+    """Record app-level identification facts on the parent component.
+
+    The NDK version dates every NDK-built library of an ABI, so the
+    distinct ``.note.android.ident`` NDK versions are recorded per ABI as
+    one property (ground rule 36: per-ABI facts, never the first or the
+    best).
+    """
+    if parent_component is None:
+        return
+    ndk_versions = app_facts.get("ndk_versions") or {}
+    if ndk_versions:
+        value = ";".join(
+            f"{abi}:{','.join(sorted(versions))}"
+            for abi, versions in sorted(ndk_versions.items())
+        )
+        parent_component.properties = (parent_component.properties or []) + [
+            Property(name="blint:ndk_versions", value=value)
+        ]
 
 
 def collect_bundle_metadata(
@@ -113,6 +139,7 @@ def collect_bundle_metadata(
     bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
     file_components = []
     parent_component: Component | None = None
+    app_facts: dict = {}
     try:
         unzip_unsafe(app_file, bundle_temp_dir)
         bundle_info = read_bundle_info(bundle_temp_dir)
@@ -124,10 +151,12 @@ def collect_bundle_metadata(
             parent_component = apk_parent_component(app_file, base_apk, bundle_info)
         for apk in apk_files:
             file_components += collect_files_metadata(
-                app_file, parent_component, deep_mode, unpack_target=apk
+                app_file, parent_component, deep_mode, unpack_target=apk,
+                app_facts=app_facts,
             )
     finally:
         shutil.rmtree(bundle_temp_dir, ignore_errors=True)
+    attach_app_framework_facts(parent_component, app_facts)
     return parent_component, file_components
 
 
@@ -550,7 +579,11 @@ def _so_version_and_build_id(so_metadata: dict) -> tuple[str | None, str | None]
     return version, build_id
 
 
-def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) -> list[Component]:
+def collect_so_files_metadata(
+    app_file: str,
+    app_temp_dir: str | None = None,
+    app_facts: dict | None = None,
+) -> list[Component]:
     """Collect SBOM components for the app's native libraries (A1.3, 01/D).
 
     Reads the libraries through the A1.1 container model (zip in place,
@@ -588,6 +621,16 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
         so_metadata = parsed.get(lib["sha256"])
         if so_metadata is None:
             continue
+        if app_facts is not None:
+            # App-level per-ABI NDK facts (rule 36): every NDK-built library
+            # of the ABI dates it, so collect the distinct note versions.
+            ident = (so_metadata.get("android") or {}).get("android_ident") or {}
+            if ident.get("ndk_version"):
+                for loc in lib.get("locations") or []:
+                    if loc.get("abi"):
+                        app_facts.setdefault("ndk_versions", {}).setdefault(
+                            loc["abi"], set()
+                        ).add(str(ident["ndk_version"]))
         version, _build = _so_version_and_build_id(so_metadata)
         groups.setdefault((lib["name"], version or ""), []).append((lib, so_metadata))
     components: list[Component] = []
@@ -637,6 +680,39 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
             Property(name="internal:abis", value=",".join(abis)),
             Property(name="internal:functions", value=SYMBOL_DELIMITER.join(functions)),
         ]
+        # Framework identification (04/B, rule 38): when every member of
+        # this group carries the same replace-grade identification, the
+        # framework component takes the file component's slot - the file is
+        # the distribution unit of the project, and emitting both would
+        # double-count the same bytes. The identity comes only from the
+        # named evidence in the records; the file name becomes a hint.
+        framework_record = _replacing_framework_record(members)
+        component_name, component_version = name, version or None
+        if framework_record:
+            identity = framework_identity(framework_record, abis)
+            if identity:
+                component_name, component_version, purl = identity
+                properties.append(
+                    Property(
+                        name="blint:hint:file_name",
+                        value=name,
+                    )
+                )
+                for ev in framework_record.get("evidence") or []:
+                    properties.append(
+                        Property(
+                            name="cdx:blint:identification:evidence",
+                            value=(
+                                f"{framework_record['framework']}: "
+                                f"{ev.get('what')} ({ev.get('where')}): "
+                                f"{ev.get('value')}"
+                            ),
+                        )
+                    )
+                for hint in framework_record.get("hints") or []:
+                    properties.append(
+                        Property(name="blint:identification:hint", value=hint)
+                    )
         if build_ids:
             properties.append(
                 Property(name="blint:build_id", value=",".join(build_ids))
@@ -650,8 +726,8 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
             )
         component = Component(
             type=Type.library,
-            name=name,
-            version=version or None,
+            name=component_name,
+            version=component_version,
             purl=purl,
             scope=Scope.required,
             evidence=create_component_evidence(src_files[0] if src_files else app_file, 0.6),
@@ -660,6 +736,42 @@ def collect_so_files_metadata(app_file: str, app_temp_dir: str | None = None) ->
         component.bom_ref = RefType(purl)
         components.append(component)
     return components
+
+
+def _replacing_framework_record(members: list[tuple[dict, dict]]) -> dict | None:
+    """One replace-grade identification for a (name, version) group, or None.
+
+    Every parsed member must carry the same framework record (same
+    framework key and version) and that framework must be in the component
+    table, so a half-identified multi-ABI build never rewrites the group's
+    identity. Static identifications (a framework inside a host library)
+    and hint-only records never replace.
+    """
+    from blint.lib.framework_ident import FRAMEWORK_COMPONENTS
+
+    seen: tuple | None = None
+    for _lib, meta in members:
+        records = meta.get("frameworks") or []
+        replacing = [
+            r for r in records
+            if not r.get("static")
+            and (r.get("framework") or "") in FRAMEWORK_COMPONENTS
+        ]
+        if len(replacing) != 1:
+            return None
+        record = replacing[0]
+        key = (record.get("framework"), record.get("version"))
+        if seen is None:
+            seen = key
+        elif seen != key:
+            return None
+    if seen is None:
+        return None
+    for _lib, meta in members:
+        for r in meta.get("frameworks") or []:
+            if not r.get("static") and (r.get("framework"), r.get("version")) == seen:
+                return r
+    return None
 
 
 def parse_so_file(app_file: str, app_temp_dir: str, sof: str) -> Component:
@@ -1004,6 +1116,7 @@ def collect_files_metadata(
     parent_component: Component | None,
     deep_mode: bool,
     unpack_target: str | None = None,
+    app_facts: dict | None = None,
 ) -> list[Component]:
     """
     Unzip the app (or a specific apk within a bundle) and collect metadata.
@@ -1023,7 +1136,7 @@ def collect_files_metadata(
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     # Native libraries come from the zip in place (A1.1 model), not from
     # the unzip tree.
-    file_components += collect_so_files_metadata(app_file)
+    file_components += collect_so_files_metadata(app_file, app_facts=app_facts)
     if deep_mode:
         file_components += collect_dex_files_metadata(app_file, parent_component, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)

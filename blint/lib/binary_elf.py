@@ -99,6 +99,7 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.elf_abi import analyze_elf_abi
 from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
 from blint.lib.elf_linkmap import resolve_link_closure
+from blint.lib.framework_ident import attach_frameworks
 from blint.lib.jni import parse_static_jni_surface
 from blint.lib.utils import (
     demangle_symbolic_name,
@@ -814,6 +815,10 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     android_facts = parse_android_facts(parsed_obj, metadata)
     if android_facts is not None:
         metadata["android"] = android_facts
+    # Framework/runtime identification (04/B, rule 38): evidence-keyed only,
+    # stored under "frameworks" when anything matches. Runs after the android
+    # facts (the NDK-note detector reads them) and the symbol tables.
+    metadata = attach_frameworks(metadata, parsed_obj)
     metadata["functions"] = parse_functions(parsed_obj.functions)
     metadata["ctor_functions"] = parse_functions(parsed_obj.ctor_functions)
     metadata["dtor_functions"] = parse_functions(parsed_obj.dtor_functions)

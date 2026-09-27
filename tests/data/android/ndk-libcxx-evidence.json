@@ -36,6 +36,14 @@
       ],
       "symbol_evidence": {
         "matched_names": [
+          "operator new(unsigned long)",
+          "operator new(unsigned long, std::align_val_t)",
+          "operator new(unsigned long, std::align_val_t, std::nothrow_t const&)",
+          "operator new(unsigned long, std::nothrow_t const&)",
+          "operator new[](unsigned long)",
+          "operator new[](unsigned long, std::align_val_t)",
+          "operator new[](unsigned long, std::align_val_t, std::nothrow_t const&)",
+          "operator new[](unsigned long, std::nothrow_t const&)",
           "std::__ndk1::__arrive_barrier_algorithm_base(std::__ndk1::__barrier_algorithm_base*, unsigned char)",
           "std::__ndk1::__assoc_sub_state::__execute()",
           "std::__ndk1::__assoc_sub_state::__make_ready()",
@@ -227,18 +235,17 @@
           "std::__ndk1::__money_put<wchar_t>::__gather_info(bool, bool, std::__ndk1::locale const&, std::__ndk1::money_base::pattern&, wchar_t&, wchar_t&, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >&, std::__ndk1::basic_string<wchar_t, std::__ndk1::char_traits<wchar_t>, std::__ndk1::allocator<wchar_t> >&, std::__ndk1::basic_string<wchar_t, std::__ndk1::char_traits<wchar_t>, std::__ndk1::allocator<wchar_t> >&, int&)",
           "std::__ndk1::__narrow_to_utf8<(unsigned long)16>::~__narrow_to_utf8()",
           "std::__ndk1::__narrow_to_utf8<(unsigned long)32>::~__narrow_to_utf8()",
-          "std::__ndk1::__next_prime(unsigned long)",
-          "std::__ndk1::__num_get<char>::__stage2_float_loop(char, bool&, char&, char*, char*&, char, char, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&, unsigned int*, unsigned int*&, unsigned int&, char*)",
-          "std::__ndk1::__num_get<char>::__stage2_float_prep(std::__ndk1::ios_base&, char*, char&, char&)",
-          "std::__ndk1::__num_get<char>::__stage2_int_loop(char, int, char*, char*&, unsigned int&, char, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&, unsigned int*, unsigned int*&, char*)",
-          "std::__ndk1::__num_get<char>::__stage2_int_prep(std::__ndk1::ios_base&, char*, char&)",
-          "std::__ndk1::__num_get<wchar_t>::__stage2_float_loop(wchar_t, bool&, char&, char*, char*&, wchar_t, wchar_t, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&, unsigned int*, unsigned int*&, unsigned int&, wchar_t*)",
-          "std::__ndk1::__num_get<wchar_t>::__stage2_float_prep(std::__ndk1::ios_base&, wchar_t*, wchar_t&, wchar_t&)",
-          "std::__ndk1::__num_get<wchar_t>::__stage2_int_loop(wchar_t, int, char*, char*&, unsigned int&, wchar_t, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&, unsigned int*, unsigned int*&, wchar_t*)",
-          "std::__ndk1::__num_get<wchar_t>::__stage2_int_prep(std::__ndk1::ios_base&, wchar_t*, wchar_t&)"
+          "std::__ndk1::__next_prime(unsigned long)"
         ],
-        "matched_count": 1489,
-        "dynamic_symbols_total": 2522
+        "matched_count": 1497,
+        "dynamic_symbols_total": 2522,
+        "ndk1_namespace": true,
+        "operator_new_exported": true,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],
@@ -255,6 +262,14 @@
     },
     "oracle_llvm": {
       "nm_matched_symbols": [
+        "operator new(unsigned long)",
+        "operator new(unsigned long, std::align_val_t)",
+        "operator new(unsigned long, std::align_val_t, std::nothrow_t const&)",
+        "operator new(unsigned long, std::nothrow_t const&)",
+        "operator new[](unsigned long)",
+        "operator new[](unsigned long, std::align_val_t)",
+        "operator new[](unsigned long, std::align_val_t, std::nothrow_t const&)",
+        "operator new[](unsigned long, std::nothrow_t const&)",
         "std::__ndk1::__arrive_barrier_algorithm_base(std::__ndk1::__barrier_algorithm_base*, unsigned char)",
         "std::__ndk1::__assoc_sub_state::__execute()",
         "std::__ndk1::__assoc_sub_state::__make_ready()",
@@ -446,17 +461,9 @@
         "std::__ndk1::__money_put<wchar_t>::__gather_info(bool, bool, std::__ndk1::locale const&, std::__ndk1::money_base::pattern&, wchar_t&, wchar_t&, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char>>&, std::__ndk1::basic_string<wchar_t, std::__ndk1::char_traits<wchar_t>, std::__ndk1::allocator<wchar_t>>&, std::__ndk1::basic_string<wchar_t, std::__ndk1::char_traits<wchar_t>, std::__ndk1::allocator<wchar_t>>&, int&)",
         "std::__ndk1::__narrow_to_utf8<16ul>::~__narrow_to_utf8()",
         "std::__ndk1::__narrow_to_utf8<32ul>::~__narrow_to_utf8()",
-        "std::__ndk1::__next_prime(unsigned long)",
-        "std::__ndk1::__num_get<char>::__stage2_float_loop(char, bool&, char&, char*, char*&, char, char, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char>> const&, unsigned int*, unsigned int*&, unsigned int&, char*)",
-        "std::__ndk1::__num_get<char>::__stage2_float_prep(std::__ndk1::ios_base&, char*, char&, char&)",
-        "std::__ndk1::__num_get<char>::__stage2_int_loop(char, int, char*, char*&, unsigned int&, char, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char>> const&, unsigned int*, unsigned int*&, char*)",
-        "std::__ndk1::__num_get<char>::__stage2_int_prep(std::__ndk1::ios_base&, char*, char&)",
-        "std::__ndk1::__num_get<wchar_t>::__stage2_float_loop(wchar_t, bool&, char&, char*, char*&, wchar_t, wchar_t, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char>> const&, unsigned int*, unsigned int*&, unsigned int&, wchar_t*)",
-        "std::__ndk1::__num_get<wchar_t>::__stage2_float_prep(std::__ndk1::ios_base&, wchar_t*, wchar_t&, wchar_t&)",
-        "std::__ndk1::__num_get<wchar_t>::__stage2_int_loop(wchar_t, int, char*, char*&, unsigned int&, wchar_t, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char>> const&, unsigned int*, unsigned int*&, wchar_t*)",
-        "std::__ndk1::__num_get<wchar_t>::__stage2_int_prep(std::__ndk1::ios_base&, wchar_t*, wchar_t&)"
+        "std::__ndk1::__next_prime(unsigned long)"
       ],
-      "nm_matched_count": 1489,
+      "nm_matched_count": 1497,
       "strings_dart_or_banner": [],
       "readelf_notes_android_ident": [
         "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",

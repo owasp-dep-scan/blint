@@ -48,7 +48,7 @@ OPENSSL_BANNER_RE = re.compile(r"^OpenSSL \d+\.\d+\.\d+[a-z]* [A-Za-z]+ +\d+ \d{
 # The symbol-set evidence, as parse()'s demangled names spell them.
 SYMBOL_EVIDENCE_RE = re.compile(
     r"^(?:std::__ndk1::|facebook::jni::|BORINGSSL_|InternalFlutterGpu_)"
-    r"|^_kDart|NSS_VersionCheck"
+    r"|^_kDart|NSS_VersionCheck|^operator new"
 )
 
 
@@ -104,6 +104,10 @@ def extract(path: str, tools: dict) -> dict:
 
     symbol_names = [s.get("name") for s in (metadata.get("dynamic_symbols") or [])
                     if s.get("name")]
+    exported_names = [
+        s.get("name") for s in (metadata.get("dynamic_symbols") or [])
+        if s.get("name") and s.get("is_exported")
+    ]
     # llvm-nm -D --demangle, defined-only: the oracle read of the same set.
     nm_lines = run_tool(tools["nm"], ["-D", "--demangle", "--defined-only", path])
     oracle_symbols = [
@@ -131,6 +135,25 @@ def extract(path: str, tools: dict) -> dict:
                     1 for n in symbol_names if SYMBOL_EVIDENCE_RE.match(n)
                 ),
                 "dynamic_symbols_total": len(symbol_names),
+                # Explicit flags so an R1 fixture never depends on the
+                # matched_names cap.
+                "ndk1_namespace": any(n.startswith("std::__ndk1::") for n in symbol_names),
+                "operator_new_exported": any(
+                    n.startswith("operator new") for n in exported_names
+                ),
+                "facebook_jni_namespace": any(
+                    n.startswith("facebook::jni::") for n in symbol_names
+                ),
+                "boringssl_prefix": any(
+                    n.startswith("BORINGSSL_") for n in symbol_names
+                ),
+                "flutter_gpu_symbols": any(
+                    n.startswith("InternalFlutterGpu_") for n in symbol_names
+                ),
+                "dart_snapshot_symbols": any(
+                    n.startswith("_kDart") for n in symbol_names
+                ),
+                "nss_version_check": any(n == "NSS_VersionCheck" for n in symbol_names),
             },
             "string_evidence": {
                 "dart_vm_version": matched(DART_VERSION_RE),
