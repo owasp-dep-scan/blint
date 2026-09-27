@@ -939,7 +939,7 @@ Swift type and field names also join the ObjC selectors and symbols in the priva
 
 Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
 
-- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
+- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`. On ELF binaries the extent repair is visible here too: `function_sizes_rejected` (entries whose declared size was impossible — wrapped or past the containing section — and was dropped, leaving the disassembler's next-known-start rule) and `function_sizes_corrected` (entries whose size was replaced by a higher-precedence source: a symbol's `st_size`, then the unwind-table FDE range, over LIEF's `functions` size).
 - **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
 - **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).

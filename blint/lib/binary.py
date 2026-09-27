@@ -212,7 +212,11 @@ from blint.lib.elf_linkmap import (  # noqa: F401
     resolve_link_closure,
 )
 from blint.lib.entropy import analyze_binary_entropy
-from blint.lib.funcdisc.unwind import discover_functions, merge_discovered_functions
+from blint.lib.funcdisc.unwind import (
+    discover_functions,
+    merge_discovered_functions,
+    reconcile_function_extents,
+)
 from blint.lib.import_attribution import (
     UNATTRIBUTED_LIBRARY,
     analyze_link_hygiene,
@@ -1591,6 +1595,17 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         },
         "degradations": sorted(degradations),
     }
+    # The ELF extent reconciliation's repair counts: sizes dropped because no
+    # source produced a possible extent, and sizes replaced by a
+    # higher-precedence source. Present whenever reconciliation ran (ELF),
+    # so a consumer can see the repair, not just the silent result.
+    if function_extent := metadata.get("function_extent"):
+        coverage["functions"]["function_sizes_rejected"] = function_extent.get(
+            "sizes_rejected", 0
+        )
+        coverage["functions"]["function_sizes_corrected"] = function_extent.get(
+            "sizes_corrected", 0
+        )
     if entropy := metadata.get("entropy"):
         sections_analyzed = len(entropy.get("sections") or [])
         coverage["sections_analyzed"] = sections_analyzed
@@ -1852,14 +1867,24 @@ def discover_and_merge_functions(metadata: dict, parsed_obj) -> dict:
     Recovery of stripped-binary function starts lives in a dedicated module;
     this only applies its merge contract: ``discovered_functions`` records the
     findings additively and ``functions`` gains ``sub_<address>`` entries only
-    for addresses no symbol bucket already claims.
+    for addresses no symbol bucket already claims. ELF binaries then get the
+    extent reconciliation (symbol ``st_size`` > unwind FDE range > LIEF
+    ``functions`` size, impossible sizes dropped), which repairs the wrapped
+    sizes LIEF's eh_frame walk produces on zPLR CIEs.
     """
     try:
         discovered = discover_functions(parsed_obj)
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Function discovery failed for {metadata.get('name')}: {type(e).__name__}: {e}")
         return metadata
-    return merge_discovered_functions(metadata, discovered)
+    merged = merge_discovered_functions(metadata, discovered)
+    if isinstance(parsed_obj, lief.ELF.Binary):
+        try:
+            return reconcile_function_extents(merged, parsed_obj)
+        except (AttributeError, TypeError, ValueError) as e:
+            LOG.debug(f"Function extent reconciliation failed: {type(e).__name__}: {e}")
+            return merged
+    return merged
 
 
 def parse_dex(dex_file: str) -> dict:
