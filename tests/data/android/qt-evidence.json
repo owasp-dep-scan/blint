@@ -1,0 +1,70 @@
+{
+  "framework": "qt",
+  "source": {
+    "apk": "net.osmand.plus_540403.apk",
+    "member": "lib/arm64-v8a/libQt5Core.so"
+  },
+  "sha256": "9cc85fd23d565d69a460d491cfee7a11a70f68d8c7ec08a0083ff2c65052677a",
+  "bytes": 8087416,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings lib/arm64-v8a/libQt5Core.so",
+      "llvm-nm -D --demangle --defined-only lib/arm64-v8a/libQt5Core.so",
+      "llvm-readelf -n lib/arm64-v8a/libQt5Core.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": {
+        "min_api": 21,
+        "ndk_version": "r28c",
+        "ndk_build_number": "13676358"
+      },
+      "ident_notes": [
+        {
+          "type": "ANDROID_IDENT",
+          "sdk_version": 21,
+          "ndk_version": "r28c",
+          "ndk_build_number": "13676358"
+        }
+      ],
+      "symbol_evidence": {
+        "matched_names": [
+          "std::__ndk1::__throw_system_error(int, char const*)",
+          "std::__ndk1::ctype<char>::id",
+          "std::__ndk1::locale::classic()",
+          "std::__ndk1::locale::use_facet(std::__ndk1::locale::id&) const"
+        ],
+        "matched_count": 4,
+        "dynamic_symbols_total": 6839
+      },
+      "string_evidence": {
+        "dart_vm_version": [],
+        "rn_release": [],
+        "nss_version": [],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [],
+        "boringssl_bare": [],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 13528
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [],
+      "nm_matched_count": 0,
+      "strings_dart_or_banner": [],
+      "readelf_notes_android_ident": [
+        "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",
+        "description data: 15 00 00 00 72 32 38 63 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 31 33 36 37 36 33 35 38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+      ]
+    }
+  }
+}
