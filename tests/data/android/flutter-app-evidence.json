@@ -32,7 +32,14 @@
           "_kDartVmSnapshotInstructions"
         ],
         "matched_count": 5,
-        "dynamic_symbols_total": 5
+        "dynamic_symbols_total": 5,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": true,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],

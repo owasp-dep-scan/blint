@@ -60,6 +60,28 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
         "name": "libc++ (NDK)",
         "replaces": "libc++_shared.so",
     },
+    # The Flutter engine. Post-2025 the engine source and the revision
+    # strings it embeds both live in flutter/flutter (the monorepo), so the
+    # spec's github type names the project. No version: the engine's
+    # revision strings are reported as hashes because nothing published
+    # maps them to releases at scan time.
+    "flutter-engine": {
+        "purl": ("github", "flutter", "flutter"),
+        "name": "flutter_engine",
+        "replaces": "libflutter.so",
+    },
+}
+
+# Nested-only identifications: statically linked inside a host library,
+# they become child components of the host record and never replace it.
+NESTED_COMPONENTS: dict[str, dict] = {
+    # The Dart VM embedded in the Flutter engine; the version comes from
+    # the Dart VM version string the engine prints (its own
+    # runtime/vm/version_in.cc template).
+    "dart-sdk": {
+        "purl": ("github", "dart-lang", "sdk"),
+        "name": "Dart SDK",
+    },
 }
 
 # --- Evidence patterns ------------------------------------------------------
@@ -73,6 +95,34 @@ LIBCXX_OPERATOR_NEW_RE = re.compile(r"^operator new")
 # std::__ndk1 (the NDK libc++ inline namespace) - secondary evidence only:
 # every NDK-built C++ library carries it, so it cannot pick out the runtime.
 NDK1_NAMESPACE_RE = re.compile(r"^std::__ndk1::")
+# The Dart VM prints its version as
+#   3.11.5 (stable) (Wed Apr 15 00:36:32 2026 -0700) on "android_arm64"
+# (dart-lang/sdk runtime/vm/version_in.cc: the str_ template).
+DART_VM_VERSION_RE = re.compile(
+    r"^(?P<version>\d+\.\d+\.\d+(?:\.\d+)?) \((?P<channel>[a-z]+)\) "
+    r"\((?P<date>[^)]+)\) on \"(?P<target>[a-z0-9_]+)\"$"
+)
+# Bare 40-hex revision strings (the whole string is the hash). The Flutter
+# engine bakes four of these (shell/version/BUILD.gn: FLUTTER_ENGINE_VERSION,
+# FLUTTER_CONTENT_HASH, SKIA_VERSION, DART_VERSION); toolchain revisions
+# never appear as bare strings, so no prefix table is needed.
+HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+# A Dart snapshot version hash: 32 lower-hex chars (an MD5 - see
+# DART_SNAPSHOT_HASH_EVIDENCE below).
+DART_SNAPSHOT_HASH_RE = re.compile(r"^[0-9a-f]{32}$")
+# Flutter engine's exported InternalFlutterGpu_* API surface.
+FLUTTER_SYMBOL_RE = re.compile(r"^InternalFlutterGpu_")
+# Dart AOT snapshot exports (libapp.so shape).
+DART_SNAPSHOT_SYMBOL_RE = re.compile(r"^_kDart(Vm|Isolate)Snapshot")
+# The Dart AOT snapshot header: magic f5 f5 dc dc, a u64 length, a u64 kind,
+# then the version-hash string (runtime/vm/snapshot.h). The hash itself is
+# derived by dart-lang/sdk tools/make_version.py MakeSnapshotHashString.
+DART_SNAPSHOT_HASH_EVIDENCE = (
+    "Dart snapshot version hash "
+    "(tools/make_version.py MakeSnapshotHashString)"
+)
+DART_SNAPSHOT_HASH_OFFSET = 20
+DART_SNAPSHOT_HASH_LEN = 32
 
 
 def _declared_soname(parsed_obj) -> str | None:
@@ -119,7 +169,8 @@ def _exported_symbol_names(metadata: dict) -> list[str]:
 
 
 def _record(framework: str, evidence: list[dict], hints: list[str],
-            version: str | None = None, static: bool = False) -> dict:
+            version: str | None = None, static: bool = False,
+            nested: list[dict] | None = None) -> dict:
     record = {
         "framework": framework,
         "evidence": evidence,
@@ -128,7 +179,33 @@ def _record(framework: str, evidence: list[dict], hints: list[str],
     }
     if version:
         record["version"] = version
+    if nested:
+        record["nested"] = nested
     return record
+
+
+def _scan_evidence_strings(parsed_obj) -> dict:
+    """One pass over the raw strings, recording each named evidence match.
+
+    Only the first occurrence of each kind is kept - the evidence is the
+    presence and content of a version-bearing string, not a census.
+    """
+    strings_seen: dict = {
+        "dart_vm_version": None,
+        "hex40": set(),
+    }
+    for raw in _iter_strings(parsed_obj):
+        if not isinstance(raw, str):
+            continue
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if strings_seen["dart_vm_version"] is None:
+            if match := DART_VM_VERSION_RE.match(stripped):
+                strings_seen["dart_vm_version"] = (match, stripped)
+        if HEX40_RE.match(stripped):
+            strings_seen["hex40"].add(stripped)
+    return strings_seen
 
 
 def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
@@ -148,6 +225,11 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
     # statically also export operator new (frescolib's
     # libnative-imagetranscoder.so does) - it is the declared SONAME that
     # says this file *is* the shared runtime rather than carrying a copy.
+    strings_seen = _scan_evidence_strings(parsed_obj)
+    records.extend(
+        _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata)
+    )
+
     android_ident = (metadata.get("android") or {}).get("android_ident") or {}
     soname = _declared_soname(parsed_obj)
     if (
@@ -197,6 +279,122 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
             _record("ndk-libcxx", evidence, [], version=ndk_version)
         )
     return records
+
+
+def _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata) -> list[dict]:
+    """H2: the Flutter engine, the Dart VM inside it, and Dart AOT snapshots.
+
+    The engine is identified by its exported InternalFlutterGpu_* surface
+    together with an embedded Dart VM version string or a bare revision
+    hash. The Dart version string versions a nested dart-sdk record; the
+    bare hashes are reported as hashes only. A library exporting the Dart
+    AOT snapshot symbols without the engine surface (libapp.so) is a
+    hint-only record: the snapshot version hash is reported, never mapped
+    to a Dart version (no published table).
+    """
+    records: list[dict] = []
+    has_flutter_symbols = any(FLUTTER_SYMBOL_RE.match(n) for n in symbols)
+    has_dart_snapshot_symbols = any(DART_SNAPSHOT_SYMBOL_RE.match(n) for n in symbols)
+    dart_match = strings_seen.get("dart_vm_version")
+    hex40 = strings_seen.get("hex40") or set()
+
+    if has_flutter_symbols and (dart_match or hex40):
+        evidence = [
+            {
+                "what": "InternalFlutterGpu_* exported symbols",
+                "where": "symbols",
+                "value": "InternalFlutterGpu_*",
+            }
+        ]
+        nested: list[dict] = []
+        if dart_match:
+            match, text = dart_match
+            evidence.append(
+                {
+                    "what": "Dart VM version string",
+                    "where": "strings",
+                    "value": text,
+                }
+            )
+            nested.append(
+                _record(
+                    "dart-sdk",
+                    [
+                        {
+                            "what": "Dart VM version string",
+                            "where": "strings",
+                            "value": text,
+                        }
+                    ],
+                    [],
+                    version=match.group("version"),
+                    static=True,
+                )
+            )
+        if hex40:
+            evidence.append(
+                {
+                    "what": "bare 40-hex revision strings (FLUTTER_ENGINE_VERSION / "
+                            "FLUTTER_CONTENT_HASH / SKIA_VERSION / DART_VERSION slots, "
+                            "shell/version/BUILD.gn)",
+                    "where": "strings",
+                    "value": ", ".join(sorted(hex40)),
+                }
+            )
+        records.append(
+            _record("flutter-engine", evidence, [], nested=nested or None)
+        )
+
+    if has_dart_snapshot_symbols and not has_flutter_symbols:
+        evidence = [
+            {
+                "what": "Dart AOT snapshot symbols",
+                "where": "symbols",
+                "value": "_kDart*Snapshot*",
+            }
+        ]
+        if snapshot_hash := _dart_snapshot_hash(parsed_obj, metadata):
+            evidence.append(
+                {
+                    "what": DART_SNAPSHOT_HASH_EVIDENCE,
+                    "where": "bytes at _kDartIsolateSnapshotData+20",
+                    "value": snapshot_hash,
+                }
+            )
+        records.append(_record("dart-aot-snapshot", evidence, []))
+    return records
+
+
+def _dart_snapshot_hash(parsed_obj, metadata) -> str | None:
+    """The 32-hex snapshot version hash from the snapshot data's header.
+
+    Read at the documented header offset; anything unexpected (a short
+    read, a non-hex payload) yields None rather than a guess.
+    """
+    address = None
+    for symbol in metadata.get("dynamic_symbols") or []:
+        if isinstance(symbol, dict) and symbol.get("name") in (
+            "_kDartIsolateSnapshotData",
+            "_kDartVmSnapshotData",
+        ):
+            raw = symbol.get("address") or symbol.get("value")
+            try:
+                address = int(str(raw), 16)
+                break
+            except (TypeError, ValueError):
+                continue
+    if address is None:
+        return None
+    try:
+        content = parsed_obj.get_content_from_virtual_address(
+            address + DART_SNAPSHOT_HASH_OFFSET, DART_SNAPSHOT_HASH_LEN
+        )
+        text = bytes(content).decode("ascii", errors="ignore")
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if DART_SNAPSHOT_HASH_RE.match(text):
+        return text
+    return None
 
 
 def attach_frameworks(metadata: dict, parsed_obj) -> dict:

@@ -45,6 +45,9 @@
           "facebook::jni::throwCppExceptionIf(bool)",
           "facebook::jni::throwNewJavaException(char const*, char const*)",
           "facebook::jni::throwPendingJniExceptionAsCppException()",
+          "operator new(unsigned long)",
+          "operator new(unsigned long, std::nothrow_t const&)",
+          "operator new[](unsigned long)",
           "std::__ndk1::__call_once(unsigned long volatile&, void*, void (*)(void*))",
           "std::__ndk1::__next_prime(unsigned long)",
           "std::__ndk1::__shared_weak_count::__get_deleter(std::type_info const&) const",
@@ -129,8 +132,15 @@
           "std::__ndk1::to_string(unsigned int)",
           "std::__ndk1::to_string(unsigned long)"
         ],
-        "matched_count": 99,
-        "dynamic_symbols_total": 406
+        "matched_count": 102,
+        "dynamic_symbols_total": 406,
+        "ndk1_namespace": true,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": true,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],

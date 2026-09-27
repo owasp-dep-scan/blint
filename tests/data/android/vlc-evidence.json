@@ -36,6 +36,10 @@
       ],
       "symbol_evidence": {
         "matched_names": [
+          "operator new(unsigned long)",
+          "operator new(unsigned long, std::nothrow_t const&)",
+          "operator new[](unsigned long)",
+          "operator new[](unsigned long, std::nothrow_t const&)",
           "std::__ndk1::__libcpp_verbose_abort(char const*, ...)",
           "std::__ndk1::__list_iterator<TagLib::ByteVector, void*> std::__ndk1::list<TagLib::ByteVector, std::__ndk1::allocator<TagLib::ByteVector> >::__insert_with_sentinel[abi:ne190000]<std::__ndk1::__list_const_iterator<TagLib::ByteVector, void*>, std::__ndk1::__list_const_iterator<TagLib::ByteVector, void*> >(std::__ndk1::__list_const_iterator<TagLib::ByteVector, void*>, std::__ndk1::__list_const_iterator<TagLib::ByteVector, void*>, std::__ndk1::__list_const_iterator<TagLib::ByteVector, void*>)",
           "std::__ndk1::__list_iterator<TagLib::MP4::Atom*, void*> std::__ndk1::list<TagLib::MP4::Atom*, std::__ndk1::allocator<TagLib::MP4::Atom*> >::__insert_with_sentinel[abi:ne190000]<std::__ndk1::__list_const_iterator<TagLib::MP4::Atom*, void*>, std::__ndk1::__list_const_iterator<TagLib::MP4::Atom*, void*> >(std::__ndk1::__list_const_iterator<TagLib::MP4::Atom*, void*>, std::__ndk1::__list_const_iterator<TagLib::MP4::Atom*, void*>, std::__ndk1::__list_const_iterator<TagLib::MP4::Atom*, void*>)",
@@ -147,8 +151,15 @@
           "std::__ndk1::to_string(long)",
           "std::__ndk1::to_string(unsigned long)"
         ],
-        "matched_count": 110,
-        "dynamic_symbols_total": 32559
+        "matched_count": 114,
+        "dynamic_symbols_total": 32559,
+        "ndk1_namespace": true,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],

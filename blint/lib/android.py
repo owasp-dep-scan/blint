@@ -688,6 +688,7 @@ def collect_so_files_metadata(
         # named evidence in the records; the file name becomes a hint.
         framework_record = _replacing_framework_record(members)
         component_name, component_version = name, version or None
+        component_children: list[Component] = []
         if framework_record:
             identity = framework_identity(framework_record, abis)
             if identity:
@@ -713,6 +714,25 @@ def collect_so_files_metadata(
                     properties.append(
                         Property(name="blint:identification:hint", value=hint)
                     )
+                nested = _nested_framework_components(framework_record, abis)
+                if nested:
+                    component_children = nested
+        else:
+            # Hint-only identifications (a framework detected inside a file
+            # that keeps its own identity, or evidence without a version
+            # mapping): properties on the file component, never components.
+            for record in _group_hint_records(members):
+                values = [
+                    f"{e.get('what')} ({e.get('where')}): {e.get('value')}"
+                    for e in record.get("evidence") or []
+                ]
+                if values:
+                    properties.append(
+                        Property(
+                            name=f"blint:identification:{record['framework']}",
+                            value="; ".join(values),
+                        )
+                    )
         if build_ids:
             properties.append(
                 Property(name="blint:build_id", value=",".join(build_ids))
@@ -734,8 +754,72 @@ def collect_so_files_metadata(
             properties=properties,
         )
         component.bom_ref = RefType(purl)
+        if component_children:
+            # Statically linked frameworks ride as child components of the
+            # host - never as second copies of the host at top level.
+            component.components = component_children
         components.append(component)
     return components
+
+
+def _nested_framework_components(record: dict, abis: list[str]) -> list[Component]:
+    """Child components for the record's static identifications."""
+    from blint.lib.framework_ident import NESTED_COMPONENTS
+
+    children: list[Component] = []
+    for nested in record.get("nested") or []:
+        entry = NESTED_COMPONENTS.get(nested.get("framework") or "")
+        if not entry:
+            continue
+        purl_type, namespace, name = entry["purl"]
+        qualifiers = {"abi": ",".join(sorted(abis))} if abis else {}
+        purl = PackageURL(
+            type=purl_type,
+            namespace=namespace,
+            name=name,
+            version=nested.get("version") or None,
+            qualifiers=qualifiers,
+        ).to_string()
+        props = [
+            Property(
+                name="cdx:blint:identification:evidence",
+                value=(
+                    f"{nested['framework']}: {e.get('what')} ({e.get('where')}): "
+                    f"{e.get('value')}"
+                ),
+            )
+            for e in nested.get("evidence") or []
+        ]
+        child = Component(
+            type=Type.library,
+            name=entry["name"],
+            version=nested.get("version") or None,
+            purl=purl,
+            properties=props,
+        )
+        child.bom_ref = RefType(purl)
+        children.append(child)
+    return children
+
+
+def _group_hint_records(members: list[tuple[dict, dict]]) -> list[dict]:
+    """Non-replacing framework records common to every member of a group."""
+    seen: dict[tuple, dict] = {}
+    common: list[tuple] | None = None
+    for _lib, meta in members:
+        records = meta.get("frameworks") or []
+        keys = []
+        for record in records:
+            key = (record.get("framework"), record.get("version"))
+            keys.append(key)
+            seen.setdefault(key, record)
+        if common is None:
+            common = keys
+        else:
+            common = [k for k in common if k in keys]
+    if not common:
+        return []
+    return [seen[k] for k in common]
 
 
 def _replacing_framework_record(members: list[tuple[dict, dict]]) -> dict | None:

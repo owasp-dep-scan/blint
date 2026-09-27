@@ -176,3 +176,93 @@ def test_r2_corpus_libcxx_identifies_and_app_lib_does_not():
         # runtime - H4's nested-only rule, checked on the app side).
         transcoder_meta = parse(transcoder_path)
         assert not (transcoder_meta.get("frameworks") or [])
+
+
+def test_r1_flutter_engine_identifies_with_nested_dart_and_hashes_only():
+    """The engine record: symbols + Dart string; hashes stay hashes."""
+    evidence = _load_evidence("flutter-engine")
+    blint = evidence["evidence"]["blint_parse"]
+    strings = blint["string_evidence"]
+    assert strings["dart_vm_version"], "the engine embeds the Dart VM string"
+    sym = blint["symbol_evidence"]
+    assert sym["flutter_gpu_symbols"]
+
+    symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
+    metadata = {"dynamic_symbols": symbols}
+    parsed = _FakeElf(strings=strings["dart_vm_version"] + strings["hex40_bare"])
+    records = identify_frameworks(parsed, metadata)
+    assert [r["framework"] for r in records] == ["flutter-engine"]
+    record = records[0]
+    # No version on the engine: the bare hashes map to no published release.
+    assert "version" not in record
+    # The nested Dart VM carries the version from its own string.
+    nested = record.get("nested") or []
+    assert [n["framework"] for n in nested] == ["dart-sdk"]
+    assert nested[0]["version"] == strings["dart_vm_version"][0].split(" ")[0]
+    assert nested[0]["static"] is True
+    # The hashes ride as evidence values, never as the component version.
+    hash_evidence = [e for e in record["evidence"] if "40-hex" in e["what"]]
+    assert hash_evidence and "42d3d75a" in hash_evidence[0]["value"]
+
+
+def test_r1_flutter_app_is_hint_only_with_the_snapshot_hash():
+    """libapp.so: snapshot symbols + hash recorded; never a component."""
+    evidence = _load_evidence("flutter-app")
+    blint = evidence["evidence"]["blint_parse"]
+    sym = blint["symbol_evidence"]
+    assert sym["dart_snapshot_symbols"]
+
+    symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
+    metadata = {"dynamic_symbols": symbols}
+    parsed = _FakeElf()
+    records = identify_frameworks(parsed, metadata)
+    assert [r["framework"] for r in records] == ["dart-aot-snapshot"]
+    assert records[0]["framework"] not in FRAMEWORK_COMPONENTS
+    assert framework_identity(records[0], []) is None
+
+
+@pytest.mark.skipif(
+    not (
+        Path.home()
+        / "sandbox/android-corpus/tier2-fdroid/org.localsend.localsend_app_643.apk"
+    ).exists(),
+    reason="corpus not present on this machine (rule 39: never committed)",
+)
+def test_r2_corpus_libflutter_nests_dart_and_libapp_stays_hint_only():
+    """R2: the real Flutter libraries, parsed for real, when present."""
+    import os
+    import tempfile
+    import zipfile
+
+    apk = (
+        Path.home()
+        / "sandbox/android-corpus/tier2-fdroid/org.localsend.localsend_app_643.apk"
+    )
+    from blint.lib.binary import parse
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(apk) as z:
+            flutter = z.read("lib/arm64-v8a/libflutter.so")
+            libapp = z.read("lib/arm64-v8a/libapp.so")
+        flutter_path = os.path.join(tmp, "libflutter.so")
+        libapp_path = os.path.join(tmp, "libapp.so")
+        Path(flutter_path).write_bytes(flutter)
+        Path(libapp_path).write_bytes(libapp)
+
+        flutter_meta = parse(flutter_path)
+        records = flutter_meta.get("frameworks") or []
+        assert [r["framework"] for r in records] == ["flutter-engine"]
+        name, version, purl = framework_identity(records[0], ["arm64-v8a"])
+        assert name == "flutter_engine"
+        assert version == ""
+        assert purl == "pkg:github/flutter/flutter?abi=arm64-v8a"
+        assert records[0]["nested"][0]["version"] == "3.11.5"
+
+        libapp_meta = parse(libapp_path)
+        app_records = libapp_meta.get("frameworks") or []
+        assert [r["framework"] for r in app_records] == ["dart-aot-snapshot"]
+        # The snapshot hash is in the evidence, hash-only.
+        hash_evidence = [
+            e for e in app_records[0]["evidence"] if "snapshot version hash" in e["what"]
+        ]
+        assert hash_evidence and len(hash_evidence[0]["value"]) == 32

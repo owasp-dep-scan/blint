@@ -36,13 +36,24 @@
       ],
       "symbol_evidence": {
         "matched_names": [
+          "operator new(unsigned long)",
+          "operator new(unsigned long, std::nothrow_t const&)",
+          "operator new[](unsigned long)",
+          "operator new[](unsigned long, std::nothrow_t const&)",
           "std::__ndk1::__throw_system_error(int, char const*)",
           "std::__ndk1::ctype<char>::id",
           "std::__ndk1::locale::classic()",
           "std::__ndk1::locale::use_facet(std::__ndk1::locale::id&) const"
         ],
-        "matched_count": 4,
-        "dynamic_symbols_total": 6839
+        "matched_count": 8,
+        "dynamic_symbols_total": 6839,
+        "ndk1_namespace": true,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],

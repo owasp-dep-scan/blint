@@ -237,8 +237,15 @@
           "facebook::jni::jmethod_traits<unsigned char ()>::kDescriptor",
           "facebook::jni::jmethod_traits<void ()>::kDescriptor"
         ],
-        "matched_count": 327,
-        "dynamic_symbols_total": 486
+        "matched_count": 328,
+        "dynamic_symbols_total": 486,
+        "ndk1_namespace": true,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": true,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],

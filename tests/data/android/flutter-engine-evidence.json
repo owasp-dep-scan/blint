@@ -83,7 +83,14 @@
           "InternalFlutterGpu_Texture_SetCoordinateSystem"
         ],
         "matched_count": 45,
-        "dynamic_symbols_total": 531
+        "dynamic_symbols_total": 531,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": true,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [

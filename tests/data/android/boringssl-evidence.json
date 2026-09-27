@@ -48,7 +48,14 @@
           "BORINGSSL_self_test"
         ],
         "matched_count": 10,
-        "dynamic_symbols_total": 2595
+        "dynamic_symbols_total": 2595,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": true,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
       },
       "string_evidence": {
         "dart_vm_version": [],
