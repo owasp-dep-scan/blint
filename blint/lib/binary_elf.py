@@ -99,6 +99,7 @@ from blint.lib.binary_wasm import (  # noqa: F401
 from blint.lib.elf_abi import analyze_elf_abi
 from blint.lib.elf_dlopen import recover_runtime_dependencies, summarize_runtime_loading
 from blint.lib.elf_linkmap import resolve_link_closure
+from blint.lib.jni import parse_static_jni_surface
 from blint.lib.utils import (
     demangle_symbolic_name,
     enum_to_str,
@@ -497,9 +498,7 @@ def _decode_aarch64_property_note(note) -> list[str]:
             offset += 8
             if prop_type == GNU_PROPERTY_AARCH64_FEATURE_1_AND and data_size >= 4:
                 value = int.from_bytes(data[offset : offset + 4], "little")
-                features = [
-                    name for bit, name in _AARCH64_FEATURE_NAMES.items() if value & bit
-                ]
+                features = [name for bit, name in _AARCH64_FEATURE_NAMES.items() if value & bit]
                 break
             offset += data_size + (8 - (data_size % 8)) % 8
     return features
@@ -508,7 +507,8 @@ def _decode_aarch64_property_note(note) -> list[str]:
 def parse_android_sanitizers(symbol_names: set[str]) -> dict | None:
     """Sanitizer runtime markers in the dynamic symbol table (02/A)."""
     found = sorted(
-        kind for kind, prefix in SANITIZER_PREFIXES.items()
+        kind
+        for kind, prefix in SANITIZER_PREFIXES.items()
         if any(name.startswith(prefix) for name in symbol_names)
     )
     result = {"sanitizers": found, "cfi": CFI_SYMBOL in symbol_names}
@@ -523,9 +523,9 @@ def parse_android_fortify(symbol_names: set[str]) -> dict | None:
     deliberately excluded here as there.
     """
     fortified = sorted(
-        name for name in symbol_names
-        if name.startswith("__") and name.endswith("_chk")
-        and not name.startswith("__stack_chk")
+        name
+        for name in symbol_names
+        if name.startswith("__") and name.endswith("_chk") and not name.startswith("__stack_chk")
     )
     return {"symbols": fortified} if fortified else None
 
@@ -630,7 +630,10 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
             tag = entry.tag
             name = str(tag).removeprefix("TAG.")
             if name in (
-                "ANDROID_REL", "ANDROID_RELA", "RELR", "ANDROID_RELR",
+                "ANDROID_REL",
+                "ANDROID_RELA",
+                "RELR",
+                "ANDROID_RELR",
             ):
                 packed.setdefault(name, {})
             elif name in ("ANDROID_RELSZ", "ANDROID_RELASZ", "RELRSZ", "ANDROID_RELRSZ"):
@@ -651,8 +654,10 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
         # stream itself), so the honest fact is the table size in bytes;
         # RELR carries DT_RELRENT and a count is derived from it.
         kind_names = {
-            "ANDROID_REL": "aps2", "ANDROID_RELA": "aps2",
-            "RELR": "relr", "ANDROID_RELR": "android_relr",
+            "ANDROID_REL": "aps2",
+            "ANDROID_RELA": "aps2",
+            "RELR": "relr",
+            "ANDROID_RELR": "android_relr",
         }
         size_tags = {
             "aps2": ("ANDROID_RELSZ", "ANDROID_RELASZ"),
@@ -711,6 +716,10 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
         facts["fortify"] = fortify
     if unwind := parse_android_unwind(parsed_obj):
         facts["unwind"] = unwind
+    # Static JNI surface (A5.1): Java_* exports and the lifecycle hooks,
+    # decoded from the dynamic symbols both twins of a build carry.
+    if jni_surface := parse_static_jni_surface(metadata.get("dynamic_symbols")):
+        facts["jni"] = jni_surface
     return facts
 
 

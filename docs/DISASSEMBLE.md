@@ -92,10 +92,31 @@ from, in order of confidence:
    `.text` label says nothing about `.plt` bytes. These also drive the span
    rules below. Only present on unstripped builds.
 2. **The symbol's Thumb bit**: `st_value & 1` marks a Thumb function and the
-   address is `st_value & ~1`.
-3. **Neither evidence** (stripped, or unwind-table discoveries): both states
-   are decoded and the one whose last instruction lands exactly on the span
-   end wins; ties fall back to Thumb, the NDK default.
+   address is `st_value & ~1`. LIEF's synthetic `__dt_init_array` /
+   `__dt_fini_array` functions keep this convention: an array entry's stored
+   word is the function pointer, bit 0 included.
+3. **Call evidence**: a function already decoded in a known mode states its
+   immediate targets' modes — `bl` (and tail `b`) never changes state, so
+   the target shares the caller's mode; `blx #imm` exists to switch state,
+   so its target takes the opposite. Evidence accrues in worklist order, so
+   a caller placed after the target (by address) cannot help it.
+4. **Data-pointer evidence**: a linker-relocated word (`.init_array` /
+   `.fini_array` entries and other `R_ARM_RELATIVE` slots) that names a
+   known function start states its mode by the same interworking bit 0.
+   Packed relocations LIEF cannot decode contribute nothing — evidence is
+   missed, never guessed.
+5. **Neither evidence** (stripped, or unwind-table discoveries): both states
+   are decoded and scored; the higher score wins. A stream ending (after
+   trailing filler) on a terminator — a return, or a tail branch out of the
+   span — scores +2, the shape a real function ends in; every immediate
+   `b`/`bl`/`blx` votes +1 when its target is a known function start and −1
+   when it leaves the executable ranges (wrong-mode decodes misread the
+   halfwords into a spray of nonsense targets); landing exactly on the span
+   end scores +1. Ties fall back to Thumb, the NDK default.
+
+Each disassembled function records the outcome as `instruction_mode`
+(`thumb`/`arm`) and the deciding evidence as `instruction_mode_source`
+(`mapping_symbol`, `symbol_parity`, `call`, `data_pointer`, `arbiter`).
 
 Within a function extent, only `$a`/`$t`-labeled code regions are decoded —
 the rule `llvm-objdump` itself applies with mapping-symbol knowledge — so `$d`
