@@ -21,6 +21,8 @@ from blint.lib.android import (
 from blint.lib.android_blintdb import (
     artifact_version,
     blintdb_records,
+    refuses_openssl_match,
+    screen_standalone_matches,
     superseded_by_framework,
 )
 from blint.lib.sbom import process_exe_file
@@ -319,28 +321,73 @@ def test_standalone_path_never_reports_openssl_for_boringssl(tmp_path, monkeypat
     assert superseded == ["boringssl:openssl"]
 
 
-def test_provider_shaped_openssl_refused_without_openssl3_evidence():
-    """J2: the BoringSSL libssl.so shape never becomes an OpenSSL match.
+def test_refuses_openssl_match_without_openssl3_names():
+    """The BoringSSL libssl.so shape never becomes an OpenSSL match.
 
-    The tier-0 BoringSSL libssl.so files (llvm-nm, committed openssl3
-    evidence) export the shared SSL_* surface, no BORINGSSL_*, no ossl_*,
-    and carry no BoringSSL string - so no framework record exists to win;
-    the refusal is the verdict.
+    Names are llvm-nm's (committed openssl3 evidence). The 78 tier-0
+    BoringSSL libcrypto.so/libssl.so files define and import no OSSL_* or
+    ossl_* name. A real OpenSSL 3.6.2 libssl.so, SONAME libssl.so, defines
+    five OSSL_* names and imports 45, and must stay matchable.
     """
-    from blint.lib.android_blintdb import provider_shaped_openssl_refused
-
+    evidence = json.loads(
+        (Path(__file__).resolve().parent / "data" / "android" / "openssl3-evidence.json")
+        .read_text(encoding="utf-8")
+    )
+    assert evidence["boringssl_tier0_file_count"] == 78
+    assert evidence["boringssl_tier0_OSSL_or_ossl_count"] == 0
     ssl_surface = ["SSL_new", "SSL_free", "SSL_connect", "SSL_read", "SSL_write"]
-    # Provider shape, no OpenSSL-3 evidence: refused.
-    assert provider_shaped_openssl_refused("libssl.so", ssl_surface) is True
-    assert provider_shaped_openssl_refused("libcrypto.so", ssl_surface) is True
-    assert provider_shaped_openssl_refused("stable_cronet_libcrypto.so", ssl_surface) is True
-    # OpenSSL 3's own namespace present: not refused (the framework record
-    # then speaks for the bytes).
-    assert provider_shaped_openssl_refused("libssl.so", ssl_surface + ["ossl_provider_init"]) is False
-    # A framework record (ossl static copy or banner) already claims them.
-    assert provider_shaped_openssl_refused("libssl.so", ssl_surface, {"openssl"}) is False
-    assert provider_shaped_openssl_refused("libssl.so", ssl_surface, {"boringssl"}) is False
-    # Any other host shape (realm's jni wrapper, sentry's own library):
-    # ordinary nesting, no refusal.
-    assert provider_shaped_openssl_refused("librealm-jni.so", ssl_surface) is False
-    assert provider_shaped_openssl_refused(None, ssl_surface) is False
+    assert refuses_openssl_match("libssl.so", ssl_surface)
+    assert refuses_openssl_match("libcrypto.so", ssl_surface)
+    assert refuses_openssl_match("stable_cronet_libcrypto.so", ssl_surface)
+    # OpenSSL 3's shared libssl.so: its own OSSL_* exports, or the OSSL_*
+    # API it imports from libcrypto.
+    exports = evidence["openssl3_shared_libssl_defined_OSSL"]
+    imports = evidence["openssl3_shared_libssl_imported_OSSL_sample"]
+    assert not refuses_openssl_match("libssl.so", ssl_surface + exports)
+    assert not refuses_openssl_match("libssl.so", ssl_surface + imports)
+    # A static copy's internal namespace.
+    assert not refuses_openssl_match("libssl.so", ssl_surface + ["ossl_provider_init"])
+    # A TLS framework record already speaks for the bytes.
+    assert not refuses_openssl_match("libssl.so", ssl_surface, {"openssl"})
+    assert not refuses_openssl_match("libssl.so", ssl_surface, {"boringssl"})
+    # Versioned OpenSSL SONAMEs and other hosts nest as usual.
+    assert not refuses_openssl_match("libssl.so.3", ssl_surface)
+    assert not refuses_openssl_match("librealm-jni.so", ssl_surface)
+    assert not refuses_openssl_match(None, ssl_surface)
+
+
+def test_standalone_path_keeps_openssl_match_under_an_openssl_record():
+    """Only a contradicting framework record drops a standalone match.
+
+    The standalone path emits no framework components, so an OpenSSL banner
+    record must not remove the blintdb openssl match for the same library:
+    it would leave the SBOM with no OpenSSL at all. The APK path, which
+    emits the record, still drops the duplicate.
+    """
+    detected = {"pkg:generic/openssl@3.6.2"}
+    evidence = {"pkg:generic/openssl@3.6.2": {"project_name": "openssl"}}
+    metadata = {
+        "dynamic_entries": [{"tag": "SONAME", "name": "libcrypto.so"}],
+        "dynamic_symbols": [{"name": "OSSL_PARAM_construct_end"}],
+        "frameworks": [{"framework": "openssl", "version": "3.6.2", "static": False}],
+    }
+    kept, superseded, refused = screen_standalone_matches(metadata, detected, evidence)
+    assert kept == detected and not superseded and refused is None
+    records = [{"project": "openssl", "project_purl": "pkg:generic/openssl@3.6.2"}]
+    kept, superseded = superseded_by_framework(records, {"openssl"})
+    assert not kept and superseded == ["openssl:openssl"]
+    kept, superseded = superseded_by_framework(records, {"openssl"}, emitted=False)
+    assert kept == records and not superseded
+
+
+def test_nested_child_carries_only_the_abis_whose_copy_matched():
+    """Rule 36: a static copy found in one ABI's build is a fact for that ABI."""
+    members = [
+        (
+            {"locations": [{"abi": "arm64-v8a"}]},
+            {"blintdb_records": [{"project": "zstd", "score": 577, "soname_match": False}]},
+        ),
+        ({"locations": [{"abi": "x86_64"}]}, {"blintdb_records": []}),
+    ]
+    records, _ = _collect_group_blintdb_records(members, set())
+    assert records[0]["abis"] == ["arm64-v8a"]

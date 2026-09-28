@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,13 @@ from packageurl import PackageURL
 
 from blint.config import SYMBOL_DELIMITER
 from blint.cyclonedx.spec import Component, Property, RefType, Scope, Type
+from blint.db import build_function_hash_index, build_symbol_source_map, detect_binaries_utilized
+from blint.lib.android_blintdb import (
+    blintdb_records,
+    dynamic_symbol_names,
+    refuses_openssl_match,
+    superseded_by_framework,
+)
 from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import parse, parse_dex
 from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
@@ -782,73 +790,14 @@ def collect_so_files_metadata(
                             value="; ".join(values),
                         )
                     )
-        # blintdb identification (A6.3 J1): framework records win for the
-        # same bytes, a structural SONAME agreement may replace the host's
-        # identity, and every other match nests as a static copy. Versions
-        # come from the artifact; the database row's port version is a
-        # property.
-        framework_keys = {
-            record.get("framework")
-            for record in ([framework_record] if framework_record else [])
-            + _group_hint_records(members)
-            if record.get("framework")
-        }
-        db_records, superseded = _collect_group_blintdb_records(members, framework_keys)
-        if superseded:
-            properties.append(
-                Property(
-                    name="blint:blintdb:superseded_by_framework",
-                    value="; ".join(sorted(set(superseded))),
-                )
-            )
-        # J2: an openssl match on a provider-shaped host (SONAME
-        # libcrypto.so / libssl.so) is refused unless OpenSSL-3-only
-        # evidence exists - BoringSSL and OpenSSL share the whole API
-        # surface, and the platform's libssl.so must not become an OpenSSL
-        # component on a bare symbol match.
-        from blint.lib.android_blintdb import provider_shaped_openssl_refused
-
-        exported_names = [
-            str(sym.get("name"))
-            for _lib, meta in members
-            for sym in meta.get("dynamic_symbols") or []
-            if isinstance(sym, dict) and sym.get("name")
-        ]
-        refused = [
-            record["soname"]
-            for record in db_records
-            if record["project"] == "openssl"
-            and provider_shaped_openssl_refused(
-                record.get("soname"), exported_names, framework_keys
-            )
-        ]
-        if refused:
-            db_records = [
-                record
-                for record in db_records
-                if not (
-                    record["project"] == "openssl"
-                    and provider_shaped_openssl_refused(
-                        record.get("soname"), exported_names, framework_keys
-                    )
-                )
-            ]
-            properties.append(
-                Property(
-                    name="blint:blintdb:refused_provider_shape",
-                    value="; ".join(sorted(set(refused))),
-                )
-            )
-        # A framework identification that replaced the group's identity also
-        # denies the blintdb replace for the same slot: A6.1 wins.
-        db_replace = (
-            _blintdb_replace_record(members, db_records) if identity is None else None
+        db_replace, db_records, db_properties = _group_blintdb_identity(
+            members, framework_record, can_replace=identity is None
         )
+        properties += db_properties
         if db_replace is not None:
-            replaced_purl = _blintdb_component_purl(db_replace, abis)
             component_name = db_replace["project"]
-            component_version = db_replace.get("version") or None
-            purl = replaced_purl
+            component_version = db_replace.get("version")
+            purl = _blintdb_component_purl(db_replace, abis)
             properties.append(Property(name="blint:hint:file_name", value=name))
             properties += _blintdb_evidence_properties(db_replace)
         if build_ids:
@@ -872,11 +821,6 @@ def collect_so_files_metadata(
             properties=properties,
         )
         component.bom_ref = RefType(purl)
-        if db_replace is not None:
-            # The host IS the project's library (SONAME agreement): the
-            # blintdb record replaced its identity, so no child copies of
-            # the same project ride under it.
-            db_records = [r for r in db_records if r is not db_replace]
         if children := _nested_framework_components(static_records, abis, purl):
             # Statically linked frameworks ride as child components of the
             # host - never as second copies of the host at top level.
@@ -898,76 +842,121 @@ def _evidence_properties(record: dict) -> list[Property]:
     ]
 
 
+def _group_blintdb_identity(
+    members: list[tuple[dict, dict]], framework_record: dict | None, *, can_replace: bool
+) -> tuple[dict | None, list[dict], list[Property]]:
+    """The group's blintdb replace record, nested records and drop counts.
+
+    A framework record for the same bytes wins, a SONAME agreement may
+    replace the host's identity when no framework identity holds the slot,
+    and every other match nests.
+    """
+    framework_keys = {
+        record.get("framework")
+        for record in ([framework_record] if framework_record else [])
+        + _group_hint_records(members)
+    }
+    records, superseded = _collect_group_blintdb_records(members, framework_keys)
+    properties: list[Property] = []
+    if superseded:
+        properties.append(
+            Property(
+                name="blint:blintdb:superseded_by_framework",
+                value="; ".join(sorted(set(superseded))),
+            )
+        )
+    group_names = [n for _lib, meta in members for n in dynamic_symbol_names(meta)]
+    refused = {
+        record["soname"]
+        for record in records
+        if record["project"] == "openssl"
+        and refuses_openssl_match(record["soname"], group_names, framework_keys)
+    }
+    if refused:
+        records = [
+            r for r in records if not (r["project"] == "openssl" and r["soname"] in refused)
+        ]
+        properties.append(
+            Property(name="blint:blintdb:refused_provider_shape", value="; ".join(sorted(refused)))
+        )
+    replace = _blintdb_replace_record(members, records) if can_replace else None
+    if replace is not None:
+        records = [r for r in records if r is not replace]
+    return replace, records, properties
+
+
 def _attach_blintdb_records(so_metadata: dict, member_path: str) -> None:
     """Match one parsed .so against blintdb and attach identification records.
 
-    Runs the same ``detect_binaries_utilized`` the standalone binary path
-    uses, once per file, and resolves each match's version from the
-    artifact's own strings (rule 38) - which is why this needs the member
-    path: the raw strings live in the file, not the parsed summary.
+    The member path is needed for the version rules, which read the file's
+    own strings.
     """
-    from blint.db import (
-        build_function_hash_index,
-        build_symbol_source_map,
-        detect_binaries_utilized,
-    )
-    from blint.lib.android_blintdb import blintdb_records
-
     try:
         detected, evidence = detect_binaries_utilized(
             symbol_source_map=build_symbol_source_map(so_metadata),
             function_hash_index=build_function_hash_index(so_metadata),
             binary_metadata=so_metadata,
         )
-        if not detected:
-            return
-        raw_strings = _raw_member_strings(member_path)
-        so_metadata["blintdb_records"] = blintdb_records(
-            so_metadata, detected, evidence, raw_strings
-        )
+        if detected:
+            so_metadata["blintdb_records"] = blintdb_records(
+                so_metadata, detected, evidence, _version_bearing_strings(member_path)
+            )
     except Exception as e:  # a database problem must not sink the app's SBOM
         LOG.debug(f"blintdb matching failed for {member_path}: {type(e).__name__}: {e}")
 
 
-def _raw_member_strings(member_path: str) -> list[bytes]:
-    """The member's printable byte runs - ``strings -a`` semantics.
+# A whole printable run (``strings -a``), short enough to be a version
+# string, and the digit-dot-digit or date shape every version rule needs.
+_PRINTABLE_RUN_RE = re.compile(rb"(?<![\x20-\x7e])[\x20-\x7e]{4,200}(?![\x20-\x7e])")
+_VERSION_SHAPE_RE = re.compile(rb"\d[.-]\d")
 
-    Read from the file bytes, not a format parser: LIEF's string iterator
-    skips sections (measured: libvlc's ``libpng version 1.6.50`` banner is
-    invisible to it while lying in .rodata), and the version rules need
-    every printable run the artifact carries.
+
+def _version_bearing_strings(member_path: str) -> list[bytes]:
+    """The file's printable runs that could carry a version.
+
+    Read from the raw bytes: LIEF's string iterator skips sections, and
+    libvlc's ``libpng version 1.6.50`` banner is invisible to it.
     """
     try:
-        import re as _re
-
         with open(member_path, "rb") as fh:
             data = fh.read()
-        return [match.group() for match in _re.finditer(rb"[\x20-\x7e]{4,}", data)]
     except OSError as e:
         LOG.debug(f"string read failed for {member_path}: {e}")
         return []
+    return [
+        run.group()
+        for run in _PRINTABLE_RUN_RE.finditer(data)
+        if _VERSION_SHAPE_RE.search(run.group())
+    ]
 
 
 def _collect_group_blintdb_records(
     members: list[tuple[dict, dict]], framework_keys: set[str]
 ) -> tuple[list[dict], list[str]]:
-    """Union of the group's blintdb records, minus framework-claimed ones."""
-    from blint.lib.android_blintdb import superseded_by_framework
+    """One record per project for the group, minus framework-claimed ones.
 
+    The strongest member's record stands for the project, and ``abis``
+    lists the ABIs whose copy matched: a child is a fact per ABI (rule 36).
+    """
     merged: dict[str, dict] = {}
+    abis: dict[str, set[str]] = {}
     superseded: list[str] = []
-    for _lib, meta in members:
+    for lib, meta in members:
         records, dropped = superseded_by_framework(
             meta.get("blintdb_records") or [], framework_keys
         )
         superseded += dropped
         for record in records:
-            current = merged.setdefault(record["project"], record)
-            if record is not current and (record.get("score") or 0) > (
-                current.get("score") or 0
-            ):
-                merged[record["project"]] = record
-    return list(merged.values()), superseded
+            project = record["project"]
+            current = merged.get(project)
+            if current is None or (record.get("score") or 0) > (current.get("score") or 0):
+                merged[project] = record
+            abis.setdefault(project, set()).update(
+                loc["abi"] for loc in lib.get("locations") or [] if loc.get("abi")
+            )
+    return [
+        {**record, "abis": sorted(abis[project])} for project, record in merged.items()
+    ], superseded
 
 
 def _blintdb_replace_record(members: list[tuple[dict, dict]], records: list[dict]) -> dict | None:
@@ -979,8 +968,8 @@ def _blintdb_replace_record(members: list[tuple[dict, dict]], records: list[dict
     a hint; a partial (single-ABI) agreement keeps the file's identity and
     nests instead.
     """
-    by_project = {record["project"]: record for record in records}
-    for project, record in by_project.items():
+    for record in records:
+        project = record["project"]
         if not record.get("soname_match"):
             continue
         agreed = all(
@@ -996,19 +985,18 @@ def _blintdb_replace_record(members: list[tuple[dict, dict]], records: list[dict
 
 
 def _blintdb_component_purl(record: dict, abis: list[str]) -> str:
-    """The component purl: the DB purl's identity, the artifact's version."""
+    """The database purl's identity with the artifact's version."""
     base = PackageURL.from_string(record["project_purl"])
     return PackageURL(
         type=base.type,
         namespace=base.namespace,
         name=base.name,
-        version=record.get("version") or None,
+        version=record.get("version"),
         qualifiers={"abi": ",".join(sorted(abis))} if abis else {},
     ).to_string()
 
 
 def _blintdb_evidence_properties(record: dict) -> list[Property]:
-    """Evidence + database statistics properties for a blintdb identification."""
     properties = [
         Property(
             name="blint:identification:evidence",
@@ -1016,22 +1004,14 @@ def _blintdb_evidence_properties(record: dict) -> list[Property]:
         )
         for e in record.get("evidence") or []
     ]
-    properties.append(
-        Property(name="blint:blintdb:project_purl", value=record["project_purl"])
-    )
+    properties.append(Property(name="blint:blintdb:project_purl", value=record["project_purl"]))
     if record.get("score") is not None:
-        properties.append(
-            Property(name="blint:blintdb:score", value=str(record["score"]))
-        )
-    if record.get("soname"):
+        properties.append(Property(name="blint:blintdb:score", value=str(record["score"])))
+    if record.get("soname_match"):
         properties.append(
             Property(
                 name="blint:blintdb:soname_match",
-                value=(
-                    f"{record['soname']} = {', '.join(record.get('matched_binary_names') or [])}"
-                    if record.get("soname_match")
-                    else f"{record['soname']} != {', '.join(record.get('matched_binary_names') or [])}"
-                ),
+                value=f"{record['soname']} = {', '.join(record['matched_binary_names'])}",
             )
         )
     return properties
@@ -1040,19 +1020,17 @@ def _blintdb_evidence_properties(record: dict) -> list[Property]:
 def _nested_blintdb_components(
     records: list[dict], abis: list[str], host_purl: str
 ) -> list[Component]:
-    """Child components for blintdb-identified static copies in a host.
+    """Child components for the static copies blintdb found in a host.
 
-    The bom-ref is scoped by the host's (``host|child``), exactly like the
-    framework children, so two hosts carrying the same static copy in one
-    ABI never share a ref.
+    Bom-refs are scoped by the host, like the framework children.
     """
     children: list[Component] = []
     for record in records:
-        purl = _blintdb_component_purl(record, abis)
+        purl = _blintdb_component_purl(record, record.get("abis") or abis)
         child = Component(
             type=Type.library,
             name=record["project"],
-            version=record.get("version") or None,
+            version=record.get("version"),
             purl=purl,
             properties=_blintdb_evidence_properties(record),
         )

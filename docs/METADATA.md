@@ -649,11 +649,11 @@ evidence", never as "verified not a framework":
 - `static: true` marks a framework found inside a host library (a nested
   identification, carried in the host record's `nested` list).
 - TLS grades (H4/J2): OpenSSL is identified by the `OPENSSL_VERSION_TEXT`
-  banner (versioned), or - banner-less - by the `ossl_*` internal namespace
-  an OpenSSL 3 static copy still exports (static, versionless; realm-core's
-  vcpkg-built copy inside `librealm-jni.so`). The namespace separates it
-  from BoringSSL: every tier-0 BoringSSL `libcrypto.so` exports zero
-  `ossl_*` names. BoringSSL keeps its three H4 grades (provider replace,
+  banner (versioned; replace-grade only under a `libcrypto.so` SONAME, a
+  static copy elsewhere), or banner-less by exported `ossl_*` names (static,
+  versionless). OpenSSL's shared libcrypto hides that internal namespace, so
+  exporting it means a static copy (realm-core's inside `librealm-jni.so`);
+  BoringSSL has none. BoringSSL keeps its three H4 grades (provider replace,
   re-exported static copy, hint-only strings).
 - In `blint sbom` on Android apps, a replace-grade identification takes
   over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
@@ -690,20 +690,22 @@ identity, and lands in the SBOM in one of three shapes:
   its declared `DT_SONAME` equals one of the project's own library names in
   the database (the same SONAME rule the NDK libc++ and BoringSSL provider
   identifications use). A file name alone is a hint.
-- **Dropped:** framework identifications from the table above win for the
-  same bytes (a BoringSSL record shadows an `openssl` port match); the drop
-  is counted in the host's `blint:blintdb:superseded_by_framework` property.
-- **Refused:** an `openssl` match on a provider-shaped host (declared
-  SONAME `libcrypto.so` / `libssl.so`, vendor-prefixed variants) is
-  refused unless OpenSSL-3-only evidence exists — the `ossl_*` namespace or
-  the `OPENSSL_VERSION_TEXT` banner, both of which carry their own
-  framework record. BoringSSL and OpenSSL share the whole `SSL_*`/`EVP_*`
-  API, so a bare symbol match on the provider shape cannot tell them
-  apart; the platform's BoringSSL `libssl.so` files export no
-  `BORINGSSL_*` and carry no BoringSSL string, leaving nothing else to
-  speak for the bytes. The refusal is counted in
-  `blint:blintdb:refused_provider_shape` (`internal:blintdb_refused_provider_shape`
-  on the standalone binary path).
+- **Dropped:** a framework identification for the same bytes wins. A
+  BoringSSL record contradicts an `openssl` match; an OpenSSL or NSS record
+  duplicates the match for its own project, which the APK path already
+  emits. Drops are counted in the host's
+  `blint:blintdb:superseded_by_framework` property (`<framework>:<project>`).
+  The standalone binary path emits no framework components, so there only a
+  contradiction drops a match (`internal:blintdb_superseded_by_framework`).
+- **Refused:** an `openssl` match on a host whose SONAME is `libcrypto.so`
+  or `libssl.so` (vendor-prefixed ones included) needs one of OpenSSL 3's
+  own names among its dynamic symbols, defined or imported: the public
+  `OSSL_*` API or the internal `ossl_*` namespace. BoringSSL shares the rest
+  of the `SSL_*`/`EVP_*` API, and none of the 78 tier-0 BoringSSL
+  `libcrypto.so`/`libssl.so` files carries either namespace; OpenSSL 3.6.2's
+  `libssl.so` defines 5 `OSSL_*` names and imports 45. The refusal is
+  counted in `blint:blintdb:refused_provider_shape`
+  (`internal:blintdb_refused_provider_shape` on the standalone path).
 
 Component versions come from the artifact, never from the database row (the
 row carries the vcpkg port's version; the corpus OsmAnd ships PROJ 8.2.0
@@ -719,10 +721,10 @@ is versionless with the database row's purl recorded as the
 `blint:blintdb:project_purl` property.
 
 Matched components carry `blint:identification:evidence` entries naming the
-symbol match (count and sample), the database row, and the version
-evidence, plus `blint:blintdb:score` and `blint:blintdb:soname_match`
-(stating the host SONAME against the project's library names, with the
-verdict). The committed evidence fixture
+symbol match (count and sample) and the version evidence, plus
+`blint:blintdb:score`, and on a replace `blint:blintdb:soname_match` (the
+host SONAME and the project's library names it equals). A child's `abi`
+qualifier lists only the ABIs whose copy matched. The committed evidence fixture
 (`tests/data/android/blintdb-zstd-evidence.json`) carries both sides of the
 R1 match: the vcpkg build's symbol names (llvm-nm) and the corpus library's
 exported symbols (llvm-nm -D), with the extracting commands recorded.

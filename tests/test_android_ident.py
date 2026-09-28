@@ -407,6 +407,29 @@ def test_r1_boringssl_needs_boringssl_only_evidence_and_no_openssl_banner():
     assert records[0]["version"] == "3.0.2"
 
 
+def test_openssl_banner_outside_libcrypto_is_a_static_copy():
+    """A library linking OpenSSL carries its banner without being OpenSSL.
+
+    The banner is the one in vcpkg's arm64-android OpenSSL 3.6.2
+    libcrypto.so (strings -a; SONAME libcrypto.so from llvm-readelf -d).
+    Under that SONAME it replaces; under any other (libcurl linking OpenSSL
+    statically) it nests with its version, like a re-exported BoringSSL.
+    """
+    banner = ["OpenSSL 3.6.2 7 Apr 2026"]
+    provider = _FakeElf(strings=banner, dynamic_entries=[_Soname("libcrypto.so")])
+    records = identify_frameworks(provider, {"dynamic_symbols": []})
+    assert [(r["framework"], r["version"], r["static"]) for r in records] == [
+        ("openssl", "3.6.2", False)
+    ]
+    versioned = _FakeElf(strings=banner, dynamic_entries=[_Soname("libcrypto.so.3")])
+    assert not identify_frameworks(versioned, {"dynamic_symbols": []})[0]["static"]
+    host = _FakeElf(strings=banner, dynamic_entries=[_Soname("libcurl.so")])
+    records = identify_frameworks(host, {"dynamic_symbols": []})
+    assert [(r["framework"], r["version"], r["static"]) for r in records] == [
+        ("openssl", "3.6.2", True)
+    ]
+
+
 def test_r1_boringssl_inside_the_flutter_engine_nests():
     """A statically linked copy is an identification inside the host."""
     evidence = _load_evidence("flutter-engine")

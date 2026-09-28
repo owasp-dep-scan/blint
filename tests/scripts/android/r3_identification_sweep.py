@@ -64,89 +64,44 @@ def sweep_so(path: Path, use_blintdb: bool) -> list[dict]:
             }
         )
     if use_blintdb:
+        from blint.lib.android_blintdb import (
+            dynamic_symbol_names,
+            framework_claims,
+            metadata_soname,
+            refuses_openssl_match,
+        )
+
         detected, evidence = detect_binaries_utilized(
             symbol_source_map=build_symbol_source_map(metadata),
             binary_metadata=metadata,
         )
-        # The same bytes rule the SBOM applies: a framework record claiming
-        # the TLS implementation drops a blintdb match for the project it
-        # shadows (a BoringSSL libcrypto.so never reports openssl).
-        from blint.lib.android_blintdb import superseded_by_framework
-
-        framework_keys = {
-            record.get("framework")
-            for record in metadata.get("frameworks") or []
-            if record.get("framework")
-        }
-        records = [
-            {
-                "project": (evidence.get(purl) or {}).get("project_name") or "",
-                "project_purl": purl,
-            }
-            for purl in sorted(detected)
-        ]
-        kept, superseded = superseded_by_framework(records, framework_keys)
-        kept_purls = {record["project_purl"] for record in kept}
-        from blint.lib.android_blintdb import provider_shaped_openssl_refused
-
-        soname = None
-        for entry in metadata.get("dynamic_entries") or []:
-            if entry.get("tag") == "SONAME":
-                soname = entry.get("name")
-        exported_names = [
-            str(sym.get("name"))
-            for sym in metadata.get("dynamic_symbols") or []
-            if isinstance(sym, dict) and sym.get("name")
-        ]
-        provider_refused = provider_shaped_openssl_refused(
-            soname, exported_names, framework_keys
-        )
+        # The APK path's same-bytes rules: the sweep reports framework rows,
+        # so a record for the same project claims the match too.
+        framework_keys = {r.get("framework") for r in metadata.get("frameworks") or []}
+        claims = framework_claims(framework_keys, emitted=True)
+        soname = metadata_soname(metadata)
+        names = dynamic_symbol_names(metadata)
         for purl in sorted(detected):
-            if purl not in kept_purls:
-                rows.append(
-                    {
-                        "file": str(path),
-                        "engine": "blintdb",
-                        "framework": purl,
-                        "version": None,
-                        "grade": "superseded",
-                        "evidence": superseded,
-                    }
-                )
-                continue
-            if provider_refused and (
-                (evidence.get(purl) or {}).get("project_name") == "openssl"
-            ):
-                rows.append(
-                    {
-                        "file": str(path),
-                        "engine": "blintdb",
-                        "framework": purl,
-                        "version": None,
-                        "grade": "refused",
-                        "evidence": [f"provider-shaped SONAME {soname} without OpenSSL-3 evidence"],
-                    }
-                )
-                continue
             match = evidence.get(purl) or {}
-            soname = None
-            for entry in metadata.get("dynamic_entries") or []:
-                if entry.get("tag") == "SONAME":
-                    soname = entry.get("name")
-            rows.append(
-                {
-                    "file": str(path),
-                    "engine": "blintdb",
-                    "framework": purl,
-                    "version": None,
-                    "grade": "nested",
-                    "note": (
+            project = match.get("project_name")
+            row = {"file": str(path), "engine": "blintdb", "framework": purl, "version": None}
+            if claimant := claims.get(project):
+                row.update(grade="superseded", evidence=[f"{claimant}:{project}"])
+            elif project == "openssl" and refuses_openssl_match(soname, names, framework_keys):
+                row.update(
+                    grade="refused",
+                    evidence=[f"TLS provider SONAME {soname} without OpenSSL 3 names"],
+                )
+            else:
+                row.update(
+                    grade="nested",
+                    note=(
                         f"soname_match={soname in (match.get('matched_binary_names') or [])}"
                         f" score={match.get('score')}"
                         f" symbols={match.get('matched_symbol_count')}"
                     ),
-                }
-            )
+                )
+            rows.append(row)
     return rows
 
 

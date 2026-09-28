@@ -1,8 +1,11 @@
 {
- "description": "OpenSSL 3 vs BoringSSL namespace evidence (A6.3 J2): the ossl_* internal namespace is exported by an OpenSSL 3 static copy and by no BoringSSL build. librealm-jni.so (element 1.6.62) statically links realm-core 13.26.0's vcpkg arm64-android OpenSSL 3; the platform's BoringSSL libcrypto.so exports BORINGSSL_* and zero ossl_*.",
+ "description": "OpenSSL 3 vs BoringSSL namespace evidence (A6.3 J2). OpenSSL 3's public OSSL_* API is exported by its shared libcrypto/libssl and imported by callers; its internal ossl_* namespace is exported only by a static copy linked without OpenSSL's version script (librealm-jni.so, element 1.6.62, statically links realm-core 13.26.0's vcpkg arm64-android OpenSSL 3). No tier-0 BoringSSL libcrypto.so/libssl.so defines or imports either.",
  "extracting_commands": {
   "realm_ossl_exports": "llvm-nm -D --defined-only lib/arm64-v8a/librealm-jni.so (im.vector.app_40106622.apk) | grep '^ossl_'",
-  "boringssl_libcrypto_exports": "llvm-nm -D --defined-only libcrypto.so (api36-arm64 system image)"
+  "boringssl_libcrypto_exports": "llvm-nm -D --defined-only libcrypto.so (api36-arm64 system image)",
+  "openssl3_shared_libssl": "llvm-nm -D --defined-only / --undefined-only libssl.so (vcpkg openssl 3.6.2, arm64-android-dynamic, blint-db feat/an-a6-2 I2) | grep -E '^(OSSL|ossl)_'",
+  "openssl3_shared_libcrypto": "llvm-nm -D --defined-only libcrypto.so (same build)",
+  "boringssl_tier0": "llvm-nm -D on every libcrypto.so/libssl.so (and *_libcrypto.so/*_libssl.so) under the api34/api35/api36 system images, 78 files | grep -E '^(OSSL|ossl)_'"
  },
  "llvm_nm_version": "llvm-nm, compatible with GNU nm",
  "realm_ossl_export_count": 1618,
@@ -72,5 +75,29 @@
   "BORINGSSL_keccak_init",
   "BORINGSSL_keccak_squeeze",
   "BORINGSSL_self_test"
- ]
+ ],
+ "openssl3_shared_libssl_defined_OSSL": [
+  "OSSL_QUIC_client_method",
+  "OSSL_QUIC_client_thread_method",
+  "OSSL_QUIC_server_method",
+  "OSSL_default_cipher_list",
+  "OSSL_default_ciphersuites"
+ ],
+ "openssl3_shared_libssl_imported_OSSL_count": 45,
+ "openssl3_shared_libssl_imported_OSSL_sample": [
+  "OSSL_DECODER_CTX_free",
+  "OSSL_DECODER_CTX_new_for_pkey",
+  "OSSL_DECODER_from_bio",
+  "OSSL_ERR_STATE_free",
+  "OSSL_ERR_STATE_new",
+  "OSSL_ERR_STATE_restore",
+  "OSSL_ERR_STATE_save",
+  "OSSL_ERR_STATE_save_to_mark",
+  "OSSL_LIB_CTX_get_conf_diagnostics",
+  "OSSL_LIB_CTX_get_data"
+ ],
+ "openssl3_shared_libcrypto_defined_ossl_count": 0,
+ "openssl3_shared_libcrypto_defined_OSSL_count": 697,
+ "boringssl_tier0_file_count": 78,
+ "boringssl_tier0_OSSL_or_ossl_count": 0
 }
