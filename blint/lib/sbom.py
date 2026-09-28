@@ -39,6 +39,7 @@ from blint.db import (
     detect_binaries_utilized,
 )
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
+from blint.lib.android_blintdb import screen_standalone_matches
 from blint.lib.android_services import detect_services
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
@@ -356,7 +357,13 @@ def generate(
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
+            components += process_android_file(
+                dependencies_dict,
+                blint_options.deep_mode,
+                f,
+                sbom,
+                use_blintdb=blint_options.use_blintdb,
+            )
             if blint_options.disassemble:
                 write_dex_callgraph(f, cast(str, blint_options.sbom_output))
         if ios_files:
@@ -1284,6 +1291,22 @@ def process_exe_file(
             callgraph_canon_names=callgraph_canon_names,
             binary_metadata=metadata,
         )
+        # A BoringSSL record contradicts an openssl match on the same bytes,
+        # and the TLS provider shape refuses one without OpenSSL 3's names.
+        binaries_detected, superseded, refused_soname = screen_standalone_matches(
+            metadata, binaries_detected, binary_evidence
+        )
+        if superseded:
+            parent_component.properties.append(
+                Property(
+                    name="internal:blintdb_superseded_by_framework",
+                    value="; ".join(superseded),
+                )
+            )
+        if refused_soname:
+            parent_component.properties.append(
+                Property(name="internal:blintdb_refused_provider_shape", value=refused_soname)
+            )
         if binaries_detected:
             LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
             # F2a.3: when the database holds several versions of the same
@@ -1715,6 +1738,7 @@ def process_android_file(
     deep_mode: bool,
     f: str,
     sbom: CycloneDX,
+    use_blintdb: bool = False,
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
@@ -1724,11 +1748,12 @@ def process_android_file(
         deep_mode (bool): Flag indicating whether to process in deep mode.
         f (str): File to be processed.
         sbom (obj): Software Bill-of-Materials object to be updated.
+        use_blintdb (bool): Match native libraries against the local blintdb.
 
     Returns:
         list: Updated components list after processing.
     """
-    parent_component, app_components = collect_app_metadata(f, deep_mode)
+    parent_component, app_components = collect_app_metadata(f, deep_mode, use_blintdb=use_blintdb)
     if parent_component:
         if not sbom.metadata.component.components:
             sbom.metadata.component.components = []

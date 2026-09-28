@@ -102,8 +102,18 @@ LOW_INFORMATION_PROJECT_SPREAD = 2
 # are the loader's fixed names. Blocking the shape, not a number range:
 # _OUTLINED_FUNCTION_14 in one binary is not the same function as
 # _OUTLINED_FUNCTION_14 in another.
+# The same class, measured on the Android NDK corpus (A6.3 J0):
+# - sub_<hex> - the synthetic name blint's ELF reader gives an address-only
+#   function; a stripped app library and a corpus .so "share" 25-140 of them
+#   by pure address coincidence (libmla -> ffmpeg on 45 dumped names, all
+#   sub_*; realm/pdfium/gkcodecs -> ffmpeg the same way).
+# - $a/$t/$d/$x with an optional .<n> suffix - ARM/AArch64 mapping symbols
+#   (code/data boundary markers); llvm numbers them per binary, and every
+#   unstripped arm64 build carries thousands. libOsmAndCore "matched" four
+#   projects on 121-4,425 of them while exporting none of those APIs.
 MECHANICALLY_EMITTED_SYMBOL_RE = re.compile(
-    r"^_*(?:__mh_[a-z]+_header|OUTLINED_FUNCTION_\d+|main|start|init|fini|_GLOBAL__sub_I_.*)$",
+    r"^_*(?:__mh_[a-z]+_header|OUTLINED_FUNCTION_\d+|main|start|init|fini"
+    r"|_GLOBAL__sub_I_.*|sub_[0-9a-fA-F]+|\$[atdx](?:\.\d+)?)$",
     re.IGNORECASE,
 )
 
@@ -393,6 +403,13 @@ def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
     database that way. Two agreeing signals cover every recorded shape: the
     ``is_imported`` flag, and the ``library::symbol`` name form PE and
     Mach-O import entries carry.
+
+    Mechanically-emitted names (``MECHANICALLY_EMITTED_SYMBOL_RE``) are
+    dropped here as well as at the attribution gate: they cannot identify a
+    project, and querying thousands of them costs SQL time and score noise
+    for matches that can never be evidence (A6.3 J0: an unstripped arm64
+    query offered up to 4,400 ``$d.<n>`` mapping symbols, and a stripped one
+    up to 2,400 ``sub_<hex>`` synthetic function names).
     """
     if not metadata:
         return {}
@@ -407,7 +424,7 @@ def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
                 name = entry.get("name")
             else:
                 name = entry
-            if name and "::" not in name:
+            if name and "::" not in name and not MECHANICALLY_EMITTED_SYMBOL_RE.match(name):
                 names.append(name)
         cleaned_names = _clean_nonempty_values(names)
         if cleaned_names:

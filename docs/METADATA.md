@@ -648,6 +648,13 @@ evidence", never as "verified not a framework":
   no published table maps to a version are reported as hashes in `evidence`.
 - `static: true` marks a framework found inside a host library (a nested
   identification, carried in the host record's `nested` list).
+- TLS grades (H4/J2): OpenSSL is identified by the `OPENSSL_VERSION_TEXT`
+  banner (versioned; replace-grade only under a `libcrypto.so` SONAME, a
+  static copy elsewhere), or banner-less by exported `ossl_*` names (static,
+  versionless). OpenSSL's shared libcrypto hides that internal namespace, so
+  exporting it means a static copy (realm-core's inside `librealm-jni.so`);
+  BoringSSL has none. BoringSSL keeps its three H4 grades (provider replace,
+  re-exported static copy, hint-only strings).
 - In `blint sbom` on Android apps, a replace-grade identification takes
   over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
   for the NDK C++ runtime, for example), keeping the file's provenance
@@ -666,6 +673,66 @@ evidence", never as "verified not a framework":
 The committed evidence fixtures (`tests/data/android/<framework>-evidence.json`)
 carry the corpus side of every detector, with the extracting command and the
 llvm oracle read recorded in each file.
+
+### blintdb identification of Android native libraries (`--use-blintdb`)
+
+With `--use-blintdb`, every native library of an Android app (one call per
+unique sha256) is matched against the local blintdb through the same
+`detect_binaries_utilized` the standalone binary path uses
+(`blint/lib/android_blintdb.py`, A6.3). A match is symbol evidence, not
+identity, and lands in the SBOM in one of three shapes:
+
+- **Nested (the default):** a static copy inside a host library becomes a
+  child component of the host's, bom-ref scoped by the host's
+  (`<host purl>|<child purl>`), purl from the database row's project
+  identity with the artifact-derived version and the ABI qualifier.
+- **Replace:** only when the host structurally *is* the project's library —
+  its declared `DT_SONAME` equals one of the project's own library names in
+  the database (the same SONAME rule the NDK libc++ and BoringSSL provider
+  identifications use). A file name alone is a hint.
+- **Dropped:** a framework identification for the same bytes wins. A
+  BoringSSL record contradicts an `openssl` match; an OpenSSL or NSS record
+  duplicates the match for its own project, which the APK path already
+  emits. Drops are counted in the host's
+  `blint:blintdb:superseded_by_framework` property (`<framework>:<project>`).
+  The standalone binary path emits no framework components, so there only a
+  contradiction drops a match (`internal:blintdb_superseded_by_framework`).
+- **Refused:** an `openssl` match on a host whose SONAME is `libcrypto.so`
+  or `libssl.so` (vendor-prefixed ones included) needs one of OpenSSL 3's
+  own names among its dynamic symbols, defined or imported: the public
+  `OSSL_*` API or the internal `ossl_*` namespace. BoringSSL shares the rest
+  of the `SSL_*`/`EVP_*` API, and none of the 78 tier-0 BoringSSL
+  `libcrypto.so`/`libssl.so` files carries either namespace; OpenSSL 3.6.2's
+  `libssl.so` defines 5 `OSSL_*` names and imports 45. The refusal is
+  counted in `blint:blintdb:refused_provider_shape`
+  (`internal:blintdb_refused_provider_shape` on the standalone path).
+
+Component versions come from the artifact, never from the database row (the
+row carries the vcpkg port's version; the corpus OsmAnd ships PROJ 8.2.0
+against a 9.8.1 row). The strings are read under one rule table,
+`blint.lib.banners.VERSION_RULES`, shared with the standalone vendored-banner
+layer; each rule names the upstream file that defines its string. The
+banner rules (zlib's `deflate_copyright`/`inflate_copyright`, Lua's
+`LUA_COPYRIGHT`, OpenSSL's `OPENSSL_VERSION_TEXT`, curl's `curl_version()`,
+expat's `XML_ExpatVersion()`, libpng's `PNG_HEADER_VERSION_STRING`) name the
+library in the string. The others only date a project the match already
+identified: `libopus x.y.z` (libopus `celt/celt.c`), PROJ's `pj_release`
+(`src/release.cpp`), SQLite's `SQLITE_SOURCE_ID` date mapped through
+sqlite.org's `chronology.html`, and the bare `ZSTD_VERSION_STRING`,
+`PNG_LIBPNG_VER_STRING` and `SENTRY_SDK_VERSION`, each accepted only as the
+artifact's single distinct bare version. Named strings are read before bare
+ones, and named strings that disagree leave the component versionless, as
+do several bare candidates. The database row's purl is recorded as the
+`blint:blintdb:project_purl` property.
+
+Matched components carry `blint:identification:evidence` entries naming the
+symbol match (count and sample) and the version evidence, plus
+`blint:blintdb:score`, and on a replace `blint:blintdb:soname_match` (the
+host SONAME and the project's library names it equals). A child's `abi`
+qualifier lists only the ABIs whose copy matched. The committed evidence fixture
+(`tests/data/android/blintdb-zstd-evidence.json`) carries both sides of the
+R1 match: the vcpkg build's symbol names (llvm-nm) and the corpus library's
+exported symbols (llvm-nm -D), with the extracting commands recorded.
 
 ---
 

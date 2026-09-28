@@ -1556,10 +1556,10 @@ def test_mechanically_emitted_names_never_match(tmp_path):
     """Toolchain-emitted names are not identity (F2b.1).
 
     frc.dylib matched ripgrep on 31 _OUTLINED_FUNCTION_<n> names - clang
-    numbers outlined functions per binary and the numbers happened to
+    numbers outlined functions per binary, and the numbers happened to
     overlap. The names are blocked by shape, project-chosen names are not.
     """
-    from blint.db import MECHANICALLY_EMITTED_SYMBOL_RE
+    from blint.db import MECHANICALLY_EMITTED_SYMBOL_RE, build_symbol_source_map
 
     db_file = tmp_path / "mechanical.db"
     outlined = [f"_OUTLINED_FUNCTION_{i}" for i in range(31)]
@@ -1580,10 +1580,23 @@ def test_mechanically_emitted_names_never_match(tmp_path):
         db_file=str(db_file),
     )
     assert [m["project_purl"] for m in matches] == ["pkg:generic/ripgrep@15.2.0"]
-    for chosen in ("deflate", "rg_main", "png_create_read_struct"):
+    for chosen in ("deflate", "rg_main", "png_create_read_struct", "ZSTD_compress"):
         assert not MECHANICALLY_EMITTED_SYMBOL_RE.match(chosen), chosen
-    for mechanical in ("_OUTLINED_FUNCTION_0", "__mh_execute_header", "_main", "main", "_start", "init", "fini"):
+    for mechanical in (
+        "_OUTLINED_FUNCTION_0", "__mh_execute_header", "_main", "main", "_start", "init", "fini",
+        # A6.3 J0: the synthetic sub_<hex> function names blint's ELF reader
+        # mints, and ARM/AArch64 mapping symbols ($a/$t/$d/$x, numbered per
+        # binary by llvm).
+        "sub_1fd0f4", "sub_227488", "$d.0", "$d.1044", "$x.17", "$a.3", "$t.9", "$d", "$x",
+    ):
         assert MECHANICALLY_EMITTED_SYMBOL_RE.match(mechanical), mechanical
+    # The query side never offers them either (A6.3 J0: an unstripped arm64
+    # query carried up to 4,400 $d.<n> names into the SQL IN lists).
+    source_map = build_symbol_source_map(
+        {"symtab_symbols": ["$d.0", "$d.1", "ZSTD_compress"],
+         "functions": ["sub_1000", "sub_2000", "ZSTD_decompress"]}
+    )
+    assert source_map == {"symtab_symbols": ["ZSTD_compress"], "functions": ["ZSTD_decompress"]}
 
 
 def test_nameless_symbol_only_floor(tmp_path):
