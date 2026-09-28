@@ -90,12 +90,55 @@ def collect_app_metadata(
     if app_file.endswith(BUNDLE_EXTENSIONS):
         return collect_bundle_metadata(app_file, deep_mode)
     parent_component = apk_parent_component(app_file)
-    app_facts: dict = {}
+    app_facts: dict = {"hermes_bundles": scan_hermes_bundles(app_file)}
     components = collect_files_metadata(
         app_file, parent_component, deep_mode, app_facts=app_facts
     )
     attach_app_framework_facts(parent_component, app_facts)
     return parent_component, components
+
+
+# Hermes bytecode container magic (facebook/hermes
+# include/hermes/BCGen/HBC/BytecodeFileFormat.h: MAGIC = 0x1F1903C103BC1FC6,
+# "Hermes" in ancient Greek, UTF-16BE, truncated to 8 bytes), little-endian
+# on disk, followed by the u32 BYTECODE_VERSION
+# (BytecodeVersion.h: 96 as of the constant's last update).
+HERMES_HBC_MAGIC = bytes.fromhex("c61fbc03c103191f")
+HERMES_BUNDLE_SUFFIXES = (".bundle", ".hbc")
+
+
+def scan_hermes_bundles(app_file: str) -> list[dict]:
+    """Read the Hermes bytecode header of the app's JS bundles, in place.
+
+    The hbc header is the version-bearing evidence the Hermes source
+    defines (magic + BYTECODE_VERSION), so the app-level fact states the
+    bytecode format version the app ships. Reads 12 bytes per bundle-named
+    member - nothing is extracted or fully read.
+    """
+    import zipfile
+
+    bundles: list[dict] = []
+    try:
+        with zipfile.ZipFile(app_file) as z:
+            for name in z.namelist():
+                if not name.endswith(HERMES_BUNDLE_SUFFIXES):
+                    continue
+                try:
+                    with z.open(name) as fh:
+                        header = fh.read(12)
+                except (OSError, zipfile.BadZipFile):
+                    continue
+                if len(header) < 12 or header[:8] != HERMES_HBC_MAGIC:
+                    continue
+                bundles.append(
+                    {
+                        "member": name,
+                        "bytecode_version": int.from_bytes(header[8:12], "little"),
+                    }
+                )
+    except (OSError, zipfile.BadZipFile) as e:
+        LOG.debug(f"Hermes bundle scan failed for {app_file}: {e}")
+    return bundles
 
 
 def attach_app_framework_facts(parent_component: Component | None, app_facts: dict) -> None:
@@ -116,6 +159,14 @@ def attach_app_framework_facts(parent_component: Component | None, app_facts: di
         )
         parent_component.properties = (parent_component.properties or []) + [
             Property(name="blint:ndk_versions", value=value)
+        ]
+    bundles = app_facts.get("hermes_bundles") or []
+    if bundles:
+        value = ",".join(
+            f"{b['member']}:{b['bytecode_version']}" for b in bundles
+        )
+        parent_component.properties = (parent_component.properties or []) + [
+            Property(name="blint:hermes_bytecode_version", value=value)
         ]
 
 
@@ -139,7 +190,7 @@ def collect_bundle_metadata(
     bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
     file_components = []
     parent_component: Component | None = None
-    app_facts: dict = {}
+    app_facts: dict = {"hermes_bundles": scan_hermes_bundles(app_file)}
     try:
         unzip_unsafe(app_file, bundle_temp_dir)
         bundle_info = read_bundle_info(bundle_temp_dir)

@@ -70,6 +70,18 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
         "name": "flutter_engine",
         "replaces": "libflutter.so",
     },
+    # React Native: the release versions are published and consumed on npm,
+    # so the spec's npm type carries the exact identity a consumer matches.
+    "react-native": {
+        "purl": ("npm", None, "react-native"),
+        "name": "react-native",
+    },
+    # fbjni: a separate upstream project with no version-bearing evidence in
+    # release builds, so a versionless component from its own evidence.
+    "fbjni": {
+        "purl": ("github", "facebook", "fbjni"),
+        "name": "fbjni",
+    },
 }
 
 # Nested-only identifications: statically linked inside a host library,
@@ -107,11 +119,24 @@ DART_VM_VERSION_RE = re.compile(
 # FLUTTER_CONTENT_HASH, SKIA_VERSION, DART_VERSION); toolchain revisions
 # never appear as bare strings, so no prefix table is needed.
 HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+# react-native's own build stamps Hermes with the RN release:
+# packages/react-native/ReactAndroid/hermes-engine/build.gradle.kts
+# ("-DHERMES_RELEASE_VERSION=for RN ${version}"), compiled in by hermes'
+# CMakeLists.txt (-DHERMES_RELEASE_VERSION="..."). A version-bearing
+# string is the only RN version evidence accepted (04/B).
+RN_RELEASE_RE = re.compile(r"^for RN (?P<version>\d+\.\d+\.\S+)$")
 # A Dart snapshot version hash: 32 lower-hex chars (an MD5 - see
 # DART_SNAPSHOT_HASH_EVIDENCE below).
 DART_SNAPSHOT_HASH_RE = re.compile(r"^[0-9a-f]{32}$")
 # Flutter engine's exported InternalFlutterGpu_* API surface.
 FLUTTER_SYMBOL_RE = re.compile(r"^InternalFlutterGpu_")
+# facebook::jni (github.com/facebook/fbjni) symbols - paired with the
+# runtime string below, because header-using libraries instantiate
+# facebook::jni templates without being fbjni itself.
+FBJNI_SYMBOL_RE = re.compile(r"^facebook::jni::")
+# fbjni's own runtime strings: only its translation units define them
+# (measured: zero occurrences in libreactnative/libjsi/libappmodules).
+FBJNI_RUNTIME_STRING = "fbjni is uninitialized"
 # Dart AOT snapshot exports (libapp.so shape).
 DART_SNAPSHOT_SYMBOL_RE = re.compile(r"^_kDart(Vm|Isolate)Snapshot")
 # The Dart AOT snapshot header: magic f5 f5 dc dc, a u64 length, a u64 kind,
@@ -184,6 +209,51 @@ def _record(framework: str, evidence: list[dict], hints: list[str],
     return record
 
 
+def _react_native_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> list[dict]:
+    """H3: React Native from its Hermes build stamp; fbjni on its own evidence.
+
+    React Native's version comes only from the version-bearing string RN's
+    build stamps into libhermes.so. fbjni needs BOTH the facebook::jni
+    symbol namespace and its own runtime string: header-using libraries
+    (libreactnative) instantiate the templates, but only fbjni's own
+    translation units define the runtime strings.
+    """
+    records: list[dict] = []
+    if (rn := strings_seen.get("rn_release")):
+        match, text = rn
+        records.append(
+            _record(
+                "react-native",
+                [
+                    {
+                        "what": "HERMES_RELEASE_VERSION string",
+                        "where": "strings",
+                        "value": text,
+                    }
+                ],
+                [],
+                version=match.group("version"),
+            )
+        )
+    has_fbjni_symbols = any(FBJNI_SYMBOL_RE.match(n) for n in symbols)
+    fbjni_string = strings_seen.get("fbjni_runtime_string")
+    if has_fbjni_symbols and fbjni_string:
+        evidence = [
+            {
+                "what": "fbjni runtime string",
+                "where": "strings",
+                "value": fbjni_string,
+            },
+            {
+                "what": "facebook::jni symbol namespace",
+                "where": "symbols",
+                "value": "facebook::jni::*",
+            },
+        ]
+        records.append(_record("fbjni", evidence, []))
+    return records
+
+
 def _scan_evidence_strings(parsed_obj) -> dict:
     """One pass over the raw strings, recording each named evidence match.
 
@@ -193,6 +263,8 @@ def _scan_evidence_strings(parsed_obj) -> dict:
     strings_seen: dict = {
         "dart_vm_version": None,
         "hex40": set(),
+        "rn_release": None,
+        "fbjni_runtime_string": None,
     }
     for raw in _iter_strings(parsed_obj):
         if not isinstance(raw, str):
@@ -203,6 +275,12 @@ def _scan_evidence_strings(parsed_obj) -> dict:
         if strings_seen["dart_vm_version"] is None:
             if match := DART_VM_VERSION_RE.match(stripped):
                 strings_seen["dart_vm_version"] = (match, stripped)
+        if strings_seen["rn_release"] is None:
+            if match := RN_RELEASE_RE.match(stripped):
+                strings_seen["rn_release"] = (match, stripped)
+        if strings_seen["fbjni_runtime_string"] is None:
+            if FBJNI_RUNTIME_STRING in stripped:
+                strings_seen["fbjni_runtime_string"] = stripped
         if HEX40_RE.match(stripped):
             strings_seen["hex40"].add(stripped)
     return strings_seen
@@ -229,6 +307,7 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
     records.extend(
         _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata)
     )
+    records.extend(_react_native_and_fbjni_records(strings_seen, symbols))
 
     android_ident = (metadata.get("android") or {}).get("android_ident") or {}
     soname = _declared_soname(parsed_obj)

@@ -266,3 +266,90 @@ def test_r2_corpus_libflutter_nests_dart_and_libapp_stays_hint_only():
             e for e in app_records[0]["evidence"] if "snapshot version hash" in e["what"]
         ]
         assert hash_evidence and len(hash_evidence[0]["value"]) == 32
+
+
+def test_r1_react_native_identifies_from_the_hermes_build_stamp():
+    """RN's version comes only from the "for RN x.y.z" build stamp."""
+    evidence = _load_evidence("react-native")
+    blint = evidence["evidence"]["blint_parse"]
+    strings = blint["string_evidence"]
+    assert strings["rn_release"] == ["for RN 0.76.9"]
+    metadata = _metadata_from_evidence(evidence)
+    parsed = _FakeElf(strings=strings["rn_release"])
+    records = identify_frameworks(parsed, metadata)
+    assert [r["framework"] for r in records] == ["react-native"]
+    assert records[0]["version"] == "0.76.9"
+    name, version, purl = framework_identity(records[0], ["arm64-v8a"])
+    assert (name, version) == ("react-native", "0.76.9")
+    assert purl == "pkg:npm/react-native@0.76.9?abi=arm64-v8a"
+
+
+def test_r1_fbjni_needs_both_the_string_and_the_symbol_namespace():
+    """Templates alone (libreactnative) must never read as fbjni."""
+    evidence = _load_evidence("fbjni")
+    blint = evidence["evidence"]["blint_parse"]
+    sym = blint["symbol_evidence"]
+    assert sym["facebook_jni_namespace"] and blint["string_evidence"]["fbjni_uninitialized"]
+
+    symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
+    strings = blint["string_evidence"]["fbjni_uninitialized"]
+    parsed = _FakeElf(strings=strings)
+    records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["fbjni"]
+
+    # Symbols without the runtime string: a header-using library - no hit.
+    records = identify_frameworks(
+        _FakeElf(), {"dynamic_symbols": symbols}
+    )
+    assert records == []
+
+    # The runtime string without the namespace: no hit either.
+    records = identify_frameworks(parsed, {"dynamic_symbols": []})
+    assert records == []
+
+
+def test_r1_hermes_hbc_header_fact():
+    """The bundle header: magic then the u32 BYTECODE_VERSION."""
+    evidence = _load_evidence("react-native")
+    hbc = evidence.get("hbc_header")
+    assert hbc, "the R1 fixture records the bundle header bytes"
+    # BytecodeFileFormat.h MAGIC, little-endian on disk.
+    assert hbc["magic_hex"] == "c61fbc03c103191f"
+    # BytecodeVersion.h: BYTECODE_VERSION = 96.
+    assert hbc["bytecode_version"] == 96
+
+
+@pytest.mark.skipif(
+    not (
+        Path.home()
+        / "sandbox/android-corpus/tier3-frameworks/com.blint.rnhello_1.apk"
+    ).exists(),
+    reason="corpus not present on this machine (rule 39: never committed)",
+)
+def test_r2_corpus_rnhello_identifies_react_native_and_fbjni():
+    """R2: the real libraries and the bundle, parsed for real."""
+    import os
+    import tempfile
+    import zipfile
+
+    apk = Path.home() / "sandbox/android-corpus/tier3-frameworks/com.blint.rnhello_1.apk"
+    from blint.lib.android import scan_hermes_bundles
+    from blint.lib.binary import parse
+
+    bundles = scan_hermes_bundles(str(apk))
+    assert bundles == [{"member": "assets/index.android.bundle", "bytecode_version": 96}]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(apk) as z:
+            hermes = z.read("lib/arm64-v8a/libhermes.so")
+            fbjni = z.read("lib/arm64-v8a/libfbjni.so")
+        hermes_path = os.path.join(tmp, "libhermes.so")
+        fbjni_path = os.path.join(tmp, "libfbjni.so")
+        Path(hermes_path).write_bytes(hermes)
+        Path(fbjni_path).write_bytes(fbjni)
+
+        hermes_meta = parse(hermes_path)
+        assert [(r["framework"], r.get("version"))
+                for r in hermes_meta.get("frameworks") or []] == [("react-native", "0.76.9")]
+        fbjni_meta = parse(fbjni_path)
+        assert [r["framework"] for r in fbjni_meta.get("frameworks") or []] == ["fbjni"]
