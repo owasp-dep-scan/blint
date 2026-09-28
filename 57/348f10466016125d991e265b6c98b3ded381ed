@@ -1,0 +1,39 @@
+tests/scripts/android/h5-r3-sweep-results.md
+  s_3ce4fa53ecd7da::t_ac01f9633be63c 11-26,34,59
+blint/lib/android.py
+  s_3ce4fa53ecd7da::t_4f1af72d0364be 741,743-750,752-754,756-758,791,794,799-817,821,839,841
+tests/scripts/android/r3_identification_sweep.py
+  s_3ce4fa53ecd7da::t_d18b8592305f27 51,69
+tests/test_android_ident.py
+  s_3ce4fa53ecd7da::t_3531aa8d72c74a 271-272,280,283-285,330,354,391-393,396,402-404,519-520,522,526-558
+blint/lib/framework_ident.py
+  s_3ce4fa53ecd7da::t_82864210c3624a 69-75
+  s_3ce4fa53ecd7da::t_47f99231199a31 266-267,269-274,281
+  s_3ce4fa53ecd7da::t_0c0b0bdbd402ed 124-126
+  s_3ce4fa53ecd7da::t_b4156fd52a4393 513,519-520,522,527-535,558-564
+  s_3ce4fa53ecd7da::t_1b37bbce0cdfbd 51
+  s_3ce4fa53ecd7da::t_0e11e209a2e307 182-184,312,314-327,348,371,389-405
+docs/METADATA.md
+  s_3ce4fa53ecd7da::t_d18b8592305f27 654
+  s_3ce4fa53ecd7da::t_15d4a399c8c4d1 624-625
+  s_3ce4fa53ecd7da::t_7606ef39288a10 656-660,662-664
+tests/scripts/android/h0-identification-shape.md
+  s_3ce4fa53ecd7da::t_52879c61b2f2a0 48,77-78,102,105,118-119
+  s_3ce4fa53ecd7da::t_d18b8592305f27 82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "57348f10466016125d991e265b6c98b3ded381ed",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
