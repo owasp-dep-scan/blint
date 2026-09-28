@@ -621,6 +621,52 @@ Recovered function starts for binaries whose symbol tables are stripped or incom
 
 Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.
 
+On ELF, `function_extent` records the size reconciliation that follows the merge (see `docs/DISASSEMBLE.md`, "Function extents"): `sizes_rejected` (impossible sizes dropped), `sizes_corrected` (sizes replaced by a higher-precedence source) and `entries_checked`. The first two are also surfaced in `analysis_coverage.functions`.
+
+### Framework and runtime identification (`frameworks`, ELF only)
+
+One record per identified framework or runtime, emitted only when evidence
+named in `blint/lib/framework_ident.py` matches (rule 38): a file name alone
+is a *hint*, never a component. The key is absent when no evidence matched
+(ELF) or the pass never ran (non-ELF) - both read as "no framework
+evidence", never as "verified not a framework":
+
+```json
+{
+  "framework": "ndk-libcxx",
+  "version": "r26-canary",
+  "evidence": [
+    {"what": ".note.android.ident NDK version", "where": "notes",
+     "value": "r26-canary"}
+  ],
+  "hints": [],
+  "static": false
+}
+```
+
+- `version` is present only when the named evidence pins one; hashes that
+  no published table maps to a version are reported as hashes in `evidence`.
+- `static: true` marks a framework found inside a host library (a nested
+  identification, carried in the host record's `nested` list).
+- In `blint sbom` on Android apps, a replace-grade identification takes
+  over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
+  for the NDK C++ runtime, for example), keeping the file's provenance
+  properties and adding one `blint:identification:evidence` property
+  per evidence entry plus `blint:hint:file_name`. Files that merely bundle
+  a framework statically keep their own component: a copy with exact
+  evidence (the Dart VM and BoringSSL inside `libflutter.so`, or a
+  re-exported `BORINGSSL_*` surface) is a child component whose bom-ref is
+  scoped by the host's, and weaker evidence is a
+  `blint:identification:<framework>` property. App-level facts ride the
+  parent application component as properties (`blint:ndk_versions` — the
+  distinct NDK note versions per ABI, per ground rule 36;
+  `blint:hermes_bytecode_version` — the Hermes bytecode header version of
+  each bundle).
+
+The committed evidence fixtures (`tests/data/android/<framework>-evidence.json`)
+carry the corpus side of every detector, with the extracting command and the
+llvm oracle read recorded in each file.
+
 ---
 
 ## Build and Dependency Information
@@ -939,7 +985,7 @@ Swift type and field names also join the ObjC selectors and symbols in the priva
 
 Accounting for what was analyzed versus what was discovered, so a run that disassembled 3 of 400 functions is never indistinguishable from a clean run of 400:
 
-- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`.
+- **`functions`**: `symbolic` (from symbol buckets), `discovered` (recovered from unwind tables, prologues and call sites), `discovered_merged_into_function_list`, `disassembled`. On ELF binaries the extent repair is visible here too: `function_sizes_rejected` (entries whose declared size was impossible — wrapped or past the containing section — and was dropped, leaving the disassembler's next-known-start rule) and `function_sizes_corrected` (entries whose size was replaced by a higher-precedence source: a symbol's `st_size`, then the unwind-table FDE range, over LIEF's `functions` size).
 - **`degradations`**: reasons parts of the binary were not analyzed, e.g. `fairplay_encrypted`, `disassembly_unavailable`, `slice_summary_failed`.
 - **`sections_analyzed`**: sections the entropy pass examined.
 - **`slices`** (universal Mach-O binaries only): `total`, `summarized` and `failed` slice counts. A slice whose summary failed is isolated — the remaining slices are still reported, and `errors` carries one record per failed slice (`index`, `exception_type`, `message`).

@@ -1,0 +1,171 @@
+{
+  "framework": "flutter-engine",
+  "source": {
+    "apk": "org.localsend.localsend_app_643.apk",
+    "member": "lib/arm64-v8a/libflutter.so"
+  },
+  "sha256": "0c56c4a468224beb2336c7bacaee6d5885047a0075d613fe421871b4dceafdce",
+  "bytes": 11317744,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings lib/arm64-v8a/libflutter.so",
+      "llvm-nm -D --demangle --defined-only lib/arm64-v8a/libflutter.so",
+      "llvm-readelf -n lib/arm64-v8a/libflutter.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": {
+        "min_api": 24,
+        "ndk_version": "r28c",
+        "ndk_build_number": "13676358"
+      },
+      "ident_notes": [
+        {
+          "type": "ANDROID_IDENT",
+          "sdk_version": 24,
+          "ndk_version": "r28c",
+          "ndk_build_number": "13676358"
+        }
+      ],
+      "symbol_evidence": {
+        "matched_names": [
+          "InternalFlutterGpu_CommandBuffer_Initialize",
+          "InternalFlutterGpu_CommandBuffer_Submit",
+          "InternalFlutterGpu_Context_GetDefaultColorFormat",
+          "InternalFlutterGpu_Context_GetDefaultDepthStencilFormat",
+          "InternalFlutterGpu_Context_GetDefaultStencilFormat",
+          "InternalFlutterGpu_Context_GetMinimumUniformByteAlignment",
+          "InternalFlutterGpu_Context_GetSupportsOffscreenMSAA",
+          "InternalFlutterGpu_Context_InitializeDefault",
+          "InternalFlutterGpu_DeviceBuffer_Flush",
+          "InternalFlutterGpu_DeviceBuffer_Initialize",
+          "InternalFlutterGpu_DeviceBuffer_InitializeWithHostData",
+          "InternalFlutterGpu_DeviceBuffer_Overwrite",
+          "InternalFlutterGpu_RenderPass_Begin",
+          "InternalFlutterGpu_RenderPass_BindIndexBufferDevice",
+          "InternalFlutterGpu_RenderPass_BindPipeline",
+          "InternalFlutterGpu_RenderPass_BindTexture",
+          "InternalFlutterGpu_RenderPass_BindUniformDevice",
+          "InternalFlutterGpu_RenderPass_BindVertexBufferDevice",
+          "InternalFlutterGpu_RenderPass_ClearBindings",
+          "InternalFlutterGpu_RenderPass_Draw",
+          "InternalFlutterGpu_RenderPass_Initialize",
+          "InternalFlutterGpu_RenderPass_SetColorAttachment",
+          "InternalFlutterGpu_RenderPass_SetColorBlendEnable",
+          "InternalFlutterGpu_RenderPass_SetColorBlendEquation",
+          "InternalFlutterGpu_RenderPass_SetCullMode",
+          "InternalFlutterGpu_RenderPass_SetDepthCompareOperation",
+          "InternalFlutterGpu_RenderPass_SetDepthStencilAttachment",
+          "InternalFlutterGpu_RenderPass_SetDepthWriteEnable",
+          "InternalFlutterGpu_RenderPass_SetPolygonMode",
+          "InternalFlutterGpu_RenderPass_SetPrimitiveType",
+          "InternalFlutterGpu_RenderPass_SetScissor",
+          "InternalFlutterGpu_RenderPass_SetStencilConfig",
+          "InternalFlutterGpu_RenderPass_SetStencilReference",
+          "InternalFlutterGpu_RenderPass_SetViewport",
+          "InternalFlutterGpu_RenderPass_SetWindingOrder",
+          "InternalFlutterGpu_RenderPipeline_Initialize",
+          "InternalFlutterGpu_ShaderLibrary_GetShader",
+          "InternalFlutterGpu_ShaderLibrary_InitializeWithAsset",
+          "InternalFlutterGpu_Shader_GetUniformMemberOffset",
+          "InternalFlutterGpu_Shader_GetUniformStructSize",
+          "InternalFlutterGpu_Texture_AsImage",
+          "InternalFlutterGpu_Texture_BytesPerTexel",
+          "InternalFlutterGpu_Texture_Initialize",
+          "InternalFlutterGpu_Texture_Overwrite",
+          "InternalFlutterGpu_Texture_SetCoordinateSystem"
+        ],
+        "matched_count": 45,
+        "dynamic_symbols_total": 531,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": true,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
+      },
+      "string_evidence": {
+        "dart_vm_version": [
+          "3.11.5 (stable) (Wed Apr 15 00:36:32 2026 -0700) on \"android_arm64\""
+        ],
+        "rn_release": [],
+        "nss_version": [],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [
+          "42d3d75a56efe1a2e9902f52dc8006099c45d937",
+          "a183ded9ad67d998a5b0fe4cd86d3ef5402ffb45"
+        ],
+        "boringssl_bare": [],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 16821
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [
+        "InternalFlutterGpu_CommandBuffer_Initialize",
+        "InternalFlutterGpu_CommandBuffer_Submit",
+        "InternalFlutterGpu_Context_GetDefaultColorFormat",
+        "InternalFlutterGpu_Context_GetDefaultDepthStencilFormat",
+        "InternalFlutterGpu_Context_GetDefaultStencilFormat",
+        "InternalFlutterGpu_Context_GetMinimumUniformByteAlignment",
+        "InternalFlutterGpu_Context_GetSupportsOffscreenMSAA",
+        "InternalFlutterGpu_Context_InitializeDefault",
+        "InternalFlutterGpu_DeviceBuffer_Flush",
+        "InternalFlutterGpu_DeviceBuffer_Initialize",
+        "InternalFlutterGpu_DeviceBuffer_InitializeWithHostData",
+        "InternalFlutterGpu_DeviceBuffer_Overwrite",
+        "InternalFlutterGpu_RenderPass_Begin",
+        "InternalFlutterGpu_RenderPass_BindIndexBufferDevice",
+        "InternalFlutterGpu_RenderPass_BindPipeline",
+        "InternalFlutterGpu_RenderPass_BindTexture",
+        "InternalFlutterGpu_RenderPass_BindUniformDevice",
+        "InternalFlutterGpu_RenderPass_BindVertexBufferDevice",
+        "InternalFlutterGpu_RenderPass_ClearBindings",
+        "InternalFlutterGpu_RenderPass_Draw",
+        "InternalFlutterGpu_RenderPass_Initialize",
+        "InternalFlutterGpu_RenderPass_SetColorAttachment",
+        "InternalFlutterGpu_RenderPass_SetColorBlendEnable",
+        "InternalFlutterGpu_RenderPass_SetColorBlendEquation",
+        "InternalFlutterGpu_RenderPass_SetCullMode",
+        "InternalFlutterGpu_RenderPass_SetDepthCompareOperation",
+        "InternalFlutterGpu_RenderPass_SetDepthStencilAttachment",
+        "InternalFlutterGpu_RenderPass_SetDepthWriteEnable",
+        "InternalFlutterGpu_RenderPass_SetPolygonMode",
+        "InternalFlutterGpu_RenderPass_SetPrimitiveType",
+        "InternalFlutterGpu_RenderPass_SetScissor",
+        "InternalFlutterGpu_RenderPass_SetStencilConfig",
+        "InternalFlutterGpu_RenderPass_SetStencilReference",
+        "InternalFlutterGpu_RenderPass_SetViewport",
+        "InternalFlutterGpu_RenderPass_SetWindingOrder",
+        "InternalFlutterGpu_RenderPipeline_Initialize",
+        "InternalFlutterGpu_ShaderLibrary_GetShader",
+        "InternalFlutterGpu_ShaderLibrary_InitializeWithAsset",
+        "InternalFlutterGpu_Shader_GetUniformMemberOffset",
+        "InternalFlutterGpu_Shader_GetUniformStructSize",
+        "InternalFlutterGpu_Texture_AsImage",
+        "InternalFlutterGpu_Texture_BytesPerTexel",
+        "InternalFlutterGpu_Texture_Initialize",
+        "InternalFlutterGpu_Texture_Overwrite",
+        "InternalFlutterGpu_Texture_SetCoordinateSystem"
+      ],
+      "nm_matched_count": 45,
+      "strings_dart_or_banner": [
+        "3.11.5 (stable) (Wed Apr 15 00:36:32 2026 -0700) on \"android_arm64\""
+      ],
+      "readelf_notes_android_ident": [
+        "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",
+        "description data: 18 00 00 00 72 32 38 63 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 31 33 36 37 36 33 35 38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+      ]
+    }
+  }
+}

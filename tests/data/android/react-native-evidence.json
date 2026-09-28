@@ -1,0 +1,181 @@
+{
+  "framework": "react-native",
+  "source": {
+    "apk": "com.blint.rnhello_1.apk",
+    "member": "lib/arm64-v8a/libhermes.so"
+  },
+  "sha256": "73527674faf810ef75403849ee0e143a8371f6fd03330cc0dbd10d70e1a1f0f2",
+  "bytes": 2273184,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings lib/arm64-v8a/libhermes.so",
+      "llvm-nm -D --demangle --defined-only lib/arm64-v8a/libhermes.so",
+      "llvm-readelf -n lib/arm64-v8a/libhermes.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": {
+        "min_api": 24,
+        "ndk_version": "r26b",
+        "ndk_build_number": "10909125"
+      },
+      "ident_notes": [
+        {
+          "type": "ANDROID_IDENT",
+          "sdk_version": 24,
+          "ndk_version": "r26b",
+          "ndk_build_number": "10909125"
+        }
+      ],
+      "symbol_evidence": {
+        "matched_names": [
+          "facebook::jni::Environment::current()",
+          "facebook::jni::JString::toStdString() const",
+          "facebook::jni::JString::toU16String() const",
+          "facebook::jni::ThreadScope::WithClassLoader(std::__ndk1::function<void ()>&&)",
+          "facebook::jni::findClassLocal(char const*)",
+          "facebook::jni::findClassStatic(char const*)",
+          "facebook::jni::throwCppExceptionIf(bool)",
+          "facebook::jni::throwNewJavaException(char const*, char const*)",
+          "facebook::jni::throwPendingJniExceptionAsCppException()",
+          "operator new(unsigned long)",
+          "operator new(unsigned long, std::nothrow_t const&)",
+          "operator new[](unsigned long)",
+          "std::__ndk1::__call_once(unsigned long volatile&, void*, void (*)(void*))",
+          "std::__ndk1::__next_prime(unsigned long)",
+          "std::__ndk1::__shared_weak_count::__get_deleter(std::type_info const&) const",
+          "std::__ndk1::__shared_weak_count::__release_weak()",
+          "std::__ndk1::__shared_weak_count::lock()",
+          "std::__ndk1::__shared_weak_count::~__shared_weak_count()",
+          "std::__ndk1::__thread_local_data()",
+          "std::__ndk1::__thread_struct::__thread_struct()",
+          "std::__ndk1::__thread_struct::~__thread_struct()",
+          "std::__ndk1::__throw_system_error(int, char const*)",
+          "std::__ndk1::bad_function_call::~bad_function_call()",
+          "std::__ndk1::basic_ios<char, std::__ndk1::char_traits<char> >::~basic_ios()",
+          "std::__ndk1::basic_iostream<char, std::__ndk1::char_traits<char> >::~basic_iostream()",
+          "std::__ndk1::basic_istream<char, std::__ndk1::char_traits<char> >::~basic_istream()",
+          "std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >::operator<<(unsigned int)",
+          "std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >::sentry::sentry(std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >&)",
+          "std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >::sentry::~sentry()",
+          "std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >::write(char const*, long)",
+          "std::__ndk1::basic_ostream<char, std::__ndk1::char_traits<char> >::~basic_ostream()",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::basic_streambuf()",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::imbue(std::__ndk1::locale const&)",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::setbuf(char*, long)",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::showmanyc()",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::sync()",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::uflow()",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::xsgetn(char*, long)",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::xsputn(char const*, long)",
+          "std::__ndk1::basic_streambuf<char, std::__ndk1::char_traits<char> >::~basic_streambuf()",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > std::__ndk1::operator+<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >(char const*, std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::__grow_by(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::append(char const*)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::append(char const*, unsigned long)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::assign(char const*)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::basic_string(std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::erase(unsigned long, unsigned long)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::insert(unsigned long, char const*)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::operator=(std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::push_back(char)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::replace(unsigned long, unsigned long, unsigned long, char)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::reserve(unsigned long)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::resize(unsigned long, char)",
+          "std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> >::~basic_string()",
+          "std::__ndk1::chrono::steady_clock::now()",
+          "std::__ndk1::chrono::system_clock::now()",
+          "std::__ndk1::codecvt<char, char, mbstate_t>::id",
+          "std::__ndk1::condition_variable::__do_timed_wait(std::__ndk1::unique_lock<std::__ndk1::mutex>&, std::__ndk1::chrono::time_point<std::__ndk1::chrono::system_clock, std::__ndk1::chrono::duration<long long, std::__ndk1::ratio<(long)1, (long)1000000000> > >)",
+          "std::__ndk1::condition_variable::notify_all()",
+          "std::__ndk1::condition_variable::notify_one()",
+          "std::__ndk1::condition_variable::wait(std::__ndk1::unique_lock<std::__ndk1::mutex>&)",
+          "std::__ndk1::condition_variable::~condition_variable()",
+          "std::__ndk1::ctype<char>::id",
+          "std::__ndk1::error_category::default_error_condition(int) const",
+          "std::__ndk1::error_category::equivalent(int, std::__ndk1::error_condition const&) const",
+          "std::__ndk1::error_category::equivalent(std::__ndk1::error_code const&, int) const",
+          "std::__ndk1::error_category::~error_category()",
+          "std::__ndk1::error_code::message() const",
+          "std::__ndk1::generic_category()",
+          "std::__ndk1::ios_base::__set_badbit_and_consider_rethrow()",
+          "std::__ndk1::ios_base::clear(unsigned int)",
+          "std::__ndk1::ios_base::getloc() const",
+          "std::__ndk1::ios_base::init(void*)",
+          "std::__ndk1::locale::use_facet(std::__ndk1::locale::id&) const",
+          "std::__ndk1::locale::~locale()",
+          "std::__ndk1::mutex::lock()",
+          "std::__ndk1::mutex::unlock()",
+          "std::__ndk1::mutex::~mutex()",
+          "std::__ndk1::random_device::operator()()",
+          "std::__ndk1::random_device::random_device()",
+          "std::__ndk1::random_device::random_device(std::__ndk1::basic_string<char, std::__ndk1::char_traits<char>, std::__ndk1::allocator<char> > const&)",
+          "std::__ndk1::random_device::~random_device()",
+          "std::__ndk1::recursive_mutex::lock()",
+          "std::__ndk1::recursive_mutex::recursive_mutex()",
+          "std::__ndk1::recursive_mutex::unlock()",
+          "std::__ndk1::recursive_mutex::~recursive_mutex()",
+          "std::__ndk1::system_category()",
+          "std::__ndk1::system_error::system_error(std::__ndk1::error_code)",
+          "std::__ndk1::system_error::~system_error()",
+          "std::__ndk1::thread::join()",
+          "std::__ndk1::thread::~thread()",
+          "std::__ndk1::to_string(int)",
+          "std::__ndk1::to_string(long long)",
+          "std::__ndk1::to_string(unsigned int)",
+          "std::__ndk1::to_string(unsigned long)"
+        ],
+        "matched_count": 102,
+        "dynamic_symbols_total": 406,
+        "ndk1_namespace": true,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": true,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
+      },
+      "string_evidence": {
+        "dart_vm_version": [],
+        "rn_release": [
+          "for RN 0.76.9"
+        ],
+        "nss_version": [],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [],
+        "boringssl_bare": [],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 2238
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [
+        "std::__ndk1::bad_function_call::~bad_function_call()",
+        "std::__ndk1::random_device::random_device()"
+      ],
+      "nm_matched_count": 2,
+      "strings_dart_or_banner": [
+        "for RN 0.76.9"
+      ],
+      "readelf_notes_android_ident": [
+        "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",
+        "description data: 18 00 00 00 72 32 36 62 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 31 30 39 30 39 31 32 35 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+      ]
+    }
+  },
+  "hbc_header": {
+    "member": "assets/index.android.bundle",
+    "magic_hex": "c61fbc03c103191f",
+    "bytecode_version": 96,
+    "sha256": "e326cbd32a7a9b6587eaac3c1cfd6d6ee16e27162d2399568286ae2c5548abe3"
+  }
+}

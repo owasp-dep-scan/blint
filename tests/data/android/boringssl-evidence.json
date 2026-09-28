@@ -1,0 +1,97 @@
+{
+  "framework": "boringssl",
+  "source": {
+    "apk": "libcrypto.so",
+    "member": "libcrypto.so"
+  },
+  "sha256": "2d392f09fa89a25a3ba862866f29141c93ccb1bec6ed04f4f274c3ecc0c0df02",
+  "bytes": 1576432,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings libcrypto.so",
+      "llvm-nm -D --demangle --defined-only libcrypto.so",
+      "llvm-readelf -n libcrypto.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": {
+        "min_api": 36,
+        "ndk_version": null,
+        "ndk_build_number": null
+      },
+      "ident_notes": [
+        {
+          "type": "ANDROID_IDENT",
+          "sdk_version": 36,
+          "ndk_version": "",
+          "ndk_build_number": ""
+        }
+      ],
+      "symbol_evidence": {
+        "matched_names": [
+          "BORINGSSL_bcm_rodata_end",
+          "BORINGSSL_bcm_rodata_start",
+          "BORINGSSL_bcm_text_end",
+          "BORINGSSL_bcm_text_start",
+          "BORINGSSL_integrity_test",
+          "BORINGSSL_keccak",
+          "BORINGSSL_keccak_absorb",
+          "BORINGSSL_keccak_init",
+          "BORINGSSL_keccak_squeeze",
+          "BORINGSSL_self_test"
+        ],
+        "matched_count": 10,
+        "dynamic_symbols_total": 2595,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": true,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": false
+      },
+      "string_evidence": {
+        "dart_vm_version": [],
+        "rn_release": [],
+        "nss_version": [],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [],
+        "boringssl_bare": [
+          "BoringSSL"
+        ],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 2788
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [
+        "BORINGSSL_bcm_rodata_end",
+        "BORINGSSL_bcm_rodata_start",
+        "BORINGSSL_bcm_text_end",
+        "BORINGSSL_bcm_text_start",
+        "BORINGSSL_integrity_test",
+        "BORINGSSL_keccak",
+        "BORINGSSL_keccak_absorb",
+        "BORINGSSL_keccak_init",
+        "BORINGSSL_keccak_squeeze",
+        "BORINGSSL_self_test"
+      ],
+      "nm_matched_count": 10,
+      "strings_dart_or_banner": [],
+      "readelf_notes_android_ident": [
+        "Android              0x00000004\tNT_ANDROID_TYPE_IDENT",
+        "description data: 24 00 00 00",
+        "description data: 01 00 00 00"
+      ]
+    }
+  }
+}

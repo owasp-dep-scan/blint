@@ -80,6 +80,30 @@ Function addresses come from three cooperating sources, tried in order of confid
 
 On a stripped Go ELF binary — no symbols, no `.eh_frame` — the completion passes recover a working function set (prologue precision measured at 1.00 against the unstripped symbol table on the evaluation corpus).
 
+### Function extents: the size precedence (ELF)
+
+A function's extent must never run past its containing section. Where more
+than one source declares a size, the first entry per address in the buckets
+the disassembler reads is reconciled by this precedence:
+
+1. **The symbol's `st_size`** (from the `symtab_symbols` / `dynamic_symbols`
+   buckets) — wins over both other sources;
+2. **the unwind-table FDE range** (blint's own `.eh_frame` parse, exact
+   `pc_range` values) — wins over LIEF's `functions` size;
+3. **LIEF's `Binary.functions` size** as listed.
+
+A winning size that is impossible — wrapped at 2^64, or running past the end
+of its containing section — is **dropped, not clamped**: the entry then takes
+the next-known-start rule below. LIEF needs this repair: its eh_frame walk
+misreads CIE augmentations that carry a personality routine (`zPLR`) and
+hands out wrapped sizes on stripped C++ libraries (265 of 2,377 functions on
+RnHello's arm64 `libc++_shared.so`, each decoding ~162,000 instructions to
+the end of `.text` — 1.7 GB of metadata per file). The repair is counted in
+`analysis_coverage.functions.function_sizes_rejected` (sizes dropped) and
+`function_sizes_corrected` (sizes replaced by a higher-precedence source).
+Symbol buckets are never mutated, so `st_size` stays comparable against
+`llvm-readelf`.
+
 ## ARM32 (armeabi-v7a): per-function Thumb/ARM mode
 
 A 32-bit ARM binary mixes ARM and Thumb functions (NDK-built armeabi-v7a code

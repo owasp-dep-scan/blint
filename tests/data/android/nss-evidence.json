@@ -1,0 +1,80 @@
+{
+  "framework": "nss",
+  "source": {
+    "apk": "org.mozilla.fennec_fdroid_1560020.apk",
+    "member": "lib/arm64-v8a/libnss3.so"
+  },
+  "sha256": "abe448a293bfe6945aff5de8c1ac0ae6f32de6e6709588f2cff24dca1e8a623f",
+  "bytes": 2791912,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings lib/arm64-v8a/libnss3.so",
+      "llvm-nm -D --demangle --defined-only lib/arm64-v8a/libnss3.so",
+      "llvm-readelf -n lib/arm64-v8a/libnss3.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": {
+        "min_api": 26,
+        "ndk_version": "r29",
+        "ndk_build_number": "14206865"
+      },
+      "ident_notes": [
+        {
+          "type": "ANDROID_IDENT",
+          "sdk_version": 26,
+          "ndk_version": "r29",
+          "ndk_build_number": "14206865"
+        }
+      ],
+      "symbol_evidence": {
+        "matched_names": [
+          "NSS_VersionCheck"
+        ],
+        "matched_count": 1,
+        "dynamic_symbols_total": 1535,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": false,
+        "nss_version_check": true
+      },
+      "string_evidence": {
+        "dart_vm_version": [],
+        "rn_release": [],
+        "nss_version": [
+          "Version: NSS 3.128"
+        ],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [],
+        "boringssl_bare": [],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 4405
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [
+        "NSS_VersionCheck@@libnss3.so"
+      ],
+      "nm_matched_count": 1,
+      "strings_dart_or_banner": [
+        "Version: NSS 3.128"
+      ],
+      "readelf_notes_android_ident": [
+        "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",
+        "description data: 1a 00 00 00 72 32 39 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 31 34 32 30 36 38 36 35 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+      ]
+    }
+  }
+}

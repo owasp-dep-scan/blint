@@ -71,6 +71,10 @@ ELF_TEXT = ".text"
 # "return what parsed so far" instead of raising into the parse path.
 MAX_FUNCTION_ENTRIES = 1 << 20
 
+# No section in any format blint parses is this large (executable_ranges()
+# applies the same sanity bound); a size at or above it cannot be an extent.
+MAX_PLAUSIBLE_EXTENT = 1 << 32
+
 
 def _section_bytes(parsed_obj, name: str):
     """Return (virtual_address, bytes) for a named section, or (None, None)."""
@@ -627,3 +631,156 @@ def _existing_function_entries(metadata: dict) -> dict[int, dict]:
                 continue
             existing[address] = func_entry
     return existing
+
+
+def _elf_section_ranges(parsed_obj) -> list[tuple[int, int]]:
+    """All ELF section ranges as sorted ``[(start, end_exclusive), ...]``."""
+    ranges: list[tuple[int, int]] = []
+    try:
+        for section in parsed_obj.sections:
+            size = int(section.size)
+            if size <= 0 or size > MAX_PLAUSIBLE_EXTENT:
+                continue
+            start = int(section.virtual_address)
+            ranges.append((start, start + size))
+    except (AttributeError, TypeError, ValueError):
+        return []
+    return sorted(ranges)
+
+
+def _containing_section_end(address: int, ranges: list[tuple[int, int]]) -> int | None:
+    for start, end in ranges:
+        if start <= address < end:
+            return end
+    return None
+
+
+def _elf_symbol_sizes(metadata: dict, arm32: bool) -> dict[int, int]:
+    """Address -> positive ``st_size`` from the ELF symbol buckets.
+
+    ``parse_symbols`` stores a symbol's address under ``value`` while function
+    entries store theirs under ``address``; both spellings are accepted. The
+    first bucket to claim an address wins, mirroring the disassembler's
+    bucket order.
+    """
+    sizes: dict[int, int] = {}
+    for bucket_key in ("symtab_symbols", "dynamic_symbols"):
+        for symbol in metadata.get(bucket_key) or []:
+            if not isinstance(symbol, dict):
+                continue
+            raw = symbol.get("address") or symbol.get("value")
+            if not raw:
+                continue
+            with contextlib.suppress(ValueError):
+                address = int(str(raw), 16) & (~1 if arm32 else -1)
+                size = symbol.get("size")
+                if isinstance(size, int) and 0 < size < MAX_PLAUSIBLE_EXTENT:
+                    sizes.setdefault(address, size)
+    return sizes
+
+
+def _unwind_extents(metadata: dict, arm32: bool) -> dict[int, int]:
+    """Address -> extent size from blint's own unwind discovery records.
+
+    Exact FDE ranges (source ``eh_frame``) beat a header table's gap-derived
+    size (source ``unwind``) when both exist for one address.
+    """
+    extents: dict[int, int] = {}
+    for record in metadata.get("discovered_functions") or []:
+        if not isinstance(record, dict) or record.get("source") not in ("eh_frame", "unwind"):
+            continue
+        size = record.get("size")
+        if not isinstance(size, int) or size <= 0:
+            continue
+        with contextlib.suppress(ValueError):
+            address = int(str(record["address"]), 16) & (~1 if arm32 else -1)
+            if record.get("source") == "eh_frame" or address not in extents:
+                extents[address] = size
+    return extents
+
+
+def reconcile_function_extents(metadata: dict, parsed_obj) -> dict:
+    """Enforce the function-extent precedence and the section-end invariant.
+
+    LIEF's ``Binary.functions`` misparses CIE augmentations that carry a
+    personality routine ("zPLR"): the personality's P encoding byte is read
+    as the FDE pointer encoding, so ``pc_range`` is decoded with the wrong
+    format from the wrong offset and lands as a negative ``int32`` that
+    ``Function::size(uint64_t)`` sign-extends into a wrapped value around
+    2**64. Every function carrying such a size decodes from its start to the
+    end of ``.text`` — on a stripped 1.3 MB NDK library that was 1.7 GB of
+    metadata.
+
+    This pass gives the disassembler's size readers one precedence, applied
+    to the first entry per address in the buckets the disassembler reads:
+
+    1. a symbol's ``st_size`` (from the ``symtab_symbols`` /
+       ``dynamic_symbols`` buckets) — wins over both other sources;
+    2. the unwind-table FDE range (blint's own ``.eh_frame`` parse) — wins
+       over LIEF's ``functions`` size;
+    3. the LIEF ``functions`` size as listed.
+
+    A winning size that is impossible — wrapped (>= 2**32) or running past
+    the end of its containing section — is *dropped* (set to 0), never
+    clamped: the entry then takes the disassembler's existing
+    next-known-start rule. Symbol buckets are read as evidence but never
+    mutated, so ``st_size`` stays comparable against ``llvm-readelf``.
+
+    ELF only: PE has no unwind-derived ``functions`` sizes and Mach-O keeps
+    the merge behaviour its KPI baselines were calibrated against. The
+    outcome is counted in ``metadata["function_extent"]`` and surfaced
+    through ``analysis_coverage``.
+    """
+    from blint.lib.disassembler import FUNCTION_SYMBOLS
+
+    try:
+        arm32 = parsed_obj.header.machine_type == lief.ELF.ARCH.ARM
+    except (AttributeError, TypeError):
+        arm32 = False
+    section_ranges = _elf_section_ranges(parsed_obj)
+    symbol_sizes = _elf_symbol_sizes(metadata, arm32)
+    fde_sizes = _unwind_extents(metadata, arm32)
+    seen: set[int] = set()
+    rejected = 0
+    corrected = 0
+    for bucket_key in FUNCTION_SYMBOLS:
+        for entry in metadata.get(bucket_key) or []:
+            if not isinstance(entry, dict):
+                continue
+            raw = entry.get("address") or entry.get("rva_start")
+            if not raw:
+                continue
+            with contextlib.suppress(ValueError):
+                address = int(str(raw), 16) & (~1 if arm32 else -1)
+                if address in seen:
+                    continue
+                seen.add(address)
+                current = entry.get("size") or entry.get("length")
+                if not isinstance(current, int) or current <= 0:
+                    # Sizeless entries already take the next-known-start rule;
+                    # filling sizes in is the merge's job, not this pass's.
+                    continue
+                st_size = symbol_sizes.get(address)
+                if st_size:
+                    target, _source = st_size, "st_size"
+                elif fde_sizes.get(address):
+                    target, _source = fde_sizes[address], "eh_frame_fde"
+                else:
+                    target, _source = current, "lief_functions"
+                end = _containing_section_end(address, section_ranges)
+                if target >= MAX_PLAUSIBLE_EXTENT or (
+                    end is not None and address + target > end
+                ):
+                    # Impossible: dropped, not clamped - the disassembler's
+                    # next-known-start rule bounds the window instead.
+                    entry["size"] = 0
+                    rejected += 1
+                elif target != current:
+                    entry["size"] = target
+                    corrected += 1
+    metadata["function_extent"] = {
+        "sizes_rejected": rejected,
+        "sizes_corrected": corrected,
+        "entries_checked": len(seen),
+    }
+    return metadata

@@ -1,0 +1,70 @@
+{
+  "framework": "flutter-app",
+  "source": {
+    "apk": "org.localsend.localsend_app_643.apk",
+    "member": "lib/arm64-v8a/libapp.so"
+  },
+  "sha256": "8f46efd1f78d65ebc0ff630655f274f3c36be89aa13316fb7322a3dda8a497d6",
+  "bytes": 14549936,
+  "extraction": {
+    "tools": {
+      "llvm-strings": "/Users/prabhu/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strings",
+      "llvm-nm": "llvm-nm, compatible with GNU nm",
+      "llvm-readelf": "LLVM (http://llvm.org/):"
+    },
+    "commands": [
+      "llvm-strings lib/arm64-v8a/libapp.so",
+      "llvm-nm -D --demangle --defined-only lib/arm64-v8a/libapp.so",
+      "llvm-readelf -n lib/arm64-v8a/libapp.so",
+      "blint parse() over the same extracted file (framework_ident inputs)"
+    ]
+  },
+  "evidence": {
+    "blint_parse": {
+      "android_ident": null,
+      "ident_notes": [],
+      "symbol_evidence": {
+        "matched_names": [
+          "_kDartIsolateSnapshotData",
+          "_kDartIsolateSnapshotInstructions",
+          "_kDartSnapshotBuildId",
+          "_kDartVmSnapshotData",
+          "_kDartVmSnapshotInstructions"
+        ],
+        "matched_count": 5,
+        "dynamic_symbols_total": 5,
+        "ndk1_namespace": false,
+        "operator_new_exported": false,
+        "facebook_jni_namespace": false,
+        "boringssl_prefix": false,
+        "flutter_gpu_symbols": false,
+        "dart_snapshot_symbols": true,
+        "nss_version_check": false
+      },
+      "string_evidence": {
+        "dart_vm_version": [],
+        "rn_release": [],
+        "nss_version": [],
+        "vlc_version": [],
+        "qt_version": [],
+        "openssl_banner": [],
+        "hex40_bare": [],
+        "boringssl_bare": [],
+        "fbjni_uninitialized": [],
+        "raw_strings_scanned": 114
+      }
+    },
+    "oracle_llvm": {
+      "nm_matched_symbols": [
+        "_kDartIsolateSnapshotData",
+        "_kDartIsolateSnapshotInstructions",
+        "_kDartSnapshotBuildId",
+        "_kDartVmSnapshotData",
+        "_kDartVmSnapshotInstructions"
+      ],
+      "nm_matched_count": 5,
+      "strings_dart_or_banner": [],
+      "readelf_notes_android_ident": []
+    }
+  }
+}

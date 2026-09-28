@@ -1,6 +1,7 @@
 """Tests for unwind-table function discovery (blint.lib.funcdisc)."""
 
 import struct
+from pathlib import Path
 
 from blint.lib.funcdisc.complete import (
     ARM64_MOV_FP_SP,
@@ -14,6 +15,7 @@ from blint.lib.funcdisc.unwind import (
     _parse_eh_frame_hdr,
     discover_macho_unwind_functions,
     merge_discovered_functions,
+    reconcile_function_extents,
 )
 
 
@@ -354,3 +356,136 @@ def test_prologue_scan_arm64_patterns():
     buf2 = bytearray(b"\x00" * 32)
     struct.pack_into("<I", buf2, 0, 0xA9827BFD)
     assert not _scan_arm64_prologues(base, bytes(buf2))
+
+
+
+
+# --- G1: the ELF extent precedence and the section-end invariant ------------
+# The precedence (symbol st_size > unwind FDE range > LIEF functions size) is
+# enforced by reconcile_function_extents over the first entry per address in
+# the buckets the disassembler reads. Tests run it against a real NDK-built
+# ELF fixture (rule 22: no hand-built binary bytes; the metadata dicts are
+# blint's own shape) and compute addresses from the fixture's own sections in
+# the same run, never from recorded values (standing requirement 4).
+
+_RECONCILE_FIXTURE = Path(__file__).parent / "data" / "android" / "liba5_static_arm64-v8a.so"
+
+
+def _reconcile_fixture_layout():
+    """(parsed fixture, .text start, .text end) computed in the same run."""
+    import lief
+
+    parsed = lief.ELF.parse(str(_RECONCILE_FIXTURE))
+    text = next(s for s in parsed.sections if s.name == ".text")
+    text_start = int(text.virtual_address)
+    return parsed, text_start, text_start + int(text.size)
+
+
+def test_reconcile_drops_a_wrapped_lief_size_when_no_better_source():
+    """LIEF's wrapped u64 (zPLR CIEs) with no symbol and no FDE: dropped."""
+    parsed, text_start, text_end = _reconcile_fixture_layout()
+    assert text_end > text_start  # sanity: the fixture really has a .text
+    wrapped = 2**64 - 69010680  # the exact value LIEF gives sub_9c938
+    metadata = {
+        "functions": [
+            {"index": 0, "name": "", "address": hex(text_start), "size": wrapped},
+        ],
+    }
+    out = reconcile_function_extents(metadata, parsed)
+    assert out["functions"][0]["size"] == 0
+    assert out["function_extent"]["sizes_rejected"] == 1
+    assert out["function_extent"]["sizes_corrected"] == 0
+
+
+def test_reconcile_fde_range_wins_over_a_plausible_lief_size():
+    parsed, text_start, text_end = _reconcile_fixture_layout()
+    fde_size = 0x50
+    assert text_start + fde_size < text_end  # the FDE size must be possible
+    metadata = {
+        "functions": [
+            {"index": 0, "name": "sub_x", "address": hex(text_start), "size": 16},
+        ],
+        "discovered_functions": [
+            {
+                "name": "sub_x",
+                "address": hex(text_start),
+                "size": fde_size,
+                "source": "eh_frame",
+            },
+        ],
+    }
+    out = reconcile_function_extents(metadata, parsed)
+    assert out["functions"][0]["size"] == fde_size
+    assert out["function_extent"]["sizes_corrected"] == 1
+
+
+def test_reconcile_st_size_wins_over_fde_and_lief_and_evidence_is_not_mutated():
+    parsed, text_start, text_end = _reconcile_fixture_layout()
+    st_size, fde_size, lief_size = 0x60, 0x50, 16
+    assert text_start + st_size < text_end
+    metadata = {
+        "functions": [
+            {"index": 0, "name": "sym_fn", "address": hex(text_start), "size": lief_size},
+        ],
+        "symtab_symbols": [
+            {"name": "sym_fn", "value": hex(text_start), "size": st_size, "type": "FUNC"},
+        ],
+        "discovered_functions": [
+            {
+                "name": "sym_fn",
+                "address": hex(text_start),
+                "size": fde_size,
+                "source": "eh_frame",
+            },
+        ],
+    }
+    out = reconcile_function_extents(metadata, parsed)
+    assert out["functions"][0]["size"] == st_size
+    # The symbol bucket is evidence: read, never rewritten.
+    assert out["symtab_symbols"][0]["size"] == st_size
+    assert out["function_extent"]["sizes_corrected"] == 1
+
+
+def test_reconcile_drops_a_size_that_runs_past_its_containing_section():
+    parsed, text_start, text_end = _reconcile_fixture_layout()
+    # A valid-looking size that still runs past .text's end (the musl
+    # _init/_fini shape: st_size 5 against a 3-byte section).
+    metadata = {
+        "functions": [
+            {"index": 0, "name": "tail_fn", "address": hex(text_end - 4), "size": 64},
+        ],
+        "symtab_symbols": [
+            {"name": "tail_fn", "value": hex(text_end - 4), "size": 64, "type": "FUNC"},
+        ],
+    }
+    out = reconcile_function_extents(metadata, parsed)
+    assert out["functions"][0]["size"] == 0
+    assert out["function_extent"]["sizes_rejected"] == 1
+
+
+def test_reconcile_leaves_sizeless_entries_and_second_claims_alone():
+    parsed, text_start, text_end = _reconcile_fixture_layout()
+    assert text_start + 8 < text_end
+    metadata = {
+        "functions": [
+            # Sizeless: the merge and the next-known-start rule own these.
+            {"index": 0, "name": "no_size", "address": hex(text_start), "size": 0},
+            # A second entry at the same address: the disassembler never
+            # reads it (visited_addrs dedupes), so it must not be counted.
+            {"index": 1, "name": "dup", "address": hex(text_start), "size": 999999999999},
+        ],
+    }
+    out = reconcile_function_extents(metadata, parsed)
+    assert out["functions"][0]["size"] == 0
+    assert out["functions"][1]["size"] == 999999999999
+    assert out["function_extent"]["sizes_rejected"] == 0
+
+
+def test_elf_parse_surfaces_the_extent_counts_in_analysis_coverage():
+    from blint.lib.binary import parse
+
+    metadata = parse(str(_RECONCILE_FIXTURE))
+    coverage = metadata.get("analysis_coverage", {}).get("functions", {})
+    assert "function_sizes_rejected" in coverage
+    assert "function_sizes_corrected" in coverage
+    assert coverage["function_sizes_rejected"] == 0  # a clean NDK fixture
