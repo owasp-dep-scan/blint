@@ -44,6 +44,7 @@ import re
 
 import lief
 
+from blint.lib.banners import OPENSSL_VERSION_TEXT_RE
 from blint.logger import LOG
 
 # --- The component identity table (tests/scripts/android/
@@ -197,11 +198,6 @@ BORINGSSL_PROVIDER_SONAME_RE = re.compile(r"(?:^|_)libcrypto\.so$")
 # assertion strings (flutter/third_party/boringssl/src/...): the named
 # token for a BoringSSL copy statically linked into a host library.
 BORINGSSL_VENDORED_PATH = "third_party/boringssl/"
-# OpenSSL's version banner, "OpenSSL 3.0.2 15 Mar 2022"
-# (OPENSSL_VERSION_TEXT: version then "DD Mon YYYY").
-OPENSSL_BANNER_RE = re.compile(
-    r"^OpenSSL (?P<version>\d+\.\d+\.\d+[a-z]*) (?P<date>\d{1,2} [A-Za-z]+ \d{4})$"
-)
 # Dart AOT snapshot exports (libapp.so shape).
 DART_SNAPSHOT_SYMBOL_RE = re.compile(r"^_kDart(Vm|Isolate)Snapshot")
 # The Dart AOT snapshot header: magic f5 f5 dc dc, a u64 length, a u64 kind,
@@ -520,7 +516,7 @@ def _scan_evidence_strings(parsed_obj) -> dict:
             if match := NSS_VERSION_RE.match(stripped):
                 strings_seen["nss_version"] = (match, stripped)
         if strings_seen["openssl_banner"] is None:
-            if match := OPENSSL_BANNER_RE.match(stripped):
+            if match := OPENSSL_VERSION_TEXT_RE.match(stripped):
                 strings_seen["openssl_banner"] = (match, stripped)
         if strings_seen["boringssl_string"] is None and (
             stripped.lower() == "boringssl" or BORINGSSL_VENDORED_PATH in stripped

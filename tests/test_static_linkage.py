@@ -39,7 +39,9 @@ from blint.db import (
 from blint.lib.banners import (
     BANNER_LAYER_ACTIVE,
     BANNER_LAYER_INACTIVE_NO_STRINGS,
+    BANNER_SIGNATURES,
     REJECTED_SIGNATURES,
+    VERSION_RULES,
     detect_vendored_banners,
     is_probable_banner_string,
 )
@@ -501,7 +503,6 @@ def test_banner_signatures_match_library_anchored_strings():
         "curl": ["libcurl/8.4.0"],
         "expat": ["expat_2.5.0"],
         "libpng": [" libpng version 1.6.40 - September 14, 2023 "],
-        "zstd": ["Zstandard v1.5.5"],
     }
     for library, banners in positives.items():
         for banner in banners:
@@ -532,6 +533,8 @@ def test_banner_signatures_reject_unanchored_versions():
         # libturbojpeg 0.5, which carry zlib 1.3.1 and 1.3.2).
         "failed to inflate 1.5 MB of payload",
         "deflate 1.3.1 stream ready",
+        # No zstd build emits this; its version string is bare.
+        "Zstandard v1.5.5",
     ]
     for value in negatives:
         assert not is_probable_banner_string(value), value
@@ -607,6 +610,20 @@ def test_rejected_signature_documented():
     reasons = {entry["library"]: entry["reason"] for entry in REJECTED_SIGNATURES}
     assert "sqlite3" in reasons
     assert "string" in reasons["sqlite3"]
+    assert "zstd" in reasons
+
+
+def test_one_rule_table_serves_both_layers():
+    """Every rule names its upstream source; the banner layer is its subset
+    of library-naming rules, each with a component purl."""
+    for rule in VERSION_RULES:
+        assert rule["what"] and rule["source"] and rule["project"], rule
+        assert "version" in rule["regex"].groupindex or rule.get("chronology"), rule
+    assert BANNER_SIGNATURES == tuple(r for r in VERSION_RULES if r.get("banner"))
+    assert all(rule["purl"].startswith("pkg:generic/") for rule in BANNER_SIGNATURES)
+    # Attribution-only rules never keep a string the banner layer would claim.
+    assert not is_probable_banner_string("1.5.7")
+    assert not is_probable_banner_string("2024-08-13 09:16:08 c9c2ab54ba1f5f46")
 
 
 def test_banner_detection_states_and_dedup():

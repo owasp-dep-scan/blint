@@ -709,15 +709,20 @@ identity, and lands in the SBOM in one of three shapes:
 
 Component versions come from the artifact, never from the database row (the
 row carries the vcpkg port's version; the corpus OsmAnd ships PROJ 8.2.0
-against a 9.8.1 row). Accepted version evidence, each naming its published
-source: `ZSTD_VERSION_STRING` (zstd `lib/zstd.h`), `libopus x.y.z`
-(libopus `src/opus.c`), `PNG_LIBPNG_VER_STRING` (libpng `png.h`),
-`SENTRY_SDK_VERSION` (sentry-native `include/sentry.h`), PROJ's `Rel. x.y.z`
-release banner, SQLite's `SQLITE_SOURCE_ID` date mapped through
-sqlite.org's `chronology.html`, and OpenSSL's `OPENSSL_VERSION_TEXT`
-banner. A bare `x.y.z` is accepted only as the artifact's single distinct
-bare version string; several candidates stay versionless. Everything else
-is versionless with the database row's purl recorded as the
+against a 9.8.1 row). The strings are read under one rule table,
+`blint.lib.banners.VERSION_RULES`, shared with the standalone vendored-banner
+layer; each rule names the upstream file that defines its string. The
+banner rules (zlib's `deflate_copyright`/`inflate_copyright`, Lua's
+`LUA_COPYRIGHT`, OpenSSL's `OPENSSL_VERSION_TEXT`, curl's `curl_version()`,
+expat's `XML_ExpatVersion()`, libpng's `PNG_HEADER_VERSION_STRING`) name the
+library in the string. The others only date a project the match already
+identified: `libopus x.y.z` (libopus `celt/celt.c`), PROJ's `pj_release`
+(`src/release.cpp`), SQLite's `SQLITE_SOURCE_ID` date mapped through
+sqlite.org's `chronology.html`, and the bare `ZSTD_VERSION_STRING`,
+`PNG_LIBPNG_VER_STRING` and `SENTRY_SDK_VERSION`, each accepted only as the
+artifact's single distinct bare version. Named strings are read before bare
+ones, and named strings that disagree leave the component versionless, as
+do several bare candidates. The database row's purl is recorded as the
 `blint:blintdb:project_purl` property.
 
 Matched components carry `blint:identification:evidence` entries naming the

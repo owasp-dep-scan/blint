@@ -19,12 +19,12 @@ from blint.lib.android import (
     _collect_group_blintdb_records,
 )
 from blint.lib.android_blintdb import (
-    artifact_version,
     blintdb_records,
     refuses_openssl_match,
     screen_standalone_matches,
     superseded_by_framework,
 )
+from blint.lib.banners import artifact_version
 from blint.lib.sbom import process_exe_file
 
 EVIDENCE = Path(__file__).resolve().parent / "data" / "android" / "blintdb-zstd-evidence.json"
@@ -194,6 +194,29 @@ def test_artifact_version_named_published_mappings():
     assert artifact_version("openssl", [b"ossl provider"])[0] is None
     # freetype has no accepted mapping: versionless.
     assert artifact_version("freetype", [b"2.13.2"])[0] is None
+    # The banner rules date an identified project on this path too.
+    assert artifact_version("zlib", [b" deflate 1.3.1 Copyright 1995-2024 Jean-loup Gailly "])[
+        0
+    ] == "1.3.1"
+
+
+def test_artifact_version_refuses_conflicting_named_strings():
+    """Two versions of one project in one artifact: neither is claimed."""
+    version, evidence = artifact_version(
+        "openssl", [b"OpenSSL 3.0.2 15 Mar 2022", b"OpenSSL/1.1.1w"]
+    )
+    assert version is None and len(evidence) == 2
+    # Repeated strings of one version are one claim (OpenSSL's per-module
+    # "part of OpenSSL" banners).
+    assert artifact_version(
+        "openssl", [b"OpenSSL 3.0.2 15 Mar 2022", b"OpenSSL 3.0.2 15 Mar 2022"]
+    )[0] == "3.0.2"
+    # A dated and an undated source id are two copies: versionless.
+    source_id = b" 09:16:08 c9c2ab54ba1f5f46360f1b4f35d849cd3f080e6f"
+    version, _ = artifact_version("sqlite3", [b"2024-08-13" + source_id, b"2013-05-20" + source_id])
+    assert version is None
+    # A named string outranks the bare one.
+    assert artifact_version("libpng", [b"1.6.58", b"libpng version 1.6.50"])[0] == "1.6.50"
 
 
 def test_superseded_by_framework_drops_boringssl_shadowed_openssl():
