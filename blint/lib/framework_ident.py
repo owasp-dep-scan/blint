@@ -48,9 +48,7 @@ from blint.logger import LOG
 
 # --- The component identity table (tests/scripts/android/
 # h0-identification-shape.md section 3 carries the purl justifications).
-# ``purl`` is (type, namespace, name); ``replaces`` names the file component
-# this framework takes over when the whole .so file is the framework's
-# artifact.
+# ``purl`` is (type, namespace, name).
 FRAMEWORK_COMPONENTS: dict[str, dict] = {
     # The NDK's C++ runtime: no purl ecosystem type exists for NDK
     # components, so the spec's generic fallback with an android-ndk
@@ -58,7 +56,6 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
     "ndk-libcxx": {
         "purl": ("generic", "android-ndk", "libcxx"),
         "name": "libc++ (NDK)",
-        "replaces": "libc++_shared.so",
     },
     # The Flutter engine. Post-2025 the engine source and the revision
     # strings it embeds both live in flutter/flutter (the monorepo), so the
@@ -68,13 +65,14 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
     "flutter-engine": {
         "purl": ("github", "flutter", "flutter"),
         "name": "flutter_engine",
-        "replaces": "libflutter.so",
     },
-    # React Native: the release versions are published and consumed on npm,
-    # so the spec's npm type carries the exact identity a consumer matches.
-    "react-native": {
-        "purl": ("npm", None, "react-native"),
-        "name": "react-native",
+    # libhermes.so is the Hermes engine React Native publishes to Maven
+    # Central as com.facebook.react:hermes-android, versioned with the RN
+    # release its build stamp names. The bytes are Hermes, not RN's npm
+    # package, so the Maven artifact is the identity.
+    "hermes-android": {
+        "purl": ("maven", "com.facebook.react", "hermes-android"),
+        "name": "hermes-android",
     },
     # fbjni: a separate upstream project with no version-bearing evidence in
     # release builds, so a versionless component from its own evidence.
@@ -87,7 +85,6 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
     "boringssl": {
         "purl": ("github", "google", "boringssl"),
         "name": "BoringSSL",
-        "replaces": "libcrypto.so",
     },
     "openssl": {
         "purl": ("github", "openssl", "openssl"),
@@ -124,11 +121,9 @@ NESTED_COMPONENTS: dict[str, dict] = {
         "purl": ("github", "dart-lang", "sdk"),
         "name": "Dart SDK",
     },
-    # BoringSSL statically linked inside the Flutter engine.
-    "boringssl": {
-        "purl": ("github", "google", "boringssl"),
-        "name": "BoringSSL",
-    },
+    # BoringSSL statically linked inside a host: the Flutter engine, or a
+    # library that re-exports the BORINGSSL_* surface under its own SONAME.
+    "boringssl": FRAMEWORK_COMPONENTS["boringssl"],
 }
 
 # --- Evidence patterns ------------------------------------------------------
@@ -184,6 +179,9 @@ QT_VERSION_RE = re.compile(r"^Qt (?P<version>\d+\.\d+\.\d+) \(")
 # BoringSSL's own symbol prefix (BORINGSSL_keccak and friends) - named
 # BoringSSL-only evidence for a crypto library carrying no OpenSSL banner.
 BORINGSSL_SYMBOL_RE = re.compile(r"^BORINGSSL_")
+# The provider's SONAME: libcrypto.so, or a vendor-prefixed copy such as
+# the tethering APEX's stable_cronet_libcrypto.so.
+BORINGSSL_PROVIDER_SONAME_RE = re.compile(r"(?:^|_)libcrypto\.so$")
 # BoringSSL's vendored source path, baked into the Flutter engine's
 # assertion strings (flutter/third_party/boringssl/src/...): the named
 # token for a BoringSSL copy statically linked into a host library.
@@ -265,21 +263,22 @@ def _record(framework: str, evidence: list[dict], hints: list[str],
     return record
 
 
-def _react_native_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> list[dict]:
-    """H3: React Native from its Hermes build stamp; fbjni on its own evidence.
+def _hermes_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> list[dict]:
+    """H3: Hermes from React Native's build stamp; fbjni on its own evidence.
 
-    React Native's version comes only from the version-bearing string RN's
-    build stamps into libhermes.so. fbjni needs BOTH the facebook::jni
-    symbol namespace and its own runtime string: header-using libraries
-    (libreactnative) instantiate the templates, but only fbjni's own
-    translation units define the runtime strings.
+    The version comes only from the version-bearing string RN's build
+    stamps into libhermes.so, which is also the hermes-android Maven
+    version. fbjni needs BOTH the facebook::jni symbol namespace and its
+    own runtime string: header-using libraries (libreactnative) instantiate
+    the templates, but only fbjni's own translation units define the
+    runtime strings.
     """
     records: list[dict] = []
     if (rn := strings_seen.get("rn_release")):
         match, text = rn
         records.append(
             _record(
-                "react-native",
+                "hermes-android",
                 [
                     {
                         "what": "HERMES_RELEASE_VERSION string",
@@ -310,21 +309,22 @@ def _react_native_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> l
     return records
 
 
-def _tls_records(strings_seen: dict, symbols: list[str],
-                 exported: list[str] | None = None,
+def _tls_records(strings_seen: dict, exported: list[str], soname: str | None,
                  flutter_hosted: bool = False) -> list[dict]:
-    """H4: OpenSSL by its banner; NSS by NSS_VersionCheck plus the version
-    string; BoringSSL by the absence of the OpenSSL banner plus
-    BoringSSL-only evidence.
+    """H4: OpenSSL by its banner; NSS by the NSS_VersionCheck export plus the
+    version string; BoringSSL by the absence of the OpenSSL banner plus
+    BoringSSL-only evidence, in three grades:
 
-    Replace-grade BoringSSL (the file IS the provider, the platform's
-    libcrypto.so) requires the BORINGSSL_* EXPORTED symbol prefix - a
-    library that merely bundles BoringSSL statically keeps hidden visibility
-    and leaks only vendored-path strings (libjingle_peerconnection_so.so:
-    0 BORINGSSL_ exports against the platform's 6+). A string-only hit is
-    therefore a hint-only record: it never replaces the host's identity.
-    A BoringSSL bundled inside the Flutter engine never reaches here - the
-    flutter detector nests it.
+    - the provider: the BORINGSSL_* exported prefix under a libcrypto SONAME
+      (the platform's libcrypto.so, cronet's stable_cronet_libcrypto.so);
+    - a static copy: the exported prefix under any other SONAME (AOSP's NNAPI
+      sample driver re-exports BORINGSSL_self_test) - nested in the host;
+    - vendored-path strings only (WebRTC's libjingle_peerconnection_so.so):
+      hint-only.
+
+    Only the provider replaces the file's identity. A BoringSSL bundled
+    inside the Flutter engine never reaches here - the flutter detector
+    nests it.
     """
     records: list[dict] = []
     openssl = strings_seen.get("openssl_banner")
@@ -345,8 +345,7 @@ def _tls_records(strings_seen: dict, symbols: list[str],
             )
         )
     nss = strings_seen.get("nss_version")
-    has_nss_check = any(n == "NSS_VersionCheck" for n in symbols)
-    if has_nss_check and nss:
+    if nss and "NSS_VersionCheck" in exported:
         match, text = nss
         records.append(
             _record(
@@ -369,9 +368,7 @@ def _tls_records(strings_seen: dict, symbols: list[str],
         )
     if not openssl and not flutter_hosted:
         boringssl_evidence = []
-        exports_boringssl = any(
-            BORINGSSL_SYMBOL_RE.match(n) for n in (exported or [])
-        )
+        exports_boringssl = any(BORINGSSL_SYMBOL_RE.match(n) for n in exported)
         if exports_boringssl:
             boringssl_evidence.append(
                 {
@@ -389,9 +386,23 @@ def _tls_records(strings_seen: dict, symbols: list[str],
                 }
             )
         if boringssl_evidence:
-            record = _record("boringssl", boringssl_evidence, [])
-            # Without the exported provider surface the file is a host
-            # carrying a static copy, not the provider itself.
+            provider = exports_boringssl and bool(
+                soname and BORINGSSL_PROVIDER_SONAME_RE.search(soname)
+            )
+            if provider:
+                boringssl_evidence.append(
+                    {
+                        "what": "declared DT_SONAME",
+                        "where": "dynamic_entries",
+                        "value": soname,
+                    }
+                )
+            record = _record(
+                "boringssl",
+                boringssl_evidence,
+                [],
+                static=exports_boringssl and not provider,
+            )
             record["hint_only"] = not exports_boringssl
             records.append(record)
     return records
@@ -499,6 +510,19 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
     exported = _exported_symbol_names(metadata)
     has_ndk1_symbols = any(NDK1_NAMESPACE_RE.match(n) for n in symbols)
     exports_operator_new = any(LIBCXX_OPERATOR_NEW_RE.match(n) for n in exported)
+    soname = _declared_soname(parsed_obj)
+
+    strings_seen = _scan_evidence_strings(parsed_obj)
+    records.extend(
+        _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata)
+    )
+    records.extend(_hermes_and_fbjni_records(strings_seen, symbols))
+    # The Flutter host nests its own BoringSSL.
+    records.extend(
+        _tls_records(strings_seen, exported, soname,
+                     flutter_hosted=any(r["framework"] == "flutter-engine" for r in records))
+    )
+    records.extend(_application_runtime_records(strings_seen))
 
     # H1: the NDK C++ runtime. Evidence: the declared DT_SONAME
     # (libc++_shared.so - what the loader registers, not the file name), the
@@ -509,21 +533,7 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
     # statically also export operator new (frescolib's
     # libnative-imagetranscoder.so does) - it is the declared SONAME that
     # says this file *is* the shared runtime rather than carrying a copy.
-    strings_seen = _scan_evidence_strings(parsed_obj)
-    records.extend(
-        _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata)
-    )
-    records.extend(_react_native_and_fbjni_records(strings_seen, symbols))
-    # The Flutter host nests its own BoringSSL; the standalone detector
-    # only speaks for libraries that ARE the crypto provider.
-    records.extend(
-        _tls_records(strings_seen, symbols, exported,
-                     flutter_hosted=any(r["framework"] == "flutter-engine" for r in records))
-    )
-    records.extend(_application_runtime_records(strings_seen))
-
     android_ident = (metadata.get("android") or {}).get("android_ident") or {}
-    soname = _declared_soname(parsed_obj)
     if (
         (ndk_version := android_ident.get("ndk_version"))
         and soname == "libc++_shared.so"
@@ -545,14 +555,13 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
                     "value": build_number,
                 }
             )
-        if has_ndk1_symbols:
-            evidence.append(
-                {
-                    "what": "std::__ndk1 inline namespace symbols",
-                    "where": "symbols",
-                    "value": "std::__ndk1::*",
-                }
-            )
+        evidence.append(
+            {
+                "what": "std::__ndk1 inline namespace symbols",
+                "where": "symbols",
+                "value": "std::__ndk1::*",
+            }
+        )
         evidence.append(
             {
                 "what": "exported operator new/delete (libc++abi)",

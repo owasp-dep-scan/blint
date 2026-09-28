@@ -621,6 +621,8 @@ Recovered function starts for binaries whose symbol tables are stripped or incom
 
 Entries whose addresses already appear in the symbol-driven buckets never replace or duplicate them; only genuinely new addresses are appended to `functions` (with `"discovered": true`, `size` 0). Call-site promotion (see the disassembly docs) records its additions in `discovered_functions` with `source: "callsite"`.
 
+On ELF, `function_extent` records the size reconciliation that follows the merge (see `docs/DISASSEMBLE.md`, "Function extents"): `sizes_rejected` (impossible sizes dropped), `sizes_corrected` (sizes replaced by a higher-precedence source) and `entries_checked`. The first two are also surfaced in `analysis_coverage.functions`.
+
 ### Framework and runtime identification (`frameworks`, ELF only)
 
 One record per identified framework or runtime, emitted only when evidence
@@ -649,11 +651,17 @@ evidence", never as "verified not a framework":
 - In `blint sbom` on Android apps, a replace-grade identification takes
   over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
   for the NDK C++ runtime, for example), keeping the file's provenance
-  properties and adding one `cdx:blint:identification:evidence` property
+  properties and adding one `blint:identification:evidence` property
   per evidence entry plus `blint:hint:file_name`. Files that merely bundle
-  a framework statically keep their own component. App-level facts ride the
+  a framework statically keep their own component: a copy with exact
+  evidence (the Dart VM and BoringSSL inside `libflutter.so`, or a
+  re-exported `BORINGSSL_*` surface) is a child component whose bom-ref is
+  scoped by the host's, and weaker evidence is a
+  `blint:identification:<framework>` property. App-level facts ride the
   parent application component as properties (`blint:ndk_versions` — the
-  distinct NDK note versions per ABI, per ground rule 36).
+  distinct NDK note versions per ABI, per ground rule 36;
+  `blint:hermes_bytecode_version` — the Hermes bytecode header version of
+  each bundle).
 
 The committed evidence fixtures (`tests/data/android/<framework>-evidence.json`)
 carry the corpus side of every detector, with the extracting command and the

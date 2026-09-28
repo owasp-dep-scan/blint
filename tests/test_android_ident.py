@@ -268,8 +268,8 @@ def test_r2_corpus_libflutter_nests_dart_and_libapp_stays_hint_only():
         assert hash_evidence and len(hash_evidence[0]["value"]) == 32
 
 
-def test_r1_react_native_identifies_from_the_hermes_build_stamp():
-    """RN's version comes only from the "for RN x.y.z" build stamp."""
+def test_r1_hermes_android_identifies_from_the_rn_build_stamp():
+    """libhermes.so is hermes-android, versioned by the "for RN x.y.z" stamp."""
     evidence = _load_evidence("react-native")
     blint = evidence["evidence"]["blint_parse"]
     strings = blint["string_evidence"]
@@ -277,11 +277,12 @@ def test_r1_react_native_identifies_from_the_hermes_build_stamp():
     metadata = _metadata_from_evidence(evidence)
     parsed = _FakeElf(strings=strings["rn_release"])
     records = identify_frameworks(parsed, metadata)
-    assert [r["framework"] for r in records] == ["react-native"]
+    assert [r["framework"] for r in records] == ["hermes-android"]
     assert records[0]["version"] == "0.76.9"
     name, version, purl = framework_identity(records[0], ["arm64-v8a"])
-    assert (name, version) == ("react-native", "0.76.9")
-    assert purl == "pkg:npm/react-native@0.76.9?abi=arm64-v8a"
+    assert (name, version) == ("hermes-android", "0.76.9")
+    # RnHello's android/app/build.gradle pulls com.facebook.react:hermes-android.
+    assert purl == "pkg:maven/com.facebook.react/hermes-android@0.76.9?abi=arm64-v8a"
 
 
 def test_r1_fbjni_needs_both_the_string_and_the_symbol_namespace():
@@ -326,7 +327,7 @@ def test_r1_hermes_hbc_header_fact():
     ).exists(),
     reason="corpus not present on this machine (rule 39: never committed)",
 )
-def test_r2_corpus_rnhello_identifies_react_native_and_fbjni():
+def test_r2_corpus_rnhello_identifies_hermes_android_and_fbjni():
     """R2: the real libraries and the bundle, parsed for real."""
     import os
     import tempfile
@@ -350,7 +351,7 @@ def test_r2_corpus_rnhello_identifies_react_native_and_fbjni():
 
         hermes_meta = parse(hermes_path)
         assert [(r["framework"], r.get("version"))
-                for r in hermes_meta.get("frameworks") or []] == [("react-native", "0.76.9")]
+                for r in hermes_meta.get("frameworks") or []] == [("hermes-android", "0.76.9")]
         fbjni_meta = parse(fbjni_path)
         assert [r["framework"] for r in fbjni_meta.get("frameworks") or []] == ["fbjni"]
 
@@ -387,15 +388,20 @@ def test_r1_boringssl_needs_boringssl_only_evidence_and_no_openssl_banner():
     assert not blint["string_evidence"]["openssl_banner"]
 
     symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
-    records = identify_frameworks(_FakeElf(), {"dynamic_symbols": symbols})
+    # llvm-readelf -d on the same api36 libcrypto.so: SONAME libcrypto.so.
+    provider = _FakeElf(dynamic_entries=[_Soname("libcrypto.so")])
+    records = identify_frameworks(provider, {"dynamic_symbols": symbols})
     assert [r["framework"] for r in records] == ["boringssl"]
     assert "version" not in records[0]
+    assert not records[0]["static"] and not records[0]["hint_only"]
     name, version, purl = framework_identity(records[0], ["arm64-v8a"])
     assert (name, version) == ("BoringSSL", "")
     assert purl == "pkg:github/google/boringssl?abi=arm64-v8a"
 
     # An OpenSSL banner in the same file would rule BoringSSL out.
-    parsed = _FakeElf(strings=["OpenSSL 3.0.2 15 Mar 2022"])
+    parsed = _FakeElf(
+        strings=["OpenSSL 3.0.2 15 Mar 2022"], dynamic_entries=[_Soname("libcrypto.so")]
+    )
     records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
     assert [r["framework"] for r in records] == ["openssl"]
     assert records[0]["version"] == "3.0.2"
@@ -510,9 +516,43 @@ def test_r3_regression_string_only_boringssl_never_replaces_its_host():
     # hint-only records never reach the component table.
     assert framework_identity(records[0], ["armeabi-v7a"]) is None
 
-    # The platform provider shape: exports the BORINGSSL_* prefix and so
-    # replace-grades.
+    # The platform provider shape: exports the BORINGSSL_* prefix under a
+    # libcrypto SONAME and so replace-grades.
     metadata["dynamic_symbols"].append({"name": "BORINGSSL_keccak", "is_exported": True})
+    parsed.dynamic_entries = [_Soname("libcrypto.so")]
     records = identify_frameworks(parsed, metadata)
     assert records[0].get("hint_only") is not True
     assert framework_identity(records[0], ["arm64-v8a"])[0] == "BoringSSL"
+
+
+def test_boringssl_exports_under_another_soname_are_a_static_copy():
+    """AOSP's NNAPI sample SL driver re-exports BORINGSSL_self_test.
+
+    llvm-nm -D --defined-only on the api35 neuralnetworks APEX's
+    neuralnetworks_sample_sl_driver_prebuilt.so lists BORINGSSL_self_test;
+    llvm-readelf -d gives SONAME neuralnetworks_sample_sl_driver_prebuilt.so.
+    The driver links BoringSSL but is not BoringSSL: the record nests,
+    never replacing the driver's identity.
+    """
+    from blint.lib.android import _nested_framework_components
+
+    metadata = {"dynamic_symbols": [{"name": "BORINGSSL_self_test", "is_exported": True}]}
+    parsed = _FakeElf(
+        dynamic_entries=[_Soname("neuralnetworks_sample_sl_driver_prebuilt.so")]
+    )
+    records = identify_frameworks(parsed, metadata)
+    assert [(r["framework"], r["static"], r["hint_only"]) for r in records] == [
+        ("boringssl", True, False)
+    ]
+    host = "pkg:android/neuralnetworks_sample_sl_driver_prebuilt.so?abi=arm64-v8a"
+    children = _nested_framework_components(records, ["arm64-v8a"], host)
+    assert [c.purl for c in children] == ["pkg:github/google/boringssl?abi=arm64-v8a"]
+    # Scoped by the host, so two hosts with the same static copy never share a ref.
+    assert children[0].bom_ref.root == f"{host}|pkg:github/google/boringssl?abi=arm64-v8a"
+
+
+def test_nss_needs_the_export_not_an_import():
+    """A library importing NSS_VersionCheck is a consumer, not NSS."""
+    parsed = _FakeElf(strings=["Version: NSS 3.128"])
+    imported = {"name": "NSS_VersionCheck", "is_exported": False, "is_imported": True}
+    assert identify_frameworks(parsed, {"dynamic_symbols": [imported]}) == []

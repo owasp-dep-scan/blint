@@ -738,41 +738,24 @@ def collect_so_files_metadata(
         # double-count the same bytes. The identity comes only from the
         # named evidence in the records; the file name becomes a hint.
         framework_record = _replacing_framework_record(members)
+        identity = framework_identity(framework_record, abis) if framework_record else None
         component_name, component_version = name, version or None
-        component_children: list[Component] = []
-        if framework_record:
-            identity = framework_identity(framework_record, abis)
-            if identity:
-                component_name, component_version, purl = identity
-                properties.append(
-                    Property(
-                        name="blint:hint:file_name",
-                        value=name,
-                    )
-                )
-                for ev in framework_record.get("evidence") or []:
-                    properties.append(
-                        Property(
-                            name="cdx:blint:identification:evidence",
-                            value=(
-                                f"{framework_record['framework']}: "
-                                f"{ev.get('what')} ({ev.get('where')}): "
-                                f"{ev.get('value')}"
-                            ),
-                        )
-                    )
-                for hint in framework_record.get("hints") or []:
-                    properties.append(
-                        Property(name="blint:identification:hint", value=hint)
-                    )
-                nested = _nested_framework_components(framework_record, abis)
-                if nested:
-                    component_children = nested
+        static_records: list[dict] = []
+        if identity:
+            component_name, component_version, purl = identity
+            properties.append(Property(name="blint:hint:file_name", value=name))
+            properties += _evidence_properties(framework_record)
+            for hint in framework_record.get("hints") or []:
+                properties.append(Property(name="blint:identification:hint", value=hint))
+            static_records = framework_record.get("nested") or []
         else:
-            # Hint-only identifications (a framework detected inside a file
-            # that keeps its own identity, or evidence without a version
-            # mapping): properties on the file component, never components.
+            # The file keeps its own identity. A static copy with exact
+            # evidence (a re-exported BORINGSSL_* surface) nests as a child;
+            # anything weaker is a property on the file component.
             for record in _group_hint_records(members):
+                if record.get("static") and not record.get("hint_only"):
+                    static_records.append(record)
+                    continue
                 values = [
                     f"{e.get('what')} ({e.get('where')}): {e.get('value')}"
                     for e in record.get("evidence") or []
@@ -805,20 +788,37 @@ def collect_so_files_metadata(
             properties=properties,
         )
         component.bom_ref = RefType(purl)
-        if component_children:
+        if children := _nested_framework_components(static_records, abis, purl):
             # Statically linked frameworks ride as child components of the
             # host - never as second copies of the host at top level.
-            component.components = component_children
+            component.components = children
         components.append(component)
     return components
 
 
-def _nested_framework_components(record: dict, abis: list[str]) -> list[Component]:
-    """Child components for the record's static identifications."""
+def _evidence_properties(record: dict) -> list[Property]:
+    """One ``blint:identification:evidence`` property per evidence entry."""
+    return [
+        Property(
+            name="blint:identification:evidence",
+            value=f"{record['framework']}: {e.get('what')} ({e.get('where')}): {e.get('value')}",
+        )
+        for e in record.get("evidence") or []
+    ]
+
+
+def _nested_framework_components(
+    records: list[dict], abis: list[str], host_purl: str
+) -> list[Component]:
+    """Child components for static identifications inside a host library.
+
+    The bom-ref is scoped by the host's, so two hosts carrying the same
+    static copy in one ABI never share a ref.
+    """
     from blint.lib.framework_ident import NESTED_COMPONENTS
 
     children: list[Component] = []
-    for nested in record.get("nested") or []:
+    for nested in records:
         entry = NESTED_COMPONENTS.get(nested.get("framework") or "")
         if not entry:
             continue
@@ -831,24 +831,14 @@ def _nested_framework_components(record: dict, abis: list[str]) -> list[Componen
             version=nested.get("version") or None,
             qualifiers=qualifiers,
         ).to_string()
-        props = [
-            Property(
-                name="cdx:blint:identification:evidence",
-                value=(
-                    f"{nested['framework']}: {e.get('what')} ({e.get('where')}): "
-                    f"{e.get('value')}"
-                ),
-            )
-            for e in nested.get("evidence") or []
-        ]
         child = Component(
             type=Type.library,
             name=entry["name"],
             version=nested.get("version") or None,
             purl=purl,
-            properties=props,
+            properties=_evidence_properties(nested),
         )
-        child.bom_ref = RefType(purl)
+        child.bom_ref = RefType(f"{host_purl}|{purl}")
         children.append(child)
     return children
 

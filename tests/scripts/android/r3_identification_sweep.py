@@ -48,6 +48,7 @@ def sweep_so(path: Path) -> list[dict]:
                 "framework": record.get("framework"),
                 "version": record.get("version"),
                 "static": bool(record.get("static")),
+                "hint_only": bool(record.get("hint_only")),
                 "evidence": [
                     f"{e.get('what')} ({e.get('where')}): {e.get('value')}"
                     for e in record.get("evidence") or []
@@ -65,7 +66,7 @@ def sweep_apk(path: Path) -> tuple[list[dict], list[dict]]:
     parent, components = collect_app_metadata(str(path), False)
     for component in components or []:
         for prop in component.properties or []:
-            if prop.name == "cdx:blint:identification:evidence":
+            if prop.name == "blint:identification:evidence":
                 purl = component.purl or ""
                 rows.append(
                     {
