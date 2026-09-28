@@ -423,3 +423,96 @@ def test_r1_boringssl_inside_the_flutter_engine_nests():
     from blint.lib.framework_ident import NESTED_COMPONENTS
 
     assert "boringssl" in NESTED_COMPONENTS
+
+
+def test_r1_vlc_identifies_from_the_release_string():
+    evidence = _load_evidence("vlc")
+    blint = evidence["evidence"]["blint_parse"]
+    strings = blint["string_evidence"]
+    assert strings["vlc_version"] == ["VLC 3.0.23"]
+    parsed = _FakeElf(strings=strings["vlc_version"])
+    records = identify_frameworks(parsed, {"dynamic_symbols": []})
+    assert [r["framework"] for r in records] == ["vlc"]
+    assert records[0]["version"] == "3.0.23"
+    name, version, purl = framework_identity(records[0], ["x86_64"])
+    assert (name, version) == ("libvlc", "3.0.23")
+    assert purl == "pkg:github/videolan/vlc@3.0.23?abi=x86_64"
+
+
+def test_r1_qt_identifies_from_qt_version_str():
+    evidence = _load_evidence("qt")
+    blint = evidence["evidence"]["blint_parse"]
+    strings = blint["string_evidence"]
+    assert strings["qt_version"], "the QT_VERSION_STR string must be recorded"
+    parsed = _FakeElf(strings=strings["qt_version"])
+    records = identify_frameworks(parsed, {"dynamic_symbols": []})
+    assert [r["framework"] for r in records] == ["qt"]
+    assert records[0]["version"] == "5.15.15"
+    name, version, purl = framework_identity(records[0], ["arm64-v8a"])
+    assert (name, version) == ("Qt", "5.15.15")
+    assert purl == "pkg:github/qt/qtbase@5.15.15?abi=arm64-v8a"
+
+
+@pytest.mark.skipif(
+    not (Path.home() / "sandbox/android-corpus/tier2-fdroid").exists(),
+    reason="corpus not present on this machine (rule 39: never committed)",
+)
+def test_r2_corpus_vlc_and_qt_identify_with_versions():
+    """R2: the real VLC and Qt5 libraries, parsed for real."""
+    import os
+    import tempfile
+    import zipfile
+
+    from blint.lib.binary import parse
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with zipfile.ZipFile(
+            Path.home()
+            / "sandbox/android-corpus/tier2-fdroid/org.videolan.vlc_13070108.apk"
+        ) as z:
+            libvlc_path = os.path.join(tmp, "libvlc.so")
+            Path(libvlc_path).write_bytes(z.read("lib/x86_64/libvlc.so"))
+        with zipfile.ZipFile(
+            Path.home()
+            / "sandbox/android-corpus/tier2-fdroid/net.osmand.plus_540403.apk"
+        ) as z:
+            qt_path = os.path.join(tmp, "libQt5Core.so")
+            Path(qt_path).write_bytes(z.read("lib/arm64-v8a/libQt5Core.so"))
+
+        vlc_meta = parse(libvlc_path)
+        assert [(r["framework"], r.get("version"))
+                for r in vlc_meta.get("frameworks") or []] == [("vlc", "3.0.23")]
+        qt_meta = parse(qt_path)
+        assert [(r["framework"], r.get("version"))
+                for r in qt_meta.get("frameworks") or []] == [("qt", "5.15.15")]
+
+
+def test_r3_regression_string_only_boringssl_never_replaces_its_host():
+    """R3 caught this: element v7a's libjingle (WebRTC) bundles BoringSSL.
+
+    The vendored-path strings leaked from the static copy, and the first
+    cut of the detector replaced the host's identity - WebRTC labelled as
+    BoringSSL. Replace-grade requires the BORINGSSL_* exported prefix; a
+    string-only hit is hint_only and keeps the host's identity.
+    """
+    metadata = {
+        "dynamic_symbols": [
+            {"name": "Java_org_webrtc_PeerConnectionFactory_nativeFoo",
+             "is_exported": True},
+        ],
+    }
+    parsed = _FakeElf(
+        strings=["../../third_party/boringssl/src/ssl/internal.h"]
+    )
+    records = identify_frameworks(parsed, metadata)
+    assert [r["framework"] for r in records] == ["boringssl"]
+    assert records[0]["hint_only"] is True
+    # hint-only records never reach the component table.
+    assert framework_identity(records[0], ["armeabi-v7a"]) is None
+
+    # The platform provider shape: exports the BORINGSSL_* prefix and so
+    # replace-grades.
+    metadata["dynamic_symbols"].append({"name": "BORINGSSL_keccak", "is_exported": True})
+    records = identify_frameworks(parsed, metadata)
+    assert records[0].get("hint_only") is not True
+    assert framework_identity(records[0], ["arm64-v8a"])[0] == "BoringSSL"

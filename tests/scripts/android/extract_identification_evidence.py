@@ -42,7 +42,7 @@ DART_VERSION_RE = re.compile(
 RN_RELEASE_RE = re.compile(r"^for RN \d+\.\d+\.\S+$")
 NSS_VERSION_RE = re.compile(r"^Version: NSS \d+\.\d+(?:\.\d+)*$")
 VLC_VERSION_RE = re.compile(r"^VLC \d+\.\d+\.\d+$")
-QT_VERSION_RE = re.compile(r"^Qt \d+\.\d+\.\d+$")
+QT_VERSION_RE = re.compile(r"^Qt \d+\.\d+\.\d+ \(")
 OPENSSL_BANNER_RE = re.compile(r"^OpenSSL \d+\.\d+\.\d+[a-z]* [A-Za-z]+ +\d+ \d{4}$")
 
 # The symbol-set evidence, as parse()'s demangled names spell them.

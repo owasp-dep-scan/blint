@@ -625,8 +625,9 @@ Entries whose addresses already appear in the symbol-driven buckets never replac
 
 One record per identified framework or runtime, emitted only when evidence
 named in `blint/lib/framework_ident.py` matches (rule 38): a file name alone
-is a *hint*, never a component. Absence of the key means the pass never ran
-(non-ELF); an empty result reads as no evidence, never "no frameworks":
+is a *hint*, never a component. The key is absent when no evidence matched
+(ELF) or the pass never ran (non-ELF) - both read as "no framework
+evidence", never as "verified not a framework":
 
 ```json
 {

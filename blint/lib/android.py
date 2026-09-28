@@ -890,6 +890,7 @@ def _replacing_framework_record(members: list[tuple[dict, dict]]) -> dict | None
         replacing = [
             r for r in records
             if not r.get("static")
+            and not r.get("hint_only")
             and (r.get("framework") or "") in FRAMEWORK_COMPONENTS
         ]
         if len(replacing) != 1:

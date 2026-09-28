@@ -100,6 +100,18 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
         "purl": ("github", "nss-dev", "nss"),
         "name": "NSS",
     },
+    # VLC: libvlc.so is the VLC core; the release string carries the
+    # version (the codename form "3.0.23 Vetinari" rides the evidence).
+    "vlc": {
+        "purl": ("github", "videolan", "vlc"),
+        "name": "libvlc",
+    },
+    # Qt5Core is a qtbase artifact; the github type names the official
+    # mirror of code.qt.io's qt/qtbase.
+    "qt": {
+        "purl": ("github", "qt", "qtbase"),
+        "name": "Qt",
+    },
 }
 
 # Nested-only identifications: statically linked inside a host library,
@@ -163,6 +175,12 @@ FBJNI_RUNTIME_STRING = "fbjni is uninitialized"
 # NSS ships its version as "Version: NSS 3.128" and exports
 # NSS_VersionCheck; the number is the NSS release version.
 NSS_VERSION_RE = re.compile(r"^Version: NSS (?P<version>\d+\.\d+(?:\.\d+)*)$")
+# libvlc prints "VLC 3.0.23" (the release; the codename form
+# "3.0.23 Vetinari" also appears - libvlc/media.c's VERSION_TEXT).
+VLC_VERSION_RE = re.compile(r"^VLC (?P<version>\d+\.\d+\.\d+)$")
+# Qt carries QT_VERSION_STR, rendered in libQt5Core strings as
+# "Qt 5.15.15 (arm64-little_endian-lp64 shared (dynamic) release build; ...)".
+QT_VERSION_RE = re.compile(r"^Qt (?P<version>\d+\.\d+\.\d+) \(")
 # BoringSSL's own symbol prefix (BORINGSSL_keccak and friends) - named
 # BoringSSL-only evidence for a crypto library carrying no OpenSSL banner.
 BORINGSSL_SYMBOL_RE = re.compile(r"^BORINGSSL_")
@@ -293,15 +311,20 @@ def _react_native_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> l
 
 
 def _tls_records(strings_seen: dict, symbols: list[str],
+                 exported: list[str] | None = None,
                  flutter_hosted: bool = False) -> list[dict]:
     """H4: OpenSSL by its banner; NSS by NSS_VersionCheck plus the version
     string; BoringSSL by the absence of the OpenSSL banner plus
     BoringSSL-only evidence.
 
-    The standalone BoringSSL record is for libraries that ARE the crypto
-    provider (the Android platform's libcrypto.so): the BORINGSSL_* symbol
-    prefix or the bare string. A BoringSSL bundled inside a host (the
-    Flutter engine) never reaches here - the flutter detector nests it.
+    Replace-grade BoringSSL (the file IS the provider, the platform's
+    libcrypto.so) requires the BORINGSSL_* EXPORTED symbol prefix - a
+    library that merely bundles BoringSSL statically keeps hidden visibility
+    and leaks only vendored-path strings (libjingle_peerconnection_so.so:
+    0 BORINGSSL_ exports against the platform's 6+). A string-only hit is
+    therefore a hint-only record: it never replaces the host's identity.
+    A BoringSSL bundled inside the Flutter engine never reaches here - the
+    flutter detector nests it.
     """
     records: list[dict] = []
     openssl = strings_seen.get("openssl_banner")
@@ -346,10 +369,13 @@ def _tls_records(strings_seen: dict, symbols: list[str],
         )
     if not openssl and not flutter_hosted:
         boringssl_evidence = []
-        if any(BORINGSSL_SYMBOL_RE.match(n) for n in symbols):
+        exports_boringssl = any(
+            BORINGSSL_SYMBOL_RE.match(n) for n in (exported or [])
+        )
+        if exports_boringssl:
             boringssl_evidence.append(
                 {
-                    "what": "BORINGSSL_* symbol prefix",
+                    "what": "BORINGSSL_* exported symbol prefix",
                     "where": "symbols",
                     "value": "BORINGSSL_*",
                 }
@@ -357,13 +383,59 @@ def _tls_records(strings_seen: dict, symbols: list[str],
         if strings_seen.get("boringssl_string"):
             boringssl_evidence.append(
                 {
-                    "what": "boringssl string",
+                    "what": "vendored BoringSSL source path string",
                     "where": "strings",
-                    "value": strings_seen["boringssl_string"],
+                    "value": strings_seen["boringssl_string"][:120],
                 }
             )
         if boringssl_evidence:
-            records.append(_record("boringssl", boringssl_evidence, []))
+            record = _record("boringssl", boringssl_evidence, [])
+            # Without the exported provider surface the file is a host
+            # carrying a static copy, not the provider itself.
+            record["hint_only"] = not exports_boringssl
+            records.append(record)
+    return records
+
+
+def _application_runtime_records(strings_seen: dict) -> list[dict]:
+    """H5: application runtimes present in the corpus - VLC and Qt5.
+
+    Unity/IL2CPP and Mono/.NET stay out of scope: the corpus has neither
+    (H0 doc), so there are no detectors to write against.
+    """
+    records: list[dict] = []
+    if (vlc := strings_seen.get("vlc_version")):
+        match, text = vlc
+        records.append(
+            _record(
+                "vlc",
+                [
+                    {
+                        "what": "VLC release string",
+                        "where": "strings",
+                        "value": text,
+                    }
+                ],
+                [],
+                version=match.group("version"),
+            )
+        )
+    if (qt := strings_seen.get("qt_version")):
+        match, text = qt
+        records.append(
+            _record(
+                "qt",
+                [
+                    {
+                        "what": "QT_VERSION_STR string",
+                        "where": "strings",
+                        "value": text,
+                    }
+                ],
+                [],
+                version=match.group("version"),
+            )
+        )
     return records
 
 
@@ -381,6 +453,8 @@ def _scan_evidence_strings(parsed_obj) -> dict:
         "nss_version": None,
         "openssl_banner": None,
         "boringssl_string": None,
+        "vlc_version": None,
+        "qt_version": None,
     }
     for raw in _iter_strings(parsed_obj):
         if not isinstance(raw, str):
@@ -407,6 +481,12 @@ def _scan_evidence_strings(parsed_obj) -> dict:
             stripped.lower() == "boringssl" or BORINGSSL_VENDORED_PATH in stripped
         ):
             strings_seen["boringssl_string"] = stripped
+        if strings_seen["vlc_version"] is None:
+            if match := VLC_VERSION_RE.match(stripped):
+                strings_seen["vlc_version"] = (match, stripped)
+        if strings_seen["qt_version"] is None:
+            if match := QT_VERSION_RE.match(stripped):
+                strings_seen["qt_version"] = (match, stripped)
         if HEX40_RE.match(stripped):
             strings_seen["hex40"].add(stripped)
     return strings_seen
@@ -437,9 +517,10 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
     # The Flutter host nests its own BoringSSL; the standalone detector
     # only speaks for libraries that ARE the crypto provider.
     records.extend(
-        _tls_records(strings_seen, symbols,
+        _tls_records(strings_seen, symbols, exported,
                      flutter_hosted=any(r["framework"] == "flutter-engine" for r in records))
     )
+    records.extend(_application_runtime_records(strings_seen))
 
     android_ident = (metadata.get("android") or {}).get("android_ident") or {}
     soname = _declared_soname(parsed_obj)
@@ -640,11 +721,14 @@ def attach_frameworks(metadata: dict, parsed_obj) -> dict:
 def framework_identity(record: dict, abis: list[str]) -> tuple[str, str, str] | None:
     """The (name, version, purl) a framework record's SBOM component carries.
 
-    None when the framework is not in the component table (a hint-only
-    identification keeps the generic file component). The ABI qualifier
-    rides the purl exactly like the generic file component's did, so
-    bom_refs stay deterministic per input.
+    None when the framework is not in the component table, or when the
+    record is hint-only (a framework detected inside a file that keeps its
+    own identity - such a record never replaces the host). The ABI
+    qualifier rides the purl exactly like the generic file component's did,
+    so bom_refs stay deterministic per input.
     """
+    if record.get("hint_only"):
+        return None
     entry = FRAMEWORK_COMPONENTS.get(record.get("framework") or "")
     if not entry:
         return None

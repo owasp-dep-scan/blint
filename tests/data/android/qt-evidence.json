@@ -60,7 +60,9 @@
         "rn_release": [],
         "nss_version": [],
         "vlc_version": [],
-        "qt_version": [],
+        "qt_version": [
+          "Qt 5.15.15 (arm64-little_endian-lp64 shared (dynamic) release build; by Clang 19.0.1 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2))"
+        ],
         "openssl_banner": [],
         "hex40_bare": [],
         "boringssl_bare": [],
@@ -71,7 +73,9 @@
     "oracle_llvm": {
       "nm_matched_symbols": [],
       "nm_matched_count": 0,
-      "strings_dart_or_banner": [],
+      "strings_dart_or_banner": [
+        "Qt 5.15.15 (arm64-little_endian-lp64 shared (dynamic) release build; by Clang 19.0.1 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2))"
+      ],
       "readelf_notes_android_ident": [
         "Android              0x00000084\tNT_ANDROID_TYPE_IDENT",
         "description data: 15 00 00 00 72 32 38 63 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 31 33 36 37 36 33 35 38 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
