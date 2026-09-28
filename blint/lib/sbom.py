@@ -356,7 +356,13 @@ def generate(
             )
         for f in android_files:
             progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
-            components += process_android_file(dependencies_dict, blint_options.deep_mode, f, sbom)
+            components += process_android_file(
+                dependencies_dict,
+                blint_options.deep_mode,
+                f,
+                sbom,
+                use_blintdb=blint_options.use_blintdb,
+            )
             if blint_options.disassemble:
                 write_dex_callgraph(f, cast(str, blint_options.sbom_output))
         if ios_files:
@@ -1715,6 +1721,7 @@ def process_android_file(
     deep_mode: bool,
     f: str,
     sbom: CycloneDX,
+    use_blintdb: bool = False,
 ) -> list[Component]:
     """
     Process an Android file and update the dependencies and components.
@@ -1724,11 +1731,12 @@ def process_android_file(
         deep_mode (bool): Flag indicating whether to process in deep mode.
         f (str): File to be processed.
         sbom (obj): Software Bill-of-Materials object to be updated.
+        use_blintdb (bool): Match native libraries against the local blintdb.
 
     Returns:
         list: Updated components list after processing.
     """
-    parent_component, app_components = collect_app_metadata(f, deep_mode)
+    parent_component, app_components = collect_app_metadata(f, deep_mode, use_blintdb=use_blintdb)
     if parent_component:
         if not sbom.metadata.component.components:
             sbom.metadata.component.components = []

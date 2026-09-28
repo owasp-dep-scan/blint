@@ -79,7 +79,7 @@ def exec_tool(
 
 
 def collect_app_metadata(
-    app_file: str, deep_mode: bool
+    app_file: str, deep_mode: bool, use_blintdb: bool = False
 ) -> tuple[Component | None, list[Component]]:
     """
     Collect various metadata about an android app.
@@ -88,11 +88,11 @@ def collect_app_metadata(
     are supported.
     """
     if app_file.endswith(BUNDLE_EXTENSIONS):
-        return collect_bundle_metadata(app_file, deep_mode)
+        return collect_bundle_metadata(app_file, deep_mode, use_blintdb=use_blintdb)
     parent_component = apk_parent_component(app_file)
     app_facts: dict = {"hermes_bundles": scan_hermes_bundles(app_file)}
     components = collect_files_metadata(
-        app_file, parent_component, deep_mode, app_facts=app_facts
+        app_file, parent_component, deep_mode, app_facts=app_facts, use_blintdb=use_blintdb
     )
     attach_app_framework_facts(parent_component, app_facts)
     return parent_component, components
@@ -171,7 +171,7 @@ def attach_app_framework_facts(parent_component: Component | None, app_facts: di
 
 
 def collect_bundle_metadata(
-    app_file: str, deep_mode: bool
+    app_file: str, deep_mode: bool, use_blintdb: bool = False
 ) -> tuple[Component | None, list[Component]]:
     """
     Collect metadata for a split bundle (``.apkm``, ``.apks``, ``.xapk``).
@@ -203,7 +203,7 @@ def collect_bundle_metadata(
         for apk in apk_files:
             file_components += collect_files_metadata(
                 app_file, parent_component, deep_mode, unpack_target=apk,
-                app_facts=app_facts,
+                app_facts=app_facts, use_blintdb=use_blintdb,
             )
     finally:
         shutil.rmtree(bundle_temp_dir, ignore_errors=True)
@@ -634,6 +634,7 @@ def collect_so_files_metadata(
     app_file: str,
     app_temp_dir: str | None = None,
     app_facts: dict | None = None,
+    use_blintdb: bool = False,
 ) -> list[Component]:
     """Collect SBOM components for the app's native libraries (A1.3, 01/D).
 
@@ -648,6 +649,14 @@ def collect_so_files_metadata(
     "app"/"data"), and the ABI is a qualifier. DT_NEEDED platform
     libraries are recorded as the ``blint:platform_needed`` fact on the
     needing component, never emitted as components.
+
+    With ``use_blintdb`` (A6.3 J1) every unique sha256 is matched against
+    the local blintdb once - the same ``detect_binaries_utilized`` the
+    standalone binary path uses. A match is symbol evidence: it nests as
+    a child component of the host, and replaces the host's identity only
+    when the host's declared DT_SONAME is one of the project's own library
+    names in the database. Component versions come from the artifact, never
+    from the database row.
     """
     model = scan_android_native(app_file)
     parsed: dict[str, dict] = {}
@@ -656,6 +665,8 @@ def collect_so_files_metadata(
         LibraryReader(app_file) as reader,
     ):
         for lib in model["libraries"]:
+            if lib["sha256"] in parsed:
+                continue
             data = reader.read(lib["locations"][0])
             if not data:
                 continue
@@ -663,9 +674,13 @@ def collect_so_files_metadata(
             with open(member, "wb") as fh:
                 fh.write(data)
             try:
-                parsed[lib["sha256"]] = parse(member)
+                so_metadata = parse(member)
             except Exception as e:  # one unreadable library must not sink the app
                 LOG.debug(f"Failed to parse {lib['name']} from {app_file}: {e}")
+                continue
+            parsed[lib["sha256"]] = so_metadata
+            if use_blintdb:
+                _attach_blintdb_records(so_metadata, member)
     # Group by (name, version): per-ABI builds of the same library merge.
     groups: dict[tuple[str, str], list[tuple[dict, dict]]] = {}
     for lib in model["libraries"]:
@@ -767,6 +782,37 @@ def collect_so_files_metadata(
                             value="; ".join(values),
                         )
                     )
+        # blintdb identification (A6.3 J1): framework records win for the
+        # same bytes, a structural SONAME agreement may replace the host's
+        # identity, and every other match nests as a static copy. Versions
+        # come from the artifact; the database row's port version is a
+        # property.
+        framework_keys = {
+            record.get("framework")
+            for record in ([framework_record] if framework_record else [])
+            + _group_hint_records(members)
+            if record.get("framework")
+        }
+        db_records, superseded = _collect_group_blintdb_records(members, framework_keys)
+        if superseded:
+            properties.append(
+                Property(
+                    name="blint:blintdb:superseded_by_framework",
+                    value="; ".join(sorted(set(superseded))),
+                )
+            )
+        # A framework identification that replaced the group's identity also
+        # denies the blintdb replace for the same slot: A6.1 wins.
+        db_replace = (
+            _blintdb_replace_record(members, db_records) if identity is None else None
+        )
+        if db_replace is not None:
+            replaced_purl = _blintdb_component_purl(db_replace, abis)
+            component_name = db_replace["project"]
+            component_version = db_replace.get("version") or None
+            purl = replaced_purl
+            properties.append(Property(name="blint:hint:file_name", value=name))
+            properties += _blintdb_evidence_properties(db_replace)
         if build_ids:
             properties.append(
                 Property(name="blint:build_id", value=",".join(build_ids))
@@ -788,10 +834,17 @@ def collect_so_files_metadata(
             properties=properties,
         )
         component.bom_ref = RefType(purl)
+        if db_replace is not None:
+            # The host IS the project's library (SONAME agreement): the
+            # blintdb record replaced its identity, so no child copies of
+            # the same project ride under it.
+            db_records = [r for r in db_records if r is not db_replace]
         if children := _nested_framework_components(static_records, abis, purl):
             # Statically linked frameworks ride as child components of the
             # host - never as second copies of the host at top level.
             component.components = children
+        if nested_db := _nested_blintdb_components(db_records, abis, purl):
+            component.components = (component.components or []) + nested_db
         components.append(component)
     return components
 
@@ -805,6 +858,169 @@ def _evidence_properties(record: dict) -> list[Property]:
         )
         for e in record.get("evidence") or []
     ]
+
+
+def _attach_blintdb_records(so_metadata: dict, member_path: str) -> None:
+    """Match one parsed .so against blintdb and attach identification records.
+
+    Runs the same ``detect_binaries_utilized`` the standalone binary path
+    uses, once per file, and resolves each match's version from the
+    artifact's own strings (rule 38) - which is why this needs the member
+    path: the raw strings live in the file, not the parsed summary.
+    """
+    from blint.db import (
+        build_function_hash_index,
+        build_symbol_source_map,
+        detect_binaries_utilized,
+    )
+    from blint.lib.android_blintdb import blintdb_records
+
+    try:
+        detected, evidence = detect_binaries_utilized(
+            symbol_source_map=build_symbol_source_map(so_metadata),
+            function_hash_index=build_function_hash_index(so_metadata),
+            binary_metadata=so_metadata,
+        )
+        if not detected:
+            return
+        raw_strings = _raw_member_strings(member_path)
+        so_metadata["blintdb_records"] = blintdb_records(
+            so_metadata, detected, evidence, raw_strings
+        )
+    except Exception as e:  # a database problem must not sink the app's SBOM
+        LOG.debug(f"blintdb matching failed for {member_path}: {type(e).__name__}: {e}")
+
+
+def _raw_member_strings(member_path: str) -> list[bytes]:
+    """The member's printable byte runs - ``strings -a`` semantics.
+
+    Read from the file bytes, not a format parser: LIEF's string iterator
+    skips sections (measured: libvlc's ``libpng version 1.6.50`` banner is
+    invisible to it while lying in .rodata), and the version rules need
+    every printable run the artifact carries.
+    """
+    try:
+        import re as _re
+
+        with open(member_path, "rb") as fh:
+            data = fh.read()
+        return [match.group() for match in _re.finditer(rb"[\x20-\x7e]{4,}", data)]
+    except OSError as e:
+        LOG.debug(f"string read failed for {member_path}: {e}")
+        return []
+
+
+def _collect_group_blintdb_records(
+    members: list[tuple[dict, dict]], framework_keys: set[str]
+) -> tuple[list[dict], list[str]]:
+    """Union of the group's blintdb records, minus framework-claimed ones."""
+    from blint.lib.android_blintdb import superseded_by_framework
+
+    merged: dict[str, dict] = {}
+    superseded: list[str] = []
+    for _lib, meta in members:
+        records, dropped = superseded_by_framework(
+            meta.get("blintdb_records") or [], framework_keys
+        )
+        superseded += dropped
+        for record in records:
+            current = merged.setdefault(record["project"], record)
+            if record is not current and (record.get("score") or 0) > (
+                current.get("score") or 0
+            ):
+                merged[record["project"]] = record
+    return list(merged.values()), superseded
+
+
+def _blintdb_replace_record(members: list[tuple[dict, dict]], records: list[dict]) -> dict | None:
+    """The record that may replace the group's identity, or None.
+
+    Structural rule: every member of the group carries the record AND every
+    member's declared DT_SONAME is one of the project's own library names in
+    the database - the host *is* the project's library. A file name alone is
+    a hint; a partial (single-ABI) agreement keeps the file's identity and
+    nests instead.
+    """
+    by_project = {record["project"]: record for record in records}
+    for project, record in by_project.items():
+        if not record.get("soname_match"):
+            continue
+        agreed = all(
+            any(
+                r.get("project") == project and r.get("soname_match")
+                for r in (meta.get("blintdb_records") or [])
+            )
+            for _lib, meta in members
+        )
+        if agreed:
+            return record
+    return None
+
+
+def _blintdb_component_purl(record: dict, abis: list[str]) -> str:
+    """The component purl: the DB purl's identity, the artifact's version."""
+    base = PackageURL.from_string(record["project_purl"])
+    return PackageURL(
+        type=base.type,
+        namespace=base.namespace,
+        name=base.name,
+        version=record.get("version") or None,
+        qualifiers={"abi": ",".join(sorted(abis))} if abis else {},
+    ).to_string()
+
+
+def _blintdb_evidence_properties(record: dict) -> list[Property]:
+    """Evidence + database statistics properties for a blintdb identification."""
+    properties = [
+        Property(
+            name="blint:identification:evidence",
+            value=f"{record['project']}: {e.get('what')} ({e.get('where')}): {e.get('value')}",
+        )
+        for e in record.get("evidence") or []
+    ]
+    properties.append(
+        Property(name="blint:blintdb:project_purl", value=record["project_purl"])
+    )
+    if record.get("score") is not None:
+        properties.append(
+            Property(name="blint:blintdb:score", value=str(record["score"]))
+        )
+    if record.get("soname"):
+        properties.append(
+            Property(
+                name="blint:blintdb:soname_match",
+                value=(
+                    f"{record['soname']} = {', '.join(record.get('matched_binary_names') or [])}"
+                    if record.get("soname_match")
+                    else f"{record['soname']} != {', '.join(record.get('matched_binary_names') or [])}"
+                ),
+            )
+        )
+    return properties
+
+
+def _nested_blintdb_components(
+    records: list[dict], abis: list[str], host_purl: str
+) -> list[Component]:
+    """Child components for blintdb-identified static copies in a host.
+
+    The bom-ref is scoped by the host's (``host|child``), exactly like the
+    framework children, so two hosts carrying the same static copy in one
+    ABI never share a ref.
+    """
+    children: list[Component] = []
+    for record in records:
+        purl = _blintdb_component_purl(record, abis)
+        child = Component(
+            type=Type.library,
+            name=record["project"],
+            version=record.get("version") or None,
+            purl=purl,
+            properties=_blintdb_evidence_properties(record),
+        )
+        child.bom_ref = RefType(f"{host_purl}|{purl}")
+        children.append(child)
+    return children
 
 
 def _nested_framework_components(
@@ -1243,6 +1459,7 @@ def collect_files_metadata(
     deep_mode: bool,
     unpack_target: str | None = None,
     app_facts: dict | None = None,
+    use_blintdb: bool = False,
 ) -> list[Component]:
     """
     Unzip the app (or a specific apk within a bundle) and collect metadata.
@@ -1252,6 +1469,7 @@ def collect_files_metadata(
         parent_component (Component or None): The parent component, if available.
         deep_mode (bool): Flag indicating whether to parse dex files.
         unpack_target (str): Specific apk to unpack. Defaults to ``app_file``.
+        use_blintdb (bool): Match native libraries against the local blintdb.
 
     Returns:
         list: A list of Component objects.
@@ -1262,7 +1480,9 @@ def collect_files_metadata(
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     # Native libraries come from the zip in place (A1.1 model), not from
     # the unzip tree.
-    file_components += collect_so_files_metadata(app_file, app_facts=app_facts)
+    file_components += collect_so_files_metadata(
+        app_file, app_facts=app_facts, use_blintdb=use_blintdb
+    )
     if deep_mode:
         file_components += collect_dex_files_metadata(app_file, parent_component, app_temp_dir)
     shutil.rmtree(app_temp_dir, ignore_errors=True)

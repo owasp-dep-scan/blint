@@ -667,6 +667,48 @@ The committed evidence fixtures (`tests/data/android/<framework>-evidence.json`)
 carry the corpus side of every detector, with the extracting command and the
 llvm oracle read recorded in each file.
 
+### blintdb identification of Android native libraries (`--use-blintdb`)
+
+With `--use-blintdb`, every native library of an Android app (one call per
+unique sha256) is matched against the local blintdb through the same
+`detect_binaries_utilized` the standalone binary path uses
+(`blint/lib/android_blintdb.py`, A6.3). A match is symbol evidence, not
+identity, and lands in the SBOM in one of three shapes:
+
+- **Nested (the default):** a static copy inside a host library becomes a
+  child component of the host's, bom-ref scoped by the host's
+  (`<host purl>|<child purl>`), purl from the database row's project
+  identity with the artifact-derived version and the ABI qualifier.
+- **Replace:** only when the host structurally *is* the project's library —
+  its declared `DT_SONAME` equals one of the project's own library names in
+  the database (the same SONAME rule the NDK libc++ and BoringSSL provider
+  identifications use). A file name alone is a hint.
+- **Dropped:** framework identifications from the table above win for the
+  same bytes (a BoringSSL record shadows an `openssl` port match); the drop
+  is counted in the host's `blint:blintdb:superseded_by_framework` property.
+
+Component versions come from the artifact, never from the database row (the
+row carries the vcpkg port's version; the corpus OsmAnd ships PROJ 8.2.0
+against a 9.8.1 row). Accepted version evidence, each naming its published
+source: `ZSTD_VERSION_STRING` (zstd `lib/zstd.h`), `libopus x.y.z`
+(libopus `src/opus.c`), `PNG_LIBPNG_VER_STRING` (libpng `png.h`),
+`SENTRY_SDK_VERSION` (sentry-native `include/sentry.h`), PROJ's `Rel. x.y.z`
+release banner, SQLite's `SQLITE_SOURCE_ID` date mapped through
+sqlite.org's `chronology.html`, and OpenSSL's `OPENSSL_VERSION_TEXT`
+banner. A bare `x.y.z` is accepted only as the artifact's single distinct
+bare version string; several candidates stay versionless. Everything else
+is versionless with the database row's purl recorded as the
+`blint:blintdb:project_purl` property.
+
+Matched components carry `blint:identification:evidence` entries naming the
+symbol match (count and sample), the database row, and the version
+evidence, plus `blint:blintdb:score` and `blint:blintdb:soname_match`
+(stating the host SONAME against the project's library names, with the
+verdict). The committed evidence fixture
+(`tests/data/android/blintdb-zstd-evidence.json`) carries both sides of the
+R1 match: the vcpkg build's symbol names (llvm-nm) and the corpus library's
+exported symbols (llvm-nm -D), with the extracting commands recorded.
+
 ---
 
 ## Build and Dependency Information
