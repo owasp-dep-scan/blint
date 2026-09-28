@@ -82,6 +82,24 @@ FRAMEWORK_COMPONENTS: dict[str, dict] = {
         "purl": ("github", "facebook", "fbjni"),
         "name": "fbjni",
     },
+    # BoringSSL carries no version strings in release builds; the component
+    # is versionless from its own symbol/string evidence.
+    "boringssl": {
+        "purl": ("github", "google", "boringssl"),
+        "name": "BoringSSL",
+        "replaces": "libcrypto.so",
+    },
+    "openssl": {
+        "purl": ("github", "openssl", "openssl"),
+        "name": "OpenSSL",
+    },
+    # NSS upstream publishes via the nss-dev GitHub mirror
+    # (gitlab.mozilla.org is the origin); the mirror is the public
+    # reference identity.
+    "nss": {
+        "purl": ("github", "nss-dev", "nss"),
+        "name": "NSS",
+    },
 }
 
 # Nested-only identifications: statically linked inside a host library,
@@ -93,6 +111,11 @@ NESTED_COMPONENTS: dict[str, dict] = {
     "dart-sdk": {
         "purl": ("github", "dart-lang", "sdk"),
         "name": "Dart SDK",
+    },
+    # BoringSSL statically linked inside the Flutter engine.
+    "boringssl": {
+        "purl": ("github", "google", "boringssl"),
+        "name": "BoringSSL",
     },
 }
 
@@ -137,6 +160,21 @@ FBJNI_SYMBOL_RE = re.compile(r"^facebook::jni::")
 # fbjni's own runtime strings: only its translation units define them
 # (measured: zero occurrences in libreactnative/libjsi/libappmodules).
 FBJNI_RUNTIME_STRING = "fbjni is uninitialized"
+# NSS ships its version as "Version: NSS 3.128" and exports
+# NSS_VersionCheck; the number is the NSS release version.
+NSS_VERSION_RE = re.compile(r"^Version: NSS (?P<version>\d+\.\d+(?:\.\d+)*)$")
+# BoringSSL's own symbol prefix (BORINGSSL_keccak and friends) - named
+# BoringSSL-only evidence for a crypto library carrying no OpenSSL banner.
+BORINGSSL_SYMBOL_RE = re.compile(r"^BORINGSSL_")
+# BoringSSL's vendored source path, baked into the Flutter engine's
+# assertion strings (flutter/third_party/boringssl/src/...): the named
+# token for a BoringSSL copy statically linked into a host library.
+BORINGSSL_VENDORED_PATH = "third_party/boringssl/"
+# OpenSSL's version banner, "OpenSSL 3.0.2 15 Mar 2022"
+# (OPENSSL_VERSION_TEXT: version then "DD Mon YYYY").
+OPENSSL_BANNER_RE = re.compile(
+    r"^OpenSSL (?P<version>\d+\.\d+\.\d+[a-z]*) (?P<date>\d{1,2} [A-Za-z]+ \d{4})$"
+)
 # Dart AOT snapshot exports (libapp.so shape).
 DART_SNAPSHOT_SYMBOL_RE = re.compile(r"^_kDart(Vm|Isolate)Snapshot")
 # The Dart AOT snapshot header: magic f5 f5 dc dc, a u64 length, a u64 kind,
@@ -254,6 +292,81 @@ def _react_native_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> l
     return records
 
 
+def _tls_records(strings_seen: dict, symbols: list[str],
+                 flutter_hosted: bool = False) -> list[dict]:
+    """H4: OpenSSL by its banner; NSS by NSS_VersionCheck plus the version
+    string; BoringSSL by the absence of the OpenSSL banner plus
+    BoringSSL-only evidence.
+
+    The standalone BoringSSL record is for libraries that ARE the crypto
+    provider (the Android platform's libcrypto.so): the BORINGSSL_* symbol
+    prefix or the bare string. A BoringSSL bundled inside a host (the
+    Flutter engine) never reaches here - the flutter detector nests it.
+    """
+    records: list[dict] = []
+    openssl = strings_seen.get("openssl_banner")
+    if openssl:
+        match, text = openssl
+        records.append(
+            _record(
+                "openssl",
+                [
+                    {
+                        "what": "OPENSSL_VERSION_TEXT banner",
+                        "where": "strings",
+                        "value": text,
+                    }
+                ],
+                [],
+                version=match.group("version"),
+            )
+        )
+    nss = strings_seen.get("nss_version")
+    has_nss_check = any(n == "NSS_VersionCheck" for n in symbols)
+    if has_nss_check and nss:
+        match, text = nss
+        records.append(
+            _record(
+                "nss",
+                [
+                    {
+                        "what": "NSS_VersionCheck export",
+                        "where": "symbols",
+                        "value": "NSS_VersionCheck",
+                    },
+                    {
+                        "what": "NSS version string",
+                        "where": "strings",
+                        "value": text,
+                    },
+                ],
+                [],
+                version=match.group("version"),
+            )
+        )
+    if not openssl and not flutter_hosted:
+        boringssl_evidence = []
+        if any(BORINGSSL_SYMBOL_RE.match(n) for n in symbols):
+            boringssl_evidence.append(
+                {
+                    "what": "BORINGSSL_* symbol prefix",
+                    "where": "symbols",
+                    "value": "BORINGSSL_*",
+                }
+            )
+        if strings_seen.get("boringssl_string"):
+            boringssl_evidence.append(
+                {
+                    "what": "boringssl string",
+                    "where": "strings",
+                    "value": strings_seen["boringssl_string"],
+                }
+            )
+        if boringssl_evidence:
+            records.append(_record("boringssl", boringssl_evidence, []))
+    return records
+
+
 def _scan_evidence_strings(parsed_obj) -> dict:
     """One pass over the raw strings, recording each named evidence match.
 
@@ -265,6 +378,9 @@ def _scan_evidence_strings(parsed_obj) -> dict:
         "hex40": set(),
         "rn_release": None,
         "fbjni_runtime_string": None,
+        "nss_version": None,
+        "openssl_banner": None,
+        "boringssl_string": None,
     }
     for raw in _iter_strings(parsed_obj):
         if not isinstance(raw, str):
@@ -281,6 +397,16 @@ def _scan_evidence_strings(parsed_obj) -> dict:
         if strings_seen["fbjni_runtime_string"] is None:
             if FBJNI_RUNTIME_STRING in stripped:
                 strings_seen["fbjni_runtime_string"] = stripped
+        if strings_seen["nss_version"] is None:
+            if match := NSS_VERSION_RE.match(stripped):
+                strings_seen["nss_version"] = (match, stripped)
+        if strings_seen["openssl_banner"] is None:
+            if match := OPENSSL_BANNER_RE.match(stripped):
+                strings_seen["openssl_banner"] = (match, stripped)
+        if strings_seen["boringssl_string"] is None and (
+            stripped.lower() == "boringssl" or BORINGSSL_VENDORED_PATH in stripped
+        ):
+            strings_seen["boringssl_string"] = stripped
         if HEX40_RE.match(stripped):
             strings_seen["hex40"].add(stripped)
     return strings_seen
@@ -308,6 +434,12 @@ def identify_frameworks(parsed_obj, metadata: dict) -> list[dict]:
         _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata)
     )
     records.extend(_react_native_and_fbjni_records(strings_seen, symbols))
+    # The Flutter host nests its own BoringSSL; the standalone detector
+    # only speaks for libraries that ARE the crypto provider.
+    records.extend(
+        _tls_records(strings_seen, symbols,
+                     flutter_hosted=any(r["framework"] == "flutter-engine" for r in records))
+    )
 
     android_ident = (metadata.get("android") or {}).get("android_ident") or {}
     soname = _declared_soname(parsed_obj)
@@ -419,6 +551,23 @@ def _flutter_and_dart_records(parsed_obj, strings_seen, symbols, metadata) -> li
                     "where": "strings",
                     "value": ", ".join(sorted(hex40)),
                 }
+            )
+        if strings_seen.get("boringssl_string"):
+            # The engine bundles BoringSSL statically: a nested
+            # identification, never a second copy of the host.
+            nested.append(
+                _record(
+                    "boringssl",
+                    [
+                        {
+                            "what": "vendored BoringSSL source path (statically linked)",
+                            "where": "strings",
+                            "value": BORINGSSL_VENDORED_PATH,
+                        }
+                    ],
+                    [],
+                    static=True,
+                )
             )
         records.append(
             _record("flutter-engine", evidence, [], nested=nested or None)

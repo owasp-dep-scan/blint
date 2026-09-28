@@ -353,3 +353,73 @@ def test_r2_corpus_rnhello_identifies_react_native_and_fbjni():
                 for r in hermes_meta.get("frameworks") or []] == [("react-native", "0.76.9")]
         fbjni_meta = parse(fbjni_path)
         assert [r["framework"] for r in fbjni_meta.get("frameworks") or []] == ["fbjni"]
+
+
+def test_r1_nss_identifies_from_versioncheck_plus_the_version_string():
+    """Both halves required: the export and the version banner."""
+    evidence = _load_evidence("nss")
+    blint = evidence["evidence"]["blint_parse"]
+    sym = blint["symbol_evidence"]
+    assert sym["nss_version_check"]
+    strings = blint["string_evidence"]["nss_version"]
+    assert strings == ["Version: NSS 3.128"]
+
+    symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
+    parsed = _FakeElf(strings=strings)
+    records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["nss"]
+    assert records[0]["version"] == "3.128"
+    name, version, purl = framework_identity(records[0], ["arm64-v8a"])
+    assert (name, version) == ("NSS", "3.128")
+    assert purl == "pkg:github/nss-dev/nss@3.128?abi=arm64-v8a"
+
+    # The string without the export: no identification.
+    records = identify_frameworks(parsed, {"dynamic_symbols": []})
+    assert records == []
+
+
+def test_r1_boringssl_needs_boringssl_only_evidence_and_no_openssl_banner():
+    """The platform libcrypto: BORINGSSL_* prefix, no banner - BoringSSL."""
+    evidence = _load_evidence("boringssl")
+    blint = evidence["evidence"]["blint_parse"]
+    sym = blint["symbol_evidence"]
+    assert sym["boringssl_prefix"]
+    assert not blint["string_evidence"]["openssl_banner"]
+
+    symbols = [{"name": n, "is_exported": True} for n in sym["matched_names"]]
+    records = identify_frameworks(_FakeElf(), {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["boringssl"]
+    assert "version" not in records[0]
+    name, version, purl = framework_identity(records[0], ["arm64-v8a"])
+    assert (name, version) == ("BoringSSL", "")
+    assert purl == "pkg:github/google/boringssl?abi=arm64-v8a"
+
+    # An OpenSSL banner in the same file would rule BoringSSL out.
+    parsed = _FakeElf(strings=["OpenSSL 3.0.2 15 Mar 2022"])
+    records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["openssl"]
+    assert records[0]["version"] == "3.0.2"
+
+
+def test_r1_boringssl_inside_the_flutter_engine_nests():
+    """A statically linked copy is an identification inside the host."""
+    evidence = _load_evidence("flutter-engine")
+    blint = evidence["evidence"]["blint_parse"]
+    strings = blint["string_evidence"]
+    symbols = [
+        {"name": n, "is_exported": True} for n in blint["symbol_evidence"]["matched_names"]
+    ]
+    parsed = _FakeElf(
+        strings=strings["dart_vm_version"] + strings["hex40_bare"]
+        + ["../../../flutter/third_party/boringssl/src/crypto/mem_internal.c"]
+    )
+    records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["flutter-engine"]
+    nested = records[0].get("nested") or []
+    assert [n["framework"] for n in nested] == ["dart-sdk", "boringssl"]
+    # The nested copy never becomes a second top-level component.
+    assert not any(r["framework"] == "boringssl" for r in records)
+    # And the nested table builds its child identity.
+    from blint.lib.framework_ident import NESTED_COMPONENTS
+
+    assert "boringssl" in NESTED_COMPONENTS
