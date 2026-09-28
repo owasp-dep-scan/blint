@@ -556,3 +556,68 @@ def test_nss_needs_the_export_not_an_import():
     parsed = _FakeElf(strings=["Version: NSS 3.128"])
     imported = {"name": "NSS_VersionCheck", "is_exported": False, "is_imported": True}
     assert identify_frameworks(parsed, {"dynamic_symbols": [imported]}) == []
+
+
+def test_ossl_namespace_names_a_bannerless_openssl3_static_copy():
+    """J2: realm-core's OpenSSL 3 inside librealm-jni.so, by ossl_*.
+
+    The names are llvm-nm's, from the committed openssl3 evidence:
+    librealm-jni.so exports 1,618 ossl_* names and no OPENSSL_VERSION_TEXT
+    banner (H4 left it unidentified for exactly that reason). The record
+    nests in the host, versionless.
+    """
+    from blint.lib.android import _nested_framework_components
+
+    evidence = json.loads(
+        (EVIDENCE_DIR / "openssl3-evidence.json").read_text(encoding="utf-8")
+    )
+    assert evidence["boringssl_libcrypto_ossl_count"] == 0
+    names = evidence["realm_ossl_sample"]
+    assert len(names) >= 10 and all(n.startswith("ossl_") for n in names)
+    symbols = [{"name": n, "is_exported": True} for n in names]
+    parsed = _FakeElf(dynamic_entries=[_Soname("librealm-jni.so")])
+    records = identify_frameworks(parsed, {"dynamic_symbols": symbols})
+    assert [(r["framework"], r["static"]) for r in records] == [("openssl", True)]
+    assert "version" not in records[0]
+    assert any("ossl_*" in e["what"] for e in records[0]["evidence"])
+    host = "pkg:android/librealm-jni.so?abi=arm64-v8a"
+    children = _nested_framework_components(records, ["arm64-v8a"], host)
+    assert [c.purl for c in children] == ["pkg:github/openssl/openssl?abi=arm64-v8a"]
+    assert children[0].bom_ref.root == f"{host}|pkg:github/openssl/openssl?abi=arm64-v8a"
+
+
+def test_ossl_namespace_never_fires_on_boringssl_builds():
+    """J2: the tier-0 BoringSSL libcrypto.so exports zero ossl_* names.
+
+    The names are llvm-nm's from the api36 system image's libcrypto.so
+    (committed openssl3 evidence): the BORINGSSL_* provider surface and no
+    OpenSSL 3 namespace, so the file stays BoringSSL and never becomes an
+    OpenSSL match.
+    """
+    evidence = json.loads(
+        (EVIDENCE_DIR / "openssl3-evidence.json").read_text(encoding="utf-8")
+    )
+    boring = evidence["boringssl_libcrypto_boringssl_exports"]
+    assert boring and all(n.startswith("BORINGSSL_") for n in boring)
+    symbols = [{"name": n, "is_exported": True} for n in boring]
+    provider = _FakeElf(dynamic_entries=[_Soname("libcrypto.so")])
+    records = identify_frameworks(provider, {"dynamic_symbols": symbols})
+    assert [r["framework"] for r in records] == ["boringssl"]
+    assert not any(r["framework"] == "openssl" for r in records)
+
+
+def test_blintdb_openssl_match_is_dropped_when_boringssl_is_identified():
+    """J2: the A6.1 record wins for the same bytes.
+
+    A blintdb openssl port match on a library whose framework record says
+    BoringSSL (any grade) is dropped and counted, so the platform's
+    libcrypto.so never becomes an OpenSSL component.
+    """
+    from blint.lib.android_blintdb import superseded_by_framework
+
+    records = [{"project": "openssl", "project_purl": "pkg:generic/openssl@3.6.2"}]
+    for grade in ({"framework": "boringssl", "static": False, "hint_only": False},
+                  {"framework": "boringssl", "static": True, "hint_only": False},
+                  {"framework": "boringssl", "static": False, "hint_only": True}):
+        kept, dropped = superseded_by_framework(records, {grade["framework"]})
+        assert not kept and dropped == ["boringssl:openssl"]

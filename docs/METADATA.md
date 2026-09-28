@@ -648,6 +648,13 @@ evidence", never as "verified not a framework":
   no published table maps to a version are reported as hashes in `evidence`.
 - `static: true` marks a framework found inside a host library (a nested
   identification, carried in the host record's `nested` list).
+- TLS grades (H4/J2): OpenSSL is identified by the `OPENSSL_VERSION_TEXT`
+  banner (versioned), or - banner-less - by the `ossl_*` internal namespace
+  an OpenSSL 3 static copy still exports (static, versionless; realm-core's
+  vcpkg-built copy inside `librealm-jni.so`). The namespace separates it
+  from BoringSSL: every tier-0 BoringSSL `libcrypto.so` exports zero
+  `ossl_*` names. BoringSSL keeps its three H4 grades (provider replace,
+  re-exported static copy, hint-only strings).
 - In `blint sbom` on Android apps, a replace-grade identification takes
   over the library file's component slot (`pkg:generic/android-ndk/libcxx@`
   for the NDK C++ runtime, for example), keeping the file's provenance

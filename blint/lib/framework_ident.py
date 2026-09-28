@@ -124,6 +124,11 @@ NESTED_COMPONENTS: dict[str, dict] = {
     # BoringSSL statically linked inside a host: the Flutter engine, or a
     # library that re-exports the BORINGSSL_* surface under its own SONAME.
     "boringssl": FRAMEWORK_COMPONENTS["boringssl"],
+    # OpenSSL 3 statically linked inside a host (realm-core's vcpkg-built
+    # copy inside librealm-jni.so). Named by the ossl_* internal namespace
+    # the banner-less build still exports; nests, versionless unless the
+    # OPENSSL_VERSION_TEXT banner is present.
+    "openssl": FRAMEWORK_COMPONENTS["openssl"],
 }
 
 # --- Evidence patterns ------------------------------------------------------
@@ -176,6 +181,12 @@ VLC_VERSION_RE = re.compile(r"^VLC (?P<version>\d+\.\d+\.\d+)$")
 # Qt carries QT_VERSION_STR, rendered in libQt5Core strings as
 # "Qt 5.15.15 (arm64-little_endian-lp64 shared (dynamic) release build; ...)".
 QT_VERSION_RE = re.compile(r"^Qt (?P<version>\d+\.\d+\.\d+) \(")
+# OpenSSL 3's internal namespace prefix (ossl_provider, ossl_aes128cbc_...):
+# OpenSSL 3 exports it for provider interop; BoringSSL and LibreSSL do not
+# define it (measured: every tier-0 BoringSSL libcrypto.so exports 0 ossl_*
+# names and 9-10 BORINGSSL_*; realm-core's vcpkg-built OpenSSL 3 inside
+# librealm-jni.so exports 1,618 ossl_*).
+OPENSSL3_SYMBOL_RE = re.compile(r"^ossl_")
 # BoringSSL's own symbol prefix (BORINGSSL_keccak and friends) - named
 # BoringSSL-only evidence for a crypto library carrying no OpenSSL banner.
 BORINGSSL_SYMBOL_RE = re.compile(r"^BORINGSSL_")
@@ -311,9 +322,11 @@ def _hermes_and_fbjni_records(strings_seen: dict, symbols: list[str]) -> list[di
 
 def _tls_records(strings_seen: dict, exported: list[str], soname: str | None,
                  flutter_hosted: bool = False) -> list[dict]:
-    """H4: OpenSSL by its banner; NSS by the NSS_VersionCheck export plus the
-    version string; BoringSSL by the absence of the OpenSSL banner plus
-    BoringSSL-only evidence, in three grades:
+    """H4/J2: OpenSSL by its banner, or banner-less by the ossl_* internal
+    namespace an OpenSSL 3 static copy still exports; NSS by the
+    NSS_VersionCheck export plus the version string; BoringSSL by the
+    absence of the OpenSSL banner plus BoringSSL-only evidence, in three
+    grades:
 
     - the provider: the BORINGSSL_* exported prefix under a libcrypto SONAME
       (the platform's libcrypto.so, cronet's stable_cronet_libcrypto.so);
@@ -324,7 +337,8 @@ def _tls_records(strings_seen: dict, exported: list[str], soname: str | None,
 
     Only the provider replaces the file's identity. A BoringSSL bundled
     inside the Flutter engine never reaches here - the flutter detector
-    nests it.
+    nests it. An OpenSSL 3 copy named by ossl_* always nests, versionless
+    unless the banner named it.
     """
     records: list[dict] = []
     openssl = strings_seen.get("openssl_banner")
@@ -342,6 +356,26 @@ def _tls_records(strings_seen: dict, exported: list[str], soname: str | None,
                 ],
                 [],
                 version=match.group("version"),
+            )
+        )
+    elif any(OPENSSL3_SYMBOL_RE.match(n) for n in exported):
+        # J2: a banner-less OpenSSL 3 static copy is named by the ossl_*
+        # internal namespace it still exports - present in OpenSSL 3,
+        # absent from BoringSSL and LibreSSL. It nests in the host,
+        # versionless (no published mapping without the banner).
+        count = sum(1 for n in exported if OPENSSL3_SYMBOL_RE.match(n))
+        records.append(
+            _record(
+                "openssl",
+                [
+                    {
+                        "what": "ossl_* exported symbol namespace (OpenSSL 3 internal)",
+                        "where": "symbols",
+                        "value": f"ossl_* ({count} exported)",
+                    }
+                ],
+                [],
+                static=True,
             )
         )
     nss = strings_seen.get("nss_version")
