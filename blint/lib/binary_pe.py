@@ -870,7 +870,12 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     recovers live at absolute VAs — with the default image base a PE names
     every address ``0x140...``, above any RVA the sections report — so the
     image base is added to the ranges before the comparison. ELF and Mach-O
-    sections already carry absolute addresses and contribute nothing.
+    sections already carry absolute addresses and contribute nothing. The
+    same split governs the cheap below-floor rejection: a PE's constants
+    only become plausible pointers above the image base, but an ELF shared
+    object maps its string sections from address zero (an Android ``.so``
+    keeps ``.rodata`` well below 0x10000), so with no image base the
+    section-range membership test below is the only floor.
     """
     ranges: list[tuple[int, int]] = []
     imagebase = 0
@@ -886,7 +891,7 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     resolved: dict[int, str | None] = {}
 
     def resolve(value: int) -> str | None:
-        if value < _POINTER_STRING_MIN_VALUE:
+        if imagebase and value < _POINTER_STRING_MIN_VALUE:
             return None
         if value in resolved:
             return resolved[value]

@@ -11,6 +11,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from blint.lib.android_reviews import ANDROID_RULE_EVALUATORS, evaluate_android_rule
 from blint.lib.driver_ioctl import (
     USER_BUFFER_PROBE_IMPORTS,
     _normalized_callee,
@@ -22,6 +23,9 @@ from blint.lib.implant_reviews import (
     IMPLANT_RULE_EVALUATORS,
     evaluate_implant_rule,
 )
+
+# The A7 rule ids, imported once so the dispatch below is a set lookup.
+ANDROID_RULE_IDS = frozenset(ANDROID_RULE_EVALUATORS)
 
 # Primitives that grant a caller direct hardware or physical-memory reach.
 HARDWARE_PRIMITIVE_IMPORTS: set[str] = {
@@ -575,6 +579,12 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     """Evaluate rule-specific whole-binary heuristics. Returns evidence list."""
     if rule_id in IMPLANT_RULE_EVALUATORS:
         return evaluate_implant_rule(rule_id, metadata)
+
+    # The A7 native Android capability rules (plan 04/C): conjunctions and
+    # call-site constants only — their module documents why every
+    # single-signal form of these families fires on benign code.
+    if rule_id in ANDROID_RULE_IDS:
+        return evaluate_android_rule(rule_id, metadata)
 
     if rule_id in (
         "USERMODE_DIRECT_SYSCALL",

@@ -471,6 +471,9 @@ def test_resolve_direct_calls_supports_callq_and_symbol_decorations():
             "target_address_candidates": ["0x2000"],
             "raw_operand": "0x2000",
             "kind": "direct",
+            # The emitting instruction's line index, so the call-site
+            # recovery can resolve by site where operand text collides.
+            "site_index": 0,
         }
     ]
 
@@ -491,6 +494,7 @@ def test_resolve_direct_calls_preserves_unresolved_raw_target():
             "target_address_candidates": [],
             "raw_operand": "std::rt::lang_start",
             "kind": "direct",
+            "site_index": 0,
         }
     ]
 
@@ -705,6 +709,7 @@ def test_resolve_direct_calls_x86_decimal_operand_prefers_relative_target():
             "target_address_candidates": ["0x1012", "0x10"],
             "raw_operand": "16",
             "kind": "direct",
+            "site_index": 0,
         }
     ]
 
@@ -725,6 +730,7 @@ def test_resolve_direct_calls_memory_operand_is_indirect_hint():
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rip + 0x10]",
             "kind": "indirect_hint",
+            "site_index": 0,
         }
     ]
 
@@ -745,6 +751,7 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol():
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rip + 0x10]",
             "kind": "indirect_hint",
+            "site_index": 0,
         }
     ]
 
@@ -765,6 +772,7 @@ def test_resolve_direct_calls_memory_operand_recovers_rip_slot_symbol_without_sp
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rip+0x10]",
             "kind": "indirect_hint",
+            "site_index": 0,
         }
     ]
 
@@ -792,6 +800,7 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_register_plus_
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rax + 0x8]",
             "kind": "indirect_hint",
+            "site_index": 1,
         }
     ]
 
@@ -819,6 +828,7 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_percent_regist
             "target_address_candidates": [],
             "raw_operand": "qword ptr [%rax]",
             "kind": "indirect_hint",
+            "site_index": 1,
         }
     ]
 
@@ -846,6 +856,7 @@ def test_resolve_direct_calls_memory_operand_recovers_symbol_from_r12_plus_disp(
             "target_address_candidates": [],
             "raw_operand": "qword ptr [r12 + 72]",
             "kind": "indirect_hint",
+            "site_index": 1,
         }
     ]
 
@@ -885,6 +896,7 @@ def test_resolve_direct_calls_windows_propagates_two_hop_memory_chain_before_cal
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rdx + 0x20]",
             "kind": "indirect_hint",
+            "site_index": 3,
         }
     ]
 
@@ -929,6 +941,7 @@ def test_resolve_direct_calls_windows_stops_memory_chain_after_two_hops():
             "target_address_candidates": [],
             "raw_operand": "qword ptr [r8 + 0x20]",
             "kind": "indirect_hint",
+            "site_index": 4,
         }
     ]
 
@@ -951,6 +964,7 @@ def test_resolve_direct_calls_tailcall_windows_decimal_operand_prefers_relative_
             "target_address_candidates": ["0x1ff2"],
             "raw_operand": "-16",
             "kind": "tailcall",
+            "site_index": 0,
         }
     ]
 
@@ -1006,6 +1020,7 @@ def test_resolve_direct_calls_aarch64_unsigned_immediate_adds_relative_candidate
             "target_address_candidates": ["0x1258", "0x125c", "0x258"],
             "raw_operand": "#600",
             "kind": "direct",
+            "site_index": 0,
         }
     ]
 
@@ -1131,6 +1146,7 @@ def test_resolve_direct_calls_aarch64_pac_branch_call_uses_first_register_operan
         "target_address_candidates": ["0x410000"],
         "raw_operand": "0x410000",
         "kind": "indirect_hint",
+        "site_index": 1,
     }
 
 
@@ -1190,6 +1206,7 @@ def test_resolve_direct_calls_windows_arm64_drops_noncanonical_register_target_c
             "target_address_candidates": [],
             "raw_operand": "[x9, #24]",
             "kind": "indirect_hint",
+            "site_index": 2,
         }
     ]
 
@@ -1278,6 +1295,7 @@ def test_tail_jump_through_rip_slot_is_named_from_the_slot(arch):
             "target_address_candidates": [],
             "raw_operand": "qword ptr [rip + 1234]",
             "kind": "tailcall",
+            "site_index": 0,
         }
     ]
     assert _resolve_direct_calls([instr], {}, arch)[1] == []

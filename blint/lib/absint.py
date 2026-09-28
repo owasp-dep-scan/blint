@@ -1478,17 +1478,24 @@ def argument_registers(binary_format: str, arch_target: str) -> tuple[str, ...] 
 
 def _callee_resolvers(
     direct_call_targets: list[dict] | None,
-) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Index the disassembler's resolved call targets by their operand text.
+) -> tuple[dict, dict, dict, dict]:
+    """Index the disassembler's resolved call targets for site resolution.
 
-    Returns two maps, (call-site operands, tail-transfer operands), keyed by
-    the normalized operand text of the call instruction (the assembly line
-    minus its mnemonic) and holding the set of callee names that operand
-    resolved to. A key resolving to more than one name (the same register or
-    slot text reaching different callees at different program points) keeps
-    both names, and resolution refuses it: an unresolved callee is a
-    legitimate result, a wrong one is not.
+    Returns four maps: (call-site by line index, tail-transfer by line
+    index, call-site by operand text, tail-transfer by operand text). The
+    line-index maps are primary whenever the disassembler recorded the
+    emitting instruction (``site_index``): nyxstone renders ARM branch
+    targets pc-relative (``bl #1280``), so the same operand text occurs at
+    many sites reaching different callees, and keying by text there would
+    either mis-resolve or (the historical behaviour) refuse every such
+    site as ambiguous. The operand maps remain the fallback for entries
+    built without a site index, and the ambiguity refusal is unchanged: a
+    key resolving to more than one name keeps both names and resolution
+    refuses it — an unresolved callee is a legitimate result, a wrong one
+    is not.
     """
+    call_sites: dict[int, set[str]] = {}
+    tail_sites: dict[int, set[str]] = {}
     call_operands: dict[str, set[str]] = {}
     tail_operands: dict[str, set[str]] = {}
     for entry in direct_call_targets or []:
@@ -1502,17 +1509,23 @@ def _callee_resolvers(
         # stand-in for an unresolved numeric target) carries no resolution.
         if " ".join(name.split()).lower() == operand:
             continue
-        table = tail_operands if entry.get("kind") == "tailcall" else call_operands
-        table.setdefault(operand, set()).add(name)
-    return call_operands, tail_operands
+        is_tail = entry.get("kind") == "tailcall"
+        site_index = entry.get("site_index")
+        if isinstance(site_index, int):
+            (tail_sites if is_tail else call_sites).setdefault(site_index, set()).add(name)
+        (tail_operands if is_tail else call_operands).setdefault(operand, set()).add(name)
+    return call_sites, tail_sites, call_operands, tail_operands
 
 
 def _call_site_callee(
     model: ArchModel,
     text: str,
+    call_sites: dict[int, set[str]],
+    tail_sites: dict[int, set[str]],
     call_operands: dict[str, set[str]],
     tail_operands: dict[str, set[str]],
     is_last_line: bool,
+    line_index: int | None = None,
 ) -> str | None:
     """Resolve one instruction's callee name from the disassembler's targets.
 
@@ -1531,8 +1544,12 @@ def _call_site_callee(
         return None
     if kind == "tail" and not is_last_line:
         return None
-    key = " ".join(parts[1].split()).lower()
-    names = (tail_operands if kind == "tail" else call_operands).get(key)
+    sites = tail_sites if kind == "tail" else call_sites
+    operands = tail_operands if kind == "tail" else call_operands
+    names = sites.get(line_index) if line_index is not None else None
+    if not names:
+        key = " ".join(parts[1].split()).lower()
+        names = operands.get(key)
     if names and len(names) == 1:
         return next(iter(names))
     return None
@@ -1570,7 +1587,7 @@ def _call_site_records(
     records are O(call sites) small dicts, which is the only extra memory
     retained.
     """
-    call_operands, tail_operands = _callee_resolvers(direct_call_targets)
+    call_sites, tail_sites, call_operands, tail_operands = _callee_resolvers(direct_call_targets)
     last_line = len(lines) - 1
     records: list[dict] = []
     for block_index, (start, end) in enumerate(spans):
@@ -1590,7 +1607,14 @@ def _call_site_records(
             # an ordinary branch and must not be recorded at all.
             if kind is not None and (kind == "call" or start + offset == last_line):
                 callee = _call_site_callee(
-                    model, text, call_operands, tail_operands, start + offset == last_line
+                    model,
+                    text,
+                    call_sites,
+                    tail_sites,
+                    call_operands,
+                    tail_operands,
+                    start + offset == last_line,
+                    line_index=start + offset,
                 )
                 arguments = []
                 materialised = 0
