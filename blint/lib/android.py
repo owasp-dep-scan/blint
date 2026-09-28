@@ -801,6 +801,44 @@ def collect_so_files_metadata(
                     value="; ".join(sorted(set(superseded))),
                 )
             )
+        # J2: an openssl match on a provider-shaped host (SONAME
+        # libcrypto.so / libssl.so) is refused unless OpenSSL-3-only
+        # evidence exists - BoringSSL and OpenSSL share the whole API
+        # surface, and the platform's libssl.so must not become an OpenSSL
+        # component on a bare symbol match.
+        from blint.lib.android_blintdb import provider_shaped_openssl_refused
+
+        exported_names = [
+            str(sym.get("name"))
+            for _lib, meta in members
+            for sym in meta.get("dynamic_symbols") or []
+            if isinstance(sym, dict) and sym.get("name")
+        ]
+        refused = [
+            record["soname"]
+            for record in db_records
+            if record["project"] == "openssl"
+            and provider_shaped_openssl_refused(
+                record.get("soname"), exported_names, framework_keys
+            )
+        ]
+        if refused:
+            db_records = [
+                record
+                for record in db_records
+                if not (
+                    record["project"] == "openssl"
+                    and provider_shaped_openssl_refused(
+                        record.get("soname"), exported_names, framework_keys
+                    )
+                )
+            ]
+            properties.append(
+                Property(
+                    name="blint:blintdb:refused_provider_shape",
+                    value="; ".join(sorted(set(refused))),
+                )
+            )
         # A framework identification that replaced the group's identity also
         # denies the blintdb replace for the same slot: A6.1 wins.
         db_replace = (

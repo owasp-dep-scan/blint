@@ -357,6 +357,36 @@ def blintdb_records(
     return records
 
 
+# The provider's SONAME: libcrypto.so / libssl.so, or a vendor-prefixed
+# copy such as the tethering APEX's stable_cronet_libcrypto.so.
+BORINGSSL_PROVIDER_SONAME_RE = re.compile(r"(?:^|_)(?:libcrypto|libssl)\.so$")
+
+
+def provider_shaped_openssl_refused(
+    soname: str | None, exported_names, framework_keys: set[str] | None = None
+) -> bool:
+    """Whether an openssl match on this host must be refused (J2).
+
+    The provider shape (SONAME libcrypto.so / libssl.so) is exactly where
+    BoringSSL and OpenSSL share the whole SSL_*/EVP_* API. A real OpenSSL 3
+    build names itself two ways that both produce their own framework
+    record and supersede the port match: the ossl_* internal namespace and
+    the OPENSSL_VERSION_TEXT banner. Without either, a bare symbol match
+    cannot tell the libraries apart - and refusing is the only verdict that
+    keeps the platform's BoringSSL libssl.so from becoming an OpenSSL
+    component (measured on tier-0: those files export no BORINGSSL_* and
+    carry no BoringSSL string, so no framework record exists to win).
+    """
+    if not soname or not BORINGSSL_PROVIDER_SONAME_RE.search(soname):
+        return False
+    if framework_keys and framework_keys & {"openssl", "boringssl"}:
+        # The framework layer already speaks for these bytes.
+        return False
+    return not any(
+        isinstance(name, str) and name.startswith("ossl_") for name in exported_names or []
+    )
+
+
 def superseded_by_framework(
     records: list[dict], framework_keys: set[str]
 ) -> tuple[list[dict], list[str]]:

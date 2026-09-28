@@ -1290,6 +1290,79 @@ def process_exe_file(
             callgraph_canon_names=callgraph_canon_names,
             binary_metadata=metadata,
         )
+        # J2: a framework identification that names the TLS implementation
+        # wins for the same bytes - a BoringSSL library (any grade) never
+        # becomes an OpenSSL component through a shared EVP/X509 API
+        # surface. Measured on the tier-0 system images: every BoringSSL
+        # libcrypto.so matches the openssl port on ~1,767 symbol names.
+        from blint.lib.android_blintdb import FRAMEWORK_SUPersedes_BLINTDB
+
+        framework_keys = {
+            record.get("framework")
+            for record in metadata.get("frameworks") or []
+            if record.get("framework")
+        }
+        claimed_projects: set[str] = set()
+        for key in framework_keys:
+            claimed_projects |= FRAMEWORK_SUPersedes_BLINTDB.get(key) or set()
+        if claimed_projects and binaries_detected:
+            kept = {
+                purl
+                for purl in binaries_detected
+                if (binary_evidence.get(purl) or {}).get("project_name")
+                not in claimed_projects
+            }
+            superseded = sorted(
+                f"{key}:{(binary_evidence.get(purl) or {}).get('project_name')}"
+                for purl in binaries_detected - kept
+                for key in (sorted(framework_keys)[:1] or ["framework"])
+            )
+            if superseded:
+                parent_component.properties.append(
+                    Property(
+                        name="internal:blintdb_superseded_by_framework",
+                        value="; ".join(superseded),
+                    )
+                )
+                LOG.debug(
+                    "Dropped %d blintdb match(es) claimed by framework records: %s",
+                    len(superseded),
+                    "; ".join(superseded),
+                )
+            binaries_detected = kept
+        # J2's provider-shape refusal, standalone path: an openssl match on
+        # a libcrypto.so / libssl.so SONAME without OpenSSL-3-only evidence
+        # (ossl_* exports - the banner case already carries a framework
+        # record above) is BoringSSL's API-compatible surface, not
+        # OpenSSL. Measured on the tier-0 system images' libssl.so files.
+        from blint.lib.android_blintdb import provider_shaped_openssl_refused
+
+        soname = None
+        for entry in metadata.get("dynamic_entries") or []:
+            if isinstance(entry, dict) and entry.get("tag") == "SONAME":
+                soname = entry.get("name")
+                break
+        exported_names = [
+            str(sym.get("name"))
+            for sym in metadata.get("dynamic_symbols") or []
+            if isinstance(sym, dict) and sym.get("name")
+        ]
+        if binaries_detected and provider_shaped_openssl_refused(
+            soname, exported_names, framework_keys
+        ):
+            dropped = {
+                purl
+                for purl in binaries_detected
+                if (binary_evidence.get(purl) or {}).get("project_name") == "openssl"
+            }
+            if dropped:
+                parent_component.properties.append(
+                    Property(
+                        name="internal:blintdb_refused_provider_shape",
+                        value=str(soname),
+                    )
+                )
+                binaries_detected -= dropped
         if binaries_detected:
             LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
             # F2a.3: when the database holds several versions of the same

@@ -11,6 +11,7 @@ matching rule.
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from blint.db import detect_binaries_utilized
 from blint.lib.android import (
@@ -22,6 +23,7 @@ from blint.lib.android_blintdb import (
     blintdb_records,
     superseded_by_framework,
 )
+from blint.lib.sbom import process_exe_file
 
 EVIDENCE = Path(__file__).resolve().parent / "data" / "android" / "blintdb-zstd-evidence.json"
 
@@ -230,3 +232,115 @@ def test_collect_group_blintdb_records_merges_by_project():
     assert len(records) == 1
     # The strongest member evidence represents the group.
     assert records[0]["score"] == 610
+
+
+def test_standalone_path_never_reports_openssl_for_boringssl(tmp_path, monkeypatch):
+    """J2 on the standalone path: the platform libcrypto.so stays BoringSSL.
+
+    The names are llvm-nm's from the api36 system image's BoringSSL
+    libcrypto.so and from librealm-jni.so (committed openssl3 evidence):
+    the BoringSSL provider's EVP/X509 surface matches the openssl port,
+    and only the A6.1 BoringSSL record stops the component.
+    process_exe_file drops the match and counts it in
+    internal:blintdb_superseded_by_framework.
+    """
+    import json as _json
+
+    from tests.test_sbom_blintdb import _create_typed_blintdb
+
+    evidence = _json.loads(
+        (Path(__file__).resolve().parent / "data" / "android" / "openssl3-evidence.json")
+        .read_text(encoding="utf-8")
+    )
+    boring = evidence["boringssl_libcrypto_boringssl_exports"]
+    evp_names = evidence["realm_sample_other"]
+    db_file = tmp_path / "boringssl-gate.db"
+    _create_typed_blintdb(
+        db_file,
+        [
+            (
+                "libcrypto.so",
+                "ELF",
+                "openssl",
+                "pkg:generic/openssl@3.6.2",
+                evp_names + boring[:8],
+            ),
+        ],
+    )
+    metadata = {
+        "name": "/system/lib64/libcrypto.so",
+        "binary_type": "ELF",
+        "llvm_target_tuple": "aarch64-unknown-linux-android",
+        # symtab, the bucket the typed fixture stores under - the
+        # provider exports its surface and also carries it in symtab.
+        "symtab_symbols": [
+            {"name": name, "is_exported": True} for name in evp_names + boring[:8]
+        ],
+        "dynamic_entries": [{"tag": "SONAME", "name": "libcrypto.so"}],
+        "frameworks": [
+            {
+                "framework": "boringssl",
+                "evidence": [
+                    {
+                        "what": "BORINGSSL_* exported symbol prefix",
+                        "where": "symbols",
+                        "value": "BORINGSSL_*",
+                    }
+                ],
+                "hints": [],
+                "static": False,
+            }
+        ],
+    }
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
+    monkeypatch.setattr(
+        "blint.lib.sbom.parse",
+        lambda _exe, disassemble=False, sdk_path=None: metadata,
+    )
+
+    components = process_exe_file(
+        {}, False, "/system/lib64/libcrypto.so", sbom, [], {}, True, False
+    )
+
+    # No openssl component anywhere: the BoringSSL record wins for the
+    # same bytes.
+    everywhere = list(components) + list(
+        getattr(sbom.metadata.component, "components", None) or []
+    )
+    assert not any("openssl" in (comp.purl or "") for comp in everywhere)
+    # The drop is counted on the parent component.
+    superseded = [
+        prop.value
+        for comp in everywhere
+        for prop in (comp.properties or [])
+        if prop.name == "internal:blintdb_superseded_by_framework"
+    ]
+    assert superseded == ["boringssl:openssl"]
+
+
+def test_provider_shaped_openssl_refused_without_openssl3_evidence():
+    """J2: the BoringSSL libssl.so shape never becomes an OpenSSL match.
+
+    The tier-0 BoringSSL libssl.so files (llvm-nm, committed openssl3
+    evidence) export the shared SSL_* surface, no BORINGSSL_*, no ossl_*,
+    and carry no BoringSSL string - so no framework record exists to win;
+    the refusal is the verdict.
+    """
+    from blint.lib.android_blintdb import provider_shaped_openssl_refused
+
+    ssl_surface = ["SSL_new", "SSL_free", "SSL_connect", "SSL_read", "SSL_write"]
+    # Provider shape, no OpenSSL-3 evidence: refused.
+    assert provider_shaped_openssl_refused("libssl.so", ssl_surface) is True
+    assert provider_shaped_openssl_refused("libcrypto.so", ssl_surface) is True
+    assert provider_shaped_openssl_refused("stable_cronet_libcrypto.so", ssl_surface) is True
+    # OpenSSL 3's own namespace present: not refused (the framework record
+    # then speaks for the bytes).
+    assert provider_shaped_openssl_refused("libssl.so", ssl_surface + ["ossl_provider_init"]) is False
+    # A framework record (ossl static copy or banner) already claims them.
+    assert provider_shaped_openssl_refused("libssl.so", ssl_surface, {"openssl"}) is False
+    assert provider_shaped_openssl_refused("libssl.so", ssl_surface, {"boringssl"}) is False
+    # Any other host shape (realm's jni wrapper, sentry's own library):
+    # ordinary nesting, no refusal.
+    assert provider_shaped_openssl_refused("librealm-jni.so", ssl_surface) is False
+    assert provider_shaped_openssl_refused(None, ssl_surface) is False

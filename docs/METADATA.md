@@ -693,6 +693,17 @@ identity, and lands in the SBOM in one of three shapes:
 - **Dropped:** framework identifications from the table above win for the
   same bytes (a BoringSSL record shadows an `openssl` port match); the drop
   is counted in the host's `blint:blintdb:superseded_by_framework` property.
+- **Refused:** an `openssl` match on a provider-shaped host (declared
+  SONAME `libcrypto.so` / `libssl.so`, vendor-prefixed variants) is
+  refused unless OpenSSL-3-only evidence exists — the `ossl_*` namespace or
+  the `OPENSSL_VERSION_TEXT` banner, both of which carry their own
+  framework record. BoringSSL and OpenSSL share the whole `SSL_*`/`EVP_*`
+  API, so a bare symbol match on the provider shape cannot tell them
+  apart; the platform's BoringSSL `libssl.so` files export no
+  `BORINGSSL_*` and carry no BoringSSL string, leaving nothing else to
+  speak for the bytes. The refusal is counted in
+  `blint:blintdb:refused_provider_shape` (`internal:blintdb_refused_provider_shape`
+  on the standalone binary path).
 
 Component versions come from the artifact, never from the database row (the
 row carries the vcpkg port's version; the corpus OsmAnd ships PROJ 8.2.0
