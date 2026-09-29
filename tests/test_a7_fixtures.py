@@ -1,9 +1,9 @@
-"""A7 K1 — the native capability-review fixtures (R1).
+"""The native capability-review fixtures.
 
 The fixtures are real NDK r28c builds (commands and versions in
 ``tests/data/android/a7-fixtures-manifest.json``, sources in
-``tests/scripts/android/a7_sources/``). This file pins what holds before
-the K2 rules exist:
+``tests/scripts/android/a7_sources/``). This file pins the fixtures
+themselves, independent of the rules:
 
 - the committed binaries match the manifest's build description;
 - every fixture parses as an Android-targeting ELF with the expected
@@ -11,11 +11,11 @@ the K2 rules exist:
 - the inline-syscall family's fire/no-fire is already decidable from the
   disassembly text (``svc #0`` / ``syscall`` / ``int 128``), per ABI;
 - the RootBeer library keeps the 0.1.2 JNI exports and holds no constant
-  su path of its own (measurement 4), while the a7 APKs carry the dex half
-  plus all three libraries.
+  su path of its own, while the a7 APKs carry the dex half plus all three
+  libraries.
 
-The ReviewRunner-level fire/no-fire table (the manifest's ``expected``
-block) is asserted in K2, once the rules exist to evaluate it.
+The rules' fire/no-fire table (the manifest's ``expected`` block) is
+asserted in ``test_android_capability_rules.py``.
 """
 
 from __future__ import annotations
@@ -108,8 +108,8 @@ def test_manifest_names_the_build_commands() -> None:
     assert "rootbeer/toolChecker.cpp" in manifest["sources"]
     assert "verbatim" in manifest["sources"]["rootbeer/toolChecker.cpp"]
     expected = manifest["expected"]
-    # Every family has a fire and a no-fire case, and the armeabi-v7a column
-    # of the call-site rules is "not evaluated", never a silent no-fire.
+    # Every family has a fire and a no-fire case, and each armeabi-v7a
+    # column says the rule does not evaluate there.
     for rule in (
         "ANDROID_PTRACE_TRACEME",
         "ANDROID_ROOT_PATH_PROBE",
@@ -122,12 +122,6 @@ def test_manifest_names_the_build_commands() -> None:
     for rule in expected:
         if rule == "ANDROID_DEX_SU_PATHS_TO_NATIVE" or not isinstance(expected[rule], dict):
             continue
-        # On armeabi-v7a every rule reports "not evaluated" — the five
-        # call-site rules because absint models arm64/x86_64 only, the
-        # inline-syscall rule because ARM32 extent overrun injects false
-        # svc #0 sites (the R3 llvm-objdump measurement). Ground rule 35
-        # cuts both ways, and here it is the recovery, not the rule, that
-        # cannot apply.
         for lib, table in expected[rule].items():
             if isinstance(table, dict) and "armeabi-v7a" in table:
                 assert "not evaluated" in table["armeabi-v7a"], (rule, lib)
@@ -180,11 +174,9 @@ def test_rootbeer_library_keeps_jni_exports_and_no_constant_su_path(abi: str) ->
 
 @pytest.mark.parametrize("abi", ABIS)
 def test_inline_syscall_sites_decode_on_every_abi(abi: str) -> None:
-    # A disassembler-level fact, independent of the rule: the Thumb/ARM64/
-    # x86 encodings decode as svc #0 / syscall / int 128 in the fire
-    # fixture and nowhere in the no-fire twin. (The K2 rule separately
-    # declines to report arm32 sites - the R3 extent-overrun measurement -
-    # which is why this asserts the instruction text, not a finding.)
+    # A disassembler-level fact, independent of the rule (which does not
+    # evaluate 32-bit ARM): the encodings decode as svc #0 / syscall /
+    # int 128 in the fire fixture and nowhere in the no-fire twin.
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
     fire = _metadata(FIRE[abi], disassemble=True)

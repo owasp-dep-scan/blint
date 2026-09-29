@@ -8,6 +8,8 @@ implementation missing the ``pc & ~0xFFF`` masking, or off by one
 instruction, produces a different number than the asserted one.
 """
 
+import pytest
+
 from blint.lib.absint import (
     ARM64_MODEL,
     X86_64_MODEL,
@@ -391,3 +393,44 @@ def test_narrow_write_of_a_materialised_pointer_reports_nothing():
     # The full-width move still carries it.
     X86_64_MODEL.step(state, "mov rsi, rax")
     assert state.registers.get("rsi") == ("ptr", 0x1000 + 7 + 7978)
+
+
+def test_small_plain_integers_are_never_offered_to_the_resolver():
+    # A flag or size below MIN_PLAIN_POINTER_VALUE is not an address, even
+    # where a shared object happens to map text at that value.
+    func = _arm64_func(
+        "mov x0, #2480\nbl #4096",
+        direct_call_targets=[{"target_name": "malloc", "raw_operand": "#4096", "kind": "call"}],
+    )
+    offered = []
+
+    def resolve(value):
+        offered.append(value)
+        return "looks like text"
+
+    entries, coverage = analyze_call_site_arguments(
+        {"k": func}, "aarch64-apple-macosx", "MachO", resolve_string=resolve
+    )
+    assert entries[0]["value"] == 2480
+    assert "string" not in entries[0]
+    assert offered == []
+    assert coverage["strings_resolved"] == 0
+
+
+def test_materialised_pointers_below_the_plain_floor_still_resolve():
+    # Android shared objects keep .rodata below 0x10000; a pointer the model
+    # folded from adrp + add is an address wherever it lands.
+    from pathlib import Path
+
+    from blint.lib.binary import parse
+
+    fixture = Path(__file__).parent / "data" / "android" / "liba7_fire_arm64-v8a.so"
+    metadata = parse(str(fixture), True)
+    if not metadata.get("disassembled_functions"):
+        pytest.skip("nyxstone is not available")
+    strings = {
+        entry["string"]: entry["value"]
+        for entry in metadata.get("call_site_arguments") or []
+        if entry.get("string")
+    }
+    assert strings.get("/system/xbin/su", 0x10000) < 0x10000

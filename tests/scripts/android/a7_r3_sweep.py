@@ -12,9 +12,10 @@ member-review path, not a parallel one.
 
 Output (``a7-r3-sweep.json`` beside this script) records, per rule id: the
 fire counts, every finding with its file/function/evidence (the
-hand-check list), the ``not_evaluated`` counts by reason (coverage facts,
-not findings), and the tier-0 median rules fired per library both raw and
-excluding not-evaluated notes — the K0 baseline comparison.
+hand-check list), how many libraries carry each call-site coverage
+degradation (``callsite_abi_not_modelled``, ``callsite_entries_truncated``:
+coverage facts, not findings), and the tier-0 median rules fired per
+library — the K0 baseline comparison.
 
 Usage:
   python tests/scripts/android/a7_r3_sweep.py [--limit N] [--no-apps]
@@ -42,9 +43,9 @@ TIER0_ROOT = CORPUS / "tier0-system"
 IMAGES = ("api34-arm64-v8a", "api35-arm64-v8a", "api36-arm64", "api36-arm64-v8a")
 APP_DIRS = ("tier2-fdroid", "tier3-frameworks", "tier3-builds")
 
+CALLSITE_GAPS = ("callsite_abi_not_modelled", "callsite_entries_truncated")
+
 EVIDENCE_FIELDS = (
-    "status",
-    "reason",
     "callee",
     "via",
     "path",
@@ -95,6 +96,13 @@ def review_android_rules(metadata: dict) -> dict[str, list[dict]]:
     return {key: value for key, value in runner.results.items() if key.startswith("ANDROID_")}
 
 
+def count_callsite_gaps(metadata: dict, buckets: dict) -> None:
+    for reason in (metadata.get("analysis_coverage") or {}).get("degradations") or []:
+        if reason in CALLSITE_GAPS:
+            bucket = buckets.setdefault("call_site_rules", {})
+            bucket[reason] = bucket.get(reason, 0) + 1
+
+
 def sweep_tier0(limit: int, shard_index: int = 0, shard_count: int = 1) -> dict:
     files = tier0_unique_files()
     if limit:
@@ -104,41 +112,27 @@ def sweep_tier0(limit: int, shard_index: int = 0, shard_count: int = 1) -> dict:
     per_rule: dict[str, list] = {}
     not_evaluated: dict[str, dict] = {}
     rules_per_library: list[int] = []
-    rules_per_library_real: list[int] = []
     started = time.monotonic()
     for index, item in enumerate(files):
         metadata = parse(item["path"], True)
         if metadata.get("binary_type") != "ELF":
             continue
         results = review_android_rules(metadata)
-        fired = 0
-        fired_real = 0
+        count_callsite_gaps(metadata, not_evaluated)
         for rule_id, entries in sorted(results.items()):
-            real = [e for e in entries if e.get("status") != "not_evaluated"]
-            notes = [e for e in entries if e.get("status") == "not_evaluated"]
-            if real:
-                fired += 1
-                fired_real += 1
-                for entry in real:
-                    per_rule.setdefault(rule_id, []).append(
-                        {
-                            "file": item["member"],
-                            "images": item["images"],
-                            **{field: entry.get(field) for field in EVIDENCE_FIELDS},
-                        }
-                    )
-            elif notes:
-                fired += 1
-                bucket = not_evaluated.setdefault(rule_id, {})
-                reason = notes[0].get("reason") or "unknown"
-                bucket[reason] = bucket.get(reason, 0) + 1
-        rules_per_library.append(fired)
-        rules_per_library_real.append(fired_real)
+            for entry in entries:
+                per_rule.setdefault(rule_id, []).append(
+                    {
+                        "file": item["member"],
+                        "images": item["images"],
+                        **{field: entry.get(field) for field in EVIDENCE_FIELDS},
+                    }
+                )
+        rules_per_library.append(len(results))
         if index % 100 == 0:
             elapsed = time.monotonic() - started
             print(f"tier0 {index}/{len(files)} ({elapsed:.0f}s)", flush=True)
     rules_per_library.sort()
-    rules_per_library_real.sort()
     count = len(rules_per_library)
     return {
         "libraries": count,
@@ -147,14 +141,9 @@ def sweep_tier0(limit: int, shard_index: int = 0, shard_count: int = 1) -> dict:
             for rule, findings in sorted(per_rule.items())
         },
         "not_evaluated_notes": not_evaluated,
-        "median_rules_per_library_including_notes": (
-            rules_per_library[count // 2] if count else 0
-        ),
-        "median_rules_per_library_real": rules_per_library_real[count // 2] if count else 0,
-        "mean_rules_per_library_real": round(sum(rules_per_library_real) / count, 3)
-        if count
-        else 0,
-        "libraries_with_zero_real_rules": rules_per_library_real.count(0),
+        "median_rules_per_library": rules_per_library[count // 2] if count else 0,
+        "mean_rules_per_library": round(sum(rules_per_library) / count, 3) if count else 0,
+        "libraries_with_zero_rules": rules_per_library.count(0),
         "wall_time_s": round(time.monotonic() - started, 1),
     }
 
@@ -198,16 +187,14 @@ def sweep_apps(only_apk: str | None, no_apps: bool) -> dict:
                 if not str(rule_id).startswith("ANDROID_"):
                     continue
                 for entry in review.get("evidence") or []:
-                    record = {
-                        "file": review.get("filename") or review.get("exe_name"),
-                        **{field: entry.get(field) for field in EVIDENCE_FIELDS},
-                    }
-                    if entry.get("status") == "not_evaluated":
-                        bucket = app_notes.setdefault(rule_id, {})
-                        reason = entry.get("reason") or "unknown"
-                        bucket[reason] = bucket.get(reason, 0) + 1
-                    else:
-                        per_rule.setdefault(rule_id, []).append(record)
+                    per_rule.setdefault(rule_id, []).append(
+                        {
+                            "file": review.get("filename") or review.get("exe_name"),
+                            **{field: entry.get(field) for field in EVIDENCE_FIELDS},
+                        }
+                    )
+            for member in Path(tmp).glob("*.so-metadata.json"):
+                count_callsite_gaps(json.loads(member.read_text(encoding="utf-8")), app_notes)
         print(f"app {apk.name}: {time.monotonic() - started:.0f}s", flush=True)
     return {
         "apps": len(apk_files),

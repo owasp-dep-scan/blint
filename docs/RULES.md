@@ -369,8 +369,9 @@ rules:
 Some findings cannot be expressed over a single symbol or function, because the signal is a
 _contradiction between two parts of the image_, or the _absence_ of something that ought to be
 present. These rules use `check_type: binary_analysis`, which dispatches to a named evaluator in
-`blint/lib/binary_reviews.py` (driver access control) or `blint/lib/implant_reviews.py`
-(side-loading and passive implants) rather than matching a pattern list.
+`blint/lib/binary_reviews.py` (driver access control), `blint/lib/implant_reviews.py`
+(side-loading and passive implants) or `blint/lib/android_reviews.py` (native Android
+capabilities) rather than matching a pattern list.
 
 ```yaml
 ---
@@ -401,6 +402,21 @@ The implant rule group is defined in `blint/data/annotations/review_implants_pe.
 | `HOST_AUTHENTICATION_DOWNGRADE`        | Registry values whose only effect is to lower an authentication boundary                       |
 | `EMBEDDED_ENCRYPTED_PAYLOAD`           | An opaque region dominating its section, beside identified crypto primitives                   |
 | `CUSTOM_COMMAND_DISPATCH_TABLE`        | A runtime-populated table of code pointers, plus an execution primitive                        |
+
+The native Android group is defined in `blint/data/annotations/review_binary_android.yml`. Its
+call-site rules read the `call_site_arguments` block, so they need `--disassemble` and an arm64 or
+x86_64 library; on other ABIs the library's `analysis_coverage.degradations` carries
+`callsite_abi_not_modelled` instead of a finding.
+
+| Rule                               | What it reports                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `ANDROID_PTRACE_TRACEME`           | `ptrace` called with the constant request `PTRACE_TRACEME`                               |
+| `ANDROID_ROOT_PATH_PROBE`          | Constant su paths reaching `access`, `stat`, `fopen` or `open`                           |
+| `ANDROID_SU_EXECUTION`             | An exec-family call, or a `std::string` command builder, receiving a su path             |
+| `ANDROID_EMULATOR_PROPERTY_PROBE`  | Emulator-only properties read by name, or a hardware property beside a goldfish compare  |
+| `ANDROID_WRITABLE_LOCATION_DLOPEN` | `dlopen` of a constant path in shared storage or a writable app directory                |
+| `ANDROID_INLINE_SYSCALLS`          | Raw `svc`/`syscall` instructions outside bionic, the sanitizer runtimes and Go libraries |
+| `ANDROID_DEX_SU_PATHS_TO_NATIVE`   | A su directory list in the dex beside native methods the JNI join bound                  |
 
 Each rule is deliberately narrow, and several are gated on _correlation_ rather than on a single
 observation, because a whole-binary rule that fires on ordinary software makes every report less

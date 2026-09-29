@@ -361,6 +361,28 @@ def test_pointer_string_resolver_reads_a_real_image():
     assert resolve(0xDEAD_BEEF_0000) is None
 
 
+def test_elf_resolver_reads_only_data_sections():
+    # The dynamic string table and notes are never a call argument's target;
+    # decoding them would turn integers into symbol-name fragments.
+    from pathlib import Path
+
+    import lief
+
+    from blint.lib.binary import _pointer_string_resolver
+
+    parsed = lief.ELF.parse(
+        str(Path(__file__).parent / "data" / "android" / "liba7_fire_arm64-v8a.so")
+    )
+    resolve = _pointer_string_resolver(parsed)
+    dynstr = parsed.get_section(".dynstr")
+    assert resolve(dynstr.virtual_address + 1) is None
+    rodata = parsed.get_section(".rodata")
+    blob = bytes(rodata.content)
+    offset = blob.find(b"/system/xbin/su\x00")
+    assert offset >= 0
+    assert resolve(rodata.virtual_address + offset) == "/system/xbin/su"
+
+
 def test_decode_pointer_string_rejects_residue():
     assert decode_pointer_string(b"/etc/passwd\x00rest") == "/etc/passwd"
     # Below the longer minimum this decoder uses: three printable bytes are

@@ -1016,12 +1016,8 @@ def _append_call_target(
             "target_address_candidates": _hex_list(target_addrs),
             "raw_operand": raw_operand,
             "kind": kind,
-            # The emitting instruction's index into the function's assembly
-            # lines. nyxstone renders branch targets pc-relative on ARM
-            # (``bl #1280``), so the operand text alone cannot name a site:
-            # two sites with the same offset reach different callees. The
-            # index lets the call-site recovery resolve by site; entries
-            # built without one (synthetic fixtures) keep the operand key.
+            # The emitting line in the function's assembly. ARM branch operands
+            # are pc-relative, so the operand text alone cannot name a site.
             "site_index": site_index,
         }
     )
@@ -1653,22 +1649,12 @@ def _analyze_instructions(
 def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
     """Map each ELF PLT stub entry address to the symbol it transfers to.
 
-    Decodes the stub's own reference to its GOT slot — ``adrp x16`` +
-    ``ldr x17, [x16, #imm]`` on arm64, ``jmp qword ptr [rip + disp32]``
-    (ff 25) on x86-64 — and resolves the slot through the JUMP_SLOT
-    relocations the caller already indexed. Reading the stub's reference
-    rather than assuming an entry layout keeps this correct across header
-    sizes and linker versions; on x86-64 both the 16-byte-aligned entry
-    base and the jump instruction's own address are keyed, covering the
-    call-to-entry and call-into-stub forms.
-
-    Verified against NDK r28c (lld) output for aarch64 and x86_64; other
-    architectures return an empty map (arm32 PLT entries load their slot
-    through an ip-relative sequence this decoder does not read, and the
-    call-site layer does not model that ABI anyway).
+    Decodes each stub's own reference to its GOT slot (arm64 ``adrp x16`` +
+    ``ldr x17, [x16, #imm]``; x86-64 ``jmp [rip + disp32]``) and names it
+    from the slot's JUMP_SLOT relocation, so no PLT entry layout is assumed.
+    On x86-64 both the jump's address and its 16-byte entry base are keyed.
+    Other architectures return an empty map.
     """
-    import struct
-
     got_names: dict[int, str] = {}
     for reloc in getattr(parsed_obj, "pltgot_relocations", []) or []:
         with contextlib.suppress(AttributeError, TypeError, ValueError):
@@ -1775,11 +1761,8 @@ def _build_addr_to_name_map(metadata: dict, parsed_obj=None) -> dict[int, str]:
                     if not sym_name:
                         continue
                     addr_to_name_map[int(reloc.address)] = sym_name
-        # A call to an imported function lands on the PLT *stub*, whose
-        # address is not a relocation address, so without this pass an
-        # Android arm64 `bl <plt>` carries no callee name at all and the
-        # call-site constant block (and the callgraph's import edges) stay
-        # empty for every shared library that calls through a PLT.
+        # A call to an import lands on its PLT stub, whose address is not a
+        # relocation address; without the stub names such calls name no callee.
         for stub_addr, sym_name in _elf_plt_stub_names(parsed_obj).items():
             addr_to_name_map.setdefault(stub_addr, sym_name)
     elif isinstance(parsed_obj, lief.MachO.Binary):
@@ -2514,7 +2497,7 @@ def _resolve_direct_calls(
                     target_addrs=target_addrs,
                     raw_operand=_raw_operand_text(operand_text),
                     site_index=line_index,
-            )
+                )
             continue
 
         if is_arm32 and is_indirect_call and operand_text:
@@ -2531,7 +2514,7 @@ def _resolve_direct_calls(
                     target_addrs=target_addrs,
                     raw_operand=reg,
                     site_index=line_index,
-            )
+                )
                 continue
             if state and state[0] == "memory":
                 target_name = _lookup_target_name([state[1]], addr_to_name_map)
@@ -2541,7 +2524,7 @@ def _resolve_direct_calls(
                     target_name=target_name,
                     raw_operand=reg,
                     site_index=line_index,
-            )
+                )
                 continue
             _append_call_target(
                 direct_call_targets,
@@ -2549,7 +2532,7 @@ def _resolve_direct_calls(
                 target_name="",
                 raw_operand=reg,
                 site_index=line_index,
-        )
+            )
             continue
 
         if is_indirect_call and operand_text:
@@ -2574,7 +2557,7 @@ def _resolve_direct_calls(
                     target_addrs=exposed_target_addrs,
                     raw_operand=reg_target.get("raw_operand", reg_token),
                     site_index=line_index,
-            )
+                )
                 continue
 
             # Preserve memory-indirect and annotated-symbol evidence for
@@ -2609,7 +2592,7 @@ def _resolve_direct_calls(
                         target_name=target_name,
                         raw_operand=raw_operand,
                         site_index=line_index,
-                )
+                    )
             continue
 
         if is_direct_call and operand_text:
@@ -2634,7 +2617,7 @@ def _resolve_direct_calls(
                 target_addrs=target_addrs,
                 raw_operand=raw_operand,
                 site_index=line_index,
-        )
+            )
 
     # This recovers common compiler-emitted tail dispatch patterns that would
     # otherwise appear as disconnected terminal blocks.
@@ -2675,7 +2658,7 @@ def _resolve_direct_calls(
                         target_addrs=[target_addr],
                         raw_operand=_raw_operand_text(operand),
                         site_index=line_index,
-                )
+                    )
             elif mnemonic in jump_set and parsed_tail.operand_text:
                 operand = parsed_tail.operand_text.strip()
                 reg_token = _extract_register_token(operand, arch_reg_set)
@@ -2696,7 +2679,7 @@ def _resolve_direct_calls(
                             target_addrs=target_addrs,
                             raw_operand=raw_operand,
                             site_index=line_index,
-                    )
+                        )
                 elif not is_aarch64 and not is_mips and "[" in operand and "]" in operand:
                     # Tail jump through a pointer slot - jmp qword ptr
                     # [rip + N] is the PLT, -fno-plt and PE import-thunk
@@ -2713,7 +2696,7 @@ def _resolve_direct_calls(
                             target_name=target_name,
                             raw_operand=_raw_operand_text(operand),
                             site_index=line_index,
-                    )
+                        )
                 elif not any(ch in operand for ch in ("[", "]")):
                     target_addrs = _resolve_operand_target_addresses(
                         mnemonic,
@@ -2737,7 +2720,7 @@ def _resolve_direct_calls(
                             target_addrs=target_addrs,
                             raw_operand=raw_operand,
                             site_index=line_index,
-                    )
+                        )
     return potential_callees, direct_call_targets
 
 

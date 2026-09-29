@@ -24,9 +24,6 @@ from blint.lib.implant_reviews import (
     evaluate_implant_rule,
 )
 
-# The A7 rule ids, imported once so the dispatch below is a set lookup.
-ANDROID_RULE_IDS = frozenset(ANDROID_RULE_EVALUATORS)
-
 # Primitives that grant a caller direct hardware or physical-memory reach.
 HARDWARE_PRIMITIVE_IMPORTS: set[str] = {
     "halgetbusdata",
@@ -580,10 +577,7 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     if rule_id in IMPLANT_RULE_EVALUATORS:
         return evaluate_implant_rule(rule_id, metadata)
 
-    # The A7 native Android capability rules (plan 04/C): conjunctions and
-    # call-site constants only — their module documents why every
-    # single-signal form of these families fires on benign code.
-    if rule_id in ANDROID_RULE_IDS:
+    if rule_id in ANDROID_RULE_EVALUATORS:
         return evaluate_android_rule(rule_id, metadata)
 
     if rule_id in (

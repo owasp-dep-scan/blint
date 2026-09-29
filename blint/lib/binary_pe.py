@@ -80,10 +80,6 @@ from blint.lib.utils import (
 )
 from blint.logger import LOG
 
-# A recovered call-site constant is only treated as a candidate pointer when
-# it could name an address: below this it is a small integer (a flag, a size,
-# a count) and resolving it would be reading a section it does not name.
-_POINTER_STRING_MIN_VALUE = 0x10000
 # How many bytes to read at a candidate pointer, and how long the run must be
 # to count as the string it points at. The longer minimum (the stack-string
 # decoder accepts three) keeps near-coincidental three-byte decodes out.
@@ -856,6 +852,17 @@ def _pe_data_section_bytes(parsed_obj: lief.PE.Binary) -> list:
     return _pe_section_bytes(parsed_obj, IOCTL_TABLE_SECTIONS)
 
 
+def _may_hold_pointed_data(section) -> bool:
+    """Whether a pointer argument could target this section."""
+    if not isinstance(section, lief.ELF.Section):
+        return True
+    return (
+        section.type == lief.ELF.Section.TYPE.PROGBITS
+        and section.has(lief.ELF.Section.FLAGS.ALLOC)
+        and not section.has(lief.ELF.Section.FLAGS.EXECINSTR)
+    )
+
+
 def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     """Build the constant→string resolver for the call-site arguments block.
 
@@ -870,12 +877,10 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
     recovers live at absolute VAs — with the default image base a PE names
     every address ``0x140...``, above any RVA the sections report — so the
     image base is added to the ranges before the comparison. ELF and Mach-O
-    sections already carry absolute addresses and contribute nothing. The
-    same split governs the cheap below-floor rejection: a PE's constants
-    only become plausible pointers above the image base, but an ELF shared
-    object maps its string sections from address zero (an Android ``.so``
-    keeps ``.rodata`` well below 0x10000), so with no image base the
-    section-range membership test below is the only floor.
+    sections already carry absolute addresses and contribute nothing. For
+    ELF only allocated, non-executable ``PROGBITS`` sections count: symbol
+    and string tables, notes and code are never what a call's argument
+    points at, and decoding them turns integers into text.
     """
     ranges: list[tuple[int, int]] = []
     imagebase = 0
@@ -885,14 +890,12 @@ def _pointer_string_resolver(parsed_obj) -> Callable[[int], str | None]:
         for section in parsed_obj.sections:
             va = int(section.virtual_address or 0)
             size = int(section.size or 0)
-            if va and size:
+            if va and size and _may_hold_pointed_data(section):
                 ranges.append((va + imagebase, va + imagebase + size))
     ranges.sort()
     resolved: dict[int, str | None] = {}
 
     def resolve(value: int) -> str | None:
-        if imagebase and value < _POINTER_STRING_MIN_VALUE:
-            return None
         if value in resolved:
             return resolved[value]
         result = None

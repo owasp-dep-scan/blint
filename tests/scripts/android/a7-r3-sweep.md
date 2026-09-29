@@ -4,7 +4,7 @@ Host: the reviewer Mac (macOS 27.0 arm64), blint `feat/an-a7` at the K3
 commit, NDK r28c `28.2.13676358` (its `llvm-objdump`/`llvm-nm` are the
 oracle), nyxstone LLVM 18 (`NYXSTONE_LLVM_PREFIX=/opt/homebrew/opt/llvm@18`).
 Runner: `a7_r3_sweep.py` (tier 0 sharded 4 ways, merged by
-`a7_r3_merge.py`); raw JSON: `a7-r3-sweep.json`.
+`a7_r3_merge.py`); the raw `a7-r3-sweep.json` they write is not committed.
 
 Sets: tier 0 = all four system images (api34-arm64-v8a, api35-arm64-v8a,
 api36-arm64, api36-arm64-v8a) deduped by sha256 → 3,540 unique `.so`,
@@ -144,3 +144,14 @@ the K3 commit).
 - **Full suite, serially**: 2039 passed, 101 skipped, 0 failed
   (44:08 on this host, LLVM 18 for nyxstone); flake8
   `E9,F63,F7,F82` count 0 and ruff clean on the final tree.
+
+## Review update
+
+The "notes (not evaluated)" columns above describe the K3 tree, where a rule
+that could not evaluate returned a placeholder row. Those rows reached the
+capability review table under the rule's own summary (19 on the armeabi-v7a
+fixture APK), so the review moved the facts to the library's
+`analysis_coverage.degradations` (`callsite_abi_not_modelled`,
+`callsite_entries_truncated`) and the rules now return nothing there. The
+fires listed above are unchanged: libdumpstateutil and libnix were re-run
+under the review tree with the same findings.

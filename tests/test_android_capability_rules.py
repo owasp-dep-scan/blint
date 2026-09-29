@@ -1,11 +1,10 @@
-"""A7 K2 — the native Android capability rules against the R1 fixtures.
+"""The native Android capability rules against NDK-built fixtures.
 
 The oracle is ``tests/data/android/a7-fixtures-manifest.json``'s
 ``expected`` table: every rule fires on its fire fixture and stays silent
-on its no-fire fixture, on every ABI the rule evaluates; on armeabi-v7a
-the call-site rules report ``not_evaluated`` as a fact (ground rule 35)
-while the instruction-text rule still evaluates. The fixtures are real
-NDK builds — see the manifest for commands and versions.
+on its no-fire fixture, on every ABI the rule evaluates. On armeabi-v7a no
+rule reports, and the call-site gap is named in the coverage block. The
+manifest records the build commands and toolchain versions.
 """
 
 from __future__ import annotations
@@ -29,6 +28,8 @@ CALL_SITE_RULES = (
     "ANDROID_EMULATOR_PROPERTY_PROBE",
     "ANDROID_WRITABLE_LOCATION_DLOPEN",
 )
+
+
 def _nyxstone_available() -> bool:
     try:
         from blint.lib.disassembler import NYXSTONE_AVAILABLE
@@ -91,18 +92,15 @@ def test_fire_fixture_fires_every_rule(abi: str) -> None:
         assert "ro.kernel.qemu" in properties
         load_paths = {entry["path"] for entry in results["ANDROID_WRITABLE_LOCATION_DLOPEN"]}
         assert "/data/local/tmp/plugin.so" in load_paths
-    # The instruction-text rule fires on the modelled ABIs; on v7a it
-    # reports not_evaluated (the arm32 extent-overrun measurement).
-    inline = results["ANDROID_INLINE_SYSCALLS"]
     if abi in MODELLED_ABIS:
+        inline = results["ANDROID_INLINE_SYSCALLS"]
         assert inline and inline[0]["site_total"] >= 1
         assert {"a7_inline_syscall", "a7_run_all"} <= {
             holder["function"] for holder in inline[0]["functions"]
         }
     else:
-        assert inline and inline[0]["status"] == "not_evaluated"
-        assert inline[0]["reason"] == "arm32_recovery_unreliable"
-        assert "llvm-objdump" in inline[0]["detail"]
+        # 32-bit ARM: nothing reports, not even a placeholder row.
+        assert results == {}, results
 
 
 @pytest.mark.parametrize("abi", ABIS)
@@ -118,38 +116,36 @@ def test_nofire_fixture_stays_silent(abi: str) -> None:
         assert real == {}, real
         assert "ANDROID_INLINE_SYSCALLS" not in results
     else:
-        # Unmodelled ABI: all six rules each say so as a fact.
-        assert set(real) == set(CALL_SITE_RULES)
-        for entries in real.values():
-            assert entries[0]["status"] == "not_evaluated"
-            assert entries[0]["reason"] == "abi_not_modelled"
-        inline = results["ANDROID_INLINE_SYSCALLS"]
-        assert inline and inline[0]["reason"] == "arm32_recovery_unreliable"
+        assert results == {}, results
 
 
 @pytest.mark.parametrize("abi", ABIS)
-def test_unmodelled_abi_reports_not_evaluated(abi: str) -> None:
+def test_unmodelled_abi_is_named_in_coverage_not_in_reviews(abi: str) -> None:
+    # An ABI the call-site dataflow does not model is a coverage fact on the
+    # library, never a review row carrying the rule's summary.
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
+    metadata = _parse_fixture(f"liba7_fire_{abi}.so")
+    degradations = metadata["analysis_coverage"]["degradations"]
     if abi in MODELLED_ABIS:
-        pytest.skip("absint models this ABI")
-    results = _android_results(_parse_fixture(f"liba7_fire_{abi}.so"))
-    for rule in CALL_SITE_RULES:
-        assert rule in results, rule
-        entries = results[rule]
-        assert entries[0]["status"] == "not_evaluated"
-        assert entries[0]["reason"] == "abi_not_modelled"
-        assert "arm64 and x86_64" in entries[0]["detail"]
+        assert "callsite_abi_not_modelled" not in degradations
+    else:
+        assert "callsite_abi_not_modelled" in degradations
+        assert _android_results(metadata) == {}
 
 
-def test_without_disassembly_the_rules_stay_silent_like_every_disassembly_layer() -> None:
-    # A plain parse (no --disassemble) of an Android library: the call-site
-    # rules are silent, exactly as the stack-string and function-review
-    # layers are — the run's analysis coverage already names the missing
-    # disassembly globally, and per-rule notes would be boilerplate on
-    # every library. The not_evaluated fact is reserved for the cases a
-    # disassembled report could mistake for absence (unmodelled ABI,
-    # truncated block) — asserted in the v7a tests above.
+def test_truncated_call_site_block_is_a_coverage_degradation() -> None:
+    from blint.lib.binary import _build_analysis_coverage
+
+    coverage = _build_analysis_coverage(
+        {"call_site_arguments_coverage": {"entries_truncated": True, "functions_no_abi": 0}},
+        True,
+    )
+    assert "callsite_entries_truncated" in coverage["degradations"]
+    assert "callsite_abi_not_modelled" not in coverage["degradations"]
+
+
+def test_without_disassembly_the_rules_stay_silent() -> None:
     from blint.lib.binary import parse
 
     metadata = parse(str(DATA / "liba7_fire_arm64-v8a.so"))
@@ -158,9 +154,7 @@ def test_without_disassembly_the_rules_stay_silent_like_every_disassembly_layer(
 
 
 def test_non_android_elf_never_reports() -> None:
-    # A desktop ELF carries no android facts block; every rule is silent
-    # rather than guessing (the fixture is blint's own committed ELF test
-    # binary territory, so a synthetic metadata shape is the honest unit).
+    # A desktop ELF carries no android facts block, so every rule is silent.
     from blint.lib.review_runner import ReviewRunner
 
     initialize_rules(BlintOptions())
@@ -178,8 +172,8 @@ def test_non_android_elf_never_reports() -> None:
 
 
 def test_rootbeer_native_library_holds_no_fire_evidence() -> None:
-    # Measurement 4: toolChecker at 0.1.2 receives its paths from Java, so
-    # the native side fires nothing — the dex rule carries that case.
+    # RootBeer 0.1.2's toolChecker receives its paths from Java, so its
+    # library holds no constant; the dex rule covers that case.
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
     results = _android_results(_parse_fixture("libtoolChecker_arm64-v8a.so"))
@@ -189,9 +183,8 @@ def test_rootbeer_native_library_holds_no_fire_evidence() -> None:
 
 
 def test_dex_rule_fires_on_a7_apk_and_not_on_a5(tmp_path: Path) -> None:
-    # The app-level conjunction: analyze_android_app's merged dex metadata
-    # plus the A5 JNI join summary, exactly the two blocks
-    # _process_android_app attaches before the review runs.
+    # The app-level conjunction: the merged dex metadata plus the JNI join
+    # summary, the two blocks _process_android_app attaches before review.
     from blint.lib.android import analyze_android_app
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
@@ -221,6 +214,22 @@ def test_dex_rule_fires_on_a7_apk_and_not_on_a5(tmp_path: Path) -> None:
             assert rule is None, apk
 
 
+def test_dex_rule_needs_a_list_of_su_directories() -> None:
+    from blint.lib.android_reviews import evaluate_android_rule
+
+    join = {"per_abi": {"arm64-v8a": {"bound": [{"method": "a"}], "bound_dynamic": []}}}
+    one = {"android_jni": join, "informative_strings": ["/system/xbin/", "/data/"]}
+    assert evaluate_android_rule("ANDROID_DEX_SU_PATHS_TO_NATIVE", one) == []
+    two = {"android_jni": join, "informative_strings": [{"value": "/system/xbin/"}, "/su/bin/"]}
+    evidence = evaluate_android_rule("ANDROID_DEX_SU_PATHS_TO_NATIVE", two)
+    assert evidence and evidence[0]["su_path_strings"] == ["/su/bin/", "/system/xbin/"]
+    unbound = {
+        "android_jni": {"per_abi": {}},
+        "informative_strings": ["/system/xbin/", "/su/bin/"],
+    }
+    assert evaluate_android_rule("ANDROID_DEX_SU_PATHS_TO_NATIVE", unbound) == []
+
+
 def test_su_path_matcher_forms() -> None:
     from blint.lib.android_reviews import _SU_COMMAND_RE, _SU_PATH_SUFFIX_RE
 
@@ -247,16 +256,14 @@ def test_plt_stub_names_decode_the_fixture_table() -> None:
         stubs = _elf_plt_stub_names(parsed)
         assert stubs, name
         assert machine_marker in stubs.values(), name
-        # The arm32 PLT shape is not decoded (documented): a v7a library
-        # returns no stubs rather than wrong ones.
+        # The arm32 PLT shape is not decoded: no stubs rather than wrong ones.
         parsed_v7a = lief.ELF.parse(str(DATA / "liba7_fire_armeabi-v7a.so"))
         assert _elf_plt_stub_names(parsed_v7a) == {}
 
 
 def test_su_execution_covers_the_dumpstate_string_append_form() -> None:
-    # llvm-objdump of the api36 libdumpstateutil: RunCommandToFd appends
-    # "/system/xbin/su" through basic_string::append(char const*) and the
-    # later execvp receives a register - the recoverable half is the append.
+    # dumpstate's RunCommandToFd appends "/system/xbin/su" through
+    # basic_string::append(char const*); the later execvp receives a register.
     from blint.lib.android_reviews import evaluate_android_rule
 
     metadata = {
@@ -310,10 +317,7 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
     # Go-built libraries are excluded by buildinfo.
     go = dict(base, name="libgo.so", build_info={"go_version": "go1.24.0"})
     assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", go) == []
-    # ARM32: even a decoded svc site does not carry a finding - the R3
-    # hand-check measured extent-overrun false sites on stripped v7a
-    # libraries (llvm-objdump oracle: 25 false vs 2 true), so the ABI
-    # reports not_evaluated with that reason instead.
+    # 32-bit ARM is not evaluated, even with a decoded svc site.
     arm32 = dict(
         base,
         name="libflutter.so",
@@ -326,9 +330,26 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
             }
         },
     )
-    verdict = evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32)
-    assert verdict and verdict[0]["status"] == "not_evaluated"
-    assert verdict[0]["reason"] == "arm32_recovery_unreliable"
+    assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32) == []
+
+
+# nyxstone's rendering of svc #0, syscall and int 0x80 in each IntegerBase
+# (NYXSTONE_LLVM_PREFIX=llvm@18; aarch64 prints "#0" in every style).
+SYSCALL_RENDERINGS = {
+    "Dec": ("svc #0", "syscall\nint 128"),
+    "HexPrefix": ("svc #0x0", "syscall\nint 0x80"),
+    "HexSuffix": ("svc #0h", "syscall\nint 80h"),
+}
+
+
+def test_inline_syscall_sites_match_every_integer_base() -> None:
+    from blint.lib.android_reviews import _INLINE_SYSCALL_RE
+
+    for style, (arm, x86) in SYSCALL_RENDERINGS.items():
+        assert len(_INLINE_SYSCALL_RE.findall(arm)) == 1, style
+        assert len(_INLINE_SYSCALL_RE.findall(x86)) == 2, style
+    for other in ("svc #1", "svc #0x80", "int 3", "int3", "syscalls"):
+        assert not _INLINE_SYSCALL_RE.findall(other), other
 
 
 def test_writable_prefix_boundaries() -> None:

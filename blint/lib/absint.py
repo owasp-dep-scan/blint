@@ -1481,18 +1481,13 @@ def _callee_resolvers(
 ) -> tuple[dict, dict, dict, dict]:
     """Index the disassembler's resolved call targets for site resolution.
 
-    Returns four maps: (call-site by line index, tail-transfer by line
-    index, call-site by operand text, tail-transfer by operand text). The
-    line-index maps are primary whenever the disassembler recorded the
-    emitting instruction (``site_index``): nyxstone renders ARM branch
-    targets pc-relative (``bl #1280``), so the same operand text occurs at
-    many sites reaching different callees, and keying by text there would
-    either mis-resolve or (the historical behaviour) refuse every such
-    site as ambiguous. The operand maps remain the fallback for entries
-    built without a site index, and the ambiguity refusal is unchanged: a
-    key resolving to more than one name keeps both names and resolution
-    refuses it — an unresolved callee is a legitimate result, a wrong one
-    is not.
+    Returns four maps: call and tail-transfer targets keyed by the emitting
+    line (``site_index``), then the same keyed by operand text. The line key
+    comes first because ARM branch operands are pc-relative (``bl #1280``),
+    so one operand text can name different callees at different sites. The
+    operand maps serve entries recorded without a line. A key that resolves
+    to more than one name is refused: an unresolved callee is a legitimate
+    result, a wrong one is not.
     """
     call_sites: dict[int, set[str]] = {}
     tail_sites: dict[int, set[str]] = {}
@@ -1617,6 +1612,7 @@ def _call_site_records(
                     line_index=start + offset,
                 )
                 arguments = []
+                pointer_positions = []
                 materialised = 0
                 materialised_page = 0
                 for family in arg_families:
@@ -1629,6 +1625,7 @@ def _call_site_records(
                         and value[0] == "ptr"
                         and isinstance(value[1], int)
                     ):
+                        pointer_positions.append(len(arguments))
                         arguments.append(value[1])
                         materialised += 1
                         if value[1] % 4096 == 0:
@@ -1646,6 +1643,7 @@ def _call_site_records(
                         "callee": callee,
                         "registers": tuple(arg_families),
                         "arguments": arguments,
+                        "pointer_positions": tuple(pointer_positions),
                         "materialised": materialised,
                         "materialised_page": materialised_page,
                     }
@@ -1755,6 +1753,11 @@ MAX_CALLSITE_SITES_PER_ENTRY = 3
 # Keep at most this many function names in the coverage counter that names
 # the functions whose contributions were cut by the per-function cap.
 MAX_NAMED_CAPPED_FUNCTIONS = 20
+# A plain integer below this is a flag, size or count, so it is never offered
+# to the string resolver. A materialised pointer is an address by
+# construction and is offered wherever it lands: a shared object maps its
+# read-only data from address zero, often well below this bound.
+MIN_PLAIN_POINTER_VALUE = 0x10000
 
 
 def _wide_terminated_prefix(data: bytes) -> bytes:
@@ -1837,8 +1840,10 @@ def analyze_call_site_arguments(
     contribute a counter, not an entry: an integer constant with no resolved
     destination is the noise this block exists to keep out of reports.
 
-    ``resolve_string``, when given, is called once per distinct constant and
-    may return the string its value points at (the caller owns the
+    ``resolve_string``, when given, is called once per distinct constant that
+    could be an address (a materialised pointer, or a plain integer of at
+    least :data:`MIN_PLAIN_POINTER_VALUE`) and may return the string its
+    value points at (the caller owns the
     section-level answer; this module deliberately knows nothing about
     sections). ``max_entries`` bounds the block and defaults to the
     ``BLINT_MAX_CALLSITE_ARGUMENTS`` environment value or
@@ -1910,12 +1915,15 @@ def analyze_call_site_arguments(
                     [value for value in record.get("arguments", []) if value is not None]
                 )
                 continue
+            pointer_positions = record.get("pointer_positions") or ()
             for argument, value in enumerate(record.get("arguments") or []):
                 if value is None:
                     continue
                 key = (callee, argument, value)
                 if key in aggregated:
                     aggregated[key]["site_count"] += 1
+                    if argument in pointer_positions:
+                        aggregated[key]["pointer"] = True
                     if (
                         len(aggregated[key]["functions"]) < MAX_CALLSITE_SITES_PER_ENTRY
                         and function_name not in aggregated[key]["functions"]
@@ -1943,6 +1951,7 @@ def analyze_call_site_arguments(
                         "line": record.get("line"),
                         "instruction": record.get("instruction"),
                     },
+                    "pointer": argument in pointer_positions,
                 }
                 if len(aggregated) >= max_entries:
                     truncated = True
@@ -1963,7 +1972,9 @@ def analyze_call_site_arguments(
             "functions": list(item["functions"]),
             "example": item["example"],
         }
-        if resolve_string is not None:
+        if resolve_string is not None and (
+            item["pointer"] or item["value"] >= MIN_PLAIN_POINTER_VALUE
+        ):
             if item["value"] not in resolved:
                 resolved[item["value"]] = resolve_string(item["value"])
             if string := resolved[item["value"]]:
