@@ -1,0 +1,62 @@
+blint/lib/disassembler.py
+  s_3ce4fa53ecd7da::t_a61e66762c7a85 1019-1020,2500,2517,2527,2535,2560,2595,2620,2661,2682,2699,2723
+  s_3ce4fa53ecd7da::t_e571a32ec35587 1764-1765
+  s_3ce4fa53ecd7da::t_b5a75333eb95e4 1652-1656
+tests/test_callsite_block.py
+  s_3ce4fa53ecd7da::t_cb8b3bbc11edc2 364-385
+blint/lib/binary_reviews.py
+  s_3ce4fa53ecd7da::t_a61e66762c7a85 580
+tests/scripts/android/a7-r3-sweep.md
+  s_3ce4fa53ecd7da::t_277ecb0b85d279 7,147-157
+tests/test_android_capability_rules.py
+  s_3ce4fa53ecd7da::t_9ee85f37387ae4 31-32,226-229
+  s_3ce4fa53ecd7da::t_778a4ccf666ab4 1,5-7,96,102-103,119,123-125,128-129,131-148,157,175-176,186-187,217-225,230-232,259,265-266,320,333-352
+blint/lib/binary_pe.py
+  s_3ce4fa53ecd7da::t_4f96b9628bd400 855-865,880-883,893
+blint/lib/binary.py
+  s_3ce4fa53ecd7da::t_07540456af6290 1570-1573,1575-1578
+blint/lib/absint.py
+  s_3ce4fa53ecd7da::t_1e090f4c5cc412 1756-1760
+  s_3ce4fa53ecd7da::t_cc7a2bd75763f5 1954
+  s_3ce4fa53ecd7da::t_2f521888e26fdd 1975-1977
+  s_3ce4fa53ecd7da::t_6f689c477a6901 1843-1846
+  s_3ce4fa53ecd7da::t_e0743fc697d017 1615,1628
+  s_3ce4fa53ecd7da::t_c1f58ea004f1ea 1484-1490
+  s_3ce4fa53ecd7da::t_02a5b687fee3b5 1918,1925-1926
+  s_3ce4fa53ecd7da::t_4baa4d5e084f25 1646
+tests/data/android/a7-fixtures-manifest.json
+  s_3ce4fa53ecd7da::t_983d9fccea2bfa 19,35,118
+tests/test_pointer_materialisation.py
+  s_3ce4fa53ecd7da::t_d063e1163de253 11-12
+  s_3ce4fa53ecd7da::t_389194f85ed150 396-436
+docs/RULES.md
+  s_3ce4fa53ecd7da::t_200fe314da7d35 372-374,406-419
+  s_3ce4fa53ecd7da::t_e9003e1a05ece4 420
+blint/lib/android_reviews.py
+  s_3ce4fa53ecd7da::t_9ee85f37387ae4 235
+  s_3ce4fa53ecd7da::t_401e856f5e41ff 1-14,23-25,42,50,55-57,60-62,64-66,68,70,73-74,76-82,86-102,106,113-114,123-124,127-132,135,138-141,143-144,147-148,152,156,161,163,170,174-196,200-201,205,208,210,214-219,221-222,224-225,228,230,240-253,257-258,260,267,269-270,272,274,277,288-289,296-297,304,307-310,318-323,333-336,356-357,362-364
+blint/data/annotations/review_binary_android.yml
+  s_3ce4fa53ecd7da::t_fb2534288e28b3 2-5,7-10,16,18,20-23,25-28,30-34,41,43-47,49-53,58,60,62-65,67-72,74-76,83,85-91,93,95-98,103,105,107-112,114-116,121,123,125-129,131-133,135-138,143,149,151,153-159,161-165
+docs/METADATA.md
+  s_3ce4fa53ecd7da::t_200fe314da7d35 292,296
+tests/test_a7_fixtures.py
+  s_3ce4fa53ecd7da::t_f176e7bce12f74 1,5-6,14-15,17-18,111-112,177-179
+tests/scripts/android/a7_r3_sweep.py
+  s_3ce4fa53ecd7da::t_483a34a3297416 15-18,46-47,99-105,121,123-131,144-146,190-197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6f64762061f00b212b5f541aff1de5e1ef0ec416",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
