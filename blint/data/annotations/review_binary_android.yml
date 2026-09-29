@@ -1,0 +1,168 @@
+---
+# Native Android capability reviews. Every rule is a call-site constant or a
+# conjunction: the single-signal forms (a ptrace import, a /proc/self/maps or
+# TracerPid string, a system property read, a dlopen import, an emulator
+# token) are carried mostly by crash handlers, unwinders and GPU backends.
+#
+# Rejected: matching "frida" strings. The substring occurs in ordinary words
+# and identifiers ("Friday", "gMainThread"); detecting Frida needs evidence
+# such as its server port or thread names, which this layer does not have.
+text: Native Android capability reviews - anti-debug, root probes, su execution, emulator checks, writable-location code loading, inline syscalls
+group: BINARY_REVIEWS
+exe_type:
+  - ELF
+rules:
+  - id: ANDROID_PTRACE_TRACEME
+    title: Library calls ptrace(PTRACE_TRACEME)
+    severity: medium
+    summary: A ptrace call site passes the request PTRACE_TRACEME (0), the self-anti-debug idiom.
+    description: |
+      A resolved ptrace call receives the constant request 0, PTRACE_TRACEME,
+      which makes the calling process its parent's tracee. A process has one
+      tracer at a time, so a debugger's later attach fails: the standard native
+      anti-debug technique on Android and Linux.
+
+      A ptrace import alone is not reported. Crash handlers and memory
+      debuggers import it to attach to other processes (PTRACE_ATTACH,
+      PTRACE_SEIZE). A library that only wraps the call, such as a ptrace
+      binding crate, also matches; read the function name.
+
+      Cannot see: a request computed at run time, ptrace reached through an
+      unresolved function pointer or the libc syscall() wrapper, and x86-64
+      tail jumps into the PLT. Needs --disassemble and arm64 or x86_64; other
+      ABIs are named in analysis_coverage.degradations as
+      callsite_abi_not_modelled.
+    attack:
+      - T1622 (Debugger Evasion)
+    check_type: binary_analysis
+  - id: ANDROID_ROOT_PATH_PROBE
+    title: Constant su paths reach file-existence checks
+    severity: low
+    summary: Constant su paths such as /system/xbin/su reach access, stat, fopen or open, the native root-check idiom.
+    description: |
+      A resolved call to access, stat, lstat, fopen or open receives a constant
+      path whose last component is "su". Probing the well-known su locations is
+      the file half of a native root check. Security SDKs and platform
+      diagnostics use the same shape, so the evidence lists the paths and
+      callees rather than a verdict.
+
+      Cannot see: paths built at run time, paths passed in from Java (RootBeer's
+      native checker receives its list through JNI; see
+      ANDROID_DEX_SU_PATHS_TO_NATIVE), and paths read from a table inside a
+      loop the compiler did not unroll, which is the usual shape at -Os and
+      -Oz. Needs --disassemble and arm64 or x86_64.
+    attack:
+      - T1636 (Android Protected Files)
+    check_type: binary_analysis
+  - id: ANDROID_SU_EXECUTION
+    title: Library executes su
+    severity: medium
+    summary: An exec-family call site receives a constant su path or command, or a su path is appended to a std::string command.
+    description: |
+      A resolved execve, execv, execl, execle, execlp, execvp, popen or system
+      call receives a constant naming su, either the path itself or a command
+      that starts with it ("/system/bin/su -c ..."). Running su, rather than
+      probing for it, is what root helpers and privilege-escalation code do.
+
+      A su path appended to a std::string (basic_string::append) is reported
+      too, with via: string_append: that is how C++ code assembles a command
+      before handing the buffer to an exec call. The append is what is proven;
+      the consumer of the string is not traced. Android's own dumpstate
+      builds its userdebug root commands this way, and platform code is
+      reported like any other.
+
+      Cannot see: commands built by other means, su reached through a shell
+      whose constant names only the shell, and the ABIs the call-site block
+      does not model. Needs --disassemble.
+    attack:
+      - T1548.001 (Abuse Elevation Control Mechanism: Setuid and Setgid)
+    check_type: binary_analysis
+  - id: ANDROID_EMULATOR_PROPERTY_PROBE
+    title: Emulator-only system properties read by name
+    severity: low
+    summary: __system_property_get reads a property only emulators set, or a hardware property beside a goldfish/ranchu comparison.
+    description: |
+      Two forms report. A resolved __system_property_get or
+      __system_property_find call receives ro.kernel.qemu, ro.kernel.qemu.gles,
+      ro.kernel.qemu1 or ro.boot.qemu: properties that only an emulator sets,
+      so reading one is the emulator check itself. Or the library reads
+      ro.hardware, ro.product.device or ro.product.board and also compares a
+      string against the constant goldfish or ranchu; graphics code does the
+      same to pick a backend, so read the library's purpose.
+
+      Ordinary property reads such as ro.build.version.sdk are not reported.
+
+      Cannot see: property names built at run time, reads through
+      android::base::GetProperty or property_get, comparisons against other
+      values, and the ABIs the call-site block does not model. Needs
+      --disassemble.
+    attack:
+      - T1497.001 (Virtualization/Sandbox Evasion: System Checks)
+    check_type: binary_analysis
+  - id: ANDROID_WRITABLE_LOCATION_DLOPEN
+    title: Code loaded from a writable location
+    severity: medium
+    summary: dlopen or android_dlopen_ext receives a constant path under /data/local/tmp, /sdcard, /storage or /data/data.
+    description: |
+      A resolved dlopen or android_dlopen_ext call receives a constant path in
+      shared storage (/sdcard, /storage) or a writable app location
+      (/data/data, /data/local/tmp). Code loaded from there can be replaced by
+      anything that can write to it, which is why native libraries belong in
+      the APK. A bare library name resolved through the linker's search path
+      is the normal shape and is not reported.
+
+      Cannot see: the common dynamic-loading shape, a path received from Java
+      or built at run time. This rule covers constant paths only, and needs
+      --disassemble and arm64 or x86_64.
+    attack:
+      - T1627 (Obfuscated Files or Information)
+    check_type: binary_analysis
+  - id: ANDROID_INLINE_SYSCALLS
+    title: Raw syscall instructions in the library's own code
+    severity: low
+    summary: svc #0, syscall or int 0x80 appear in this library's functions, outside the code that legitimately issues them.
+    description: |
+      The library's own functions contain the kernel transition instruction
+      (svc #0 on arm64, syscall or int 0x80 on x86) instead of calling bionic's
+      wrappers. Packers and anti-instrumentation code do this to avoid hooks on
+      libc entry points. bionic libc (by SONAME), the clang sanitizer runtimes
+      (libclang_rt.*) and Go-built libraries (by build info) are excluded.
+
+      Benign code does it too: a signal-safety stub that queries the signal
+      mask is a common single site. The evidence lists the functions and their
+      site counts; read them before concluding.
+
+      Needs --disassemble. 32-bit ARM is not evaluated: function extents in
+      stripped libraries can run into the literal pools between functions,
+      whose bytes decode as svc. Cannot see syscalls in code generated or
+      decrypted at run time.
+    attack:
+      - T1106 (Native API)
+    check_type: binary_analysis
+---
+text: Android app review - dex evidence joined to the app's native code
+group: BINARY_REVIEWS
+exe_type:
+  - dexbinary
+rules:
+  - id: ANDROID_DEX_SU_PATHS_TO_NATIVE
+    title: Su directory list in the dex beside native methods
+    severity: low
+    summary: The dex holds a list of su directories and declares native methods bound to the app's libraries.
+    description: |
+      The dex holds at least two directories from the root-probe list that
+      scottyab/rootbeer's Const.suPaths carries (/system/xbin/, /su/bin/,
+      /system/bin/.ext/, /system/bin/failsafe/, /system/sd/xbin/,
+      /system/usr/we-need-root/, /system_ext/bin/, /data/local/xbin/), and the
+      JNI join binds some of its native method declarations to shipped
+      libraries. RootBeer's native checker receives these paths from Java, so
+      its library holds no constant for ANDROID_ROOT_PATH_PROBE to find.
+
+      What this does not prove: that the paths reach the native methods. The
+      dex-to-native dataflow is not traced, so an app that lists su
+      directories for another reason and ships unrelated native code also
+      matches. Generic mount points (/data/, /cache/, /dev/, /sbin/,
+      /system/bin/) do not count.
+    attack:
+      - T1636 (Android Protected Files)
+    check_type: binary_analysis

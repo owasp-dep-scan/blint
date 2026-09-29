@@ -1567,11 +1567,15 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         # Imports exist but none could be pinned to a library, so the
         # unused/undeclared dependency checks were skipped rather than clean.
         degradations.append("dependency_attribution_unresolved")
-    # Pointer-materialisation blind spots, mirrored from the
-    # call-site block's coverage so a consumer reading only this block
-    # still sees them: a pc-relative materialisation that stayed symbolic
-    # because the listing could not be located, and why.
+    # Call-site block blind spots, mirrored from its coverage so a consumer
+    # reading only this block still sees them: an ABI the dataflow does not
+    # model, a block cut at its entry bound (an absent constant then proves
+    # nothing), and pc-relative materialisations left symbolic.
     callsite_coverage = metadata.get("call_site_arguments_coverage") or {}
+    if callsite_coverage.get("functions_no_abi"):
+        degradations.append("callsite_abi_not_modelled")
+    if callsite_coverage.get("entries_truncated"):
+        degradations.append("callsite_entries_truncated")
     if callsite_coverage.get("functions_extent_mismatch"):
         degradations.append("callsite_block_extent_mismatch")
     if callsite_coverage.get("functions_no_line_addresses"):

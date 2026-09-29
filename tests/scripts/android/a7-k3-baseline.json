@@ -1,0 +1,41 @@
+{
+ "per_library_findings": {
+  "app": {
+   "libraries": 73,
+   "libraries_with_zero_findings": 34,
+   "mean_rules_fired_per_library": 0.781,
+   "median_rules_fired_per_library": 1
+  },
+  "tier0": {
+   "libraries": 1157,
+   "libraries_with_zero_findings": 822,
+   "mean_rules_fired_per_library": 0.347,
+   "median_rules_fired_per_library": 0
+  }
+ },
+ "per_rule": {
+  "app": {
+   "DOH_BYPASS_CLUSTER": 1,
+   "FORTIFIED_LIBC_IN_USE": 30,
+   "HTTP_METHODS": 1,
+   "LOADER_SYMBOLS": 15,
+   "PII_READ": 7,
+   "RAW_NET_ACCESS": 1,
+   "WEB_SOCKET_API": 2
+  },
+  "tier0": {
+   "DOH_BYPASS_CLUSTER": 2,
+   "EBPF_SOCK_OPS_CLUSTER": 2,
+   "FFI_METHODS": 8,
+   "FILE_IO_READ": 11,
+   "FILE_IO_WRITE": 24,
+   "FORTIFIED_LIBC_IN_USE": 293,
+   "HTTP_METHODS": 2,
+   "LOADER_SYMBOLS": 38,
+   "NET_METHODS": 5,
+   "PII_READ": 14,
+   "WEAK_CRYPTO": 1,
+   "WEB_SOCKET_API": 1
+  }
+ }
+}

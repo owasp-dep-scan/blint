@@ -1,0 +1,1997 @@
+{
+ "libc.so": {
+  "functions_holding_sites": [
+   {
+    "address": "0x7c9b4",
+    "example_lines": [],
+    "function": "abort",
+    "sites": 2
+   },
+   {
+    "address": "0x85554",
+    "example_lines": [],
+    "function": "fdsan_error(char const*, ...)",
+    "sites": 2
+   },
+   {
+    "address": "0xb3240",
+    "example_lines": [],
+    "function": "__bionic_clone",
+    "sites": 1
+   },
+   {
+    "address": "0xb3280",
+    "example_lines": [],
+    "function": "_exit_with_stack_teardown",
+    "sites": 2
+   },
+   {
+    "address": "0xb3700",
+    "example_lines": [],
+    "function": "syscall",
+    "sites": 1
+   },
+   {
+    "address": "0xb3740",
+    "example_lines": [],
+    "function": "vfork",
+    "sites": 1
+   },
+   {
+    "address": "0x108700",
+    "example_lines": [],
+    "function": "getuid",
+    "sites": 1
+   },
+   {
+    "address": "0x108740",
+    "example_lines": [],
+    "function": "getgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108780",
+    "example_lines": [],
+    "function": "geteuid",
+    "sites": 1
+   },
+   {
+    "address": "0x1087c0",
+    "example_lines": [],
+    "function": "getegid",
+    "sites": 1
+   },
+   {
+    "address": "0x108800",
+    "example_lines": [],
+    "function": "getresuid",
+    "sites": 1
+   },
+   {
+    "address": "0x108840",
+    "example_lines": [],
+    "function": "getresgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108880",
+    "example_lines": [],
+    "function": "getgroups",
+    "sites": 1
+   },
+   {
+    "address": "0x1088c0",
+    "example_lines": [],
+    "function": "setgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108900",
+    "example_lines": [],
+    "function": "setuid",
+    "sites": 1
+   },
+   {
+    "address": "0x108940",
+    "example_lines": [],
+    "function": "setreuid",
+    "sites": 1
+   },
+   {
+    "address": "0x108980",
+    "example_lines": [],
+    "function": "setresuid",
+    "sites": 1
+   },
+   {
+    "address": "0x1089c0",
+    "example_lines": [],
+    "function": "setresgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108a00",
+    "example_lines": [],
+    "function": "setfsgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108a40",
+    "example_lines": [],
+    "function": "setfsuid",
+    "sites": 1
+   },
+   {
+    "address": "0x108a80",
+    "example_lines": [],
+    "function": "readahead",
+    "sites": 1
+   },
+   {
+    "address": "0x108ac0",
+    "example_lines": [],
+    "function": "getpgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108b00",
+    "example_lines": [],
+    "function": "getppid",
+    "sites": 1
+   },
+   {
+    "address": "0x108b40",
+    "example_lines": [],
+    "function": "getsid",
+    "sites": 1
+   },
+   {
+    "address": "0x108b80",
+    "example_lines": [],
+    "function": "setsid",
+    "sites": 1
+   },
+   {
+    "address": "0x108bc0",
+    "example_lines": [],
+    "function": "kill",
+    "sites": 1
+   },
+   {
+    "address": "0x108c00",
+    "example_lines": [],
+    "function": "tgkill",
+    "sites": 1
+   },
+   {
+    "address": "0x108c40",
+    "example_lines": [],
+    "function": "__brk",
+    "sites": 1
+   },
+   {
+    "address": "0x108c80",
+    "example_lines": [],
+    "function": "execve",
+    "sites": 1
+   },
+   {
+    "address": "0x108cc0",
+    "example_lines": [],
+    "function": "__ptrace",
+    "sites": 1
+   },
+   {
+    "address": "0x108d00",
+    "example_lines": [],
+    "function": "getrusage",
+    "sites": 1
+   },
+   {
+    "address": "0x108d40",
+    "example_lines": [],
+    "function": "__getpriority",
+    "sites": 1
+   },
+   {
+    "address": "0x108d80",
+    "example_lines": [],
+    "function": "setpriority",
+    "sites": 1
+   },
+   {
+    "address": "0x108dc0",
+    "example_lines": [],
+    "function": "getrlimit64",
+    "sites": 1
+   },
+   {
+    "address": "0x108e00",
+    "example_lines": [],
+    "function": "setrlimit64",
+    "sites": 1
+   },
+   {
+    "address": "0x108e40",
+    "example_lines": [],
+    "function": "prlimit",
+    "sites": 1
+   },
+   {
+    "address": "0x108e80",
+    "example_lines": [],
+    "function": "setgroups",
+    "sites": 1
+   },
+   {
+    "address": "0x108ec0",
+    "example_lines": [],
+    "function": "setpgid",
+    "sites": 1
+   },
+   {
+    "address": "0x108f00",
+    "example_lines": [],
+    "function": "setregid",
+    "sites": 1
+   },
+   {
+    "address": "0x108f40",
+    "example_lines": [],
+    "function": "chroot",
+    "sites": 1
+   },
+   {
+    "address": "0x108f80",
+    "example_lines": [],
+    "function": "prctl",
+    "sites": 1
+   },
+   {
+    "address": "0x108fc0",
+    "example_lines": [],
+    "function": "capget",
+    "sites": 1
+   },
+   {
+    "address": "0x109000",
+    "example_lines": [],
+    "function": "capset",
+    "sites": 1
+   },
+   {
+    "address": "0x109040",
+    "example_lines": [],
+    "function": "sigaltstack",
+    "sites": 1
+   },
+   {
+    "address": "0x109080",
+    "example_lines": [],
+    "function": "acct",
+    "sites": 1
+   },
+   {
+    "address": "0x1090c0",
+    "example_lines": [],
+    "function": "read",
+    "sites": 1
+   },
+   {
+    "address": "0x109100",
+    "example_lines": [],
+    "function": "write",
+    "sites": 1
+   },
+   {
+    "address": "0x109140",
+    "example_lines": [],
+    "function": "pread",
+    "sites": 1
+   },
+   {
+    "address": "0x109180",
+    "example_lines": [],
+    "function": "pwrite64",
+    "sites": 1
+   },
+   {
+    "address": "0x1091c0",
+    "example_lines": [],
+    "function": "__preadv64",
+    "sites": 1
+   },
+   {
+    "address": "0x109200",
+    "example_lines": [],
+    "function": "__pwritev64",
+    "sites": 1
+   },
+   {
+    "address": "0x109240",
+    "example_lines": [],
+    "function": "__preadv64v2",
+    "sites": 1
+   },
+   {
+    "address": "0x109280",
+    "example_lines": [],
+    "function": "__pwritev64v2",
+    "sites": 1
+   },
+   {
+    "address": "0x1092c0",
+    "example_lines": [],
+    "function": "__close",
+    "sites": 1
+   },
+   {
+    "address": "0x109300",
+    "example_lines": [],
+    "function": "close_range",
+    "sites": 1
+   },
+   {
+    "address": "0x109340",
+    "example_lines": [],
+    "function": "copy_file_range",
+    "sites": 1
+   },
+   {
+    "address": "0x109380",
+    "example_lines": [],
+    "function": "__getpid",
+    "sites": 1
+   },
+   {
+    "address": "0x1093c0",
+    "example_lines": [],
+    "function": "memfd_create",
+    "sites": 1
+   },
+   {
+    "address": "0x109400",
+    "example_lines": [],
+    "function": "munmap",
+    "sites": 1
+   },
+   {
+    "address": "0x109440",
+    "example_lines": [],
+    "function": "msync",
+    "sites": 1
+   },
+   {
+    "address": "0x109480",
+    "example_lines": [],
+    "function": "mprotect",
+    "sites": 1
+   },
+   {
+    "address": "0x1094c0",
+    "example_lines": [],
+    "function": "madvise",
+    "sites": 1
+   },
+   {
+    "address": "0x109500",
+    "example_lines": [],
+    "function": "process_madvise",
+    "sites": 1
+   },
+   {
+    "address": "0x109540",
+    "example_lines": [],
+    "function": "mlock",
+    "sites": 1
+   },
+   {
+    "address": "0x109580",
+    "example_lines": [],
+    "function": "mlock2",
+    "sites": 1
+   },
+   {
+    "address": "0x1095c0",
+    "example_lines": [],
+    "function": "munlock",
+    "sites": 1
+   },
+   {
+    "address": "0x109600",
+    "example_lines": [],
+    "function": "mlockall",
+    "sites": 1
+   },
+   {
+    "address": "0x109640",
+    "example_lines": [],
+    "function": "mseal",
+    "sites": 1
+   },
+   {
+    "address": "0x109680",
+    "example_lines": [],
+    "function": "munlockall",
+    "sites": 1
+   },
+   {
+    "address": "0x1096c0",
+    "example_lines": [],
+    "function": "mincore",
+    "sites": 1
+   },
+   {
+    "address": "0x109700",
+    "example_lines": [],
+    "function": "__ioctl",
+    "sites": 1
+   },
+   {
+    "address": "0x109740",
+    "example_lines": [],
+    "function": "readv",
+    "sites": 1
+   },
+   {
+    "address": "0x109780",
+    "example_lines": [],
+    "function": "writev",
+    "sites": 1
+   },
+   {
+    "address": "0x1097c0",
+    "example_lines": [],
+    "function": "__fcntl",
+    "sites": 1
+   },
+   {
+    "address": "0x109800",
+    "example_lines": [],
+    "function": "flock",
+    "sites": 1
+   },
+   {
+    "address": "0x109840",
+    "example_lines": [],
+    "function": "__fchmod",
+    "sites": 1
+   },
+   {
+    "address": "0x109880",
+    "example_lines": [],
+    "function": "__pipe2",
+    "sites": 1
+   },
+   {
+    "address": "0x1098c0",
+    "example_lines": [],
+    "function": "__dup",
+    "sites": 1
+   },
+   {
+    "address": "0x109900",
+    "example_lines": [],
+    "function": "__dup3",
+    "sites": 1
+   },
+   {
+    "address": "0x109940",
+    "example_lines": [],
+    "function": "fsync",
+    "sites": 1
+   },
+   {
+    "address": "0x109980",
+    "example_lines": [],
+    "function": "fdatasync",
+    "sites": 1
+   },
+   {
+    "address": "0x1099c0",
+    "example_lines": [],
+    "function": "fchown",
+    "sites": 1
+   },
+   {
+    "address": "0x109a00",
+    "example_lines": [],
+    "function": "sync",
+    "sites": 1
+   },
+   {
+    "address": "0x109a40",
+    "example_lines": [],
+    "function": "syncfs",
+    "sites": 1
+   },
+   {
+    "address": "0x109a80",
+    "example_lines": [],
+    "function": "__fsetxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x109ac0",
+    "example_lines": [],
+    "function": "__fgetxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x109b00",
+    "example_lines": [],
+    "function": "__flistxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x109b40",
+    "example_lines": [],
+    "function": "fremovexattr",
+    "sites": 1
+   },
+   {
+    "address": "0x109b80",
+    "example_lines": [],
+    "function": "__getdents64",
+    "sites": 1
+   },
+   {
+    "address": "0x109bc0",
+    "example_lines": [],
+    "function": "__openat",
+    "sites": 1
+   },
+   {
+    "address": "0x109c00",
+    "example_lines": [],
+    "function": "__faccessat",
+    "sites": 1
+   },
+   {
+    "address": "0x109c40",
+    "example_lines": [],
+    "function": "__fchmodat",
+    "sites": 1
+   },
+   {
+    "address": "0x109c80",
+    "example_lines": [],
+    "function": "fchownat",
+    "sites": 1
+   },
+   {
+    "address": "0x109cc0",
+    "example_lines": [],
+    "function": "fstatat",
+    "sites": 1
+   },
+   {
+    "address": "0x109d00",
+    "example_lines": [],
+    "function": "linkat",
+    "sites": 1
+   },
+   {
+    "address": "0x109d40",
+    "example_lines": [],
+    "function": "mkdirat",
+    "sites": 1
+   },
+   {
+    "address": "0x109d80",
+    "example_lines": [],
+    "function": "mknodat",
+    "sites": 1
+   },
+   {
+    "address": "0x109dc0",
+    "example_lines": [],
+    "function": "readlinkat",
+    "sites": 1
+   },
+   {
+    "address": "0x109e00",
+    "example_lines": [],
+    "function": "renameat2",
+    "sites": 1
+   },
+   {
+    "address": "0x109e40",
+    "example_lines": [],
+    "function": "symlinkat",
+    "sites": 1
+   },
+   {
+    "address": "0x109e80",
+    "example_lines": [],
+    "function": "unlinkat",
+    "sites": 1
+   },
+   {
+    "address": "0x109ec0",
+    "example_lines": [],
+    "function": "utimensat",
+    "sites": 1
+   },
+   {
+    "address": "0x109f00",
+    "example_lines": [],
+    "function": "lseek",
+    "sites": 1
+   },
+   {
+    "address": "0x109f40",
+    "example_lines": [],
+    "function": "sendfile",
+    "sites": 1
+   },
+   {
+    "address": "0x109f80",
+    "example_lines": [],
+    "function": "truncate64",
+    "sites": 1
+   },
+   {
+    "address": "0x109fc0",
+    "example_lines": [],
+    "function": "fallocate",
+    "sites": 1
+   },
+   {
+    "address": "0x10a000",
+    "example_lines": [],
+    "function": "ftruncate",
+    "sites": 1
+   },
+   {
+    "address": "0x10a040",
+    "example_lines": [],
+    "function": "mmap",
+    "sites": 1
+   },
+   {
+    "address": "0x10a080",
+    "example_lines": [],
+    "function": "mremap",
+    "sites": 1
+   },
+   {
+    "address": "0x10a0c0",
+    "example_lines": [],
+    "function": "__fadvise64",
+    "sites": 1
+   },
+   {
+    "address": "0x10a100",
+    "example_lines": [],
+    "function": "__fstatfs",
+    "sites": 1
+   },
+   {
+    "address": "0x10a140",
+    "example_lines": [],
+    "function": "__statfs",
+    "sites": 1
+   },
+   {
+    "address": "0x10a180",
+    "example_lines": [],
+    "function": "fstat64",
+    "sites": 1
+   },
+   {
+    "address": "0x10a1c0",
+    "example_lines": [],
+    "function": "chdir",
+    "sites": 1
+   },
+   {
+    "address": "0x10a200",
+    "example_lines": [],
+    "function": "mount",
+    "sites": 1
+   },
+   {
+    "address": "0x10a240",
+    "example_lines": [],
+    "function": "umount2",
+    "sites": 1
+   },
+   {
+    "address": "0x10a280",
+    "example_lines": [],
+    "function": "__getcwd",
+    "sites": 1
+   },
+   {
+    "address": "0x10a2c0",
+    "example_lines": [],
+    "function": "fchdir",
+    "sites": 1
+   },
+   {
+    "address": "0x10a300",
+    "example_lines": [],
+    "function": "setxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a340",
+    "example_lines": [],
+    "function": "lsetxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a380",
+    "example_lines": [],
+    "function": "getxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a3c0",
+    "example_lines": [],
+    "function": "lgetxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a400",
+    "example_lines": [],
+    "function": "listxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a440",
+    "example_lines": [],
+    "function": "llistxattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a480",
+    "example_lines": [],
+    "function": "removexattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a4c0",
+    "example_lines": [],
+    "function": "lremovexattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10a500",
+    "example_lines": [],
+    "function": "statx",
+    "sites": 1
+   },
+   {
+    "address": "0x10a540",
+    "example_lines": [],
+    "function": "swapon",
+    "sites": 1
+   },
+   {
+    "address": "0x10a580",
+    "example_lines": [],
+    "function": "swapoff",
+    "sites": 1
+   },
+   {
+    "address": "0x10a5c0",
+    "example_lines": [],
+    "function": "settimeofday",
+    "sites": 1
+   },
+   {
+    "address": "0x10a600",
+    "example_lines": [],
+    "function": "times",
+    "sites": 1
+   },
+   {
+    "address": "0x10a640",
+    "example_lines": [],
+    "function": "nanosleep",
+    "sites": 1
+   },
+   {
+    "address": "0x10a680",
+    "example_lines": [],
+    "function": "clock_settime",
+    "sites": 1
+   },
+   {
+    "address": "0x10a6c0",
+    "example_lines": [],
+    "function": "__clock_nanosleep",
+    "sites": 1
+   },
+   {
+    "address": "0x10a700",
+    "example_lines": [],
+    "function": "getitimer",
+    "sites": 1
+   },
+   {
+    "address": "0x10a740",
+    "example_lines": [],
+    "function": "setitimer",
+    "sites": 1
+   },
+   {
+    "address": "0x10a780",
+    "example_lines": [],
+    "function": "__timer_create",
+    "sites": 1
+   },
+   {
+    "address": "0x10a7c0",
+    "example_lines": [],
+    "function": "__timer_settime",
+    "sites": 1
+   },
+   {
+    "address": "0x10a800",
+    "example_lines": [],
+    "function": "__timer_gettime",
+    "sites": 1
+   },
+   {
+    "address": "0x10a840",
+    "example_lines": [],
+    "function": "__timer_getoverrun",
+    "sites": 1
+   },
+   {
+    "address": "0x10a880",
+    "example_lines": [],
+    "function": "__timer_delete",
+    "sites": 1
+   },
+   {
+    "address": "0x10a8c0",
+    "example_lines": [],
+    "function": "timerfd_create",
+    "sites": 1
+   },
+   {
+    "address": "0x10a900",
+    "example_lines": [],
+    "function": "timerfd_settime",
+    "sites": 1
+   },
+   {
+    "address": "0x10a940",
+    "example_lines": [],
+    "function": "timerfd_gettime",
+    "sites": 1
+   },
+   {
+    "address": "0x10a980",
+    "example_lines": [],
+    "function": "adjtimex",
+    "sites": 1
+   },
+   {
+    "address": "0x10a9c0",
+    "example_lines": [],
+    "function": "clock_adjtime",
+    "sites": 1
+   },
+   {
+    "address": "0x10aa00",
+    "example_lines": [],
+    "function": "__rt_sigaction",
+    "sites": 1
+   },
+   {
+    "address": "0x10aa40",
+    "example_lines": [],
+    "function": "__rt_sigpending",
+    "sites": 1
+   },
+   {
+    "address": "0x10aa80",
+    "example_lines": [],
+    "function": "__rt_sigprocmask",
+    "sites": 1
+   },
+   {
+    "address": "0x10aac0",
+    "example_lines": [],
+    "function": "__rt_sigsuspend",
+    "sites": 1
+   },
+   {
+    "address": "0x10ab00",
+    "example_lines": [],
+    "function": "__rt_sigtimedwait",
+    "sites": 1
+   },
+   {
+    "address": "0x10ab40",
+    "example_lines": [],
+    "function": "__rt_sigqueueinfo",
+    "sites": 1
+   },
+   {
+    "address": "0x10ab80",
+    "example_lines": [],
+    "function": "__signalfd4",
+    "sites": 1
+   },
+   {
+    "address": "0x10abc0",
+    "example_lines": [],
+    "function": "__socket",
+    "sites": 1
+   },
+   {
+    "address": "0x10ac00",
+    "example_lines": [],
+    "function": "__socketpair",
+    "sites": 1
+   },
+   {
+    "address": "0x10ac40",
+    "example_lines": [],
+    "function": "bind",
+    "sites": 1
+   },
+   {
+    "address": "0x10ac80",
+    "example_lines": [],
+    "function": "__connect",
+    "sites": 1
+   },
+   {
+    "address": "0x10acc0",
+    "example_lines": [],
+    "function": "listen",
+    "sites": 1
+   },
+   {
+    "address": "0x10ad00",
+    "example_lines": [],
+    "function": "__accept4",
+    "sites": 1
+   },
+   {
+    "address": "0x10ad40",
+    "example_lines": [],
+    "function": "getsockname",
+    "sites": 1
+   },
+   {
+    "address": "0x10ad80",
+    "example_lines": [],
+    "function": "getpeername",
+    "sites": 1
+   },
+   {
+    "address": "0x10adc0",
+    "example_lines": [],
+    "function": "__sendto",
+    "sites": 1
+   },
+   {
+    "address": "0x10ae00",
+    "example_lines": [],
+    "function": "recvfrom",
+    "sites": 1
+   },
+   {
+    "address": "0x10ae40",
+    "example_lines": [],
+    "function": "shutdown",
+    "sites": 1
+   },
+   {
+    "address": "0x10ae80",
+    "example_lines": [],
+    "function": "setsockopt",
+    "sites": 1
+   },
+   {
+    "address": "0x10aec0",
+    "example_lines": [],
+    "function": "getsockopt",
+    "sites": 1
+   },
+   {
+    "address": "0x10af00",
+    "example_lines": [],
+    "function": "__recvmsg",
+    "sites": 1
+   },
+   {
+    "address": "0x10af40",
+    "example_lines": [],
+    "function": "__sendmsg",
+    "sites": 1
+   },
+   {
+    "address": "0x10af80",
+    "example_lines": [],
+    "function": "__recvmmsg",
+    "sites": 1
+   },
+   {
+    "address": "0x10afc0",
+    "example_lines": [],
+    "function": "__sendmmsg",
+    "sites": 1
+   },
+   {
+    "address": "0x10b000",
+    "example_lines": [],
+    "function": "sched_get_priority_max",
+    "sites": 1
+   },
+   {
+    "address": "0x10b040",
+    "example_lines": [],
+    "function": "sched_get_priority_min",
+    "sites": 1
+   },
+   {
+    "address": "0x10b080",
+    "example_lines": [],
+    "function": "__sched_getaffinity",
+    "sites": 1
+   },
+   {
+    "address": "0x10b0c0",
+    "example_lines": [],
+    "function": "sched_getattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10b100",
+    "example_lines": [],
+    "function": "sched_getparam",
+    "sites": 1
+   },
+   {
+    "address": "0x10b140",
+    "example_lines": [],
+    "function": "sched_getscheduler",
+    "sites": 1
+   },
+   {
+    "address": "0x10b180",
+    "example_lines": [],
+    "function": "sched_rr_get_interval",
+    "sites": 1
+   },
+   {
+    "address": "0x10b1c0",
+    "example_lines": [],
+    "function": "sched_setaffinity",
+    "sites": 1
+   },
+   {
+    "address": "0x10b200",
+    "example_lines": [],
+    "function": "sched_setattr",
+    "sites": 1
+   },
+   {
+    "address": "0x10b240",
+    "example_lines": [],
+    "function": "sched_setparam",
+    "sites": 1
+   },
+   {
+    "address": "0x10b280",
+    "example_lines": [],
+    "function": "sched_setscheduler",
+    "sites": 1
+   },
+   {
+    "address": "0x10b2c0",
+    "example_lines": [],
+    "function": "sched_yield",
+    "sites": 1
+   },
+   {
+    "address": "0x10b300",
+    "example_lines": [],
+    "function": "uname",
+    "sites": 1
+   },
+   {
+    "address": "0x10b340",
+    "example_lines": [],
+    "function": "umask",
+    "sites": 1
+   },
+   {
+    "address": "0x10b380",
+    "example_lines": [],
+    "function": "__reboot",
+    "sites": 1
+   },
+   {
+    "address": "0x10b3c0",
+    "example_lines": [],
+    "function": "init_module",
+    "sites": 1
+   },
+   {
+    "address": "0x10b400",
+    "example_lines": [],
+    "function": "delete_module",
+    "sites": 1
+   },
+   {
+    "address": "0x10b440",
+    "example_lines": [],
+    "function": "klogctl",
+    "sites": 1
+   },
+   {
+    "address": "0x10b480",
+    "example_lines": [],
+    "function": "sysinfo",
+    "sites": 1
+   },
+   {
+    "address": "0x10b4c0",
+    "example_lines": [],
+    "function": "personality",
+    "sites": 1
+   },
+   {
+    "address": "0x10b500",
+    "example_lines": [],
+    "function": "setns",
+    "sites": 1
+   },
+   {
+    "address": "0x10b540",
+    "example_lines": [],
+    "function": "unshare",
+    "sites": 1
+   },
+   {
+    "address": "0x10b580",
+    "example_lines": [],
+    "function": "__getcpu",
+    "sites": 1
+   },
+   {
+    "address": "0x10b5c0",
+    "example_lines": [],
+    "function": "bpf",
+    "sites": 1
+   },
+   {
+    "address": "0x10b600",
+    "example_lines": [],
+    "function": "tee",
+    "sites": 1
+   },
+   {
+    "address": "0x10b640",
+    "example_lines": [],
+    "function": "splice",
+    "sites": 1
+   },
+   {
+    "address": "0x10b680",
+    "example_lines": [],
+    "function": "vmsplice",
+    "sites": 1
+   },
+   {
+    "address": "0x10b6c0",
+    "example_lines": [],
+    "function": "__epoll_create1",
+    "sites": 1
+   },
+   {
+    "address": "0x10b700",
+    "example_lines": [],
+    "function": "epoll_ctl",
+    "sites": 1
+   },
+   {
+    "address": "0x10b740",
+    "example_lines": [],
+    "function": "__epoll_pwait",
+    "sites": 1
+   },
+   {
+    "address": "0x10b780",
+    "example_lines": [],
+    "function": "__epoll_pwait2",
+    "sites": 1
+   },
+   {
+    "address": "0x10b7c0",
+    "example_lines": [],
+    "function": "__eventfd",
+    "sites": 1
+   },
+   {
+    "address": "0x10b800",
+    "example_lines": [],
+    "function": "_Exit",
+    "sites": 1
+   },
+   {
+    "address": "0x10b840",
+    "example_lines": [],
+    "function": "__exit",
+    "sites": 1
+   },
+   {
+    "address": "0x10b880",
+    "example_lines": [],
+    "function": "inotify_init1",
+    "sites": 1
+   },
+   {
+    "address": "0x10b8c0",
+    "example_lines": [],
+    "function": "inotify_add_watch",
+    "sites": 1
+   },
+   {
+    "address": "0x10b900",
+    "example_lines": [],
+    "function": "inotify_rm_watch",
+    "sites": 1
+   },
+   {
+    "address": "0x10b940",
+    "example_lines": [],
+    "function": "__pselect6",
+    "sites": 1
+   },
+   {
+    "address": "0x10b980",
+    "example_lines": [],
+    "function": "__ppoll",
+    "sites": 1
+   },
+   {
+    "address": "0x10b9c0",
+    "example_lines": [],
+    "function": "process_vm_readv",
+    "sites": 1
+   },
+   {
+    "address": "0x10ba00",
+    "example_lines": [],
+    "function": "process_vm_writev",
+    "sites": 1
+   },
+   {
+    "address": "0x10ba40",
+    "example_lines": [],
+    "function": "quotactl",
+    "sites": 1
+   },
+   {
+    "address": "0x10ba80",
+    "example_lines": [],
+    "function": "__set_tid_address",
+    "sites": 1
+   },
+   {
+    "address": "0x10bac0",
+    "example_lines": [],
+    "function": "setdomainname",
+    "sites": 1
+   },
+   {
+    "address": "0x10bb00",
+    "example_lines": [],
+    "function": "sethostname",
+    "sites": 1
+   },
+   {
+    "address": "0x10bb40",
+    "example_lines": [],
+    "function": "sync_file_range",
+    "sites": 1
+   },
+   {
+    "address": "0x10bb80",
+    "example_lines": [],
+    "function": "wait4",
+    "sites": 1
+   },
+   {
+    "address": "0x10bbc0",
+    "example_lines": [],
+    "function": "__waitid",
+    "sites": 1
+   },
+   {
+    "address": "0x10bc00",
+    "example_lines": [],
+    "function": "__clock_getres",
+    "sites": 1
+   },
+   {
+    "address": "0x10bc40",
+    "example_lines": [],
+    "function": "__clock_gettime",
+    "sites": 1
+   },
+   {
+    "address": "0x10bc80",
+    "example_lines": [],
+    "function": "__gettimeofday",
+    "sites": 1
+   },
+   {
+    "address": "0x10bcc0",
+    "example_lines": [],
+    "function": "getrandom",
+    "sites": 1
+   },
+   {
+    "address": "0x10bd00",
+    "example_lines": [],
+    "function": "__pidfd_open",
+    "sites": 1
+   },
+   {
+    "address": "0x10bd40",
+    "example_lines": [],
+    "function": "__pidfd_getfd",
+    "sites": 1
+   },
+   {
+    "address": "0x10bd80",
+    "example_lines": [],
+    "function": "pidfd_send_signal",
+    "sites": 1
+   }
+  ],
+  "functions_holding_sites_count": 225,
+  "site_total": 228
+ },
+ "libclang_rt.asan.so": {
+  "functions_holding_sites": [
+   {
+    "address": "0x641e4",
+    "example_lines": [],
+    "function": "__sanitizer::SetSigProcMask(unsigned long*, unsigned long*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64230",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigprocmask(int, unsigned long*, unsigned long*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64248",
+    "example_lines": [],
+    "function": "__sanitizer::BlockSignals(unsigned long*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64330",
+    "example_lines": [],
+    "function": "__sanitizer::ScopedBlockSignals::ScopedBlockSignals(unsigned long*)",
+    "sites": 1
+   },
+   {
+    "address": "0x643d0",
+    "example_lines": [],
+    "function": "__sanitizer::ScopedBlockSignals::~ScopedBlockSignals()",
+    "sites": 1
+   },
+   {
+    "address": "0x64440",
+    "example_lines": [],
+    "function": "__sanitizer::internal_mmap(void*, unsigned long, int, int, int, unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x6445c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_munmap(void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x6446c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_mprotect(void*, unsigned long, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64480",
+    "example_lines": [],
+    "function": "__sanitizer::internal_madvise(unsigned long, unsigned long, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64494",
+    "example_lines": [],
+    "function": "__sanitizer::internal_close(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x644a8",
+    "example_lines": [],
+    "function": "__sanitizer::internal_open(char const*, int, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x644d0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_read(int, void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x644fc",
+    "example_lines": [],
+    "function": "__sanitizer::internal_write(int, void const*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x64528",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x6453c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup2(int, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64558",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sched_yield()",
+    "sites": 1
+   },
+   {
+    "address": "0x64568",
+    "example_lines": [],
+    "function": "__sanitizer::internal_usleep(unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x645b4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_execve(char const*, char* const*, char* const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x645c4",
+    "example_lines": [],
+    "function": "__sanitizer::internal__exit(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x645dc",
+    "example_lines": [],
+    "function": "__sanitizer::FileExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x6465c",
+    "example_lines": [],
+    "function": "__sanitizer::DirExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x646b0",
+    "example_lines": [],
+    "function": "__sanitizer::GetTid()",
+    "sites": 1
+   },
+   {
+    "address": "0x64b20",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWait(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64b44",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWake(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64b68",
+    "example_lines": [],
+    "function": "__sanitizer::internal_ptrace(int, int, void*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64b80",
+    "example_lines": [],
+    "function": "__sanitizer::internal_waitpid(int, int*, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64b9c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_getpid()",
+    "sites": 1
+   },
+   {
+    "address": "0x64bac",
+    "example_lines": [],
+    "function": "__sanitizer::internal_getppid()",
+    "sites": 1
+   },
+   {
+    "address": "0x64bbc",
+    "example_lines": [],
+    "function": "__sanitizer::internal_prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x64bd0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigaltstack(void const*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64be0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_fork()",
+    "sites": 1
+   },
+   {
+    "address": "0x64bf8",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigaction_norestorer(int, void const*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x64cf0",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::ThreadLister(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x64ddc",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::ListThreads(__sanitizer::InternalMmapVector<unsigned long long>*)",
+    "sites": 2
+   },
+   {
+    "address": "0x651b0",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::~ThreadLister()",
+    "sites": 1
+   },
+   {
+    "address": "0x65234",
+    "example_lines": [],
+    "function": "__sanitizer::ReadBinaryName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x652d8",
+    "example_lines": [],
+    "function": "__sanitizer::ReadLongProcessName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x653ec",
+    "example_lines": [],
+    "function": "__sanitizer::internal_clone(int (*)(void*), void*, int, void*, int*, void*, int*)",
+    "sites": 2
+   },
+   {
+    "address": "0x65478",
+    "example_lines": [],
+    "function": "__sanitizer::internal_uname(utsname*)",
+    "sites": 1
+   },
+   {
+    "address": "0x65564",
+    "example_lines": [],
+    "function": "__sanitizer::internal_start_thread(void* (*)(void*), void*)",
+    "sites": 2
+   }
+  ],
+  "functions_holding_sites_count": 40,
+  "site_total": 43
+ },
+ "libclang_rt.hwasan.so": {
+  "functions_holding_sites": [
+   {
+    "address": "0x35cb0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigprocmask(int, unsigned long*, unsigned long*)",
+    "sites": 1
+   },
+   {
+    "address": "0x35d4c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_mmap(void*, unsigned long, int, int, int, unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x35d68",
+    "example_lines": [],
+    "function": "__sanitizer::internal_munmap(void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x35d78",
+    "example_lines": [],
+    "function": "__sanitizer::internal_mprotect(void*, unsigned long, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35d8c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_madvise(unsigned long, unsigned long, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35da0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_close(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35db4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_open(char const*, int, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35ddc",
+    "example_lines": [],
+    "function": "__sanitizer::internal_read(int, void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x35e08",
+    "example_lines": [],
+    "function": "__sanitizer::internal_write(int, void const*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x35e34",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35e48",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup2(int, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35e64",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sched_yield()",
+    "sites": 1
+   },
+   {
+    "address": "0x35e74",
+    "example_lines": [],
+    "function": "__sanitizer::internal_usleep(unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x35ec0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_execve(char const*, char* const*, char* const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x35ed0",
+    "example_lines": [],
+    "function": "__sanitizer::internal__exit(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x35ee8",
+    "example_lines": [],
+    "function": "__sanitizer::FileExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x35f68",
+    "example_lines": [],
+    "function": "__sanitizer::DirExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x35fbc",
+    "example_lines": [],
+    "function": "__sanitizer::GetTid()",
+    "sites": 1
+   },
+   {
+    "address": "0x362e0",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWait(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x36304",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWake(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x36328",
+    "example_lines": [],
+    "function": "__sanitizer::internal_ptrace(int, int, void*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x36340",
+    "example_lines": [],
+    "function": "__sanitizer::internal_waitpid(int, int*, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x3635c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_getpid()",
+    "sites": 1
+   },
+   {
+    "address": "0x3636c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_getppid()",
+    "sites": 1
+   },
+   {
+    "address": "0x3637c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x36390",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigaltstack(void const*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x363a0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_fork()",
+    "sites": 1
+   },
+   {
+    "address": "0x363b8",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sigaction_norestorer(int, void const*, void*)",
+    "sites": 1
+   },
+   {
+    "address": "0x364b0",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::ThreadLister(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x3659c",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::ListThreads(__sanitizer::InternalMmapVector<unsigned long long>*)",
+    "sites": 2
+   },
+   {
+    "address": "0x36970",
+    "example_lines": [],
+    "function": "__sanitizer::ThreadLister::~ThreadLister()",
+    "sites": 1
+   },
+   {
+    "address": "0x36a44",
+    "example_lines": [],
+    "function": "__sanitizer::ReadBinaryName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x36ae8",
+    "example_lines": [],
+    "function": "__sanitizer::ReadLongProcessName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x36bfc",
+    "example_lines": [],
+    "function": "__sanitizer::internal_clone(int (*)(void*), void*, int, void*, int*, void*, int*)",
+    "sites": 2
+   },
+   {
+    "address": "0x36d64",
+    "example_lines": [],
+    "function": "__sanitizer::internal_start_thread(void* (*)(void*), void*)",
+    "sites": 2
+   },
+   {
+    "address": "0x36f34",
+    "example_lines": [],
+    "function": "__sanitizer::GetRandom(void*, unsigned long, bool)",
+    "sites": 4
+   }
+  ],
+  "functions_holding_sites_count": 36,
+  "site_total": 42
+ },
+ "libclang_rt.ubsan.so": {
+  "functions_holding_sites": [
+   {
+    "address": "0x1c7b4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_mmap(void*, unsigned long, int, int, int, unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c7d0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_munmap(void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c7e0",
+    "example_lines": [],
+    "function": "__sanitizer::internal_close(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c7f4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_open(char const*, int, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c81c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_read(int, void*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c848",
+    "example_lines": [],
+    "function": "__sanitizer::internal_write(int, void const*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c874",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c888",
+    "example_lines": [],
+    "function": "__sanitizer::internal_dup2(int, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c8a4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_sched_yield()",
+    "sites": 1
+   },
+   {
+    "address": "0x1c8b4",
+    "example_lines": [],
+    "function": "__sanitizer::internal_usleep(unsigned long long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c900",
+    "example_lines": [],
+    "function": "__sanitizer::internal_execve(char const*, char* const*, char* const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c910",
+    "example_lines": [],
+    "function": "__sanitizer::internal__exit(int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c928",
+    "example_lines": [],
+    "function": "__sanitizer::FileExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c9a8",
+    "example_lines": [],
+    "function": "__sanitizer::DirExists(char const*)",
+    "sites": 1
+   },
+   {
+    "address": "0x1c9fc",
+    "example_lines": [],
+    "function": "__sanitizer::GetTid()",
+    "sites": 1
+   },
+   {
+    "address": "0x1ccdc",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWait(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1cd00",
+    "example_lines": [],
+    "function": "__sanitizer::FutexWake(__sanitizer::atomic_uint32_t*, unsigned int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1cd24",
+    "example_lines": [],
+    "function": "__sanitizer::internal_waitpid(int, int*, int)",
+    "sites": 1
+   },
+   {
+    "address": "0x1cd40",
+    "example_lines": [],
+    "function": "__sanitizer::internal_getpid()",
+    "sites": 1
+   },
+   {
+    "address": "0x1cd50",
+    "example_lines": [],
+    "function": "__sanitizer::internal_prctl(int, unsigned long, unsigned long, unsigned long, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1cd64",
+    "example_lines": [],
+    "function": "__sanitizer::internal_fork()",
+    "sites": 1
+   },
+   {
+    "address": "0x1cdd8",
+    "example_lines": [],
+    "function": "__sanitizer::ReadBinaryName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1ce7c",
+    "example_lines": [],
+    "function": "__sanitizer::ReadLongProcessName(char*, unsigned long)",
+    "sites": 1
+   },
+   {
+    "address": "0x1d06c",
+    "example_lines": [],
+    "function": "__sanitizer::internal_start_thread(void* (*)(void*), void*)",
+    "sites": 2
+   }
+  ],
+  "functions_holding_sites_count": 24,
+  "site_total": 25
+ },
+ "libxul.so": {
+  "functions_holding_sites": [
+   {
+    "address": "0x6635430",
+    "example_lines": [
+     "stur xzr, [x2, #4]",
+     "add x2, x0, #40",
+     "mov x0, #0",
+     "mov x1, #0",
+     "mov x3, #8",
+     "mov x8, #135",
+     "svc #0",
+     "mov x0, #0"
+    ],
+    "function": "sub_6635430",
+    "sites": 1
+   }
+  ],
+  "functions_holding_sites_count": 1,
+  "site_total": 1
+ }
+}

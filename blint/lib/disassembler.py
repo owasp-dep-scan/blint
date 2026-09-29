@@ -1006,6 +1006,7 @@ def _append_call_target(
     target_addr: int | None = None,
     target_addrs: list[int] | None = None,
     raw_operand: str = "",
+    site_index: int | None = None,
 ):
     target_addrs = target_addrs or []
     direct_call_targets.append(
@@ -1015,6 +1016,9 @@ def _append_call_target(
             "target_address_candidates": _hex_list(target_addrs),
             "raw_operand": raw_operand,
             "kind": kind,
+            # The emitting line in the function's assembly. ARM branch operands
+            # are pc-relative, so the operand text alone cannot name a site.
+            "site_index": site_index,
         }
     )
 
@@ -1642,6 +1646,78 @@ def _analyze_instructions(
     )
 
 
+def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
+    """Map each ELF PLT stub entry address to the symbol it transfers to.
+
+    Decodes each stub's own reference to its GOT slot (arm64 ``adrp x16`` +
+    ``ldr x17, [x16, #imm]``; x86-64 ``jmp [rip + disp32]``) and names it
+    from the slot's JUMP_SLOT relocation, so no PLT entry layout is assumed.
+    On x86-64 both the jump's address and its 16-byte entry base are keyed.
+    Other architectures return an empty map.
+    """
+    got_names: dict[int, str] = {}
+    for reloc in getattr(parsed_obj, "pltgot_relocations", []) or []:
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            if reloc.has_symbol and (reloc.symbol.name or "").strip():
+                got_names[int(reloc.address)] = reloc.symbol.name.strip()
+    if not got_names:
+        return {}
+
+    stubs: dict[int, str] = {}
+    machine = ""
+    with contextlib.suppress(AttributeError, TypeError):
+        machine = str(parsed_obj.header.machine_type)
+    is_aarch64 = "AARCH64" in machine.upper()
+    is_x86_64 = "x86_64" in machine.lower() or "AMD64" in machine.upper()
+    if not (is_aarch64 or is_x86_64):
+        return stubs
+
+    plt = parsed_obj.get_section(".plt")
+    try:
+        data = bytes(plt.content)
+        base = int(plt.virtual_address)
+    except (AttributeError, TypeError, ValueError):
+        return stubs
+    if not data or not base:
+        return stubs
+
+    if is_aarch64:
+        page = None
+        stub_start = None
+        for offset in range(0, len(data) - 3, 4):
+            word = struct.unpack_from("<I", data, offset)[0]
+            address = base + offset
+            # adrp x16, imm: begins the stub; ldr x17, [x16, #imm12]: names
+            # the GOT slot the stub jumps through.
+            if (word & 0x9F000000) == 0x90000000 and (word & 0x1F) == 16:
+                immlo = (word >> 29) & 0x3
+                immhi = (word >> 5) & 0x7FFFF
+                imm = (immhi << 2) | immlo
+                if imm & (1 << 20):
+                    imm -= 1 << 21
+                page = (address & ~0xFFF) + (imm << 12)
+                stub_start = address
+            elif (word & 0xFFC00000) == 0xF9400000 and (word & 0x1F) == 17 and page is not None:
+                slot = page + ((word >> 10) & 0xFFF) * 8
+                name = got_names.get(slot)
+                if name and stub_start is not None:
+                    stubs.setdefault(stub_start, name)
+                page = None
+                stub_start = None
+    else:
+        for offset in range(len(data) - 5):
+            if data[offset] != 0xFF or data[offset + 1] != 0x25:
+                continue
+            disp = struct.unpack_from("<i", data, offset + 2)[0]
+            slot = base + offset + 6 + disp
+            name = got_names.get(slot)
+            if not name:
+                continue
+            stubs.setdefault(base + offset, name)
+            stubs.setdefault(base + (offset & ~0xF), name)
+    return stubs
+
+
 def _build_addr_to_name_map(metadata: dict, parsed_obj=None) -> dict[int, str]:
     """Builds a lookup map from address (int) to name from metadata functions."""
     addr_to_name_map = {}
@@ -1685,6 +1761,10 @@ def _build_addr_to_name_map(metadata: dict, parsed_obj=None) -> dict[int, str]:
                     if not sym_name:
                         continue
                     addr_to_name_map[int(reloc.address)] = sym_name
+        # A call to an import lands on its PLT stub, whose address is not a
+        # relocation address; without the stub names such calls name no callee.
+        for stub_addr, sym_name in _elf_plt_stub_names(parsed_obj).items():
+            addr_to_name_map.setdefault(stub_addr, sym_name)
     elif isinstance(parsed_obj, lief.MachO.Binary):
         import_map = metadata.get("import_call_addresses")
         if not isinstance(import_map, dict):
@@ -2416,6 +2496,7 @@ def _resolve_direct_calls(
                     target_addr=target_addr,
                     target_addrs=target_addrs,
                     raw_operand=_raw_operand_text(operand_text),
+                    site_index=line_index,
                 )
             continue
 
@@ -2432,6 +2513,7 @@ def _resolve_direct_calls(
                     target_addr=state[1],
                     target_addrs=target_addrs,
                     raw_operand=reg,
+                    site_index=line_index,
                 )
                 continue
             if state and state[0] == "memory":
@@ -2441,6 +2523,7 @@ def _resolve_direct_calls(
                     kind="indirect_hint",
                     target_name=target_name,
                     raw_operand=reg,
+                    site_index=line_index,
                 )
                 continue
             _append_call_target(
@@ -2448,6 +2531,7 @@ def _resolve_direct_calls(
                 kind="indirect_hint",
                 target_name="",
                 raw_operand=reg,
+                site_index=line_index,
             )
             continue
 
@@ -2472,6 +2556,7 @@ def _resolve_direct_calls(
                     target_addr=exposed_target_addr,
                     target_addrs=exposed_target_addrs,
                     raw_operand=reg_target.get("raw_operand", reg_token),
+                    site_index=line_index,
                 )
                 continue
 
@@ -2506,6 +2591,7 @@ def _resolve_direct_calls(
                         kind="indirect_hint",
                         target_name=target_name,
                         raw_operand=raw_operand,
+                        site_index=line_index,
                     )
             continue
 
@@ -2530,6 +2616,7 @@ def _resolve_direct_calls(
                 target_addr=target_addr,
                 target_addrs=target_addrs,
                 raw_operand=raw_operand,
+                site_index=line_index,
             )
 
     # This recovers common compiler-emitted tail dispatch patterns that would
@@ -2570,6 +2657,7 @@ def _resolve_direct_calls(
                         target_addr=target_addr,
                         target_addrs=[target_addr],
                         raw_operand=_raw_operand_text(operand),
+                        site_index=line_index,
                     )
             elif mnemonic in jump_set and parsed_tail.operand_text:
                 operand = parsed_tail.operand_text.strip()
@@ -2590,6 +2678,7 @@ def _resolve_direct_calls(
                             target_addr=target_addr,
                             target_addrs=target_addrs,
                             raw_operand=raw_operand,
+                            site_index=line_index,
                         )
                 elif not is_aarch64 and not is_mips and "[" in operand and "]" in operand:
                     # Tail jump through a pointer slot - jmp qword ptr
@@ -2606,6 +2695,7 @@ def _resolve_direct_calls(
                             kind="tailcall",
                             target_name=target_name,
                             raw_operand=_raw_operand_text(operand),
+                            site_index=line_index,
                         )
                 elif not any(ch in operand for ch in ("[", "]")):
                     target_addrs = _resolve_operand_target_addresses(
@@ -2629,6 +2719,7 @@ def _resolve_direct_calls(
                             target_addr=target_addr,
                             target_addrs=target_addrs,
                             raw_operand=raw_operand,
+                            site_index=line_index,
                         )
     return potential_callees, direct_call_targets
 

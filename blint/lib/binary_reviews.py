@@ -11,6 +11,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from blint.lib.android_reviews import ANDROID_RULE_EVALUATORS, evaluate_android_rule
 from blint.lib.driver_ioctl import (
     USER_BUFFER_PROBE_IMPORTS,
     _normalized_callee,
@@ -575,6 +576,9 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
     """Evaluate rule-specific whole-binary heuristics. Returns evidence list."""
     if rule_id in IMPLANT_RULE_EVALUATORS:
         return evaluate_implant_rule(rule_id, metadata)
+
+    if rule_id in ANDROID_RULE_EVALUATORS:
+        return evaluate_android_rule(rule_id, metadata)
 
     if rule_id in (
         "USERMODE_DIRECT_SYSCALL",

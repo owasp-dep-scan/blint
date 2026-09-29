@@ -1,0 +1,118 @@
+{
+  "packet": "A7 K1 (feat/an-a7)",
+  "host": "the reviewer Mac (macOS arm64)",
+  "tools": {
+    "ndk": "28.2.13676358 (r28c)",
+    "clang": "Android (13624864, +pgo, -bolt, +lto, -mlgo, based on r530567e) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2799f5296a4ab2694d2)",
+    "llvm_strip": "llvm-strip, compatible with GNU strip (NDK r28c)",
+    "javac": "javac 26.0.2 (Temurin-26.0.2+10), invoked with --release 11",
+    "d8": "D8 8.10.9-dev (build a7ad18a70460b799d0482e497c109a75bf7f91de) from build-tools 36.0.0",
+    "aapt2": "aapt 2.20-13193326 from build-tools 36.0.0",
+    "zipalign": "build-tools 36.0.0",
+    "zip": "/usr/bin/zip 3.0 (macOS build)",
+    "platform_jar": "platforms/android-34/android.jar"
+  },
+  "build_script": "tests/scripts/android/build_a7_fixtures.sh",
+  "sources": {
+    "a7_fire.c": "the six fire shapes, one exported function per family: a7_anti_debug (ptrace PTRACE_TRACEME), a7_root_check (constant su paths to access/stat/fopen), a7_su_exec (execl/system/popen of constant su paths), a7_emulator_fingerprint (__system_property_get of ro.kernel.qemu / ro.hardware / ro.product.model with goldfish+ranchu comparison), a7_writable_dlopen (dlopen of /data/local/tmp, /sdcard, /data/data constant paths), a7_inline_syscall (svc #0 arm64, svc #0 Thumb, syscall + int 0x80 x86_64), plus the a7_run_all driver",
+    "a7_nofire.c": "the measured benign shapes: a7_unwinder (fopen /proc/self/maps), a7_crash_handler (PTRACE_ATTACH/SEIZE/CONT/DETACH on a forked child), a7_sdk_probe (__system_property_get ro.build.version.sdk), a7_shell_exec (execve /system/bin/sh), a7_soname_dlopen (dlopen libc++_shared.so / liblog.so)",
+    "rootbeer/toolChecker.cpp": "scottyab/rootbeer tag 0.1.2 rootbeerlib/src/main/cpp/toolChecker.cpp, verbatim (Apache-2.0): checkForRoot receives the su paths as a Java String[] and passes each to fopen, so the native side holds no constant su path",
+    "rootbeer/toolChecker.h": "same source tree and tag, verbatim",
+    "java/com/scottyab/rootbeer/Const.java": "the suPaths directory list from rootbeer 0.1.2 (Const.suPaths + getPaths()), the dex half of the join fixture",
+    "java/com/scottyab/rootbeer/RootBeerNative.java": "rootbeer 0.1.2 RootBeerNative (loadLibrary(\"toolChecker\") + the two native declarations), original package kept so the JNI join binds to the unmodified native exports",
+    "java/com/scottyab/rootbeer/RootBeer.java": "cut-down 0.1.2 RootBeer: checkForBinary builds path + \"su\" and hands the array to the native checkForRoot — the dataflow that moves the paths out of native sight",
+    "java/com/example/blint/a7/Main.java": "the fixture driver (root check plus one benign ro.build.version.sdk string)",
+    "AndroidManifest.xml": "package com.example.blint.a7, minSdk 24, targetSdk 34"
+  },
+  "builds": {
+    "a7-classes.dex": "javac --release 11 over java/... then d8 --release --min-api 24 --lib platforms/android-34/android.jar",
+    "liba7_fire_<abi>.so": "clang -O2 -fPIC -funwind-tables -shared a7_fire.c for abi in arm64-v8a (aarch64-linux-android24-clang), armeabi-v7a (armv7a-linux-androideabi24-clang), x86_64 (x86_64-linux-android24-clang), plus an llvm-strip --strip-all twin",
+    "liba7_nofire_<abi>.so": "same commands over a7_nofire.c, plus the stripped twin",
+    "libtoolChecker_<abi>.so": "same commands over rootbeer/toolChecker.cpp with -llog, plus the stripped twin",
+    "a7-jni-<abi>.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/<abi>/{liba7fire.so, liba7nofire.so, libtoolChecker.so}; zipalign -f 4 — one APK per ABI in arm64-v8a, armeabi-v7a, x86_64"
+  },
+  "expected": {
+    "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule does not evaluate on 32-bit ARM, where function extents can run into literal pools",
+    "ANDROID_PTRACE_TRACEME": {
+      "liba7_fire": {
+        "arm64-v8a": "fire",
+        "x86_64": "fire",
+        "armeabi-v7a": "not evaluated"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent (crash handler attaches to a child)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      }
+    },
+    "ANDROID_ROOT_PATH_PROBE": {
+      "liba7_fire": {
+        "arm64-v8a": "fire (access/stat/fopen of constant su paths)",
+        "x86_64": "fire",
+        "armeabi-v7a": "not evaluated"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      },
+      "libtoolChecker": {
+        "arm64-v8a": "silent (paths arrive from Java; no native constant)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      }
+    },
+    "ANDROID_SU_EXECUTION": {
+      "liba7_fire": {
+        "arm64-v8a": "fire (execl/system/popen of constant su paths)",
+        "x86_64": "fire",
+        "armeabi-v7a": "not evaluated"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent (execve of /system/bin/sh)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      }
+    },
+    "ANDROID_EMULATOR_PROPERTY_PROBE": {
+      "liba7_fire": {
+        "arm64-v8a": "fire (ro.kernel.qemu / ro.hardware vs goldfish|ranchu)",
+        "x86_64": "fire",
+        "armeabi-v7a": "not evaluated"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent (ro.build.version.sdk only)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      }
+    },
+    "ANDROID_WRITABLE_LOCATION_DLOPEN": {
+      "liba7_fire": {
+        "arm64-v8a": "fire (/data/local/tmp, /sdcard, /data/data)",
+        "x86_64": "fire",
+        "armeabi-v7a": "not evaluated"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent (bare SONAMEs)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated"
+      }
+    },
+    "ANDROID_INLINE_SYSCALLS": {
+      "liba7_fire": {
+        "arm64-v8a": "fire (svc #0 in a7_inline_syscall and the inlined copy in a7_run_all)",
+        "x86_64": "fire (syscall and int 128)",
+        "armeabi-v7a": "not evaluated (arm32 recovery: extent overrun into literal pools injects false svc #0 sites - R3 hand-check; the disassembly itself still decodes the Thumb svc)"
+      },
+      "liba7_nofire": {
+        "arm64-v8a": "silent (no inline syscall sites)",
+        "x86_64": "silent",
+        "armeabi-v7a": "not evaluated (same arm32 reason)"
+      }
+    },
+    "ANDROID_DEX_SU_PATHS_TO_NATIVE": {
+      "a7-jni-<abi>.apk": "fire at app level: the dex carries Const.suPaths and declares checkForRoot, which the JNI join binds to libtoolChecker.so's Java_com_scottyab_rootbeer_RootBeerNative_checkForRoot export",
+      "a5-jni-<abi>.apk": "silent: native declarations exist but no su-path strings (the committed A5 fixtures are this rule's no-fire case)"
+    }
+  }
+}

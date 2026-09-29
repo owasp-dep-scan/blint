@@ -1,0 +1,257 @@
+{
+ "libart.so": {
+  "callsite_coverage": {
+   "entries": 4096,
+   "entries_truncated": true,
+   "functions_dataflow": 16045,
+   "functions_no_abi": 0,
+   "functions_total": 16066,
+   "strings_resolved": 2583
+  },
+  "callsite_entries": 4096,
+  "disassembled_functions": 16066,
+  "functions": 16066,
+  "recovered": {},
+  "wall_time_disassemble_s": 89.35
+ },
+ "libbluetooth_jni.so": {
+  "callsite_coverage": {
+   "entries": 4096,
+   "entries_truncated": true,
+   "functions_dataflow": 21634,
+   "functions_no_abi": 0,
+   "functions_total": 21776,
+   "strings_resolved": 1543
+  },
+  "callsite_entries": 4096,
+  "disassembled_functions": 21776,
+  "functions": 21776,
+  "recovered": {},
+  "wall_time_disassemble_s": 115.81
+ },
+ "libc.so": {
+  "callsite_coverage": {
+   "entries": 1400,
+   "entries_truncated": null,
+   "functions_dataflow": 2465,
+   "functions_no_abi": 0,
+   "functions_total": 2467,
+   "strings_resolved": 495
+  },
+  "callsite_entries": 1400,
+  "disassembled_functions": 2467,
+  "functions": 2467,
+  "recovered": {},
+  "wall_time_disassemble_s": 8.26
+ },
+ "libc_malloc_debug.so": {
+  "callsite_coverage": {
+   "entries": 433,
+   "entries_truncated": null,
+   "functions_dataflow": 1212,
+   "functions_no_abi": 0,
+   "functions_total": 1215,
+   "strings_resolved": 0
+  },
+  "callsite_entries": 433,
+  "disassembled_functions": 1215,
+  "functions": 1215,
+  "recovered": {},
+  "wall_time_disassemble_s": 3.97
+ },
+ "libchrome.so": {
+  "callsite_coverage": {
+   "entries": 183,
+   "entries_truncated": null,
+   "functions_dataflow": 3197,
+   "functions_no_abi": 0,
+   "functions_total": 3197,
+   "strings_resolved": 62
+  },
+  "callsite_entries": 183,
+  "disassembled_functions": 3197,
+  "functions": 3197,
+  "recovered": {},
+  "wall_time_disassemble_s": 5.94
+ },
+ "libclang_rt.asan.so": {
+  "callsite_coverage": {
+   "entries": 2452,
+   "entries_truncated": null,
+   "functions_dataflow": 2508,
+   "functions_no_abi": 0,
+   "functions_total": 2510,
+   "strings_resolved": 1048
+  },
+  "callsite_entries": 2452,
+  "disassembled_functions": 2510,
+  "functions": 2510,
+  "recovered": {},
+  "wall_time_disassemble_s": 7.79
+ },
+ "libclang_rt.ubsan.so": {
+  "callsite_coverage": {
+   "entries": 820,
+   "entries_truncated": null,
+   "functions_dataflow": 542,
+   "functions_no_abi": 0,
+   "functions_total": 542,
+   "strings_resolved": 0
+  },
+  "callsite_entries": 820,
+  "disassembled_functions": 542,
+  "functions": 542,
+  "recovered": {},
+  "wall_time_disassemble_s": 1.24
+ },
+ "libdumpstateutil.so": {
+  "callsite_coverage": {
+   "entries": 15,
+   "entries_truncated": null,
+   "functions_dataflow": 45,
+   "functions_no_abi": 0,
+   "functions_total": 45,
+   "strings_resolved": 0
+  },
+  "callsite_entries": 15,
+  "disassembled_functions": 45,
+  "functions": 45,
+  "recovered": {},
+  "wall_time_disassemble_s": 0.31
+ },
+ "libfdtrack.so": {
+  "callsite_coverage": {
+   "entries": 310,
+   "entries_truncated": null,
+   "functions_dataflow": 919,
+   "functions_no_abi": 0,
+   "functions_total": 920,
+   "strings_resolved": 0
+  },
+  "callsite_entries": 310,
+  "disassembled_functions": 920,
+  "functions": 920,
+  "recovered": {},
+  "wall_time_disassemble_s": 4.31
+ },
+ "libflutter.so": {
+  "callsite_coverage": {
+   "entries": 4096,
+   "entries_truncated": true,
+   "functions_dataflow": 44905,
+   "functions_no_abi": 0,
+   "functions_total": 44921,
+   "strings_resolved": 1038
+  },
+  "callsite_entries": 4096,
+  "disassembled_functions": 44921,
+  "functions": 44898,
+  "recovered": {},
+  "wall_time_disassemble_s": 87.95
+ },
+ "libjnidispatch.so": {
+  "callsite_coverage": {
+   "entries": 97,
+   "entries_truncated": null,
+   "functions_dataflow": 174,
+   "functions_no_abi": 0,
+   "functions_total": 174,
+   "strings_resolved": 69
+  },
+  "callsite_entries": 97,
+  "disassembled_functions": 174,
+  "functions": 174,
+  "recovered": {},
+  "wall_time_disassemble_s": 0.78
+ },
+ "libmemunreachable.so": {
+  "callsite_coverage": {
+   "entries": 163,
+   "entries_truncated": null,
+   "functions_dataflow": 490,
+   "functions_no_abi": 0,
+   "functions_total": 491,
+   "strings_resolved": 0
+  },
+  "callsite_entries": 163,
+  "disassembled_functions": 491,
+  "functions": 491,
+  "recovered": {},
+  "wall_time_disassemble_s": 1.7
+ },
+ "libmozglue.so": {
+  "callsite_coverage": {
+   "entries": 568,
+   "entries_truncated": null,
+   "functions_dataflow": 2856,
+   "functions_no_abi": 0,
+   "functions_total": 2857,
+   "strings_resolved": 136
+  },
+  "callsite_entries": 568,
+  "disassembled_functions": 2857,
+  "functions": 2856,
+  "recovered": {},
+  "wall_time_disassemble_s": 8.49
+ },
+ "libsentry.so": {
+  "callsite_coverage": {
+   "entries": 511,
+   "entries_truncated": null,
+   "functions_dataflow": 1766,
+   "functions_no_abi": 0,
+   "functions_total": 1767,
+   "strings_resolved": 211
+  },
+  "callsite_entries": 511,
+  "disassembled_functions": 1767,
+  "functions": 1766,
+  "recovered": {},
+  "wall_time_disassemble_s": 4.75
+ },
+ "libunwindstack.so": {
+  "callsite_coverage": {
+   "entries": 165,
+   "entries_truncated": null,
+   "functions_dataflow": 1361,
+   "functions_no_abi": 0,
+   "functions_total": 1361,
+   "strings_resolved": 20
+  },
+  "callsite_entries": 165,
+  "disassembled_functions": 1361,
+  "functions": 1361,
+  "recovered": {},
+  "wall_time_disassemble_s": 5.84
+ },
+ "libvlc.so": {
+  "callsite_coverage": {
+   "entries": 4096,
+   "entries_truncated": true,
+   "functions_dataflow": 56513,
+   "functions_no_abi": 0,
+   "functions_total": 56668,
+   "strings_resolved": 2388
+  },
+  "callsite_entries": 4096,
+  "disassembled_functions": 56668,
+  "functions": 56534,
+  "recovered": {},
+  "wall_time_disassemble_s": 312.57
+ },
+ "libxul.so": {
+  "callsite_coverage": {
+   "entries": 4096,
+   "entries_truncated": true,
+   "functions_dataflow": 270181,
+   "functions_no_abi": 0,
+   "functions_total": 270662,
+   "strings_resolved": 1214
+  },
+  "callsite_entries": 4096,
+  "disassembled_functions": 270662,
+  "functions": 270566,
+  "recovered": {},
+  "wall_time_disassemble_s": 1349.87
+ }
+}
