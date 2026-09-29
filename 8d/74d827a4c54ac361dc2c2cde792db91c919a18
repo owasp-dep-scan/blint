@@ -1,0 +1,31 @@
+docs/METADATA.md
+  s_c49eb31e317cab::t_44c5a8651ce337 293
+tests/test_disassembler.py
+  s_fd07128e7dbdfd::t_41ae7b6b3d234b 972-1017
+tests/data/android/a7-fixtures-manifest.json
+  s_c49eb31e317cab::t_680a824c0005eb 155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8d74d827a4c54ac361dc2c2cde792db91c919a18",
+  "prompts": {},
+  "sessions": {
+    "s_c49eb31e317cab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3f2c4695-4d8f-41c7-8a07-f27eb3294e64",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
