@@ -152,7 +152,7 @@
       },
       "x86_64_Oz": {
         "liba7_fire": {
-          "ANDROID_PTRACE_TRACEME": "silent pre-A7.2-M1 (a7_anti_debug is a tail jmp into the PLT the ELF resolver read absolute)",
+          "ANDROID_PTRACE_TRACEME": "fire post-A7.2-M1 (a7_anti_debug's tail jmp resolves pc-relative into the PLT)",
           "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
           "ANDROID_SU_EXECUTION": "fire",
           "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",

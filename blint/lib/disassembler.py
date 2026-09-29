@@ -1849,6 +1849,7 @@ def _resolve_operand_target_addresses(
     is_aarch64: bool,
     is_mips: bool,
     is_windows: bool,
+    is_macho: bool = False,
 ) -> list[int]:
     """Parse operand forms and return normalized numeric target candidates."""
     operand = (operand or "").strip().rstrip(",")
@@ -1906,7 +1907,16 @@ def _resolve_operand_target_addresses(
                 elif (
                     whole_operand_is_immediate
                     and not is_mips
-                    and (mnemonic.startswith("call") or (is_windows and mnemonic.startswith("j")))
+                    and (
+                        mnemonic.startswith("call")
+                        or (is_windows and mnemonic.startswith("j"))
+                        # A tail `jmp imm` on ELF x86/x86_64 prints the same
+                        # end-relative delta `call` does; reading it absolute
+                        # left every tail call into the PLT unresolved.
+                        # Mach-O keeps the old treatment: its tail jumps are
+                        # not part of this change's measured scope.
+                        or (not is_windows and not is_macho and mnemonic in X86_UNCONDITIONAL_JMP_INST)
+                    )
                 ):
                     _append_unique_target_addr(
                         target_addrs, instr.address + len(instr.bytes) + val
@@ -2349,6 +2359,7 @@ def _resolve_direct_calls(
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
     is_mips = "mips" in lower_arch
     is_windows = "windows" in lower_arch
+    is_macho = any(token in lower_arch for token in ("macos", "apple", "darwin"))
     is_arm32 = _is_arm32_target(lower_arch)
     arch_reg_set = get_arch_reg_set(lower_arch)
     reg_targets: dict = {}
@@ -2578,7 +2589,7 @@ def _resolve_direct_calls(
                         target_name = reg_target.get("target_name", "")
 
                 target_addrs = _resolve_operand_target_addresses(
-                    mnemonic, operand, instr, is_aarch64, is_mips, is_windows
+                    mnemonic, operand, instr, is_aarch64, is_mips, is_windows, is_macho
                 )
                 if not target_name:
                     target_name = _lookup_target_name(target_addrs, addr_to_name_map)
@@ -2598,7 +2609,7 @@ def _resolve_direct_calls(
         if is_direct_call and operand_text:
             operand = operand_text.strip()
             target_addrs = _resolve_operand_target_addresses(
-                mnemonic, operand, instr, is_aarch64, is_mips, is_windows
+                mnemonic, operand, instr, is_aarch64, is_mips, is_windows, is_macho
             )
             target_addr = target_addrs[0] if target_addrs else None
             target_name = _lookup_target_name(target_addrs, addr_to_name_map)
@@ -2686,7 +2697,13 @@ def _resolve_direct_calls(
                     # shape. Named from the slot, like a call through one;
                     # the slot's address is never offered as the callee's.
                     slot_addrs = _resolve_operand_target_addresses(
-                        mnemonic, operand, tail_instr, is_aarch64, is_mips, is_windows
+                        mnemonic,
+                        operand,
+                        tail_instr,
+                        is_aarch64,
+                        is_mips,
+                        is_windows,
+                        is_macho,
                     )
                     target_name = _lookup_target_name(slot_addrs, addr_to_name_map)
                     if target_name:
@@ -2705,6 +2722,7 @@ def _resolve_direct_calls(
                         is_aarch64,
                         is_mips,
                         is_windows,
+                        is_macho,
                     )
                     target_addr = target_addrs[0] if target_addrs else None
                     target_name = _lookup_target_name(target_addrs, addr_to_name_map)

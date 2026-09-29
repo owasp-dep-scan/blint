@@ -969,6 +969,52 @@ def test_resolve_direct_calls_tailcall_windows_decimal_operand_prefers_relative_
     ]
 
 
+def test_resolve_direct_calls_tailcall_elf_decimal_operand_resolves_relative():
+    # The same end-relative delta `call` prints: nyxstone renders an ELF
+    # x86-64 tail `jmp imm` the same way it renders the Windows one, and the
+    # operand used to be read absolute, leaving every tail call into the PLT
+    # unresolved (the committed liba7_fire_x86_64_Oz fixture's a7_anti_debug
+    # is exactly `jmp 917` to ptrace@plt).
+    instr = MagicMock()
+    instr.assembly = "jmp 917"
+    instr.address = 0x4D5A
+    instr.bytes = b"\x90" * 5
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [instr], {0x50F4: "ptrace"}, "x86_64-unknown-linux-android"
+    )
+
+    assert direct_calls == []
+    assert direct_targets == [
+        {
+            "target_name": "ptrace",
+            "target_address": "0x50f4",
+            "target_address_candidates": ["0x50f4"],
+            "raw_operand": "917",
+            "kind": "tailcall",
+            "site_index": 0,
+        }
+    ]
+
+
+def test_resolve_direct_calls_tailcall_macho_keeps_the_absolute_reading():
+    # Mach-O tail jumps keep the pre-A7.2 treatment: the pc-relative
+    # reading is measured into this wave's scope for ELF only, so a macos
+    # triple must not change resolution by triple coincidence.
+    instr = MagicMock()
+    instr.assembly = "jmp 917"
+    instr.address = 0x4D5A
+    instr.bytes = b"\x90" * 5
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [instr], {0x395: "by_absolute_only", 0x50F4: "by_delta"}, "x86_64-apple-macosx"
+    )
+
+    tailcall = [t for t in direct_targets if t.get("kind") == "tailcall"]
+    assert direct_calls == []
+    assert tailcall and tailcall[0]["target_name"] == "by_absolute_only"
+
+
 def test_resolve_direct_calls_aarch64_bl_immediate_is_pc_relative():
     """nyxstone prints bl's operand as a byte offset from the instruction, in
     decimal by default (Automator arm64e: bl #146012 at 0x100001478 is
