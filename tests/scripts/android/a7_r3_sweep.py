@@ -55,6 +55,7 @@ EVIDENCE_FIELDS = (
     "site_total",
     "function_count",
     "function",
+    "functions",
     "su_path_strings",
     "bound_native_declarations",
 )
@@ -94,10 +95,12 @@ def review_android_rules(metadata: dict) -> dict[str, list[dict]]:
     return {key: value for key, value in runner.results.items() if key.startswith("ANDROID_")}
 
 
-def sweep_tier0(limit: int) -> dict:
+def sweep_tier0(limit: int, shard_index: int = 0, shard_count: int = 1) -> dict:
     files = tier0_unique_files()
     if limit:
         files = files[:limit]
+    if shard_count > 1:
+        files = files[shard_index::shard_count]
     per_rule: dict[str, list] = {}
     not_evaluated: dict[str, dict] = {}
     rules_per_library: list[int] = []
@@ -223,12 +226,18 @@ def main() -> None:
     parser.add_argument("--no-apps", action="store_true")
     parser.add_argument("--no-tier0", action="store_true")
     parser.add_argument("--only-apk", help="sweep only this APK name")
+    parser.add_argument(
+        "--shard-index", type=int, default=0, help="this shard's 0-based index"
+    )
+    parser.add_argument(
+        "--shard-count", type=int, default=1, help="total shards (files[i::n] split)"
+    )
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
     initialize_rules(BlintOptions())
     result = {"tier0": None, "apps": None}
     if not args.no_tier0:
-        result["tier0"] = sweep_tier0(args.limit)
+        result["tier0"] = sweep_tier0(args.limit, args.shard_index, args.shard_count)
     if not args.no_apps or args.only_apk:
         result["apps"] = sweep_apps(args.only_apk, args.no_apps)
     out = Path(args.out) if args.out else Path(__file__).parent / "a7-r3-sweep.json"

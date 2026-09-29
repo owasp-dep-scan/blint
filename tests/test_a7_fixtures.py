@@ -122,12 +122,12 @@ def test_manifest_names_the_build_commands() -> None:
     for rule in expected:
         if rule == "ANDROID_DEX_SU_PATHS_TO_NATIVE" or not isinstance(expected[rule], dict):
             continue
-        # The call-site rules report "not evaluated" on armeabi-v7a (absint
-        # models arm64 and x86_64 only); the inline-syscall rule is
-        # text-based and genuinely evaluates there (ground rule 35 cuts
-        # both ways: a rule that *can* apply to an ABI runs on it).
-        if rule == "ANDROID_INLINE_SYSCALLS":
-            continue
+        # On armeabi-v7a every rule reports "not evaluated" — the five
+        # call-site rules because absint models arm64/x86_64 only, the
+        # inline-syscall rule because ARM32 extent overrun injects false
+        # svc #0 sites (the R3 llvm-objdump measurement). Ground rule 35
+        # cuts both ways, and here it is the recovery, not the rule, that
+        # cannot apply.
         for lib, table in expected[rule].items():
             if isinstance(table, dict) and "armeabi-v7a" in table:
                 assert "not evaluated" in table["armeabi-v7a"], (rule, lib)
@@ -179,7 +179,12 @@ def test_rootbeer_library_keeps_jni_exports_and_no_constant_su_path(abi: str) ->
 
 
 @pytest.mark.parametrize("abi", ABIS)
-def test_inline_syscall_sites_fire_and_stay_silent(abi: str) -> None:
+def test_inline_syscall_sites_decode_on_every_abi(abi: str) -> None:
+    # A disassembler-level fact, independent of the rule: the Thumb/ARM64/
+    # x86 encodings decode as svc #0 / syscall / int 128 in the fire
+    # fixture and nowhere in the no-fire twin. (The K2 rule separately
+    # declines to report arm32 sites - the R3 extent-overrun measurement -
+    # which is why this asserts the instruction text, not a finding.)
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
     fire = _metadata(FIRE[abi], disassemble=True)

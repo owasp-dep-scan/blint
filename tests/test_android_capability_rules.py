@@ -91,12 +91,18 @@ def test_fire_fixture_fires_every_rule(abi: str) -> None:
         assert "ro.kernel.qemu" in properties
         load_paths = {entry["path"] for entry in results["ANDROID_WRITABLE_LOCATION_DLOPEN"]}
         assert "/data/local/tmp/plugin.so" in load_paths
-    # The instruction-text rule evaluates on every ABI, v7a included.
+    # The instruction-text rule fires on the modelled ABIs; on v7a it
+    # reports not_evaluated (the arm32 extent-overrun measurement).
     inline = results["ANDROID_INLINE_SYSCALLS"]
-    assert inline and inline[0]["site_total"] >= 1
-    assert {"a7_inline_syscall", "a7_run_all"} <= {
-        holder["function"] for holder in inline[0]["functions"]
-    }
+    if abi in MODELLED_ABIS:
+        assert inline and inline[0]["site_total"] >= 1
+        assert {"a7_inline_syscall", "a7_run_all"} <= {
+            holder["function"] for holder in inline[0]["functions"]
+        }
+    else:
+        assert inline and inline[0]["status"] == "not_evaluated"
+        assert inline[0]["reason"] == "arm32_recovery_unreliable"
+        assert "llvm-objdump" in inline[0]["detail"]
 
 
 @pytest.mark.parametrize("abi", ABIS)
@@ -112,12 +118,13 @@ def test_nofire_fixture_stays_silent(abi: str) -> None:
         assert real == {}, real
         assert "ANDROID_INLINE_SYSCALLS" not in results
     else:
-        # Unmodelled ABI: the five call-site rules each say so as a fact.
+        # Unmodelled ABI: all six rules each say so as a fact.
         assert set(real) == set(CALL_SITE_RULES)
         for entries in real.values():
             assert entries[0]["status"] == "not_evaluated"
             assert entries[0]["reason"] == "abi_not_modelled"
-        assert "ANDROID_INLINE_SYSCALLS" not in results
+        inline = results["ANDROID_INLINE_SYSCALLS"]
+        assert inline and inline[0]["reason"] == "arm32_recovery_unreliable"
 
 
 @pytest.mark.parametrize("abi", ABIS)
@@ -135,17 +142,19 @@ def test_unmodelled_abi_reports_not_evaluated(abi: str) -> None:
         assert "arm64 and x86_64" in entries[0]["detail"]
 
 
-def test_without_disassembly_the_reason_is_named() -> None:
-    # A plain parse (no --disassemble) of an Android library must not read
-    # as "checked and absent": the call-site rules name the missing layer.
+def test_without_disassembly_the_rules_stay_silent_like_every_disassembly_layer() -> None:
+    # A plain parse (no --disassemble) of an Android library: the call-site
+    # rules are silent, exactly as the stack-string and function-review
+    # layers are — the run's analysis coverage already names the missing
+    # disassembly globally, and per-rule notes would be boilerplate on
+    # every library. The not_evaluated fact is reserved for the cases a
+    # disassembled report could mistake for absence (unmodelled ABI,
+    # truncated block) — asserted in the v7a tests above.
     from blint.lib.binary import parse
 
     metadata = parse(str(DATA / "liba7_fire_arm64-v8a.so"))
     results = _android_results(metadata)
-    for rule in CALL_SITE_RULES:
-        assert rule in results, rule
-        assert results[rule][0]["status"] == "not_evaluated"
-        assert results[rule][0]["reason"] == "disassembly_not_enabled"
+    assert results == {}, results
 
 
 def test_non_android_elf_never_reports() -> None:
@@ -301,6 +310,25 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
     # Go-built libraries are excluded by buildinfo.
     go = dict(base, name="libgo.so", build_info={"go_version": "go1.24.0"})
     assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", go) == []
+    # ARM32: even a decoded svc site does not carry a finding - the R3
+    # hand-check measured extent-overrun false sites on stripped v7a
+    # libraries (llvm-objdump oracle: 25 false vs 2 true), so the ABI
+    # reports not_evaluated with that reason instead.
+    arm32 = dict(
+        base,
+        name="libflutter.so",
+        llvm_target_tuple="armv7a-unknown-linux-androideabi24",
+        disassembled_functions={
+            "f::stub": {
+                "name": "stub",
+                "address": "0x1000",
+                "assembly": "movs r0, r0\nsvc #0\nmovs r0, r0",
+            }
+        },
+    )
+    verdict = evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32)
+    assert verdict and verdict[0]["status"] == "not_evaluated"
+    assert verdict[0]["reason"] == "arm32_recovery_unreliable"
 
 
 def test_writable_prefix_boundaries() -> None:

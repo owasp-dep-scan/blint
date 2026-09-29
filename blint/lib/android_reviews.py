@@ -162,15 +162,20 @@ def _entry_string(entry: dict) -> str:
 def _callsite_evaluation_status(metadata: dict) -> str | None:
     """Why the call-site layer cannot evaluate this image, or None.
 
-    The three refusals are distinct facts, not degrees of failure:
-    the layer was never asked to run (no disassembly), the ABI's argument
-    registers are not modelled (armeabi-v7a and x86 today), or the block
-    the parse exported is unusable (its coverage was truncated, so an
-    absence would read as an answer it is not).
+    Two refusals are distinct facts, not degrees of failure: the ABI's
+    argument registers are not modelled (armeabi-v7a and x86 today), or
+    the block the parse exported is unusable (its coverage was
+    truncated, so an absence would read as an answer it is not). Both
+    are reported only when disassembly actually ran - in a run that did
+    not ask for ``--disassemble``, every disassembly-dependent layer
+    (stack strings, function reviews, this one) is equally absent and
+    the metadata's analysis coverage already names it, so a per-rule
+    note would be boilerplate on every Android library rather than a
+    fact a reader could mistake for absence.
     """
     coverage = metadata.get("call_site_arguments_coverage")
     if not isinstance(coverage, dict):
-        return "disassembly_not_enabled"
+        return None
     if coverage.get("entries_truncated"):
         return "callsite_block_truncated"
     registers = argument_registers(
@@ -179,6 +184,18 @@ def _callsite_evaluation_status(metadata: dict) -> str | None:
     if registers is None:
         return "abi_not_modelled"
     return None
+
+
+def _not_evaluated_for(reason: str, explanation: str) -> list[dict]:
+    """One ``not_evaluated`` fact naming its reason, for a rule-specific
+    refusal the shared status function does not know about."""
+    return [
+        {
+            "status": "not_evaluated",
+            "reason": reason,
+            "detail": f"Not evaluated: {explanation}.",
+        }
+    ]
 
 
 def _not_evaluated_evidence(metadata: dict) -> list[dict]:
@@ -193,9 +210,6 @@ def _not_evaluated_evidence(metadata: dict) -> list[dict]:
     if reason is None:
         return []
     explanations = {
-        "disassembly_not_enabled": (
-            "the call-site constant layer needs --disassemble, which this run did not request"
-        ),
         "abi_not_modelled": (
             "the abstract interpreter models arm64 and x86_64 only; this image is "
             f"{metadata.get('llvm_target_tuple') or metadata.get('machine_type') or 'an unmodelled ABI'}"
@@ -446,6 +460,17 @@ def _go_buildinfo_present(metadata: dict) -> bool:
     return isinstance(build_info, dict) and bool(build_info.get("go_version"))
 
 
+def _is_arm32(metadata: dict) -> bool:
+    """True for 32-bit ARM targets (arm-unknown-linux-android,
+    armv7a-…, armeabi-v7a), false for AArch64 and everything else."""
+    lowered = str(metadata.get("llvm_target_tuple") or "").lower()
+    if not lowered:
+        lowered = str(metadata.get("machine_type") or "").lower()
+    if "aarch64" in lowered or "arm64" in lowered:
+        return False
+    return lowered.startswith("arm") or "armeabi" in lowered or "thumb" in lowered
+
+
 def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
     """Family 6: raw kernel-transition instructions in the image's own code.
 
@@ -455,8 +480,21 @@ def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
     each) and Go-built libraries (the runtime issues syscalls directly).
     What is left is an image that bypasses bionic on its own, which on
     Android means bypassing every seccomp-filtered and hookable libc
-    wrapper. This rule is instruction-text based, so it evaluates on every
-    ABI blint disassembles, armeabi-v7a included.
+    wrapper. Evaluates on arm64 and x86/x86_64, where the recovered site
+    counts match the ``llvm-objdump`` oracle (K0: bionic libc 228/228,
+    libxul's single app-library site).
+
+    armeabi-v7a reports ``not_evaluated`` instead: on stripped ARM32
+    libraries blint's function extents overrun into the literal pools
+    ARM32 linkers place between functions, and pool bytes decode as
+    ``svc #0`` (Thumb 0xDF00) amid ``movs r0, r0`` padding — measured
+    against llvm-objdump (R3 hand-check): libflutter 0 real vs 2
+    reported, libhermes 0/1, libvlc 0/2, libxul 1/21, against
+    libjnidispatch's genuine 1/1. 25 false sites against 2 true across
+    those five, so the ABI's instruction-stream evidence does not carry a
+    finding; the fact is stated rather than silenced (ground rule 35's
+    recovery-side form). Fixing the overrun is A4-lane work; the numbers
+    here are its input.
     """
     name = _soname_or_basename(metadata)
     if name in _BIONIC_LIBC_SONAMES or name.startswith(_SANITIZER_RUNTIME_PREFIX):
@@ -468,6 +506,15 @@ def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
         # The rule needs the instruction stream; without disassembly there
         # is nothing to evaluate, and the fact says so.
         return _not_evaluated_evidence(metadata)
+    if _is_arm32(metadata):
+        return _not_evaluated_for(
+            "arm32_recovery_unreliable",
+            "ARM32 function extents overrun into the literal pools between "
+            "functions, so svc #0 sites appear where llvm-objdump decodes none "
+            "(R3 hand-check: 25 false sites against 2 true across libflutter, "
+            "libhermes, libvlc, libxul and libjnidispatch armeabi-v7a); no "
+            "conclusion is drawn on this ABI",
+        )
     holders = []
     site_total = 0
     for key, func_data in disassembled.items():

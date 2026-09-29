@@ -1,0 +1,1448 @@
+{
+ "libc.so": {
+  "callsite_entries": 2513,
+  "rule_relevant_constants": [
+   {
+    "argument": 0,
+    "callee": "__system_property_find",
+    "functions": [
+     "android_fdsan_set_error_level_from_property"
+    ],
+    "string": "debug.fdsan",
+    "value": 145776
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "MallocInitImpl(libc_globals*)"
+    ],
+    "string": "libc.debug.malloc.options",
+    "value": 132000
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "MallocInitImpl(libc_globals*)"
+    ],
+    "string": "libc.debug.malloc.program",
+    "value": 132032
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "MallocInitImpl(libc_globals*)"
+    ],
+    "string": "libc.debug.hooks.enable",
+    "value": 132096
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "HeapprofdShouldLoad()"
+    ],
+    "string": "heapprofd.enable",
+    "value": 132832
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "android_get_device_api_level"
+    ],
+    "string": "ro.build.version.sdk",
+    "value": 146128
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "device_launched_before_api_29()::$_0::operator()() const"
+    ],
+    "string": "ro.product.first_api_level",
+    "value": 149872
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "__system_property_set"
+    ],
+    "string": "ro.property_service.version",
+    "value": 163280
+   },
+   {
+    "argument": 0,
+    "callee": "access",
+    "functions": [
+     "ContextsSplit::InitializeProperties()"
+    ],
+    "string": "/system/etc/selinux/plat_property_contexts",
+    "value": 140256
+   },
+   {
+    "argument": 0,
+    "callee": "access",
+    "functions": [
+     "SystemProperties::InitContexts(bool)"
+    ],
+    "string": "/dev/__properties__/property_info",
+    "value": 140800
+   },
+   {
+    "argument": 0,
+    "callee": "access",
+    "functions": [
+     "__bionic_get_shell_path"
+    ],
+    "string": "/bin/sh",
+    "value": 142032
+   },
+   {
+    "argument": 0,
+    "callee": "access",
+    "functions": [
+     "__libc_safe_arc4random_buf(void*, unsigned long)"
+    ],
+    "string": "/dev/urandom",
+    "value": 143040
+   },
+   {
+    "argument": 0,
+    "callee": "access",
+    "functions": [
+     "PropertyServiceConnection::PropertyServiceConnection(char const*)"
+    ],
+    "string": "/dev/socket/property_service_for_system",
+    "value": 163424
+   },
+   {
+    "argument": 1,
+    "callee": "access",
+    "functions": [
+     "__bionic_get_shell_path"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 1,
+    "callee": "access",
+    "functions": [
+     "PropertyServiceConnection::PropertyServiceConnection(char const*)"
+    ],
+    "string": null,
+    "value": 2
+   },
+   {
+    "argument": 1,
+    "callee": "access",
+    "functions": [
+     "ContextNode::CheckAccessAndOpen()",
+     "ContextNode::ResetAccess()",
+     "ContextsSplit::InitializeProperties()"
+    ],
+    "string": null,
+    "value": 4
+   },
+   {
+    "argument": 1,
+    "callee": "android_dlopen_ext",
+    "functions": [
+     "LoadSharedLibrary(char const*, char const*, MallocDispatch*)"
+    ],
+    "string": null,
+    "value": 2
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "netdClientInitImpl()"
+    ],
+    "string": "libnetd_client.so",
+    "value": 134816
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "LoadSharedLibrary(char const*, char const*, MallocDispatch*)",
+     "netdClientInitImpl()"
+    ],
+    "string": null,
+    "value": 2
+   },
+   {
+    "argument": 1,
+    "callee": "execl",
+    "functions": [
+     "popen"
+    ],
+    "string": null,
+    "value": 165600
+   },
+   {
+    "argument": 2,
+    "callee": "execl",
+    "functions": [
+     "popen"
+    ],
+    "string": null,
+    "value": 165616
+   },
+   {
+    "argument": 3,
+    "callee": "execl",
+    "functions": [
+     "popen"
+    ],
+    "string": null,
+    "value": 165632
+   },
+   {
+    "argument": 5,
+    "callee": "execl",
+    "functions": [
+     "popen"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 0,
+    "callee": "fopen",
+    "functions": [
+     "__find_main_stack_limits(unsigned long*, unsigned long*)"
+    ],
+    "string": "/proc/self/maps",
+    "value": 153056
+   },
+   {
+    "argument": 0,
+    "callee": "fopen",
+    "functions": [
+     "__find_main_stack_limits(unsigned long*, unsigned long*)"
+    ],
+    "string": "/proc/self/stat",
+    "value": 153408
+   },
+   {
+    "argument": 0,
+    "callee": "fopen",
+    "functions": [
+     "_files_getaddrinfo"
+    ],
+    "string": "/system/etc/hosts",
+    "value": 169408
+   },
+   {
+    "argument": 0,
+    "callee": "fopen",
+    "functions": [
+     "sethostent",
+     "sethostent_r",
+     "_hf_gethtbyname"
+    ],
+    "string": "/system/etc/hosts",
+    "value": 177872
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "ContextsSplit::InitializePropertiesFromFile(char const*)"
+    ],
+    "string": null,
+    "value": 140192
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "__find_main_stack_limits(unsigned long*, unsigned long*)"
+    ],
+    "string": null,
+    "value": 153072
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "__get_cpu_count(char const*)"
+    ],
+    "string": null,
+    "value": 162480
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "_files_getaddrinfo"
+    ],
+    "string": null,
+    "value": 169440
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sethostent",
+     "sethostent_r",
+     "_hf_gethtbyname"
+    ],
+    "string": null,
+    "value": 177904
+   },
+   {
+    "argument": 0,
+    "callee": "open",
+    "functions": [
+     "getentropy"
+    ],
+    "string": "/dev/urandom",
+    "value": 146112
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "creat64"
+    ],
+    "string": null,
+    "value": 577
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "getentropy"
+    ],
+    "string": null,
+    "value": 557056
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "prop_area::map_prop_area_rw(char const*, char const*, bool*)"
+    ],
+    "string": null,
+    "value": 557250
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "tmpfile64"
+    ],
+    "string": null,
+    "value": 4210690
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "getentropy"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "prop_area::map_prop_area_rw(char const*, char const*, bool*)"
+    ],
+    "string": null,
+    "value": 292
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "tmpfile64",
+     "mktemp_internal"
+    ],
+    "string": null,
+    "value": 384
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "fopen",
+     "freopen64"
+    ],
+    "string": null,
+    "value": 438
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 8.97
+ },
+ "libc_malloc_debug.so": {
+  "callsite_entries": 629,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sub_771f8"
+    ],
+    "string": null,
+    "value": 12667
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "sub_68b0c"
+    ],
+    "string": null,
+    "value": 557633
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "debug_dump_heap"
+    ],
+    "string": null,
+    "value": 557634
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "debug_dump_heap"
+    ],
+    "string": null,
+    "value": 420
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "sub_68b0c"
+    ],
+    "string": null,
+    "value": 493
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_756ac",
+     "sub_76268"
+    ],
+    "string": null,
+    "value": 17
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_76328"
+    ],
+    "string": null,
+    "value": 16900
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_756ac"
+    ],
+    "string": "erminate_handler unexpectedly threw an exception",
+    "value": 16902
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_756ac"
+    ],
+    "string": "rminate_handler unexpectedly threw an exception",
+    "value": 16903
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "sub_756ac",
+     "sub_76268"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "sub_76328"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 3,
+    "callee": "ptrace",
+    "functions": [
+     "sub_756ac"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 4.38
+ },
+ "libchrome.so": {
+  "callsite_entries": 1347,
+  "rule_relevant_constants": [
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "sub_119b2c"
+    ],
+    "string": "dalvik.vm.heapsize",
+    "value": 397262
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "base::SysInfo::GetAndroidBuildCodename()"
+    ],
+    "string": "ro.build.version.codename",
+    "value": 398708
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "sub_119d34"
+    ],
+    "string": "dalvik.vm.heapgrowthlimit",
+    "value": 402710
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "sub_1196d8"
+    ],
+    "string": "ro.build.version.release",
+    "value": 404195
+   },
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "base::SysInfo::GetAndroidBuildID()"
+    ],
+    "string": "ro.build.id",
+    "value": 406939
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::CreateTemporaryDirInDir(base::FilePath const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, base::FilePath*)"
+    ],
+    "string": "XXXXXX",
+    "value": 394257
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::HistogramBase::WriteAsciiBucketGraph(double, double, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": null,
+    "value": 394730
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::Histogram::WriteHTMLGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const",
+     "base::SparseHistogram::WriteHTMLGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": "</PRE>",
+    "value": 394839
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::GlobalHistogramAllocator::ConstructFilePaths(base::FilePath const&, base::BasicStringPiece<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > >, base::FilePath*, base::FilePath*, base::FilePath*)"
+    ],
+    "string": "-active",
+    "value": 396398
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "sub_a52b0",
+     "sub_a5474",
+     "sub_a59f8"
+    ],
+    "string": null,
+    "value": 396537
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::StatisticsRecorder::ToJSON(base::JSONVerbosityLevel)"
+    ],
+    "string": null,
+    "value": 396561
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::GlobalHistogramAllocator::ConstructFilePaths(base::FilePath const&, base::BasicStringPiece<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > >, base::FilePath*, base::FilePath*, base::FilePath*)"
+    ],
+    "string": "-spare",
+    "value": 397162
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::PersistentMemoryAllocator::CreateTrackingHistograms(base::BasicStringPiece<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > >)"
+    ],
+    "string": ".UsedPct",
+    "value": 397679
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::StatisticsRecorder::ToJSON(base::JSONVerbosityLevel)"
+    ],
+    "string": null,
+    "value": 397969
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::Location::ToString() const"
+    ],
+    "string": null,
+    "value": 400626
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::HistogramBase::WriteAsciiBucketGraph(double, double, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": null,
+    "value": 401485
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::StatisticsRecorder::WriteGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*)"
+    ],
+    "string": null,
+    "value": 402438
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::StatisticsRecorder::WriteGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*)"
+    ],
+    "string": null,
+    "value": 402736
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::StatisticsRecorder::ToJSON(base::JSONVerbosityLevel)"
+    ],
+    "string": null,
+    "value": 402808
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::JSONWriter::BuildJSONString(base::Value const&, unsigned long)"
+    ],
+    "string": null,
+    "value": 403562
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::HistogramBase::WriteAsciiBucketGraph(double, double, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": null,
+    "value": 404220
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::GetNativeLibraryName(base::BasicStringPiece<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > >)"
+    ],
+    "string": null,
+    "value": 405204
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::Histogram::WriteHTMLGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const",
+     "base::SparseHistogram::WriteHTMLGraph(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": "<PRE>",
+    "value": 405486
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::debug::GlobalActivityTracker::RecordProcessLaunch(int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&)"
+    ],
+    "string": null,
+    "value": 406177
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::Histogram::WriteAsciiImpl(bool, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >*) const"
+    ],
+    "string": null,
+    "value": 406353
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "base::PersistentMemoryAllocator::CreateTrackingHistograms(base::BasicStringPiece<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > >)"
+    ],
+    "string": ".Errors",
+    "value": 406358
+   },
+   {
+    "argument": 1,
+    "callee": "access",
+    "functions": [
+     "sub_a232c",
+     "base::PathExists(base::FilePath const&)"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 1,
+    "callee": "access",
+    "functions": [
+     "base::PathIsWritable(base::FilePath const&)"
+    ],
+    "string": null,
+    "value": 2
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "base::AndroidHardwareBufferCompat::AndroidHardwareBufferCompat()"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "__system_property_get"
+    ],
+    "string": "libc.so",
+    "value": 406480
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "base::LoadNativeLibraryWithOptions(base::FilePath const&, base::NativeLibraryOptions const&, base::NativeLibraryLoadError*)"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "base::AndroidHardwareBufferCompat::AndroidHardwareBufferCompat()"
+    ],
+    "string": null,
+    "value": 2
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "__system_property_get"
+    ],
+    "string": null,
+    "value": 4
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sub_ae374"
+    ],
+    "string": null,
+    "value": 395321
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "base::File::DoInitialize(base::FilePath const&, unsigned int)",
+     "sub_a232c"
+    ],
+    "string": null,
+    "value": 384
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 6.86
+ },
+ "libclang_rt.asan.so": {
+  "callsite_entries": 2648,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "__sanitizer::SanitizerInitializeUnwinder()"
+    ],
+    "string": null,
+    "value": 1
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 8.12
+ },
+ "libclang_rt.hwasan.so": {
+  "callsite_entries": 1675,
+  "rule_relevant_constants": [],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 2.56
+ },
+ "libclang_rt.ubsan.so": {
+  "callsite_entries": 920,
+  "rule_relevant_constants": [],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 1.55
+ },
+ "libdumpstateutil.so": {
+  "callsite_entries": 97,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "android::os::dumpstate::RunCommandToFd(int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, android::os::dumpstate::CommandOptions const&)"
+    ],
+    "string": null,
+    "value": 9166
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "android::os::dumpstate::RunCommandToFd(int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, android::os::dumpstate::CommandOptions const&)"
+    ],
+    "string": "/system/xbin/su",
+    "value": 9688
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "android::os::dumpstate::RunCommandToFd(int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, android::os::dumpstate::CommandOptions const&)"
+    ],
+    "string": " root ",
+    "value": 9882
+   }
+  ],
+  "rules": {
+   "ANDROID_SU_EXECUTION": {
+    "evidence": [
+     {
+      "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+      "function": "android::os::dumpstate::RunCommandToFd(int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > > const&, android::os::dumpstate::CommandOptions const&)",
+      "path": "/system/xbin/su",
+      "property": null,
+      "reason": null,
+      "request_name": null,
+      "site_total": null,
+      "via": "string_append"
+     }
+    ],
+    "fires": 1,
+    "not_evaluated": 0
+   }
+  },
+  "truncated": false,
+  "wall_time_s": 0.14
+ },
+ "libfdtrack.so": {
+  "callsite_entries": 426,
+  "rule_relevant_constants": [
+   {
+    "argument": 0,
+    "callee": "__system_property_get",
+    "functions": [
+     "sub_6c078"
+    ],
+    "string": "ro.log.file_logger.path",
+    "value": 10754
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "sub_649a0"
+    ],
+    "string": "libdexfile.so",
+    "value": 9331
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "sub_649a0"
+    ],
+    "string": "eException",
+    "value": 4102
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "sub_649a0"
+    ],
+    "string": "_get",
+    "value": 4354
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sub_6c694"
+    ],
+    "string": null,
+    "value": 9345
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_5850c"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_59a78"
+    ],
+    "string": null,
+    "value": 33
+   },
+   {
+    "argument": 3,
+    "callee": "ptrace",
+    "functions": [
+     "sub_5850c"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 4.17
+ },
+ "libjnidispatch.so": {
+  "callsite_entries": 205,
+  "rule_relevant_constants": [
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "Java_com_sun_jna_Native_open"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sub_fcf4"
+    ],
+    "string": null,
+    "value": 137584
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "sub_fcf4"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "sub_d174"
+    ],
+    "string": null,
+    "value": 4735106
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "sub_d174"
+    ],
+    "string": null,
+    "value": 448
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 0.72
+ },
+ "libmemunreachable.so": {
+  "callsite_entries": 299,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "sub_366fc"
+    ],
+    "string": null,
+    "value": 11268
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_34dec",
+     "sub_359a8"
+    ],
+    "string": null,
+    "value": 17
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_35a68"
+    ],
+    "string": "angle8NameTypeE",
+    "value": 16900
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_34dec"
+    ],
+    "string": "gle8NameTypeE",
+    "value": 16902
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_34dec"
+    ],
+    "string": "le8NameTypeE",
+    "value": 16903
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "sub_34dec",
+     "sub_359a8"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "sub_35a68"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 3,
+    "callee": "ptrace",
+    "functions": [
+     "sub_34dec"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 2.0
+ },
+ "libmozglue.so": {
+  "callsite_entries": 1109,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "_ZNSt6__ndk112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "sub_d67fc"
+    ],
+    "string": null,
+    "value": 287793
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "sub_938cc",
+     "sub_93aa4",
+     "sub_93c14"
+    ],
+    "string": "libc.so",
+    "value": 288937
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "sub_938cc",
+     "sub_93aa4",
+     "sub_93c14"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "Java_org_mozilla_gecko_mozglue_GeckoLoader_loadSQLiteLibsNative",
+     "Java_org_mozilla_gecko_mozglue_GeckoLoader_loadNSSLibsNative",
+     "ChildProcessInit"
+    ],
+    "string": null,
+    "value": 257
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "Java_org_mozilla_gecko_mozglue_GeckoLoader_suppressCrashDialog",
+     "sub_c1814"
+    ],
+    "string": null,
+    "value": 279656
+   },
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "Java_org_mozilla_gecko_mozglue_GeckoLoader_nativeRun"
+    ],
+    "string": null,
+    "value": 284138
+   },
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "sub_955a8"
+    ],
+    "string": null,
+    "value": 0
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "sub_955a8"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 9.79
+ },
+ "libsentry.so": {
+  "callsite_entries": 979,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "open",
+    "functions": [
+     "sub_502d8",
+     "sub_50f7c"
+    ],
+    "string": null,
+    "value": 578
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "sub_50e94",
+     "sub_50f7c"
+    ],
+    "string": null,
+    "value": 436
+   },
+   {
+    "argument": 2,
+    "callee": "open",
+    "functions": [
+     "sub_502d8"
+    ],
+    "string": null,
+    "value": 438
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_7bc8c"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_7d1f8"
+    ],
+    "string": null,
+    "value": 33
+   },
+   {
+    "argument": 3,
+    "callee": "ptrace",
+    "functions": [
+     "sub_7bc8c"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 5.22
+ },
+ "libunwindstack.so": {
+  "callsite_entries": 490,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "unwindstack::ArmExidx::Decode()"
+    ],
+    "string": null,
+    "value": 81289
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "unwindstack::RemoteMaps::GetMapsFile() const"
+    ],
+    "string": "/maps",
+    "value": 82280
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "unwindstack::DwarfCfa<unsigned int>::GetOperandString(unsigned char, unsigned long, unsigned long*)",
+     "unwindstack::DwarfCfa<unsigned long>::GetOperandString(unsigned char, unsigned long, unsigned long*)"
+    ],
+    "string": null,
+    "value": 82656
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "unwindstack::Unwinder::FormatFrame(unwindstack::ArchEnum, unwindstack::FrameData const&, bool)"
+    ],
+    "string": "  <unknown>",
+    "value": 83504
+   },
+   {
+    "argument": 1,
+    "callee": "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "functions": [
+     "unwindstack::Unwinder::FormatFrame(unwindstack::ArchEnum, unwindstack::FrameData const&, bool)"
+    ],
+    "string": null,
+    "value": 84378
+   },
+   {
+    "argument": 0,
+    "callee": "dlopen",
+    "functions": [
+     "sub_a253c"
+    ],
+    "string": "libdexfile.so",
+    "value": 81009
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "sub_a253c"
+    ],
+    "string": null,
+    "value": 4102
+   },
+   {
+    "argument": 1,
+    "callee": "dlopen",
+    "functions": [
+     "sub_a253c"
+    ],
+    "string": null,
+    "value": 4354
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "sub_86d28"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "unwindstack::MemoryRemote::ReadTag(unsigned long)"
+    ],
+    "string": null,
+    "value": 33
+   },
+   {
+    "argument": 0,
+    "callee": "ptrace",
+    "functions": [
+     "unwindstack::Regs::RemoteGet(int, unwindstack::ErrorCode*)",
+     "unwindstack::Regs::RemoteGetArch(int, unwindstack::ErrorCode*)",
+     "unwindstack::RegsRiscv64::GetVlenbFromRemote(int)"
+    ],
+    "string": null,
+    "value": 16900
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "unwindstack::Regs::RemoteGet(int, unwindstack::ErrorCode*)",
+     "unwindstack::Regs::RemoteGetArch(int, unwindstack::ErrorCode*)"
+    ],
+    "string": null,
+    "value": 1
+   },
+   {
+    "argument": 2,
+    "callee": "ptrace",
+    "functions": [
+     "unwindstack::RegsRiscv64::GetVlenbFromRemote(int)",
+     "unwindstack::RegsRiscv64::Read(void const*, int)"
+    ],
+    "string": null,
+    "value": 2305
+   },
+   {
+    "argument": 3,
+    "callee": "ptrace",
+    "functions": [
+     "sub_86d28"
+    ],
+    "string": null,
+    "value": 0
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 5.6
+ },
+ "rootbeer:libtoolChecker_arm64-v8a.so": {
+  "callsite_entries": 4,
+  "rule_relevant_constants": [],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 0.02
+ },
+ "rootbeer:libtoolChecker_x86_64.so": {
+  "callsite_entries": 5,
+  "rule_relevant_constants": [
+   {
+    "argument": 1,
+    "callee": "fopen",
+    "functions": [
+     "exists(char const*)",
+     "Java_com_scottyab_rootbeer_RootBeerNative_checkForRoot"
+    ],
+    "string": null,
+    "value": 1643
+   }
+  ],
+  "rules": {},
+  "truncated": false,
+  "wall_time_s": 0.01
+ }
+}

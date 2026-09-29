@@ -187,11 +187,22 @@ rules:
       signal-subsystem hygiene, not a packer. Read the reported functions
       before concluding.
 
-      This rule is instruction-text based, so it evaluates on every ABI blint
-      disassembles, armeabi-v7a included, and needs --disassemble. Cannot see:
-      syscalls issued from JIT-generated or run-time-decrypted code, and a
-      stripped library's sites carry discovered names (sub_XXXX) rather than
-      symbol names.
+      This rule is instruction-text based and needs --disassemble. It evaluates
+      on arm64 and x86/x86_64, where the recovered site counts match the
+      llvm-objdump oracle (bionic libc 228/228; libxul's single app-library
+      site). armeabi-v7a reports "not evaluated" instead of findings: on
+      stripped ARM32 libraries blint's function extents overrun into the
+      literal pools ARM32 linkers place between functions, and pool bytes
+      decode as svc #0 (Thumb 0xDF00) amid movs r0, r0 padding - measured
+      against llvm-objdump at R3: libflutter 0 real vs 2 reported, libhermes
+      0/1, libvlc 0/2, libxul 1/21, against libjnidispatch's genuine 1/1,
+      so 25 false sites against 2 true on that ABI and its evidence does
+      not carry a finding. Fixing the extent overrun is disassembler work
+      (A4 lane); until then a genuine v7a site stays unreported - the
+      measured cost of not shipping the false ones. Cannot see: syscalls
+      issued from JIT-generated or run-time-decrypted code, and a stripped
+      library's sites carry discovered names (sub_XXXX) rather than symbol
+      names.
     attack:
       - T1106 (Native API)
     check_type: binary_analysis
