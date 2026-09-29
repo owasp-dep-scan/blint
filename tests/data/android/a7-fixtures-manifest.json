@@ -20,7 +20,7 @@
     "rootbeer/toolChecker.h": "same source tree and tag, verbatim",
     "java/com/scottyab/rootbeer/Const.java": "the suPaths directory list from rootbeer 0.1.2 (Const.suPaths + getPaths()), the dex half of the join fixture",
     "java/com/scottyab/rootbeer/RootBeerNative.java": "rootbeer 0.1.2 RootBeerNative (loadLibrary(\"toolChecker\") + the two native declarations), original package kept so the JNI join binds to the unmodified native exports",
-    "java/com/scottyab/rootbeer/RootBeer.java": "cut-down 0.1.2 RootBeer: checkForBinary builds path + \"su\" and hands the array to the native checkForRoot — the dataflow that moves the paths out of native sight",
+    "java/com/scottyab/rootbeer/RootBeer.java": "cut-down 0.1.2 RootBeer: checkForBinary builds path + \"su\" and hands the array to the native checkForRoot \u2014 the dataflow that moves the paths out of native sight",
     "java/com/example/blint/a7/Main.java": "the fixture driver (root check plus one benign ro.build.version.sdk string)",
     "AndroidManifest.xml": "package com.example.blint.a7, minSdk 24, targetSdk 34"
   },
@@ -29,7 +29,8 @@
     "liba7_fire_<abi>.so": "clang -O2 -fPIC -funwind-tables -shared a7_fire.c for abi in arm64-v8a (aarch64-linux-android24-clang), armeabi-v7a (armv7a-linux-androideabi24-clang), x86_64 (x86_64-linux-android24-clang), plus an llvm-strip --strip-all twin",
     "liba7_nofire_<abi>.so": "same commands over a7_nofire.c, plus the stripped twin",
     "libtoolChecker_<abi>.so": "same commands over rootbeer/toolChecker.cpp with -llog, plus the stripped twin",
-    "a7-jni-<abi>.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/<abi>/{liba7fire.so, liba7nofire.so, libtoolChecker.so}; zipalign -f 4 — one APK per ABI in arm64-v8a, armeabi-v7a, x86_64"
+    "a7-jni-<abi>.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/<abi>/{liba7fire.so, liba7nofire.so, libtoolChecker.so}; zipalign -f 4 \u2014 one APK per ABI in arm64-v8a, armeabi-v7a, x86_64",
+    "size_optimised_twins_a72": "A7.2 R1: liba7_{fire,nofire}_{arm64-v8a,x86_64}_{Os,Oz}.so plus a stripped twin each, same compilers and flags except -Os/-Oz for -O2. No APKs, no toolChecker variants: the flag twins gate the native rules only."
   },
   "expected": {
     "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule does not evaluate on 32-bit ARM, where function extents can run into literal pools",
@@ -113,6 +114,53 @@
     "ANDROID_DEX_SU_PATHS_TO_NATIVE": {
       "a7-jni-<abi>.apk": "fire at app level: the dex carries Const.suPaths and declares checkForRoot, which the JNI join binds to libtoolChecker.so's Java_com_scottyab_rootbeer_RootBeerNative_checkForRoot export",
       "a5-jni-<abi>.apk": "silent: native declarations exist but no su-path strings (the committed A5 fixtures are this rule's no-fire case)"
+    },
+    "flag_variants_note": "A7.2 rows below are per (abi, flag); the plain rows above are the -O2 builds. The -Os/-Oz shapes the reviewer measured on feat/an-a7: the su paths sit in a pointer table in .data.rel.ro read inside a loop the compiler did not unroll (ANDROID_ROOT_PATH_PROBE silent at -Os/-Oz on both ABIs), arm64 -Oz moves the dlopen argument setup into OUTLINED_FUNCTION_0 (ANDROID_WRITABLE_LOCATION_DLOPEN silent until A7.2 M2 resolves through pure thunks), and x86_64 -Oz emits a7_anti_debug as a tail jmp into the PLT that the ELF resolver read absolute (ANDROID_PTRACE_TRACEME silent until A7.2 M1 reads tail jmps pc-relative).",
+    "flag_variants": {
+      "arm64-v8a_Os": {
+        "liba7_fire": {
+          "ANDROID_PTRACE_TRACEME": "fire",
+          "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
+          "ANDROID_SU_EXECUTION": "fire",
+          "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",
+          "ANDROID_WRITABLE_LOCATION_DLOPEN": "fire",
+          "ANDROID_INLINE_SYSCALLS": "fire"
+        },
+        "liba7_nofire": "silent (all rules)"
+      },
+      "arm64-v8a_Oz": {
+        "liba7_fire": {
+          "ANDROID_PTRACE_TRACEME": "fire",
+          "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
+          "ANDROID_SU_EXECUTION": "fire",
+          "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",
+          "ANDROID_WRITABLE_LOCATION_DLOPEN": "silent pre-A7.2-M2 (OUTLINED_FUNCTION_0 carries mov w1, #2; b dlopen)",
+          "ANDROID_INLINE_SYSCALLS": "fire"
+        },
+        "liba7_nofire": "silent (all rules)"
+      },
+      "x86_64_Os": {
+        "liba7_fire": {
+          "ANDROID_PTRACE_TRACEME": "fire",
+          "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
+          "ANDROID_SU_EXECUTION": "fire",
+          "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",
+          "ANDROID_WRITABLE_LOCATION_DLOPEN": "fire",
+          "ANDROID_INLINE_SYSCALLS": "fire"
+        },
+        "liba7_nofire": "silent (all rules)"
+      },
+      "x86_64_Oz": {
+        "liba7_fire": {
+          "ANDROID_PTRACE_TRACEME": "silent pre-A7.2-M1 (a7_anti_debug is a tail jmp into the PLT the ELF resolver read absolute)",
+          "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
+          "ANDROID_SU_EXECUTION": "fire",
+          "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",
+          "ANDROID_WRITABLE_LOCATION_DLOPEN": "fire",
+          "ANDROID_INLINE_SYSCALLS": "fire"
+        },
+        "liba7_nofire": "silent (all rules)"
+      }
     }
   }
 }

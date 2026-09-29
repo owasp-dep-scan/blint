@@ -58,16 +58,20 @@ javac --release 11 -d "$work/classes" \
   --output "$work" $(find "$work/classes" -name '*.class' | sort)
 cp "$work/classes.dex" "$out/a7-classes.dex"
 
+cc_for_abi() {
+  case "$1" in
+    arm64-v8a) echo "$toolchain/aarch64-linux-android24-clang" ;;
+    armeabi-v7a) echo "$toolchain/armv7a-linux-androideabi24-clang" ;;
+    x86_64) echo "$toolchain/x86_64-linux-android24-clang" ;;
+  esac
+}
+
 # ---------------------------------------------------------------- libs
 # -funwind-tables mirrors the A5 choice: real RegisterNatives libraries are
 # C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows
 # for function discovery. toolChecker links -llog for __android_log_print.
 for abi in arm64-v8a armeabi-v7a x86_64; do
-  case "$abi" in
-    arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
-    armeabi-v7a) cc="$toolchain/armv7a-linux-androideabi24-clang" ;;
-    x86_64) cc="$toolchain/x86_64-linux-android24-clang" ;;
-  esac
+  cc="$(cc_for_abi "$abi")"
   for pair in "fire a7_fire.c" "nofire a7_nofire.c"; do
     set -- $pair
     lib="$1"; csrc="$2"
@@ -100,6 +104,30 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
     --min-sdk-version 24 --target-sdk-version 34
   (cd "$apkroot" && zip -q -r "$work/a7-$abi.apk" .)
   "$build_tools/zipalign" -f 4 "$work/a7-$abi.apk" "$out/a7-jni-$abi.apk"
+done
+
+# ------------------------------------------------- size-optimised twins (A7.2 R1)
+# -Os and -Oz builds of the same sources for the two call-site-modelled
+# ABIs: at -Os/-Oz the root probe's su paths stay in a pointer table read
+# inside a loop the compiler does not unroll, arm64 -Oz moves the dlopen
+# argument setup into a machine-outlined thunk, and x86_64 -Oz emits
+# a7_anti_debug as a tail jmp into the PLT. Naming keeps the flag suffix:
+# liba7_fire_arm64-v8a_Os.so, liba7_fire_x86_64_Oz.so, ... plus a
+# stripped twin each. No APKs: the flag variants gate the native rules.
+for abi in arm64-v8a x86_64; do
+  cc="$(cc_for_abi "$abi")"
+  for opt in Os Oz; do
+    for pair in "fire a7_fire.c" "nofire a7_nofire.c"; do
+      set -- $pair
+      lib="$1"; csrc="$2"
+      name="liba7_${lib}_${abi}_${opt}"
+      "$cc" "-${opt}" -fPIC -funwind-tables -shared -o "$work/${name}.so" \
+        "$src/$csrc"
+      cp "$work/${name}.so" "$out/${name}.so"
+      "$toolchain/llvm-strip" --strip-all -o "$out/${name}_stripped.so" \
+        "$work/${name}.so"
+    done
+  done
 done
 
 echo "built:"
