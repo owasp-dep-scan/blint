@@ -21,7 +21,10 @@ from blint.lib.absint import (
     ARM64_ARGUMENT_REGISTERS,
     X86_SYSV_ARGUMENT_REGISTERS,
     X86_WIN64_ARGUMENT_REGISTERS,
+    _overlay_thunk_replay,
+    _thunk_prep_replay,
     argument_registers,
+    pure_thunk_map,
     recover_call_site_arguments,
     recover_call_site_arguments_with_method,
 )
@@ -830,3 +833,132 @@ def test_entry_block_call_does_not_see_a_value_the_loop_body_writes():
     assert method == "dataflow"
     assert [r["arguments"][1] for r in records] == [None]
     assert extract_client_ioctl_codes(func, "", "PE") == []
+
+
+# ---------------------------------------------------------------------------
+# Pure thunks (A7.2 M2). Every assembly string below is captured from
+# nyxstone over a committed fixture: OUTLINED_FUNCTION_0 and its caller in
+# liba7_fire_arm64-v8a_Oz.so, and the -Os x86_64 dlopen site.
+# ---------------------------------------------------------------------------
+
+# liba7_fire_arm64-v8a_Oz.so, OUTLINED_FUNCTION_0 @ 0x5164.
+_THUNK_ASSEMBLY = "mov w1, #2\nb #408"
+_THUNK_TARGETS = [
+    {
+        "target_name": "dlopen",
+        "target_address": "0x5300",
+        "target_address_candidates": ["0x5300"],
+        "raw_operand": "#408",
+        "kind": "tailcall",
+        "site_index": 1,
+    }
+]
+
+
+def _thunk_function(**overrides) -> dict:
+    func = {
+        "name": "OUTLINED_FUNCTION_0",
+        "address": "0x5164",
+        "assembly": _THUNK_ASSEMBLY,
+        "instruction_lengths": [4, 4],
+        "direct_call_targets": _THUNK_TARGETS,
+    }
+    func.update(overrides)
+    return func
+
+
+def test_pure_thunk_map_follows_the_outlined_thunk():
+    thunks = pure_thunk_map(
+        {"0x5164::OUTLINED_FUNCTION_0": _thunk_function()}, "aarch64-unknown-linux-android"
+    )
+    assert set(thunks) == {0x5164}
+    assert thunks[0x5164]["callee"] == "dlopen"
+    assert thunks[0x5164]["name"] == "OUTLINED_FUNCTION_0"
+    assert thunks[0x5164]["replay"] == {1: 2}
+
+
+def test_pure_thunk_map_refuses_every_disagreeing_shape():
+    # A conditional tail branch, an unresolved tail callee, a branch among
+    # the prep, a non-move instruction and a too-long body each keep the
+    # function out of the map, so sites into it keep naming it.
+    target = "aarch64-unknown-linux-android"
+    assert pure_thunk_map(
+        {"a": _thunk_function(assembly="mov w1, #2\nb.eq #408")}, target
+    ) == {}
+    assert pure_thunk_map(
+        {"a": _thunk_function(direct_call_targets=[])}, target
+    ) == {}
+    assert pure_thunk_map(
+        {"a": _thunk_function(assembly="mov w1, #2\ncbz x0, #8\nb #408")}, target
+    ) == {}
+    assert pure_thunk_map(
+        {"a": _thunk_function(assembly="ldr x0, [sp]\nb #408")}, target
+    ) == {}
+    assert pure_thunk_map(
+        {
+            "a": _thunk_function(
+                assembly="mov x3, x0\nmov x4, x1\nmov x5, x2\nmov w6, #2\nmov w7, #3\nb #408",
+                instruction_lengths=[4] * 6,
+            )
+        },
+        target,
+    ) == {}
+
+
+def test_thunk_prep_replay_forms():
+    # The immediate forms (captured: "mov w1, #2" arm64, "mov esi, 2" x86),
+    # the register shuffle between argument positions, the adrp+add pair
+    # that can only be marked unknown here, and the refusal of a load.
+    assert _thunk_prep_replay(["mov w1, #2"], True) == {1: 2}
+    assert _thunk_prep_replay(["mov esi, 2"], False) == {1: 2}
+    assert _thunk_prep_replay(["mov x2, x0"], True) == {2: ("caller", 0)}
+    assert _thunk_prep_replay(["adrp x0, #8192", "add x0, x0, #16"], True) == {0: None}
+    assert _thunk_prep_replay(["ldr x0, [sp]"], True) is None
+
+
+def test_overlay_thunk_replay_applies_the_moves_in_order():
+    arguments, pointers = _overlay_thunk_replay([11, 22, 33, 44], [0], {1: 2, 2: ("caller", 0), 3: None})
+    assert arguments == [11, 2, 11, None]
+    assert pointers == [0, 2]
+
+
+def test_call_through_a_thunk_names_the_final_callee_and_applies_moves():
+    # The caller side of liba7_fire_arm64-v8a_Oz.so's a7_writable_dlopen:
+    # adrp/add materialises the path, then `bl #228` enters
+    # OUTLINED_FUNCTION_0, whose `mov w1, #2` supplies RTLD_NOW at dlopen.
+    caller = _resolved_func(
+        "adrp x0, #-20480\nadd x0, x0, #2961\nbl #228",
+        callee="OUTLINED_FUNCTION_0",
+        operand="#228",
+        kind="direct",
+        blocks=[{"instructions": 3, "start": "0x506c", "end": "0x5078"}],
+        direct_call_targets=[
+            {
+                "target_name": "OUTLINED_FUNCTION_0",
+                "target_address": "0x5164",
+                "target_address_candidates": ["0x5164"],
+                "raw_operand": "#228",
+                "kind": "direct",
+                "site_index": 2,
+            }
+        ],
+    )
+    # The real function's address (a7_writable_dlopen @ 0x506c in
+    # liba7_fire_arm64-v8a_Oz.so): the adrp fold needs it to land the
+    # pointer the fixture's .rodata really holds.
+    caller["address"] = "0x506c"
+    caller["instruction_lengths"] = [4, 4, 4]
+    records, method = recover_call_site_arguments_with_method(
+        caller,
+        "aarch64-unknown-linux-android",
+        "ELF",
+        thunks={0x5164: {"name": "OUTLINED_FUNCTION_0", "callee": "dlopen", "replay": {1: 2}}},
+    )
+    assert method == "dataflow"
+    assert len(records) == 1
+    record = records[0]
+    assert record["callee"] == "dlopen"
+    assert record["callee_via_thunk"] == "OUTLINED_FUNCTION_0"
+    assert record["arguments"][0] == 2961  # the materialised path address
+    assert record["arguments"][1] == 2  # the thunk's RTLD_NOW
+    assert record["pointer_positions"] == (0,)

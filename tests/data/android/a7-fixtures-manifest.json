@@ -134,7 +134,7 @@
           "ANDROID_ROOT_PATH_PROBE": "silent (su paths in a .data.rel.ro table read in a loop)",
           "ANDROID_SU_EXECUTION": "fire",
           "ANDROID_EMULATOR_PROPERTY_PROBE": "fire",
-          "ANDROID_WRITABLE_LOCATION_DLOPEN": "silent pre-A7.2-M2 (OUTLINED_FUNCTION_0 carries mov w1, #2; b dlopen)",
+          "ANDROID_WRITABLE_LOCATION_DLOPEN": "fire post-A7.2-M2 (the call sites resolve through OUTLINED_FUNCTION_0, whose mov w1, #2 supplies RTLD_NOW)",
           "ANDROID_INLINE_SYSCALLS": "fire"
         },
         "liba7_nofire": "silent (all rules)"

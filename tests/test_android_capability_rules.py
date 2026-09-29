@@ -9,6 +9,7 @@ manifest records the build commands and toolchain versions.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,58 @@ def test_nofire_fixture_stays_silent(abi: str) -> None:
         assert "ANDROID_INLINE_SYSCALLS" not in results
     else:
         assert results == {}, results
+
+
+@pytest.mark.parametrize("abi_flag", ["arm64-v8a_Os", "arm64-v8a_Oz", "x86_64_Os", "x86_64_Oz"])
+def test_flag_variant_fixture_matches_the_manifest_table(abi_flag: str) -> None:
+    # The -Os/-Oz twins (A7.2 R1) are pinned to the manifest's expected
+    # table, which records what each flag does to each rule: the loop-held
+    # su-path table silences the root probe everywhere, the arm64 -Oz
+    # outliner hides dlopen until a pure thunk is followed, and the x86_64
+    # -Oz tail jmp hides ptrace until the ELF resolver reads it pc-relative.
+    if not _nyxstone_available():
+        pytest.skip("nyxstone is not available")
+    initialize_rules(BlintOptions())
+    manifest = json.loads((DATA / "a7-fixtures-manifest.json").read_text(encoding="utf-8"))
+    expected = manifest["expected"]["flag_variants"][abi_flag]
+    for lib, rows in expected.items():
+        results = _android_results(_parse_fixture(f"{lib}_{abi_flag}.so"))
+        if isinstance(rows, str):
+            assert results == {}, (lib, abi_flag, results)
+            continue
+        for rule, verdict in rows.items():
+            fires = verdict.startswith("fire")
+            assert bool(results.get(rule)) is fires, (lib, abi_flag, rule, verdict)
+
+
+@pytest.mark.parametrize("abi_flag", ["arm64-v8a_Oz"])
+def test_outlined_thunk_is_followed_and_its_moves_applied(abi_flag: str) -> None:
+    # The arm64 -Oz machine outliner carries dlopen's RTLD_NOW in
+    # OUTLINED_FUNCTION_0 (mov w1, #2; b dlopen): the call-site block names
+    # dlopen through the thunk and the thunk's constant reaches argument 1.
+    if not _nyxstone_available():
+        pytest.skip("nyxstone is not available")
+    from blint.lib.binary import parse
+
+    metadata = parse(str(DATA / f"liba7_fire_{abi_flag}.so"), True)
+    entries = metadata.get("call_site_arguments") or []
+    via_thunk = [
+        entry
+        for entry in entries
+        if entry.get("callee") == "dlopen" and entry.get("callee_via_thunk")
+    ]
+    assert via_thunk, entries
+    paths = {entry.get("string") for entry in via_thunk if entry.get("argument") == 0}
+    assert "/data/local/tmp/plugin.so" in paths
+    flags = [entry for entry in via_thunk if entry.get("argument") == 1]
+    assert flags and {entry.get("value") for entry in flags} == {2}
+    # The -O2 build has no outlined thunk, so nothing there resolves via one.
+    plain = parse(str(DATA / "liba7_fire_arm64-v8a.so"), True)
+    assert not [
+        entry
+        for entry in plain.get("call_site_arguments") or []
+        if entry.get("callee_via_thunk")
+    ]
 
 
 @pytest.mark.parametrize("abi", ABIS)
