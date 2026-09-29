@@ -1,0 +1,21 @@
+tests/test_absint_call_args.py
+  s_fd07128e7dbdfd::t_c4f32fdfb84581 24-25,27,836-964
+tests/test_android_capability_rules.py
+  s_fd07128e7dbdfd::t_517af82982db68 12,123-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a19dd7945d9fa769ad3637fdfb70204fafcd1708",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
