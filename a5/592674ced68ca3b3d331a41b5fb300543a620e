@@ -1,0 +1,21 @@
+tests/scripts/android/a7_2_m0_arm32_extent.py
+  s_fd07128e7dbdfd::t_c3c1724138df53 1-259
+tests/scripts/android/a7_2_m0_measure.py
+  s_fd07128e7dbdfd::t_230e5d3c7cd1c5 1-674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a5592674ced68ca3b3d331a41b5fb300543a620e",
+  "prompts": {},
+  "sessions": {
+    "s_fd07128e7dbdfd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5da061be-63ce-496e-8fda-dc88d919c400",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
