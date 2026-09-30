@@ -123,18 +123,23 @@ rules:
     summary: svc #0, syscall or int 0x80 appear in this library's functions, outside the code that legitimately issues them.
     description: |
       The library's own functions contain the kernel transition instruction
-      (svc #0 on arm64, syscall or int 0x80 on x86) instead of calling bionic's
-      wrappers. Packers and anti-instrumentation code do this to avoid hooks on
-      libc entry points. bionic libc (by SONAME), the clang sanitizer runtimes
-      (libclang_rt.*) and Go-built libraries (by build info) are excluded.
+      (svc #0 on arm64 and ARM, syscall or int 0x80 on x86) instead of calling
+      bionic's wrappers. Packers and anti-instrumentation code do this to avoid
+      hooks on libc entry points. bionic libc (by SONAME), the clang sanitizer
+      runtimes (libclang_rt.*) and Go-built libraries (by build info) are
+      excluded.
 
       Benign code does it too: a signal-safety stub that queries the signal
       mask is a common single site. The evidence lists the functions and their
       site counts; read them before concluding.
 
-      Needs --disassemble. 32-bit ARM is not evaluated: function extents in
-      stripped libraries can run into the literal pools between functions,
-      whose bytes decode as svc. Cannot see syscalls in code generated or
+      Needs --disassemble. On 32-bit ARM a stripped library's function extents
+      once ran into the literal pools between functions, whose bytes decoded
+      as svc; the disassembler now drops the pool and branch-table words such
+      a window swallows (the per-binary arm32_pool_cuts counter names how
+      often), and a function contributes a site only where it loads r7, the
+      EABI syscall-number register - a data word behind a call decodes as svc
+      but never loads its number. Cannot see syscalls in code generated or
       decrypted at run time.
     attack:
       - T1106 (Native API)

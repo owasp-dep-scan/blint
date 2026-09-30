@@ -102,9 +102,15 @@ the compiler does not unroll. The corpus count is zero outside the fixtures
 at all — which ranks the su-table structural rule behind every candidate
 that has corpus carriers (M3's ranked proposal carries the number).
 
-Tier-0 (arm64 system images, 3,540 libraries) is not in these counts: its
-(b)/(c) pass rides the M3 R3 sweep's disassembly instead of a second
-multi-hour run, and the numbers land in the M3 gate block.
+Tier-0 (arm64 system images, 3,540 libraries, all four images deduped by
+sha256) was measured after M3's code landed, on the same instrument:
+34,362 pure thunks across 1,945 libraries (69,575 resolved call sites enter
+one, 68,291 through an argument-writing thunk; none is named
+OUTLINED_FUNCTION_* — the system images are stripped), zero
+`.data.rel.ro`-loaded probe paths, and by architecture zero x86 tail jumps
+(the images are arm64-only). The corpus-wide conclusions above hold: M2's
+thunk population is real everywhere, and the su-table rule has no carrier
+in any measured population.
 
 ## (d) the ARM32 extent overrun, per library
 

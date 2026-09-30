@@ -253,11 +253,40 @@ def _evaluate_writable_dlopen(metadata: dict) -> list[dict]:
     ]
 
 
-def _is_arm32(metadata: dict) -> bool:
-    target = str(metadata.get("llvm_target_tuple") or metadata.get("machine_type") or "").lower()
-    if "aarch64" in target or "arm64" in target:
-        return False
+# 32-bit ARM EABI passes the syscall number in r7, and the load sits in the
+# same basic block as the svc that consumes it (r7 is callee-saved; a call
+# between the load and the svc clobbers nothing, but the compiler emits the
+# pair together and nothing else moves r7 in between). A pool or
+# branch-table word that decodes as svc has no such load anywhere near it -
+# the measured false windows either never load r7 at all or carry an
+# unrelated r7 write hundreds of instructions away.
+_ARM32_R7_SETUP_RE = re.compile(
+    r"^(?:mov|movs|movw|movt)(?:\.w|\.n)?\s+r7,\s*(?:#|0x)"
+    r"|^ldr(?:\.w|\.n)?\s+r7,\s*\[pc",
+    re.IGNORECASE,
+)
+# How many instructions before a svc an r7 load may sit and still be its
+# number: the measured true sites load r7 within three instructions
+# (mov r7,#N / movw+movt pairs / ldr r7,[pc]); eight covers any
+# argument-shuffle interleaving a compiler emits between them.
+_ARM32_R7_SETUP_WINDOW = 8
+
+
+def _is_arm32_target(metadata: dict) -> bool:
+    target = str(metadata.get("llvm_target_tuple") or "").lower()
     return target.startswith(("arm", "thumb")) or "armeabi" in target
+
+
+def _arm32_syscall_sites(lines: list[str]) -> int:
+    """svc sites whose r7 number load sits in the same block, 32-bit ARM."""
+    sites = 0
+    for index, line in enumerate(lines):
+        if not _INLINE_SYSCALL_RE.search(line):
+            continue
+        window = lines[max(0, index - _ARM32_R7_SETUP_WINDOW) : index]
+        if any(_ARM32_R7_SETUP_RE.search(window_line) for window_line in window):
+            sites += 1
+    return sites
 
 
 def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
@@ -266,23 +295,25 @@ def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
         return []
     if (metadata.get("build_info") or {}).get("go_version"):
         return []
-    # 32-bit ARM is not evaluated: a stripped library's function extents can
-    # run into the literal pools between functions, whose bytes decode as svc.
-    if _is_arm32(metadata):
-        return []
+    arm32 = _is_arm32_target(metadata)
     holders = []
     for key, func_data in (metadata.get("disassembled_functions") or {}).items():
         if not isinstance(func_data, dict):
             continue
-        sites = len(_INLINE_SYSCALL_RE.findall(str(func_data.get("assembly") or "")))
-        if sites:
-            holders.append(
-                {
-                    "function": str(func_data.get("name") or key),
-                    "address": func_data.get("address"),
-                    "sites": sites,
-                }
-            )
+        lines = str(func_data.get("assembly") or "").split("\n")
+        if arm32:
+            sites = _arm32_syscall_sites(lines)
+        else:
+            sites = len(_INLINE_SYSCALL_RE.findall("\n".join(lines)))
+        if not sites:
+            continue
+        holders.append(
+            {
+                "function": str(func_data.get("name") or key),
+                "address": func_data.get("address"),
+                "sites": sites,
+            }
+        )
     if not holders:
         return []
     holders.sort(key=lambda item: (-item["sites"], item["function"]))

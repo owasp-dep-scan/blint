@@ -33,7 +33,7 @@
     "size_optimised_twins_a72": "A7.2 R1: liba7_{fire,nofire}_{arm64-v8a,x86_64}_{Os,Oz}.so plus a stripped twin each, same compilers and flags except -Os/-Oz for -O2. No APKs, no toolChecker variants: the flag twins gate the native rules only."
   },
   "expected": {
-    "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule does not evaluate on 32-bit ARM, where function extents can run into literal pools",
+    "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule evaluates on every ABI (since A7.2 M3 stopped 32-bit ARM extents at the literal pools)",
     "ANDROID_PTRACE_TRACEME": {
       "liba7_fire": {
         "arm64-v8a": "fire",
@@ -103,12 +103,12 @@
       "liba7_fire": {
         "arm64-v8a": "fire (svc #0 in a7_inline_syscall and the inlined copy in a7_run_all)",
         "x86_64": "fire (syscall and int 128)",
-        "armeabi-v7a": "not evaluated (arm32 recovery: extent overrun into literal pools injects false svc #0 sites - R3 hand-check; the disassembly itself still decodes the Thumb svc)"
+        "armeabi-v7a": "fire post-A7.2-M3 (svc #0 in a7_inline_syscall and the inlined copy in a7_run_all; the pool cut keeps the stripped twin's count identical)"
       },
       "liba7_nofire": {
         "arm64-v8a": "silent (no inline syscall sites)",
         "x86_64": "silent",
-        "armeabi-v7a": "not evaluated (same arm32 reason)"
+        "armeabi-v7a": "silent"
       }
     },
     "ANDROID_DEX_SU_PATHS_TO_NATIVE": {
