@@ -710,7 +710,7 @@ def build_jni_join_summary(
     nothing there - never another ABI's tables in its place. A library
     whose first parsed copy owns neither a static surface nor a recovered
     table is not parsed again for its other ABIs (the same sources build
-    every ABI's copy; the wall-time budget is A9 P0(b)).
+    every ABI's copy).
     ``System.loadLibrary`` call sites map to ``lib<name>.so`` members.
     Bounded: counts always, the first ``JOIN_LISTING_CAP`` entries of
     each list, ``truncated`` flags beside. ``confirm_findclass`` (set by
@@ -769,10 +769,7 @@ def build_jni_join_summary(
                         # One successfully parsed copy that owns neither a
                         # surface nor a table settles the library: the same
                         # sources build every ABI's copy, so the remaining
-                        # copies are not read (A9 P0(b)'s wall-time budget:
-                        # RnHello parses its 7 surface-owning libraries per
-                        # ABI - 0.47 s, libreactnative.so 0.41 s of it -
-                        # and one copy of the other 3).
+                        # copies are not read.
                         continue
                     data = None
                     with contextlib.suppress(Exception):
@@ -844,11 +841,8 @@ def build_jni_join_summary(
 _JAVA_IDENTIFIER_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
 # A candidate name or signature string is read with this bound: one whose
-# NUL does not sit within it is refused, never truncated (A9 P2: a
-# truncated signature failed validation silently, and a truncated name
-# could still match the identifier grammar and bind as a wrong string).
-# React Native's longest real descriptor is 446 bytes (ReactInstance's
-# initHybrid, A9 P0); the JVM bounds a UTF-8 constant at 65,535.
+# NUL does not sit within it is refused, never truncated, so a cut-down
+# name or signature cannot bind.
 JNI_STRING_READ_LIMIT = 1024
 
 

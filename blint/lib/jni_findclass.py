@@ -54,6 +54,7 @@ import itertools
 import re
 import struct
 
+from blint.lib.jni import _read_cstring
 from blint.logger import LOG
 
 # JNIEnv vtable slots (the JNINativeInterface order, reserved0-3 first):
@@ -88,6 +89,13 @@ _X86_SP_LEA_RE = re.compile(
 # [rip - N]` (no register ever holds the string's address), so the
 # operand is the only carrier - the same pc-relative textual read `adr`
 # gets. The class-name shape check filters what it accepts.
+# Byte-level pre-scan for rip-relative loads. The lookahead makes the
+# matches overlap, so a false match cannot hide a real instruction that
+# starts inside its 7 bytes.
+_X86_RIP_CANDIDATE_RES = (
+    re.compile(rb"(?=[\x48\x4c][\x8b\x8d][\x05\x0d\x15\x1d\x25\x2d\x35\x3d])", re.DOTALL),
+    re.compile(rb"(?=\x0f[\x10\x28][\x05\x0d\x15\x1d\x25\x2d\x35\x3d])", re.DOTALL),
+)
 _RIP_RELATIVE_RE = re.compile(
     r"\[rip\s*(?P<sign>[+-])\s*(?P<off>0x[0-9a-f]+|\d+)\]", re.IGNORECASE
 )
@@ -265,8 +273,7 @@ def _x86_rip_operands(parsed_obj, instruction, text: str) -> set[int]:
     a name this pass can use: the registerHybrid copy loads the class name
     with overlapping SSE moves whose later operands address the string's
     middle, and a mid-string address can still decode as a class-shaped
-    name (measured: ``ct.bridge.CatalystInstanceImpl`` off the real one).
-    A usable start is the byte after a NUL, or after the ``L`` of an
+    name. A usable start is the byte after a NUL, or after the ``L`` of an
     ``L...;`` descriptor the registrar sliced the name out of."""
     out: set[int] = set()
     for match in _RIP_RELATIVE_RE.finditer(text):
@@ -385,8 +392,7 @@ def _direct_target(instruction, text: str, arch: str, plt_stubs: dict[int, int])
     """A direct call's target from nyxstone's printed operand, PLT-resolved
     by the caller. ``bl`` prints a delta from the instruction's own
     address; an x86 ``call`` prints the rel32, which encodes from the end
-    of the instruction (reading it instruction-relative, or as an absolute
-    address, lost every x86_64 chain hop - A9 P3's first fix)."""
+    of the instruction."""
     mnemonic = text.split(None, 1)[0].lower()
     if mnemonic not in ("bl", "call"):
         return None
@@ -409,20 +415,6 @@ def _int_register(state, name: str) -> int | None:
         return None
     inner = value[0]
     return inner if isinstance(inner, int) and 0 < inner <= 4096 else None
-
-
-def _read_cstring(parsed_obj, address: int, limit: int = 256) -> str | None:
-    try:
-        blob = bytes(parsed_obj.get_content_from_virtual_address(address, limit))
-    except Exception:
-        return None
-    end = blob.find(b"\x00")
-    if end <= 0:
-        return None
-    try:
-        return blob[:end].decode("utf-8")
-    except UnicodeDecodeError:
-        return None
 
 
 def _class_name_at(parsed_obj, address: int) -> str | None:
@@ -490,18 +482,14 @@ def _naive_materializations(sections: list[tuple[int, bytes]], arch: str) -> lis
                         out.append((site, page + (imm << 12) + ((w2 >> 10) & 0xFFF)))
                         break
     else:
-        # C-speed candidate location: the three rip-relative encodings are
-        # 7 bytes each (REX opcode modrm disp32 / 0F opcode modrm disp32),
-        # so a compiled regex walks the section where a Python loop over
-        # every byte costs seconds on a 100 MB .text (measured: libxul
-        # x86_64, 934k candidates, 5.5 s -> regex 0.1 s). The matches are
-        # only proposals; the model confirms each.
-        rex = re.compile(rb"[\x48\x4c][\x8b\x8d][\x05\x0d\x15\x1d\x25\x2d\x35\x3d]....", re.DOTALL)
-        sse = re.compile(rb"\x0f[\x10\x28][\x05\x0d\x15\x1d\x25\x2d\x35\x3d]....", re.DOTALL)
+        # The rip-relative lea/mov/SSE-move encodings are 7 bytes each; the
+        # matches are only proposals and the model confirms each.
         for base, blob in sections:
-            for pattern in (rex, sse):
+            for pattern in _X86_RIP_CANDIDATE_RES:
                 for match in pattern.finditer(blob):
                     i = match.start()
+                    if i + 7 > len(blob):
+                        break
                     disp = struct.unpack_from("<i", blob, i + 3)[0]
                     out.append((base + i, base + i + 7 + disp))
     return out
