@@ -181,3 +181,41 @@ function start (a per-ABI recovery fact, not the string bound).
 
 Wall time: RnHello 1.42 s → 1.44 s plain (1.83 s → 1.86 s with the
 confirmer) — the longer reads are bounded and rare.
+
+## After P3 (same host, same run shape)
+
+The registrar's argument registers are carried into the callee's first
+state (`_seed_for_call` rewrites caller-frame `("sp", k)` / `("rbp", k)`
+to `("caller_sp", k)` / `("caller_rbp", k)` markers); the callee's
+RegisterNatives event then carries (methods marker, count, class) and
+`_stack_copy_origin` ties the marker back: the registrar's memcpy
+(dst == the stack slot, src a materialised table address, size) when the
+copy is a call, else the registrar's entry-aligned materialised
+addresses. Four x86_64 gaps fell out on the way: nyxstone prints x86
+direct-call operands as rel32 (end-relative), which `_call_targets` read
+as absolute — every x86_64 chain hop was lost; the x86 model keeps
+rsp/rbp out of register values, so `mov rbx, rsp` is read beside the
+model like `adr`; the class name in the x86_64 registerHybrid lives only
+in rip-relative operands (overlapping SSE loads — mid-string artifacts
+filtered by requiring a NUL or `L` before the address); and the x86_64
+one-entry registrars address the table's words directly through
+rip-relative loads, which the byte pre-scan now proposes.
+
+RnHello with the confirmer: arm64 303/3 → **305/1** and x86_64
+282/24 → **305/1** — NativeArray/NativeMap `toString` bind on both
+call-site ABIs (each registrar's one-entry slice), and x86_64 reaches
+arm64's counts for the first time. The residue on both is exactly
+JSCInstance's `initHybrid` (no registrar, no class string anywhere).
+Wall time: 1.86 s → 1.79 s with the confirmer, 1.43 s plain (the
+confirmer stays behind `--disassemble`). The first cut cost 2.04 s on
+RnHello and 11.6 s on fennec 1560010 (x86_64): the new pre-scan patterns
+walked libxul's 118 MB .text byte-by-byte in Python (934k candidates,
+5.5 s). Compiled-regex candidate location (0.7 s) put fennec 1560010 at
+6.56 s - under P2's 8.29 s, because the regex also replaced the old
+single-pattern loop.
+
+The a9_split fixture (R1): SplitOne's and SplitTwo's `splitShared`
+declarations bind through their own registrars' slices with their own
+implementations on arm64 and x86_64; SplitRt's volatile count stays
+ambiguous with all three candidates; the 32-bit twins keep all three
+ambiguous.

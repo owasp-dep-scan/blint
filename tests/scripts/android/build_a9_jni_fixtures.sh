@@ -49,6 +49,29 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
     -o "$out/liba9_long_${abi}_stripped.so" "$work/liba9_long_${abi}.so"
 done
 
+# ---------------------------------------------------------------- P3 dex
+javac --release 11 -d "$work/classes-split" \
+  $(find "$here/jni_sources/a9_split/java" -name '*.java' | sort)
+"$build_tools/d8" --release --min-api 24 --lib "$platform_jar" \
+  --output "$work" $(find "$work/classes-split" -name '*.class' | sort)
+cp "$work/classes.dex" "$out/a9-split-classes.dex"
+
+# ---------------------------------------------------------------- P3 libs
+for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+  case "$abi" in
+    arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
+    armeabi-v7a) cc="$toolchain/armv7a-linux-androideabi24-clang" ;;
+    x86_64) cc="$toolchain/x86_64-linux-android24-clang" ;;
+    x86) cc="$toolchain/i686-linux-android24-clang" ;;
+  esac
+  "$cc" -g -O2 -fPIC -funwind-tables -shared \
+    -o "$work/liba9_split_${abi}.so" \
+    "$here/jni_sources/a9_split/a9_split_tables.cpp"
+  cp "$work/liba9_split_${abi}.so" "$out/liba9_split_${abi}.so"
+  "$toolchain/llvm-strip" --strip-all \
+    -o "$out/liba9_split_${abi}_stripped.so" "$work/liba9_split_${abi}.so"
+done
+
 # ---------------------------------------------------------------- apks
 # P1: the multi-ABI join fixture (committed a8 bytes).
 apkroot="$work/apk"
@@ -71,7 +94,7 @@ cp "$out/liba8_ambig_x86_64.so" "$apkroot/lib/x86_64/liba8amb.so"
 longroot="$work/long"
 mkdir -p "$longroot/lib/arm64-v8a" "$longroot/lib/armeabi-v7a" \
   "$longroot/lib/x86_64" "$longroot/lib/x86"
-cp "$work/classes.dex" "$longroot/classes.dex"
+cp "$out/a9-classes.dex" "$longroot/classes.dex"
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   cp "$work/liba9_long_${abi}.so" "$longroot/lib/$abi/liba9long.so"
 done
@@ -80,6 +103,20 @@ done
   --min-sdk-version 24 --target-sdk-version 34
 (cd "$longroot" && zip -q -r "$work/a9-long.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a9-long.apk" "$out/a9-jni-long.apk"
+
+# P3: the merged-table split fixture, one copy per ABI.
+splitroot="$work/split"
+mkdir -p "$splitroot/lib/arm64-v8a" "$splitroot/lib/armeabi-v7a" \
+  "$splitroot/lib/x86_64" "$splitroot/lib/x86"
+cp "$out/a9-split-classes.dex" "$splitroot/classes.dex"
+for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+  cp "$work/liba9_split_${abi}.so" "$splitroot/lib/$abi/liba9split.so"
+done
+"$build_tools/aapt2" link --manifest "$here/jni_sources/a9_long/AndroidManifest.xml" \
+  -I "$platform_jar" -o "$work/a9-split.apk" \
+  --min-sdk-version 24 --target-sdk-version 34
+(cd "$splitroot" && zip -q -r "$work/a9-split.apk" .)
+"$build_tools/zipalign" -f 4 "$work/a9-split.apk" "$out/a9-jni-split.apk"
 
 echo "built:"
 ls -l "$out" | grep -E "a9-|liba9_" || true

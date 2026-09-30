@@ -1118,3 +1118,94 @@ def test_long_string_declarations_bind_or_stay_unbound() -> None:
             for e in abi_join["unbound_dex_natives"]
         }
         assert unbound == {("sigLong", 7, 1279), ("a9LongName", 1120, 4)}
+
+
+# --------------------------- A9 P3: argument propagation across the registrar's call
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+@pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
+def test_merged_table_splits_by_carried_registration(abi: str) -> None:
+    """The R1 gate for the carried argument registers: the a9_split
+    fixture's five-entry table is registered piecemeal by three per-class
+    registrars that stack-copy their slice and call a per-class helper -
+    the helper's RegisterNatives reads (methods, count) from the caller's
+    argument registers. SplitOne and SplitTwo's shared declarations bind
+    to their own implementations; SplitRt's count is a volatile load, so
+    its registration carries no constant and its declaration stays
+    ambiguous with all three candidates."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-split.apk")
+    native = scan_android_native(apk)
+    # Without --disassemble the confirmer does not run: all three stay
+    # ambiguous (the gate the A8 review added, still standing).
+    plain = build_jni_join_summary(apk, native)
+    assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    assert per_abi["counts"] == {
+        "libraries": 1,
+        "bound": 0,
+        "bound_dynamic": 4,
+        "ambiguous_dynamic": 1,
+        "unbound_dex_natives": 0,
+        "undeclared_exports": 0,
+    }
+    # the x86_64 twin's dynsym carries parameter lists on these names
+    confirmed = {
+        e["class"]: e["fn_name"].split("(")[0]
+        for e in per_abi["bound_dynamic"]
+        if e.get("confirmed_by")
+    }
+    assert confirmed == {
+        "com.blint.a9.split.SplitOne": "a9_split_shared_one",
+        "com.blint.a9.split.SplitTwo": "a9_split_shared_two",
+    }
+    ambiguous = {
+        (e["class"], e["name"], e["table_candidates"]) for e in per_abi["ambiguous_dynamic"]
+    }
+    assert ambiguous == {("com.blint.a9.split.SplitRt", "splitShared", 3)}
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_split_ranges_are_the_registrars_slices() -> None:
+    """Entry-exact, at the confirmer's own granularity: the two constant
+    registrars cover [T, T+2) and [T+2, T+4); the runtime-count
+    registration covers nothing."""
+    import lief
+
+    from blint.lib.jni import recover_register_natives_tables
+    from blint.lib.jni_findclass import _function_starts, confirm_table_ranges
+
+    parsed = lief.ELF.parse(str(FIXTURES / "liba9_split_arm64-v8a.so"))
+    starts = _function_starts(parsed)
+    tables = recover_register_natives_tables(parsed, set(starts), starts)
+    ranges = confirm_table_ranges(parsed, tables["tables"])
+    resolved = sorted((r["begin"], r["end"], r["class"]) for r in ranges)
+    table_address = int(tables["tables"][0]["address"], 16)
+    assert resolved == [
+        (table_address, table_address + 48, "com.blint.a9.split.SplitOne"),
+        (table_address + 48, table_address + 96, "com.blint.a9.split.SplitTwo"),
+    ]
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_split_fixture_stays_ambiguous_off_the_callsite_abis() -> None:
+    """The 32-bit twins keep every splitShared declaration ambiguous -
+    the call-site layer does not model them, so nothing is guessed."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-split.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
+    for abi in ("armeabi-v7a", "x86"):
+        assert join["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
+        assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"])
