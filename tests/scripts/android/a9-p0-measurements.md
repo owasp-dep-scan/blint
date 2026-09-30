@@ -56,7 +56,8 @@ own ABI's bytes — including the static rows above.
 
 P1's budget: the join must not grow past these by parsing each ABI's own
 copy. Plan: parse only the libraries that own tables or a JNI surface in
-the first pass (RnHello: 2 of 10; the other 8 have nothing to join), and
+the first pass (RnHello: 7 of 10, most a bare ``JNI_OnLoad`` at ~0.01 s;
+``libreactnative.so`` is the expensive one at 0.10 s per copy), and
 re-check the wall time per APK.
 
 ## (c) RnHello's nine unbound singles

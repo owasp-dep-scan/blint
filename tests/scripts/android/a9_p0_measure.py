@@ -132,7 +132,8 @@ def measure_first_location(apk: Path, confirm: bool) -> dict:
                 continue
             total_dynamic += 1
             with contextlib.suppress(TypeError, ValueError):
-                address = int(entry.get("fn_addr") or "0", 16)
+                # a v7a Thumb export carries bit 0; the starts clear it
+                address = int(entry.get("fn_addr") or "0", 16) & ~1
             own = starts_by_key.get((entry["library"], abi))
             if own is not None and address not in own:
                 bad_dynamic += 1
@@ -143,7 +144,7 @@ def measure_first_location(apk: Path, confirm: bool) -> dict:
                 continue
             total_static += 1
             with contextlib.suppress(TypeError, ValueError):
-                address = int(entry.get("fn_addr") or "0", 16)
+                address = int(entry.get("fn_addr") or "0", 16) & ~1
             own = starts_by_key.get((entry["library"], abi))
             if own is not None and address not in own:
                 bad_static += 1

@@ -1,0 +1,15 @@
+{
+    "packet": "A9 P1 (feat/an-a9)",
+    "host": "the reviewer Mac (macOS arm64)",
+    "tools": {
+        "build_tools": "aapt2/zip/zipalign from Android SDK build-tools 36.0.0",
+        "platform_jar": "platforms/android-34/android.jar",
+        "zip": "/usr/bin/zip 3.0 (macOS build)"
+    },
+    "build_script": "tests/scripts/android/build_a9_jni_fixtures.sh",
+    "inputs": "the committed A8 outputs only - liba8_hybrid_<abi>.so (all four ABIs), liba8_ambig_arm64-v8a.so, liba8_ambig_x86_64.so and a8-classes.dex (NDK r28c 28.2.13676358 builds; see a8-jni-fixtures-manifest.json). No compilation runs here.",
+    "outputs": [
+        "a9-jni-multiabi.apk - one APK carrying all four ABIs' own bytes of liba8hyb.so, with liba8amb.so deliberately in arm64-v8a and x86_64 only: a library missing from an ABI answers nothing there (ground rule 36)"
+    ],
+    "oracle": "per ABI, every bound fn_addr is a function start in that ABI's own copy of the library; the 32-bit ABIs keep the Ambig* declarations unbound rather than filled in from the 64-bit tables"
+}
