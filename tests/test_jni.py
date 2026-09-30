@@ -1275,7 +1275,9 @@ def test_gap_fixture_join_binds_each_abi_from_its_own_bytes() -> None:
             set() if abi == "armeabi-v7a" else {"nounwindAdd"}
         )
         assert abi_join["counts"]["ambiguous_dynamic"] == 0
-        plain_addrs[abi] = next(e["fn_addr"] for e in abi_join["bound_dynamic"] if e["name"] == "plainAdd")
+        plain_addrs[abi] = next(
+            e["fn_addr"] for e in abi_join["bound_dynamic"] if e["name"] == "plainAdd"
+        )
     assert len(set(plain_addrs.values())) == 4
 
 
@@ -1341,24 +1343,24 @@ def test_gap_fixture_fn_addrs_pass_the_readelf_oracle(abi: str) -> None:
             assert int(entry["fn_addr"], 16) in func_starts, (abi, entry["name"], entry["fn_addr"])
 
 
-# ---------------------------- A10 Q3: the registered-nowhere mark
+# ---------------------------- A10 Q3: candidates registered elsewhere
 
 
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
 @pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
-def test_registered_nowhere_marks_the_unregistered_class(abi: str) -> None:
+def test_mark_when_every_candidate_is_registered_for_another_class(abi: str) -> None:
     """The a10 nowhere fixture: nwShared is declared by NwBound, NwMissing
     and NwElsewhere, and its one table entry is registered for NwBound with
     a constant count. With --disassemble NwBound binds through the
     confirmer; NwMissing's row - ambiguous, its only candidate covered by
     NwBound's range, its class named by no resolved registration - carries
-    registered_nowhere. NwElsewhere's identical-looking nwShared row does
-    NOT: its own nwMine registration names it, and the mark claims no
-    chain names the class at all. The nwRt rows stay plain ambiguous:
-    their candidates sit in no resolved range (volatile counts), so the
-    confirmer claims nothing and no mark appears."""
+    candidates_registered_elsewhere. NwElsewhere's identical-looking
+    nwShared row does NOT: its own nwMine registration names it. The nwRt
+    rows stay plain ambiguous: their candidates sit in no resolved range
+    (volatile counts), so the confirmer claims nothing and no mark
+    appears."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
@@ -1367,7 +1369,7 @@ def test_registered_nowhere_marks_the_unregistered_class(abi: str) -> None:
     plain = build_jni_join_summary(apk, native)
     assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 5
     assert not any(
-        "registered_nowhere" in e for e in plain["per_abi"][abi]["ambiguous_dynamic"]
+        "candidates_registered_elsewhere" in e for e in plain["per_abi"][abi]["ambiguous_dynamic"]
     )
     join = build_jni_join_summary(apk, native, confirm_findclass=True)
     per_abi = join["per_abi"][abi]
@@ -1378,7 +1380,7 @@ def test_registered_nowhere_marks_the_unregistered_class(abi: str) -> None:
         ("com.blint.a10.nowhere.NwElsewhere", "nwMine"),
     }
     ambiguous = {
-        (e["class"], e["name"], e.get("registered_nowhere", False))
+        (e["class"], e["name"], e.get("candidates_registered_elsewhere", False))
         for e in per_abi["ambiguous_dynamic"]
     }
     assert ambiguous == {
@@ -1392,7 +1394,7 @@ def test_registered_nowhere_marks_the_unregistered_class(abi: str) -> None:
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
-def test_registered_nowhere_never_appears_without_resolved_ranges() -> None:
+def test_no_candidates_mark_without_resolved_ranges() -> None:
     """The mark needs the --disassemble confirmer's resolved ranges: the
     plain join never marks, and the 32-bit ABIs - which the call-site
     layer does not model - never mark even with the flag on. Their rows
@@ -1408,5 +1410,5 @@ def test_registered_nowhere_never_appears_without_resolved_ranges() -> None:
             per_abi = join["per_abi"][abi]
             assert per_abi["counts"]["ambiguous_dynamic"] == 5
             assert not any(
-                "registered_nowhere" in e for e in per_abi["ambiguous_dynamic"]
+                "candidates_registered_elsewhere" in e for e in per_abi["ambiguous_dynamic"]
             )

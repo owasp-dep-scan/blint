@@ -120,14 +120,14 @@ def measure(apk: Path, main_tree: Path | None) -> dict:
                 counts = dict(abi_join["counts"])
                 per_abi[abi] = counts
                 for entry in abi_join.get("ambiguous_dynamic") or []:
-                    if entry.get("registered_nowhere"):
+                    if entry.get("candidates_registered_elsewhere"):
                         marked.append(
                             {"abi": abi, "class": entry["class"], "name": entry["name"]}
                         )
             report[f"{label}_confirm_{confirm}"] = {
                 "wall_s": round(wall, 2),
                 "counts": per_abi,
-                "registered_nowhere": marked,
+                "candidates_registered_elsewhere": marked,
             }
             print(
                 f"  {label} confirm={confirm}: wall {wall:.2f}s "
