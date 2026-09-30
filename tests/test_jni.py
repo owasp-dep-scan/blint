@@ -864,10 +864,11 @@ def test_fbjni_shape_binds_the_dex_declarations() -> None:
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
-    join = build_jni_join_summary(
-        str(FIXTURES / "a8-jni-arm64-v8a.apk"),
-        scan_android_native(str(FIXTURES / "a8-jni-arm64-v8a.apk")),
-    )
+    apk = str(FIXTURES / "a8-jni-arm64-v8a.apk")
+    # Without --disassemble the confirmer does not run: all three stay ambiguous.
+    plain = build_jni_join_summary(apk, scan_android_native(apk))
+    assert plain["per_abi"]["arm64-v8a"]["counts"]["ambiguous_dynamic"] == 3
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
     per_abi = join["per_abi"]["arm64-v8a"]
     assert per_abi["counts"] == {
         "libraries": 2,
@@ -925,6 +926,7 @@ def test_findclass_confirmer_needs_the_callsite_abis() -> None:
         join = build_jni_join_summary(
             str(FIXTURES / f"a8-jni-{abi}.apk"),
             scan_android_native(str(FIXTURES / f"a8-jni-{abi}.apk")),
+            confirm_findclass=True,
         )
         per_abi = join["per_abi"][abi]
         assert per_abi["counts"]["ambiguous_dynamic"] == 3
@@ -932,6 +934,7 @@ def test_findclass_confirmer_needs_the_callsite_abis() -> None:
     join = build_jni_join_summary(
         str(FIXTURES / "a8-jni-x86_64.apk"),
         scan_android_native(str(FIXTURES / "a8-jni-x86_64.apk")),
+        confirm_findclass=True,
     )
     per_abi = join["per_abi"]["x86_64"]
     assert per_abi["counts"]["bound_dynamic"] == 10

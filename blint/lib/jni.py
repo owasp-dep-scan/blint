@@ -655,7 +655,9 @@ def _confirm_ambiguous_tables(
     return confirmed
 
 
-def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
+def build_jni_join_summary(
+    app_file: str, native: dict, confirm_findclass: bool = False
+) -> dict | None:
     """The app-level dex <-> native static join (A5.2 E2).
 
     Per ABI (ground rule 36: one result per ``(abi, library)``, never a
@@ -666,6 +668,8 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
     per library. ``System.loadLibrary`` call sites map to ``lib<name>.so``
     members. Bounded: counts always, the first
     ``JOIN_LISTING_CAP`` entries of each list, ``truncated`` flags beside.
+    ``confirm_findclass`` (set by ``--disassemble``) runs the FindClass
+    confirmer over the libraries that hold ambiguous tables.
     """
     from blint.lib.android import _iter_app_dex_files
     from blint.lib.android_native import LibraryReader
@@ -756,8 +760,10 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
         LOG.debug(f"jni join: library surfaces failed for {app_file}: {exc}")
 
     per_abi: dict[str, dict] = {}
-    confirmed_classes = _confirm_ambiguous_tables(
-        app_file, natives, register_tables, lib_locations
+    confirmed_classes = (
+        _confirm_ambiguous_tables(app_file, natives, register_tables, lib_locations)
+        if confirm_findclass
+        else {}
     )
     for abi in sorted(abis):
         per_abi[abi] = _join_abi_lists(
@@ -904,9 +910,10 @@ def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
     ``FunctionWrapperWithJniEntryPoint<...>::call`` (FUNCs) - so the linker
     keeps ``R_*_ABS*`` against the symbol instead of folding the word to
     ``R_*_RELATIVE`` (measured in N0(b): 167 of RnHello's 221 unbound
-    declarations sit in such triples). REL forms (arm32) carry any addend
-    in the stored word; imported symbols (section index 0) have no
-    link-time value and are ignored - their slot is unknown until load.
+    declarations sit in such triples). The target is the symbol's value
+    plus a RELA addend; REL forms (arm32) keep theirs in the stored word.
+    Imported symbols (section index 0) have no link-time value and are
+    ignored.
     """
     values: dict[int, int] = {}
     relocations = []
@@ -927,7 +934,11 @@ def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
             continue
         if not value or not shndx:
             continue
-        values[int(relocation.address)] = value
+        addend = 0
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            if relocation.is_rela:
+                addend = int(relocation.addend or 0)
+        values[int(relocation.address)] = value + addend
     return values
 
 

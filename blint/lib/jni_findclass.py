@@ -221,7 +221,7 @@ def _disassemble(nyxstone, sections: list[tuple[int, bytes]], start: int, length
     return []
 
 
-def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, start: int):
+def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, plt_stubs, start: int):
     """Decode one function and step the absint model over it.
 
     Returns (class_events, registration_events, call_targets): the
@@ -230,9 +230,11 @@ def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, start: 
     most recent class name above it; and the direct call targets
     (PLT-resolved by the caller).
     """
+    from bisect import bisect_left
+
     from blint.lib.absint import FrameState
 
-    index = sorted_starts.index(start)
+    index = bisect_left(sorted_starts, start)
     end = (
         sorted_starts[index + 1] if index + 1 < len(sorted_starts) else start + _MAX_FUNCTION_BYTES
     )
@@ -276,6 +278,7 @@ def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, start: 
             last_class = None
             pending_vtable_reg = None
         span = (instruction.address, instruction.address + len(instruction.bytes))
+        before = dict(state.registers)
         with contextlib.suppress(Exception):
             model.step(state, text, leaves_function=True, address_span=span)
         match = _ADR_TEXT_RE.match(text)
@@ -285,9 +288,12 @@ def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, start: 
                 target = instruction.address + int(match.group("delta").lstrip("#"), 0)
                 materialized.add(target)
                 adr_values[match.group("reg")] = target
-        for value in state.registers.values():
+        # Only a pointer this instruction wrote names a class here; one
+        # still held from earlier must not pair with a later registration.
+        for register, value in state.registers.items():
             if (
-                isinstance(value, tuple)
+                before.get(register) != value
+                and isinstance(value, tuple)
                 and value
                 and value[0] == "ptr"
                 and isinstance(value[1], int)
@@ -298,7 +304,7 @@ def _walk_function(parsed_obj, nyxstone, model, sections, sorted_starts, start: 
             if name:
                 class_events.append(name)
                 last_class = name
-    call_targets = _call_targets(instructions, model, parsed_obj, _plt_targets(parsed_obj))
+    call_targets = _call_targets(instructions, model, parsed_obj, plt_stubs)
     return class_events, registration_events, call_targets
 
 
@@ -325,45 +331,20 @@ def _int_register(state, name: str) -> int | None:
 
 
 def _plt_targets(parsed_obj) -> dict[int, int]:
-    """PLT stub -> defining address, for direct calls that go through the
-    PLT to a weak local definition (fbjni's template instantiations)."""
-    got_slot_to_value: dict[int, int] = {}
-    for relocation in parsed_obj.relocations:
-        if "JUMP_SLOT" not in str(getattr(relocation, "type", "")):
-            continue
-        symbol = None
-        with contextlib.suppress(Exception):
-            symbol = relocation.symbol
-        if symbol is None:
-            continue
-        try:
-            value = int(symbol.value or 0)
-        except Exception:
-            continue
-        if value:
-            got_slot_to_value[int(relocation.address)] = value
-    stubs: dict[int, int] = {}
-    for section in parsed_obj.sections:
-        if (getattr(section, "name", "") or "") != ".plt":
-            continue
-        base = int(section.virtual_address)
-        try:
-            blob = bytes(parsed_obj.get_content_from_virtual_address(base, int(section.size)))
-        except Exception:
-            continue
-        # arm64 PLT stub: adrp x17, page; ldr x17, [x17, #off]; br x17
-        for off in range(0, len(blob) - 16, 16):
-            w0, w1 = struct.unpack_from("<2I", blob, off)
-            if (w0 & 0x9F000000) != 0x90000000 or (w1 & 0xFFC00000) != 0xF9400000:
-                continue
-            imm = ((w0 >> 29) & 3) | (((w0 >> 5) & 0x7FFFF) << 2)
-            if imm & (1 << 20):
-                imm -= 1 << 21
-            slot = ((base + off) & ~0xFFF) + (imm << 12) + (((w1 >> 10) & 0xFFF) * 8)
-            if slot in got_slot_to_value:
-                stubs[base + off] = got_slot_to_value[slot]
-        break
-    return stubs
+    """PLT stub -> the local definition of the symbol it jumps through
+    (fbjni's weak template instantiations are called through the PLT)."""
+    from blint.lib.disassembler import _elf_plt_stub_names
+
+    defined: dict[str, int] = {}
+    for symbol in parsed_obj.dynamic_symbols:
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            if symbol.value and int(symbol.shndx or 0):
+                defined.setdefault(symbol.name, int(symbol.value) & ~1)
+    return {
+        stub: defined[name]
+        for stub, name in _elf_plt_stub_names(parsed_obj).items()
+        if name in defined
+    }
 
 
 def _call_targets(instructions, model, parsed_obj, plt_stubs: dict[int, int]) -> set[int]:
@@ -470,6 +451,7 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
     sorted_starts = sorted(starts)
     if not sorted_starts:
         return []
+    plt_stubs = _plt_targets(parsed_obj)
 
     def materialized_in_window(site: int) -> tuple[set[int], int]:
         instructions = _disassemble(nyxstone, sections, site, 64)
@@ -532,7 +514,7 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
             callees: set[int] = set()
             for start in frontier:
                 class_events, registration_events, call_targets = _walk_function(
-                    parsed_obj, nyxstone, model, sections, sorted_starts, start
+                    parsed_obj, nyxstone, model, sections, sorted_starts, plt_stubs, start
                 )
                 chain_names.update(class_events)
                 for event in registration_events:
