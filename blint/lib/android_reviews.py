@@ -253,11 +253,46 @@ def _evaluate_writable_dlopen(metadata: dict) -> list[dict]:
     ]
 
 
+# 32-bit ARM passes the syscall number in r7, loaded from an immediate or a
+# literal just before the svc. Literal-pool words between functions can
+# decode as svc too, but not behind such a load in one run of code.
+_ARM32_SYSCALL_NUMBER_RE = re.compile(
+    r"^(?:mov|movs|movw|movt)(?:\.w|\.n)?\s+r7,\s*(?:#|0x)|^ldr(?:\.w|\.n)?\s+r7,\s*\[pc",
+    re.IGNORECASE,
+)
+# What ends that run: an unconditional transfer away, or a zero halfword or
+# word (movs r0, r0 / andeq r0, r0, r0), which compilers never emit and
+# pools are full of.
+_ARM32_RUN_BREAK_RE = re.compile(
+    r"^(?:movs\s+r0,\s*r0$|andeq\s+r0,\s*r0,\s*r0$|b(?:\.w|\.n)?\s|bx(?:\.w)?\s"
+    r"|pop(?:\.w)?\s+\{[^}]*\bpc\})",
+    re.IGNORECASE,
+)
+# How many instructions before the svc the r7 load may sit.
+_ARM32_SYSCALL_NUMBER_WINDOW = 8
+
+
 def _is_arm32(metadata: dict) -> bool:
     target = str(metadata.get("llvm_target_tuple") or metadata.get("machine_type") or "").lower()
     if "aarch64" in target or "arm64" in target:
         return False
     return target.startswith(("arm", "thumb")) or "armeabi" in target
+
+
+def _arm32_syscall_sites(lines: list[str]) -> int:
+    """Count svc sites that load their syscall number into r7 first."""
+    sites = 0
+    for index, line in enumerate(lines):
+        if not _INLINE_SYSCALL_RE.search(line):
+            continue
+        for item in reversed(lines[max(0, index - _ARM32_SYSCALL_NUMBER_WINDOW) : index]):
+            text = item.strip()
+            if _ARM32_SYSCALL_NUMBER_RE.search(text):
+                sites += 1
+                break
+            if _ARM32_RUN_BREAK_RE.search(text):
+                break
+    return sites
 
 
 def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
@@ -266,15 +301,16 @@ def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
         return []
     if (metadata.get("build_info") or {}).get("go_version"):
         return []
-    # 32-bit ARM is not evaluated: a stripped library's function extents can
-    # run into the literal pools between functions, whose bytes decode as svc.
-    if _is_arm32(metadata):
-        return []
+    arm32 = _is_arm32(metadata)
     holders = []
     for key, func_data in (metadata.get("disassembled_functions") or {}).items():
         if not isinstance(func_data, dict):
             continue
-        sites = len(_INLINE_SYSCALL_RE.findall(str(func_data.get("assembly") or "")))
+        assembly = str(func_data.get("assembly") or "")
+        if arm32:
+            sites = _arm32_syscall_sites(assembly.split("\n"))
+        else:
+            sites = len(_INLINE_SYSCALL_RE.findall(assembly))
         if sites:
             holders.append(
                 {

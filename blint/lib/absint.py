@@ -78,6 +78,7 @@ recovery, because a fallback would resurface exactly those leaked values.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from collections.abc import Callable, Iterator
 
@@ -1449,6 +1450,124 @@ X86_WIN64_ARGUMENT_REGISTERS = ("rcx", "rdx", "r8", "r9")
 X86_SYSV_ARGUMENT_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9")
 ARM64_ARGUMENT_REGISTERS = tuple(f"x{i}" for i in range(8))
 
+# ---------------------------------------------------------------------------
+# Pure thunks: the machine outliner's OUTLINED_FUNCTION_* and hand-written
+# forwarders. A call into one is reported as a call to its final callee, with
+# the thunk's instructions stepped over the caller's state.
+# ---------------------------------------------------------------------------
+
+THUNK_MAX_PREP = 4
+
+_ARM64_THUNK_PREP = re.compile(r"^(?:mov|movz|movk|fmov|nop|adrp)\b", re.IGNORECASE)
+_X86_THUNK_PREP = re.compile(r"^(?:mov|nop)\b", re.IGNORECASE)
+
+
+def _is_thunk_prep(prep: list[str], is_arm64: bool) -> bool:
+    """True when every prep line is a register move or constant load.
+
+    ARM64 also accepts the ``adrp`` + ``add`` address pair (an ``add`` only
+    directly after an ``adrp``); x86 accepts ``xor`` of a register with
+    itself, the zeroing idiom. A memory operand is never accepted.
+    """
+    previous = ""
+    for line in prep:
+        if "[" in line:
+            return False
+        parts = line.split(None, 1)
+        mnemonic = parts[0].lower() if parts else ""
+        if is_arm64:
+            if not (_ARM64_THUNK_PREP.match(line) or (mnemonic == "add" and previous == "adrp")):
+                return False
+        elif not _X86_THUNK_PREP.match(line):
+            match = _XOR_SELF_RE.match(line)
+            if not match or match.group(1).lower() != match.group(2).lower():
+                return False
+        previous = mnemonic
+    return True
+
+
+def _thunk_tail_callee(func_data: dict, last_index: int) -> str | None:
+    """The named callee of a function's last-line tail branch, if resolved."""
+    for entry in func_data.get("direct_call_targets") or []:
+        if not isinstance(entry, dict) or entry.get("kind") != "tailcall":
+            continue
+        if entry.get("site_index") != last_index:
+            continue
+        name = str(entry.get("target_name") or "").strip()
+        operand = " ".join(str(entry.get("raw_operand") or "").split()).lower()
+        # A name that is just the operand echoed back is the disassembler's
+        # stand-in for an unresolved numeric target, not a resolution.
+        if name and " ".join(name.split()).lower() != operand:
+            return name
+    return None
+
+
+def pure_thunk_map(disassembled_functions: dict | None, arch_target: str) -> dict[int, dict]:
+    """``{thunk start address: facts}`` for the local pure thunks.
+
+    A pure thunk is at most :data:`THUNK_MAX_PREP` register-move or
+    constant-load instructions followed by one unconditional immediate tail
+    branch to a callee the disassembler named. It has a single path, so a
+    call into it can be resolved through it. Facts carry the thunk's
+    ``name``, its final ``callee``, the ``prep`` lines and their
+    ``prep_spans`` (virtual address ranges, for pc-relative folds). A
+    conditional tail, a branch or a memory operand among the prep, or an
+    unnamed callee keeps a function out of the map.
+    """
+    if not disassembled_functions:
+        return {}
+    lowered = (arch_target or "").lower()
+    is_arm64 = "aarch64" in lowered or "arm64" in lowered
+    if not is_arm64 and not any(
+        marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")
+    ):
+        return {}
+    thunks: dict[int, dict] = {}
+    for func_key, func_data in disassembled_functions.items():
+        if not isinstance(func_data, dict):
+            continue
+        lines = [line.strip() for line in str(func_data.get("assembly") or "").split("\n")]
+        lengths = func_data.get("instruction_lengths") or []
+        if not 2 <= len(lines) <= THUNK_MAX_PREP + 1 or len(lengths) != len(lines):
+            continue
+        try:
+            start = int(str(func_data.get("address")), 16)
+        except (TypeError, ValueError):
+            continue
+        parts = lines[-1].split(None, 1)
+        mnemonic = parts[0].lower() if parts else ""
+        operand = parts[1].strip() if len(parts) > 1 else ""
+        if mnemonic not in (("b",) if is_arm64 else ("jmp", "jmpq", "jmpl")):
+            continue
+        if _parse_immediate(operand.lstrip("#")) is None:
+            continue
+        callee = _thunk_tail_callee(func_data, len(lines) - 1)
+        if not callee or not _is_thunk_prep(lines[:-1], is_arm64):
+            continue
+        prep_spans = []
+        cursor = start
+        for length in lengths[:-1]:
+            prep_spans.append((cursor, cursor + int(length)))
+            cursor += int(length)
+        thunks[start] = {
+            "name": str(func_data.get("name") or func_key),
+            "callee": callee,
+            "prep": lines[:-1],
+            "prep_spans": prep_spans,
+        }
+    return thunks
+
+
+def _state_after_thunk(model: ArchModel, state: FrameState, thunk: dict) -> FrameState:
+    """A copy of ``state`` with the thunk's prep instructions stepped over it."""
+    stepped = FrameState(model)
+    stepped.registers = dict(state.registers)
+    stepped.slots = dict(state.slots)
+    stepped.sp_adjustment = state.sp_adjustment
+    for text, span in zip(thunk["prep"], thunk["prep_spans"]):
+        model.step(stepped, text, address_span=span)
+    return stepped
+
 
 def argument_registers(binary_format: str, arch_target: str) -> tuple[str, ...] | None:
     """Integer argument register families for the ABI a binary was built for.
@@ -1478,14 +1597,16 @@ def argument_registers(binary_format: str, arch_target: str) -> tuple[str, ...] 
 
 def _callee_resolvers(
     direct_call_targets: list[dict] | None,
-) -> tuple[dict, dict, dict, dict]:
+) -> tuple[dict, dict, dict, dict, dict[int, str]]:
     """Index the disassembler's resolved call targets for site resolution.
 
     Returns four maps: call and tail-transfer targets keyed by the emitting
-    line (``site_index``), then the same keyed by operand text. The line key
-    comes first because ARM branch operands are pc-relative (``bl #1280``),
-    so one operand text can name different callees at different sites. The
-    operand maps serve entries recorded without a line. A key that resolves
+    line (``site_index``), then the same keyed by operand text; plus each
+    resolved site's hex ``target_address``, which is how a call into a pure
+    thunk is recognised. The line key comes first because ARM branch
+    operands are pc-relative (``bl #1280``), so one operand text can name
+    different callees at different sites. The operand maps serve entries
+    recorded without a line. A key that resolves
     to more than one name is refused: an unresolved callee is a legitimate
     result, a wrong one is not.
     """
@@ -1493,6 +1614,7 @@ def _callee_resolvers(
     tail_sites: dict[int, set[str]] = {}
     call_operands: dict[str, set[str]] = {}
     tail_operands: dict[str, set[str]] = {}
+    site_addrs: dict[int, str] = {}
     for entry in direct_call_targets or []:
         if not isinstance(entry, dict):
             continue
@@ -1508,8 +1630,11 @@ def _callee_resolvers(
         site_index = entry.get("site_index")
         if isinstance(site_index, int):
             (tail_sites if is_tail else call_sites).setdefault(site_index, set()).add(name)
+            address = entry.get("target_address")
+            if address and isinstance(address, str):
+                site_addrs.setdefault(site_index, address)
         (tail_operands if is_tail else call_operands).setdefault(operand, set()).add(name)
-    return call_sites, tail_sites, call_operands, tail_operands
+    return call_sites, tail_sites, call_operands, tail_operands, site_addrs
 
 
 def _call_site_callee(
@@ -1560,6 +1685,7 @@ def _call_site_records(
     arg_families: tuple[str, ...],
     direct_call_targets: list[dict] | None,
     address_spans: list[tuple[int, int]] | None = None,
+    thunks: dict[int, dict] | None = None,
 ) -> list[dict]:
     """Snapshot the argument registers at every call instruction.
 
@@ -1578,11 +1704,19 @@ def _call_site_records(
     same leaves-function decision the convergence pass used, and the same
     address spans, so the replayed state matches it exactly.
 
+    When ``thunks`` names pure thunks by start address and the site's
+    resolved target is one, the record names the thunk's final callee
+    (``callee``), keeps the thunk itself in ``callee_via_thunk``, and the
+    arguments are read after the thunk's instructions are stepped over a
+    copy of the caller's state.
+
     The replay is O(lines) time and holds one FrameState at a time; the
     records are O(call sites) small dicts, which is the only extra memory
     retained.
     """
-    call_sites, tail_sites, call_operands, tail_operands = _callee_resolvers(direct_call_targets)
+    call_sites, tail_sites, call_operands, tail_operands, site_addrs = _callee_resolvers(
+        direct_call_targets
+    )
     last_line = len(lines) - 1
     records: list[dict] = []
     for block_index, (start, end) in enumerate(spans):
@@ -1611,12 +1745,24 @@ def _call_site_records(
                     start + offset == last_line,
                     line_index=start + offset,
                 )
+                via_thunk = None
+                thunk = None
+                if thunks and callee:
+                    address = site_addrs.get(start + offset)
+                    if address:
+                        with contextlib.suppress(ValueError):
+                            thunk = thunks.get(int(address, 16))
+                snapshot = state
+                if thunk is not None:
+                    callee = thunk["callee"]
+                    via_thunk = thunk["name"]
+                    snapshot = _state_after_thunk(model, state, thunk)
                 arguments = []
                 pointer_positions = []
                 materialised = 0
                 materialised_page = 0
                 for family in arg_families:
-                    value = state.registers.get(family)
+                    value = snapshot.registers.get(family)
                     if isinstance(value, int):
                         arguments.append(value)
                         continue
@@ -1641,6 +1787,7 @@ def _call_site_records(
                         "line": start + offset,
                         "instruction": text,
                         "callee": callee,
+                        "callee_via_thunk": via_thunk,
                         "registers": tuple(arg_families),
                         "arguments": arguments,
                         "pointer_positions": tuple(pointer_positions),
@@ -1658,7 +1805,10 @@ def _call_site_records(
 
 
 def recover_call_site_arguments_with_method(
-    func_data: dict, arch_target: str = "", binary_format: str = ""
+    func_data: dict,
+    arch_target: str = "",
+    binary_format: str = "",
+    thunks: dict[int, dict] | None = None,
 ) -> tuple[list[dict], str]:
     """Recover one function's call-site constant arguments via the CFG dataflow.
 
@@ -1669,8 +1819,11 @@ def recover_call_site_arguments_with_method(
     that point (None where the model does not know one). A constant the
     model materialised from a pc-relative form (ARM64 ``adrp`` [+ ``add``],
     x86 rip-relative ``lea``) is reported as the address it names, counted
-    in the record's ``materialised`` field. ``method`` names
-    how the function was analyzed: ``"dataflow"`` (CFG fixed point),
+    in the record's ``materialised`` field. ``callee_via_thunk`` names the
+    local pure thunk (from :func:`pure_thunk_map`, passed as ``thunks``) a
+    call goes through; the record then names the thunk's final callee and
+    its arguments as they stand after the thunk. ``method`` names how the
+    function was analyzed: ``"dataflow"`` (CFG fixed point),
     ``"no_cfg"`` / ``"cfg_mismatch"`` (no CFG, or one that does not tile the
     text — there is deliberately no straight-line fallback, which would
     report values that leak from not-taken paths), ``"cap_hit"`` (iteration
@@ -1718,6 +1871,7 @@ def recover_call_site_arguments_with_method(
         arg_families,
         func_data.get("direct_call_targets"),
         address_spans=address_spans,
+        thunks=thunks,
     )
     return records, "dataflow"
 
@@ -1885,12 +2039,13 @@ def analyze_call_site_arguments(
     truncated_by_function: list[str] = []
     truncated = False
     model = model_for_target(arch_target)
+    thunks = pure_thunk_map(disassembled_functions, arch_target)
     for func_key, func_data in disassembled_functions.items():
         if not isinstance(func_data, dict):
             continue
         coverage["functions_total"] += 1
         records, method = recover_call_site_arguments_with_method(
-            func_data, arch_target, binary_format
+            func_data, arch_target, binary_format, thunks=thunks
         )
         if method == "dataflow":
             coverage["functions_dataflow"] += 1
@@ -1952,6 +2107,7 @@ def analyze_call_site_arguments(
                         "instruction": record.get("instruction"),
                     },
                     "pointer": argument in pointer_positions,
+                    "callee_via_thunk": record.get("callee_via_thunk"),
                 }
                 if len(aggregated) >= max_entries:
                     truncated = True
@@ -1972,6 +2128,10 @@ def analyze_call_site_arguments(
             "functions": list(item["functions"]),
             "example": item["example"],
         }
+        if item.get("callee_via_thunk"):
+            # The first citation's thunk, like its example; later sites into
+            # the same callee fold in and are counted by site_count.
+            entry["callee_via_thunk"] = item["callee_via_thunk"]
         if resolve_string is not None and (
             item["pointer"] or item["value"] >= MIN_PLAIN_POINTER_VALUE
         ):

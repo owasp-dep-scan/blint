@@ -168,12 +168,11 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 12645,
+        "external_edges": 9638,
         "external_reason_buckets": {
           "address_space_miss": 5905,
           "address_space_miss:indirect_hint": 424,
-          "address_space_miss:tailcall": 98,
-          "symbol_only_miss:tailcall": 2910,
+          "address_space_miss:tailcall": 1,
           "unresolved:indirect_hint": 3306,
           "unresolved:tailcall": 2
         },
@@ -182,9 +181,9 @@
         "internal_edge_kinds": {
           "direct": 119715,
           "indirect_hint": 1,
-          "tailcall": 4
+          "tailcall": 3011
         },
-        "internal_edges": 119720
+        "internal_edges": 122727
       }
     },
     "riscv64-unknown-linux-gnu": {
@@ -223,11 +222,12 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 8357,
+        "external_edges": 4347,
         "external_reason_buckets": {
           "import": 3407,
+          "import:tailcall": 21,
           "symbol_only_miss:indirect_hint": 17,
-          "symbol_only_miss:tailcall": 4032,
+          "symbol_only_miss:tailcall": 1,
           "unresolved:indirect_hint": 718,
           "unresolved:tailcall": 183
         },
@@ -236,9 +236,9 @@
         "internal_edge_kinds": {
           "direct": 55074,
           "indirect_hint": 390,
-          "tailcall": 2066
+          "tailcall": 6076
         },
-        "internal_edges": 57530
+        "internal_edges": 61540
       }
     },
     "x86_64-pc-windows-msvc": {
@@ -288,13 +288,13 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 111030,
+        "external_edges": 107027,
         "external_reason_buckets": {
           "address_space_miss": 144,
           "address_space_miss:indirect_hint": 6117,
-          "address_space_miss:tailcall": 1092,
+          "address_space_miss:tailcall": 111,
           "symbol_only_miss:indirect_hint": 7960,
-          "symbol_only_miss:tailcall": 3038,
+          "symbol_only_miss:tailcall": 16,
           "unresolved:indirect_hint": 92658,
           "unresolved:tailcall": 21
         },
@@ -303,9 +303,9 @@
         "internal_edge_kinds": {
           "direct": 39309,
           "indirect_hint": 3,
-          "tailcall": 11
+          "tailcall": 4014
         },
-        "internal_edges": 39323
+        "internal_edges": 43326
       }
     },
     "x86_64-unknown-linux-gnu": {
@@ -322,13 +322,13 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 92721,
+        "external_edges": 87685,
         "external_reason_buckets": {
           "address_space_miss": 216,
           "address_space_miss:indirect_hint": 5845,
-          "address_space_miss:tailcall": 1038,
+          "address_space_miss:tailcall": 117,
           "symbol_only_miss:indirect_hint": 6957,
-          "symbol_only_miss:tailcall": 4141,
+          "symbol_only_miss:tailcall": 26,
           "unresolved:indirect_hint": 74498,
           "unresolved:tailcall": 26
         },
@@ -337,9 +337,9 @@
         "internal_edge_kinds": {
           "direct": 22257,
           "indirect_hint": 5,
-          "tailcall": 9
+          "tailcall": 5045
         },
-        "internal_edges": 22271
+        "internal_edges": 27307
       }
     }
   },

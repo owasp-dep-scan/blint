@@ -969,6 +969,33 @@ def test_resolve_direct_calls_tailcall_windows_decimal_operand_prefers_relative_
     ]
 
 
+@pytest.mark.parametrize("triple", ["x86_64-unknown-linux-android", "x86_64-apple-macosx"])
+def test_resolve_direct_calls_tailcall_decimal_operand_resolves_relative(triple):
+    # nyxstone prints a tail `jmp imm` as the end-relative delta `call`
+    # uses. liba7_fire_x86_64_Oz.so's a7_anti_debug ends in `jmp 917` at
+    # 0x4d5a, which lands on ptrace@plt.
+    instr = MagicMock()
+    instr.assembly = "jmp 917"
+    instr.address = 0x4D5A
+    instr.bytes = b"\x90" * 5
+
+    direct_calls, direct_targets = _resolve_direct_calls(
+        [instr], {0x395: "absolute_reading", 0x50F4: "ptrace"}, triple
+    )
+
+    assert direct_calls == []
+    assert direct_targets == [
+        {
+            "target_name": "ptrace",
+            "target_address": "0x50f4",
+            "target_address_candidates": ["0x50f4"],
+            "raw_operand": "917",
+            "kind": "tailcall",
+            "site_index": 0,
+        }
+    ]
+
+
 def test_resolve_direct_calls_aarch64_bl_immediate_is_pc_relative():
     """nyxstone prints bl's operand as a byte offset from the instruction, in
     decimal by default (Automator arm64e: bl #146012 at 0x100001478 is

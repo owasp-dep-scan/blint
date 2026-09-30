@@ -1906,7 +1906,13 @@ def _resolve_operand_target_addresses(
                 elif (
                     whole_operand_is_immediate
                     and not is_mips
-                    and (mnemonic.startswith("call") or (is_windows and mnemonic.startswith("j")))
+                    and (
+                        mnemonic.startswith("call")
+                        # nyxstone prints an x86 `jmp imm` as the same
+                        # end-relative delta as `call`, on every format.
+                        or mnemonic in X86_UNCONDITIONAL_JMP_INST
+                        or (is_windows and mnemonic.startswith("j"))
+                    )
                 ):
                     _append_unique_target_addr(
                         target_addrs, instr.address + len(instr.bytes) + val

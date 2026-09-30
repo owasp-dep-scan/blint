@@ -123,7 +123,15 @@ def test_manifest_names_the_build_commands() -> None:
         if rule == "ANDROID_DEX_SU_PATHS_TO_NATIVE" or not isinstance(expected[rule], dict):
             continue
         for lib, table in expected[rule].items():
-            if isinstance(table, dict) and "armeabi-v7a" in table:
+            if not (isinstance(table, dict) and "armeabi-v7a" in table):
+                continue
+            if rule == "ANDROID_INLINE_SYSCALLS":
+                # The instruction-text rule evaluates everywhere; since
+                # A7.2 M3 stopped 32-bit ARM extents at the literal pools,
+                # its armeabi-v7a cells state a fire/silent verdict.
+                assert "not evaluated" not in table["armeabi-v7a"], (rule, lib)
+            else:
+                # The call-site rules still need the modelled ABIs.
                 assert "not evaluated" in table["armeabi-v7a"], (rule, lib)
 
 

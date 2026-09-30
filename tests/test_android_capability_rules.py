@@ -9,6 +9,7 @@ manifest records the build commands and toolchain versions.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -92,15 +93,17 @@ def test_fire_fixture_fires_every_rule(abi: str) -> None:
         assert "ro.kernel.qemu" in properties
         load_paths = {entry["path"] for entry in results["ANDROID_WRITABLE_LOCATION_DLOPEN"]}
         assert "/data/local/tmp/plugin.so" in load_paths
-    if abi in MODELLED_ABIS:
-        inline = results["ANDROID_INLINE_SYSCALLS"]
-        assert inline and inline[0]["site_total"] >= 1
-        assert {"a7_inline_syscall", "a7_run_all"} <= {
-            holder["function"] for holder in inline[0]["functions"]
-        }
     else:
-        # 32-bit ARM: nothing reports, not even a placeholder row.
-        assert results == {}, results
+        # 32-bit ARM: the call-site rules cannot evaluate and report nothing,
+        # while the instruction-text rule does (the extents stop at the
+        # literal pools, so the Thumb svc is real).
+        for rule in CALL_SITE_RULES:
+            assert rule not in results, (rule, abi)
+    inline = results["ANDROID_INLINE_SYSCALLS"]
+    assert inline and inline[0]["site_total"] >= 1
+    assert {"a7_inline_syscall", "a7_run_all"} <= {
+        holder["function"] for holder in inline[0]["functions"]
+    }
 
 
 @pytest.mark.parametrize("abi", ABIS)
@@ -109,20 +112,69 @@ def test_nofire_fixture_stays_silent(abi: str) -> None:
         pytest.skip("nyxstone is not available")
     results = _android_results(_parse_fixture(f"liba7_nofire_{abi}.so"))
     real = {key: value for key, value in results.items() if key != "ANDROID_INLINE_SYSCALLS"}
-    if abi in MODELLED_ABIS:
-        # The crash handler's ptrace(PTRACE_ATTACH), the /proc/self/maps
-        # read, the SDK probe, the shell execve and the bare-SONAME dlopen
-        # are all present in this binary and all stay silent.
-        assert real == {}, real
-        assert "ANDROID_INLINE_SYSCALLS" not in results
-    else:
-        assert results == {}, results
+    # The crash handler's ptrace(PTRACE_ATTACH), the /proc/self/maps
+    # read, the SDK probe, the shell execve and the bare-SONAME dlopen
+    # are all present in this binary and all stay silent.
+    assert real == {}, real
+    assert "ANDROID_INLINE_SYSCALLS" not in results
+
+
+@pytest.mark.parametrize("abi_flag", ["arm64-v8a_Os", "arm64-v8a_Oz", "x86_64_Os", "x86_64_Oz"])
+def test_flag_variant_fixture_matches_the_manifest_table(abi_flag: str) -> None:
+    # The -Os/-Oz twins (A7.2 R1) are pinned to the manifest's expected
+    # table, which records what each flag does to each rule: the loop-held
+    # su-path table silences the root probe everywhere, the arm64 -Oz
+    # outliner hides dlopen until a pure thunk is followed, and the x86_64
+    # -Oz tail jmp hides ptrace until the ELF resolver reads it pc-relative.
+    if not _nyxstone_available():
+        pytest.skip("nyxstone is not available")
+    initialize_rules(BlintOptions())
+    manifest = json.loads((DATA / "a7-fixtures-manifest.json").read_text(encoding="utf-8"))
+    expected = manifest["expected"]["flag_variants"][abi_flag]
+    for lib, rows in expected.items():
+        results = _android_results(_parse_fixture(f"{lib}_{abi_flag}.so"))
+        if isinstance(rows, str):
+            assert results == {}, (lib, abi_flag, results)
+            continue
+        for rule, verdict in rows.items():
+            fires = verdict.startswith("fire")
+            assert bool(results.get(rule)) is fires, (lib, abi_flag, rule, verdict)
+
+
+@pytest.mark.parametrize("abi_flag", ["arm64-v8a_Oz"])
+def test_outlined_thunk_is_followed_and_its_moves_applied(abi_flag: str) -> None:
+    # The arm64 -Oz machine outliner carries dlopen's RTLD_NOW in
+    # OUTLINED_FUNCTION_0 (mov w1, #2; b dlopen): the call-site block names
+    # dlopen through the thunk and the thunk's constant reaches argument 1.
+    if not _nyxstone_available():
+        pytest.skip("nyxstone is not available")
+    from blint.lib.binary import parse
+
+    metadata = parse(str(DATA / f"liba7_fire_{abi_flag}.so"), True)
+    entries = metadata.get("call_site_arguments") or []
+    via_thunk = [
+        entry
+        for entry in entries
+        if entry.get("callee") == "dlopen" and entry.get("callee_via_thunk")
+    ]
+    assert via_thunk, entries
+    paths = {entry.get("string") for entry in via_thunk if entry.get("argument") == 0}
+    assert "/data/local/tmp/plugin.so" in paths
+    flags = [entry for entry in via_thunk if entry.get("argument") == 1]
+    assert flags and {entry.get("value") for entry in flags} == {2}
+    # The -O2 build has no outlined thunk, so nothing there resolves via one.
+    plain = parse(str(DATA / "liba7_fire_arm64-v8a.so"), True)
+    assert not [
+        entry for entry in plain.get("call_site_arguments") or [] if entry.get("callee_via_thunk")
+    ]
 
 
 @pytest.mark.parametrize("abi", ABIS)
 def test_unmodelled_abi_is_named_in_coverage_not_in_reviews(abi: str) -> None:
     # An ABI the call-site dataflow does not model is a coverage fact on the
-    # library, never a review row carrying the rule's summary.
+    # library, never a review row carrying the rule's summary: on
+    # armeabi-v7a the five call-site rules report nothing while the
+    # instruction-text rule still evaluates.
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
     metadata = _parse_fixture(f"liba7_fire_{abi}.so")
@@ -131,7 +183,7 @@ def test_unmodelled_abi_is_named_in_coverage_not_in_reviews(abi: str) -> None:
         assert "callsite_abi_not_modelled" not in degradations
     else:
         assert "callsite_abi_not_modelled" in degradations
-        assert _android_results(metadata) == {}
+        assert not (set(_android_results(metadata)) & set(CALL_SITE_RULES))
 
 
 def test_truncated_call_site_block_is_a_coverage_degradation() -> None:
@@ -317,20 +369,85 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
     # Go-built libraries are excluded by buildinfo.
     go = dict(base, name="libgo.so", build_info={"go_version": "go1.24.0"})
     assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", go) == []
-    # 32-bit ARM is not evaluated, even with a decoded svc site.
+    # 32-bit ARM needs the r7 syscall-number load before the svc. These
+    # listings are captured from nyxstone over armeabi-v7a app libraries:
+    # libQt5Core's __clear_cache (__ARM_NR_cacheflush, 0xf0002), then
+    # literal-pool and table words that decode as svc.
     arm32 = dict(
         base,
-        name="libflutter.so",
+        name="libQt5Core.so",
         llvm_target_tuple="armv7a-unknown-linux-androideabi24",
         disassembled_functions={
             "f::stub": {
-                "name": "stub",
-                "address": "0x1000",
-                "assembly": "movs r0, r0\nsvc #0\nmovs r0, r0",
+                "name": "__clear_cache",
+                "address": "0x409c3c",
+                "assembly": "push {r7, lr}\nmovw r7, #2\nmov r2, #0\nmovt r7, #15\nsvc #0\npop {r7, pc}",
             }
         },
     )
-    assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32) == []
+    fires_arm32 = evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32)
+    assert fires_arm32 and fires_arm32[0]["site_total"] == 1
+    no_r7 = dict(
+        base,
+        name="liborganicmaps.so",
+        llvm_target_tuple="armv7a-unknown-linux-androideabi24",
+        disassembled_functions={
+            "f::junk": {
+                "name": "sub_62eb4c",
+                "address": "0x62eb4c",
+                "assembly": "mov r0, r4\nblx r2\nblx #4431220\nnop\nblt #172\nlsls r5, r0, #1\nsvc #0",
+            }
+        },
+    )
+    assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", no_r7) == []
+    # A libxul data table whose words decode as literal loads into r7: the
+    # zero halfword between the load and the svc ends the run.
+    table = dict(
+        no_r7,
+        name="libxul.so",
+        disassembled_functions={
+            "f::table": {
+                "name": "sub_60799f0",
+                "address": "0x60799f0",
+                "assembly": "mov pc, pc\nmovs r0, r0\nldr r7, [pc, #0]\nmovs r0, r0\n"
+                "ldr r7, [pc, #512]\nmovs r0, r0\nsvc #0",
+            }
+        },
+    )
+    assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", table) == []
+
+
+@pytest.mark.parametrize(
+    "fixture, holders",
+    [
+        ("liba7_fire_armeabi-v7a_stripped.so", {"a7_inline_syscall": 1, "a7_run_all": 1}),
+        (
+            "liba7_guarded_svc_armeabi-v7a_thumb.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        (
+            "liba7_guarded_svc_armeabi-v7a_thumb_stripped.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        ("liba7_guarded_svc_armeabi-v7a_arm.so", {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1}),
+        (
+            "liba7_guarded_svc_armeabi-v7a_arm_stripped.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        ("liba7_nofire_armeabi-v7a_stripped.so", {}),
+    ],
+)
+def test_arm32_inline_syscall_sites(fixture: str, holders: dict) -> None:
+    # The guarded fixture's svc follows a conditional return (bxeq lr), so it
+    # is reached by fallthrough. The stripped twins name their functions
+    # from the dynamic symbol table, so the holders match.
+    if not _nyxstone_available():
+        pytest.skip("nyxstone is not available")
+    initialize_rules(BlintOptions())
+    results = _android_results(_parse_fixture(fixture))
+    rows = results.get("ANDROID_INLINE_SYSCALLS") or []
+    found = {item["function"]: item["sites"] for row in rows for item in row["functions"]}
+    assert found == holders, results
 
 
 # nyxstone's rendering of svc #0, syscall and int 0x80 in each IntegerBase
