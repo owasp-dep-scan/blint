@@ -843,9 +843,22 @@ def build_jni_join_summary(
 # a return type only). Name strings must be Java identifiers.
 _JAVA_IDENTIFIER_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
+# A candidate name or signature string is read with this bound: one whose
+# NUL does not sit within it is refused, never truncated (A9 P2: a
+# truncated signature failed validation silently, and a truncated name
+# could still match the identifier grammar and bind as a wrong string).
+# React Native's longest real descriptor is 446 bytes (ReactInstance's
+# initHybrid, A9 P0); the JVM bounds a UTF-8 constant at 65,535.
+JNI_STRING_READ_LIMIT = 1024
 
-def _read_cstring(parsed_obj, address: int, limit: int = 256) -> str | None:
-    """The NUL-terminated string at ``address``, or None."""
+
+def _read_cstring(parsed_obj, address: int, limit: int = JNI_STRING_READ_LIMIT) -> str | None:
+    """The NUL-terminated string at ``address``, or None.
+
+    A string that does not terminate within ``limit`` bytes is None, not
+    its truncated prefix - the recovery must not accept a cut-down
+    signature or name.
+    """
     try:
         content = bytes(parsed_obj.get_content_from_virtual_address(address, limit))
     except (SystemError, Exception):
@@ -853,11 +866,10 @@ def _read_cstring(parsed_obj, address: int, limit: int = 256) -> str | None:
     if not content:
         return None
     end = content.find(b"\x00")
-    if end == 0:
+    if end <= 0:
         return None
-    raw = content if end < 0 else content[:end]
     try:
-        return raw.decode("utf-8")
+        return content[:end].decode("utf-8")
     except UnicodeDecodeError:
         return None
 

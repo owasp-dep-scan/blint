@@ -150,3 +150,34 @@ without a range (stays ambiguous). This splits the merged two-class
 `toString` run (`NativeArray` at `0x61fd98`, `NativeMap` at `0x61fdb0`,
 each registered whole for its own class by its own registrar) and gives
 JReactInstance its own range once P2 re-attaches its registrar.
+
+## After P2 (same host, same run shape)
+
+The fix: `_read_cstring` refuses a name or signature whose NUL sits beyond
+`JNI_STRING_READ_LIMIT` (1024) instead of returning its truncated prefix —
+the truncated signature silently failed validation and a truncated name
+could have matched the identifier grammar and bound as a wrong string.
+
+RnHello, plain: every ABI gains its copy's long-descriptor entries
+(arm64/x86_64 278→282 bound_dynamic, unbound 30→26; v7a 208→211/102→99;
+x86 262→265/48→45). With the confirmer, arm64 goes 294/8/30 → 303/3/26:
+the four singles bind through the unique-pair rule, and the re-attached
+JReactInstance registrar (its `adr 0x620ab0` lands inside the unsplit
+14-entry table again) lets the whole-table rule bind ReactInstance's five
+shared `CatalystInstanceImpl` names. The ambiguous residue is exactly the
+P3 set: JSCInstance's `initHybrid` (no registrar anywhere) and
+NativeArray/NativeMap `toString` (two registrars, one merged two-entry
+run). x86_64's own confirmer still binds none of these: its chain hop is
+broken (P3's first fix — nyxstone prints x86 direct-call operands as
+pc-relative deltas, `_call_targets` read them as absolute), which P1's
+per-ABI confirmations exposed now that arm64's ranges no longer stand in.
+
+Corpus, plain, P1 → P2: element gains the same four RN descriptors
+(+3/+4 bound_dynamic per version, in that version's own ABI), fennec
+gains `GeckoSession$Window.open` (291 B), RnHello as above; the other 19
+APKs unchanged. On the 32-bit ABIs `UIConstantsProviderBinding.install`
+stays unbound: its v7a/x86 fnPtr words do not land on a discovered
+function start (a per-ABI recovery fact, not the string bound).
+
+Wall time: RnHello 1.42 s → 1.44 s plain (1.83 s → 1.86 s with the
+confirmer) — the longer reads are bounded and rare.

@@ -1068,3 +1068,53 @@ def test_multiabi_confirmations_stay_in_their_abi() -> None:
         assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"]), (
             f"a {abi} row carries a confirmation that was not read from {abi} bytes"
         )
+
+
+# --------------------------------------------- A9 P2: the string-bound entries
+
+
+@pytest.mark.parametrize(
+    "abi",
+    ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+)
+def test_string_bound_entries_split_at_the_read_limit(abi: str) -> None:
+    """The recovery's string read refuses a name or signature whose NUL
+    sits beyond JNI_STRING_READ_LIMIT (1024) instead of truncating it: a
+    truncated signature silently failed validation (RnHello's
+    initializeBridge, 325 B) and a truncated name could still match the
+    identifier grammar and bind as a wrong string. The a9_long fixture
+    crosses both sides: sigUnder's 989-byte descriptor recovers, sigLong's
+    1279-byte descriptor and the 1120-char method name do not."""
+    from blint.lib.binary import parse
+    from blint.lib.jni import JNI_STRING_READ_LIMIT
+
+    assert JNI_STRING_READ_LIMIT == 1024  # the fixture's lengths cross this
+    metadata = parse(str(FIXTURES / f"liba9_long_{abi}.so"))
+    tables = metadata["android"]["jni"]["register_natives"]
+    entries = [e for table in tables["tables"] for e in table["entries"]]
+    assert [e["name"] for e in entries] == ["sigUnder"]
+    assert len(entries[0]["signature"]) == 989
+    # the stripped twin recovers the same entry
+    stripped = parse(str(FIXTURES / f"liba9_long_{abi}_stripped.so"))
+    stripped_tables = stripped["android"]["jni"]["register_natives"]
+    assert [e["name"] for t in stripped_tables["tables"] for e in t["entries"]] == ["sigUnder"]
+
+
+def test_long_string_declarations_bind_or_stay_unbound() -> None:
+    """The join on the a9 fixture: the under-limit entry binds its dex
+    declaration; the past-limit signature and the past-limit name stay
+    unbound - refused, never bound as a truncated prefix."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-long.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk))
+    assert sorted(join["per_abi"]) == ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+    for abi_join in join["per_abi"].values():
+        bound = {(e["name"], len(e["descriptor"])) for e in abi_join["bound_dynamic"]}
+        assert bound == {("sigUnder", 989)}
+        unbound = {
+            (e["name"][:10], len(e["name"]), len(e["descriptor"]))
+            for e in abi_join["unbound_dex_natives"]
+        }
+        assert unbound == {("sigLong", 7, 1279), ("a9LongName", 1120, 4)}
