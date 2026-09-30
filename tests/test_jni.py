@@ -1339,3 +1339,74 @@ def test_gap_fixture_fn_addrs_pass_the_readelf_oracle(abi: str) -> None:
     for table in tables["tables"]:
         for entry in table["entries"]:
             assert int(entry["fn_addr"], 16) in func_starts, (abi, entry["name"], entry["fn_addr"])
+
+
+# ---------------------------- A10 Q3: the registered-nowhere mark
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+@pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
+def test_registered_nowhere_marks_the_unregistered_class(abi: str) -> None:
+    """The a10 nowhere fixture: nwShared is declared by NwBound, NwMissing
+    and NwElsewhere, and its one table entry is registered for NwBound with
+    a constant count. With --disassemble NwBound binds through the
+    confirmer; NwMissing's row - ambiguous, its only candidate covered by
+    NwBound's range, its class named by no resolved registration - carries
+    registered_nowhere. NwElsewhere's identical-looking nwShared row does
+    NOT: its own nwMine registration names it, and the mark claims no
+    chain names the class at all. The nwRt rows stay plain ambiguous:
+    their candidates sit in no resolved range (volatile counts), so the
+    confirmer claims nothing and no mark appears."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a10-jni-nowhere.apk")
+    native = scan_android_native(apk)
+    plain = build_jni_join_summary(apk, native)
+    assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 5
+    assert not any(
+        "registered_nowhere" in e for e in plain["per_abi"][abi]["ambiguous_dynamic"]
+    )
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    bound = {(e["class"], e["name"]) for e in per_abi["bound_dynamic"]}
+    assert bound == {
+        ("com.blint.a10.nowhere.NwBound", "nwShared"),
+        # the unique (name, signature) pair binds without the confirmer
+        ("com.blint.a10.nowhere.NwElsewhere", "nwMine"),
+    }
+    ambiguous = {
+        (e["class"], e["name"], e.get("registered_nowhere", False))
+        for e in per_abi["ambiguous_dynamic"]
+    }
+    assert ambiguous == {
+        ("com.blint.a10.nowhere.NwMissing", "nwShared", True),
+        ("com.blint.a10.nowhere.NwElsewhere", "nwShared", False),
+        ("com.blint.a10.nowhere.NwRtA", "nwRt", False),
+        ("com.blint.a10.nowhere.NwRtB", "nwRt", False),
+    }
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_registered_nowhere_never_appears_without_resolved_ranges() -> None:
+    """The mark needs the --disassemble confirmer's resolved ranges: the
+    plain join never marks, and the 32-bit ABIs - which the call-site
+    layer does not model - never mark even with the flag on. Their rows
+    stay exactly the plain-ambiguous shape."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a10-jni-nowhere.apk")
+    native = scan_android_native(apk)
+    for confirm in (False, True):
+        join = build_jni_join_summary(apk, native, confirm_findclass=confirm)
+        for abi in ("armeabi-v7a", "x86"):
+            per_abi = join["per_abi"][abi]
+            assert per_abi["counts"]["ambiguous_dynamic"] == 5
+            assert not any(
+                "registered_nowhere" in e for e in per_abi["ambiguous_dynamic"]
+            )

@@ -9,7 +9,8 @@
 #   nounwindAdd a real wrapper compiled with -fno-unwind-tables
 #               -fno-asynchronous-unwind-tables and hidden: its triple's
 #               words relocate onto a genuine function no start source can
-#               verify (the RnHello v7a yoga wrappers) - refused everywhere.
+#               verify (the RnHello v7a yoga wrappers) - refused everywhere
+#               except armeabi-v7a, where lld backfills an .ARM.exidx row.
 #   smallOnly   the registrar builds the entry at run time through a
 #               noinline constructor (makeNativeMethod shape) - no static
 #               triple, refused everywhere.
@@ -18,6 +19,17 @@
 # a10-classes.dex - GapNative's five declarations (the join oracle).
 # a10-jni-gap.apk - the dex plus one copy of the library per ABI, each ABI's
 #               own bytes (ground rule 36).
+#
+# A10 Q3 fixture (same script, one toolchain):
+# liba10_nowhere_<abi>.so - one three-entry table registered for NwBound
+#               with a constant count (the confirmer resolves its range)
+#               and for NwRtA/NwRtB through volatile-count stack copies (no
+#               resolved range). a10-nowhere-classes.dex declares nwShared
+#               for NwBound AND NwMissing (no registrar names NwMissing:
+#               with --disassemble its ambiguous row carries the
+#               registered-nowhere mark) and nwRt for NwRtA/NwRtB (plain
+#               ambiguous - their candidates sit in no resolved range).
+# a10-jni-nowhere.apk - that dex plus one copy of the library per ABI.
 set -euo pipefail
 
 out="${1:-$(cd "$(dirname "$0")/../../.." && pwd)/tests/data/android}"
@@ -75,6 +87,44 @@ done
   --min-sdk-version 24 --target-sdk-version 34
 (cd "$apkroot" && zip -q -r "$work/a10-gap.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a10-gap.apk" "$out/a10-jni-gap.apk"
+
+# ------------------------------------------------------- Q3: nowhere dex
+javac --release 11 -d "$work/classes-nowhere" \
+  $(find "$here/jni_sources/a10_nowhere/java" -name '*.java' | sort)
+"$build_tools/d8" --release --min-api 24 --lib "$platform_jar" \
+  --output "$work" $(find "$work/classes-nowhere" -name '*.class' | sort)
+cp "$work/classes.dex" "$out/a10-nowhere-classes.dex"
+
+# ---------------------------------------------------- Q3: nowhere libs
+for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+  case "$abi" in
+    arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
+    armeabi-v7a) cc="$toolchain/armv7a-linux-androideabi24-clang" ;;
+    x86_64) cc="$toolchain/x86_64-linux-android24-clang" ;;
+    x86) cc="$toolchain/i686-linux-android24-clang" ;;
+  esac
+  "$cc" -g -O2 -fPIC -funwind-tables -shared \
+    -o "$work/liba10_nowhere_${abi}.so" \
+    "$here/jni_sources/a10_nowhere/a10_nowhere_tables.cpp"
+  cp "$work/liba10_nowhere_${abi}.so" "$out/liba10_nowhere_${abi}.so"
+  "$toolchain/llvm-strip" --strip-all \
+    -o "$out/liba10_nowhere_${abi}_stripped.so" "$work/liba10_nowhere_${abi}.so"
+done
+
+# -------------------------------------------------- Q3: nowhere apk
+nwapkroot="$work/nowhere-apk"
+mkdir -p "$nwapkroot/lib/arm64-v8a" "$nwapkroot/lib/armeabi-v7a" \
+  "$nwapkroot/lib/x86_64" "$nwapkroot/lib/x86"
+cp "$out/a10-nowhere-classes.dex" "$nwapkroot/classes.dex"
+for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+  cp "$work/liba10_nowhere_${abi}.so" "$nwapkroot/lib/$abi/liba10nowhere.so"
+done
+
+"$build_tools/aapt2" link --manifest "$here/jni_sources/a10_nowhere/AndroidManifest.xml" \
+  -I "$platform_jar" -o "$work/a10-nowhere.apk" \
+  --min-sdk-version 24 --target-sdk-version 34
+(cd "$nwapkroot" && zip -q -r "$work/a10-nowhere.apk" .)
+"$build_tools/zipalign" -f 4 "$work/a10-nowhere.apk" "$out/a10-jni-nowhere.apk"
 
 echo "built:"
 ls -l "$out" | grep -E "a10-|liba10_" || true
