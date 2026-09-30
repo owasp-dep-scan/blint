@@ -726,3 +726,244 @@ def test_r1_end_to_end_path_java_to_libc() -> None:
             for e in graph["edges"]
         )
     )
+
+
+def _nyxstone_available() -> bool:
+    try:
+        from blint.lib.disassembler import NYXSTONE_AVAILABLE
+
+        return NYXSTONE_AVAILABLE
+    except Exception:
+        return False
+
+
+# -------------------------------------------- A8 N2: fbjni's merged tables
+
+
+def _a8_hybrid_tables(fixture: str) -> list[dict]:
+    metadata = parse(str(FIXTURES / fixture))
+    tables = metadata["android"]["jni"]["register_natives"]
+    assert tables is not None, "the fbjni-shape tables must recover"
+    return tables["tables"]
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "liba8_hybrid_arm64-v8a.so",
+        "liba8_hybrid_armeabi-v7a.so",
+        "liba8_hybrid_x86_64.so",
+        "liba8_hybrid_x86.so",
+    ],
+)
+def test_fbjni_merged_tables_match_the_fixture_source(fixture: str) -> None:
+    """N2's R1 gate: the recovery equals a8_hybrid_tables.cpp's tables.
+
+    The fixture carries the measured fbjni shape: name words R_*_RELATIVE,
+    signature + fnPtr words absolute against the preemptible dynsym
+    symbols (llvm-readelf -r on the arm64 build: R_AARCH64_ABS64 against
+    a8_hyb_sig_*/a8_hyb_*_call). The shape itself is asserted first, so a
+    future rebuild that folds the words to RELATIVE cannot turn this test
+    vacuous - it fails instead.
+    """
+    import lief
+
+    parsed = lief.ELF.parse(str(FIXTURES / fixture))
+    kinds = {}
+    for relocation in parsed.relocations:
+        symbol = getattr(relocation, "symbol", None)
+        name = symbol.name if symbol is not None and symbol.name else ""
+        if name.startswith(
+            (
+                "a8_hyb_sig_",
+                "a8_hyb_decoy_sig",
+                "a8_hyb_first",
+                "a8_hyb_other",
+                "a8_hyb_decoy_words",
+            )
+        ):
+            kinds[name] = str(getattr(relocation, "type", ""))
+    assert len(kinds) >= 8
+    assert all("RELATIVE" not in kind for kind in kinds.values()), (
+        "fixture degraded: the signature/fnPtr words must relocate against "
+        f"the dynsym symbols, got {kinds}"
+    )
+
+    tables = _a8_hybrid_tables(fixture)
+    entries = [e for table in tables for e in table["entries"]]
+    assert len(entries) == 5
+    by_name_sig = {(e["name"], e["signature"]) for e in entries}
+    # a8_hybrid_tables.cpp's source tables, verbatim.
+    assert by_name_sig == {
+        ("hybInit", "()Lcom/blint/a8/HybridFirst;"),
+        ("hybTick", "(J)V"),
+        ("hybName", "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("hybPair", "(II)I"),
+        ("hybTick", "(J)J"),
+    }
+    # The fnPtr words resolve to the wrapper symbols the tables name.
+    named = {e["name"]: e.get("fn_name") for e in entries if e["name"] != "hybTick"}
+    assert named["hybInit"] == "a8_hyb_first_init_call"
+    assert named["hybName"] == "a8_hyb_first_name_call"
+    assert named["hybPair"] == "a8_hyb_other_pair_call"
+
+
+@pytest.mark.parametrize(
+    "abi",
+    ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+)
+def test_fbjni_merged_tables_stripped_twins_recover_the_same(abi: str) -> None:
+    """The preemptible symbols live in .dynsym, so the stripped twin keeps
+    the same absolute relocations and the same recovery (only the fn_name
+    extras differ)."""
+    plain = parse(str(FIXTURES / f"liba8_hybrid_{abi}.so"))
+    stripped = parse(str(FIXTURES / f"liba8_hybrid_{abi}_stripped.so"))
+    left = plain["android"]["jni"]["register_natives"]
+    right = stripped["android"]["jni"]["register_natives"]
+    # arm64 merges the two source arrays into one run; x86_64 keeps them
+    # apart (2 tables). Both twins agree, and the entries are the five
+    # source methods either way.
+    assert left["counts"] == right["counts"]
+    assert left["counts"]["entries"] == 5
+    for lt, rt in zip(left["tables"], right["tables"]):
+        for le, re_ in zip(lt["entries"], rt["entries"]):
+            assert (le["name"], le["signature"], le["fn_addr"]) == (
+                re_["name"],
+                re_["signature"],
+                re_["fn_addr"],
+            )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "liba8_hybrid_arm64-v8a.so",
+        "liba8_hybrid_armeabi-v7a_stripped.so",
+        "liba8_hybrid_x86_64.so",
+        "liba8_hybrid_x86_stripped.so",
+    ],
+)
+def test_fbjni_decoy_triple_is_refused(fixture: str) -> None:
+    """The adjacent false shape: a triple whose fnPtr word relocates
+    against a defined OBJECT in .rodata (not a function start, not an
+    executable section) must never become a table entry."""
+    tables = _a8_hybrid_tables(fixture)
+    entries = [e for table in tables for e in table["entries"]]
+    assert all(e["name"] != "hybDecoy" for e in entries)
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_fbjni_shape_binds_the_dex_declarations() -> None:
+    """The join on the a8 APK: the fbjni tables bind HybridFirst and
+    HybridOther's declarations (N2's recall), hybMissing stays unbound,
+    and of the three-class sharedTick pair exactly the two constant-name
+    registrations bind (N3) - the runtime-composed third stays ambiguous
+    with its candidate count."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a8-jni-arm64-v8a.apk")
+    # Without --disassemble the confirmer does not run: all three stay ambiguous.
+    plain = build_jni_join_summary(apk, scan_android_native(apk))
+    assert plain["per_abi"]["arm64-v8a"]["counts"]["ambiguous_dynamic"] == 3
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
+    per_abi = join["per_abi"]["arm64-v8a"]
+    assert per_abi["counts"] == {
+        "libraries": 2,
+        "bound": 0,
+        "bound_dynamic": 10,
+        "ambiguous_dynamic": 1,
+        "unbound_dex_natives": 1,
+        "undeclared_exports": 0,
+    }
+    bound = {
+        (e["class"], e["name"], e["library"], e.get("confirmed_by"))
+        for e in per_abi["bound_dynamic"]
+    }
+    assert bound == {
+        ("com.blint.a8.HybridFirst", "hybInit", "liba8hyb.so", None),
+        ("com.blint.a8.HybridFirst", "hybTick", "liba8hyb.so", None),
+        ("com.blint.a8.HybridFirst", "hybName", "liba8hyb.so", None),
+        ("com.blint.a8.HybridOther", "hybPair", "liba8hyb.so", None),
+        ("com.blint.a8.HybridOther", "hybTick", "liba8hyb.so", None),
+        ("com.blint.a8.AmbigOne", "oneOnly", "liba8amb.so", None),
+        ("com.blint.a8.AmbigTwo", "twoOnly", "liba8amb.so", None),
+        ("com.blint.a8.AmbigThree", "threeOnly", "liba8amb.so", None),
+        # The FindClass confirmer bound these two: each to its own
+        # registration range, its own implementation.
+        ("com.blint.a8.AmbigOne", "sharedTick", "liba8amb.so", "findclass"),
+        ("com.blint.a8.AmbigTwo", "sharedTick", "liba8amb.so", "findclass"),
+    }
+    confirmed = {
+        e["class"]: e["fn_name"] for e in per_abi["bound_dynamic"] if e.get("confirmed_by")
+    }
+    assert confirmed == {
+        "com.blint.a8.AmbigOne": "a8_amb_shared_one",
+        "com.blint.a8.AmbigTwo": "a8_amb_shared_two",
+    }
+    ambiguous = {
+        (e["class"], e["name"], e["table_candidates"]) for e in per_abi["ambiguous_dynamic"]
+    }
+    assert ambiguous == {("com.blint.a8.AmbigThree", "sharedTick", 3)}
+    unbound = [(e["class"], e["name"]) for e in per_abi["unbound_dex_natives"]]
+    assert unbound == [("com.blint.a8.HybridFirst", "hybMissing")]
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_findclass_confirmer_needs_the_callsite_abis() -> None:
+    """The confirmer is arm64/x86_64 (the call-site layer); the 32-bit
+    twins of the same fixture keep every sharedTick declaration
+    ambiguous - not evaluated, never guessed - while the x86_64 twin,
+    whose APK carries its own bytes, confirms exactly like arm64."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    for abi in ("armeabi-v7a", "x86"):
+        join = build_jni_join_summary(
+            str(FIXTURES / f"a8-jni-{abi}.apk"),
+            scan_android_native(str(FIXTURES / f"a8-jni-{abi}.apk")),
+            confirm_findclass=True,
+        )
+        per_abi = join["per_abi"][abi]
+        assert per_abi["counts"]["ambiguous_dynamic"] == 3
+        assert not any(e.get("confirmed_by") for e in per_abi["bound_dynamic"])
+    join = build_jni_join_summary(
+        str(FIXTURES / "a8-jni-x86_64.apk"),
+        scan_android_native(str(FIXTURES / "a8-jni-x86_64.apk")),
+        confirm_findclass=True,
+    )
+    per_abi = join["per_abi"]["x86_64"]
+    assert per_abi["counts"]["bound_dynamic"] == 10
+    assert per_abi["counts"]["ambiguous_dynamic"] == 1
+    assert {(e["class"], e.get("confirmed_by")) for e in per_abi["bound_dynamic"]} >= {
+        ("com.blint.a8.AmbigOne", "findclass"),
+        ("com.blint.a8.AmbigTwo", "findclass"),
+    }
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_findclass_ranges_are_the_registrations() -> None:
+    """R1 oracle, at the confirmer's own granularity: a8_ambig's
+    JNI_OnLoad registers [0, 2) for AmbigOne and [2, 4) for AmbigTwo
+    with constant names, and the composed third registration confirms
+    nothing - the ranges name exactly the two, entry-exact."""
+    import lief
+
+    from blint.lib.jni import recover_register_natives_tables
+    from blint.lib.jni_findclass import _function_starts, confirm_table_ranges
+
+    parsed = lief.ELF.parse(str(FIXTURES / "liba8_ambig_arm64-v8a.so"))
+    starts = _function_starts(parsed)
+    tables = recover_register_natives_tables(parsed, set(starts), starts)
+    ranges = confirm_table_ranges(parsed, tables["tables"])
+    resolved = sorted((r["begin"], r["end"], r["class"]) for r in ranges)
+    assert resolved == [
+        (0x8D28, 0x8D58, "com.blint.a8.AmbigOne"),
+        (0x8D58, 0x8D88, "com.blint.a8.AmbigTwo"),
+    ]

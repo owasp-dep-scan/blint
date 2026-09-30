@@ -1223,7 +1223,7 @@ class AnalysisRunner:
         metadata["android_native"] = _android_native_summary(native)
         # The dex <-> native static JNI join (A5.2 E2), next to the native
         # summary; absent when the app declares no natives (nothing to join).
-        jni_join = build_jni_join_summary(f, native)
+        jni_join = build_jni_join_summary(f, native, confirm_findclass=blint_options.disassemble)
         if jni_join:
             metadata["android_jni"] = jni_join
         # Members first: the app callgraph's JNI edges (A5.2 F2) point at

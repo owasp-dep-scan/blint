@@ -429,12 +429,22 @@ def join_static(dex_natives: list[dict], surface: dict | None) -> dict:
 JOIN_LISTING_CAP = 256
 
 
+def _slot_address(table_entry: dict) -> int | None:
+    """The entry's own triple address (``slot``), as an int."""
+    slot = table_entry.get("slot")
+    if isinstance(slot, str):
+        with contextlib.suppress(ValueError):
+            return int(slot, 16)
+    return slot if isinstance(slot, int) else None
+
+
 def _join_abi_lists(
     natives: list[dict],
     surfaces: dict[str, dict | None],
     register_tables: dict[str, dict],
     lib_abis: dict[str, set[str]],
     abi: str,
+    confirmed_ranges: dict[str, list[dict]] | None = None,
 ) -> dict:
     """One ABI's join across every library that ships in it.
 
@@ -444,10 +454,14 @@ def _join_abi_lists(
     signature both match (the class is unknown in the table, so signature
     equality is required, and the pair must be unique on both sides;
     otherwise the declarations are listed as ambiguous_dynamic with the
-    number of candidate entries). What neither answers is unbound, and each
-    library's unclaimed exports are its undeclared list. Counts reflect
-    the full sets; the lists are capped at ``JOIN_LISTING_CAP`` with a
-    ``truncated`` flag.
+    number of candidate entries). A8 N3: an ambiguous declaration binds
+    when the registering function chain's constant class name - the
+    ``FindClass`` confirmer's answer, per library and table - names
+    exactly one of the pair's declaring classes and exactly one candidate
+    entry names it; anything the confirmer cannot decide stays ambiguous.
+    What neither answers is unbound, and each library's unclaimed exports
+    are its undeclared list. Counts reflect the full sets; the lists are
+    capped at ``JOIN_LISTING_CAP`` with a ``truncated`` flag.
     """
     bound: list[dict] = []
     bound_dynamic: list[dict] = []
@@ -504,7 +518,42 @@ def _join_abi_lists(
                 }
             )
             continue
+        # N3: a class binds when exactly one candidate entry sits in a
+        # registration range the FindClass confirmer resolved to exactly
+        # that class. An entry covered by ranges naming two declaring
+        # classes decides nothing, and a class with two clean entries is
+        # still an arbitrary pick - both stay ambiguous.
+        decided: dict[str, dict] = {}
+        for cls in classes:
+            clean = []
+            for match in matches:
+                slot = _slot_address(match)
+                naming = {
+                    entry_range["class"]
+                    for entry_range in (confirmed_ranges or {}).get(match["library"], [])
+                    if slot is not None
+                    and entry_range["begin"] <= slot < entry_range["end"]
+                    and entry_range["class"] in classes
+                }
+                if naming == {cls}:
+                    clean.append(match)
+            if len(clean) == 1:
+                decided[cls] = clean[0]
         for cls, native_entry in classes.items():
+            if cls in decided:
+                match = decided[cls]
+                bound_dynamic.append(
+                    {
+                        **native_entry,
+                        "class": cls,
+                        "abi": abi,
+                        "library": match["library"],
+                        "fn_addr": match.get("fn_addr"),
+                        **({"fn_name": match["fn_name"]} if match.get("fn_name") else {}),
+                        "confirmed_by": "findclass",
+                    }
+                )
+                continue
             record = {**native_entry, "class": cls, "abi": abi}
             if matches:
                 record["table_candidates"] = len(matches)
@@ -538,7 +587,77 @@ def _join_abi_lists(
     return result
 
 
-def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
+def _confirm_ambiguous_tables(
+    app_file: str,
+    natives: list[dict],
+    register_tables: dict[str, dict],
+    lib_locations: dict[str, dict],
+) -> dict[str, list[dict]]:
+    """Per library: the registration ranges the FindClass confirmer
+    resolved (A8 N3) - ``[{begin, end, class}]`` over the recovered
+    tables' addresses.
+
+    Runs only where the join can be ambiguous at all - (name, signature)
+    pairs several dex classes declare, or pairs more than one recovered
+    entry answers - and only re-reads the libraries that hold candidate
+    tables. The 23 of 27 corpus APKs without such pairs pay one pass over
+    the dex facts and nothing else. Any failure degrades to "no
+    confirmation": the entries stay ambiguous, never guessed.
+    """
+    from collections import Counter, defaultdict
+
+    pair_classes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for entry in natives:
+        pair_classes[(entry["name"], entry["descriptor"])].add(_dotted_class(entry["class"]))
+    wanted = {pair for pair, classes in pair_classes.items() if len(classes) > 1}
+    if not wanted:
+        entry_counts: Counter = Counter()
+        for tables in register_tables.values():
+            for table in tables.get("tables") or []:
+                for table_entry in table.get("entries") or []:
+                    entry_counts[(table_entry.get("name"), table_entry.get("signature"))] += 1
+        wanted = {pair for pair, count in entry_counts.items() if count > 1}
+    if not wanted:
+        return {}
+    owners = {
+        name: tables
+        for name, tables in register_tables.items()
+        if name in lib_locations
+        and any(
+            (entry.get("name"), entry.get("signature")) in wanted
+            for table in tables.get("tables") or []
+            for entry in table.get("entries") or []
+        )
+    }
+    confirmed: dict[str, list[dict]] = {}
+    if not owners:
+        return confirmed
+    from blint.lib.android_native import LibraryReader
+    from blint.lib.jni_findclass import confirm_table_ranges
+
+    try:
+        with LibraryReader(app_file) as reader:
+            for name, tables in owners.items():
+                data = None
+                with contextlib.suppress(Exception):
+                    data = reader.read(lib_locations[name])
+                if not data:
+                    continue
+                parsed = lief.ELF.parse(data)
+                if parsed is None or isinstance(parsed, lief.lief_errors):
+                    continue
+                with contextlib.suppress(Exception):
+                    ranges = confirm_table_ranges(parsed, tables.get("tables") or [])
+                    if ranges:
+                        confirmed[name] = ranges
+    except Exception as exc:
+        LOG.debug(f"jni join: findclass confirmation failed for {app_file}: {exc}")
+    return confirmed
+
+
+def build_jni_join_summary(
+    app_file: str, native: dict, confirm_findclass: bool = False
+) -> dict | None:
     """The app-level dex <-> native static join (A5.2 E2).
 
     Per ABI (ground rule 36: one result per ``(abi, library)``, never a
@@ -549,6 +668,8 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
     per library. ``System.loadLibrary`` call sites map to ``lib<name>.so``
     members. Bounded: counts always, the first
     ``JOIN_LISTING_CAP`` entries of each list, ``truncated`` flags beside.
+    ``confirm_findclass`` (set by ``--disassemble``) runs the FindClass
+    confirmer over the libraries that hold ambiguous tables.
     """
     from blint.lib.android import _iter_app_dex_files
     from blint.lib.android_native import LibraryReader
@@ -574,6 +695,7 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
     register_tables: dict[str, dict] = {}
     abis: set[str] = set()
     lib_abis: dict[str, set[str]] = {}
+    lib_locations: dict[str, dict] = {}
     try:
         with LibraryReader(app_file) as reader:
             for lib in native.get("libraries") or []:
@@ -587,6 +709,9 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
                 if name in surfaces or lib.get("not_elf"):
                     continue
                 surfaces[name] = None
+                locations = lib.get("locations") or []
+                if locations:
+                    lib_locations[name] = locations[0]
                 data = None
                 with contextlib.suppress(Exception):
                     data = reader.read((lib.get("locations") or [])[0])
@@ -635,8 +760,15 @@ def build_jni_join_summary(app_file: str, native: dict) -> dict | None:
         LOG.debug(f"jni join: library surfaces failed for {app_file}: {exc}")
 
     per_abi: dict[str, dict] = {}
+    confirmed_classes = (
+        _confirm_ambiguous_tables(app_file, natives, register_tables, lib_locations)
+        if confirm_findclass
+        else {}
+    )
     for abi in sorted(abis):
-        per_abi[abi] = _join_abi_lists(natives, surfaces, register_tables, lib_abis, abi)
+        per_abi[abi] = _join_abi_lists(
+            natives, surfaces, register_tables, lib_abis, abi, confirmed_classes
+        )
 
     # loadLibrary("x") -> libx.so member presence, per ABI where it ships.
     member_names = {
@@ -716,8 +848,10 @@ def _valid_method_signature(text: str) -> bool:
 
 def _is_single_descriptor(text: str) -> bool:
     body = text.lstrip("[")
-    return len(body) == 1 and body in "BCSIJFDZ" or (
-        body.startswith("L") and body.endswith(";") and body.count(";") == 1
+    return (
+        len(body) == 1
+        and body in "BCSIJFDZ"
+        or (body.startswith("L") and body.endswith(";") and body.count(";") == 1)
     )
 
 
@@ -765,22 +899,71 @@ def relative_relocation_map(parsed_obj) -> tuple[dict[int, int], list[str]]:
     return values, incomplete
 
 
+def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
+    """``{slot address: target VA}`` from absolute relocations whose symbol
+    is *defined in this object* (A8 N2: fbjni's merged tables).
+
+    fbjni's ``makeNativeMethod`` emits ``{name, kDescriptor, &call}`` where
+    the signature and fnPtr words name preemptible weak dynsym symbols -
+    ``facebook::jni::jmethod_traits<F>::kDescriptor`` (an OBJECT in
+    ``.rodata``) and ``MethodWrapper<...>::call`` /
+    ``FunctionWrapperWithJniEntryPoint<...>::call`` (FUNCs) - so the linker
+    keeps ``R_*_ABS*`` against the symbol instead of folding the word to
+    ``R_*_RELATIVE`` (measured in N0(b): 167 of RnHello's 221 unbound
+    declarations sit in such triples). The target is the symbol's value
+    plus a RELA addend; REL forms (arm32) keep theirs in the stored word.
+    Imported symbols (section index 0) have no link-time value and are
+    ignored.
+    """
+    values: dict[int, int] = {}
+    relocations = []
+    with contextlib.suppress(Exception):
+        relocations = list(parsed_obj.relocations)
+    for relocation in relocations:
+        if "RELATIVE" in str(getattr(relocation, "type", "")):
+            continue
+        symbol = None
+        with contextlib.suppress(Exception):
+            symbol = relocation.symbol
+        if symbol is None:
+            continue
+        try:
+            value = int(symbol.value or 0)
+            shndx = int(symbol.shndx or 0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            continue
+        if not value or not shndx:
+            continue
+        addend = 0
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            if relocation.is_rela:
+                addend = int(relocation.addend or 0)
+        values[int(relocation.address)] = value + addend
+    return values
+
+
 def recover_register_natives_tables(
     parsed_obj, function_starts: set[int], addr_to_name: dict[int, str]
 ) -> dict | None:
     """Recover ``JNINativeMethod`` tables from ``.data.rel.ro``/``.data``.
 
     A table is an array of ``{const char *name, const char *signature,
-    void *fnPtr}`` whose three pointers are linker-relocated (R_*_RELATIVE,
-    RELR, packed). A triple is accepted only when all three hold: ``name``
-    is a Java identifier, ``signature`` matches the JNI method-signature
-    grammar, and ``fnPtr`` lands on a function start in an executable
-    section (the Thumb bit is allowed on arm32). The class stays unset:
-    it lives in the ``FindClass`` call next to ``RegisterNatives``, which
-    needs disassembly. Where relocations cannot be decoded the scan says
-    so; it never guesses an entry.
+    void *fnPtr}`` whose three pointers are linker-relocated: R_*_RELATIVE
+    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape (A8 N2) - an
+    absolute relocation against the preemptible weak dynsym symbols the
+    macro names (``jmethod_traits<F>::kDescriptor`` for the signature,
+    ``MethodWrapper<...>::call`` for the fnPtr), which the linker cannot
+    fold to RELATIVE. A triple is accepted only when all three hold:
+    ``name`` is a Java identifier, ``signature`` matches the JNI
+    method-signature grammar, and ``fnPtr`` lands on a function start in
+    an executable section (the Thumb bit is allowed on arm32). The class
+    stays unset: it lives in the ``FindClass`` call next to
+    ``RegisterNatives``, which needs disassembly. Where relocations
+    cannot be decoded the scan says so; it never guesses an entry.
     """
     reloc_map, incomplete = relative_relocation_map(parsed_obj)
+    for slot, target in defined_symbol_relocation_map(parsed_obj).items():
+        reloc_map.setdefault(slot, target)
     if not reloc_map:
         return None
     try:
@@ -829,6 +1012,10 @@ def recover_register_natives_tables(
                         "signature": signature,
                         "fn_addr": hex(target),
                         "thumb": bool(fn_ptr & 1),
+                        # The triple's own slot: the FindClass confirmer
+                        # maps registrations to address ranges, and the
+                        # join places each entry in one.
+                        "slot": hex(slot),
                     }
                     if fn_name := addr_to_name.get(target):
                         entry["fn_name"] = fn_name
