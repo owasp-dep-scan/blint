@@ -440,15 +440,18 @@ def _slot_address(table_entry: dict) -> int | None:
 
 def _join_abi_lists(
     natives: list[dict],
-    surfaces: dict[str, dict | None],
-    register_tables: dict[str, dict],
+    surfaces: dict[tuple[str, str], dict | None],
+    register_tables: dict[tuple[str, str], dict],
     lib_abis: dict[str, set[str]],
     abi: str,
-    confirmed_ranges: dict[str, list[dict]] | None = None,
+    confirmed_ranges: dict[tuple[str, str], list[dict]] | None = None,
 ) -> dict:
     """One ABI's join across every library that ships in it.
 
-    A dex declaration binds at most once (first library in name order):
+    ``surfaces``, ``register_tables`` and ``confirmed_ranges`` are keyed by
+    ``(library, abi)`` - each ABI's own copy of the library (ground rule
+    36), never another ABI's bytes standing in for a missing one. A dex
+    declaration binds at most once (first library in name order):
     statically to a decoded export, or - for what no export answers -
     dynamically to a recovered JNINativeMethod table entry whose name and
     signature both match (the class is unknown in the table, so signature
@@ -456,7 +459,7 @@ def _join_abi_lists(
     otherwise the declarations are listed as ambiguous_dynamic with the
     number of candidate entries). A8 N3: an ambiguous declaration binds
     when the registering function chain's constant class name - the
-    ``FindClass`` confirmer's answer, per library and table - names
+    ``FindClass`` confirmer's answer, per (library, abi) and table - names
     exactly one of the pair's declaring classes and exactly one candidate
     entry names it; anything the confirmer cannot decide stays ambiguous.
     What neither answers is unbound, and each library's unclaimed exports
@@ -472,7 +475,7 @@ def _join_abi_lists(
     for name in sorted(lib_abis):
         if abi not in lib_abis[name]:
             continue
-        result = join_static(natives, surfaces.get(name))
+        result = join_static(natives, surfaces.get((name, abi)))
         for entry in result["bound"]:
             key = (entry["class"], entry["name"], entry["descriptor"])
             if key not in answered:
@@ -497,7 +500,7 @@ def _join_abi_lists(
     for name in sorted(lib_abis):
         if abi not in lib_abis[name]:
             continue
-        for table in (register_tables.get(name) or {}).get("tables") or []:
+        for table in (register_tables.get((name, abi)) or {}).get("tables") or []:
             for table_entry in table.get("entries") or []:
                 pair = (table_entry.get("name"), table_entry.get("signature"))
                 if pair in pending:
@@ -530,7 +533,7 @@ def _join_abi_lists(
                 slot = _slot_address(match)
                 naming = {
                     entry_range["class"]
-                    for entry_range in (confirmed_ranges or {}).get(match["library"], [])
+                    for entry_range in (confirmed_ranges or {}).get((match["library"], abi), [])
                     if slot is not None
                     and entry_range["begin"] <= slot < entry_range["end"]
                     and entry_range["class"] in classes
@@ -590,18 +593,18 @@ def _join_abi_lists(
 def _confirm_ambiguous_tables(
     app_file: str,
     natives: list[dict],
-    register_tables: dict[str, dict],
-    lib_locations: dict[str, dict],
-) -> dict[str, list[dict]]:
-    """Per library: the registration ranges the FindClass confirmer
+    register_tables: dict[tuple[str, str], dict],
+    lib_locations: dict[tuple[str, str], dict],
+) -> dict[tuple[str, str], list[dict]]:
+    """Per (library, abi): the registration ranges the FindClass confirmer
     resolved (A8 N3) - ``[{begin, end, class}]`` over the recovered
     tables' addresses.
 
     Runs only where the join can be ambiguous at all - (name, signature)
     pairs several dex classes declare, or pairs more than one recovered
-    entry answers - and only re-reads the libraries that hold candidate
-    tables. The 23 of 27 corpus APKs without such pairs pay one pass over
-    the dex facts and nothing else. Any failure degrades to "no
+    entry answers - and only re-reads the (library, abi) copies that hold
+    candidate tables. The 23 of 27 corpus APKs without such pairs pay one
+    pass over the dex facts and nothing else. Any failure degrades to "no
     confirmation": the entries stay ambiguous, never guessed.
     """
     from collections import Counter, defaultdict
@@ -620,16 +623,16 @@ def _confirm_ambiguous_tables(
     if not wanted:
         return {}
     owners = {
-        name: tables
-        for name, tables in register_tables.items()
-        if name in lib_locations
+        key: tables
+        for key, tables in register_tables.items()
+        if key in lib_locations
         and any(
             (entry.get("name"), entry.get("signature")) in wanted
             for table in tables.get("tables") or []
             for entry in table.get("entries") or []
         )
     }
-    confirmed: dict[str, list[dict]] = {}
+    confirmed: dict[tuple[str, str], list[dict]] = {}
     if not owners:
         return confirmed
     from blint.lib.android_native import LibraryReader
@@ -637,10 +640,10 @@ def _confirm_ambiguous_tables(
 
     try:
         with LibraryReader(app_file) as reader:
-            for name, tables in owners.items():
+            for key, tables in owners.items():
                 data = None
                 with contextlib.suppress(Exception):
-                    data = reader.read(lib_locations[name])
+                    data = reader.read(lib_locations[key])
                 if not data:
                     continue
                 parsed = lief.ELF.parse(data)
@@ -649,10 +652,46 @@ def _confirm_ambiguous_tables(
                 with contextlib.suppress(Exception):
                     ranges = confirm_table_ranges(parsed, tables.get("tables") or [])
                     if ranges:
-                        confirmed[name] = ranges
+                        confirmed[key] = ranges
     except Exception as exc:
         LOG.debug(f"jni join: findclass confirmation failed for {app_file}: {exc}")
     return confirmed
+
+
+def _library_join_facts(parsed) -> tuple[dict | None, dict | None]:
+    """The static JNI surface and the recovered ``RegisterNatives``
+    tables from one parsed copy of a library - the join's light parse
+    (dynamic symbols plus F1's function starts for stripped builds, not
+    full metadata)."""
+    from blint.lib.binary_elf import parse_symbols
+    from blint.lib.funcdisc.unwind import discover_functions
+
+    entries, _ = parse_symbols(parsed.dynamic_symbols)
+    surface = parse_static_jni_surface(entries)
+    # F1: function starts from the defined dynamic FUNCs plus the unwind
+    # tables (stripped builds).
+    starts: set[int] = set()
+    addr_to_name: dict[int, str] = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict) or entry.get("is_imported"):
+            continue
+        if not (entry.get("is_function") or entry.get("type") == "FUNC"):
+            continue
+        try:
+            address = int(entry.get("value") or "0", 16) & ~1
+        except (TypeError, ValueError):
+            continue
+        starts.add(address)
+        if entry.get("name"):
+            addr_to_name.setdefault(address, entry["name"])
+    for discovered in discover_functions(parsed) or []:
+        # discovery records carry hex strings in metadata form and plain
+        # ints from the direct call
+        address = discovered.get("address")
+        with contextlib.suppress(TypeError, ValueError):
+            starts.add((address if isinstance(address, int) else int(address, 16)) & ~1)
+    tables = recover_register_natives_tables(parsed, starts, addr_to_name) if starts else None
+    return surface, tables
 
 
 def build_jni_join_summary(
@@ -661,20 +700,26 @@ def build_jni_join_summary(
     """The app-level dex <-> native static join (A5.2 E2).
 
     Per ABI (ground rule 36: one result per ``(abi, library)``, never a
-    silent first-or-best), every dex ``native`` declaration is bound to the
-    library whose decoded exports implement it; what no library in that ABI
-    answers is reported as unbound (likely dynamic registration, another
-    library, or obfuscation), and every export no dex declares is reported
-    per library. ``System.loadLibrary`` call sites map to ``lib<name>.so``
-    members. Bounded: counts always, the first
-    ``JOIN_LISTING_CAP`` entries of each list, ``truncated`` flags beside.
-    ``confirm_findclass`` (set by ``--disassemble``) runs the FindClass
-    confirmer over the libraries that hold ambiguous tables.
+    silent first-or-best), every dex ``native`` declaration is bound to
+    the library whose decoded exports implement it; what no library in
+    that ABI answers is reported as unbound (likely dynamic registration,
+    another library, or obfuscation), and every export no dex declares is
+    reported per library. Each ABI's copy of a library is parsed for its
+    own tables and surface, so an ``fn_addr`` always names an address in
+    that ABI's bytes; a library that does not ship in an ABI answers
+    nothing there - never another ABI's tables in its place. A library
+    whose first parsed copy owns neither a static surface nor a recovered
+    table is not parsed again for its other ABIs (the same sources build
+    every ABI's copy).
+    ``System.loadLibrary`` call sites map to ``lib<name>.so`` members.
+    Bounded: counts always, the first ``JOIN_LISTING_CAP`` entries of
+    each list, ``truncated`` flags beside. ``confirm_findclass`` (set by
+    ``--disassemble``) runs the FindClass confirmer over the
+    (library, abi) copies that hold ambiguous tables.
     """
     from blint.lib.android import _iter_app_dex_files
     from blint.lib.android_native import LibraryReader
     from blint.lib.binary import parse_dex
-    from blint.lib.binary_elf import parse_symbols
 
     natives: list[dict] = []
     load_library: list[dict] = []
@@ -689,73 +734,61 @@ def build_jni_join_summary(
     if not natives and not load_library:
         return None
 
-    # One light parse per distinct library (the model dedupes by content);
-    # the join needs only the dynamic-symbol surface, not full metadata.
-    surfaces: dict[str, dict | None] = {}
-    register_tables: dict[str, dict] = {}
+    # One light parse per (library, abi) copy (keyed ground-rule-36); the
+    # join needs only the dynamic-symbol surface, not full metadata.
+    surfaces: dict[tuple[str, str], dict | None] = {}
+    register_tables: dict[tuple[str, str], dict] = {}
     abis: set[str] = set()
     lib_abis: dict[str, set[str]] = {}
-    lib_locations: dict[str, dict] = {}
+    lib_locations: dict[tuple[str, str], dict] = {}
     try:
         with LibraryReader(app_file) as reader:
+            # The native model lists one entry per (library, abi) - a
+            # multi-ABI app repeats the name - so the join groups the
+            # locations itself; the first location per (name, abi) wins
+            # (split APKs repeat members).
             for lib in native.get("libraries") or []:
                 name = lib.get("name") or ""
-                if not name:
+                if not name or lib.get("not_elf"):
                     continue
                 for loc in lib.get("locations") or []:
-                    if loc.get("abi"):
-                        abis.add(loc["abi"])
-                        lib_abis.setdefault(name, set()).add(loc["abi"])
-                if name in surfaces or lib.get("not_elf"):
-                    continue
-                surfaces[name] = None
-                locations = lib.get("locations") or []
-                if locations:
-                    lib_locations[name] = locations[0]
-                data = None
-                with contextlib.suppress(Exception):
-                    data = reader.read((lib.get("locations") or [])[0])
-                if not data:
-                    continue
-                try:
-                    parsed = lief.ELF.parse(data)
-                    if parsed is None or isinstance(parsed, lief.lief_errors):
+                    abi = loc.get("abi")
+                    if not abi:
                         continue
-                    entries, _ = parse_symbols(parsed.dynamic_symbols)
-                    surfaces[name] = parse_static_jni_surface(entries)
-                    # F1: the same RegisterNatives table recovery the parse
-                    # path runs - function starts from the defined dynamic
-                    # FUNCs plus the unwind tables (stripped builds).
-                    starts: set[int] = set()
-                    addr_to_name: dict[int, str] = {}
-                    for entry in entries or []:
-                        if not isinstance(entry, dict) or entry.get("is_imported"):
+                    abis.add(abi)
+                    lib_abis.setdefault(name, set()).add(abi)
+                    lib_locations.setdefault((name, abi), loc)
+            by_name: dict[str, list[str]] = {}
+            for name, abi in lib_locations:
+                by_name.setdefault(name, []).append(abi)
+            for name in sorted(by_name):
+                parsed_ok = False
+                owns = False
+                for abi in sorted(by_name[name]):
+                    if parsed_ok and not owns:
+                        # One successfully parsed copy that owns neither a
+                        # surface nor a table settles the library: the same
+                        # sources build every ABI's copy, so the remaining
+                        # copies are not read.
+                        continue
+                    data = None
+                    with contextlib.suppress(Exception):
+                        data = reader.read(lib_locations[(name, abi)])
+                    if not data:
+                        continue
+                    try:
+                        parsed = lief.ELF.parse(data)
+                        if parsed is None or isinstance(parsed, lief.lief_errors):
                             continue
-                        if not (entry.get("is_function") or entry.get("type") == "FUNC"):
-                            continue
-                        try:
-                            address = int(entry.get("value") or "0", 16) & ~1
-                        except (TypeError, ValueError):
-                            continue
-                        starts.add(address)
-                        if entry.get("name"):
-                            addr_to_name.setdefault(address, entry["name"])
-                    from blint.lib.funcdisc.unwind import discover_functions
-
-                    for discovered in discover_functions(parsed) or []:
-                        # discovery records carry hex strings in metadata form
-                        # and plain ints from the direct call
-                        address = discovered.get("address")
-                        with contextlib.suppress(TypeError, ValueError):
-                            starts.add(
-                                (address if isinstance(address, int) else int(address, 16)) & ~1
-                            )
-                    if starts:
-                        tables = recover_register_natives_tables(parsed, starts, addr_to_name)
+                        parsed_ok = True
+                        surface, tables = _library_join_facts(parsed)
+                        surfaces[(name, abi)] = surface
                         if tables:
-                            register_tables[name] = tables
-                except Exception as exc:
-                    LOG.debug(f"jni join: surface parse failed for {name}: {exc}")
+                            register_tables[(name, abi)] = tables
+                        owns = owns or surface is not None or tables is not None
+                    except Exception as exc:
+                        LOG.debug(f"jni join: surface parse failed for {name}: {exc}")
+                        continue
     except Exception as exc:
         LOG.debug(f"jni join: library surfaces failed for {app_file}: {exc}")
 
@@ -807,9 +840,19 @@ def build_jni_join_summary(
 # a return type only). Name strings must be Java identifiers.
 _JAVA_IDENTIFIER_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 
+# A candidate name or signature string is read with this bound: one whose
+# NUL does not sit within it is refused, never truncated, so a cut-down
+# name or signature cannot bind.
+JNI_STRING_READ_LIMIT = 1024
 
-def _read_cstring(parsed_obj, address: int, limit: int = 256) -> str | None:
-    """The NUL-terminated string at ``address``, or None."""
+
+def _read_cstring(parsed_obj, address: int, limit: int = JNI_STRING_READ_LIMIT) -> str | None:
+    """The NUL-terminated string at ``address``, or None.
+
+    A string that does not terminate within ``limit`` bytes is None, not
+    its truncated prefix - the recovery must not accept a cut-down
+    signature or name.
+    """
     try:
         content = bytes(parsed_obj.get_content_from_virtual_address(address, limit))
     except (SystemError, Exception):
@@ -817,11 +860,10 @@ def _read_cstring(parsed_obj, address: int, limit: int = 256) -> str | None:
     if not content:
         return None
     end = content.find(b"\x00")
-    if end == 0:
+    if end <= 0:
         return None
-    raw = content if end < 0 else content[:end]
     try:
-        return raw.decode("utf-8")
+        return content[:end].decode("utf-8")
     except UnicodeDecodeError:
         return None
 

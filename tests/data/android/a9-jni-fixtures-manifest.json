@@ -1,0 +1,25 @@
+{
+    "packet": "A9 P1+P2 (feat/an-a9)",
+    "host": "the reviewer Mac (macOS arm64)",
+    "tools": {
+        "ndk": "28.2.13676358 (r28c)",
+        "clang": "Android (13624864, +pgo, -bolt, +lto, -mlgo, based on r530567e) clang version 19.0.1",
+        "llvm_strip": "llvm-strip from the NDK (r28c)",
+        "javac": "javac 26.0.2",
+        "d8": "D8 from build-tools 36.0.0",
+        "aapt2": "aapt2 from build-tools 36.0.0",
+        "zipalign": "build-tools 36.0.0",
+        "zip": "/usr/bin/zip 3.0 (macOS build)",
+        "platform_jar": "platforms/android-34/android.jar"
+    },
+    "build_script": "tests/scripts/android/build_a9_jni_fixtures.sh",
+    "sources": "tests/scripts/android/jni_sources/a9_long (compiled); the committed A8 outputs are repackaged unchanged",
+    "outputs": [
+        "liba9_long_<abi>{,_stripped}.so - three JNINativeMethod entries crossing the recovery's string bounds: sigUnder's 989-byte descriptor (over the old 256-byte read, under JNI_STRING_READ_LIMIT) must recover and bind; sigLong's 1279-byte descriptor and a 1120-char method name must stay refused",
+        "a9-classes.dex - LongNative.java's declarations (the join oracle for the three)",
+        "a9-jni-long.apk - the dex + one copy of liba9long.so per ABI",
+        "a9-jni-multiabi.apk - the committed A8 builds repackaged into one APK carrying all four ABIs' own bytes of liba8hyb.so, with liba8amb.so deliberately in arm64-v8a and x86_64 only: a library missing from an ABI answers nothing there (ground rule 36)",
+        "liba9_split_<abi>{,_stripped}.so + a9-split-classes.dex + a9-jni-split.apk - one merged five-entry JNINativeMethod table registered piecemeal by three per-class registrars (noinline stack-copy + per-class FindClass/RegisterNatives helper, the fbjni registerHybrid shape): SplitOne's [0,2) and SplitTwo's [2,4) with constant counts must split by class; SplitRt's [4,5) count is a volatile load and must stay ambiguous"
+    ],
+    "oracle": "the source table in a9_split_tables.cpp and the three registrars' slices; per ABI, every bound fn_addr is a function start in that ABI's own copy of the library; the 32-bit ABIs keep the Ambig* declarations unbound rather than filled in from the 64-bit tables"
+}

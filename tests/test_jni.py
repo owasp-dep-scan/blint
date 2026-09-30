@@ -340,7 +340,7 @@ def test_dynamic_join_refuses_ambiguous_name_and_signature() -> None:
         {"class": "Lp/C;", "name": "only", "descriptor": "(I)I"},
     ]
     tables = {
-        "libx.so": {
+        ("libx.so", "arm64-v8a"): {
             "tables": [
                 {
                     "entries": [
@@ -967,3 +967,245 @@ def test_findclass_ranges_are_the_registrations() -> None:
         (0x8D28, 0x8D58, "com.blint.a8.AmbigOne"),
         (0x8D58, 0x8D88, "com.blint.a8.AmbigTwo"),
     ]
+
+
+# ----------------------------------------------- A9 P1: the join per (abi, library)
+
+
+def test_multiabi_join_binds_each_abi_from_its_own_bytes() -> None:
+    """Ground rule 36: one result per (abi, library). The a9 multiabi APK
+    carries all four ABIs' own copies of liba8hyb.so, so every bound
+    fn_addr must be a function start in that ABI's own member bytes - the
+    first-location defect P0 measured (RnHello's v7a rows carried 256
+    arm64 addresses) fails this on its own fixture."""
+    import zipfile
+
+    import lief
+
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+    from blint.lib.jni_findclass import _function_starts
+
+    apk = str(FIXTURES / "a9-jni-multiabi.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk))
+    starts_by_member: dict[str, set[int]] = {}
+    with zipfile.ZipFile(apk) as zf:
+        for info in zf.infolist():
+            parts = info.filename.split("/")
+            if len(parts) != 3 or parts[0] != "lib" or not parts[2]:
+                continue  # the directory entries carry no bytes
+            parsed = lief.ELF.parse(zf.read(info))
+            assert parsed is not None, info.filename
+            starts_by_member[info.filename] = set(_function_starts(parsed))
+    fn_addr_by_abi: dict[str, str] = {}
+    for abi, abi_join in sorted(join["per_abi"].items()):
+        for entry in abi_join["bound_dynamic"]:
+            member = f"lib/{abi}/{entry['library']}"
+            assert member in starts_by_member, (member, entry)
+            starts = starts_by_member[member]
+            address = int(entry["fn_addr"], 16) & ~1
+            assert address in starts, (abi, entry["name"], entry["fn_addr"])
+            if entry["name"] == "hybInit":
+                fn_addr_by_abi[abi] = entry["fn_addr"]
+    # Each ABI's copy has its own layout: four different addresses, and
+    # the join bound each from its own bytes.
+    assert len(fn_addr_by_abi) == 4
+    assert len(set(fn_addr_by_abi.values())) == 4
+
+
+def test_multiabi_join_names_the_missing_library() -> None:
+    """A library that does not ship in an ABI answers nothing there:
+    liba8amb.so ships in arm64-v8a and x86_64 only, so the 32-bit ABIs
+    report its declarations unbound - never bound through another ABI's
+    tables - while the 64-bit ABIs bind them from their own copies."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-multiabi.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk))
+    for abi in ("armeabi-v7a", "x86"):
+        abi_join = join["per_abi"][abi]
+        assert abi_join["counts"]["libraries"] == 1  # liba8hyb.so only
+        assert not any(e["library"] == "liba8amb.so" for e in abi_join["bound_dynamic"]), (
+            "another ABI's tables stood in for a library this ABI does not ship"
+        )
+        unbound = {(e["class"], e["name"]) for e in abi_join["unbound_dex_natives"]}
+        # the ambig fixture's declarations are the missing library's
+        assert ("com.blint.a8.AmbigOne", "oneOnly") in unbound
+        assert ("com.blint.a8.AmbigTwo", "sharedTick") in unbound
+    for abi in ("arm64-v8a", "x86_64"):
+        abi_join = join["per_abi"][abi]
+        assert abi_join["counts"]["libraries"] == 2
+        assert any(
+            e["library"] == "liba8amb.so" and e["class"] == "com.blint.a8.AmbigOne"
+            for e in abi_join["bound_dynamic"]
+        )
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_multiabi_confirmations_stay_in_their_abi() -> None:
+    """The FindClass confirmations are per (library, abi): the multiabi
+    APK's 64-bit ABIs confirm their own sharedTick registrations while
+    the 32-bit ABIs - whose own copies have no call-site layer, and no
+    liba8amb.so at all - carry no confirmation of any kind (P0 measured
+    main repeating arm64's confirmations into every ABI's rows)."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-multiabi.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
+    for abi in ("arm64-v8a", "x86_64"):
+        confirmed = {
+            (e["class"], e["name"])
+            for e in join["per_abi"][abi]["bound_dynamic"]
+            if e.get("confirmed_by") == "findclass"
+        }
+        assert ("com.blint.a8.AmbigOne", "sharedTick") in confirmed
+        assert ("com.blint.a8.AmbigTwo", "sharedTick") in confirmed
+    for abi in ("armeabi-v7a", "x86"):
+        assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"]), (
+            f"a {abi} row carries a confirmation that was not read from {abi} bytes"
+        )
+
+
+# --------------------------------------------- A9 P2: the string-bound entries
+
+
+@pytest.mark.parametrize(
+    "abi",
+    ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+)
+def test_string_bound_entries_split_at_the_read_limit(abi: str) -> None:
+    """The recovery's string read refuses a name or signature whose NUL
+    sits beyond JNI_STRING_READ_LIMIT (1024) instead of truncating it: a
+    truncated signature silently failed validation (RnHello's
+    initializeBridge, 325 B) and a truncated name could still match the
+    identifier grammar and bind as a wrong string. The a9_long fixture
+    crosses both sides: sigUnder's 989-byte descriptor recovers, sigLong's
+    1279-byte descriptor and the 1120-char method name do not."""
+    from blint.lib.binary import parse
+    from blint.lib.jni import JNI_STRING_READ_LIMIT
+
+    assert JNI_STRING_READ_LIMIT == 1024  # the fixture's lengths cross this
+    metadata = parse(str(FIXTURES / f"liba9_long_{abi}.so"))
+    tables = metadata["android"]["jni"]["register_natives"]
+    entries = [e for table in tables["tables"] for e in table["entries"]]
+    assert [e["name"] for e in entries] == ["sigUnder"]
+    assert len(entries[0]["signature"]) == 989
+    # the stripped twin recovers the same entry
+    stripped = parse(str(FIXTURES / f"liba9_long_{abi}_stripped.so"))
+    stripped_tables = stripped["android"]["jni"]["register_natives"]
+    assert [e["name"] for t in stripped_tables["tables"] for e in t["entries"]] == ["sigUnder"]
+
+
+def test_long_string_declarations_bind_or_stay_unbound() -> None:
+    """The join on the a9 fixture: the under-limit entry binds its dex
+    declaration; the past-limit signature and the past-limit name stay
+    unbound - refused, never bound as a truncated prefix."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-long.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk))
+    assert sorted(join["per_abi"]) == ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+    for abi_join in join["per_abi"].values():
+        bound = {(e["name"], len(e["descriptor"])) for e in abi_join["bound_dynamic"]}
+        assert bound == {("sigUnder", 989)}
+        unbound = {
+            (e["name"][:10], len(e["name"]), len(e["descriptor"]))
+            for e in abi_join["unbound_dex_natives"]
+        }
+        assert unbound == {("sigLong", 7, 1279), ("a9LongName", 1120, 4)}
+
+
+# --------------------------- A9 P3: argument propagation across the registrar's call
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+@pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
+def test_merged_table_splits_by_carried_registration(abi: str) -> None:
+    """The R1 gate for the carried argument registers: the a9_split
+    fixture's five-entry table is registered piecemeal by three per-class
+    registrars that stack-copy their slice and call a per-class helper -
+    the helper's RegisterNatives reads (methods, count) from the caller's
+    argument registers. SplitOne and SplitTwo's shared declarations bind
+    to their own implementations; SplitRt's count is a volatile load, so
+    its registration carries no constant and its declaration stays
+    ambiguous with all three candidates."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-split.apk")
+    native = scan_android_native(apk)
+    # Without --disassemble the confirmer does not run: all three stay
+    # ambiguous (the gate the A8 review added, still standing).
+    plain = build_jni_join_summary(apk, native)
+    assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    assert per_abi["counts"] == {
+        "libraries": 1,
+        "bound": 0,
+        "bound_dynamic": 4,
+        "ambiguous_dynamic": 1,
+        "unbound_dex_natives": 0,
+        "undeclared_exports": 0,
+    }
+    # the x86_64 twin's dynsym carries parameter lists on these names
+    confirmed = {
+        e["class"]: e["fn_name"].split("(")[0]
+        for e in per_abi["bound_dynamic"]
+        if e.get("confirmed_by")
+    }
+    assert confirmed == {
+        "com.blint.a9.split.SplitOne": "a9_split_shared_one",
+        "com.blint.a9.split.SplitTwo": "a9_split_shared_two",
+    }
+    ambiguous = {
+        (e["class"], e["name"], e["table_candidates"]) for e in per_abi["ambiguous_dynamic"]
+    }
+    assert ambiguous == {("com.blint.a9.split.SplitRt", "splitShared", 3)}
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_split_ranges_are_the_registrars_slices() -> None:
+    """Entry-exact, at the confirmer's own granularity: the two constant
+    registrars cover [T, T+2) and [T+2, T+4); the runtime-count
+    registration covers nothing."""
+    import lief
+
+    from blint.lib.jni import recover_register_natives_tables
+    from blint.lib.jni_findclass import _function_starts, confirm_table_ranges
+
+    parsed = lief.ELF.parse(str(FIXTURES / "liba9_split_arm64-v8a.so"))
+    starts = _function_starts(parsed)
+    tables = recover_register_natives_tables(parsed, set(starts), starts)
+    ranges = confirm_table_ranges(parsed, tables["tables"])
+    resolved = sorted((r["begin"], r["end"], r["class"]) for r in ranges)
+    table_address = int(tables["tables"][0]["address"], 16)
+    assert resolved == [
+        (table_address, table_address + 48, "com.blint.a9.split.SplitOne"),
+        (table_address + 48, table_address + 96, "com.blint.a9.split.SplitTwo"),
+    ]
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_split_fixture_stays_ambiguous_off_the_callsite_abis() -> None:
+    """The 32-bit twins keep every splitShared declaration ambiguous -
+    the call-site layer does not model them, so nothing is guessed."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a9-jni-split.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
+    for abi in ("armeabi-v7a", "x86"):
+        assert join["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
+        assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"])
