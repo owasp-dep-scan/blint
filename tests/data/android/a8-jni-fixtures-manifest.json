@@ -1,0 +1,25 @@
+{
+ "packet": "A8 N2/N3 (feat/an-a8)",
+ "host": "the reviewer Mac (macOS arm64)",
+ "tools": {
+  "ndk": "28.2.13676358 (r28c)",
+  "clang": "Android (13624864, +pgo, -bolt, +lto, -mlgo, based on r530567e) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project 97a699bf4812a18fb657c2779f5296a4ab2694d2)",
+  "llvm_strip": "llvm-strip from the NDK (r28c)",
+  "javac": "javac 26.0.2",
+  "d8": "D8 from build-tools 36.0.0",
+  "aapt2": "aapt2 from build-tools 36.0.0",
+  "zipalign": "build-tools 36.0.0",
+  "zip": "/usr/bin/zip 3.0 (macOS build)",
+  "platform_jar": "platforms/android-34/android.jar"
+ },
+ "build_script": "tests/scripts/android/build_a8_jni_fixtures.sh",
+ "sources": "tests/scripts/android/jni_sources/a8_hybrid and .../a8_ambig",
+ "outputs": [
+  "liba8_hybrid_<abi>{,_stripped}.so - fbjni's merged registration shape: name words R_*_RELATIVE, signature + fnPtr words absolute against the preemptible dynsym symbols defined in a8_hybrid_defs.cpp (the jmethod_traits kDescriptor / MethodWrapper::call shape measured in libreactnative.so, N0(b)); includes the refused decoy triple whose fnPtr word targets a .rodata OBJECT",
+  "liba8_ambig_<abi>{,_stripped}.so - three classes registering the same name+signature through FindClass: two with constant class names, one with a runtime-composed name (volatile suffix read + snprintf)",
+  "a8-classes.dex - the declarations of both fixtures' natives",
+  "a8-jni-<abi>.apk - both libraries + the dex, for the app-level join"
+ ],
+ "oracle": "the source tables in a8_hybrid_tables.cpp / a8_ambig_tables.cpp",
+ "relocation_shape_check": "llvm-readelf -r on the committed arm64 build shows R_AARCH64_ABS64 against a8_hyb_sig_* and a8_hyb_*_call; test_fbjni_merged_tables_match_the_fixture_source asserts it stays that way"
+}

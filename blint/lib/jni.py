@@ -716,8 +716,10 @@ def _valid_method_signature(text: str) -> bool:
 
 def _is_single_descriptor(text: str) -> bool:
     body = text.lstrip("[")
-    return len(body) == 1 and body in "BCSIJFDZ" or (
-        body.startswith("L") and body.endswith(";") and body.count(";") == 1
+    return (
+        len(body) == 1
+        and body in "BCSIJFDZ"
+        or (body.startswith("L") and body.endswith(";") and body.count(";") == 1)
     )
 
 
@@ -765,22 +767,66 @@ def relative_relocation_map(parsed_obj) -> tuple[dict[int, int], list[str]]:
     return values, incomplete
 
 
+def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
+    """``{slot address: target VA}`` from absolute relocations whose symbol
+    is *defined in this object* (A8 N2: fbjni's merged tables).
+
+    fbjni's ``makeNativeMethod`` emits ``{name, kDescriptor, &call}`` where
+    the signature and fnPtr words name preemptible weak dynsym symbols -
+    ``facebook::jni::jmethod_traits<F>::kDescriptor`` (an OBJECT in
+    ``.rodata``) and ``MethodWrapper<...>::call`` /
+    ``FunctionWrapperWithJniEntryPoint<...>::call`` (FUNCs) - so the linker
+    keeps ``R_*_ABS*`` against the symbol instead of folding the word to
+    ``R_*_RELATIVE`` (measured in N0(b): 167 of RnHello's 221 unbound
+    declarations sit in such triples). REL forms (arm32) carry any addend
+    in the stored word; imported symbols (section index 0) have no
+    link-time value and are ignored - their slot is unknown until load.
+    """
+    values: dict[int, int] = {}
+    relocations = []
+    with contextlib.suppress(Exception):
+        relocations = list(parsed_obj.relocations)
+    for relocation in relocations:
+        if "RELATIVE" in str(getattr(relocation, "type", "")):
+            continue
+        symbol = None
+        with contextlib.suppress(Exception):
+            symbol = relocation.symbol
+        if symbol is None:
+            continue
+        try:
+            value = int(symbol.value or 0)
+            shndx = int(symbol.shndx or 0)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            continue
+        if not value or not shndx:
+            continue
+        values[int(relocation.address)] = value
+    return values
+
+
 def recover_register_natives_tables(
     parsed_obj, function_starts: set[int], addr_to_name: dict[int, str]
 ) -> dict | None:
     """Recover ``JNINativeMethod`` tables from ``.data.rel.ro``/``.data``.
 
     A table is an array of ``{const char *name, const char *signature,
-    void *fnPtr}`` whose three pointers are linker-relocated (R_*_RELATIVE,
-    RELR, packed). A triple is accepted only when all three hold: ``name``
-    is a Java identifier, ``signature`` matches the JNI method-signature
-    grammar, and ``fnPtr`` lands on a function start in an executable
-    section (the Thumb bit is allowed on arm32). The class stays unset:
-    it lives in the ``FindClass`` call next to ``RegisterNatives``, which
-    needs disassembly. Where relocations cannot be decoded the scan says
-    so; it never guesses an entry.
+    void *fnPtr}`` whose three pointers are linker-relocated: R_*_RELATIVE
+    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape (A8 N2) - an
+    absolute relocation against the preemptible weak dynsym symbols the
+    macro names (``jmethod_traits<F>::kDescriptor`` for the signature,
+    ``MethodWrapper<...>::call`` for the fnPtr), which the linker cannot
+    fold to RELATIVE. A triple is accepted only when all three hold:
+    ``name`` is a Java identifier, ``signature`` matches the JNI
+    method-signature grammar, and ``fnPtr`` lands on a function start in
+    an executable section (the Thumb bit is allowed on arm32). The class
+    stays unset: it lives in the ``FindClass`` call next to
+    ``RegisterNatives``, which needs disassembly. Where relocations
+    cannot be decoded the scan says so; it never guesses an entry.
     """
     reloc_map, incomplete = relative_relocation_map(parsed_obj)
+    for slot, target in defined_symbol_relocation_map(parsed_obj).items():
+        reloc_map.setdefault(slot, target)
     if not reloc_map:
         return None
     try:
