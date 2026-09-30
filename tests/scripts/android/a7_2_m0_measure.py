@@ -64,9 +64,7 @@ PATH_PROBE_CALLEES = frozenset(
 
 # (b): instruction forms that only move a register or load a constant. The
 # adrp+add pair is an address-constant load; adrp alone is not.
-ARM64_MOVE_LOAD = re.compile(
-    r"^(?:mov|movz|movk|fmov|nop)\s", re.IGNORECASE
-)
+ARM64_MOVE_LOAD = re.compile(r"^(?:mov|movz|movk|fmov|nop)\s", re.IGNORECASE)
 X86_MOVE_LOAD = re.compile(r"^(?:mov|nop)\s", re.IGNORECASE)
 
 # ARM64 argument registers (x0-x7 / w0-w7) and x86-64's, for reporting which
@@ -163,9 +161,7 @@ def _tail_jmps(funcs: dict, plt: dict[int, str], addr_to_name: dict[int, str]) -
     return {"counts": dict(stats), "absolute_only_samples": unresolved_samples[:8]}
 
 
-def _arm64_materialisation(
-    lines: list[str], lengths: list[int], start: int
-) -> dict[str, int]:
+def _arm64_materialisation(lines: list[str], lengths: list[int], start: int) -> dict[str, int]:
     """Registers holding an address materialised by adr or adrp+add."""
     bases: dict[str, int] = {}
     pending_page: dict[str, int] = {}
@@ -392,17 +388,11 @@ def _read_pointer_table(
     return strings
 
 
-_ARM64_LDR_FROM_BASE = re.compile(
-    r"^ldr\s+(x\d+),\s*\[([x]\d+)\s*(?:,\s*[^]]+)?\]", re.IGNORECASE
-)
+_ARM64_LDR_FROM_BASE = re.compile(r"^ldr\s+(x\d+),\s*\[([x]\d+)\s*(?:,\s*[^]]+)?\]", re.IGNORECASE)
 _ARM64_MOV_X0 = re.compile(r"^mov\s+x0,\s*(x\d+)$", re.IGNORECASE)
-_ARM64_LDR_IMM = re.compile(
-    r"^ldr\s+(x\d+),\s*\[([x]\d+),\s*(#[^\]]+)\]", re.IGNORECASE
-)
+_ARM64_LDR_IMM = re.compile(r"^ldr\s+(x\d+),\s*\[([x]\d+),\s*(#[^\]]+)\]", re.IGNORECASE)
 _ARM64_MOV_REG = re.compile(r"^mov\s+(x\d+),\s*(x\d+)$", re.IGNORECASE)
-_X86_LEA_RIP_DEF = re.compile(
-    r"^lea\s+(\w+),\s*\[\s*rip\s*([+-]\s*\d+)\s*\]", re.IGNORECASE
-)
+_X86_LEA_RIP_DEF = re.compile(r"^lea\s+(\w+),\s*\[\s*rip\s*([+-]\s*\d+)\s*\]", re.IGNORECASE)
 _X86_MOV_REG = re.compile(r"^mov\s+(\w+),\s*(\w+)$", re.IGNORECASE)
 _X86_MOV_SLOT = re.compile(
     r"^mov\s+(\w+),\s*(?:qword ptr\s+)?\[(\w+)\s*(?:\+\s*(\w+|\d+))?\]", re.IGNORECASE
@@ -528,9 +518,7 @@ def _table_load_sites(
                 # an epilogue `ldp x24, …` restores (and so clears) the base
                 # register after every call site that uses it.
                 bases = _arm64_materialisation(prefix_lines, prefix_lengths, start)
-                base_addr = _arm64_table_source(
-                    prefix_lines, prefix_lengths, start, bases
-                )
+                base_addr = _arm64_table_source(prefix_lines, prefix_lengths, start, bases)
             else:
                 base_addr = _x86_table_source(prefix_lines, prefix_lengths, start)
             if base_addr is None:
@@ -542,9 +530,7 @@ def _table_load_sites(
                     "function": func.get("name"),
                     "callee": entry.get("target_name"),
                     "table_base": base_addr,
-                    "table_strings": _read_pointer_table(
-                        parsed, base_addr, relocated_words
-                    ),
+                    "table_strings": _read_pointer_table(parsed, base_addr, relocated_words),
                 }
             )
     return sites
@@ -663,9 +649,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(aggregate(records), indent=2, sort_keys=True))
     if args.json:
-        Path(args.json).write_text(
-            json.dumps(records, indent=1, sort_keys=True), encoding="utf-8"
-        )
+        Path(args.json).write_text(json.dumps(records, indent=1, sort_keys=True), encoding="utf-8")
         print(f"per-file records: {args.json}", file=sys.stderr)
     return 0
 

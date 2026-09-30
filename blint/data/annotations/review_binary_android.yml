@@ -133,14 +133,15 @@ rules:
       mask is a common single site. The evidence lists the functions and their
       site counts; read them before concluding.
 
-      Needs --disassemble. On 32-bit ARM a stripped library's function extents
-      once ran into the literal pools between functions, whose bytes decoded
-      as svc; the disassembler now drops the pool and branch-table words such
-      a window swallows (the per-binary arm32_pool_cuts counter names how
-      often), and a function contributes a site only where it loads r7, the
-      EABI syscall-number register - a data word behind a call decodes as svc
-      but never loads its number. Cannot see syscalls in code generated or
-      decrypted at run time.
+      Needs --disassemble. On 32-bit ARM a site also needs its syscall
+      number: an immediate or literal load into r7 within the eight
+      instructions before the svc, with no zero word or unconditional branch
+      between them. Function extents in stripped libraries can run into the
+      literal pools between functions, whose words decode as svc but not
+      behind such a load. As a result, a 32-bit ARM syscall whose number
+      arrives in a register, such as a generic syscall() trampoline, is not
+      reported. Cannot see syscalls in code generated or decrypted at run
+      time.
     attack:
       - T1106 (Native API)
     check_type: binary_analysis

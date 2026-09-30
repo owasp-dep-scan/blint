@@ -20,20 +20,22 @@
     "rootbeer/toolChecker.h": "same source tree and tag, verbatim",
     "java/com/scottyab/rootbeer/Const.java": "the suPaths directory list from rootbeer 0.1.2 (Const.suPaths + getPaths()), the dex half of the join fixture",
     "java/com/scottyab/rootbeer/RootBeerNative.java": "rootbeer 0.1.2 RootBeerNative (loadLibrary(\"toolChecker\") + the two native declarations), original package kept so the JNI join binds to the unmodified native exports",
-    "java/com/scottyab/rootbeer/RootBeer.java": "cut-down 0.1.2 RootBeer: checkForBinary builds path + \"su\" and hands the array to the native checkForRoot \u2014 the dataflow that moves the paths out of native sight",
+    "java/com/scottyab/rootbeer/RootBeer.java": "cut-down 0.1.2 RootBeer: checkForBinary builds path + \"su\" and hands the array to the native checkForRoot — the dataflow that moves the paths out of native sight",
     "java/com/example/blint/a7/Main.java": "the fixture driver (root check plus one benign ro.build.version.sdk string)",
-    "AndroidManifest.xml": "package com.example.blint.a7, minSdk 24, targetSdk 34"
+    "AndroidManifest.xml": "package com.example.blint.a7, minSdk 24, targetSdk 34",
+    "a7_guarded_svc.c": "two inline syscalls (getpid, gettid) behind a conditional early return: the svc block is reached by fallthrough after bxeq lr"
   },
   "builds": {
     "a7-classes.dex": "javac --release 11 over java/... then d8 --release --min-api 24 --lib platforms/android-34/android.jar",
     "liba7_fire_<abi>.so": "clang -O2 -fPIC -funwind-tables -shared a7_fire.c for abi in arm64-v8a (aarch64-linux-android24-clang), armeabi-v7a (armv7a-linux-androideabi24-clang), x86_64 (x86_64-linux-android24-clang), plus an llvm-strip --strip-all twin",
     "liba7_nofire_<abi>.so": "same commands over a7_nofire.c, plus the stripped twin",
     "libtoolChecker_<abi>.so": "same commands over rootbeer/toolChecker.cpp with -llog, plus the stripped twin",
-    "a7-jni-<abi>.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/<abi>/{liba7fire.so, liba7nofire.so, libtoolChecker.so}; zipalign -f 4 \u2014 one APK per ABI in arm64-v8a, armeabi-v7a, x86_64",
-    "size_optimised_twins_a72": "A7.2 R1: liba7_{fire,nofire}_{arm64-v8a,x86_64}_{Os,Oz}.so plus a stripped twin each, same compilers and flags except -Os/-Oz for -O2. No APKs, no toolChecker variants: the flag twins gate the native rules only."
+    "a7-jni-<abi>.apk": "aapt2 link --manifest AndroidManifest.xml -I android.jar --min-sdk-version 24 --target-sdk-version 34; zip in classes.dex + lib/<abi>/{liba7fire.so, liba7nofire.so, libtoolChecker.so}; zipalign -f 4 — one APK per ABI in arm64-v8a, armeabi-v7a, x86_64",
+    "size_optimised_twins_a72": "A7.2 R1: liba7_{fire,nofire}_{arm64-v8a,x86_64}_{Os,Oz}.so plus a stripped twin each, same compilers and flags except -Os/-Oz for -O2. No APKs, no toolChecker variants: the flag twins gate the native rules only.",
+    "liba7_guarded_svc_armeabi-v7a_<isa>.so": "armv7a-linux-androideabi24-clang -O2 -m<isa> -fomit-frame-pointer -fPIC -funwind-tables -shared a7_guarded_svc.c for isa in thumb, arm, plus an llvm-strip --strip-all twin"
   },
   "expected": {
-    "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule evaluates on every ABI (since A7.2 M3 stopped 32-bit ARM extents at the literal pools)",
+    "note": "per rule x ABI; rules 1-5 read the call_site_arguments block, which the dataflow produces for arm64 and x86_64 only, so on armeabi-v7a they do not evaluate and the library's analysis_coverage.degradations names callsite_abi_not_modelled; the inline-syscall rule evaluates on every ABI, on 32-bit ARM only at svc sites that load r7 first",
     "ANDROID_PTRACE_TRACEME": {
       "liba7_fire": {
         "arm64-v8a": "fire",
@@ -103,12 +105,15 @@
       "liba7_fire": {
         "arm64-v8a": "fire (svc #0 in a7_inline_syscall and the inlined copy in a7_run_all)",
         "x86_64": "fire (syscall and int 128)",
-        "armeabi-v7a": "fire post-A7.2-M3 (svc #0 in a7_inline_syscall and the inlined copy in a7_run_all; the pool cut keeps the stripped twin's count identical)"
+        "armeabi-v7a": "fire (svc #0 after mov r7, #4 in a7_inline_syscall and the inlined copy in a7_run_all; the stripped twin's count is identical)"
       },
       "liba7_nofire": {
         "arm64-v8a": "silent (no inline syscall sites)",
         "x86_64": "silent",
         "armeabi-v7a": "silent"
+      },
+      "liba7_guarded_svc": {
+        "armeabi-v7a": "fire (one site each in a7_guarded_getpid and a7_guarded_gettid, Thumb and ARM, stripped and unstripped)"
       }
     },
     "ANDROID_DEX_SU_PATHS_TO_NATIVE": {

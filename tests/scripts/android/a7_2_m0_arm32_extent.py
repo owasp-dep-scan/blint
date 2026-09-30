@@ -102,7 +102,8 @@ def _first_terminator(
                 target_token = match.group(1)
                 target = (
                     int(target_token, 16)
-                    if target_token.lower().startswith("-0x") or target_token.lower().startswith("0x")
+                    if target_token.lower().startswith("-0x")
+                    or target_token.lower().startswith("0x")
                     else int(target_token)
                 )
                 if not (start <= target < end):
@@ -129,9 +130,7 @@ def measure(path_str: str, objdump: str) -> dict:
     def _terminator_for(start: int, end: int):
         cache_key = (start, end)
         if cache_key not in terminator_cache:
-            terminator_cache[cache_key] = _first_terminator(
-                instructions, addresses, start, end
-            )
+            terminator_cache[cache_key] = _first_terminator(instructions, addresses, start, end)
         return terminator_cache[cache_key]
 
     rows: list[dict] = []
@@ -152,9 +151,7 @@ def measure(path_str: str, objdump: str) -> dict:
                     else None
                 ),
                 "pool_gap": (next_start - terminator[2]) if terminator else None,
-                "terminator_precedes_svc": bool(
-                    terminator and terminator[2] <= address
-                ),
+                "terminator_precedes_svc": bool(terminator and terminator[2] <= address),
             }
         )
     # The overrun population: exidx intervals whose first function-leaving

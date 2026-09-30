@@ -159,3 +159,42 @@ silent — `OUTLINED_FUNCTION_0` carries the dlopen flags), x86_64 -Os fires
 `jmp 917` into the PLT that the ELF resolver reads absolute). Every
 nofire variant stays silent. The manifest's `expected.flag_variants` table
 records these rows; M1 and M2 flip the two cells their fixes recover.
+
+## Review addendum
+
+Measured on the reviewer Mac with the same NDK and nyxstone LLVM, against
+`49c7ea8` and the review tree.
+
+- **(a), Mach-O.** The claim above that the Mach-O binary resolves nothing
+  under either reading was wrong. With the end-relative reading, wasm-tools
+  x86_64-apple-macosx resolves 4,010 more tail calls: tailcall internal
+  edges go from 2,066 to 6,076, `symbol_only_miss:tailcall` from 4,032 to 1,
+  and 21 tail jumps into imports appear. Three sampled edges match
+  `llvm-objdump`. The reading now applies to every format, and that
+  baseline entry is refreshed.
+- **(b), the replay.** M2's textual replay of a thunk's prep lines is
+  replaced by the absint model's own `step` over a copy of the caller's
+  state. The replay overwrote a `movk` or shifted `movz` with its bare
+  immediate, and left the caller's register standing under a lone `adrp`
+  (libQt5Core's `QAnimationDriver::started()`: `adrp x1, #2555904;
+  mov w2, wzr; b OUTLINED_FUNCTION_43`).
+- **(d), the pool filter.** M3's filter is removed. On NDK r28c builds of
+  `a7_sources/a7_guarded_svc.c` (a real `svc #0` behind a conditional
+  `bxeq lr`), it dropped both genuine sites at every flag in ARM state and
+  at `-O2` in Thumb, stripped or not: its fallthrough walk treated a
+  conditional return as a terminator. The r7 syscall-number requirement
+  gives the verdicts instead: an immediate or `ldr r7, [pc, ...]` load
+  within eight instructions of the svc, with no zero decode
+  (`movs r0, r0`, `andeq r0, r0, r0`) or unconditional transfer between
+  them.
+
+  | population | raw `svc #0` decodes, filter / none | r7 sites, no filter |
+  |---|---|---|
+  | 70 v7a libraries of the tier-2/3 apps | 6 / 19 | 3, all `__clear_cache` (libjnidispatch x2, libQt5Core) |
+  | fennec v7a libxul | not run / 21 | 1, `sub_52e6dac` (`__ARM_NR_cacheflush`) |
+
+  Without the zero-decode break, libxul's `sub_60799f0` (a table of small
+  words decoding as `ldr r7, [pc, #512]; movs r0, r0; svc #0`) was a false
+  site. Disassembly time over the 70 is 4,436 s with the filter and 4,086 s
+  without it, so the filter did not speed up ARM32 disassembly; libxul takes
+  3,173 s without it.

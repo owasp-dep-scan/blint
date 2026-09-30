@@ -130,5 +130,17 @@ for abi in arm64-v8a x86_64; do
   done
 done
 
+# ------------------------------------------------- guarded svc (armeabi-v7a)
+# Real svc sites behind a conditional early return, in Thumb and ARM state:
+# liba7_guarded_svc_armeabi-v7a_{thumb,arm}.so plus a stripped twin each.
+cc="$(cc_for_abi armeabi-v7a)"
+for isa in thumb arm; do
+  name="liba7_guarded_svc_armeabi-v7a_${isa}"
+  "$cc" -O2 "-m${isa}" -fomit-frame-pointer -fPIC -funwind-tables -shared \
+    -o "$work/${name}.so" "$src/a7_guarded_svc.c"
+  cp "$work/${name}.so" "$out/${name}.so"
+  "$toolchain/llvm-strip" --strip-all -o "$out/${name}_stripped.so" "$work/${name}.so"
+done
+
 echo "built:"
 ls -l "$out" | grep -E "a7-" || true

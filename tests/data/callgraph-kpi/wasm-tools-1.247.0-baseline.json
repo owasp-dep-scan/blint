@@ -222,11 +222,12 @@
         "internal_edges": 0
       },
       "kpi": {
-        "external_edges": 8357,
+        "external_edges": 4347,
         "external_reason_buckets": {
           "import": 3407,
+          "import:tailcall": 21,
           "symbol_only_miss:indirect_hint": 17,
-          "symbol_only_miss:tailcall": 4032,
+          "symbol_only_miss:tailcall": 1,
           "unresolved:indirect_hint": 718,
           "unresolved:tailcall": 183
         },
@@ -235,9 +236,9 @@
         "internal_edge_kinds": {
           "direct": 55074,
           "indirect_hint": 390,
-          "tailcall": 2066
+          "tailcall": 6076
         },
-        "internal_edges": 57530
+        "internal_edges": 61540
       }
     },
     "x86_64-pc-windows-msvc": {

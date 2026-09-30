@@ -6,7 +6,6 @@ import pytest
 from blint.lib import disassembler as disassembler_module
 from blint.lib.disassembler import (
     _analyze_instructions,
-    _arm32_pool_run_filter,
     _classify_function,
     _extract_register_usage,
     _is_macos_system_symbol_name,
@@ -970,19 +969,18 @@ def test_resolve_direct_calls_tailcall_windows_decimal_operand_prefers_relative_
     ]
 
 
-def test_resolve_direct_calls_tailcall_elf_decimal_operand_resolves_relative():
-    # The same end-relative delta `call` prints: nyxstone renders an ELF
-    # x86-64 tail `jmp imm` the same way it renders the Windows one, and the
-    # operand used to be read absolute, leaving every tail call into the PLT
-    # unresolved (the committed liba7_fire_x86_64_Oz fixture's a7_anti_debug
-    # is exactly `jmp 917` to ptrace@plt).
+@pytest.mark.parametrize("triple", ["x86_64-unknown-linux-android", "x86_64-apple-macosx"])
+def test_resolve_direct_calls_tailcall_decimal_operand_resolves_relative(triple):
+    # nyxstone prints a tail `jmp imm` as the end-relative delta `call`
+    # uses. liba7_fire_x86_64_Oz.so's a7_anti_debug ends in `jmp 917` at
+    # 0x4d5a, which lands on ptrace@plt.
     instr = MagicMock()
     instr.assembly = "jmp 917"
     instr.address = 0x4D5A
     instr.bytes = b"\x90" * 5
 
     direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x50F4: "ptrace"}, "x86_64-unknown-linux-android"
+        [instr], {0x395: "absolute_reading", 0x50F4: "ptrace"}, triple
     )
 
     assert direct_calls == []
@@ -996,24 +994,6 @@ def test_resolve_direct_calls_tailcall_elf_decimal_operand_resolves_relative():
             "site_index": 0,
         }
     ]
-
-
-def test_resolve_direct_calls_tailcall_macho_keeps_the_absolute_reading():
-    # Mach-O tail jumps keep the pre-A7.2 treatment: the pc-relative
-    # reading is measured into this wave's scope for ELF only, so a macos
-    # triple must not change resolution by triple coincidence.
-    instr = MagicMock()
-    instr.assembly = "jmp 917"
-    instr.address = 0x4D5A
-    instr.bytes = b"\x90" * 5
-
-    direct_calls, direct_targets = _resolve_direct_calls(
-        [instr], {0x395: "by_absolute_only", 0x50F4: "by_delta"}, "x86_64-apple-macosx"
-    )
-
-    tailcall = [t for t in direct_targets if t.get("kind") == "tailcall"]
-    assert direct_calls == []
-    assert tailcall and tailcall[0]["target_name"] == "by_absolute_only"
 
 
 def test_resolve_direct_calls_aarch64_bl_immediate_is_pc_relative():
@@ -1388,167 +1368,3 @@ def test_store_does_not_forget_the_register_it_stores():
     ]
     _, targets = _resolve_direct_calls(seq, {0x100042000: "kept"}, "aarch64-apple-macosx")
     assert targets[-1]["target_name"] == "kept"
-
-
-# ---------------------------------------------------------------------------
-# The ARM32 literal-pool stop (A7.2 M3). Every assembly string below is
-# captured from nyxstone over a real stripped armeabi-v7a library: the
-# guard-return shape is libhermes.so's sub_141e50 (the R3 hand-check's false
-# svc carrier), the interior shape is libflutter.so's sub_5e25ea, the
-# cold-block shape is the wasm-tools armv7 KPI binary's regex/rayon
-# functions that disciplined the filter's refusals.
-# ---------------------------------------------------------------------------
-
-
-def _thumb(assembly: str, address: int, size: int = 2) -> MagicMock:
-    instr = MagicMock()
-    instr.assembly = assembly
-    instr.address = address
-    instr.bytes = b"\x90" * size
-    return instr
-
-
-def _filter(seq):
-    return _arm32_pool_run_filter(seq, None, "thumb", seq[0].address, seq[-1].address + 2)
-
-
-def test_arm32_pool_filter_drops_the_junk_run_after_a_guard_return():
-    # sub_141e50's ending: the always-true guard return, a far-call junk
-    # decode, then the pool's idiom run with both svc decodes. The run goes;
-    # everything up to and including the junk call stays.
-    seq = [
-        _thumb("cmp r1, r0", 0x100),
-        _thumb("itt eq", 0x102),
-        _thumb("addeq sp, #48", 0x104, 4),
-        _thumb("popeq {r4, r5, r7, pc}", 0x108, 4),
-        _thumb("blx #165576", 0x10C, 4),
-        _thumb("nop", 0x110),
-        _thumb("svc #172", 0x112),
-        _thumb("movs r2, r0", 0x114),
-        _thumb("svc #0", 0x116),
-        _thumb("movs r2, r0", 0x118),
-    ]
-    kept, modes, spans, runs = _filter(seq)
-    assert [i.assembly for i in kept] == [
-        "cmp r1, r0",
-        "itt eq",
-        "addeq sp, #48",
-        "popeq {r4, r5, r7, pc}",
-        "blx #165576",
-    ]
-    assert runs == 1
-    assert spans == [(0x110, 0xA)]
-
-
-def test_arm32_pool_filter_drops_an_interior_run_between_functions():
-    # libflutter's sub_5e25ea: the extent window covers several tiny
-    # functions with the pool in the middle. The run after the third
-    # function's pop goes; the fourth function and its tail branch stay.
-    seq = [
-        _thumb("push {r7, lr}", 0x200),
-        _thumb("bl #231940", 0x202, 4),
-        _thumb("ldr r0, [r0]", 0x206),
-        _thumb("pop {r7, pc}", 0x208, 4),
-        _thumb("vldr s2, [pc, #40]", 0x20C, 4),
-        _thumb("bxge lr", 0x210),
-        _thumb("push {r7, lr}", 0x212),
-        _thumb("blx #-3017368", 0x214, 4),
-        _thumb("pop {r7, pc}", 0x218, 4),
-        _thumb("nop", 0x21C),
-        _thumb("movs r0, r0", 0x21E),
-        _thumb("svc #0", 0x220),
-        _thumb("movs r0, r0", 0x222),
-        _thumb("ldrsh r0, [r0, r4]", 0x224),
-        _thumb("push {r7, lr}", 0x226),
-        _thumb("bl #-6322", 0x228, 4),
-        _thumb("pop.w {r7, lr}", 0x22C, 4),
-        _thumb("b.w #2239406", 0x230, 4),
-    ]
-    kept, _modes, spans, runs = _filter(seq)
-    kept_text = [i.assembly for i in kept]
-    assert "svc #0" not in kept_text
-    assert "ldrsh r0, [r0, r4]" in kept_text
-    assert "b.w #2239406" in kept_text
-    assert runs == 1
-    assert spans == [(0x21C, 8)]
-
-
-def test_arm32_pool_filter_keeps_real_code_around_a_real_syscall():
-    # jnidispatch's genuine site: the svc sits mid-block between real
-    # instructions, reachable; no idiom run forms around it.
-    seq = [
-        _thumb("push {r1, r2, lr}", 0x300),
-        _thumb("mul r3, r2, r0", 0x302),
-        _thumb("svc #0", 0x304),
-        _thumb("bx lr", 0x306),
-    ]
-    kept, _modes, spans, runs = _filter(seq)
-    assert [i.assembly for i in kept] == [i.assembly for i in seq]
-    assert runs == 0 and spans == []
-
-
-def test_arm32_pool_filter_keeps_cold_blocks_and_targeted_runs():
-    # The wasm-tools armv7 shape: a padding marker then a real cold block
-    # (loads, stores, a call) - nothing all-idiom, nothing dropped.
-    cold = [
-        _thumb("pop.w {r4, r5, r6, r7, pc}", 0x400, 4),
-        _thumb("trap", 0x404),
-        _thumb("ldrb.w r1, [sp, #2]", 0x406, 4),
-        _thumb("strd r6, r10, [r4]", 0x40A, 4),
-        _thumb("blx #2835132", 0x40E, 4),
-    ]
-    kept, _modes, spans, runs = _filter(cold)
-    assert len(kept) == len(cold) and runs == 0
-    # A branch of the function targeting into the run keeps it: the block is
-    # reachable code, whatever its instructions decode as.
-    targeted = [
-        _thumb("pop {r4, pc}", 0x500, 4),
-        _thumb("movs r0, r0", 0x504),
-        _thumb("svc #0", 0x506),
-        _thumb("movs r0, r0", 0x508),
-    ]
-    # b #2 at 0x50A would be past the end; place the branch before instead.
-    targeted = [
-        _thumb("bne #2", 0x4FC),  # Thumb base is addr+4: targets 0x502
-        _thumb("pop {r4, pc}", 0x4FE, 4),
-        _thumb("movs r0, r0", 0x502),
-        _thumb("svc #0", 0x504),
-        _thumb("movs r0, r0", 0x506),
-    ]
-    kept, _modes, spans, runs = _filter(targeted)
-    assert len(kept) == len(targeted) and runs == 0 and spans == []
-
-
-def test_arm32_pool_filter_drops_branch_table_svc_entries():
-    # libvlc's carriers: switch branch tables, where every other word is a
-    # b-entry and the svc decodes are table words directly behind an
-    # unconditional branch - unreachable, because the branch transfers
-    # control away and nothing targets them. A real syscall site (its block
-    # ends with the call's continuation, not a transfer away) is kept.
-    table = [
-        _thumb("b #286", 0x1000),
-        _thumb("svc #168", 0x1002),
-        _thumb("b #1696", 0x1004),
-        _thumb("movs r5, r7", 0x1006),
-        _thumb("b #832", 0x1008),
-        _thumb("svc #0", 0x100A),
-        _thumb("b #832", 0x100C),
-    ]
-    kept, _modes, spans, runs = _filter(table)
-    assert [i.assembly for i in kept] == [
-        "b #286",
-        "b #1696",
-        "movs r5, r7",
-        "b #832",
-        "b #832",
-    ]
-    assert runs == 2
-    assert spans == [(0x1002, 2), (0x100A, 2)]
-    real = [
-        _thumb("mov r7, #4", 0x2000),
-        _thumb("svc #0", 0x2002),
-        _thumb("bx lr", 0x2004),
-    ]
-    kept, _modes, spans, runs = _filter(real)
-    assert [i.assembly for i in kept] == [i.assembly for i in real]
-    assert runs == 0 and spans == []

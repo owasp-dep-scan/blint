@@ -165,9 +165,7 @@ def test_outlined_thunk_is_followed_and_its_moves_applied(abi_flag: str) -> None
     # The -O2 build has no outlined thunk, so nothing there resolves via one.
     plain = parse(str(DATA / "liba7_fire_arm64-v8a.so"), True)
     assert not [
-        entry
-        for entry in plain.get("call_site_arguments") or []
-        if entry.get("callee_via_thunk")
+        entry for entry in plain.get("call_site_arguments") or [] if entry.get("callee_via_thunk")
     ]
 
 
@@ -371,28 +369,24 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
     # Go-built libraries are excluded by buildinfo.
     go = dict(base, name="libgo.so", build_info={"go_version": "go1.24.0"})
     assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", go) == []
-    # 32-bit ARM evaluates since A7.2 M3 stopped the extents at the literal
-    # pools; a decoded svc site reports there too (the pool cut is what
-    # keeps such listings free of pool bytes in production - pinned by
-    # test_arm32_pool_cut_keeps_the_stripped_fixture_true_sites below).
+    # 32-bit ARM needs the r7 syscall-number load before the svc. These
+    # listings are captured from nyxstone over armeabi-v7a app libraries:
+    # libQt5Core's __clear_cache (__ARM_NR_cacheflush, 0xf0002), then
+    # literal-pool and table words that decode as svc.
     arm32 = dict(
         base,
-        name="libflutter.so",
+        name="libQt5Core.so",
         llvm_target_tuple="armv7a-unknown-linux-androideabi24",
         disassembled_functions={
             "f::stub": {
-                "name": "stub",
-                "address": "0x1000",
-                "assembly": "push {r4, lr}\nmov r7, #4\nsvc #0\npop {r4, pc}",
+                "name": "__clear_cache",
+                "address": "0x409c3c",
+                "assembly": "push {r7, lr}\nmovw r7, #2\nmov r2, #0\nmovt r7, #15\nsvc #0\npop {r7, pc}",
             }
         },
     )
     fires_arm32 = evaluate_android_rule("ANDROID_INLINE_SYSCALLS", arm32)
     assert fires_arm32 and fires_arm32[0]["site_total"] == 1
-    # 32-bit ARM additionally needs the EABI syscall-number load: a function
-    # whose bytes never write r7 cannot be issuing a syscall, whatever its
-    # pool words decode as (liborganicmaps' R3 shape - a svc word behind a
-    # call, no r7 anywhere in the window).
     no_r7 = dict(
         base,
         name="liborganicmaps.so",
@@ -400,40 +394,60 @@ def test_inline_syscall_exclusions_by_name_and_buildinfo() -> None:
         disassembled_functions={
             "f::junk": {
                 "name": "sub_62eb4c",
-                "address": "0x1000",
-                "assembly": "blx #4431220\nnop\nblt #172\nlsls r5, r0, #1\nsvc #0\nlsls r5, r0, #1",
+                "address": "0x62eb4c",
+                "assembly": "mov r0, r4\nblx r2\nblx #4431220\nnop\nblt #172\nlsls r5, r0, #1\nsvc #0",
             }
         },
     )
     assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", no_r7) == []
+    # A libxul data table whose words decode as literal loads into r7: the
+    # zero halfword between the load and the svc ends the run.
+    table = dict(
+        no_r7,
+        name="libxul.so",
+        disassembled_functions={
+            "f::table": {
+                "name": "sub_60799f0",
+                "address": "0x60799f0",
+                "assembly": "mov pc, pc\nmovs r0, r0\nldr r7, [pc, #0]\nmovs r0, r0\n"
+                "ldr r7, [pc, #512]\nmovs r0, r0\nsvc #0",
+            }
+        },
+    )
+    assert evaluate_android_rule("ANDROID_INLINE_SYSCALLS", table) == []
 
 
-def test_arm32_pool_filter_keeps_the_stripped_fixture_true_sites() -> None:
-    # The stripped armeabi-v7a twin is the extent-overrun shape: exidx
-    # next-start windows swallow the literal pools (M0's measurement). The
-    # pool filter keeps its two true sites - the same holders and counts the
-    # unstripped build and the NDK llvm-objdump carry - and the no-fire twin
-    # stays silent. This fixture's own pools decode without svc-carrying
-    # idiom runs, so arm32_pool_cuts is absent here (the filter's removals
-    # are pinned by the libhermes-shaped unit tests instead).
+@pytest.mark.parametrize(
+    "fixture, holders",
+    [
+        ("liba7_fire_armeabi-v7a_stripped.so", {"a7_inline_syscall": 1, "a7_run_all": 1}),
+        (
+            "liba7_guarded_svc_armeabi-v7a_thumb.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        (
+            "liba7_guarded_svc_armeabi-v7a_thumb_stripped.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        ("liba7_guarded_svc_armeabi-v7a_arm.so", {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1}),
+        (
+            "liba7_guarded_svc_armeabi-v7a_arm_stripped.so",
+            {"a7_guarded_getpid": 1, "a7_guarded_gettid": 1},
+        ),
+        ("liba7_nofire_armeabi-v7a_stripped.so", {}),
+    ],
+)
+def test_arm32_inline_syscall_sites(fixture: str, holders: dict) -> None:
+    # The guarded fixture's svc follows a conditional return (bxeq lr), so it
+    # is reached by fallthrough. The stripped twins name their functions
+    # from the dynamic symbol table, so the holders match.
     if not _nyxstone_available():
         pytest.skip("nyxstone is not available")
-    from blint.lib.android_reviews import _INLINE_SYSCALL_RE
-    from blint.lib.binary import parse
-
-    def _holders(path: Path) -> dict:
-        metadata = parse(str(path), True)
-        return {
-            func.get("name"): len(_INLINE_SYSCALL_RE.findall(str(func.get("assembly") or "")))
-            for func in (metadata.get("disassembled_functions") or {}).values()
-            if _INLINE_SYSCALL_RE.search(str(func.get("assembly") or ""))
-        }
-
-    assert _holders(DATA / "liba7_fire_armeabi-v7a_stripped.so") == {
-        "a7_inline_syscall": 1,
-        "a7_run_all": 1,
-    }
-    assert _holders(DATA / "liba7_nofire_armeabi-v7a_stripped.so") == {}
+    initialize_rules(BlintOptions())
+    results = _android_results(_parse_fixture(fixture))
+    rows = results.get("ANDROID_INLINE_SYSCALLS") or []
+    found = {item["function"]: item["sites"] for row in rows for item in row["functions"]}
+    assert found == holders, results
 
 
 # nyxstone's rendering of svc #0, syscall and int 0x80 in each IntegerBase

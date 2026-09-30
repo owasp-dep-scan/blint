@@ -21,9 +21,10 @@ from blint.lib.absint import (
     ARM64_ARGUMENT_REGISTERS,
     X86_SYSV_ARGUMENT_REGISTERS,
     X86_WIN64_ARGUMENT_REGISTERS,
-    _overlay_thunk_replay,
-    _thunk_prep_replay,
+    FrameState,
+    _state_after_thunk,
     argument_registers,
+    model_for_target,
     pure_thunk_map,
     recover_call_site_arguments,
     recover_call_site_arguments_with_method,
@@ -836,9 +837,8 @@ def test_entry_block_call_does_not_see_a_value_the_loop_body_writes():
 
 
 # ---------------------------------------------------------------------------
-# Pure thunks (A7.2 M2). Every assembly string below is captured from
-# nyxstone over a committed fixture: OUTLINED_FUNCTION_0 and its caller in
-# liba7_fire_arm64-v8a_Oz.so, and the -Os x86_64 dlopen site.
+# Pure thunks. OUTLINED_FUNCTION_0 and its caller are captured from nyxstone
+# over liba7_fire_arm64-v8a_Oz.so.
 # ---------------------------------------------------------------------------
 
 # liba7_fire_arm64-v8a_Oz.so, OUTLINED_FUNCTION_0 @ 0x5164.
@@ -874,7 +874,45 @@ def test_pure_thunk_map_follows_the_outlined_thunk():
     assert set(thunks) == {0x5164}
     assert thunks[0x5164]["callee"] == "dlopen"
     assert thunks[0x5164]["name"] == "OUTLINED_FUNCTION_0"
-    assert thunks[0x5164]["replay"] == {1: 2}
+    assert thunks[0x5164]["prep"] == ["mov w1, #2"]
+    assert thunks[0x5164]["prep_spans"] == [(0x5164, 0x5168)]
+
+
+def test_thunk_instructions_step_over_the_caller_state():
+    # libQt5Core.so (arm64, net.osmand.plus_540403), captured from nyxstone:
+    # QAnimationDriver::started() is `adrp x1, #2555904; mov w2, wzr;
+    # b #4708` into OUTLINED_FUNCTION_43. The thunk's page replaces the
+    # caller's x1 and its zero replaces x2; x0 passes through.
+    target = "aarch64-unknown-linux-android"
+    thunks = pure_thunk_map(
+        {
+            "a": {
+                "name": "QAnimationDriver::started()",
+                "address": "0x3490dc",
+                "assembly": "adrp x1, #2555904\nmov w2, wzr\nb #4708",
+                "instruction_lengths": [4, 4, 4],
+                "direct_call_targets": [
+                    {
+                        "target_name": "OUTLINED_FUNCTION_43",
+                        "target_address": "0x34a348",
+                        "raw_operand": "#4708",
+                        "kind": "tailcall",
+                        "site_index": 2,
+                    }
+                ],
+            }
+        },
+        target,
+    )
+    assert thunks[0x3490DC]["callee"] == "OUTLINED_FUNCTION_43"
+    model = model_for_target(target)
+    caller = FrameState(model)
+    caller.registers = {"x0": 11, "x1": 22, "x2": 33}
+    after = _state_after_thunk(model, caller, thunks[0x3490DC])
+    assert after.registers["x0"] == 11
+    assert after.registers["x1"] == ("ptr", 0x5B9000)
+    assert after.registers["x2"] == 0
+    assert caller.registers == {"x0": 11, "x1": 22, "x2": 33}
 
 
 def test_pure_thunk_map_refuses_every_disagreeing_shape():
@@ -882,44 +920,25 @@ def test_pure_thunk_map_refuses_every_disagreeing_shape():
     # the prep, a non-move instruction and a too-long body each keep the
     # function out of the map, so sites into it keep naming it.
     target = "aarch64-unknown-linux-android"
-    assert pure_thunk_map(
-        {"a": _thunk_function(assembly="mov w1, #2\nb.eq #408")}, target
-    ) == {}
-    assert pure_thunk_map(
-        {"a": _thunk_function(direct_call_targets=[])}, target
-    ) == {}
-    assert pure_thunk_map(
-        {"a": _thunk_function(assembly="mov w1, #2\ncbz x0, #8\nb #408")}, target
-    ) == {}
-    assert pure_thunk_map(
-        {"a": _thunk_function(assembly="ldr x0, [sp]\nb #408")}, target
-    ) == {}
-    assert pure_thunk_map(
-        {
-            "a": _thunk_function(
-                assembly="mov x3, x0\nmov x4, x1\nmov x5, x2\nmov w6, #2\nmov w7, #3\nb #408",
-                instruction_lengths=[4] * 6,
-            )
-        },
-        target,
-    ) == {}
-
-
-def test_thunk_prep_replay_forms():
-    # The immediate forms (captured: "mov w1, #2" arm64, "mov esi, 2" x86),
-    # the register shuffle between argument positions, the adrp+add pair
-    # that can only be marked unknown here, and the refusal of a load.
-    assert _thunk_prep_replay(["mov w1, #2"], True) == {1: 2}
-    assert _thunk_prep_replay(["mov esi, 2"], False) == {1: 2}
-    assert _thunk_prep_replay(["mov x2, x0"], True) == {2: ("caller", 0)}
-    assert _thunk_prep_replay(["adrp x0, #8192", "add x0, x0, #16"], True) == {0: None}
-    assert _thunk_prep_replay(["ldr x0, [sp]"], True) is None
-
-
-def test_overlay_thunk_replay_applies_the_moves_in_order():
-    arguments, pointers = _overlay_thunk_replay([11, 22, 33, 44], [0], {1: 2, 2: ("caller", 0), 3: None})
-    assert arguments == [11, 2, 11, None]
-    assert pointers == [0, 2]
+    assert pure_thunk_map({"a": _thunk_function(assembly="mov w1, #2\nb.eq #408")}, target) == {}
+    assert pure_thunk_map({"a": _thunk_function(direct_call_targets=[])}, target) == {}
+    assert (
+        pure_thunk_map({"a": _thunk_function(assembly="mov w1, #2\ncbz x0, #8\nb #408")}, target)
+        == {}
+    )
+    assert pure_thunk_map({"a": _thunk_function(assembly="ldr x0, [sp]\nb #408")}, target) == {}
+    assert (
+        pure_thunk_map(
+            {
+                "a": _thunk_function(
+                    assembly="mov x3, x0\nmov x4, x1\nmov x5, x2\nmov w6, #2\nmov w7, #3\nb #408",
+                    instruction_lengths=[4] * 6,
+                )
+            },
+            target,
+        )
+        == {}
+    )
 
 
 def test_call_through_a_thunk_names_the_final_callee_and_applies_moves():
@@ -952,7 +971,9 @@ def test_call_through_a_thunk_names_the_final_callee_and_applies_moves():
         caller,
         "aarch64-unknown-linux-android",
         "ELF",
-        thunks={0x5164: {"name": "OUTLINED_FUNCTION_0", "callee": "dlopen", "replay": {1: 2}}},
+        thunks=pure_thunk_map(
+            {"0x5164::OUTLINED_FUNCTION_0": _thunk_function()}, "aarch64-unknown-linux-android"
+        ),
     )
     assert method == "dataflow"
     assert len(records) == 1

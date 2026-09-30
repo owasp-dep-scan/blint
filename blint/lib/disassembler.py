@@ -1849,7 +1849,6 @@ def _resolve_operand_target_addresses(
     is_aarch64: bool,
     is_mips: bool,
     is_windows: bool,
-    is_macho: bool = False,
 ) -> list[int]:
     """Parse operand forms and return normalized numeric target candidates."""
     operand = (operand or "").strip().rstrip(",")
@@ -1909,13 +1908,10 @@ def _resolve_operand_target_addresses(
                     and not is_mips
                     and (
                         mnemonic.startswith("call")
+                        # nyxstone prints an x86 `jmp imm` as the same
+                        # end-relative delta as `call`, on every format.
+                        or mnemonic in X86_UNCONDITIONAL_JMP_INST
                         or (is_windows and mnemonic.startswith("j"))
-                        # A tail `jmp imm` on ELF x86/x86_64 prints the same
-                        # end-relative delta `call` does; reading it absolute
-                        # left every tail call into the PLT unresolved.
-                        # Mach-O keeps the old treatment: its tail jumps are
-                        # not part of this change's measured scope.
-                        or (not is_windows and not is_macho and mnemonic in X86_UNCONDITIONAL_JMP_INST)
                     )
                 ):
                     _append_unique_target_addr(
@@ -2359,7 +2355,6 @@ def _resolve_direct_calls(
     is_aarch64 = "aarch64" in lower_arch or "arm64" in lower_arch
     is_mips = "mips" in lower_arch
     is_windows = "windows" in lower_arch
-    is_macho = any(token in lower_arch for token in ("macos", "apple", "darwin"))
     is_arm32 = _is_arm32_target(lower_arch)
     arch_reg_set = get_arch_reg_set(lower_arch)
     reg_targets: dict = {}
@@ -2589,7 +2584,7 @@ def _resolve_direct_calls(
                         target_name = reg_target.get("target_name", "")
 
                 target_addrs = _resolve_operand_target_addresses(
-                    mnemonic, operand, instr, is_aarch64, is_mips, is_windows, is_macho
+                    mnemonic, operand, instr, is_aarch64, is_mips, is_windows
                 )
                 if not target_name:
                     target_name = _lookup_target_name(target_addrs, addr_to_name_map)
@@ -2609,7 +2604,7 @@ def _resolve_direct_calls(
         if is_direct_call and operand_text:
             operand = operand_text.strip()
             target_addrs = _resolve_operand_target_addresses(
-                mnemonic, operand, instr, is_aarch64, is_mips, is_windows, is_macho
+                mnemonic, operand, instr, is_aarch64, is_mips, is_windows
             )
             target_addr = target_addrs[0] if target_addrs else None
             target_name = _lookup_target_name(target_addrs, addr_to_name_map)
@@ -2697,13 +2692,7 @@ def _resolve_direct_calls(
                     # shape. Named from the slot, like a call through one;
                     # the slot's address is never offered as the callee's.
                     slot_addrs = _resolve_operand_target_addresses(
-                        mnemonic,
-                        operand,
-                        tail_instr,
-                        is_aarch64,
-                        is_mips,
-                        is_windows,
-                        is_macho,
+                        mnemonic, operand, tail_instr, is_aarch64, is_mips, is_windows
                     )
                     target_name = _lookup_target_name(slot_addrs, addr_to_name_map)
                     if target_name:
@@ -2722,7 +2711,6 @@ def _resolve_direct_calls(
                         is_aarch64,
                         is_mips,
                         is_windows,
-                        is_macho,
                     )
                     target_addr = target_addrs[0] if target_addrs else None
                     target_name = _lookup_target_name(target_addrs, addr_to_name_map)
@@ -2914,276 +2902,6 @@ def _disassemble_arm32_span(instance, byte_list, address: int) -> list:
 # zero/pool word (``andeq …``, the ARM NOP idiom). Thumb's zero halfword
 # (``movs r0, r0``) matches by operand below; other ``movs`` are real code.
 _ARM32_ARBITER_SKIP_MNEMONICS = PADDING_TRAP_MNEMONICS | {"andeq"}
-
-# The literal-pool stop (A7.2 M3). ARM32 linkers place literal pools between
-# functions, and a stripped library's exidx next-start window - blint's
-# function extent - swallows them, so pool bytes decode as instructions
-# after the function's real end (M0's measurement: a quarter to a third of
-# every stripped v7a carrier's exidx intervals, with pool words decoding as
-# ``svc #0`` the R3 hand-check found as 25 false syscall sites). The filter
-# below drops the *svc-carrying idiom runs* - and nothing else: only runs of
-# decodes a pool word produces (padding/nop family, ``andeq``, ``movs``,
-# ``svc``), at least two instructions long, whose run no branch of the
-# function targets and whose way back to the preceding function-leaving
-# terminator crosses nothing but more idiom or call-form junk. Real code is
-# never all-``movs``/``nop``/``svc``, and a real syscall site sits inside a
-# basic block with real instructions around it, so the oracle's genuine
-# sites (mid-function, reachable) survive; every other instruction of the
-# listing - including a pool's non-idiom junk decodes - is kept, which is
-# why the arm KPI entry does not move.
-_ARM32_POOL_BRANCH_SOURCE_INST = (
-    ARM32_UNCONDITIONAL_JMP_INST | ARM32_CONDITIONAL_JMP_INST | {"cbz", "cbnz", "cbz.w", "cbnz.w"}
-)
-
-
-def _arm32_base_mnemonic(mnemonic: str) -> str:
-    """An ARM32 mnemonic with its condition code stripped (``popeq`` -> ``pop``).
-
-    Condition-suffixed forms that are their own mnemonic (``blx``, ``bx``
-    families) pass through unchanged; so does anything whose stem is not a
-    known conditional-suffix host.
-    """
-    for suffix in ARM32_COND_SUFFIXES:
-        if mnemonic.endswith(suffix):
-            stem = mnemonic[: -len(suffix)]
-            if stem in (
-                "b",
-                "pop",
-                "ldm",
-                "ldmia",
-                "ldmfd",
-                "ldr",
-                "add",
-                "sub",
-                "mov",
-                "str",
-                "cmp",
-            ):
-                return stem
-            return mnemonic
-    return mnemonic
-
-
-def _arm32_run_is_targeted(
-    instr_list: list, run_start: int, run_end: int, sorted_targets: list[int]
-) -> bool:
-    """True when any branch target address lands inside [run_start, run_end)."""
-    from bisect import bisect_left
-
-    low = instr_list[run_start].address
-    high = instr_list[run_end - 1].address + len(instr_list[run_end - 1].bytes)
-    index = bisect_left(sorted_targets, low)
-    return index < len(sorted_targets) and sorted_targets[index] < high
-
-
-def _arm32_pool_run_filter(
-    instr_list: list,
-    line_modes: list[str | None] | None,
-    default_mode: str | None,
-    func_addr: int,
-    extent_end: int,
-) -> tuple[list, list[str | None] | None, list[tuple[int, int]], int]:
-    """Drop the literal-pool idiom runs from an ARM32 listing.
-
-    Returns ``(kept_instructions, kept_modes, removed_spans, removed_runs)``;
-    the mode list (when one exists) drops the same entries so it stays
-    aligned with the instructions. A removed
-    run is a maximal block of at least two pool-word decodes (the padding
-    set, ``andeq``, any ``movs``, any ``svc``) that contains a ``svc`` - the
-    decode the inline-syscall rule reads - and satisfies both reachability
-    refusals: no branch of the function (``b`` in any condition form,
-    ``cbz``/``cbnz``) targets inside the run, and between the run and the
-    preceding function-leaving terminator (a return form with its condition
-    code, or an unconditional ``b``/``b.w`` leaving the extent) there is
-    nothing but more pool-word decodes or call-form junk (``bl``/``blx`` -
-    a pool word pair decoding as a far call). A run with real instructions
-    before it - a genuine syscall site's block - is never removed. A svc
-    decode directly behind an unconditional ``b`` is also dropped unless a
-    branch targets it: that is a switch branch-table entry word (libvlc's
-    carriers), unreachable because the branch transfers control away. The
-    removed byte ranges ride along as spans so address reconstruction can
-    account for them, exactly like the ``$d`` islands the mapping symbols
-    name.
-    """
-
-    def _line_mode(index: int) -> str | None:
-        if line_modes and len(line_modes) == len(instr_list):
-            return line_modes[index]
-        return default_mode
-
-    def _pool_word(index: int) -> bool:
-        mnemonic, _operand = _split_arm32_instruction(instr_list[index].assembly)
-        return (
-            mnemonic in _ARM32_ARBITER_SKIP_MNEMONICS
-            or mnemonic in ("andeq", "movs", "movs.w", "svc", "svc.w")
-        )
-
-    branch_targets: list[tuple[int, int]] = []
-    for index, instr in enumerate(instr_list):
-        mnemonic, operand = _split_arm32_instruction(instr.assembly)
-        if mnemonic not in _ARM32_POOL_BRANCH_SOURCE_INST or not operand:
-            continue
-        branch_operand = (
-            operand.split(",", 1)[1].strip()
-            if mnemonic.startswith(("cbz", "cbnz")) and "," in operand
-            else operand
-        )
-        target = _arm32_branch_target(
-            instr, branch_operand, _line_mode(index), mnemonic
-        )
-        if target is not None:
-            branch_targets.append(target & ~1)
-    branch_targets.sort()
-
-    # Reachability from the listing's first instruction: fallthrough stops
-    # at function-leaving terminators (returns; an unconditional ``b``, any
-    # target), continues through calls, conditional branches and indirect
-    # transfers (conservatively - keeping more instructions reachable only
-    # keeps more svc sites). A svc decode in an unreachable position is a
-    # data word: a pool word behind the function's real end, or a switch
-    # branch-table entry (libvlc's carriers alternate ``b`` entries with
-    # words that decode as ``lsls``/``svc`` pairs). A real syscall site
-    # sits in a reachable block by definition, so the oracle's genuine
-    # sites survive this without special cases.
-    addresses = [instr.address for instr in instr_list]
-    target_index: dict[int, int] = {}
-    for position, address in enumerate(addresses):
-        target_index.setdefault(address & ~1, position)
-
-    def _branch_edges(index: int) -> list[int]:
-        mnemonic, operand = _split_arm32_instruction(instr_list[index].assembly)
-        if mnemonic not in _ARM32_POOL_BRANCH_SOURCE_INST or not operand:
-            return []
-        branch_operand = (
-            operand.split(",", 1)[1].strip()
-            if mnemonic.startswith(("cbz", "cbnz")) and "," in operand
-            else operand
-        )
-        target = _arm32_branch_target(
-            instr_list[index], branch_operand, _line_mode(index), mnemonic
-        )
-        if target is None:
-            return []
-        return [target_index[target & ~1]] if (target & ~1) in target_index else []
-
-    def _stops_fallthrough(index: int) -> bool:
-        mnemonic, operand = _split_arm32_instruction(instr_list[index].assembly)
-        base = _arm32_base_mnemonic(mnemonic)
-        if _is_arm32_return(base, operand) or _is_arm32_return(mnemonic, operand):
-            return True
-        # An unconditional immediate branch transfers control away; a
-        # register or memory form is left falling through (conservatively).
-        if mnemonic in ARM32_UNCONDITIONAL_JMP_INST:
-            return _arm32_parse_immediate(operand) is not None
-        return False
-
-    reachable = {0}
-    stack = [0]
-    while stack:
-        index = stack.pop()
-        for next_index in _branch_edges(index):
-            if next_index not in reachable:
-                reachable.add(next_index)
-                stack.append(next_index)
-        if index + 1 < len(instr_list) and not _stops_fallthrough(index):
-            if index + 1 not in reachable:
-                reachable.add(index + 1)
-                stack.append(index + 1)
-
-    table_svc: set[int] = set()
-    for index in range(len(instr_list)):
-        mnemonic, _operand = _split_arm32_instruction(instr_list[index].assembly)
-        if mnemonic in ("svc", "svc.w") and index not in reachable:
-            table_svc.add(index)
-
-    kept: list = []
-    kept_modes: list[str | None] = [] if line_modes else None  # type: ignore[assignment]
-    removed_spans: list[tuple[int, int]] = []
-    removed_runs = 0
-    index = 0
-    while index < len(instr_list):
-        if index in table_svc:
-            removed_runs += 1
-            removed_spans.append(
-                (
-                    instr_list[index].address,
-                    len(instr_list[index].bytes),
-                )
-            )
-            index += 1
-            continue
-        mnemonic, operand = _split_arm32_instruction(instr_list[index].assembly)
-        base = _arm32_base_mnemonic(mnemonic)
-        if not (
-            _is_arm32_return(base, operand)
-            or _is_arm32_return(mnemonic, operand)
-            or (
-                mnemonic in ARM32_UNCONDITIONAL_JMP_INST
-                and operand
-                and (
-                    (target := _arm32_branch_target(
-                        instr_list[index], operand, _line_mode(index), mnemonic
-                    ))
-                    is not None
-                    and not (func_addr <= target < extent_end)
-                )
-            )
-        ):
-            kept.append(instr_list[index])
-            if kept_modes is not None:
-                kept_modes.append(line_modes[index] if line_modes else default_mode)  # type: ignore[index]
-            index += 1
-            continue
-        # A function-leaving terminator: scan the junk that follows for a
-        # svc-carrying idiom run. Anything real ends the scan and is kept.
-        scan = index + 1
-        run_start: int | None = None
-        while scan < len(instr_list):
-            if _pool_word(scan):
-                if run_start is None:
-                    run_start = scan
-                scan += 1
-                continue
-            scan_mnemonic, _ = _split_arm32_instruction(instr_list[scan].assembly)
-            if scan_mnemonic in ("bl", "bl.w", "blx", "blx.w"):
-                # Call-form junk between the terminator and the pool.
-                if run_start is not None:
-                    break
-                scan += 1
-                continue
-            break
-        if (
-            run_start is not None
-            and run_start < scan
-            and any(
-                _split_arm32_instruction(instr_list[i].assembly)[0] in ("svc", "svc.w")
-                for i in range(run_start, scan)
-            )
-            and scan - run_start >= 2
-            and not _arm32_run_is_targeted(instr_list, run_start, scan, branch_targets)
-        ):
-            for keep_index in range(index, run_start):
-                # The terminator and any call-form junk between it and the
-                # run stay in the listing; only the run goes.
-                kept.append(instr_list[keep_index])
-                if kept_modes is not None and line_modes:
-                    kept_modes.append(line_modes[keep_index])
-            removed_runs += 1
-            removed_spans.append(
-                (
-                    instr_list[run_start].address,
-                    instr_list[scan - 1].address
-                    + len(instr_list[scan - 1].bytes)
-                    - instr_list[run_start].address,
-                )
-            )
-            index = scan
-            continue
-        kept.append(instr_list[index])
-        if kept_modes is not None and line_modes:
-            kept_modes.append(line_modes[index])
-        index += 1
-    return kept, kept_modes if line_modes else None, removed_spans, removed_runs
 
 
 def _arm32_stream_terminates(instrs: list, span_start: int, span_end: int, mode: str) -> bool:
@@ -3559,7 +3277,6 @@ def disassemble_functions(
     inst_count = 0
     num_failures = 0
     num_success = 0
-    num_pool_cuts = 0
     all_funcs = []
     for func_list_key in FUNCTION_SYMBOLS:
         if _should_skip_symbol_list_for_disassembly(parsed_obj, func_list_key):
@@ -3906,36 +3623,8 @@ def disassemble_functions(
                 continue
             end_index = _find_function_end_index(instr_list, has_exact_size, arch_target)
             truncated_instr_list = instr_list[: end_index + 1] if end_index != -1 else instr_list
-            if is_arm32 and truncated_instr_list:
-                # A stripped library's exidx next-start extent swallows the
-                # literal pools between functions; drop their svc-carrying
-                # idiom runs (see _arm32_pool_run_filter - it removes
-                # nothing else, which is what keeps the arm KPI entry
-                # unchanged). Line modes exist on the ARM32 decode path;
-                # without them the filter still runs on the default mode.
-                (
-                    truncated_instr_list,
-                    filtered_modes,
-                    pool_spans,
-                    pool_runs,
-                ) = _arm32_pool_run_filter(
-                    truncated_instr_list,
-                    arm32_line_modes,
-                    used_arm32_mode,
-                    func_addr,
-                    func_addr + size_to_disasm,
-                )
-                if pool_runs:
-                    num_pool_cuts += pool_runs
-                    arm32_data_spans.extend(pool_spans)
-                    arm32_data_spans.sort()
-                if filtered_modes is not None:
-                    arm32_line_modes = filtered_modes
-            if not truncated_instr_list:
-                LOG.debug(
-                    f"Instruction list for '{func_name}' became empty after truncation. Skipping."
-                )
-                continue
+            if is_arm32 and arm32_line_modes:
+                arm32_line_modes = arm32_line_modes[: len(truncated_instr_list)]
             if not truncated_instr_list:
                 LOG.debug(
                     f"Instruction list for '{func_name}' became empty after truncation. Skipping."
@@ -4143,11 +3832,6 @@ def disassemble_functions(
             LOG.debug(f"Failed to disassemble function '{func_name}' at {func_addr_va_hex}: {e}")
     if not disassembly_results:
         LOG.debug("Disassembly was not successful.")
-    if is_arm32 and num_pool_cuts:
-        # How many literal-pool idiom runs were dropped from function
-        # listings this run (see _arm32_pool_run_filter); named so the ARM32
-        # extent correction is a count, never a silent edit.
-        metadata["arm32_pool_cuts"] = num_pool_cuts
     if promoted_count:
         # Surface call-site discoveries in the metadata record so downstream
         # consumers can tell symbol-derived functions from promoted ones.

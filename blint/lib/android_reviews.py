@@ -253,39 +253,45 @@ def _evaluate_writable_dlopen(metadata: dict) -> list[dict]:
     ]
 
 
-# 32-bit ARM EABI passes the syscall number in r7, and the load sits in the
-# same basic block as the svc that consumes it (r7 is callee-saved; a call
-# between the load and the svc clobbers nothing, but the compiler emits the
-# pair together and nothing else moves r7 in between). A pool or
-# branch-table word that decodes as svc has no such load anywhere near it -
-# the measured false windows either never load r7 at all or carry an
-# unrelated r7 write hundreds of instructions away.
-_ARM32_R7_SETUP_RE = re.compile(
-    r"^(?:mov|movs|movw|movt)(?:\.w|\.n)?\s+r7,\s*(?:#|0x)"
-    r"|^ldr(?:\.w|\.n)?\s+r7,\s*\[pc",
+# 32-bit ARM passes the syscall number in r7, loaded from an immediate or a
+# literal just before the svc. Literal-pool words between functions can
+# decode as svc too, but not behind such a load in one run of code.
+_ARM32_SYSCALL_NUMBER_RE = re.compile(
+    r"^(?:mov|movs|movw|movt)(?:\.w|\.n)?\s+r7,\s*(?:#|0x)|^ldr(?:\.w|\.n)?\s+r7,\s*\[pc",
     re.IGNORECASE,
 )
-# How many instructions before a svc an r7 load may sit and still be its
-# number: the measured true sites load r7 within three instructions
-# (mov r7,#N / movw+movt pairs / ldr r7,[pc]); eight covers any
-# argument-shuffle interleaving a compiler emits between them.
-_ARM32_R7_SETUP_WINDOW = 8
+# What ends that run: an unconditional transfer away, or a zero halfword or
+# word (movs r0, r0 / andeq r0, r0, r0), which compilers never emit and
+# pools are full of.
+_ARM32_RUN_BREAK_RE = re.compile(
+    r"^(?:movs\s+r0,\s*r0$|andeq\s+r0,\s*r0,\s*r0$|b(?:\.w|\.n)?\s|bx(?:\.w)?\s"
+    r"|pop(?:\.w)?\s+\{[^}]*\bpc\})",
+    re.IGNORECASE,
+)
+# How many instructions before the svc the r7 load may sit.
+_ARM32_SYSCALL_NUMBER_WINDOW = 8
 
 
-def _is_arm32_target(metadata: dict) -> bool:
-    target = str(metadata.get("llvm_target_tuple") or "").lower()
+def _is_arm32(metadata: dict) -> bool:
+    target = str(metadata.get("llvm_target_tuple") or metadata.get("machine_type") or "").lower()
+    if "aarch64" in target or "arm64" in target:
+        return False
     return target.startswith(("arm", "thumb")) or "armeabi" in target
 
 
 def _arm32_syscall_sites(lines: list[str]) -> int:
-    """svc sites whose r7 number load sits in the same block, 32-bit ARM."""
+    """Count svc sites that load their syscall number into r7 first."""
     sites = 0
     for index, line in enumerate(lines):
         if not _INLINE_SYSCALL_RE.search(line):
             continue
-        window = lines[max(0, index - _ARM32_R7_SETUP_WINDOW) : index]
-        if any(_ARM32_R7_SETUP_RE.search(window_line) for window_line in window):
-            sites += 1
+        for item in reversed(lines[max(0, index - _ARM32_SYSCALL_NUMBER_WINDOW) : index]):
+            text = item.strip()
+            if _ARM32_SYSCALL_NUMBER_RE.search(text):
+                sites += 1
+                break
+            if _ARM32_RUN_BREAK_RE.search(text):
+                break
     return sites
 
 
@@ -295,25 +301,24 @@ def _evaluate_inline_syscalls(metadata: dict) -> list[dict]:
         return []
     if (metadata.get("build_info") or {}).get("go_version"):
         return []
-    arm32 = _is_arm32_target(metadata)
+    arm32 = _is_arm32(metadata)
     holders = []
     for key, func_data in (metadata.get("disassembled_functions") or {}).items():
         if not isinstance(func_data, dict):
             continue
-        lines = str(func_data.get("assembly") or "").split("\n")
+        assembly = str(func_data.get("assembly") or "")
         if arm32:
-            sites = _arm32_syscall_sites(lines)
+            sites = _arm32_syscall_sites(assembly.split("\n"))
         else:
-            sites = len(_INLINE_SYSCALL_RE.findall("\n".join(lines)))
-        if not sites:
-            continue
-        holders.append(
-            {
-                "function": str(func_data.get("name") or key),
-                "address": func_data.get("address"),
-                "sites": sites,
-            }
-        )
+            sites = len(_INLINE_SYSCALL_RE.findall(assembly))
+        if sites:
+            holders.append(
+                {
+                    "function": str(func_data.get("name") or key),
+                    "address": func_data.get("address"),
+                    "sites": sites,
+                }
+            )
     if not holders:
         return []
     holders.sort(key=lambda item: (-item["sites"], item["function"]))
