@@ -1,0 +1,21 @@
+blint/lib/jni_findclass.py
+  s_3ce4fa53ecd7da::t_c89e70ba917470 691
+tests/test_absint_i386.py
+  s_3ce4fa53ecd7da::t_c89e70ba917470 108-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15bda7e917f9ee400bba695f1954ca737ad4a9f9",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
