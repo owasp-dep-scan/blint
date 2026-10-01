@@ -105,9 +105,8 @@ def test_model_for_target_routes_32_bit_x86_triples():
 
 
 def test_model_for_target_keeps_the_existing_models():
-    # The x86-64 default (including the empty triple) and arm64 are unchanged.
-    # arm32 gained its own model in A12 (see test_absint_arm32.py), so its
-    # pre-A11 stand-in routing is no longer the x86-64 model.
+    # The x86-64 default (including the empty triple) and arm64 are unchanged;
+    # arm32 routing is covered in test_absint_arm32.py.
     assert model_for_target("") is X86_64_MODEL
     assert model_for_target("x86_64-unknown-linux-android") is X86_64_MODEL
     assert model_for_target("amd64-apple-darwin") is X86_64_MODEL

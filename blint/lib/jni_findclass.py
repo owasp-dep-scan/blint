@@ -688,7 +688,7 @@ def _i386_model():
 #   loads resolve.
 # - The GOT: `ldr rN, [rM]` off a completed pc-pair names a .got slot the
 #   linker relocated (fbjni's kDescriptor/MethodWrapper words on v7a are
-#   R_ARM_GLOB_DAT slots, not .data.rel.ro triples - A10's cause B).
+#   R_ARM_GLOB_DAT slots, not .data.rel.ro triples).
 # - The RegisterNatives call: `ldr(.w) rN, [rM, #860]` then `blx rN` (or a
 #   `bx rN` tail), with (methods, count) in (r2, r3).
 
