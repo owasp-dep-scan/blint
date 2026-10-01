@@ -941,29 +941,35 @@ def test_fbjni_shape_binds_the_dex_declarations() -> None:
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
-def test_findclass_confirmer_needs_the_callsite_abis() -> None:
-    """The confirmer is arm64/x86_64 (the call-site layer); the 32-bit
-    twins of the same fixture keep every sharedTick declaration
-    ambiguous - not evaluated, never guessed - while the x86_64 twin,
-    whose APK carries its own bytes, confirms exactly like arm64."""
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64"])
+def test_findclass_confirmer_needs_the_callsite_abis(abi: str) -> None:
+    """arm64, x86_64 and (since A12) armeabi-v7a - whose a8 twin is an
+    ARM-mode build, with the a12 Thumb twin covering the other dialect
+    below - each confirm the sharedTick registrations from their own
+    bytes. The x86 twin keeps a pre-existing i386 residue (8 bound of 10,
+    three ambiguous - its walk does not read this fixture's registrar
+    chain), stated at the end rather than silently rounded to the 64-bit
+    shape; without a layer an ABI keeps all three ambiguous, which is
+    what the pre-A12 v7a twin did.
+    arm32/Thumb and ARM states since A12): each twin of the a8 fixture,
+    carrying its own bytes, confirms the sharedTick registrations exactly
+    the same way - 10 bound, the composed third registration the only
+    residue. Without the layer an ABI would keep all three ambiguous; the
+    pre-A11 v7a and pre-A11 x86 twins did."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
-    for abi in ("armeabi-v7a", "x86"):
-        join = build_jni_join_summary(
-            str(FIXTURES / f"a8-jni-{abi}.apk"),
-            scan_android_native(str(FIXTURES / f"a8-jni-{abi}.apk")),
-            confirm_findclass=True,
-        )
-        per_abi = join["per_abi"][abi]
-        assert per_abi["counts"]["ambiguous_dynamic"] == 3
-        assert not any(e.get("confirmed_by") for e in per_abi["bound_dynamic"])
+    plain = build_jni_join_summary(
+        str(FIXTURES / f"a8-jni-{abi}.apk"),
+        scan_android_native(str(FIXTURES / f"a8-jni-{abi}.apk")),
+    )
+    assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
     join = build_jni_join_summary(
-        str(FIXTURES / "a8-jni-x86_64.apk"),
-        scan_android_native(str(FIXTURES / "a8-jni-x86_64.apk")),
+        str(FIXTURES / f"a8-jni-{abi}.apk"),
+        scan_android_native(str(FIXTURES / f"a8-jni-{abi}.apk")),
         confirm_findclass=True,
     )
-    per_abi = join["per_abi"]["x86_64"]
+    per_abi = join["per_abi"][abi]
     assert per_abi["counts"]["bound_dynamic"] == 10
     assert per_abi["counts"]["ambiguous_dynamic"] == 1
     assert {(e["class"], e.get("confirmed_by")) for e in per_abi["bound_dynamic"]} >= {
@@ -997,6 +1003,38 @@ def test_findclass_ranges_are_the_registrations() -> None:
 
 
 # ----------------------------------------------- A9 P1: the join per (abi, library)
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_findclass_ranges_are_the_registrations_on_arm32() -> None:
+    """The arm32 layer's own granularity, both dialects: the a8_ambig v7a
+    twin (an ARM-mode build) registers [0, 2) for AmbigOne and [2, 4) for
+    AmbigTwo, entry-exact like the arm64 twin, and the a12 Thumb twin of
+    the same source resolves the same two ranges."""
+    import lief
+
+    from blint.lib.jni import recover_register_natives_tables
+    from blint.lib.jni_findclass import _function_starts, confirm_table_ranges
+
+    for library in ("liba8_ambig_armeabi-v7a.so", "liba12split_armeabi-v7a.so"):
+        parsed = lief.ELF.parse(str(FIXTURES / library))
+        starts = _function_starts(parsed)
+        tables = recover_register_natives_tables(parsed, set(starts), starts)
+        ranges = confirm_table_ranges(parsed, tables["tables"])
+        resolved = sorted((r["begin"], r["end"], r["class"]) for r in ranges)
+        table_address = int(tables["tables"][0]["address"], 16)
+        assert resolved == [
+            (table_address, table_address + 24, "com.blint.a8.AmbigOne")
+            if "ambig" in library
+            else (table_address, table_address + 24, "com.blint.a9.split.SplitOne"),
+            (
+                table_address + 24,
+                table_address + 48,
+                "com.blint.a8.AmbigTwo" if "ambig" in library else "com.blint.a9.split.SplitTwo",
+            ),
+        ], library
 
 
 def test_multiabi_join_binds_each_abi_from_its_own_bytes() -> None:
@@ -1153,7 +1191,7 @@ def test_long_string_declarations_bind_or_stay_unbound() -> None:
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
-@pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64"])
 def test_merged_table_splits_by_carried_registration(abi: str) -> None:
     """The R1 gate for the carried argument registers: the a9_split
     fixture's five-entry table is registered piecemeal by three per-class
@@ -1226,27 +1264,59 @@ def test_split_ranges_are_the_registrars_slices() -> None:
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
 def test_split_fixture_stays_ambiguous_off_the_callsite_abis() -> None:
-    """armeabi-v7a keeps every splitShared declaration ambiguous - the
-    call-site layer has no arm32 model, so nothing is guessed. x86 splits
-    exactly like x86_64 (the i386 confirmer): SplitOne and SplitTwo bind
-    through findclass, and the volatile-count registration stays ambiguous."""
+    """Every ABI's own copy splits the same way (arm64 and x86_64 since A9,
+    x86's i386 layer since A11, armeabi-v7a's arm32 layer since A12 - the
+    fixture's v7a build is ARM-mode); the only residue on any ABI is the
+    volatile-count registration, which no layer can read."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
     apk = str(FIXTURES / "a9-jni-split.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
-    v7a = join["per_abi"]["armeabi-v7a"]
-    assert v7a["counts"]["ambiguous_dynamic"] == 3
-    assert not any(e.get("confirmed_by") for e in v7a["bound_dynamic"])
-    x86 = join["per_abi"]["x86"]
-    assert x86["counts"]["ambiguous_dynamic"] == 1
-    x86_64 = join["per_abi"]["x86_64"]
-    assert x86["counts"] == x86_64["counts"]
+    for abi in ("arm64-v8a", "x86_64", "x86", "armeabi-v7a"):
+        per_abi = join["per_abi"][abi]
+        assert per_abi["counts"]["ambiguous_dynamic"] == 1, abi
+        confirmed = {
+            e["class"].rsplit(".", 1)[-1]
+            for e in per_abi["bound_dynamic"]
+            if e.get("confirmed_by")
+        }
+        assert confirmed == {"SplitOne", "SplitTwo"}, abi
+        assert [e["class"].rsplit(".", 1)[-1] for e in per_abi["ambiguous_dynamic"]] == ["SplitRt"]
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_split_fixture_splits_in_the_thumb_dialect_too() -> None:
+    """The a12 fixture is the a9_split source built with -mthumb (every
+    shipped v7a library is Thumb; the A8-A11 v7a fixtures came out
+    ARM-mode). The same chain - the staging's pool-pair and NEON slice
+    copy, the per-class helper's vtable call reading the carried pair -
+    splits exactly like the ARM-mode twin, and the volatile-count
+    registration stays ambiguous."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a12-jni-split-thumb.apk")
+    native = scan_android_native(apk)
+    plain = build_jni_join_summary(apk, native)
+    assert plain["per_abi"]["armeabi-v7a"]["counts"]["ambiguous_dynamic"] == 3
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"]["armeabi-v7a"]
+    assert per_abi["counts"] == {
+        "libraries": 1,
+        "bound": 0,
+        "bound_dynamic": 4,
+        "ambiguous_dynamic": 1,
+        "unbound_dex_natives": 0,
+        "undeclared_exports": 0,
+    }
     confirmed = {
-        e["class"].rsplit(".", 1)[-1] for e in x86["bound_dynamic"] if e.get("confirmed_by")
+        e["class"].rsplit(".", 1)[-1] for e in per_abi["bound_dynamic"] if e.get("confirmed_by")
     }
     assert confirmed == {"SplitOne", "SplitTwo"}
-    assert [e["class"].rsplit(".", 1)[-1] for e in x86["ambiguous_dynamic"]] == ["SplitRt"]
+    assert [e["class"].rsplit(".", 1)[-1] for e in per_abi["ambiguous_dynamic"]] == ["SplitRt"]
 
 
 # ------------------- A10 Q1: the honest 32-bit refusals, pinned per ABI
@@ -1434,22 +1504,36 @@ def test_mark_when_every_candidate_is_registered_for_another_class(abi: str) -> 
 )
 def test_no_candidates_mark_without_resolved_ranges() -> None:
     """The mark needs the --disassemble confirmer's resolved ranges: the
-    plain join never marks, and the 32-bit ABIs - which the call-site
-    layer does not model - never mark even with the flag on. Their rows
-    stay exactly the plain-ambiguous shape."""
+    plain join never marks. With the flag on, every ABI has a call-site
+    layer (the last two gained theirs in A11 and A12), so each resolves
+    NwBound's range and leaves the same four-row shape the 64-bit ABIs
+    have had since A10."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
     apk = str(FIXTURES / "a10-jni-nowhere.apk")
     native = scan_android_native(apk)
-    for confirm in (False, True):
-        join = build_jni_join_summary(apk, native, confirm_findclass=confirm)
-        for abi in ("armeabi-v7a", "x86"):
-            per_abi = join["per_abi"][abi]
-            assert per_abi["counts"]["ambiguous_dynamic"] == 5
-            assert not any(
-                "candidates_registered_elsewhere" in e for e in per_abi["ambiguous_dynamic"]
-            )
+    plain = build_jni_join_summary(apk, native)
+    for abi in ("armeabi-v7a", "x86"):
+        assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 5
+        assert not any(
+            "candidates_registered_elsewhere" in e
+            for e in plain["per_abi"][abi]["ambiguous_dynamic"]
+        )
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    v7a = join["per_abi"]["armeabi-v7a"]
+    assert v7a["counts"]["ambiguous_dynamic"] == 4
+    marked = {
+        (e["class"].rsplit(".", 1)[-1], e.get("candidates_registered_elsewhere", False))
+        for e in v7a["ambiguous_dynamic"]
+    }
+    assert ("NwMissing", True) in marked
+    # the i386 layer does not read this fixture's registrar chain (the same
+    # pre-existing x86 residue the a8 twin shows), so x86 stays at the
+    # plain-ambiguous shape even with the flag
+    x86 = join["per_abi"]["x86"]
+    assert x86["counts"]["ambiguous_dynamic"] == 5
+    assert not any("candidates_registered_elsewhere" in e for e in x86["ambiguous_dynamic"])
 
 
 # ------------------- A11 S3: tables built at run time
@@ -1458,23 +1542,72 @@ def test_no_candidates_mark_without_resolved_ranges() -> None:
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
 )
-def test_runtime_tables_bind_on_x86_only_where_the_walk_reads_them() -> None:
+@pytest.mark.parametrize("abi", ["x86", "armeabi-v7a"])
+def test_runtime_tables_bind_where_the_walk_reads_them(abi: str) -> None:
     """The registrar walk's stores are the only source of the runtime
     entries: the constant-count word-store registrar (RtNative), the
     realigned registrar (RtAligned) and the pair-passing chain (RtPair)
-    bind on x86 through runtime_table; the volatile-count twin stays
-    ambiguous; nothing changes on the other ABIs (the recovery walks
-    i386 only)."""
+    bind through runtime_table - on x86 (i386, since A11) and on
+    armeabi-v7a (arm32 in its ARM state, since A12; the Thumb twin is the
+    fixture below). The volatile-count twin stays ambiguous everywhere,
+    and no ABI outside these two carries a runtime_table binding."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     native = scan_android_native(apk)
     join = build_jni_join_summary(apk, native, confirm_findclass=True)
-    x86 = join["per_abi"]["x86"]
+    per_abi = join["per_abi"][abi]
     bound = {
         (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
-        for e in x86["bound_dynamic"]
+        for e in per_abi["bound_dynamic"]
+    }
+    expected = {
+        ("RtAligned", "rtOne"): "runtime_table",
+        ("RtNative", "rtOne"): "runtime_table",
+        ("RtNative", "rtShared"): "runtime_table",
+        ("RtPair", "rtOne"): "runtime_table",
+        ("RtPair", "rtShared"): "runtime_table",
+    }
+    if abi == "armeabi-v7a":
+        # the arm32 confirmer (T2) also resolves this fixture's static
+        # control, which the i386 layer does not read
+        expected[("RtStatic", "rtStaticAdd")] = "findclass"
+    assert bound == expected
+    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]}
+    assert ("RtVolatile", "rtOne") in ambiguous
+    assert ("RtVolatile", "rtShared") in ambiguous
+    for other in ("arm64-v8a", "x86_64"):
+        expectations = {
+            "bound_dynamic": 1,
+            "ambiguous_dynamic": 1,
+            "unbound_dex_natives": 7,
+        }
+        other_join = join["per_abi"][other]
+        assert {k: other_join["counts"][k] for k in expectations} == expectations, other
+        assert not any(
+            e.get("confirmed_by") == "runtime_table" for e in other_join["bound_dynamic"]
+        ), other
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_tables_bind_in_the_thumb_dialect_too() -> None:
+    """The a12 fixture is the a11_rt source built with -mthumb: the same
+    registrar shapes (word stores, the realigned frame, the pair-passing
+    chain, the volatile refusal) recover identically in the Thumb
+    dialect, and the static control confirms through findclass."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a12-jni-thumb.apk")
+    native = scan_android_native(apk)
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"]["armeabi-v7a"]
+    bound = {
+        (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
+        for e in per_abi["bound_dynamic"]
     }
     assert bound == {
         ("RtAligned", "rtOne"): "runtime_table",
@@ -1482,23 +1615,11 @@ def test_runtime_tables_bind_on_x86_only_where_the_walk_reads_them() -> None:
         ("RtNative", "rtShared"): "runtime_table",
         ("RtPair", "rtOne"): "runtime_table",
         ("RtPair", "rtShared"): "runtime_table",
+        ("RtStatic", "rtStaticAdd"): "findclass",
     }
-    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in x86["ambiguous_dynamic"]}
+    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]}
     assert ("RtVolatile", "rtOne") in ambiguous
     assert ("RtVolatile", "rtShared") in ambiguous
-    # the other ABIs keep their S2-era shapes: the static control confirms
-    # through findclass on the 64-bit ABIs, v7a stays plain, and no ABI
-    # outside x86 carries a runtime_table binding
-    for abi, expected in (
-        ("arm64-v8a", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
-        ("x86_64", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
-        ("armeabi-v7a", {"bound_dynamic": 0, "ambiguous_dynamic": 2, "unbound_dex_natives": 7}),
-    ):
-        per_abi = join["per_abi"][abi]
-        assert {k: per_abi["counts"][k] for k in expected} == expected, abi
-        assert not any(
-            e.get("confirmed_by") == "runtime_table" for e in per_abi["bound_dynamic"]
-        ), abi
 
 
 @pytest.mark.skipif(
@@ -1512,18 +1633,21 @@ def test_runtime_tables_need_the_disassemble_flag() -> None:
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=False)
-    x86 = join["per_abi"]["x86"]
-    assert x86["counts"]["bound_dynamic"] == 0
-    assert x86["counts"]["unbound_dex_natives"] == 7
+    for abi in ("x86", "armeabi-v7a"):
+        per_abi = join["per_abi"][abi]
+        assert per_abi["counts"]["bound_dynamic"] == 0, abi
+        assert per_abi["counts"]["unbound_dex_natives"] == 7, abi
 
 
 @pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
 )
-def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
+@pytest.mark.parametrize("abi", ["x86", "armeabi-v7a"])
+def test_runtime_table_fn_addrs_pass_the_start_oracle(abi: str) -> None:
     """Every fn_addr the runtime recovery reports is a function start of
-    the x86 copy's own bytes (llvm-nm dynsym FUNCs plus eh_frame FDEs)."""
+    that ABI copy's own bytes (llvm-readelf dynsym FUNCs plus eh_frame
+    FDEs, and .ARM.exidx on armeabi-v7a - never blint's own discovery)."""
     import re
     import subprocess
 
@@ -1532,13 +1656,12 @@ def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
-    x86 = join["per_abi"]["x86"]
-    # dynsym FUNC values plus eh_frame FDE starts, from llvm-readelf /
-    # llvm-objdump - never blint's own discovery
+    per_abi = join["per_abi"][abi]
     readelf = _llvm_readelf()
+    library = FIXTURES / f"liba11rt_{abi}.so"
     starts = set()
     out = subprocess.run(
-        [readelf, "--dyn-syms", str(FIXTURES / "liba11rt_x86.so")], capture_output=True, text=True
+        [readelf, "--dyn-syms", str(library)], capture_output=True, text=True
     ).stdout
     for line in out.splitlines():
         parts = line.split()
@@ -1546,14 +1669,31 @@ def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
             starts.add(int(parts[1], 16) & ~1)
     objdump = readelf.replace("llvm-readelf", "llvm-objdump")
     frames = subprocess.run(
-        [objdump, "--dwarf=frames", str(FIXTURES / "liba11rt_x86.so")],
+        [objdump, "--dwarf=frames", str(library)],
         capture_output=True,
         text=True,
     ).stdout
     for match in re.finditer(r"pc=0*([0-9a-f]+)\.{2,3}0*[0-9a-f]+", frames):
         starts.add(int(match.group(1), 16) & ~1)
+    if abi == "armeabi-v7a":
+        dump = subprocess.run(
+            [readelf, "-x", ".ARM.exidx", str(library)], capture_output=True, text=True
+        ).stdout
+        for line in dump.splitlines():
+            match = re.match(r"^\s*0x([0-9a-f]+)\s+((?:[0-9a-f]{8}\s+){1,4})", line)
+            if not match:
+                continue
+            base = int(match.group(1), 16)
+            for index, group in enumerate(match.group(2).split()):
+                if index % 2:
+                    continue
+                word = int.from_bytes(bytes.fromhex(group), "little")
+                offset = word & 0x7FFFFFFF
+                if word & 0x40000000:
+                    offset -= 1 << 31
+                starts.add((base + index * 4 + offset) & ~1)
     checked = 0
-    for entry in x86["bound_dynamic"]:
+    for entry in per_abi["bound_dynamic"]:
         if entry.get("confirmed_by") != "runtime_table":
             continue
         assert int(entry["fn_addr"], 16) in starts, entry
