@@ -1650,10 +1650,12 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
     """Map each ELF PLT stub entry address to the symbol it transfers to.
 
     Decodes each stub's own reference to its GOT slot (arm64 ``adrp x16`` +
-    ``ldr x17, [x16, #imm]``; x86-64 ``jmp [rip + disp32]``) and names it
-    from the slot's JUMP_SLOT relocation, so no PLT entry layout is assumed.
-    On x86-64 both the jump's address and its 16-byte entry base are keyed.
-    Other architectures return an empty map.
+    ``ldr x17, [x16, #imm]``; x86-64 ``jmp [rip + disp32]``; i386
+    ``jmp *disp32(%ebx)`` against the ``.got.plt`` base the PIC ABI keeps
+    in ebx) and names it from the slot's JUMP_SLOT relocation, so no PLT
+    entry layout is assumed. On the x86 ABIs both the jump's address and
+    its 16-byte entry base are keyed. Other architectures return an empty
+    map.
     """
     got_names: dict[int, str] = {}
     for reloc in getattr(parsed_obj, "pltgot_relocations", []) or []:
@@ -1669,7 +1671,8 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
         machine = str(parsed_obj.header.machine_type)
     is_aarch64 = "AARCH64" in machine.upper()
     is_x86_64 = "x86_64" in machine.lower() or "AMD64" in machine.upper()
-    if not (is_aarch64 or is_x86_64):
+    is_i386 = "I386" in machine.upper() or "EM_386" in machine.upper()
+    if not (is_aarch64 or is_x86_64 or is_i386):
         return stubs
 
     plt = parsed_obj.get_section(".plt")
@@ -1704,6 +1707,27 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
                     stubs.setdefault(stub_start, name)
                 page = None
                 stub_start = None
+    elif is_i386:
+        # The PIC stub jumps through a GOT slot addressed from the .got.plt
+        # base (ebx at run time); a non-PIC stub uses the rip-equivalent
+        # absolute form. 16-byte entries, as on x86-64.
+        gotplt = parsed_obj.get_section(".got.plt")
+        try:
+            got_base = int(gotplt.virtual_address)
+        except (AttributeError, TypeError, ValueError):
+            return stubs
+        if not got_base:
+            return stubs
+        for offset in range(len(data) - 6):
+            if data[offset] != 0xFF or data[offset + 1] not in (0xA3, 0x25):
+                continue
+            disp = struct.unpack_from("<i", data, offset + 2)[0]
+            slot = (got_base + disp) if data[offset + 1] == 0xA3 else base + offset + 6 + disp
+            name = got_names.get(slot)
+            if not name:
+                continue
+            stubs.setdefault(base + offset, name)
+            stubs.setdefault(base + (offset & ~0xF), name)
     else:
         for offset in range(len(data) - 5):
             if data[offset] != 0xFF or data[offset + 1] != 0x25:

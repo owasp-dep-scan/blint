@@ -1199,16 +1199,27 @@ def test_split_ranges_are_the_registrars_slices() -> None:
     not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
 )
 def test_split_fixture_stays_ambiguous_off_the_callsite_abis() -> None:
-    """The 32-bit twins keep every splitShared declaration ambiguous -
-    the call-site layer does not model them, so nothing is guessed."""
+    """armeabi-v7a keeps every splitShared declaration ambiguous - the
+    call-site layer has no arm32 model, so nothing is guessed. x86 splits
+    exactly like x86_64 (the i386 confirmer): SplitOne and SplitTwo bind
+    through findclass, and the volatile-count registration stays ambiguous."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
     apk = str(FIXTURES / "a9-jni-split.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
-    for abi in ("armeabi-v7a", "x86"):
-        assert join["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
-        assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"])
+    v7a = join["per_abi"]["armeabi-v7a"]
+    assert v7a["counts"]["ambiguous_dynamic"] == 3
+    assert not any(e.get("confirmed_by") for e in v7a["bound_dynamic"])
+    x86 = join["per_abi"]["x86"]
+    assert x86["counts"]["ambiguous_dynamic"] == 1
+    x86_64 = join["per_abi"]["x86_64"]
+    assert x86["counts"] == x86_64["counts"]
+    confirmed = {
+        e["class"].rsplit(".", 1)[-1] for e in x86["bound_dynamic"] if e.get("confirmed_by")
+    }
+    assert confirmed == {"SplitOne", "SplitTwo"}
+    assert [e["class"].rsplit(".", 1)[-1] for e in x86["ambiguous_dynamic"]] == ["SplitRt"]
 
 
 # ------------------- A10 Q1: the honest 32-bit refusals, pinned per ABI

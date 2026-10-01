@@ -831,12 +831,24 @@ for _family, _members in _REGISTER_FAMILIES:
 # ebp and esp survive calls.
 _I386_CALL_CLOBBERED = ("eax", "ecx", "edx")
 
+# The opaque base a stack realignment (`and esp, imm`) rebases the frame to:
+# far below any entry-relative key a real frame or argument area uses, so
+# the realigned namespace can never alias the entry-relative one.
+_I386_ALIGNED_FRAME_BASE = -(1 << 24)
+
 _I386_FRAME_REGISTERS: frozenset[str] = frozenset({"esp", "ebp"})
 
 # The i386 store form: the displacement is optional (`mov [esp], esi`).
 _I386_STORE_RE = re.compile(
     rf"^\s*mov\s+(?:(byte|word|dword)\s+ptr\s+)?"
     rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*,\s*({_IMM}|{_X86_REG})\s*$",
+    re.IGNORECASE,
+)
+# A push whose source is memory (`push dword ptr [ebp + 12]`): the callee
+# re-pushes an incoming argument at its own call.
+_I386_PUSH_MEM_RE = re.compile(
+    rf"^\s*push\s+(?:(byte|word|dword)\s+ptr\s+)?"
+    rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*$",
     re.IGNORECASE,
 )
 _I386_PUSH_RE = re.compile(rf"^\s*push\s+({_X86_REG}|{_IMM})\s*$", re.IGNORECASE)
@@ -898,10 +910,15 @@ class I386Model(ArchModel):
       ``lea`` folds GOTOFF operands the way rip-relative ``lea`` folds on
       x86-64.
     - **Alignment rebases.** ``and esp, imm`` moves ``esp`` by an amount
-      the bytes do not state; the esp-relative frame is rebased there and
-      earlier esp-keyed slots are dropped, so a slot stored before a
-      realignment is never paired with an access after it. Within the
-      rebased region the naming is exact.
+      the bytes do not state, so the post-realignment frame is keyed in
+      its own namespace - an opaque base far below any entry-relative
+      key (a frame and an argument area are kilobytes at most). Slots
+      stored before the realignment keep their entry-relative keys (the
+      realignment moves esp *down*; nothing above it moved), and the
+      incoming argument slots above the entry stay readable through the
+      realignment, which is how a realigned callee still reads the pair
+      a caller staged. Within each namespace the naming is exact, and
+      the two can never alias.
 
     Loads through any other pointer (a materialised address, a heap
     pointer) invalidate the destination: their values live in sections
@@ -983,6 +1000,9 @@ class I386Model(ArchModel):
             # not relate to the entry sp.
             state.sp_adjustment = None
             state.invalidate("ebp")
+            return
+        if match := _I386_PUSH_MEM_RE.match(text):
+            self._apply_push_memory(state, *match.groups())
             return
         if match := _I386_PUSH_RE.match(text):
             self._apply_push(state, match.group(1))
@@ -1079,6 +1099,36 @@ class I386Model(ArchModel):
         immediate = _parse_immediate(token)
         if immediate is not None:
             state.store("esp", state.sp_adjustment, immediate, 4)
+        else:
+            state.drop("esp", state.sp_adjustment, 4)
+
+    def _apply_push_memory(
+        self,
+        state: FrameState,
+        size_hint: str | None,
+        base_reg: str,
+        sign: str | None,
+        offset_token: str | None,
+    ) -> None:
+        """`push [base +/- K]`: the word a frame slot holds is pushed
+        (pointer words keep their identity), and an unresolvable source
+        still moves the stack."""
+        resolved = self._resolve_frame_base(state, base_reg)
+        offset = _parse_immediate(offset_token) if offset_token else 0
+        if offset is not None and sign == "-":
+            offset = -offset
+        value = (
+            state.load_word(resolved[0], resolved[1] + offset)
+            if resolved is not None and offset is not None
+            else None
+        )
+        if state.sp_adjustment is None:
+            return
+        state.sp_adjustment -= 4
+        if isinstance(value, tuple):
+            state.store_pointer_word("esp", state.sp_adjustment, value)
+        elif isinstance(value, int):
+            state.store("esp", state.sp_adjustment, value, 4)
         else:
             state.drop("esp", state.sp_adjustment, 4)
 
@@ -1281,12 +1331,11 @@ class I386Model(ArchModel):
                 state.sp_adjustment += immediate
             elif op.lower() == "and":
                 # A realignment: the bytes do not state the delta, so the
-                # esp-relative frame is rebased and earlier esp-keyed slots
-                # are dropped - a pre-realignment slot must never pair with
-                # a post-realignment access.
-                state.sp_adjustment = 0
-                for base, offset in [(b, o) for (b, o) in state.slots if b == "esp"]:
-                    del state.slots[(base, offset)]
+                # post-realignment frame is keyed from an opaque base no
+                # entry-relative key can reach. Nothing above the entry
+                # moved, so earlier slots and the incoming arguments keep
+                # their entry-relative keys.
+                state.sp_adjustment = _I386_ALIGNED_FRAME_BASE
             return
         current = state.get_register(register)
         if current is None or immediate is None:
