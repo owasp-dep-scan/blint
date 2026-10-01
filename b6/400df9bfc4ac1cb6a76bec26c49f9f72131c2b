@@ -1,0 +1,28 @@
+blint/lib/jni.py
+  s_3ce4fa53ecd7da::t_b3b41b9db26f20 554-558,567,881-884
+blint/lib/disassembler.py
+  s_3ce4fa53ecd7da::t_b3b41b9db26f20 1712-1713,1725
+blint/lib/jni_findclass.py
+  s_3ce4fa53ecd7da::t_b3b41b9db26f20 41-43,73,1291-1292,1302-1303
+tests/test_jni.py
+  s_3ce4fa53ecd7da::t_7a728f5c36d9ac 362-375,380-382,386-388
+  s_3ce4fa53ecd7da::t_2b3c50551cbb60 376-379,383-385
+docs/METADATA.md
+  s_3ce4fa53ecd7da::t_2116cd7cdc4731 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b6400df9bfc4ac1cb6a76bec26c49f9f72131c2b",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
