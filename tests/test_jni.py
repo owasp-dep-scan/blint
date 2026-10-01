@@ -1423,3 +1423,112 @@ def test_no_candidates_mark_without_resolved_ranges() -> None:
             assert not any(
                 "candidates_registered_elsewhere" in e for e in per_abi["ambiguous_dynamic"]
             )
+
+
+# ------------------- A11 S3: tables built at run time
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_tables_bind_on_x86_only_where_the_walk_reads_them() -> None:
+    """The registrar walk's stores are the only source of the runtime
+    entries: the constant-count word-store registrar (RtNative), the
+    realigned registrar (RtAligned) and the pair-passing chain (RtPair)
+    bind on x86 through runtime_table; the volatile-count twin stays
+    ambiguous; nothing changes on the other ABIs (the recovery walks
+    i386 only)."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a11-jni-rt.apk")
+    native = scan_android_native(apk)
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    x86 = join["per_abi"]["x86"]
+    bound = {
+        (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
+        for e in x86["bound_dynamic"]
+    }
+    assert bound == {
+        ("RtAligned", "rtOne"): "runtime_table",
+        ("RtNative", "rtOne"): "runtime_table",
+        ("RtNative", "rtShared"): "runtime_table",
+        ("RtPair", "rtOne"): "runtime_table",
+        ("RtPair", "rtShared"): "runtime_table",
+    }
+    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in x86["ambiguous_dynamic"]}
+    assert ("RtVolatile", "rtOne") in ambiguous
+    assert ("RtVolatile", "rtShared") in ambiguous
+    # the other ABIs keep their S2-era shapes: the static control confirms
+    # through findclass on the 64-bit ABIs, v7a stays plain, and no ABI
+    # outside x86 carries a runtime_table binding
+    for abi, expected in (
+        ("arm64-v8a", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
+        ("x86_64", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
+        ("armeabi-v7a", {"bound_dynamic": 0, "ambiguous_dynamic": 2, "unbound_dex_natives": 7}),
+    ):
+        per_abi = join["per_abi"][abi]
+        assert {k: per_abi["counts"][k] for k in expected} == expected, abi
+        assert not any(
+            e.get("confirmed_by") == "runtime_table" for e in per_abi["bound_dynamic"]
+        ), abi
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_tables_need_the_disassemble_flag() -> None:
+    """Without --disassemble the runtime recovery never runs: every
+    runtime-built row stays unbound exactly as before this wave."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a11-jni-rt.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=False)
+    x86 = join["per_abi"]["x86"]
+    assert x86["counts"]["bound_dynamic"] == 0
+    assert x86["counts"]["unbound_dex_natives"] == 7
+
+
+@pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
+    """Every fn_addr the runtime recovery reports is a function start of
+    the x86 copy's own bytes (llvm-nm dynsym FUNCs plus eh_frame FDEs)."""
+    import re
+    import subprocess
+
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a11-jni-rt.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
+    x86 = join["per_abi"]["x86"]
+    # dynsym FUNC values plus eh_frame FDE starts, from llvm-readelf /
+    # llvm-objdump - never blint's own discovery
+    readelf = _llvm_readelf()
+    starts = set()
+    out = subprocess.run(
+        [readelf, "--dyn-syms", str(FIXTURES / "liba11rt_x86.so")], capture_output=True, text=True
+    ).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 8 and parts[3] == "FUNC" and parts[6] != "UND":
+            starts.add(int(parts[1], 16) & ~1)
+    objdump = readelf.replace("llvm-readelf", "llvm-objdump")
+    frames = subprocess.run(
+        [objdump, "--dwarf=frames", str(FIXTURES / "liba11rt_x86.so")],
+        capture_output=True,
+        text=True,
+    ).stdout
+    for match in re.finditer(r"pc=0*([0-9a-f]+)\.{2,3}0*[0-9a-f]+", frames):
+        starts.add(int(match.group(1), 16) & ~1)
+    checked = 0
+    for entry in x86["bound_dynamic"]:
+        if entry.get("confirmed_by") != "runtime_table":
+            continue
+        assert int(entry["fn_addr"], 16) in starts, entry
+        checked += 1
+    assert checked == 5

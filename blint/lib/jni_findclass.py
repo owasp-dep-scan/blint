@@ -214,8 +214,14 @@ def _walk_function(
         if isinstance(value, dict):
             continue
         state.registers[family] = value
-    for (base, offset), value in (incoming.get("slots") or {}).items():
-        if isinstance(value, tuple):
+    for key, value in (incoming.get("slots") or {}).items():
+        base, offset = key
+        if base.startswith("caller_"):
+            # the caller's frame rides along verbatim: its byte entries are
+            # bytes and its pointer words are tuples, and re-storing through
+            # the helpers would clobber neighbouring entries
+            state.slots[key] = value
+        elif isinstance(value, tuple):
             state.store_pointer_word(base, offset, value)
         elif isinstance(value, int):
             state.store(base, offset, value, 4)
@@ -1259,9 +1265,12 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
 # (ff /2, mod=10) or the slot load `mov reg, [reg+860]` (8b, mod=10). The
 # lookaheads keep the matches overlapping, so a false match cannot hide a
 # real instruction that starts inside it.
+# The load form's modrm carries the destination in its reg field, so the
+# second byte spans the whole mod=10 half; the walk validates every
+# proposal (a SIB-form coincidence decodes to garbage and is dropped).
 _X86_VTABLE_SITE_RES = (
     re.compile(rb"(?=\xff[\x90-\x97]\x5c\x03\x00\x00)", re.DOTALL),
-    re.compile(rb"(?=\x8b[\x80-\x87]\x5c\x03\x00\x00)", re.DOTALL),
+    re.compile(rb"(?=\x8b[\x80-\xbf]\x5c\x03\x00\x00)", re.DOTALL),
 )
 
 _RUNTIME_MAX_ENTRIES = 64

@@ -459,6 +459,7 @@ def _join_abi_lists(
     lib_abis: dict[str, set[str]],
     abi: str,
     confirmed_ranges: dict[tuple[str, str], list[dict]] | None = None,
+    runtime_registrations: dict[tuple[str, str], list[dict]] | None = None,
 ) -> dict:
     """One ABI's join across every library that ships in it.
 
@@ -524,6 +525,20 @@ def _join_abi_lists(
                 pair = (table_entry.get("name"), table_entry.get("signature"))
                 if pair in pending:
                     table_entries.setdefault(pair, []).append({**table_entry, "library": name})
+        # Registrations recovered from the registrar walk's stores (tables
+        # built at run time): each entry carries the class its FindClass
+        # named, so it decides only that class's rows.
+        for registration in (runtime_registrations or {}).get((name, abi)) or []:
+            for table_entry in registration.get("entries") or []:
+                pair = (table_entry.get("name"), table_entry.get("signature"))
+                if pair in pending:
+                    table_entries.setdefault(pair, []).append(
+                        {
+                            **table_entry,
+                            "library": name,
+                            "runtime_class": registration.get("class"),
+                        }
+                    )
     # The classes this ABI's resolved registrations name.
     named_classes = {
         entry_range["class"]
@@ -555,7 +570,26 @@ def _join_abi_lists(
         decided: dict[str, dict] = {}
         for cls in classes:
             clean = []
+            seen_picks: set[tuple] = set()
             for match in matches:
+                # identical implementations (the same entry recovered
+                # twice) are one pick, not an arbitrary choice between two;
+                # a runtime entry of another class is a different pick even
+                # when the fn matches - it names that class's registration
+                pick = (
+                    match["library"],
+                    match.get("fn_addr"),
+                    match.get("name"),
+                    match.get("runtime_class") or _slot_address(match),
+                )
+                if pick in seen_picks:
+                    continue
+                seen_picks.add(pick)
+                if match.get("runtime_class"):
+                    # a runtime-recovered entry names its own class
+                    if match["runtime_class"] == cls:
+                        clean.append(match)
+                    continue
                 slot = _slot_address(match)
                 naming = {
                     entry_range["class"]
@@ -579,7 +613,9 @@ def _join_abi_lists(
                         "library": match["library"],
                         "fn_addr": match.get("fn_addr"),
                         **({"fn_name": match["fn_name"]} if match.get("fn_name") else {}),
-                        "confirmed_by": "findclass",
+                        "confirmed_by": "runtime_table"
+                        if match.get("runtime_class")
+                        else "findclass",
                     }
                 )
                 continue
@@ -836,6 +872,52 @@ def build_jni_join_summary(
         per_abi[abi] = _join_abi_lists(
             natives, surfaces, register_tables, lib_abis, abi, confirmed_classes
         )
+    # Tables built at run time (A11 S3): where the join leaves dex natives
+    # unbound, the registrar walk may still read the registration's entry
+    # words off the callee's stack. Only the ABI's own copies are walked,
+    # and only the shapes S0 measured as readable (i386 word stores with a
+    # constant count) recover anything; every recovered fnPtr passes the
+    # function-start oracle inside the recovery.
+    runtime_registrations: dict[tuple[str, str], list[dict]] = {}
+    if confirm_findclass:
+        unbound_abis = {
+            abi
+            for abi, abi_join in per_abi.items()
+            if (abi_join.get("counts") or {}).get("unbound_dex_natives")
+        }
+        if unbound_abis:
+            from blint.lib.jni_findclass import recover_runtime_tables
+
+            try:
+                with LibraryReader(app_file) as reader:
+                    for (name, abi), loc in lib_locations.items():
+                        if abi not in unbound_abis:
+                            continue
+                        data = None
+                        with contextlib.suppress(Exception):
+                            data = reader.read(loc)
+                        if not data:
+                            continue
+                        parsed = lief.ELF.parse(data)
+                        if parsed is None or isinstance(parsed, lief.lief_errors):
+                            continue
+                        with contextlib.suppress(Exception):
+                            registrations = recover_runtime_tables(parsed)
+                            if registrations:
+                                runtime_registrations[(name, abi)] = registrations
+            except Exception as exc:
+                LOG.debug(f"jni join: runtime-table recovery failed for {app_file}: {exc}")
+        if runtime_registrations:
+            for abi in sorted({key[1] for key in runtime_registrations}):
+                per_abi[abi] = _join_abi_lists(
+                    natives,
+                    surfaces,
+                    register_tables,
+                    lib_abis,
+                    abi,
+                    confirmed_classes,
+                    runtime_registrations,
+                )
 
     # loadLibrary("x") -> libx.so member presence, per ABI where it ships.
     member_names = {
