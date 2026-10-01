@@ -313,7 +313,7 @@ def _walk_function(
                     {"methods": methods, "count": count, "class": last_class}
                 )
                 if (
-                    arch == "x86"
+                    arch in ("x86", "arm")
                     and isinstance(methods, tuple)
                     and methods[0]
                     in (
@@ -321,6 +321,8 @@ def _walk_function(
                         "ebp",
                         "caller_esp",
                         "caller_ebp",
+                        "sp",
+                        "caller_sp",
                     )
                 ):
                     # A table built at run time: the entry words sit in the
@@ -369,7 +371,9 @@ def _walk_function(
                         # the register map as it stood at the call (i386: an
                         # internal call may pass arguments in any register)
                         "registers": dict(state.registers) if arch == "x86" else None,
-                        "slots": dict(state.slots) if arch == "x86" else None,
+                        # the frame as it stood at the call (i386 and arm32:
+                        # a seeded callee reads a table the caller built)
+                        "slots": dict(state.slots) if arch in ("x86", "arm") else None,
                     }
                 )
                 if plt_names.get(target) in ("memcpy", "memmove"):
@@ -424,8 +428,9 @@ def _walk_function(
         materialized: set[int] = set()
         if arch == "arm":
             # the literal-pool load and the GOT slot read name words in this
-            # binary's own bytes; resolve them beside the model
-            _arm32_resolve_operand(state, model, instruction, text, sections, reloc_map)
+            # binary's own bytes; resolve them beside the model (with the
+            # pre-step registers, so a `ldr rN, [rN]` still sees its slot)
+            _arm32_resolve_operand(state, model, instruction, text, sections, reloc_map, before)
         elif arch != "aarch64":
             _apply_x86_sp_symbolic(state, model, text)
             materialized.update(_x86_rip_operands(parsed_obj, instruction, text))
@@ -778,7 +783,9 @@ def _arm32_mode_for_start(start: int, thumb: set[int], arm: set[int], range_mode
     return "thumb"
 
 
-def _arm32_resolve_operand(state, model, instruction, text: str, sections, reloc_map) -> None:
+def _arm32_resolve_operand(
+    state, model, instruction, text: str, sections, reloc_map, before: dict | None = None
+) -> None:
     """Resolve one arm32 instruction's data reads beside the model.
 
     The literal-pool load and the GOT slot load name words in this binary's
@@ -808,12 +815,22 @@ def _arm32_resolve_operand(state, model, instruction, text: str, sections, reloc
             state.registers[family] = word
         return
     if match := _ARM32_POOL_REG_LOAD_RE.match(text):
-        # ldr rN, [pc, rM]: the pool anchor plus the register's pool word.
+        # `ldr rN, [pc, rM]` (the ARM-dialect PIC form): the pool anchor plus
+        # the register's pool word names the address this load reads - a GOT
+        # slot when the target is a preemptible symbol, whose relocated value
+        # the relocation map holds, or plain pool data read from the bytes.
+        # The register's value is read from before the model stepped this
+        # load, for the same destination-equals-base reason as the GOT form.
         base_family = _family(match.group("base"))
-        base_value = state.registers.get(base_family) if base_family else None
+        source = before if before is not None else state.registers
+        base_value = source.get(base_family) if base_family else None
         family = _family(match.group("reg"))
         if isinstance(base_value, int) and family:
-            word = _word_at(((instruction.address + pc_read) & ~3) + base_value)
+            address = ((instruction.address + pc_read) & ~3) + base_value
+            if reloc_map and (address & 0xFFFFFFFF) in reloc_map:
+                state.registers[family] = ("ptr", reloc_map[address & 0xFFFFFFFF])
+                return
+            word = _word_at(address)
             if word is not None:
                 state.registers[family] = word
             else:
@@ -821,7 +838,11 @@ def _arm32_resolve_operand(state, model, instruction, text: str, sections, reloc
         return
     if match := _ARM32_GOT_LOAD_RE.match(text):
         base_family = _family(match.group("base"))
-        base_value = state.registers.get(base_family) if base_family else None
+        # The base's value is read from before the model stepped this load:
+        # a `ldr rN, [rN]` form has the model invalidate the destination,
+        # which is the same register the slot address lives in.
+        source = before if before is not None else state.registers
+        base_value = source.get(base_family) if base_family else None
         if not isinstance(base_value, int):
             return
         offset = _parse_offset(match.group("off"))
@@ -928,16 +949,26 @@ def _raw_register(state, name: str):
 
 
 def _carried_register(state, name: str, adr_values: dict[str, int]):
-    """The methods argument: an address (int or ``("ptr", a)``) or a
-    carried stack marker ``("caller_sp", k)`` / ``("caller_rbp", k)``
-    from a seeding caller."""
+    """The methods argument: an address (int or ``("ptr", a)``) or a stack
+    marker - this function's own frame (``("sp", k)`` on arm, the i386
+    families below) or one carried from a seeding caller
+    (``("caller_sp", k)`` / ``("caller_rbp", k)`` and the i386 spellings).
+    """
     value = _raw_register(state, name)
     if isinstance(value, int):
         return value
     if isinstance(value, tuple) and value:
         if value[0] == "ptr" and isinstance(value[1], int):
             return value[1]
-        if value[0] in ("caller_sp", "caller_rbp") and isinstance(value[1], int):
+        if value[0] in (
+            "caller_sp",
+            "caller_rbp",
+            "caller_esp",
+            "caller_ebp",
+            "sp",
+            "esp",
+            "ebp",
+        ) and isinstance(value[1], int):
             return value
     if adr_values and name in adr_values:
         return adr_values[name]
@@ -974,6 +1005,19 @@ def _seed_for_call(
         # the caller's whole frame rides along under caller-prefixed bases:
         # a registration whose entries a caller built at run time reads its
         # words there
+        for (base, offset), value in (slots or {}).items():
+            seed["slots"][(f"caller_{base}", offset)] = value
+        return seed
+    if arch == "arm":
+        seed: dict = {"registers": {}, "slots": {}}
+        for family, value in args.items():
+            if isinstance(value, tuple) and value and value[0] == "sp":
+                seed["registers"][family] = ("caller_sp", value[1])
+            else:
+                seed["registers"][family] = value
+        # the caller's frame rides along under a caller-prefixed base: a
+        # pair-passing registrar builds its entry words there and the callee
+        # the vtable call sits in reads them through the carried marker
         for (base, offset), value in (slots or {}).items():
             seed["slots"][(f"caller_{base}", offset)] = value
         return seed
@@ -1693,6 +1737,80 @@ _X86_VTABLE_SITE_RES = (
     re.compile(rb"(?=\x8b[\x80-\xbf]\x5c\x03\x00\x00)", re.DOTALL),
 )
 
+# The arm32 RegisterNatives vtable slot load in the byte stream, both
+# dialects: the Thumb-2 `ldr.w rN, [rM, #860]` (halfwords f8d<Rn> and
+# <Rt>35c) and the ARM-mode `ldr rN, [rM, #860]` (word e59<Rn><Rt>35c, any
+# condition). The lookaheads keep the matches overlapping, so a false match
+# cannot hide a real instruction that starts inside it.
+_ARM32_VTABLE_SITE_RES = (
+    re.compile(
+        rb"(?=[\xd0-\xdf]\xf8\x5c[\x03\x13\x23\x33\x43\x53\x63\x73"
+        rb"\x83\x93\xa3\xb3\xc3\xd3\xe3\xf3])",
+        re.DOTALL,
+    ),
+    # the ARM-mode word is cond 0101 1001 Rn Rt imm12 little-endian:
+    # 5c, 03|Rt<<4, 90|Rn, any condition
+    re.compile(
+        rb"(?=\x5c[\x03\x13\x23\x33\x43\x53\x63\x73\x83\x93\xa3"
+        rb"\xb3\xc3\xd3\xe3\xf3][\x90-\x9f])",
+        re.DOTALL,
+    ),
+)
+
+
+def _arm32_direct_callers(sections, targets: set[int]) -> set[int]:
+    """Addresses of the direct ``bl``/``blx imm`` sites whose target is in
+    ``targets``, both dialects: the Thumb two-halfword branch pair (whose
+    offset is the S:I1:I2:imm10:imm11 encoding, pc = inst+4 - word-aligned
+    for blx, which switches to the ARM-mode PLT) and the ARM-mode ``bl``
+    word (imm24 words, pc = inst+8)."""
+    callers: set[int] = set()
+    for base, blob in sections:
+        # Thumb: 2-byte-aligned branch pairs.
+        for i in range(0, len(blob) - 4, 2):
+            hw0 = blob[i] | (blob[i + 1] << 8)
+            if (hw0 & 0xF800) != 0xF000:
+                continue
+            hw1 = blob[i + 2] | (blob[i + 3] << 8)
+            site = base + i
+            # bits 15,14,12 decide bl (1,0,1) against blx (1,1,0); J1/J2
+            # (bits 13,11) are offset bits and vary.
+            if (hw1 & 0x9000) == 0x9000:  # bl
+                target = site + 4 + _thumb_branch_offset(hw0, hw1)
+            elif (hw1 & 0x9000) == 0x8000:  # blx imm (to ARM mode)
+                target = ((site + 4) & ~3) + _thumb_branch_offset(hw0, hw1)
+            else:
+                continue
+            if target & 0xFFFFFFFF in targets:
+                callers.add(site)
+        # ARM: word-aligned bl (any condition with L=1).
+        for i in range(0, len(blob) - 4, 4):
+            word = struct.unpack_from("<I", blob, i)[0]
+            if (word & 0x0F000000) != 0x0B000000:
+                continue
+            offset = word & 0x00FFFFFF
+            if offset & (1 << 23):
+                offset -= 1 << 24
+            if (base + i + 8 + (offset << 2)) & 0xFFFFFFFF in targets:
+                callers.add(base + i)
+    return callers
+
+
+def _thumb_branch_offset(hw0: int, hw1: int) -> int:
+    """The sign-extended T4/T2 branch offset from a Thumb halfword pair."""
+    sign = (hw0 >> 10) & 1
+    imm10 = hw0 & 0x3FF
+    j1 = (hw1 >> 13) & 1
+    j2 = (hw1 >> 11) & 1
+    imm11 = hw1 & 0x7FF
+    i1 = (~(j1 ^ sign)) & 1
+    i2 = (~(j2 ^ sign)) & 1
+    offset = (sign << 24) | (i1 << 23) | (i2 << 22) | (imm10 << 12) | (imm11 << 1)
+    if offset & (1 << 24):
+        offset -= 1 << 25
+    return offset
+
+
 _RUNTIME_MAX_ENTRIES = 64
 
 
@@ -1723,24 +1841,44 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     start this binary's own sources name (symbols, exports, unwind
     tables). A registration with any unreadable or invalid word is dropped
     whole rather than partially recovered, and a count computed at run
-    time reads as no constant and recovers nothing. Only i386 is walked;
-    other architectures return nothing.
+    time reads as no constant and recovers nothing. Only i386 and arm32
+    (both instruction set states) are walked - the ABIs whose registrars
+    build one- and two-entry tables at run time; other architectures
+    return nothing.
     """
     machine = str(getattr(parsed_obj.header, "machine_type", ""))
-    if "I386" not in machine and "EM_386" not in machine:
+    if "I386" in machine or "EM_386" in machine:
+        arch = "x86"
+    elif "ARM" in machine.upper() and "AARCH64" not in machine.upper():
+        arch = "arm"
+    else:
         return []
+    nyxstone = None
+    model = None
+    decoder_for = None
     try:
         from nyxstone import Nyxstone
 
         from blint.lib.absint import I386_MODEL
         from blint.lib.disassembler import _default_disassembly_features, _merge_features
 
-        nyxstone = Nyxstone(
-            target_triple="i386-unknown-linux-android",
-            features=_merge_features(_default_disassembly_features("x86"), ""),
-            immediate_style=0,
-        )
-        model = I386_MODEL
+        if arch == "arm":
+            pair = _arm32_models()
+            if pair is None:
+                return []
+            thumb_starts, arm_starts, range_modes = _arm32_mode_context(parsed_obj)
+
+            def decoder_for(start: int):
+                mode = _arm32_mode_for_start(start, thumb_starts, arm_starts, range_modes)
+                return pair[mode] + (mode,)
+
+        else:
+            nyxstone = Nyxstone(
+                target_triple="i386-unknown-linux-android",
+                features=_merge_features(_default_disassembly_features("x86"), ""),
+                immediate_style=0,
+            )
+            model = I386_MODEL
     except Exception as exc:
         LOG.debug(f"runtime-table recovery: decode layer unavailable: {exc}")
         return []
@@ -1760,13 +1898,16 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     reloc_map = relative_relocation_map(parsed_obj)[0]
     for slot, target in defined_symbol_relocation_map(parsed_obj).items():
         reloc_map.setdefault(slot, target)
-    _got_base, thunks = _i386_pc_context(nyxstone, sections, starts)
+    thunks: dict[int, str] = {}
+    if arch == "x86":
+        _got_base, thunks = _i386_pc_context(nyxstone, sections, starts)
 
     # Function starts that make (or contain) a RegisterNatives vtable call,
     # and the callers that pass the {methods, count} pair into them.
     site_functions: set[int] = set()
+    vtable_patterns = _X86_VTABLE_SITE_RES if arch == "x86" else _ARM32_VTABLE_SITE_RES
     for base, blob in sections:
-        for pattern in _X86_VTABLE_SITE_RES:
+        for pattern in vtable_patterns:
             for match in pattern.finditer(blob):
                 start = _nearest_start(sorted_starts, base + match.start())
                 if start is not None:
@@ -1774,7 +1915,11 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     if not site_functions:
         return []
     stub_targets = {stub for stub, definition in plt_stubs.items() if definition in site_functions}
-    caller_sites = _direct_callers(sections, site_functions | stub_targets)
+    wanted = site_functions | stub_targets
+    if arch == "x86":
+        caller_sites = _direct_callers(sections, wanted)
+    else:
+        caller_sites = _arm32_direct_callers(sections, wanted)
     roots: set[int] = set(site_functions)
     for site in caller_sites:
         start = _nearest_start(sorted_starts, site)
@@ -1795,10 +1940,13 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
             if start in seen and incoming is None:
                 continue
             seen.add(start)
+            walk_nyxstone, walk_model = nyxstone, model
+            if arch == "arm":
+                walk_nyxstone, walk_model, _mode = decoder_for(start)
             record = _walk_function(
                 parsed_obj,
-                nyxstone,
-                model,
+                walk_nyxstone,
+                walk_model,
                 sections,
                 sorted_starts,
                 plt_stubs,
@@ -1837,7 +1985,7 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
                         callees.setdefault(
                             target,
                             _seed_for_call(
-                                call["args"], "x86", call.get("registers"), call.get("slots")
+                                call["args"], arch, call.get("registers"), call.get("slots")
                             ),
                         )
         frontier = callees

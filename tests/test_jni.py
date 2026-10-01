@@ -1542,23 +1542,72 @@ def test_no_candidates_mark_without_resolved_ranges() -> None:
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
 )
-def test_runtime_tables_bind_on_x86_only_where_the_walk_reads_them() -> None:
+@pytest.mark.parametrize("abi", ["x86", "armeabi-v7a"])
+def test_runtime_tables_bind_where_the_walk_reads_them(abi: str) -> None:
     """The registrar walk's stores are the only source of the runtime
     entries: the constant-count word-store registrar (RtNative), the
     realigned registrar (RtAligned) and the pair-passing chain (RtPair)
-    bind on x86 through runtime_table; the volatile-count twin stays
-    ambiguous; nothing changes on the other ABIs (the recovery walks
-    i386 only)."""
+    bind through runtime_table - on x86 (i386, since A11) and on
+    armeabi-v7a (arm32 in its ARM state, since A12; the Thumb twin is the
+    fixture below). The volatile-count twin stays ambiguous everywhere,
+    and no ABI outside these two carries a runtime_table binding."""
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     native = scan_android_native(apk)
     join = build_jni_join_summary(apk, native, confirm_findclass=True)
-    x86 = join["per_abi"]["x86"]
+    per_abi = join["per_abi"][abi]
     bound = {
         (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
-        for e in x86["bound_dynamic"]
+        for e in per_abi["bound_dynamic"]
+    }
+    expected = {
+        ("RtAligned", "rtOne"): "runtime_table",
+        ("RtNative", "rtOne"): "runtime_table",
+        ("RtNative", "rtShared"): "runtime_table",
+        ("RtPair", "rtOne"): "runtime_table",
+        ("RtPair", "rtShared"): "runtime_table",
+    }
+    if abi == "armeabi-v7a":
+        # the arm32 confirmer (T2) also resolves this fixture's static
+        # control, which the i386 layer does not read
+        expected[("RtStatic", "rtStaticAdd")] = "findclass"
+    assert bound == expected
+    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]}
+    assert ("RtVolatile", "rtOne") in ambiguous
+    assert ("RtVolatile", "rtShared") in ambiguous
+    for other in ("arm64-v8a", "x86_64"):
+        expectations = {
+            "bound_dynamic": 1,
+            "ambiguous_dynamic": 1,
+            "unbound_dex_natives": 7,
+        }
+        other_join = join["per_abi"][other]
+        assert {k: other_join["counts"][k] for k in expectations} == expectations, other
+        assert not any(
+            e.get("confirmed_by") == "runtime_table" for e in other_join["bound_dynamic"]
+        ), other
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_tables_bind_in_the_thumb_dialect_too() -> None:
+    """The a12 fixture is the a11_rt source built with -mthumb: the same
+    registrar shapes (word stores, the realigned frame, the pair-passing
+    chain, the volatile refusal) recover identically in the Thumb
+    dialect, and the static control confirms through findclass."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a12-jni-thumb.apk")
+    native = scan_android_native(apk)
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"]["armeabi-v7a"]
+    bound = {
+        (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
+        for e in per_abi["bound_dynamic"]
     }
     assert bound == {
         ("RtAligned", "rtOne"): "runtime_table",
@@ -1566,23 +1615,11 @@ def test_runtime_tables_bind_on_x86_only_where_the_walk_reads_them() -> None:
         ("RtNative", "rtShared"): "runtime_table",
         ("RtPair", "rtOne"): "runtime_table",
         ("RtPair", "rtShared"): "runtime_table",
+        ("RtStatic", "rtStaticAdd"): "findclass",
     }
-    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in x86["ambiguous_dynamic"]}
+    ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]}
     assert ("RtVolatile", "rtOne") in ambiguous
     assert ("RtVolatile", "rtShared") in ambiguous
-    # the other ABIs keep their S2-era shapes except v7a, whose arm32
-    # call-site layer (A12) confirms the static control the way the 64-bit
-    # ABIs always have; no ABI outside x86 carries a runtime_table binding
-    for abi, expected in (
-        ("arm64-v8a", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
-        ("x86_64", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
-        ("armeabi-v7a", {"bound_dynamic": 1, "ambiguous_dynamic": 1, "unbound_dex_natives": 7}),
-    ):
-        per_abi = join["per_abi"][abi]
-        assert {k: per_abi["counts"][k] for k in expected} == expected, abi
-        assert not any(
-            e.get("confirmed_by") == "runtime_table" for e in per_abi["bound_dynamic"]
-        ), abi
 
 
 @pytest.mark.skipif(
@@ -1596,18 +1633,21 @@ def test_runtime_tables_need_the_disassemble_flag() -> None:
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=False)
-    x86 = join["per_abi"]["x86"]
-    assert x86["counts"]["bound_dynamic"] == 0
-    assert x86["counts"]["unbound_dex_natives"] == 7
+    for abi in ("x86", "armeabi-v7a"):
+        per_abi = join["per_abi"][abi]
+        assert per_abi["counts"]["bound_dynamic"] == 0, abi
+        assert per_abi["counts"]["unbound_dex_natives"] == 7, abi
 
 
 @pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
 @pytest.mark.skipif(
     not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
 )
-def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
+@pytest.mark.parametrize("abi", ["x86", "armeabi-v7a"])
+def test_runtime_table_fn_addrs_pass_the_start_oracle(abi: str) -> None:
     """Every fn_addr the runtime recovery reports is a function start of
-    the x86 copy's own bytes (llvm-nm dynsym FUNCs plus eh_frame FDEs)."""
+    that ABI copy's own bytes (llvm-readelf dynsym FUNCs plus eh_frame
+    FDEs, and .ARM.exidx on armeabi-v7a - never blint's own discovery)."""
     import re
     import subprocess
 
@@ -1616,13 +1656,12 @@ def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
 
     apk = str(FIXTURES / "a11-jni-rt.apk")
     join = build_jni_join_summary(apk, scan_android_native(apk), confirm_findclass=True)
-    x86 = join["per_abi"]["x86"]
-    # dynsym FUNC values plus eh_frame FDE starts, from llvm-readelf /
-    # llvm-objdump - never blint's own discovery
+    per_abi = join["per_abi"][abi]
     readelf = _llvm_readelf()
+    library = FIXTURES / f"liba11rt_{abi}.so"
     starts = set()
     out = subprocess.run(
-        [readelf, "--dyn-syms", str(FIXTURES / "liba11rt_x86.so")], capture_output=True, text=True
+        [readelf, "--dyn-syms", str(library)], capture_output=True, text=True
     ).stdout
     for line in out.splitlines():
         parts = line.split()
@@ -1630,14 +1669,31 @@ def test_runtime_table_fn_addrs_pass_the_start_oracle() -> None:
             starts.add(int(parts[1], 16) & ~1)
     objdump = readelf.replace("llvm-readelf", "llvm-objdump")
     frames = subprocess.run(
-        [objdump, "--dwarf=frames", str(FIXTURES / "liba11rt_x86.so")],
+        [objdump, "--dwarf=frames", str(library)],
         capture_output=True,
         text=True,
     ).stdout
     for match in re.finditer(r"pc=0*([0-9a-f]+)\.{2,3}0*[0-9a-f]+", frames):
         starts.add(int(match.group(1), 16) & ~1)
+    if abi == "armeabi-v7a":
+        dump = subprocess.run(
+            [readelf, "-x", ".ARM.exidx", str(library)], capture_output=True, text=True
+        ).stdout
+        for line in dump.splitlines():
+            match = re.match(r"^\s*0x([0-9a-f]+)\s+((?:[0-9a-f]{8}\s+){1,4})", line)
+            if not match:
+                continue
+            base = int(match.group(1), 16)
+            for index, group in enumerate(match.group(2).split()):
+                if index % 2:
+                    continue
+                word = int.from_bytes(bytes.fromhex(group), "little")
+                offset = word & 0x7FFFFFFF
+                if word & 0x40000000:
+                    offset -= 1 << 31
+                starts.add((base + index * 4 + offset) & ~1)
     checked = 0
-    for entry in x86["bound_dynamic"]:
+    for entry in per_abi["bound_dynamic"]:
         if entry.get("confirmed_by") != "runtime_table":
             continue
         assert int(entry["fn_addr"], 16) in starts, entry
