@@ -1,0 +1,24 @@
+{
+    "packet": "A10 Q1 (feat/an-a10)",
+    "host": "the reviewer Mac (macOS arm64, darwin 27.0.0)",
+    "tools": {
+        "ndk": "28.2.13676358 (r28c)",
+        "clang": "Android (13624864, +pgo, -bolt, +lto, -mlgo, based on r530567e) clang version 19.0.1",
+        "llvm_strip": "llvm-strip from the NDK (r28c)",
+        "javac": "javac 26.0.2",
+        "d8": "D8 from build-tools 36.0.0",
+        "aapt2": "aapt2 from build-tools 36.0.0",
+        "zipalign": "build-tools 36.0.0",
+        "zip": "/usr/bin/zip 3.0 (macOS build)",
+        "readelf_oracle": "llvm-readelf from Homebrew llvm@18 (18.1.8)"
+    },
+    "build_script": "tests/scripts/android/build_a10_jni_fixtures.sh",
+    "sources": "tests/scripts/android/jni_sources/a10_gap (compiled; a10_gap_nounwind.cpp is built with -fno-unwind-tables -fno-asynchronous-unwind-tables)",
+    "outputs": [
+        "liba10_gap_<abi>{,_stripped}.so - five shapes beside each other: plainAdd (constant-initialized table; binds everywhere), weakOnly (the fbjni kDescriptor shape: signature word against the weak preemptible OBJECT dynsym a10_weak_descriptor; binds everywhere, REL ABIs too), nounwindAdd (a real wrapper, hidden, no unwind tables: binds on armeabi-v7a where lld backfills an .ARM.exidx CANTUNWIND row, refused on the eh_frame ABIs), smallOnly (the registrar builds the entry at run time through a noinline constructor - no static triple; unbound everywhere), decoyDataFn (fnPtr word against a defined OBJECT; unbound everywhere)",
+        "a10-classes.dex - GapNative's five declarations (the join oracle)",
+        "a10-jni-gap.apk - the dex plus one copy of the library per ABI, each ABI's own bytes",
+        "liba10_nowhere_<abi>{,_stripped}.so + a10-nowhere-classes.dex + a10-jni-nowhere.apk (A10 Q3) - one three-entry table: entry [0] nwShared registered for NwBound with a constant count (the confirmer resolves its range), entries [1,2] nwRt registered for NwRtA/NwRtB through volatile-count stack copies (no resolved range). NwMissing declares nwShared with no registrar anywhere naming it: with --disassemble its ambiguous row carries registered_nowhere; the nwRt rows stay plain ambiguous"
+    ],
+    "oracle": "llvm-readelf --dyn-syms plus eh_frame, or .ARM.exidx on v7a (hexdump parsed per PREL31): every recovered fn_addr is a start in its own ABI's bytes; asserted in-repo by tests/test_jni.py::test_gap_fixture_fn_addrs_pass_the_readelf_oracle and at build time on this host. The v7a nounwindAdd row is legitimate, not lucky: readelf -x .ARM.exidx shows the backfilled entry at the wrapper's address (0x173c in this build)."
+}

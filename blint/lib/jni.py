@@ -438,6 +438,20 @@ def _slot_address(table_entry: dict) -> int | None:
     return slot if isinstance(slot, int) else None
 
 
+def _registration_covers(
+    match: dict, confirmed_ranges: dict[tuple[str, str], list[dict]], abi: str
+) -> bool:
+    """True when some resolved registration range covers this candidate
+    entry's own slot in its library's copy of the ABI."""
+    slot = _slot_address(match)
+    if slot is None:
+        return False
+    return any(
+        entry_range["begin"] <= slot < entry_range["end"]
+        for entry_range in (confirmed_ranges or {}).get((match["library"], abi), [])
+    )
+
+
 def _join_abi_lists(
     natives: list[dict],
     surfaces: dict[tuple[str, str], dict | None],
@@ -463,8 +477,13 @@ def _join_abi_lists(
     exactly one of the pair's declaring classes and exactly one candidate
     entry names it; anything the confirmer cannot decide stays ambiguous.
     What neither answers is unbound, and each library's unclaimed exports
-    are its undeclared list. Counts reflect the full sets; the lists are
-    capped at ``JOIN_LISTING_CAP`` with a ``truncated`` flag.
+    are its undeclared list. An ambiguous declaration whose candidate
+    entries all sit inside ranges the confirmer resolved, in an ABI where
+    no resolved registration names its class, carries
+    ``candidates_registered_elsewhere``: a mark, not a binding. Its own
+    registration, if any, is in a table the join did not recover. Counts
+    reflect the full sets; the lists are capped at ``JOIN_LISTING_CAP``
+    with a ``truncated`` flag.
     """
     bound: list[dict] = []
     bound_dynamic: list[dict] = []
@@ -505,6 +524,13 @@ def _join_abi_lists(
                 pair = (table_entry.get("name"), table_entry.get("signature"))
                 if pair in pending:
                     table_entries.setdefault(pair, []).append({**table_entry, "library": name})
+    # The classes this ABI's resolved registrations name.
+    named_classes = {
+        entry_range["class"]
+        for (_, range_abi), ranges in (confirmed_ranges or {}).items()
+        if range_abi == abi
+        for entry_range in ranges
+    }
     for pair, classes in pending.items():
         matches = table_entries.get(pair) or []
         if len(matches) == 1 and len(classes) == 1:
@@ -560,6 +586,13 @@ def _join_abi_lists(
             record = {**native_entry, "class": cls, "abi": abi}
             if matches:
                 record["table_candidates"] = len(matches)
+                # Every candidate is registered for some other class, and
+                # no resolved registration names this one. Without the
+                # confirmer there are no ranges, so no mark.
+                if cls not in named_classes and all(
+                    _registration_covers(match, confirmed_ranges, abi) for match in matches
+                ):
+                    record["candidates_registered_elsewhere"] = True
                 ambiguous.append(record)
             else:
                 unbound.append(record)
@@ -715,7 +748,8 @@ def build_jni_join_summary(
     Bounded: counts always, the first ``JOIN_LISTING_CAP`` entries of
     each list, ``truncated`` flags beside. ``confirm_findclass`` (set by
     ``--disassemble``) runs the FindClass confirmer over the
-    (library, abi) copies that hold ambiguous tables.
+    (library, abi) copies that hold ambiguous tables; without it no row
+    is ever confirmed or marked ``candidates_registered_elsewhere``.
     """
     from blint.lib.android import _iter_app_dex_files
     from blint.lib.android_native import LibraryReader

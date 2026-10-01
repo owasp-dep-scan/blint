@@ -1209,3 +1209,206 @@ def test_split_fixture_stays_ambiguous_off_the_callsite_abis() -> None:
     for abi in ("armeabi-v7a", "x86"):
         assert join["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 3
         assert not any(e.get("confirmed_by") for e in join["per_abi"][abi]["bound_dynamic"])
+
+
+# ------------------- A10 Q1: the honest 32-bit refusals, pinned per ABI
+
+
+def _a10_gap_tables(abi: str, stripped: bool = False) -> dict | None:
+    import lief
+
+    from blint.lib.jni import recover_register_natives_tables
+    from blint.lib.jni_findclass import _function_starts
+
+    suffix = "_stripped" if stripped else ""
+    parsed = lief.ELF.parse(str(FIXTURES / f"liba10_gap_{abi}{suffix}.so"))
+    starts = _function_starts(parsed)
+    return recover_register_natives_tables(parsed, set(starts), starts)
+
+
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"])
+def test_gap_fixture_recovery_and_fates(abi: str) -> None:
+    """The a10 gap fixture, per ABI (Q0's two causes beside controls that
+    must keep binding). plainAdd (constant-initialized table) and weakOnly
+    (the fbjni kDescriptor shape: the signature word relocates against a
+    weak preemptible OBJECT dynsym, on the REL ABIs too) recover on every
+    ABI. nounwindAdd's implementation is a real wrapper compiled without
+    unwind tables and hidden: it recovers only on armeabi-v7a, where lld
+    backfills an .ARM.exidx CANTUNWIND entry for functions whose object
+    has none - on the eh_frame ABIs no start source can verify the fnPtr
+    and the triple is refused. smallOnly (the registrar builds the entry
+    at run time through a noinline constructor - no static triple) and
+    decoyDataFn (fnPtr against a defined OBJECT) never recover."""
+    expected = {"plainAdd", "weakOnly"}
+    if abi == "armeabi-v7a":
+        expected.add("nounwindAdd")
+    for stripped in (False, True):
+        tables = _a10_gap_tables(abi, stripped)
+        entries = {e["name"] for t in tables["tables"] for e in t["entries"]}
+        assert entries == expected
+        by_name = {e["name"]: e for t in tables["tables"] for e in t["entries"]}
+        # the raw dynsym name on the .so path, demangled on the join path
+        assert "a10_plain_add" in by_name["plainAdd"]["fn_name"]
+        assert "a10_small_impl" in by_name["weakOnly"]["fn_name"]
+        assert by_name["weakOnly"]["signature"] == "(I)I"
+
+
+def test_gap_fixture_join_binds_each_abi_from_its_own_bytes() -> None:
+    """The join on the a10 APK: every ABI binds plainAdd and weakOnly and
+    leaves smallOnly and decoyDataFn unbound; nounwindAdd binds only on
+    armeabi-v7a (its exidx entry). Each ABI's plainAdd fn_addr is its own
+    copy's address - no two ABIs share one (ground rule 36)."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a10-jni-gap.apk")
+    join = build_jni_join_summary(apk, scan_android_native(apk))
+    assert sorted(join["per_abi"]) == ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
+    plain_addrs: dict[str, str] = {}
+    for abi, abi_join in join["per_abi"].items():
+        bound = {e["name"] for e in abi_join["bound_dynamic"]}
+        unbound = {e["name"] for e in abi_join["unbound_dex_natives"]}
+        assert bound == {"plainAdd", "weakOnly"} | (
+            {"nounwindAdd"} if abi == "armeabi-v7a" else set()
+        )
+        assert unbound == {"smallOnly", "decoyDataFn"} | (
+            set() if abi == "armeabi-v7a" else {"nounwindAdd"}
+        )
+        assert abi_join["counts"]["ambiguous_dynamic"] == 0
+        plain_addrs[abi] = next(
+            e["fn_addr"] for e in abi_join["bound_dynamic"] if e["name"] == "plainAdd"
+        )
+    assert len(set(plain_addrs.values())) == 4
+
+
+def _llvm_readelf() -> str | None:
+    import contextlib
+    import shutil
+    import subprocess
+
+    for candidate in (
+        shutil.which("llvm-readelf"),
+        "/opt/homebrew/opt/llvm@18/bin/llvm-readelf",
+    ):
+        if candidate and Path(candidate).exists():
+            with contextlib.suppress(Exception):
+                run = subprocess.run([candidate, "--version"], capture_output=True, timeout=30)
+                if run.returncode == 0:
+                    return candidate
+    return None
+
+
+@pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"])
+def test_gap_fixture_fn_addrs_pass_the_readelf_oracle(abi: str) -> None:
+    """The ladder's independent oracle, asserted in the same run: every
+    recovered fn_addr is a function start in its own ABI's bytes per
+    llvm-readelf - a defined FUNC dynsym symbol, or on armeabi-v7a an
+    .ARM.exidx entry (lld's backfilled CANTUNWIND row for nounwindAdd
+    makes that ABI's third binding legitimate rather than lucky)."""
+    import re
+    import subprocess
+
+    readelf = _llvm_readelf()
+    path = FIXTURES / f"liba10_gap_{abi}.so"
+    out = subprocess.run([readelf, "--dyn-syms", str(path)], capture_output=True, text=True).stdout
+    func_starts = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 8 and parts[3] == "FUNC" and parts[6] != "UND":
+            func_starts.add(int(parts[1], 16) & ~1)
+    if abi == "armeabi-v7a":
+        dump = subprocess.run(
+            [readelf, "-x", ".ARM.exidx", str(path)], capture_output=True, text=True
+        ).stdout
+        exidx_starts = set()
+        for line in dump.splitlines():
+            match = re.match(r"^\s*0x([0-9a-f]+)\s+((?:[0-9a-f]{8}\s+){1,4})", line)
+            if not match:
+                continue
+            base = int(match.group(1), 16)
+            groups = match.group(2).split()
+            for index, group in enumerate(groups):
+                if index % 2:  # word 1 is the unwind model, not a start
+                    continue
+                word = int.from_bytes(bytes.fromhex(group), "little")
+                offset = word & 0x7FFFFFFF
+                if word & 0x40000000:  # PREL31 sign bit (bit 30, per the EHABI)
+                    offset -= 1 << 31
+                exidx_starts.add((base + index * 4 + offset) & ~1)
+        func_starts |= exidx_starts
+    tables = _a10_gap_tables(abi)
+    for table in tables["tables"]:
+        for entry in table["entries"]:
+            assert int(entry["fn_addr"], 16) in func_starts, (abi, entry["name"], entry["fn_addr"])
+
+
+# ---------------------------- A10 Q3: candidates registered elsewhere
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+@pytest.mark.parametrize("abi", ["arm64-v8a", "x86_64"])
+def test_mark_when_every_candidate_is_registered_for_another_class(abi: str) -> None:
+    """The a10 nowhere fixture: nwShared is declared by NwBound, NwMissing
+    and NwElsewhere, and its one table entry is registered for NwBound with
+    a constant count. With --disassemble NwBound binds through the
+    confirmer; NwMissing's row - ambiguous, its only candidate covered by
+    NwBound's range, its class named by no resolved registration - carries
+    candidates_registered_elsewhere. NwElsewhere's identical-looking
+    nwShared row does NOT: its own nwMine registration names it. The nwRt
+    rows stay plain ambiguous: their candidates sit in no resolved range
+    (volatile counts), so the confirmer claims nothing and no mark
+    appears."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a10-jni-nowhere.apk")
+    native = scan_android_native(apk)
+    plain = build_jni_join_summary(apk, native)
+    assert plain["per_abi"][abi]["counts"]["ambiguous_dynamic"] == 5
+    assert not any(
+        "candidates_registered_elsewhere" in e for e in plain["per_abi"][abi]["ambiguous_dynamic"]
+    )
+    join = build_jni_join_summary(apk, native, confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    bound = {(e["class"], e["name"]) for e in per_abi["bound_dynamic"]}
+    assert bound == {
+        ("com.blint.a10.nowhere.NwBound", "nwShared"),
+        # the unique (name, signature) pair binds without the confirmer
+        ("com.blint.a10.nowhere.NwElsewhere", "nwMine"),
+    }
+    ambiguous = {
+        (e["class"], e["name"], e.get("candidates_registered_elsewhere", False))
+        for e in per_abi["ambiguous_dynamic"]
+    }
+    assert ambiguous == {
+        ("com.blint.a10.nowhere.NwMissing", "nwShared", True),
+        ("com.blint.a10.nowhere.NwElsewhere", "nwShared", False),
+        ("com.blint.a10.nowhere.NwRtA", "nwRt", False),
+        ("com.blint.a10.nowhere.NwRtB", "nwRt", False),
+    }
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the FindClass confirmer decodes through nyxstone"
+)
+def test_no_candidates_mark_without_resolved_ranges() -> None:
+    """The mark needs the --disassemble confirmer's resolved ranges: the
+    plain join never marks, and the 32-bit ABIs - which the call-site
+    layer does not model - never mark even with the flag on. Their rows
+    stay exactly the plain-ambiguous shape."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    apk = str(FIXTURES / "a10-jni-nowhere.apk")
+    native = scan_android_native(apk)
+    for confirm in (False, True):
+        join = build_jni_join_summary(apk, native, confirm_findclass=confirm)
+        for abi in ("armeabi-v7a", "x86"):
+            per_abi = join["per_abi"][abi]
+            assert per_abi["counts"]["ambiguous_dynamic"] == 5
+            assert not any(
+                "candidates_registered_elsewhere" in e for e in per_abi["ambiguous_dynamic"]
+            )
