@@ -216,10 +216,15 @@ def _decode_runs(runs: Iterator[tuple[str, int, bytes]]) -> list[dict]:
 
 
 def iter_frame_runs(state: FrameState) -> Iterator[tuple[str, int, bytes]]:
-    """Yield (frame base, start offset, bytes) for each contiguous byte run."""
+    """Yield (frame base, start offset, bytes) for each contiguous byte run.
+
+    A slot holding a symbolic-pointer word (i386 pushes and stores) is not
+    bytes and breaks the run around it.
+    """
     by_base: dict[str, list[int]] = {}
     for base, offset in state.slots:
-        by_base.setdefault(base, []).append(offset)
+        if isinstance(state.slots[(base, offset)], int):
+            by_base.setdefault(base, []).append(offset)
     for base, offsets in by_base.items():
         offsets.sort()
         run_start = offsets[0]
@@ -288,8 +293,14 @@ class FrameState:
     a *materialised* pointer whose absolute address the model folded from a
     pc-relative form (ARM64 ``adrp`` [+ ``add``], x86 rip-relative ``lea``).
     Stores through any of these are not frame slots. ``sp_adjustment`` is
-    the ARM64 running sp offset; ``None`` means incoming paths disagree on
-    it, after which sp-relative stores cannot be located.
+    the running sp offset (ARM64 and i386); ``None`` means incoming paths
+    disagree on it, after which sp-relative stores cannot be located.
+
+    Slot values are bytes (ints 0-255). The i386 model additionally keeps
+    whole words a push or store delivered as a *symbolic pointer* — a frame
+    slot that holds ``("esp", k)`` or another tuple rather than bytes
+    (:meth:`store_pointer_word`); such a word occupies its four byte keys
+    and no byte run is read out of it, so string recovery is unaffected.
 
     The state carries its :class:`ArchModel` so operand-named accessors know
     the register families; the join below is model-independent.
@@ -299,8 +310,10 @@ class FrameState:
         self.model = model
         # family -> int | tuple(symbolic pointer)
         self.registers: dict[str, int | tuple[str, int]] = {}
-        # (frame base, signed offset) -> byte value
-        self.slots: dict[tuple[str, int], int] = {}
+        # (frame base, signed offset) -> byte value | pointer-word tuple
+        self.slots: dict[tuple[str, int], int | tuple[str, int]] = {}
+        # xmm name -> the frame slot an 8-byte SSE load read (i386 pair moves)
+        self.xmm_pairs: dict[str, tuple[str, int]] = {}
         self.sp_adjustment: int | None = 0
 
     # -- join ---------------------------------------------------------------
@@ -322,6 +335,10 @@ class FrameState:
         for key in list(self.slots):
             if other.slots.get(key) != self.slots[key]:
                 del self.slots[key]
+                changed = True
+        for key in list(self.xmm_pairs):
+            if other.xmm_pairs.get(key) != self.xmm_pairs[key]:
+                del self.xmm_pairs[key]
                 changed = True
         if self.sp_adjustment != other.sp_adjustment:
             self.sp_adjustment = None
@@ -359,8 +376,38 @@ class FrameState:
             self.registers.pop(info[0], None)
 
     def store(self, base: str, offset: int, value: int, width: int) -> None:
+        # A pointer word sitting under any of these bytes is overwritten.
+        for index in range(width):
+            key = (base, offset + index)
+            if isinstance(self.slots.get(key), tuple):
+                del self.slots[key]
         for index in range(width):
             self.slots[(base, offset + index)] = (value >> (index * 8)) & 0xFF
+
+    def store_pointer_word(self, base: str, offset: int, value: tuple[str, int]) -> None:
+        """Store one word (4 bytes) that holds a symbolic pointer, not bytes."""
+        self.drop(base, offset, 4)
+        self.slots[(base, offset)] = value
+
+    def load_word(self, base: str, offset: int) -> int | tuple[str, int] | None:
+        """Read one aligned word: a pointer word as itself, else its bytes."""
+        value = self.slots.get((base, offset))
+        if isinstance(value, tuple):
+            return value
+        byte_values = [self.slots.get((base, offset + index)) for index in range(4)]
+        if any(not isinstance(b, int) for b in byte_values):
+            return None
+        return sum(b << (index * 8) for index, b in enumerate(byte_values))
+
+    def copy_word(self, dst: tuple[str, int], src: tuple[str, int]) -> None:
+        """Copy one word slot to another, pointer word or bytes alike."""
+        value = self.load_word(*src)
+        if isinstance(value, tuple):
+            self.store_pointer_word(dst[0], dst[1], value)
+        elif isinstance(value, int):
+            self.store(dst[0], dst[1], value, 4)
+        else:
+            self.drop(dst[0], dst[1], 4)
 
     def drop(self, base: str, offset: int, width: int) -> None:
         for index in range(width):
@@ -768,6 +815,506 @@ class X86_64Model(ArchModel):
         state.write_operand(register, result & 0xFFFFFFFFFFFFFFFF)
 
 
+# -- i386 ---------------------------------------------------------------------
+
+# The 32-bit x86 register set: the first eight families of the x86-64 table
+# (no r8-r15), keyed under each family's 32-bit name so the frame bases are
+# ``esp``/``ebp``. Sub-register writes merge into the family's low bytes; on
+# i386 no write zero-extends above 32 bits.
+_I386_REGISTER_INFO: dict[str, tuple[str, int]] = {}
+for _family, _members in _REGISTER_FAMILIES:
+    _dword_name = next(name for name, width in _members if width == 4)
+    for _name, _width in _members:
+        _I386_REGISTER_INFO[_name] = (_dword_name, _width)
+
+# cdecl: the caller saves eax/ecx/edx (and every xmm register); ebx, esi, edi,
+# ebp and esp survive calls.
+_I386_CALL_CLOBBERED = ("eax", "ecx", "edx")
+
+_I386_FRAME_REGISTERS: frozenset[str] = frozenset({"esp", "ebp"})
+
+# The i386 store form: the displacement is optional (`mov [esp], esi`).
+_I386_STORE_RE = re.compile(
+    rf"^\s*mov\s+(?:(byte|word|dword)\s+ptr\s+)?"
+    rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*,\s*({_IMM}|{_X86_REG})\s*$",
+    re.IGNORECASE,
+)
+_I386_PUSH_RE = re.compile(rf"^\s*push\s+({_X86_REG}|{_IMM})\s*$", re.IGNORECASE)
+_I386_POP_RE = re.compile(rf"^\s*pop\s+({_X86_REG})\s*$", re.IGNORECASE)
+# A frame load: `mov reg, [dword ptr] [base +/- imm]`. The base is a frame
+# register or any register - resolved through its value when it holds a frame
+# symbolic, which is how a callee reads its incoming stack arguments wherever
+# its own bytes read them.
+_I386_LOAD_RE = re.compile(
+    rf"^\s*mov\s+({_X86_REG})\s*,\s*(?:(byte|word|dword)\s+ptr\s+)?"
+    rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*$",
+    re.IGNORECASE,
+)
+# SSE pair moves: an 8-byte load into / store out of one xmm register whose
+# memory side is frame-relative. Registrar code stages {pointer, count} pairs
+# with `movsd [esp+K], xmm0` after `movsd xmm0, [esp+K']`.
+_I386_XMM_LOAD_RE = re.compile(
+    rf"^\s*mov(?:sd|lps|lpd|ups|aps|q)\s+(xmm\d+)\s*,\s*(?:qword|xmmword|dword)\s+ptr\s+"
+    rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*$",
+    re.IGNORECASE,
+)
+_I386_XMM_STORE_RE = re.compile(
+    rf"^\s*mov(?:sd|lps|lpd|ups|aps|q)\s+(?:qword|xmmword|dword)\s+ptr\s+"
+    rf"\[\s*({_X86_REG})\s*(?:([+-])\s*({_IMM})\s*)?\]\s*,\s*(xmm\d+)\s*$",
+    re.IGNORECASE,
+)
+# `call 0` - the inline pc thunk: a call whose printed operand is zero names
+# the next instruction.
+_I386_CALL_ZERO_RE = re.compile(r"^\s*call\s+0\s*$", re.IGNORECASE)
+# `inc/dec esp` move the frame base by one.
+_I386_ESP_UNARY_RE = re.compile(r"^\s*(?:inc|dec)\s+esp\s*$", re.IGNORECASE)
+
+
+class I386Model(ArchModel):
+    """The 32-bit x86 (i386) register model and instruction semantics.
+
+    Text-based over nyxstone instruction text, like the other models. The
+    frame is addressed through ``esp``/``ebp``, both keyed relative to the
+    *entry* stack pointer through the running ``sp_adjustment`` - the same
+    convention the ARM64 model uses for ``sp``. What the 32-bit ABI adds
+    over the other models:
+
+    - **Stack arguments.** cdecl passes arguments in memory at ``[esp]``
+      upward at the call, written by ``push`` or by ``mov [esp+N]`` stores;
+      both land in frame slots (``push`` also moves ``sp_adjustment`` down
+      by 4), and a word load reads them back - directly or through a
+      register holding a frame symbolic, which is how a callee reads its
+      incoming arguments at the slot its own bytes name.
+    - **Pointer words in slots.** A pushed or stored symbolic pointer
+      (``lea eax, [esp + 0x18]; push eax``) keeps its identity in the slot
+      (:meth:`FrameState.store_pointer_word`), so an outgoing-argument area
+      can carry a stack-address marker into a callee's walk.
+    - **The pc idiom.** ``call 0`` - a call whose printed operand is zero -
+      is the i386 PIC prologue: it pushes the address of the *next*
+      instruction, which the following ``pop`` takes into the GOT base
+      register. The model executes exactly that (the pushed value is the
+      instruction's own end address when the caller can place it), so
+      ``add ebx, imm`` afterwards yields the GOT base and ebx-relative
+      ``lea`` folds GOTOFF operands the way rip-relative ``lea`` folds on
+      x86-64.
+    - **Alignment rebases.** ``and esp, imm`` moves ``esp`` by an amount
+      the bytes do not state; the esp-relative frame is rebased there and
+      earlier esp-keyed slots are dropped, so a slot stored before a
+      realignment is never paired with an access after it. Within the
+      rebased region the naming is exact.
+
+    Loads through any other pointer (a materialised address, a heap
+    pointer) invalidate the destination: their values live in sections
+    this module knows nothing about. Sub-dword stores keep byte
+    decomposition (string recovery); dword stores may carry pointer words.
+    """
+
+    frame_bases = _I386_FRAME_REGISTERS
+    call_clobbered = _I386_CALL_CLOBBERED
+    instruction_stride = None  # x86 instruction lengths vary
+
+    def register(self, name: str) -> tuple[str, int] | None:
+        return _I386_REGISTER_INFO.get(name.strip().lower())
+
+    def call_kind(self, mnemonic: str) -> str | None:
+        lowered = mnemonic.strip().lower()
+        if lowered.startswith("call"):
+            return "call"
+        if lowered in ("jmp", "jmpq", "jmpl"):
+            return "tail"
+        return None
+
+    def is_zero_register(self, family: str) -> bool:
+        return False
+
+    def write_operand(self, state: FrameState, name: str, value) -> None:
+        info = self.register(name)
+        if not info:
+            return
+        family, width = info
+        if isinstance(value, tuple):
+            # A symbolic pointer needs all 32 bits; a narrower write keeps
+            # bytes that are not the pointer, so the register goes unknown.
+            if width < 4:
+                state.registers.pop(family, None)
+            else:
+                state.registers[family] = value
+            return
+        if width == 4:
+            state.registers[family] = value & 0xFFFFFFFF
+            return
+        previous = state.registers.get(family)
+        if not isinstance(previous, int):
+            return
+        mask = (1 << (width * 8)) - 1
+        state.registers[family] = (previous & ~mask & 0xFFFFFFFF) | (value & mask)
+
+    def write_family(self, state: FrameState, family: str, value, width: int) -> None:
+        state.registers[family] = value if isinstance(value, tuple) else value & 0xFFFFFFFF
+
+    def clobber_call_registers(self, state: FrameState) -> None:
+        super().clobber_call_registers(state)
+        # Every xmm register is caller-saved under every i386 ABI that uses
+        # them, so a staged pair does not survive a call.
+        state.xmm_pairs.clear()
+
+    def step(
+        self,
+        state: FrameState,
+        text: str,
+        leaves_function: bool = True,
+        address_span: tuple[int, int] | None = None,
+    ) -> None:
+        # `call 0` is the inline pc thunk (call to the next instruction): it
+        # clobbers like any call and pushes the return address - the value
+        # the following `pop` takes into the GOT base register. apply_branch
+        # would clobber without the push, so this comes first.
+        if (match := _I386_CALL_ZERO_RE.match(text)) and address_span is not None:
+            self.clobber_call_registers(state)
+            if state.sp_adjustment is not None:
+                state.sp_adjustment -= 4
+                state.store("esp", state.sp_adjustment, address_span[1] & 0xFFFFFFFF, 4)
+            return
+        if self.apply_branch(state, text, leaves_function):
+            return
+        mnemonic = text.split(None, 1)[0].lower() if text else ""
+        if mnemonic == "leave":
+            # mov esp, ebp; pop ebp - esp moves to a register this pass may
+            # not relate to the entry sp.
+            state.sp_adjustment = None
+            state.invalidate("ebp")
+            return
+        if match := _I386_PUSH_RE.match(text):
+            self._apply_push(state, match.group(1))
+            return
+        if match := _I386_POP_RE.match(text):
+            self._apply_pop(state, match.group(1))
+            return
+        if match := _I386_LOAD_RE.match(text):
+            self._apply_load(state, *match.groups())
+            return
+        if match := _I386_XMM_LOAD_RE.match(text):
+            self._apply_xmm_load(state, match)
+            return
+        if match := _I386_XMM_STORE_RE.match(text):
+            self._apply_xmm_store(state, match)
+            return
+        if match := _I386_STORE_RE.match(text):
+            self._apply_store(
+                state,
+                match.group(1),
+                match.group(2),
+                match.group(3) or "+",
+                match.group(4) or "0",
+                match.group(5),
+            )
+            return
+        if match := _MOV_REG_IMM_RE.match(text):
+            value = _parse_immediate(match.group(2))
+            if value is None:
+                state.invalidate(match.group(1))
+            else:
+                state.write_operand(match.group(1), value)
+            return
+        if (match := _XOR_SELF_RE.match(text)) and match.group(1).lower() == match.group(
+            2
+        ).lower():
+            state.write_operand(match.group(1), 0)
+            return
+        if match := _MOV_REG_REG_RE.match(text):
+            self._apply_mov_reg_reg(state, match)
+            return
+        if match := _LEA_RE.match(text):
+            self._apply_lea(state, match)
+            return
+        if match := _ARITH_REG_IMM_RE.match(text):
+            self._apply_arith(state, match)
+            return
+        if match := _I386_ESP_UNARY_RE.match(text):
+            if state.sp_adjustment is not None:
+                state.sp_adjustment += 1 if mnemonic == "inc" else -1
+            return
+        # Anything else that writes a register makes its value unknown.
+        if match := _DEST_REG_RE.match(text):
+            state.invalidate(match.group(1))
+
+    # -- frame resolution ---------------------------------------------------
+
+    def _resolve_frame_base(self, state: FrameState, base_reg: str) -> tuple[str, int] | None:
+        """Resolve a memory operand's base to a (frame base, offset) pair.
+
+        ``esp``/``ebp`` resolve as themselves (esp with the running
+        adjustment); a register holding a frame symbolic - including ebp
+        after ``mov ebp, esp`` - resolves to the slot it names. Anything
+        else returns None: the access is through a pointer this pass cannot
+        locate.
+        """
+        info = self.register(base_reg)
+        if not info:
+            return None
+        family = info[0]
+        if family == "esp":
+            return None if state.sp_adjustment is None else ("esp", state.sp_adjustment)
+        value = state.registers.get(family)
+        if isinstance(value, tuple) and value[0] in ("esp", "ebp"):
+            return value
+        if family == "ebp":
+            return ("ebp", 0)
+        return None
+
+    def _apply_push(self, state: FrameState, token: str) -> None:
+        if state.sp_adjustment is None:
+            return
+        state.sp_adjustment -= 4
+        info = self.register(token)
+        if info:
+            value = state.registers.get(info[0])
+            if isinstance(value, tuple):
+                state.store_pointer_word("esp", state.sp_adjustment, value)
+            elif isinstance(value, int):
+                state.store("esp", state.sp_adjustment, value, 4)
+            else:
+                state.drop("esp", state.sp_adjustment, 4)
+            return
+        immediate = _parse_immediate(token)
+        if immediate is not None:
+            state.store("esp", state.sp_adjustment, immediate, 4)
+        else:
+            state.drop("esp", state.sp_adjustment, 4)
+
+    def _apply_pop(self, state: FrameState, name: str) -> None:
+        if state.sp_adjustment is None:
+            state.invalidate(name)
+            return
+        value = state.load_word("esp", state.sp_adjustment)
+        state.drop("esp", state.sp_adjustment, 4)
+        state.sp_adjustment += 4
+        if isinstance(value, (int, tuple)):
+            state.write_operand(name, value)
+        else:
+            state.invalidate(name)
+
+    def _apply_load(
+        self,
+        state: FrameState,
+        dest: str,
+        size_hint: str | None,
+        base_reg: str,
+        sign: str | None,
+        offset_token: str | None,
+    ) -> None:
+        resolved = self._resolve_frame_base(state, base_reg)
+        if resolved is None:
+            state.invalidate(dest)
+            return
+        offset = _parse_immediate(offset_token) if offset_token else 0
+        if offset is None:
+            state.invalidate(dest)
+            return
+        if sign == "-":
+            offset = -offset
+        key = (resolved[0], resolved[1] + offset)
+        width = _X86_SIZE_HINTS.get((size_hint or "dword").lower(), 4)
+        if width == 4:
+            value = state.load_word(*key)
+            if isinstance(value, (int, tuple)):
+                state.write_operand(dest, value)
+            else:
+                state.invalidate(dest)
+            return
+        # A sub-dword read of known bytes; a pointer word's low bytes are not
+        # the pointer, so they stay unknown.
+        byte = state.slots.get(key)
+        if isinstance(byte, int):
+            state.write_operand(dest, byte)
+        else:
+            state.invalidate(dest)
+
+    def _apply_store(
+        self,
+        state: FrameState,
+        size_hint: str | None,
+        base_reg: str,
+        sign: str,
+        offset_token: str,
+        value_token: str,
+    ) -> None:
+        resolved = self._resolve_frame_base(state, base_reg)
+        if resolved is None:
+            return
+        offset = _parse_immediate(offset_token)
+        if offset is None:
+            return
+        if sign == "-":
+            offset = -offset
+        offset += resolved[1]
+        hint = _X86_SIZE_HINTS.get((size_hint or "").lower())
+        source_info = self.register(value_token)
+        if source_info:
+            width = hint or source_info[1]
+            value = state.registers.get(source_info[0])
+            if width == 4:
+                if isinstance(value, tuple):
+                    state.store_pointer_word(resolved[0], offset, value)
+                elif isinstance(value, int):
+                    state.store(resolved[0], offset, value, 4)
+                else:
+                    state.drop(resolved[0], offset, 4)
+            elif isinstance(value, int):
+                state.store(resolved[0], offset, value, width)
+            else:
+                state.drop(resolved[0], offset, width)
+            return
+        immediate = _parse_immediate(value_token)
+        if immediate is None:
+            return
+        # An i386 immediate store is a dword unless its size hint says
+        # otherwise (the byte form prints `byte ptr`).
+        width = hint or 4
+        if width == 4:
+            state.store(resolved[0], offset, immediate, 4)
+        else:
+            state.store(resolved[0], offset, immediate, width)
+
+    def _apply_xmm_load(self, state: FrameState, match: re.Match) -> None:
+        xmm, base_reg, sign, offset_token = match.groups()
+        resolved = self._resolve_frame_base(state, base_reg)
+        if resolved is None or (offset := self._offset(sign, offset_token)) is None:
+            state.xmm_pairs.pop(xmm.lower(), None)
+            return
+        state.xmm_pairs[xmm.lower()] = (resolved[0], resolved[1] + offset)
+
+    def _apply_xmm_store(self, state: FrameState, match: re.Match) -> None:
+        base_reg, sign, offset_token, xmm = match.groups()
+        resolved = self._resolve_frame_base(state, base_reg)
+        if resolved is None or (offset := self._offset(sign, offset_token)) is None:
+            return
+        dst = (resolved[0], resolved[1] + offset)
+        source_pair = state.xmm_pairs.get(xmm.lower())
+        if source_pair is None:
+            state.drop(dst[0], dst[1], 8)
+            return
+        state.copy_word(dst, source_pair)
+        state.copy_word((dst[0], dst[1] + 4), (source_pair[0], source_pair[1] + 4))
+
+    @staticmethod
+    def _offset(sign: str | None, token: str | None) -> int | None:
+        offset = _parse_immediate(token) if token else 0
+        if offset is None:
+            return None
+        return -offset if sign == "-" else offset
+
+    def _apply_mov_reg_reg(self, state: FrameState, match: re.Match) -> None:
+        dest, source = match.group(1), match.group(2)
+        dest_info = self.register(dest)
+        source_info = self.register(source)
+        # `mov esp, ebp` restores the frame base; trackable when ebp holds an
+        # esp symbolic, unknowable otherwise.
+        if dest_info and dest_info[0] == "esp":
+            value = state.registers.get("ebp") if source_info and source_info[0] == "ebp" else None
+            if isinstance(value, tuple) and value[0] == "esp":
+                state.sp_adjustment = value[1]
+            else:
+                state.sp_adjustment = None
+            return
+        if source_info and source_info[0] == "esp":
+            if state.sp_adjustment is None:
+                state.invalidate(dest)
+            else:
+                state.write_operand(dest, ("esp", state.sp_adjustment))
+            return
+        value = state.get_register(source)
+        if value is None:
+            state.invalidate(dest)
+            return
+        if not isinstance(value[0], int) and match.group(0).strip().lower().startswith(
+            ("movzx", "movsx", "movsxd")
+        ):
+            state.invalidate(dest)
+            return
+        state.write_operand(dest, value[0])
+
+    def _apply_lea(self, state: FrameState, match: re.Match) -> None:
+        """`lea dest, [src +/- imm]`, including a frame-base source, which
+        names a slot rather than computing a character."""
+        dest, source_reg, sign, offset_token = match.groups()
+        resolved = self._resolve_frame_base(state, source_reg)
+        if resolved is not None:
+            offset = _parse_immediate(offset_token) if offset_token else 0
+            if offset is None:
+                state.invalidate(dest)
+                return
+            if sign == "-":
+                offset = -offset
+            state.write_operand(dest, (resolved[0], resolved[1] + offset))
+            return
+        source = state.get_register(source_reg)
+        if source is None:
+            state.invalidate(dest)
+            return
+        delta = _parse_immediate(offset_token) if offset_token else 0
+        if delta is None:
+            state.invalidate(dest)
+            return
+        if sign == "-":
+            delta = -delta
+        if isinstance(source[0], tuple):
+            base_kind, base_offset = source[0]
+            state.write_operand(dest, (base_kind, base_offset + delta))
+            return
+        state.write_operand(dest, (source[0] + delta) & 0xFFFFFFFF)
+
+    def _apply_arith(self, state: FrameState, match: re.Match) -> None:
+        """`add/sub/or/and/xor reg, imm`, with the frame-base and GOT-base
+        cases cdecl registrars rely on."""
+        op, register, immediate_token = match.groups()
+        immediate = _parse_immediate(immediate_token)
+        info = self.register(register)
+        if not info:
+            return
+        if info[0] == "esp":
+            if state.sp_adjustment is None or immediate is None:
+                return
+            if op.lower() == "sub":
+                state.sp_adjustment -= immediate
+            elif op.lower() == "add":
+                state.sp_adjustment += immediate
+            elif op.lower() == "and":
+                # A realignment: the bytes do not state the delta, so the
+                # esp-relative frame is rebased and earlier esp-keyed slots
+                # are dropped - a pre-realignment slot must never pair with
+                # a post-realignment access.
+                state.sp_adjustment = 0
+                for base, offset in [(b, o) for (b, o) in state.slots if b == "esp"]:
+                    del state.slots[(base, offset)]
+            return
+        current = state.get_register(register)
+        if current is None or immediate is None:
+            state.invalidate(register)
+            return
+        value = current[0]
+        if isinstance(value, tuple):
+            base_kind, base_offset = value
+            if op.lower() == "add":
+                state.write_operand(register, (base_kind, base_offset + immediate))
+            elif op.lower() == "sub":
+                state.write_operand(register, (base_kind, base_offset - immediate))
+            else:
+                state.invalidate(register)
+            return
+        if op.lower() == "add":
+            result = value + immediate
+        elif op.lower() == "sub":
+            result = value - immediate
+        elif op.lower() == "or":
+            result = value | immediate
+        elif op.lower() == "and":
+            result = value & immediate
+        else:
+            result = value ^ immediate
+        state.write_operand(register, result & 0xFFFFFFFF)
+
+
 # -- ARM64 --------------------------------------------------------------------
 
 # Frame bases whose stores land in a recoverable frame slot. x29 is the frame
@@ -1106,6 +1653,7 @@ class Arm64Model(ArchModel):
 
 
 X86_64_MODEL = X86_64Model()
+I386_MODEL = I386Model()
 ARM64_MODEL = Arm64Model()
 
 
@@ -1268,6 +1816,7 @@ def _block_in_state(
             state = FrameState(model)
             state.registers = dict(pred_out.registers)
             state.slots = dict(pred_out.slots)
+            state.xmm_pairs = dict(pred_out.xmm_pairs)
             state.sp_adjustment = pred_out.sp_adjustment
         else:
             state.joined_with(pred_out)
@@ -1384,6 +1933,7 @@ def interpret_over_cfg(
             result = FrameState(model)
             result.registers = dict(exit_state.registers)
             result.slots = dict(exit_state.slots)
+            result.xmm_pairs = dict(exit_state.xmm_pairs)
             result.sp_adjustment = exit_state.sp_adjustment
         else:
             result.joined_with(exit_state)
@@ -1563,6 +2113,7 @@ def _state_after_thunk(model: ArchModel, state: FrameState, thunk: dict) -> Fram
     stepped = FrameState(model)
     stepped.registers = dict(state.registers)
     stepped.slots = dict(state.slots)
+    stepped.xmm_pairs = dict(state.xmm_pairs)
     stepped.sp_adjustment = state.sp_adjustment
     for text, span in zip(thunk["prep"], thunk["prep_spans"]):
         model.step(stepped, text, address_span=span)
@@ -2187,11 +2738,20 @@ def _count_materialisation_coverage(coverage: dict, func_data: dict, model: Arch
         coverage["functions_no_line_addresses"] += 1
 
 
+# 32-bit x86 triples: i386/i486/i586/i686 and the bare ia32. Everything
+# else non-aarch64 (including the empty triple) stays x86-64, as before.
+_I386_TARGET_MARKERS = ("i386", "i486", "i586", "i686", "ia32")
+
+
 def model_for_target(arch_target: str) -> ArchModel:
     """Pick the architecture model for an LLVM triple or Mach-O cpu name."""
     lowered = (arch_target or "").lower()
     if "aarch64" in lowered or "arm64" in lowered:
         return ARM64_MODEL
+    if any(marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")):
+        return X86_64_MODEL
+    if any(marker in lowered for marker in _I386_TARGET_MARKERS):
+        return I386_MODEL
     return X86_64_MODEL
 
 
