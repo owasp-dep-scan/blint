@@ -38,9 +38,13 @@ __attribute__((visibility("default"))) jlong a11_rt_shared_b(JNIEnv *env, jobjec
 
 /* the entry words: local strings reach the registrar GOTOFF-relative; the
  * signature is exported so its address arrives through the GOT (fbjni's
- * kDescriptor placement) */
+ * kDescriptor placement). The extern declaration first: a C++ const at
+ * namespace scope has internal linkage without it, and the other TU's GOT
+ * reference would then name an undefined symbol. */
 static const char a11_rt_one_name[] = "rtOne";
 static const char a11_rt_shared_name[] = "rtShared";
+extern const char a11_rt_one_sig[];
+extern const char a11_rt_shared_sig[];
 __attribute__((visibility("default"))) const char a11_rt_one_sig[] = "(I)I";
 __attribute__((visibility("default"))) const char a11_rt_shared_sig[] = "(J)J";
 
