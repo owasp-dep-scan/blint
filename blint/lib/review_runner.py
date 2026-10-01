@@ -197,6 +197,8 @@ class ReviewRunner:
             self.review_functions_list or [],
             disassembled_functions,
             EVIDENCE_LIMIT,
+            metadata.get("llvm_target_tuple") or "",
+            metadata.get("binary_type") or "",
         )
         self.results |= results
 

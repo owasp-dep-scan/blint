@@ -35,9 +35,9 @@ rules:
     description: Malware sometimes constructs API names or other strings directly on the stack before passing them to functions like GetProcAddress.
     check_type: function_analysis
   - id: SUSPICIOUS_MEMORY_ALLOC
-    title: Function Allocates Memory and Jumps/Executes
-    summary: Function allocates memory (e.g., VirtualAlloc) and then potentially jumps to or executes code within that memory.
-    description: This pattern is common in shellcode loaders and packers where decrypted/decoded code is allocated dynamically and then executed.
+    title: Function Allocates Executable Memory and Jumps/Executes
+    summary: Function obtains memory that can be executable (VirtualAlloc, VirtualProtect, mmap, mprotect) and passes control through a register, or allocates, writes and starts code in another process.
+    description: This pattern is common in shellcode loaders and packers where decrypted/decoded code is allocated dynamically and then executed. Heap allocators (malloc, HeapAlloc) do not count, nor do jump-table branches or import calls through the IAT/GOT. Where the call-site dataflow reads the protection argument (arm64 and x86-64), a constant without the execute bits clears the call.
     check_type: function_analysis
   - id: HIGH_REGISTER_USAGE
     title: Function with High Register Usage
