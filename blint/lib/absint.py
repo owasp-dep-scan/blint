@@ -1701,10 +1701,733 @@ class Arm64Model(ArchModel):
         state.write_family(info[0], value, info[1])
 
 
+# -- arm32 (ARM and Thumb) -------------------------------------------------------
+
+# The AAPCS caller-saved set: r0-r3 (the argument and return registers), r12
+# (ip, the interworking veneer scratch) and lr. r4-r11 and sp survive calls.
+_ARM32_CALL_CLOBBERED = ("r0", "r1", "r2", "r3", "r12", "lr")
+
+# Only sp is a frame base. Thumb code keeps its frame pointer in r7 and ARM
+# code in r11 (fp), but both derive it from sp in the prologue, so a derived
+# ("sp", k) symbolic is what locates their frames - the same convention the
+# ARM64 model uses for registers derived off sp.
+ARM32_FRAME_BASES = frozenset({"sp"})
+
+# The opaque base a stack realignment rebases the frame to (ARM-mode
+# -mstackrealign emits `bfc sp, #0, #2`), far below any entry-relative key a
+# real frame or argument area uses - the same namespace split as i386's
+# `and esp, imm`.
+_ARM32_ALIGNED_FRAME_BASE = -(1 << 24)
+
+_ARM32_ALIASES = {"ip": "r12", "fp": "r11", "sb": "r9", "sl": "r10"}
+
+# ARM condition suffixes, so a branch (b + cond) is never read as a call
+# (bl + cond) and vice versa - `blt` branches, `bleq` calls.
+_ARM32_CONDITIONS = frozenset(
+    [
+        "eq",
+        "ne",
+        "cs",
+        "hs",
+        "cc",
+        "lo",
+        "mi",
+        "pl",
+        "vs",
+        "vc",
+        "hi",
+        "ls",
+        "ge",
+        "lt",
+        "le",
+        "gt",
+        "al",
+    ]
+)
+
+_ARM32_REG = r"(?:r\d+|sp|lr|pc|ip|fp|sb|sl)"
+
+_ARM32_PUSH_RE = re.compile(r"^\s*push(?:\.w)?\s+\{(?P<regs>[^}]+)\}\s*$", re.IGNORECASE)
+_ARM32_POP_RE = re.compile(r"^\s*pop(?:\.w)?\s+\{(?P<regs>[^}]+)\}\s*$", re.IGNORECASE)
+# A stack realignment: the bytes do not state the delta, so the frame moves to
+# its own opaque namespace (the i386 `and esp, imm` rule). ARM-mode
+# -mstackrealign realigns sp directly; the Thumb spelling routes through a
+# register (`mov r4, sp; bfc r4, #0, #2; mov sp, r4`), so the bit-field
+# clear's destination is any register.
+_ARM32_REALIGN_RE = re.compile(
+    rf"^\s*(?:bfc(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*#\d+\s*,\s*#\d+"
+    rf"|bics?(?:\.w)?\s+(?P<dst2>{_ARM32_REG})\s*,\s*(?P<src>{_ARM32_REG})\s*,\s*{_IMM})\s*$",
+    re.IGNORECASE,
+)
+_ARM32_MOV_RE = re.compile(
+    rf"^\s*movs?(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*(?P<src>{_ARM32_REG}|{_IMM})\s*$",
+    re.IGNORECASE,
+)
+_ARM32_MOVW_RE = re.compile(
+    rf"^\s*movw(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*(?P<imm>{_IMM})\s*$",
+    re.IGNORECASE,
+)
+_ARM32_MOVT_RE = re.compile(
+    rf"^\s*movt(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*(?P<imm>{_IMM})\s*$",
+    re.IGNORECASE,
+)
+_ARM32_ADR_RE = re.compile(
+    rf"^\s*adr(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*(?P<delta>{_IMM})\s*$",
+    re.IGNORECASE,
+)
+# The two- and three-operand add/sub spellings nyxstone prints: Thumb's
+# `adds r1, #1` and `add r0, pc` against ARM's `add r11, sp, #8`.
+_ARM32_ARITH_RE = re.compile(
+    rf"^\s*(?P<op>add|sub)s?(?:\.w)?\s+(?P<dst>{_ARM32_REG})\s*,\s*(?P<a>{_ARM32_REG}|{_IMM})"
+    rf"(?:\s*,\s*(?P<b>{_ARM32_REG}|{_IMM}))?\s*$",
+    re.IGNORECASE,
+)
+# The memory operand shared by every load/store form: [base], [base, #K],
+# [base, #K]! (pre-index), [base], #K and [base], rM (post-index), and the
+# pc-relative literal-pool forms [pc], [pc, #K] and [pc, rM].
+_ARM32_MEM_OPERAND_RE = re.compile(
+    rf"^\[\s*(?P<base>{_ARM32_REG})\s*(?:,\s*(?P<off>{_IMM}|{_ARM32_REG}))?\s*\]"
+    rf"(?P<pre>!)?(?:\s*,\s*(?P<post>{_IMM}|{_ARM32_REG}))?$"
+)
+_ARM32_MEM_RE = re.compile(
+    rf"^\s*(?P<op>ldrsb|ldrsh|ldrb|strb|ldrh|strh|ldr|str)(?:\.w)?\s+"
+    rf"(?P<reg>{_ARM32_REG})\s*,\s*(?P<mem>\[.*\])\s*$",
+    re.IGNORECASE,
+)
+_ARM32_PAIR_RE = re.compile(
+    rf"^\s*(?P<op>strd|ldrd)(?:\.w)?\s+(?P<ra>{_ARM32_REG})\s*,\s*(?P<rb>{_ARM32_REG})\s*,"
+    rf"\s*(?P<mem>\[.*\])\s*$",
+    re.IGNORECASE,
+)
+_ARM32_BLOCK_RE = re.compile(
+    rf"^\s*(?P<op>stm|ldm)(?P<variant>ia|db)?(?:\.w)?\s+(?P<base>{_ARM32_REG})(?P<wb>!)?"
+    rf"\s*,\s*\{{(?P<regs>[^}}]+)\}}\s*$",
+    re.IGNORECASE,
+)
+# NEON loads/stores write D registers (unmodelled); only a writeback form
+# touches a general-purpose register, and the amount is the element stride.
+_ARM32_NEON_RE = re.compile(r"^\s*v(?:ld|st)[a-z0-9.]*", re.IGNORECASE)
+_ARM32_NEON_MEM_RE = re.compile(rf"\[\s*({_ARM32_REG})[^\]]*\]\s*(.*)$", re.IGNORECASE)
+# Instructions that write no general-purpose register: the flag setters, the
+# IT-block predicates, the barriers, the hints and every syscall instruction.
+_ARM32_NO_WRITE_RE = re.compile(
+    r"^\s*(?:cmp|cmn|tst|teq|cbz|cbnz|dmb|dsb|isb|nop|svc|bkpt|udf|pld|pldw|plli|it[a-z]*)\b",
+    re.IGNORECASE,
+)
+# Any other instruction whose first operand is a register kills the known
+# value it held. Stores, loads and the flag-setting mnemonics are matched
+# before this, so a source register is never invalidated by its own store;
+# the condition-suffixed forms (IT blocks) land here too, which is the
+# conservative reading - they may not execute.
+_ARM32_DEST_REG_RE = re.compile(rf"^\s*[a-z][a-z0-9.]*\s+({_ARM32_REG})\s*(?:,|$)", re.IGNORECASE)
+
+
+def _arm32_register_family(name: str) -> tuple[str, int] | None:
+    """Map an ARM32 register name to its (family, width); None for untracked."""
+    lowered = name.strip().lower()
+    if lowered in _ARM32_ALIASES:
+        lowered = _ARM32_ALIASES[lowered]
+    if lowered == "sp":
+        return ("sp", 4)
+    if lowered == "lr":
+        return ("lr", 4)
+    if lowered == "pc":
+        return ("pc", 4)
+    if lowered.startswith("r") and lowered[1:].isdigit():
+        if int(lowered[1:]) <= 12:
+            return (lowered, 4)
+    return None
+
+
+def _arm32_register_list(text: str) -> list[str]:
+    """Expand a brace register list (`r4, r10, lr` or `r4-r7, r9`)."""
+    names: list[str] = []
+    for token in text.split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        head, sep, tail = token.partition("-")
+        if sep and head.startswith("r") and head[1:].isdigit() and tail.startswith("r"):
+            for number in range(int(head[1:]), int(tail[1:]) + 1):
+                names.append(f"r{number}")
+        else:
+            names.append(token)
+    return names
+
+
+def _arm32_mnemonic_root(mnemonic: str) -> str:
+    """The mnemonic without its width suffix (`.w`/`.n`)."""
+    return mnemonic.split(".", 1)[0]
+
+
+class Arm32Model(ArchModel):
+    """The 32-bit ARM register model and instruction semantics.
+
+    Text-based over nyxstone instruction text, like the other models, and
+    dialect-agnostic: one handler set covers the ARM and Thumb spellings
+    (``sub sp, sp, #16`` against ``subs sp, #16``, the two- and three-operand
+    ``add`` forms, ``ldr rN, [pc, #K]`` literal pools in both). The one place
+    the dialect decides is what ``pc`` reads as - Thumb's
+    current-instruction+4 against ARM's +8 - so the model carries
+    :attr:`pc_read` and ships as :data:`ARM32_MODEL` (Thumb, the NDK
+    armeabi-v7a default) and :data:`ARM32_ARM_MODEL`.
+
+    What the 32-bit ABI adds over the shared machinery:
+
+    - **Frame-pointer derivation.** Thumb keeps its frame pointer in r7 and
+      ARM in r11, both derived by ``add rN, sp, #imm`` in the prologue, so a
+      store through either resolves by the derived ``("sp", k)`` symbolic -
+      the ARM64 model's rule. ``sub sp, rN, #imm`` restores the frame base
+      from that symbolic in the epilogue.
+    - **Literal pools.** A pc-relative load (``ldr rN, [pc, #K]``, in the
+      ``[pc]`` and ``[pc, rM]`` forms too) reads a word this text-based model
+      cannot see; the destination stays unknown here, and the caller that
+      owns the bytes (the FindClass walk) resolves it beside the model the
+      way i386's GOT loads resolve. The completions - ``add rN, pc`` (Thumb)
+      and ``add rN, pc, rM`` / ``add rN, rM, pc`` (ARM), plus ``adr`` - fold
+      against the instruction's own address when the caller provides it.
+    - **Alignment rebases.** ARM-mode ``-mstackrealign`` emits
+      ``bfc sp, #0, #2``; like i386's ``and esp, imm`` the bytes do not state
+      the delta, so the post-realignment frame is keyed from an opaque base
+      while the pre-realignment slots and the incoming arguments keep their
+      entry-relative keys.
+    - **Register-list stores.** ``push``/``pop``, ``stm``/``ldm`` blocks and
+      the ``strd``/``ldrd`` pairs land whole words in the frame, so a
+      registrar's entry words survive as pointer words exactly as i386's
+      staged stores do.
+    """
+
+    frame_bases = ARM32_FRAME_BASES
+    call_clobbered = _ARM32_CALL_CLOBBERED
+    instruction_stride = None  # Thumb instructions are 2 or 4 bytes
+
+    def __init__(self, thumb: bool = True) -> None:
+        super().__init__()
+        # pc reads as current-instruction+4 in Thumb and +8 in ARM.
+        self.pc_read = 4 if thumb else 8
+
+    def register(self, name: str) -> tuple[str, int] | None:
+        return _arm32_register_family(name)
+
+    def call_kind(self, mnemonic: str) -> str | None:
+        root = _arm32_mnemonic_root(mnemonic.strip().lower())
+        if root in ("bl", "blx"):
+            return "call"
+        if root in ("b", "bx"):
+            return "tail"
+        # Conditional spellings: `bleq` calls, `blt` is b+lt and branches -
+        # the condition split keeps the two apart.
+        if root.startswith("blx") and root[3:] in _ARM32_CONDITIONS:
+            return "call"
+        if root.startswith("bl") and root[2:] in _ARM32_CONDITIONS:
+            return "call"
+        if root.startswith("bx") and root[2:] in _ARM32_CONDITIONS:
+            return None  # a conditional bx is a return or transfer, not a call site
+        return None
+
+    def write_operand(self, state: FrameState, name: str, value) -> None:
+        info = self.register(name)
+        if not info:
+            return
+        if isinstance(value, (tuple, int)):
+            state.registers[info[0]] = value if isinstance(value, tuple) else value & 0xFFFFFFFF
+        else:
+            state.registers.pop(info[0], None)
+
+    def write_family(self, state: FrameState, family: str, value, width: int) -> None:
+        if isinstance(value, (tuple, int)):
+            state.registers[family] = value if isinstance(value, tuple) else value & 0xFFFFFFFF
+        else:
+            state.registers.pop(family, None)
+
+    def resolve_base(self, state: FrameState, base_reg: str) -> tuple[str, int] | None:
+        """Resolve a memory operand's base to a (frame base, offset) pair.
+
+        ``sp`` resolves with the running adjustment applied; a register
+        holding a derived ``("sp", off)`` tuple resolves to that slot (r7/r11
+        frame pointers arrive this way). Anything else returns None - the
+        access is through a pointer this pass cannot locate.
+        """
+        info = self.register(base_reg)
+        if not info:
+            return None
+        family = info[0]
+        if family == "sp":
+            return None if state.sp_adjustment is None else ("sp", state.sp_adjustment)
+        value = state.registers.get(family)
+        if isinstance(value, tuple) and value[0] == "sp":
+            return "sp", value[1]
+        return None
+
+    def step(
+        self,
+        state: FrameState,
+        text: str,
+        leaves_function: bool = True,
+        address_span: tuple[int, int] | None = None,
+    ) -> None:
+        parts = text.split(None, 1)
+        mnemonic = parts[0].lower() if parts else ""
+        root = _arm32_mnemonic_root(mnemonic)
+        # `bx lr` (and its conditional forms) are returns, not transfers: no
+        # register is written.
+        if root == "bx" or (root.startswith("bx") and root[2:] in _ARM32_CONDITIONS):
+            if len(parts) > 1 and parts[1].strip().lower() == "lr":
+                return
+        if self.apply_branch(state, text, leaves_function):
+            return
+        if _ARM32_NO_WRITE_RE.match(text):
+            return
+        if match := _ARM32_PUSH_RE.match(text):
+            self._apply_push(state, match.group("regs"))
+            return
+        if match := _ARM32_POP_RE.match(text):
+            self._apply_pop(state, match.group("regs"))
+            return
+        if match := _ARM32_REALIGN_RE.match(text):
+            self._apply_realign(state, match)
+            return
+        if match := _ARM32_MEM_RE.match(text):
+            self._apply_memory(state, match, address_span)
+            return
+        if match := _ARM32_PAIR_RE.match(text):
+            self._apply_pair(state, match)
+            return
+        if match := _ARM32_BLOCK_RE.match(text):
+            self._apply_block(state, match)
+            return
+        if match := _ARM32_MOV_RE.match(text):
+            self._apply_mov(state, match, address_span)
+            return
+        if match := _ARM32_MOVW_RE.match(text):
+            self._apply_movw(state, match)
+            return
+        if match := _ARM32_MOVT_RE.match(text):
+            self._apply_movt(state, match)
+            return
+        if match := _ARM32_ADR_RE.match(text):
+            self._apply_adr(state, match, address_span)
+            return
+        if match := _ARM32_ARITH_RE.match(text):
+            self._apply_arith(state, match, address_span)
+            return
+        if _ARM32_NEON_RE.match(text):
+            # Only a writeback form touches a general-purpose register, and
+            # the amount is the element stride - the base goes unknown.
+            if mem := _ARM32_NEON_MEM_RE.search(text):
+                if mem.group(2).strip():
+                    if self.register(mem.group(1))[0] == "sp":
+                        state.sp_adjustment = None
+                    else:
+                        state.invalidate(mem.group(1))
+            return
+        # Anything else writing a register makes its value unknown.
+        if match := _ARM32_DEST_REG_RE.match(text):
+            state.invalidate(match.group(1))
+
+    # -- handlers -----------------------------------------------------------
+
+    @staticmethod
+    def _offset(token: str | None) -> int | None:
+        return _parse_immediate(token) if token else 0
+
+    def _store_word(self, state: FrameState, base: str, offset: int, value) -> None:
+        """Store one 4-byte word: a pointer word keeps its identity."""
+        if isinstance(value, tuple):
+            state.store_pointer_word(base, offset, value)
+        elif isinstance(value, int):
+            state.store(base, offset, value, 4)
+        else:
+            state.drop(base, offset, 4)
+
+    def _apply_realign(self, state: FrameState, match: re.Match) -> None:
+        """A bit-field clear (or bic) that aligns the frame pointer.
+
+        The bytes do not state the delta, so whatever the destination names -
+        sp itself (ARM) or a register holding a derived sp symbolic that a
+        following `mov sp, rN` installs (Thumb) - is rebased to the opaque
+        namespace. Nothing above the entry moved, so earlier slots and the
+        incoming arguments keep their entry-relative keys.
+        """
+        dst = match.group("dst") or match.group("dst2")
+        info = self.register(dst) if dst else None
+        if dst and dst.lower() == "sp":
+            state.sp_adjustment = _ARM32_ALIGNED_FRAME_BASE
+            return
+        if info:
+            state.registers[info[0]] = ("sp", _ARM32_ALIGNED_FRAME_BASE)
+
+    def _apply_push(self, state: FrameState, regs_text: str) -> None:
+        """Store the list's registers low-to-high below sp, moving sp down."""
+        names = _arm32_register_list(regs_text)
+        if state.sp_adjustment is None:
+            return
+        state.sp_adjustment -= 4 * len(names)
+        for index, name in enumerate(names):
+            if name == "pc":
+                continue
+            if info := self.register(name):
+                self._store_word(
+                    state, "sp", state.sp_adjustment + 4 * index, state.registers.get(info[0])
+                )
+
+    def _apply_pop(self, state: FrameState, regs_text: str) -> None:
+        names = _arm32_register_list(regs_text)
+        if state.sp_adjustment is None:
+            for name in names:
+                state.invalidate(name)
+            return
+        for index, name in enumerate(names):
+            if name == "pc":
+                continue
+            if info := self.register(name):
+                value = state.load_word("sp", state.sp_adjustment + 4 * index)
+                if isinstance(value, (int, tuple)):
+                    state.registers[info[0]] = value
+                else:
+                    state.registers.pop(info[0], None)
+        state.sp_adjustment += 4 * len(names)
+
+    def _apply_memory(self, state: FrameState, match: re.Match, address_span) -> None:
+        op = match.group("op").lower()
+        reg = match.group("reg")
+        mem = _ARM32_MEM_OPERAND_RE.match(match.group("mem"))
+        if not mem:
+            return
+        base = mem.group("base").lower()
+        source = mem.group("off")
+        offset: int | None
+        if source and self.register(source):
+            offset = None  # a register offset this model cannot fold
+        else:
+            offset = self._offset(source)
+        width = 1 if op.endswith("b") else 2 if op.endswith("h") else 4
+        if base == "pc":
+            # The literal pool: a word this model cannot see. The caller that
+            # owns the bytes resolves it beside the model.
+            state.invalidate(reg)
+            return
+        resolved = self.resolve_base(state, base)
+        if resolved is None or offset is None:
+            if op.startswith("ldr"):
+                state.invalidate(reg)
+            return
+        frame_base, base_adjustment = resolved
+        effective = base_adjustment + offset
+        pre_indexed = bool(mem.group("pre"))
+        if pre_indexed and base == "sp" and state.sp_adjustment is not None:
+            # Pre-index writeback folds the offset into sp before the access.
+            state.sp_adjustment += offset
+            effective = state.sp_adjustment
+        if op.startswith("ldr"):
+            if width == 4:
+                value = state.load_word(frame_base, effective)
+                if isinstance(value, (int, tuple)):
+                    self.write_operand(state, reg, value)
+                else:
+                    state.invalidate(reg)
+            else:
+                # A sub-word read of known bytes; a pointer word's low bytes
+                # are not the pointer, so they stay unknown.
+                byte = state.slots.get((frame_base, effective))
+                if isinstance(byte, int):
+                    self.write_operand(state, reg, byte)
+                else:
+                    state.invalidate(reg)
+        else:
+            value = state.get_register(reg)
+            if width == 4:
+                self._store_word(state, frame_base, effective, value[0] if value else None)
+            elif value and isinstance(value[0], int):
+                state.store(frame_base, effective, value[0], width)
+            else:
+                state.drop(frame_base, effective, width)
+        post = mem.group("post")
+        if post is not None:
+            # Post-index writeback moves the base after the access; only sp's
+            # running adjustment tracks that without losing the frame.
+            delta = _parse_immediate(post) if not self.register(post) else None
+            if base == "sp" and delta is not None and state.sp_adjustment is not None:
+                state.sp_adjustment += delta
+            else:
+                state.invalidate(base)
+        elif pre_indexed and base != "sp":
+            state.invalidate(base)
+
+    def _apply_pair(self, state: FrameState, match: re.Match) -> None:
+        """strd/ldrd: two whole words at [base(+off)] and base(+off)+4."""
+        op = match.group("op").lower()
+        mem = _ARM32_MEM_OPERAND_RE.match(match.group("mem"))
+        if not mem:
+            return
+        offset = self._offset(mem.group("off"))
+        resolved = self.resolve_base(state, mem.group("base"))
+        if resolved is None or offset is None:
+            if op == "ldrd":
+                state.invalidate(match.group("ra"))
+                state.invalidate(match.group("rb"))
+            return
+        base, adjustment = resolved
+        slots = (adjustment + offset, adjustment + offset + 4)
+        if op == "strd":
+            for reg, slot in zip((match.group("ra"), match.group("rb")), slots):
+                value = state.get_register(reg)
+                self._store_word(state, base, slot, value[0] if value else None)
+        else:
+            for reg, slot in zip((match.group("ra"), match.group("rb")), slots):
+                value = state.load_word(base, slot)
+                if isinstance(value, (int, tuple)):
+                    self.write_operand(state, reg, value)
+                else:
+                    state.invalidate(reg)
+
+    def _apply_block(self, state: FrameState, match: re.Match) -> None:
+        """stm/ldm: the register list stored or loaded as ascending words."""
+        op = match.group("op").lower()
+        variant = (match.group("variant") or "ia").lower()
+        base_reg = match.group("base")
+        names = _arm32_register_list(match.group("regs"))
+        resolved = self.resolve_base(state, base_reg)
+        if resolved is None or variant != "ia":
+            if op == "ldm":
+                for name in names:
+                    state.invalidate(name)
+            state.invalidate(base_reg)
+            return
+        base, adjustment = resolved
+        if op == "stm":
+            for index, name in enumerate(names):
+                info = self.register(name)
+                self._store_word(
+                    state,
+                    base,
+                    adjustment + 4 * index,
+                    state.registers.get(info[0]) if info else None,
+                )
+        else:
+            for index, name in enumerate(names):
+                if name == "pc":
+                    continue
+                if info := self.register(name):
+                    value = state.load_word(base, adjustment + 4 * index)
+                    if isinstance(value, (int, tuple)):
+                        state.registers[info[0]] = value
+                    else:
+                        state.registers.pop(info[0], None)
+        if match.group("wb"):
+            # The writeback moves the base by the block size; only sp's
+            # running adjustment tracks that without losing the frame.
+            if base_reg.lower() == "sp" and state.sp_adjustment is not None:
+                state.sp_adjustment += 4 * len(names)
+            else:
+                state.invalidate(base_reg)
+
+    def _apply_mov(self, state: FrameState, match: re.Match, address_span) -> None:
+        dst, src = match.group("dst"), match.group("src")
+        dst_info = self.register(dst)
+        if not dst_info:
+            return
+        src_lower = src.lower()
+        if (imm := _parse_immediate(src)) is not None:
+            state.registers[dst_info[0]] = imm & 0xFFFFFFFF
+            return
+        if src_lower == "pc":
+            # pc reads as this instruction's own address plus the dialect's
+            # fixed offset, so the value only exists when the caller placed
+            # the instruction.
+            if address_span is not None:
+                state.registers[dst_info[0]] = (address_span[0] + self.pc_read) & 0xFFFFFFFF
+            else:
+                state.registers.pop(dst_info[0], None)
+            return
+        if src_lower == "sp":
+            if state.sp_adjustment is None:
+                state.registers.pop(dst_info[0], None)
+            else:
+                state.registers[dst_info[0]] = ("sp", state.sp_adjustment)
+            return
+        if dst_info[0] == "sp":
+            # `mov sp, rN`: the frame base moves to whatever rN holds, when
+            # that is a derived sp symbolic.
+            src_info = self.register(src)
+            value = state.registers.get(src_info[0]) if src_info else None
+            if isinstance(value, tuple) and value[0] == "sp":
+                state.sp_adjustment = value[1]
+            else:
+                state.sp_adjustment = None
+            return
+        src_info = self.register(src)
+        if not src_info:
+            return
+        value = state.registers.get(src_info[0])
+        if isinstance(value, (int, tuple)):
+            state.registers[dst_info[0]] = value
+        else:
+            state.registers.pop(dst_info[0], None)
+
+    def _apply_movw(self, state: FrameState, match: re.Match) -> None:
+        info = self.register(match.group("dst"))
+        value = _parse_immediate(match.group("imm"))
+        if info and value is not None:
+            state.registers[info[0]] = value & 0xFFFF
+        elif info:
+            state.registers.pop(info[0], None)
+
+    def _apply_movt(self, state: FrameState, match: re.Match) -> None:
+        info = self.register(match.group("dst"))
+        value = _parse_immediate(match.group("imm"))
+        if not info or value is None:
+            if info:
+                state.registers.pop(info[0], None)
+            return
+        current = state.registers.get(info[0])
+        if not isinstance(current, int):
+            state.registers.pop(info[0], None)
+            return
+        state.registers[info[0]] = (current & 0xFFFF) | ((value & 0xFFFF) << 16)
+
+    def _apply_adr(self, state: FrameState, match: re.Match, address_span) -> None:
+        """`adr rN, #delta`: pc + delta, folded when the caller placed it."""
+        info = self.register(match.group("dst"))
+        delta = _parse_immediate(match.group("delta"))
+        if not info or delta is None:
+            if info:
+                state.registers.pop(info[0], None)
+            return
+        if address_span is None:
+            state.registers.pop(info[0], None)
+            return
+        state.registers[info[0]] = (address_span[0] + delta) & 0xFFFFFFFF
+
+    def _apply_arith(self, state: FrameState, match: re.Match, address_span) -> None:
+        op = match.group("op").lower()
+        dst, a, b = match.group("dst"), match.group("a"), match.group("b")
+        dst_info = self.register(dst)
+        if not dst_info:
+            return
+        operands = [a] + ([b] if b else [])
+        # The sp forms first: `subs sp, #imm` / `sub sp, sp, #imm` move the
+        # frame base, and the epilogue `sub sp, rN, #imm` restores it from a
+        # derived frame pointer.
+        if dst_info[0] == "sp":
+            imm = next(
+                (parsed for token in operands if (parsed := _parse_immediate(token)) is not None),
+                None,
+            )
+            reg_tokens = [token for token in operands if self.register(token)]
+            if imm is None:
+                return
+            if not reg_tokens or reg_tokens[0].lower() == "sp":
+                if state.sp_adjustment is not None:
+                    state.sp_adjustment += imm if op == "add" else -imm
+                return
+            src_info = self.register(reg_tokens[0])
+            value = state.registers.get(src_info[0]) if src_info else None
+            if isinstance(value, tuple) and value[0] == "sp":
+                state.sp_adjustment = value[1] + (imm if op == "add" else -imm)
+            else:
+                state.sp_adjustment = None
+            return
+        # The pc completion: `add rN, pc` (Thumb, rN += pc), `add rN, pc, rM`
+        # / `add rN, rM, pc` (ARM). The pool word usually arrives as the other
+        # operand's value - resolved beside the model by the caller - and the
+        # pc side needs this instruction's address.
+        pc_position = next(
+            (index for index, token in enumerate(operands) if token.lower() == "pc"), None
+        )
+        if pc_position is not None and op == "add":
+            if len(operands) == 1:
+                # The two-operand spelling: the other addend is rN itself.
+                other_value = state.registers.get(dst_info[0])
+            else:
+                other = operands[1 - pc_position]
+                if (imm := _parse_immediate(other)) is not None:
+                    other_value = imm
+                else:
+                    other_info = self.register(other)
+                    other_value = state.registers.get(other_info[0]) if other_info else None
+            if isinstance(other_value, int) and address_span is not None:
+                state.registers[dst_info[0]] = (
+                    other_value + address_span[0] + self.pc_read
+                ) & 0xFFFFFFFF
+            elif (
+                isinstance(other_value, tuple)
+                and other_value[0] == "sp"
+                and address_span is not None
+            ):
+                # Folding arithmetic on a frame symbolic moves the pointer.
+                state.registers[dst_info[0]] = (
+                    "sp",
+                    other_value[1] + address_span[0] + self.pc_read,
+                )
+            else:
+                state.registers.pop(dst_info[0], None)
+            return
+        # A frame-pointer derivation: `add rN, sp[, #imm]`, and the epilogue
+        # move of one (`sub.w r4, r7, #8`): arithmetic on a derived sp
+        # symbolic moves the symbolic, so a `mov sp, rN` after it restores the
+        # frame base instead of losing it.
+        sp_position = next(
+            (index for index, token in enumerate(operands) if token.lower() == "sp"), None
+        )
+        symbolic_source = None
+        for token in operands:
+            if info := self.register(token):
+                value = state.registers.get(info[0])
+                if isinstance(value, tuple) and value[0] == "sp":
+                    symbolic_source = value
+        if symbolic_source is not None:
+            imm = next(
+                (parsed for token in operands if (parsed := _parse_immediate(token)) is not None),
+                0,
+            )
+            delta = imm if op == "add" else -imm
+            state.registers[dst_info[0]] = ("sp", symbolic_source[1] + delta)
+            return
+        if sp_position is not None and op == "add":
+            other = operands[1 - sp_position] if len(operands) > 1 else "#0"
+            imm = _parse_immediate(other) if not self.register(other) else 0
+            if imm is None or state.sp_adjustment is None:
+                state.registers.pop(dst_info[0], None)
+            else:
+                state.registers[dst_info[0]] = ("sp", state.sp_adjustment + imm)
+            return
+        # Plain register/immediate arithmetic; the two-operand spelling adds
+        # into rN itself (adds r1, #0x3a).
+        values: list[int] = []
+        if len(operands) == 1:
+            current = state.registers.get(dst_info[0])
+            if not isinstance(current, int):
+                state.registers.pop(dst_info[0], None)
+                return
+            values.append(current)
+        for token in operands:
+            if (imm := _parse_immediate(token)) is not None:
+                values.append(imm)
+                continue
+            info = self.register(token)
+            if not info or info[0] == "sp":
+                state.registers.pop(dst_info[0], None)
+                return
+            value = state.registers.get(info[0])
+            if not isinstance(value, int):
+                state.registers.pop(dst_info[0], None)
+                return
+            values.append(value)
+        if not values:
+            state.registers.pop(dst_info[0], None)
+            return
+        result = values[0]
+        for extra in values[1:]:
+            result = result + extra if op == "add" else result - extra
+        state.registers[dst_info[0]] = result & 0xFFFFFFFF
+
+
 X86_64_MODEL = X86_64Model()
 I386_MODEL = I386Model()
 ARM64_MODEL = Arm64Model()
-
+ARM32_MODEL = Arm32Model(thumb=True)
+ARM32_ARM_MODEL = Arm32Model(thumb=False)
 
 # ---------------------------------------------------------------------------
 # Traversals: the shared straight-line pass and the CFG dataflow.
@@ -2797,6 +3520,11 @@ def model_for_target(arch_target: str) -> ArchModel:
     lowered = (arch_target or "").lower()
     if "aarch64" in lowered or "arm64" in lowered:
         return ARM64_MODEL
+    arch = lowered.split("-", 1)[0]
+    # 32-bit ARM and Thumb triples (arm*/thumb*, armeb/thumbeb included) -
+    # never aarch64/arm64, which matched above.
+    if arch.startswith(("arm", "thumb")):
+        return ARM32_MODEL
     if any(marker in lowered for marker in ("x86_64", "x86-64", "amd64", "x64")):
         return X86_64_MODEL
     if any(marker in lowered for marker in _I386_TARGET_MARKERS):
