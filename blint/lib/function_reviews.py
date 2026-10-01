@@ -142,35 +142,71 @@ ACCESS_CHECK_APIS: set[str] = {
     "rtlvalidrelativesecuritydescriptor",
 }
 
-ALLOC_APIS: set[str] = {
+# Allocation or protection calls that can hand back executable memory. A plain
+# heap allocation (malloc, HeapAlloc) cannot, so it is not a loader signal.
+EXEC_MEMORY_APIS: set[str] = {
     "virtualalloc",
+    "virtualalloc2",
     "virtualallocex",
-    "heapalloc",
-    "globalalloc",
-    "localalloc",
+    "virtualallocexnuma",
     "virtualprotect",
     "virtualprotectex",
-    "cryptmemalloc",
     "ntallocatevirtualmemory",
-    "ntprotectvirtualmemory",
     "zwallocatevirtualmemory",
+    "ntprotectvirtualmemory",
+    "zwprotectvirtualmemory",
     "mmap",
+    "mmap64",
     "mprotect",
-    "malloc",
-    "calloc",
-    "realloc",
-    "posix_memalign",
-    "valloc",
-    "pvalloc",
+    "pkey_mprotect",
+    "vm_protect",
+    "mach_vm_protect",
+}
+# Where each API takes its protection argument (0-based) and the bits that
+# make the memory executable: PROT_EXEC and VM_PROT_EXECUTE are 4, and the
+# Windows PAGE_EXECUTE* constants are 0x10-0x80.
+EXEC_PROTECTION_ARGUMENT: dict[str, tuple[int, int]] = {
+    "mmap": (2, 0x4),
+    "mmap64": (2, 0x4),
+    "mprotect": (2, 0x4),
+    "pkey_mprotect": (2, 0x4),
+    "vm_protect": (4, 0x4),
+    "mach_vm_protect": (4, 0x4),
+    "virtualalloc": (3, 0xF0),
+    "virtualalloc2": (4, 0xF0),
+    "virtualallocex": (4, 0xF0),
+    "virtualallocexnuma": (4, 0xF0),
+    "virtualprotect": (2, 0xF0),
+    "virtualprotectex": (3, 0xF0),
+    "ntallocatevirtualmemory": (5, 0xF0),
+    "zwallocatevirtualmemory": (5, 0xF0),
+    "ntprotectvirtualmemory": (3, 0xF0),
+    "zwprotectvirtualmemory": (3, 0xF0),
+}
+# Remote injection: memory allocated in another process, written there, then
+# started by a thread or APC rather than by a local indirect call.
+REMOTE_ALLOC_APIS: set[str] = {
+    "virtualallocex",
+    "virtualallocexnuma",
+    "virtualprotectex",
+    "ntallocatevirtualmemory",
+    "zwallocatevirtualmemory",
+}
+REMOTE_WRITE_APIS: set[str] = {
     "writeprocessmemory",
-    "createremotethread",
-    "queueuserapc",
-    "setthreadcontext",
-    "getthreadcontext",
-    "resumethread",
     "ntwritevirtualmemory",
-    "ntresumethread",
-    "ntqueueapcvalues",
+    "zwwritevirtualmemory",
+}
+REMOTE_START_APIS: set[str] = {
+    "createremotethread",
+    "createremotethreadex",
+    "ntcreatethreadex",
+    "zwcreatethreadex",
+    "rtlcreateuserthread",
+    "queueuserapc",
+    "ntqueueapcthread",
+    "setthreadcontext",
+    "ntsetcontextthread",
 }
 DEBUG_APIS: set[str] = {
     "isdebuggerpresent",
@@ -303,6 +339,87 @@ def _looks_like_indirect_call_line(line: str) -> bool:
     )
 
 
+_REGISTER_CALL_MNEMONICS = {"blr", "blraa", "blrab", "blraaz", "blrabz", "call", "callq", "blx"}
+_REGISTER_JUMP_MNEMONICS = {"br", "braa", "brab", "braaz", "brabz", "jmp", "jmpq", "bx"}
+_ARM32_TRANSFER_REGISTERS = {f"r{idx}" for idx in range(13)} | {"ip", "sb", "sl", "fp"}
+# A frame restore just before a register jump marks it as a tail call; a
+# switch's jump-table branch never follows one.
+_FRAME_RESTORE_RE = re.compile(
+    r"^(?:ldp\s+x29,\s*x30|ldr\s+x30,|pop\b|leave\b|add\s+[re]?sp,|ldm\w*\s+sp!|"
+    r"pop\.w\b|ldr\s+lr,)"
+)
+
+
+def _transfer_register(mnemonic: str, operand: str) -> bool:
+    """True when a call/jump operand is a bare general-purpose register."""
+    operand = operand.removeprefix("%").removeprefix("*%").strip()
+    if not operand or "[" in operand or "," in operand:
+        return False
+    if mnemonic in ("blx", "bx"):
+        return operand in _ARM32_TRANSFER_REGISTERS
+    if operand == "x30":
+        return False
+    return operand in X86_INDIRECT_CALL_REGISTERS or operand in ARM64_INDIRECT_CALL_REGISTERS
+
+
+def _has_register_indirect_transfer(assembly: str) -> bool:
+    """True when control passes to an address held in a register: a register
+    call, or a register jump in tail position. Memory-operand calls (x86-64
+    import calls through the IAT or GOT) and jump-table branches do not count.
+    """
+    lines = [line.strip().lower() for line in assembly.splitlines() if line.strip()]
+    for idx, line in enumerate(lines):
+        mnemonic, _, operand = line.partition(" ")
+        if mnemonic in _REGISTER_CALL_MNEMONICS and _transfer_register(mnemonic, operand):
+            return True
+        if mnemonic in _REGISTER_JUMP_MNEMONICS and _transfer_register(mnemonic, operand):
+            if any(_FRAME_RESTORE_RE.match(prev) for prev in lines[max(0, idx - 4) : idx]):
+                return True
+    return False
+
+
+def _requests_executable_memory(func_data: dict, arch_target: str, binary_format: str) -> bool:
+    """True unless every executable-capable call in the function provably asks
+    for non-executable memory.
+
+    The protection argument is read from the call-site dataflow
+    (:func:`blint.lib.absint.recover_call_site_arguments_with_method`). A call
+    whose protection the dataflow cannot pin to one constant, or a function it
+    cannot analyse, counts as executable: only a known constant without the
+    execute bits clears a call.
+    """
+    if not _function_has_any_direct_call(func_data, EXEC_MEMORY_APIS):
+        return False
+    from blint.lib.absint import recover_call_site_arguments_with_method
+
+    try:
+        records, method = recover_call_site_arguments_with_method(
+            func_data, arch_target, binary_format
+        )
+    except Exception:  # pylint: disable=broad-except
+        return True
+    if method != "dataflow":
+        return True
+    resolved_sites = 0
+    for record in records:
+        callee = _normalize_direct_call_name(record.get("callee") or "")
+        if callee not in EXEC_MEMORY_APIS:
+            continue
+        resolved_sites += 1
+        position, exec_bits = EXEC_PROTECTION_ARGUMENT[callee]
+        arguments = record.get("arguments") or []
+        protection = arguments[position] if position < len(arguments) else None
+        if not isinstance(protection, int) or protection & exec_bits:
+            return True
+    expected_sites = sum(
+        1
+        for call_name in func_data.get("direct_calls", [])
+        if _normalize_direct_call_name(call_name) in EXEC_MEMORY_APIS
+    )
+    # a call the records did not cover is not proven non-executable
+    return resolved_sites < expected_sites
+
+
 def _iter_indirect_call_windows(assembly: str, window_size: int = 8) -> Iterator[str]:
     """Yield short instruction windows ending at each indirect call site."""
     lines = [line.strip().lower() for line in assembly.splitlines() if line.strip()]
@@ -399,7 +516,11 @@ def _evaluate_function_metric(rule_obj: dict, func_data: dict) -> bool:
 
 
 def _evaluate_function_analysis(
-    rule_id: str, func_data: dict, resolver_helpers: dict[str, str]
+    rule_id: str,
+    func_data: dict,
+    resolver_helpers: dict[str, str],
+    arch_target: str = "",
+    binary_format: str = "",
 ) -> tuple[bool, str]:
     """Evaluate rule-specific function_analysis heuristics."""
     metrics = func_data.get("instruction_metrics", {})
@@ -431,8 +552,15 @@ def _evaluate_function_analysis(
         if icount > 15 and (mov_count / icount) > 0.6:
             passed = True
     elif rule_id == "SUSPICIOUS_MEMORY_ALLOC":
-        has_alloc = any(api in c for c in direct_calls for api in ALLOC_APIS)
-        if has_alloc and (func_data.get("has_indirect_call") or metrics.get("jump_count", 0) > 0):
+        local_loader = _has_register_indirect_transfer(assembly) and (
+            _requests_executable_memory(func_data, arch_target, binary_format)
+        )
+        remote_injection = (
+            _function_has_any_direct_call(func_data, REMOTE_ALLOC_APIS)
+            and _function_has_any_direct_call(func_data, REMOTE_WRITE_APIS)
+            and _function_has_any_direct_call(func_data, REMOTE_START_APIS)
+        )
+        if local_loader or remote_injection:
             passed = True
     elif rule_id == "POTENTIAL_ANTI_DEBUG":
         if "rdtsc" in assembly or any(api in c for c in direct_calls for api in DEBUG_APIS):
@@ -563,9 +691,18 @@ def _evaluate_function_analysis(
 
 
 def review_disassembled_functions(
-    review_functions_list: list[dict[str, Any]], disassembled_functions: dict, evidence_limit: int
+    review_functions_list: list[dict[str, Any]],
+    disassembled_functions: dict,
+    evidence_limit: int,
+    arch_target: str = "",
+    binary_format: str = "",
 ) -> dict[str, list]:
-    """Run all FUNCTION_REVIEWS against disassembled function metadata."""
+    """Run all FUNCTION_REVIEWS against disassembled function metadata.
+
+    ``arch_target`` and ``binary_format`` (the metadata's ``llvm_target_tuple``
+    and ``binary_type``) let a rule read call-site arguments; without them
+    those rules assume the unknown argument.
+    """
     if not disassembled_functions:
         return {}
 
@@ -589,7 +726,7 @@ def review_disassembled_functions(
                     passed = _evaluate_function_metric(rule_obj, func_data)
                 elif check_type == "function_analysis":
                     passed, related_function = _evaluate_function_analysis(
-                        rule_id, func_data, resolver_helpers
+                        rule_id, func_data, resolver_helpers, arch_target, binary_format
                     )
                 if passed:
                     evidence = {
