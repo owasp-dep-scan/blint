@@ -1709,8 +1709,8 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
                 stub_start = None
     elif is_i386:
         # The PIC stub jumps through a GOT slot addressed from the .got.plt
-        # base (ebx at run time); a non-PIC stub uses the rip-equivalent
-        # absolute form. 16-byte entries, as on x86-64.
+        # base (ebx at run time); a non-PIC stub names the slot's absolute
+        # address. 16-byte entries, as on x86-64.
         gotplt = parsed_obj.get_section(".got.plt")
         try:
             got_base = int(gotplt.virtual_address)
@@ -1722,7 +1722,7 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
             if data[offset] != 0xFF or data[offset + 1] not in (0xA3, 0x25):
                 continue
             disp = struct.unpack_from("<i", data, offset + 2)[0]
-            slot = (got_base + disp) if data[offset + 1] == 0xA3 else base + offset + 6 + disp
+            slot = (got_base + disp) if data[offset + 1] == 0xA3 else disp & 0xFFFFFFFF
             name = got_names.get(slot)
             if not name:
                 continue

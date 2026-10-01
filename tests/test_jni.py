@@ -359,6 +359,33 @@ def test_dynamic_join_refuses_ambiguous_name_and_signature() -> None:
     assert result["unbound_dex_natives"] == []
 
 
+def test_unique_runtime_entry_binds_only_its_registered_class() -> None:
+    """A (name, signature) pair with one declaring class and one entry the
+    registrar walk recovered binds as runtime_table only when the walk's
+    FindClass class is that declaring class; another class leaves it
+    unbound."""
+    from blint.lib.jni import _join_abi_lists
+
+    natives = [
+        {"class": "Lp/A;", "name": "run", "descriptor": "()V"},
+        {"class": "Lp/C;", "name": "other", "descriptor": "(I)V"},
+    ]
+    runtime = {
+        ("libx.so", "x86"): [
+            {"class": "p.A", "entries": [{"name": "run", "signature": "()V", "fn_addr": "0x10"}]},
+            {
+                "class": "p.B",
+                "entries": [{"name": "other", "signature": "(I)V", "fn_addr": "0x20"}],
+            },
+        ]
+    }
+    result = _join_abi_lists(natives, {}, {}, {"libx.so": {"x86"}}, "x86", {}, runtime)
+    assert [
+        (b["class"], b["fn_addr"], b.get("confirmed_by")) for b in result["bound_dynamic"]
+    ] == [("p.A", "0x10", "runtime_table")]
+    assert [u["class"] for u in result["unbound_dex_natives"]] == ["p.C"]
+
+
 def test_app_join_absent_without_dex_natives() -> None:
     from blint.lib.android_native import scan_android_native
     from blint.lib.jni import build_jni_join_summary

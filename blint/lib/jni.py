@@ -551,6 +551,11 @@ def _join_abi_lists(
         if len(matches) == 1 and len(classes) == 1:
             cls, native_entry = next(iter(classes.items()))
             match = matches[0]
+            runtime_class = match.get("runtime_class")
+            if runtime_class and runtime_class != cls:
+                # registered for a class the dex does not declare it on
+                unbound.append({**native_entry, "class": cls, "abi": abi})
+                continue
             bound_dynamic.append(
                 {
                     **native_entry,
@@ -559,6 +564,7 @@ def _join_abi_lists(
                     "library": match["library"],
                     "fn_addr": match.get("fn_addr"),
                     **({"fn_name": match["fn_name"]} if match.get("fn_name") else {}),
+                    **({"confirmed_by": "runtime_table"} if runtime_class else {}),
                 }
             )
             continue
@@ -872,12 +878,10 @@ def build_jni_join_summary(
         per_abi[abi] = _join_abi_lists(
             natives, surfaces, register_tables, lib_abis, abi, confirmed_classes
         )
-    # Tables built at run time (A11 S3): where the join leaves dex natives
-    # unbound, the registrar walk may still read the registration's entry
-    # words off the callee's stack. Only the ABI's own copies are walked,
-    # and only the shapes S0 measured as readable (i386 word stores with a
-    # constant count) recover anything; every recovered fnPtr passes the
-    # function-start oracle inside the recovery.
+    # Tables built at run time: where the join leaves dex natives unbound,
+    # the registrar walk may still read the entry words off the stack.
+    # Only each ABI's own copies are walked, and only i386 word stores
+    # with a constant count recover anything.
     runtime_registrations: dict[tuple[str, str], list[dict]] = {}
     if confirm_findclass:
         unbound_abis = {

@@ -38,13 +38,9 @@ tables are registered for which class:
 A cheap byte pre-scan only proposes *where* to decode; the model
 recomputes every address and a proposal the model does not confirm is
 dropped, so a pre-scan defect can cost recall, never precision.
-``armeabi-v7a`` and ``x86`` have no call-site layer here and stay
-unconfirmed by design.
-
-Measured carriers (N0(c)): fennec's libxul 7/7 candidate tables, and
-RnHello's six ``initHybrid`` registrar chains; element's
-runtime-composed soloader registration carries no constant name and
-correctly confirms nothing.
+arm64, x86_64 and x86 (i386) have a call-site layer; ``armeabi-v7a``
+has none and stays unconfirmed. On i386 the walk also recovers tables
+the registrar builds at run time (:func:`recover_runtime_tables`).
 """
 
 from __future__ import annotations
@@ -74,7 +70,7 @@ def _vtable_slot_tokens(arch: str) -> tuple[str, ...]:
     """
     if arch == "x86":
         return ("+860]", "#860")
-    return ("#0x6b8", "#1720", "+0x6b8]", "+1720]")
+    return _REGISTER_NATIVES_TOKENS
 
 
 def _table_entry_stride(arch: str) -> int:
@@ -1292,8 +1288,8 @@ def _direct_callers(sections, targets: set[int]) -> set[int]:
 def recover_runtime_tables(parsed_obj) -> list[dict]:
     """Registrations whose ``JNINativeMethod`` table no static triple holds.
 
-    The registrar builds the entries at run time (A10's cause B, the fbjni
-    32-bit and jni.hpp single-entry shapes); this walk reads the words it
+    The registrar builds the entries at run time (fbjni's 32-bit
+    single-entry registrations); this walk reads the words it
     stored - the name and signature string addresses plus the fnPtr - from
     the frame slots the methods pointer names, in the function that made
     the vtable call or in the caller whose stack buffer the pair carried.
@@ -1303,9 +1299,8 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     start this binary's own sources name (symbols, exports, unwind
     tables). A registration with any unreadable or invalid word is dropped
     whole rather than partially recovered, and a count computed at run
-    time reads as no constant and recovers nothing. Only i386 is walked -
-    the ABI whose word-store shape S0 measured as readable; other
-    architectures return nothing.
+    time reads as no constant and recovers nothing. Only i386 is walked;
+    other architectures return nothing.
     """
     machine = str(getattr(parsed_obj.header, "machine_type", ""))
     if "I386" not in machine and "EM_386" not in machine:
