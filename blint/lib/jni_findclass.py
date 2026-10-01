@@ -38,13 +38,9 @@ tables are registered for which class:
 A cheap byte pre-scan only proposes *where* to decode; the model
 recomputes every address and a proposal the model does not confirm is
 dropped, so a pre-scan defect can cost recall, never precision.
-``armeabi-v7a`` and ``x86`` have no call-site layer here and stay
-unconfirmed by design.
-
-Measured carriers (N0(c)): fennec's libxul 7/7 candidate tables, and
-RnHello's six ``initHybrid`` registrar chains; element's
-runtime-composed soloader registration carries no constant name and
-correctly confirms nothing.
+arm64, x86_64 and x86 (i386) have a call-site layer; ``armeabi-v7a``
+has none and stays unconfirmed. On i386 the walk also recovers tables
+the registrar builds at run time (:func:`recover_runtime_tables`).
 """
 
 from __future__ import annotations
@@ -58,8 +54,29 @@ from blint.lib.jni import _read_cstring
 from blint.logger import LOG
 
 # JNIEnv vtable slots (the JNINativeInterface order, reserved0-3 first):
-# FindClass is entry 6, RegisterNatives entry 215.
+# FindClass is entry 6, RegisterNatives entry 215. The slot's byte offset and
+# the JNINativeMethod entry stride scale with the ABI's word size: 215*8/24
+# on the 64-bit ABIs, 215*4/12 on i386.
 REGISTER_NATIVES_VTABLE_OFFSET = 215 * 8
+
+
+def _vtable_slot_tokens(arch: str) -> tuple[str, ...]:
+    """The RegisterNatives vtable access as nyxstone prints it, per arch.
+
+    arm64 loads the slot (``ldr xN, [xM, #1720]``); x86-64 calls or loads
+    through it (``call qword ptr [rN + 1720]``); i386 spells the same access
+    with the 32-bit offset (``call dword ptr [eN + 860]``). The compact
+    text (spaces removed) is what carries the token.
+    """
+    if arch == "x86":
+        return ("+860]", "#860")
+    return _REGISTER_NATIVES_TOKENS
+
+
+def _table_entry_stride(arch: str) -> int:
+    """JNINativeMethod is three words: 24 bytes on 64-bit ABIs, 12 on i386."""
+    return 12 if arch == "x86" else 24
+
 
 # A Java binary name in slashed form, with fbjni's optional trailing ';'
 # (the registrars slice the name out of the middle of an `L...;`
@@ -101,7 +118,8 @@ _RIP_RELATIVE_RE = re.compile(
 )
 # arm64 prints the vtable offset as `ldr xN, [xM, #1720]` (or #0x6b8);
 # x86_64 as `call qword ptr [rN + 1720]` - no '#' and the ']' closes the
-# operand, which keeps ordinary +1720 immediates out.
+# operand, which keeps ordinary +1720 immediates out. i386's 860 form is
+# added per-arch by _vtable_slot_tokens.
 _REGISTER_NATIVES_TOKENS = ("#0x6b8", "#1720", "+0x6b8]", "+1720]")
 
 # Decode bounds: the pre-scan pairs an adrp with an add within 8
@@ -131,28 +149,47 @@ def _walk_function(
     plt_names,
     start: int,
     incoming: dict | None = None,
+    reloc_map: dict[int, int] | None = None,
+    thunks: dict[int, str] | None = None,
 ):
     """Decode one function and step the absint model over it.
 
     ``incoming`` seeds the first state with the caller's argument
     registers at its direct call (A9 P3), with caller-frame ``("sp", k)``
     symbolics rewritten to ``("caller_sp", k)`` so a stack copy keeps its
-    identity without aliasing this function's own frame.
+    identity without aliasing this function's own frame. On i386 it also
+    carries the caller's whole register map and the outgoing argument
+    slots (an internal call may pass arguments in any register under
+    clang's i386 convention, and the hardware truth is that every
+    register holds exactly what the caller left in it).
+
+    ``reloc_map`` (i386) resolves GOT slot loads beside the model, the way
+    rip-relative operands resolve on x86-64; ``thunks`` names the
+    ``__x86.get_pc_thunk.*`` start addresses so a call to one leaves the
+    return address in the thunk's register as a materialised pointer.
 
     Returns a record: the ordered class-name materializations; the
-    RegisterNatives calls whose methods/count registers the model could
-    read (methods may be the carried stack marker), each paired with the
-    most recent class name above it; the direct calls with the argument
-    registers as they stood (PLT-resolved targets); the memcpy-shaped
-    calls with (dst, src, size); and the function's own materialised
-    addresses (adr text plus the model's fresh ``("ptr", a)`` writes).
+    RegisterNatives calls whose methods/count the model could read (on
+    i386 from the cdecl argument slots at [esp+8]/[esp+0xc], methods may
+    be the carried stack marker), each paired with the most recent class
+    name above it; the direct calls with the argument registers as they
+    stood (PLT-resolved targets; on i386 the outgoing slot words beside
+    them); the memcpy-shaped calls with (dst, src, size); and the
+    function's own materialised addresses (adr text plus the model's
+    fresh ``("ptr", a)`` writes - on i386 fresh GOTOFF ints too, filtered
+    by the class-name shape check below).
     """
     from bisect import bisect_left
 
     from blint.lib.absint import FrameState
 
-    arch = "aarch64" if type(model).__name__ == "Arm64Model" else "x86_64"
-    args_order = _ARGUMENT_REGISTERS[arch]
+    arch = (
+        "aarch64"
+        if type(model).__name__ == "Arm64Model"
+        else ("x86" if type(model).__name__ == "I386Model" else "x86_64")
+    )
+    args_order = _ARGUMENT_REGISTERS.get(arch, ())
+    slot_tokens = _vtable_slot_tokens(arch)
     index = bisect_left(sorted_starts, start)
     end = (
         sorted_starts[index + 1] if index + 1 < len(sorted_starts) else start + _MAX_FUNCTION_BYTES
@@ -162,15 +199,31 @@ def _walk_function(
         return {
             "class_events": [],
             "registration_events": [],
+            "runtime_registrations": [],
             "calls": [],
             "copies": [],
             "targets": set(),
         }
     state = FrameState(model)
-    for family, value in (incoming or {}).items():
+    incoming = incoming or {}
+    for family, value in incoming.get("registers", incoming).items():
+        if isinstance(value, dict):
+            continue
         state.registers[family] = value
+    for key, value in (incoming.get("slots") or {}).items():
+        base, offset = key
+        if base.startswith("caller_"):
+            # the caller's frame rides along verbatim: its byte entries are
+            # bytes and its pointer words are tuples, and re-storing through
+            # the helpers would clobber neighbouring entries
+            state.slots[key] = value
+        elif isinstance(value, tuple):
+            state.store_pointer_word(base, offset, value)
+        elif isinstance(value, int):
+            state.store(base, offset, value, 4)
     class_events: list[str] = []
     registration_events: list[dict] = []
+    runtime_registrations: list[dict] = []
     calls: list[dict] = []
     copies: list[dict] = []
     materialized_addresses: set[int] = set()
@@ -189,8 +242,9 @@ def _walk_function(
         # arm64 loads the slot (`ldr xN, [xM, #1720]`) and branches
         # through it (`blr`/a `br` tail); x86-64 either calls through the
         # slot in one instruction (`call/jmp qword ptr [rN + 1720]`) or
-        # loads it (`mov r8, [rcx + 1720]`) and tails out (`jmp r8`).
-        carries_slot = any(token in compact for token in _REGISTER_NATIVES_TOKENS)
+        # loads it (`mov r8, [rcx + 1720]`) and tails out (`jmp r8`); i386
+        # spells the same two shapes with the 32-bit offset.
+        carries_slot = any(token in compact for token in slot_tokens)
         # Argument registers are read BEFORE stepping the call: a call
         # clobbers them in the model, and they are the evidence.
         vtable_call = False
@@ -203,28 +257,99 @@ def _walk_function(
             else:
                 vtable_call = mnemonic in ("call", "jmp") and "[" not in compact
         if vtable_call:
-            methods = _carried_register(state, "rdx" if arch != "aarch64" else "x2", adr_values)
-            count = _int_register(state, "ecx" if arch != "aarch64" else "w3")
+            if arch == "x86":
+                # cdecl: the four arguments sit in the outgoing slots
+                # [esp .. esp+0xc]; methods is the third, count the fourth.
+                methods = (
+                    state.slots.get(("esp", state.sp_adjustment + 8))
+                    if state.sp_adjustment is not None
+                    else None
+                )
+                count = (
+                    state.slots.get(("esp", state.sp_adjustment + 0xC))
+                    if state.sp_adjustment is not None
+                    else None
+                )
+                methods = methods if isinstance(methods, (int, tuple)) else None
+                count = count if isinstance(count, int) and 0 < count <= 4096 else None
+            else:
+                methods = _carried_register(
+                    state, "rdx" if arch != "aarch64" else "x2", adr_values
+                )
+                count = _int_register(state, "ecx" if arch != "aarch64" else "w3")
             if methods is not None and count and last_class:
                 registration_events.append(
                     {"methods": methods, "count": count, "class": last_class}
                 )
+                if (
+                    arch == "x86"
+                    and isinstance(methods, tuple)
+                    and methods[0]
+                    in (
+                        "esp",
+                        "ebp",
+                        "caller_esp",
+                        "caller_ebp",
+                    )
+                ):
+                    # A table built at run time: the entry words sit in the
+                    # frame slots the methods pointer names. Each word is
+                    # whatever a store left - an immediate address, a
+                    # materialised pointer, or nothing (unreadable).
+                    runtime_registrations.append(
+                        {
+                            "methods": methods,
+                            "count": count,
+                            "class": last_class,
+                            "words": [
+                                state.load_word(methods[0], methods[1] + 4 * index)
+                                for index in range(count * 3)
+                            ],
+                        }
+                    )
             last_class = None
             pending_vtable_reg = None
         if mnemonic in ("bl", "call"):
             target = _direct_target(instruction, text, arch, plt_stubs)
             if target is not None:
                 args = {}
-                for name in args_order:
-                    value = state.get_register(name)
-                    if value is not None:
-                        args[name] = value[0]
-                calls.append({"target": target, "args": args})
+                if arch == "x86":
+                    for offset in (0, 4, 8, 0xC):
+                        if state.sp_adjustment is None:
+                            break
+                        value = state.load_word("esp", state.sp_adjustment + offset)
+                        if value is not None:
+                            args[offset] = value
+                else:
+                    for name in args_order:
+                        value = state.get_register(name)
+                        if value is not None:
+                            args[name] = value[0]
+                calls.append(
+                    {
+                        "target": target,
+                        "args": args,
+                        # the register map as it stood at the call (i386: an
+                        # internal call may pass arguments in any register)
+                        "registers": dict(state.registers) if arch == "x86" else None,
+                        "slots": dict(state.slots) if arch == "x86" else None,
+                    }
+                )
                 if plt_names.get(target) in ("memcpy", "memmove"):
-                    dst = _raw_register(state, args_order[0])
-                    src = _raw_register(state, args_order[1])
-                    size = _int_register(state, args_order[2])
-                    if dst is not None and src is not None and size:
+                    if arch == "x86":
+                        dst = args.get(0)
+                        src = args.get(4)
+                        size = args.get(8)
+                    else:
+                        dst = _raw_register(state, args_order[0])
+                        src = _raw_register(state, args_order[1])
+                        size = _int_register(state, args_order[2])
+                    if (
+                        isinstance(dst, (int, tuple))
+                        and isinstance(src, (int, tuple))
+                        and isinstance(size, int)
+                        and size
+                    ):
                         copies.append({"dst": dst, "src": src, "size": size})
         span = (instruction.address, instruction.address + len(instruction.bytes))
         before = dict(state.registers)
@@ -234,6 +359,30 @@ def _walk_function(
         if arch != "aarch64":
             _apply_x86_sp_symbolic(state, model, text)
             materialized.update(_x86_rip_operands(parsed_obj, instruction, text))
+        if arch == "x86":
+            # GOTOFF operands (SSE entry copies, string loads through the
+            # GOT base register) name addresses beside the model
+            materialized.update(_x86_gotoff_operands(state, text))
+        if arch == "x86":
+            # A call into a named pc thunk leaves the return address in the
+            # thunk's register: the GOT base every ebx-relative operand
+            # folds against (the inline `call 0` form the model executes
+            # itself leaves an int, which the capture below also accepts).
+            if mnemonic == "call" and thunks:
+                raw_target = _call_target_address(instruction, text)
+                thunk_register = thunks.get(raw_target) if raw_target is not None else None
+                if thunk_register:
+                    state.registers[thunk_register] = ("ptr", span[1])
+                    materialized.add(span[1])
+            # A GOT slot load (`mov reg, [got_base_reg + K]`) reads a word
+            # the linker relocated: resolve it beside the model so the
+            # signature/fnPtr words carry real addresses.
+            if (
+                reloc_map is not None
+                and (resolved := _resolve_x86_got_load(state, text, reloc_map)) is not None
+            ):
+                register, value = resolved
+                state.registers[register] = value
         match = _ADR_TEXT_RE.match(text)
         if match:
             with contextlib.suppress(ValueError):
@@ -243,16 +392,27 @@ def _walk_function(
         # Only a pointer this instruction wrote names a class here; one
         # still held from earlier must not pair with a later registration.
         for register, value in state.registers.items():
+            if before.get(register) == value:
+                continue
             if (
-                before.get(register) != value
-                and isinstance(value, tuple)
+                isinstance(value, tuple)
                 and value
                 and value[0] == "ptr"
                 and isinstance(value[1], int)
             ):
                 materialized.add(value[1])
+            elif arch == "x86" and isinstance(value, int) and value > 0x1000:
+                # i386 materialises addresses as plain ints (the inline pc
+                # thunk leaves the GOT base as one); the class-name shape
+                # check below filters what survives.
+                materialized.add(value)
         materialized_addresses.update(materialized)
         for value in materialized:
+            if arch == "x86" and not _starts_a_string_object(parsed_obj, value):
+                # a GOTOFF operand can address a string's middle; only an
+                # object start (the byte after NUL, or after the L of a
+                # descriptor) names a class
+                continue
             name = _class_name_at(parsed_obj, value)
             if name:
                 class_events.append(name)
@@ -260,11 +420,170 @@ def _walk_function(
     return {
         "class_events": class_events,
         "registration_events": registration_events,
+        "runtime_registrations": runtime_registrations,
         "calls": calls,
         "copies": copies,
         "targets": {call["target"] for call in calls},
         "materialized": materialized_addresses,
     }
+
+
+def _call_target_address(instruction, text: str) -> int | None:
+    """A direct call's raw numeric target (pre-PLT), or None.
+
+    ``bl`` prints a delta from the instruction's own address; an x86
+    ``call`` prints the rel32, which encodes from the end of the
+    instruction. Shared with ``_direct_target``'s arithmetic.
+    """
+    mnemonic = text.split(None, 1)[0].lower()
+    if mnemonic not in ("bl", "call"):
+        return None
+    for token in text.split()[1:]:
+        with contextlib.suppress(ValueError):
+            value = int(token.strip("<>,").lstrip("#"), 0)
+            base = (
+                instruction.address
+                if mnemonic == "bl"
+                else instruction.address + len(instruction.bytes)
+            )
+            return base + value
+    return None
+
+
+_X86_GOT_LOAD_RE = re.compile(
+    r"^mov\s+(?P<dest>[a-z]{2,3})\s*,\s*(?:dword\s+ptr\s+)?"
+    r"\[\s*(?P<base>[a-z]{2,3})\s*(?P<sign>[+-])\s*(?P<off>\d+|0x[0-9a-f]+)\s*\]$",
+    re.IGNORECASE,
+)
+
+
+def _x86_gotoff_operands(state, text: str) -> set[int]:
+    """The absolute addresses a GOTOFF operand names: every ``[base ± K]``
+    memory operand whose base register holds a known address (the GOT base
+    an inline or named pc thunk left). The class-name shape check filters
+    what survives wherever these are consumed as materialisations."""
+    out: set[int] = set()
+    model = _i386_model()
+    for match in re.finditer(
+        r"\[\s*([a-z]{2,3})\s*(?:([+-])\s*(\d+|0x[0-9a-f]+)\s*)?\]", text, re.IGNORECASE
+    ):
+        info = model.register(match.group(1))
+        if not info:
+            continue
+        value = state.registers.get(info[0])
+        if isinstance(value, tuple):
+            if value[0] != "ptr":
+                continue
+            base = value[1]
+        elif isinstance(value, int):
+            base = value
+        else:
+            continue
+        offset = int(match.group(3), 0) if match.group(3) else 0
+        if match.group(2) == "-":
+            offset = -offset
+        out.add((base + offset) & 0xFFFFFFFF)
+    return out
+
+
+def _i386_pc_context(nyxstone, sections: list[tuple[int, bytes]], starts: dict[int, str]):
+    """The i386 PIC context the walk needs: the GOT base measured from an
+    inline ``call .+0; pop; add`` site, and the ``__x86.get_pc_thunk.*``
+    start addresses with the register each leaves the return address in.
+
+    Returns ``(got_base, {thunk start: register family})``; the base is
+    None when no inline site exists (named-thunk-only binaries keep their
+    per-site ``add`` operands, which the walk still folds per function).
+    """
+    got_base: int | None = None
+    for base, blob in sections:
+        offset = 0
+        while got_base is None and offset < len(blob) - 12:
+            offset = blob.find(b"\xe8\x00\x00\x00\x00", offset)
+            if offset < 0:
+                break
+            # a window that ends mid-instruction fails the whole decode;
+            # shrink to the reported position and take what decoded
+            window = blob[offset : offset + 24]
+            decoded = []
+            while window:
+                try:
+                    decoded = nyxstone.disassemble_to_instructions(list(window), base + offset)
+                    break
+                except ValueError as exc:
+                    match = re.search(r"position (\d+)", str(exc))
+                    if not match or int(match.group(1)) <= 1:
+                        break
+                    window = window[: int(match.group(1))]
+                except Exception:
+                    break
+            texts = [i.assembly.strip() for i in decoded[:4]]
+            if len(texts) >= 3 and texts[1].startswith("pop ") and texts[2].startswith("add "):
+                add_match = re.match(r"^add (\w+), (\d+)$", texts[2])
+                pop_match = re.match(r"^pop (\w+)$", texts[1])
+                if add_match and pop_match:
+                    got_base = (decoded[1].address + int(add_match.group(2))) & 0xFFFFFFFF
+            offset += 1
+    thunks: dict[int, str] = {}
+    model = _i386_model()
+    for start, name in starts.items():
+        if "__x86.get_pc_thunk" not in name:
+            continue
+        window = _window_bytes(sections, start, 8)
+        if not window:
+            continue
+        try:
+            decoded = nyxstone.disassemble_to_instructions(list(window), start)
+        except Exception:
+            continue
+        texts = [i.assembly.strip() for i in decoded[:3]]
+        if len(texts) >= 2 and texts[0].startswith("mov ") and texts[1].startswith("ret"):
+            mov_match = re.match(r"^mov (\w+), esp$", texts[0], re.IGNORECASE)
+            if mov_match and (info := model.register(mov_match.group(1))):
+                thunks[start] = info[0]
+    return got_base, thunks
+
+
+def _resolve_x86_got_load(state, text: str, reloc_map: dict[int, int]):
+    """Resolve ``mov reg, [base ± K]`` when base holds a known address whose
+    ``base ± K`` slot carries a relocation: the register then holds the
+    relocated target (a GOT slot read). Returns (register family, value) or
+    None - the relocation lookup is the filter, so a load through any other
+    pointer stays unresolved exactly as before."""
+    match = _X86_GOT_LOAD_RE.match(text)
+    if not match:
+        return None
+    model = _i386_model()
+    info = model.register(match.group("base"))
+    if not info:
+        return None
+    base_value = state.registers.get(info[0])
+    if isinstance(base_value, tuple):
+        if base_value[0] != "ptr":
+            return None
+        base = base_value[1]
+    elif isinstance(base_value, int):
+        base = base_value
+    else:
+        return None
+    offset = int(match.group("off"), 0)
+    if match.group("sign") == "-":
+        offset = -offset
+    target = reloc_map.get((base + offset) & 0xFFFFFFFF)
+    if target is None:
+        return None
+    dest_info = model.register(match.group("dest"))
+    if not dest_info:
+        return None
+    return dest_info[0], ("ptr", target)
+
+
+def _i386_model():
+    """The i386 absint model, imported lazily (the module is optional to the
+    import order of this file's callers)."""
+    from blint.lib.absint import I386_MODEL
+
+    return I386_MODEL
 
 
 def _x86_rip_operands(parsed_obj, instruction, text: str) -> set[int]:
@@ -335,11 +654,39 @@ def _carried_register(state, name: str, adr_values: dict[str, int]):
     return None
 
 
-def _seed_for_call(args: dict) -> dict:
-    """Rewrite a caller's argument registers into the callee's first
-    state: caller-frame ``("sp", k)`` / ``("rbp", k)`` symbolics become
+def _seed_for_call(
+    args: dict, arch: str = "x86_64", registers: dict | None = None, slots: dict | None = None
+) -> dict:
+    """Rewrite a caller's argument state into the callee's first state.
+
+    Caller-frame ``("sp", k)`` / ``("rbp", k)`` symbolics become
     ``("caller_sp", k)`` / ``("caller_rbp", k)`` so they cannot alias the
-    callee's own frame; everything else passes."""
+    callee's own frame; everything else passes. On i386 the argument
+    registers are stack slots keyed by their outgoing offset, so the seed
+    carries them as callee slots at the cdecl incoming positions (+4, +8,
+    ... - the return address occupies [esp+0]); the caller's whole
+    register map rides along too, because an internal i386 call may pass
+    arguments in any register under clang's convention, and at entry every
+    register holds exactly what the caller left in it.
+    """
+    if arch == "x86":
+        seed: dict = {"registers": {}, "slots": {}}
+        for family, value in (registers or {}).items():
+            if isinstance(value, tuple) and value and value[0] in ("esp", "ebp"):
+                seed["registers"][family] = (f"caller_{value[0]}", value[1])
+            else:
+                seed["registers"][family] = value
+        for offset, value in args.items():
+            if isinstance(value, tuple) and value and value[0] in ("esp", "ebp"):
+                seed["slots"][("esp", 4 + offset)] = (f"caller_{value[0]}", value[1])
+            else:
+                seed["slots"][("esp", 4 + offset)] = value
+        # the caller's whole frame rides along under caller-prefixed bases:
+        # a registration whose entries a caller built at run time reads its
+        # words there
+        for (base, offset), value in (slots or {}).items():
+            seed["slots"][(f"caller_{base}", offset)] = value
+        return seed
     out = {}
     for family, value in args.items():
         if isinstance(value, tuple) and value and value[0] in ("sp", "rbp"):
@@ -350,40 +697,56 @@ def _seed_for_call(args: dict) -> dict:
 
 
 def _stack_copy_origin(
-    marker: tuple, copies: list[dict], tables: set[int], lo: int, hi: int, count: int
+    marker: tuple,
+    copies: list[dict],
+    tables: set[int],
+    lo: int,
+    hi: int,
+    count: int,
+    stride: int = _TABLE_ENTRY_STRIDE,
 ) -> int | None:
     """The static-table address a carried stack marker (``("caller_sp",
     k)`` or ``("caller_rbp", k)``) methods pointer was copied from. The
     registrar's memcpy read (dst, src, size) names the source directly
-    when the copy is a call; an inlined copy leaves the registrar's own
-    materialised table addresses as the candidates - entry-aligned (the
-    copy's rip operands address the name/signature words and the fn word
-    of each entry, so exactly the entry starts are stride-aligned),
-    contiguous, and exactly ``count`` of them. Anything else decides
-    nothing - the registration stays unconfirmed rather than guessed."""
+    when the copy is a call (on i386 the source may be a GOTOFF int as
+    well as a materialised pointer); an inlined copy leaves the
+    registrar's own materialised table addresses as the candidates -
+    entry-aligned (the copy's rip/GOTOFF operands address the
+    name/signature words and the fn word of each entry, so exactly the
+    entry starts are stride-aligned), contiguous, and exactly ``count``
+    of them. Anything else decides nothing - the registration stays
+    unconfirmed rather than guessed."""
     if len(marker) < 2 or not isinstance(marker[1], int):
         return None
     frame_base = marker[0].removeprefix("caller_")
+
+    def origin_of(source) -> int | None:
+        if (
+            isinstance(source, tuple)
+            and source
+            and source[0] == "ptr"
+            and isinstance(source[1], int)
+        ):
+            return source[1]
+        if isinstance(source, int) and lo <= source < hi:
+            return source
+        return None
+
     origins = {
-        copy["src"][1]
+        origin
         for copy in copies
         if copy["dst"] == (frame_base, marker[1])
-        and isinstance(copy["src"], tuple)
-        and copy["src"]
-        and copy["src"][0] == "ptr"
-        and isinstance(copy["src"][1], int)
+        and (origin := origin_of(copy["src"])) is not None
     }
     if len(origins) == 1:
         return next(iter(origins))
     if origins:
         return None
-    aligned = {t for t in tables if lo <= t < hi and (t - lo) % _TABLE_ENTRY_STRIDE == 0}
+    aligned = {t for t in tables if lo <= t < hi and (t - lo) % stride == 0}
     if len(aligned) == 1:
         return next(iter(aligned))
     ordered = sorted(aligned)
-    if len(ordered) == count and all(
-        b - a == _TABLE_ENTRY_STRIDE for a, b in itertools.pairwise(ordered)
-    ):
+    if len(ordered) == count and all(b - a == stride for a, b in itertools.pairwise(ordered)):
         return ordered[0]
     return None
 
@@ -417,6 +780,17 @@ def _int_register(state, name: str) -> int | None:
     return inner if isinstance(inner, int) and 0 < inner <= 4096 else None
 
 
+def _starts_a_string_object(parsed_obj, address: int) -> bool:
+    """True when ``address`` begins a string object rather than pointing
+    into one: the byte before it is a NUL, or the ``L`` of an ``L...;``
+    descriptor the registrar sliced a name out of."""
+    try:
+        before = bytes(parsed_obj.get_content_from_virtual_address(address - 1, 1))
+    except Exception:
+        return False
+    return before in (b"\x00", b"L")
+
+
 def _class_name_at(parsed_obj, address: int) -> str | None:
     text = _read_cstring(parsed_obj, address)
     if text and 5 < len(text) < 200 and _CLASS_NAME_RE.match(text):
@@ -444,16 +818,43 @@ def _exec_sections(parsed_obj) -> list[tuple[int, bytes]]:
     return out
 
 
-def _naive_materializations(sections: list[tuple[int, bytes]], arch: str) -> list[tuple[int, int]]:
+def _naive_materializations(
+    sections: list[tuple[int, bytes]],
+    arch: str,
+    extents: list[tuple[int, int, int]] | None = None,
+    got_base: int | None = None,
+) -> list[tuple[int, int]]:
     """Candidate (site, target) pairs from a raw scan - *where* to decode.
 
     arm64: an ``adrp`` word whose destination register is the base of a
     following ``add`` within 8 instructions, or an ``adr`` (one
     instruction, one target). x86_64: a REX ``lea`` with a rip-relative
-    operand. The target here is only a proposal; the absint model
-    recomputes it from the decoded instructions and a disagreement drops
-    the candidate.
+    operand. i386: the four-byte GOTOFF displacements that would address a
+    table entry start against the measured GOT base, found in the byte
+    stream (the site is stepped back to the lea's opcode bytes; the model
+    confirms or drops). The target here is only a proposal; the absint
+    model recomputes it from the decoded instructions and a disagreement
+    drops the candidate.
     """
+    if arch == "x86":
+        import struct as _struct
+
+        out: list[tuple[int, int]] = []
+        if got_base is None or not extents:
+            return out
+        for base, blob in sections:
+            for lo, hi, _ in extents:
+                for entry in range(lo, hi, _table_entry_stride(arch)):
+                    disp = _struct.pack("<i", entry - got_base)
+                    offset = 0
+                    while True:
+                        offset = blob.find(disp, offset)
+                        if offset < 0:
+                            break
+                        for back in (2, 3):
+                            out.append((base + offset - back, entry))
+                        offset += 1
+        return out
     out = []
     if arch == "aarch64":
         for base, blob in sections:
@@ -585,10 +986,13 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
     single table materialisation - names the range. What neither path
     resolves (a runtime-computed count, a chain naming two classes)
     stays unconfirmed unless the chain names exactly one class, in which
-    case its registrar's table confirms whole. Only ``arm64`` and
-    ``x86_64`` are modelled (the call-site layer); anything else - or a
-    nyxstone that cannot initialise - returns nothing and the caller
-    keeps the entries ambiguous.
+    case its registrar's table confirms whole. ``arm64``, ``x86_64`` and
+    ``x86`` (i386) are modelled - the vtable slot and the entry stride
+    scale with the ABI's word size, and on i386 the arguments are read
+    from the cdecl stack slots with GOT loads resolved through the
+    relocation map beside the model; anything else - or a nyxstone that
+    cannot initialise - returns nothing and the caller keeps the entries
+    ambiguous.
     """
     if not tables:
         return []
@@ -597,12 +1001,15 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         arch = "aarch64"
     elif "X86_64" in machine:
         arch = "x86_64"
+    elif "I386" in machine or "EM_386" in machine:
+        arch = "x86"
     else:
         return []
+    stride = _table_entry_stride(arch)
     try:
         from nyxstone import Nyxstone
 
-        from blint.lib.absint import ARM64_MODEL, X86_64_MODEL, FrameState
+        from blint.lib.absint import ARM64_MODEL, I386_MODEL, X86_64_MODEL, FrameState
         from blint.lib.disassembler import (
             _default_disassembly_features,
             _merge_features,
@@ -610,11 +1017,13 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         )
 
         nyxstone = Nyxstone(
-            target_triple=_to_nyxstone_triple(arch),
+            target_triple=_to_nyxstone_triple(
+                arch if arch != "x86" else "i386-unknown-linux-android"
+            ),
             features=_merge_features(_default_disassembly_features(arch), ""),
             immediate_style=0,
         )
-        model = ARM64_MODEL if arch == "aarch64" else X86_64_MODEL
+        model = {"aarch64": ARM64_MODEL, "x86_64": X86_64_MODEL, "x86": I386_MODEL}[arch]
     except Exception as exc:
         LOG.debug(f"findclass confirmer: decode layer unavailable: {exc}")
         return []
@@ -630,7 +1039,7 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         if not isinstance(address, int):
             continue
         count = len(table.get("entries") or [])
-        extents.append((address, address + count * _TABLE_ENTRY_STRIDE, address))
+        extents.append((address, address + count * stride, address))
     if not extents:
         return []
     # One linker-merged run can split into several recovered tables when
@@ -641,7 +1050,7 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
     extents.sort()
     merged: list[tuple[int, int, int]] = []
     for lo, hi, address in extents:
-        if merged and lo - merged[-1][1] <= _TABLE_ENTRY_STRIDE:
+        if merged and lo - merged[-1][1] <= stride:
             merged[-1] = (merged[-1][0], max(merged[-1][1], hi), merged[-1][2])
         else:
             merged.append((lo, hi, address))
@@ -660,6 +1069,19 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         from blint.lib.disassembler import _elf_plt_stub_names
 
         plt_names = dict(_elf_plt_stub_names(parsed_obj))
+    reloc_map: dict[int, int] = {}
+    if arch == "x86":
+        # i386 GOT slot loads resolve through the join's own relocation maps
+        from blint.lib.jni import defined_symbol_relocation_map, relative_relocation_map
+
+        reloc_map = relative_relocation_map(parsed_obj)[0]
+        for slot, target in defined_symbol_relocation_map(parsed_obj).items():
+            reloc_map.setdefault(slot, target)
+
+    thunks: dict[int, str] = {}
+    got_base: int | None = None
+    if arch == "x86":
+        got_base, thunks = _i386_pc_context(nyxstone, sections, starts)
 
     def materialized_in_window(site: int) -> tuple[set[int], int]:
         instructions = _disassemble(nyxstone, sections, site, 64)
@@ -667,6 +1089,10 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
             return set(), site
         materialized: set[int] = set()
         state = FrameState(model)
+        if arch == "x86" and got_base is not None:
+            # the window starts mid-function, after the pc idiom that set
+            # the GOT base register; seed it so GOTOFF operands fold
+            state.registers["ebx"] = ("ptr", got_base)
         for instruction in instructions:
             text = instruction.assembly.strip()
             span = (instruction.address, instruction.address + len(instruction.bytes))
@@ -682,6 +1108,10 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                 # a one-entry registrar can address the table's words only
                 # through rip-relative loads - no lea, no register pointer
                 materialized.update(_x86_rip_operands(parsed_obj, instruction, text))
+            if arch == "x86":
+                # GOTOFF operands (loads and SSE copies through the GOT base
+                # register) name addresses the model leaves as ints or drops
+                materialized.update(_x86_gotoff_operands(state, text))
             for value in state.registers.values():
                 if (
                     isinstance(value, tuple)
@@ -690,11 +1120,15 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                     and isinstance(value[1], int)
                 ):
                     materialized.add(value[1])
+                elif arch == "x86" and isinstance(value, int) and value > 0x1000:
+                    materialized.add(value)
         return materialized, instructions[0].address
 
     # Phase A: sites whose *proposal* lands inside a table extent; the
-    # model confirms and names the registrar function.
-    naive = _naive_materializations(sections, arch)
+    # model confirms and names the registrar function. On i386 the
+    # proposals come from the GOTOFF displacements that would address each
+    # entry start against the measured GOT base (the model confirms each).
+    naive = _naive_materializations(sections, arch, extents=extents, got_base=got_base)
     registrars: dict[int, set[int]] = {address: set() for _, _, address in extents}
     for site, proposed in naive:
         for lo, hi, table_address in extents:
@@ -746,6 +1180,8 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                     plt_names,
                     start,
                     incoming,
+                    reloc_map=reloc_map if arch == "x86" else None,
+                    thunks=thunks or None,
                 )
                 chain_names.update(record["class_events"])
                 own_tables = {t for t in record["materialized"] if lo <= t < hi}
@@ -756,13 +1192,24 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                     begin = None
                     if isinstance(methods, int):
                         begin = methods
-                    elif isinstance(methods, tuple) and methods[0] in ("caller_sp", "caller_rbp"):
+                    elif isinstance(methods, tuple) and methods[0] in (
+                        "caller_sp",
+                        "caller_rbp",
+                        "caller_esp",
+                        "caller_ebp",
+                    ):
                         begin = _stack_copy_origin(
-                            methods, resolution_copies, resolution_tables, lo, hi, event["count"]
+                            methods,
+                            resolution_copies,
+                            resolution_tables,
+                            lo,
+                            hi,
+                            event["count"],
+                            stride,
                         )
                     if begin is None:
                         continue
-                    end = begin + event["count"] * _TABLE_ENTRY_STRIDE
+                    end = begin + event["count"] * stride
                     if lo <= begin < hi and begin < end <= hi:
                         confirmed_ranges.append(
                             {"begin": begin, "end": end, "class": event["class"]}
@@ -778,7 +1225,16 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                         if target in starts and target not in seen:
                             seen.add(target)
                             callees.setdefault(
-                                target, (_seed_for_call(call["args"]), carried_context)
+                                target,
+                                (
+                                    _seed_for_call(
+                                        call["args"],
+                                        arch,
+                                        call.get("registers"),
+                                        call.get("slots"),
+                                    ),
+                                    carried_context,
+                                ),
                             )
             frontier = callees
         if len(chain_names) == 1:
@@ -799,3 +1255,220 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                     {"begin": covered, "end": hi, "class": next(iter(chain_names))}
                 )
     return confirmed_ranges
+
+
+# The i386 RegisterNatives vtable access in the byte stream: `call [reg+860]`
+# (ff /2, mod=10) or the slot load `mov reg, [reg+860]` (8b, mod=10). The
+# lookaheads keep the matches overlapping, so a false match cannot hide a
+# real instruction that starts inside it.
+# The load form's modrm carries the destination in its reg field, so the
+# second byte spans the whole mod=10 half; the walk validates every
+# proposal (a SIB-form coincidence decodes to garbage and is dropped).
+_X86_VTABLE_SITE_RES = (
+    re.compile(rb"(?=\xff[\x90-\x97]\x5c\x03\x00\x00)", re.DOTALL),
+    re.compile(rb"(?=\x8b[\x80-\xbf]\x5c\x03\x00\x00)", re.DOTALL),
+)
+
+_RUNTIME_MAX_ENTRIES = 64
+
+
+def _direct_callers(sections, targets: set[int]) -> set[int]:
+    """Addresses of the ``call rel32`` sites whose target is in ``targets``."""
+    callers: set[int] = set()
+    for base, blob in sections:
+        for offset in range(len(blob) - 5):
+            if blob[offset] != 0xE8:
+                continue
+            disp = int.from_bytes(blob[offset + 1 : offset + 5], "little", signed=True)
+            if (base + offset + 5 + disp) & 0xFFFFFFFF in targets:
+                callers.add(base + offset)
+    return callers
+
+
+def recover_runtime_tables(parsed_obj) -> list[dict]:
+    """Registrations whose ``JNINativeMethod`` table no static triple holds.
+
+    The registrar builds the entries at run time (fbjni's 32-bit
+    single-entry registrations); this walk reads the words it
+    stored - the name and signature string addresses plus the fnPtr - from
+    the frame slots the methods pointer names, in the function that made
+    the vtable call or in the caller whose stack buffer the pair carried.
+
+    Entries are never inferred from strings alone: every word must come
+    from a store the walk saw, and every fnPtr must land on a function
+    start this binary's own sources name (symbols, exports, unwind
+    tables). A registration with any unreadable or invalid word is dropped
+    whole rather than partially recovered, and a count computed at run
+    time reads as no constant and recovers nothing. Only i386 is walked;
+    other architectures return nothing.
+    """
+    machine = str(getattr(parsed_obj.header, "machine_type", ""))
+    if "I386" not in machine and "EM_386" not in machine:
+        return []
+    try:
+        from nyxstone import Nyxstone
+
+        from blint.lib.absint import I386_MODEL
+        from blint.lib.disassembler import _default_disassembly_features, _merge_features
+
+        nyxstone = Nyxstone(
+            target_triple="i386-unknown-linux-android",
+            features=_merge_features(_default_disassembly_features("x86"), ""),
+            immediate_style=0,
+        )
+        model = I386_MODEL
+    except Exception as exc:
+        LOG.debug(f"runtime-table recovery: decode layer unavailable: {exc}")
+        return []
+    sections = _exec_sections(parsed_obj)
+    starts = _function_starts(parsed_obj)
+    sorted_starts = sorted(starts)
+    if not sections or not sorted_starts:
+        return []
+    plt_stubs = _plt_targets(parsed_obj)
+    plt_names: dict[int, str] = {}
+    with contextlib.suppress(Exception):
+        from blint.lib.disassembler import _elf_plt_stub_names
+
+        plt_names = dict(_elf_plt_stub_names(parsed_obj))
+    from blint.lib.jni import defined_symbol_relocation_map, relative_relocation_map
+
+    reloc_map = relative_relocation_map(parsed_obj)[0]
+    for slot, target in defined_symbol_relocation_map(parsed_obj).items():
+        reloc_map.setdefault(slot, target)
+    _got_base, thunks = _i386_pc_context(nyxstone, sections, starts)
+
+    # Function starts that make (or contain) a RegisterNatives vtable call,
+    # and the callers that pass the {methods, count} pair into them.
+    site_functions: set[int] = set()
+    for base, blob in sections:
+        for pattern in _X86_VTABLE_SITE_RES:
+            for match in pattern.finditer(blob):
+                start = _nearest_start(sorted_starts, base + match.start())
+                if start is not None:
+                    site_functions.add(start)
+    if not site_functions:
+        return []
+    stub_targets = {stub for stub, definition in plt_stubs.items() if definition in site_functions}
+    caller_sites = _direct_callers(sections, site_functions | stub_targets)
+    roots: set[int] = set(site_functions)
+    for site in caller_sites:
+        start = _nearest_start(sorted_starts, site)
+        if start is not None:
+            roots.add(start)
+
+    exec_ranges = [(base, base + len(blob)) for base, blob in sections]
+    registrations: list[dict] = []
+    seen_registrations: set[tuple] = set()
+    seen: set[int] = set()
+    seeded_seen: set[int] = set()
+    frontier: dict[int, dict | None] = {fn: None for fn in roots}
+    hops = 0
+    while frontier and hops <= _MAX_HOPS:
+        hops += 1
+        callees: dict[int, dict | None] = {}
+        for start, incoming in frontier.items():
+            if start in seen and incoming is None:
+                continue
+            seen.add(start)
+            record = _walk_function(
+                parsed_obj,
+                nyxstone,
+                model,
+                sections,
+                sorted_starts,
+                plt_stubs,
+                plt_names,
+                start,
+                incoming,
+                reloc_map=reloc_map,
+                thunks=thunks or None,
+            )
+            for event in record.get("runtime_registrations") or []:
+                entries = _runtime_entries(parsed_obj, event, exec_ranges, set(sorted_starts))
+                if not entries:
+                    continue
+                # one registrar may sit in several walked functions (two
+                # helpers registering the same class, a registrar and its
+                # inlined twin): identical registrations count once
+                identity = (
+                    event["class"],
+                    frozenset((e["name"], e["signature"], e["fn_addr"]) for e in entries),
+                )
+                if identity in seen_registrations:
+                    continue
+                seen_registrations.add(identity)
+                registrations.append(
+                    {"class": event["class"], "count": len(entries), "entries": entries}
+                )
+            if hops < _MAX_HOPS:
+                for call in record["calls"]:
+                    target = call["target"]
+                    # a seeded walk of a vtable function is worth its own
+                    # pass even after the unseeded root walk visited it -
+                    # the chain's registration only reads with the caller's
+                    # frame carried in
+                    if target in site_functions and target not in seeded_seen:
+                        seeded_seen.add(target)
+                        callees.setdefault(
+                            target,
+                            _seed_for_call(
+                                call["args"], "x86", call.get("registers"), call.get("slots")
+                            ),
+                        )
+        frontier = callees
+    return registrations
+
+
+def _runtime_entries(parsed_obj, event: dict, exec_ranges, starts: set[int]) -> list[dict]:
+    """Validate and decode one runtime registration's entry words.
+
+    The words must all be present (each a store the walk saw), the name a
+    Java identifier, the signature a valid method signature, and the fnPtr
+    a function start in an executable section - the same oracle the static
+    scan applies. Any miss drops the registration whole.
+    """
+    from blint.lib.jni import _JAVA_IDENTIFIER_RE, _read_cstring, _valid_method_signature
+
+    words = event.get("words") or []
+    if len(words) != event["count"] * 3 or event["count"] > _RUNTIME_MAX_ENTRIES:
+        return []
+    entries: list[dict] = []
+    for index in range(event["count"]):
+        name_word, signature_word, fn_word = words[index * 3 : index * 3 + 3]
+        name_address = _word_address(name_word)
+        signature_address = _word_address(signature_word)
+        fn_address = _word_address(fn_word)
+        if name_address is None or signature_address is None or fn_address is None:
+            return []
+        name = _read_cstring(parsed_obj, name_address)
+        signature = _read_cstring(parsed_obj, signature_address)
+        target = fn_address & ~1
+        if (
+            not name
+            or not _JAVA_IDENTIFIER_RE.match(name)
+            or not signature
+            or not _valid_method_signature(signature)
+            or target not in starts
+            or not any(lo <= target < hi for lo, hi in exec_ranges)
+        ):
+            return []
+        entries.append(
+            {
+                "name": name,
+                "signature": signature,
+                "fn_addr": hex(target),
+                "thumb": bool(fn_address & 1),
+                "slot": None,
+            }
+        )
+    return entries
+
+
+def _word_address(word) -> int | None:
+    """The absolute address one entry word names, or None."""
+    if isinstance(word, tuple) and word and word[0] == "ptr" and isinstance(word[1], int):
+        return word[1]
+    if isinstance(word, int) and 0 < word <= 0xFFFFFFFF:
+        return word
+    return None

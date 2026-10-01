@@ -308,9 +308,16 @@ def test_plt_stub_names_decode_the_fixture_table() -> None:
         stubs = _elf_plt_stub_names(parsed)
         assert stubs, name
         assert machine_marker in stubs.values(), name
-        # The arm32 PLT shape is not decoded: no stubs rather than wrong ones.
-        parsed_v7a = lief.ELF.parse(str(DATA / "liba7_fire_armeabi-v7a.so"))
-        assert _elf_plt_stub_names(parsed_v7a) == {}
+    # The i386 PIC stub (`jmp *disp32(%ebx)` against the .got.plt base)
+    # decodes the same way: this fixture's registrar copies its entries with
+    # SSE moves, so its PLT carries the runtime entry points, not memcpy.
+    parsed_x86 = lief.ELF.parse(str(DATA / "liba9_split_x86.so"))
+    stubs_x86 = _elf_plt_stub_names(parsed_x86)
+    assert len(stubs_x86) >= 3, "liba9_split_x86.so"
+    assert "__cxa_finalize" in stubs_x86.values(), "liba9_split_x86.so"
+    # The arm32 PLT shape is not decoded: no stubs rather than wrong ones.
+    parsed_v7a = lief.ELF.parse(str(DATA / "liba7_fire_armeabi-v7a.so"))
+    assert _elf_plt_stub_names(parsed_v7a) == {}
 
 
 def test_su_execution_covers_the_dumpstate_string_append_form() -> None:
