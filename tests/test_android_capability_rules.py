@@ -315,9 +315,17 @@ def test_plt_stub_names_decode_the_fixture_table() -> None:
     stubs_x86 = _elf_plt_stub_names(parsed_x86)
     assert len(stubs_x86) >= 3, "liba9_split_x86.so"
     assert "__cxa_finalize" in stubs_x86.values(), "liba9_split_x86.so"
-    # The arm32 PLT shape is not decoded: no stubs rather than wrong ones.
+    # The arm32 PLT entry (add ip, pc, #A; add ip, ip, #B; ldr pc,
+    # [ip, #C]!) decodes into names since A12: the stub set names this
+    # fixture's imports, cross-checkable against its .rel.plt.
     parsed_v7a = lief.ELF.parse(str(DATA / "liba7_fire_armeabi-v7a.so"))
-    assert _elf_plt_stub_names(parsed_v7a) == {}
+    stubs_v7a = _elf_plt_stub_names(parsed_v7a)
+    assert len(stubs_v7a) >= 3, "liba7_fire_armeabi-v7a.so"
+    assert "ptrace" in stubs_v7a.values(), "liba7_fire_armeabi-v7a.so"
+    reloc_names = {
+        r.symbol.name for r in parsed_v7a.pltgot_relocations if r.has_symbol and r.symbol.name
+    }
+    assert set(stubs_v7a.values()) <= reloc_names
 
 
 def test_su_execution_covers_the_dumpstate_string_append_form() -> None:

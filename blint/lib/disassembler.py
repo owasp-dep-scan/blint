@@ -1672,7 +1672,12 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
     is_aarch64 = "AARCH64" in machine.upper()
     is_x86_64 = "x86_64" in machine.lower() or "AMD64" in machine.upper()
     is_i386 = "I386" in machine.upper() or "EM_386" in machine.upper()
-    if not (is_aarch64 or is_x86_64 or is_i386):
+    is_arm32 = (
+        not (is_aarch64 or is_x86_64 or is_i386)
+        and "ARM" in machine.upper()
+        and "AARCH64" not in machine.upper()
+    )
+    if not (is_aarch64 or is_x86_64 or is_i386 or is_arm32):
         return stubs
 
     plt = parsed_obj.get_section(".plt")
@@ -1728,6 +1733,39 @@ def _elf_plt_stub_names(parsed_obj) -> dict[int, str]:
                 continue
             stubs.setdefault(base + offset, name)
             stubs.setdefault(base + (offset & ~0xF), name)
+    elif is_arm32:
+        # The ARM-mode .plt entry: add ip, pc, #A; add ip, ip, #B;
+        # ldr pc, [ip, #C]! - so its GOT slot is stub + 8 + A + B + C, with
+        # the immediates in the ARM rotated form. No entry layout is assumed;
+        # the three-word shape is the signature.
+        def _rotated(imm12: int) -> int:
+            amount = ((imm12 >> 8) & 0xF) * 2
+            imm8 = imm12 & 0xFF
+            if not amount:
+                return imm8
+            return ((imm8 >> amount) | (imm8 << (32 - amount))) & 0xFFFFFFFF
+
+        for offset in range(0, len(data) - 12, 4):
+            w0 = struct.unpack_from("<I", data, offset)[0]
+            if (w0 & 0xFFFFF000) != 0xE28FC000:  # add ip, pc, #A
+                continue
+            w1 = struct.unpack_from("<I", data, offset + 4)[0]
+            if (w1 & 0xFFFFF000) != 0xE28CC000:  # add ip, ip, #B
+                continue
+            w2 = struct.unpack_from("<I", data, offset + 8)[0]
+            if (w2 & 0xFFFFF000) != 0xE5BCF000:  # ldr pc, [ip, #C]!
+                continue
+            slot = (
+                base
+                + offset
+                + 8
+                + _rotated(w0 & 0xFFF)
+                + _rotated(w1 & 0xFFF)
+                + (w2 & 0xFFF)
+            )
+            name = got_names.get(slot)
+            if name:
+                stubs.setdefault(base + offset, name)
     else:
         for offset in range(len(data) - 5):
             if data[offset] != 0xFF or data[offset + 1] != 0x25:

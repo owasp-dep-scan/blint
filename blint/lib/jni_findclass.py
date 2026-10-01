@@ -38,9 +38,10 @@ tables are registered for which class:
 A cheap byte pre-scan only proposes *where* to decode; the model
 recomputes every address and a proposal the model does not confirm is
 dropped, so a pre-scan defect can cost recall, never precision.
-arm64, x86_64 and x86 (i386) have a call-site layer; ``armeabi-v7a``
-has none and stays unconfirmed. On i386 the walk also recovers tables
-the registrar builds at run time (:func:`recover_runtime_tables`).
+arm64, x86_64 and x86 (i386) have a call-site layer; ``armeabi-v7a`` (arm32,
+both the Thumb and ARM instruction set states) has one too. On i386 and arm32
+the walk also recovers tables the registrar builds at run time
+(:func:`recover_runtime_tables`).
 """
 
 from __future__ import annotations
@@ -56,7 +57,7 @@ from blint.logger import LOG
 # JNIEnv vtable slots (the JNINativeInterface order, reserved0-3 first):
 # FindClass is entry 6, RegisterNatives entry 215. The slot's byte offset and
 # the JNINativeMethod entry stride scale with the ABI's word size: 215*8/24
-# on the 64-bit ABIs, 215*4/12 on i386.
+# on the 64-bit ABIs, 215*4/12 on i386 and arm32.
 REGISTER_NATIVES_VTABLE_OFFSET = 215 * 8
 
 
@@ -65,17 +66,22 @@ def _vtable_slot_tokens(arch: str) -> tuple[str, ...]:
 
     arm64 loads the slot (``ldr xN, [xM, #1720]``); x86-64 calls or loads
     through it (``call qword ptr [rN + 1720]``); i386 spells the same access
-    with the 32-bit offset (``call dword ptr [eN + 860]``). The compact
-    text (spaces removed) is what carries the token.
+    with the 32-bit offset (``call dword ptr [eN + 860]``); arm32 loads it
+    (``ldr(.w) rN, [rM, #860]`` - decimal under immediate_style 0) and calls
+    through the register with ``blx``/``bx``. The compact text (spaces
+    removed) is what carries the token.
     """
     if arch == "x86":
         return ("+860]", "#860")
+    if arch == "arm":
+        return ("#860",)
     return _REGISTER_NATIVES_TOKENS
 
 
 def _table_entry_stride(arch: str) -> int:
-    """JNINativeMethod is three words: 24 bytes on 64-bit ABIs, 12 on i386."""
-    return 12 if arch == "x86" else 24
+    """JNINativeMethod is three words: 24 bytes on 64-bit ABIs, 12 on i386
+    and arm32."""
+    return 12 if arch in ("x86", "arm") else 24
 
 
 # A Java binary name in slashed form, with fbjni's optional trailing ';'
@@ -135,6 +141,7 @@ _TABLE_ENTRY_STRIDE = 24  # 3 words; the join's tables are 64-bit parses
 # to its callee in the second and third.
 _ARGUMENT_REGISTERS = {
     "aarch64": ("x0", "x1", "x2", "x3"),
+    "arm": ("r0", "r1", "r2", "r3"),
     "x86_64": ("rdi", "rsi", "rdx", "rcx"),
 }
 
@@ -186,7 +193,11 @@ def _walk_function(
     arch = (
         "aarch64"
         if type(model).__name__ == "Arm64Model"
-        else ("x86" if type(model).__name__ == "I386Model" else "x86_64")
+        else (
+            "arm"
+            if type(model).__name__ == "Arm32Model"
+            else ("x86" if type(model).__name__ == "I386Model" else "x86_64")
+        )
     )
     args_order = _ARGUMENT_REGISTERS.get(arch, ())
     slot_tokens = _vtable_slot_tokens(arch)
@@ -194,7 +205,15 @@ def _walk_function(
     end = (
         sorted_starts[index + 1] if index + 1 < len(sorted_starts) else start + _MAX_FUNCTION_BYTES
     )
-    instructions = _disassemble(nyxstone, sections, start, min(end - start, _MAX_FUNCTION_BYTES))
+    if arch == "arm":
+        # a literal pool inside the function must not truncate the walk
+        instructions = _disassemble_arm32(
+            nyxstone, sections, start, min(end - start, _MAX_FUNCTION_BYTES)
+        )
+    else:
+        instructions = _disassemble(
+            nyxstone, sections, start, min(end - start, _MAX_FUNCTION_BYTES)
+        )
     if not instructions:
         return {
             "class_events": [],
@@ -229,6 +248,9 @@ def _walk_function(
     materialized_addresses: set[int] = set()
     pending_vtable_reg = None
     last_class: str | None = None
+    # NEON copy pairing state: the D-register list a vld/vldr read, and the
+    # base address it read from.
+    vec_sources: dict[str, int | tuple] = {}
     # The model deliberately does not fold `adr`; nyxstone prints its
     # delta, so the target is read the way the disassembler reads every
     # AArch64 pc-relative operand - instruction address plus the printed
@@ -243,7 +265,9 @@ def _walk_function(
         # through it (`blr`/a `br` tail); x86-64 either calls through the
         # slot in one instruction (`call/jmp qword ptr [rN + 1720]`) or
         # loads it (`mov r8, [rcx + 1720]`) and tails out (`jmp r8`); i386
-        # spells the same two shapes with the 32-bit offset.
+        # spells the same two shapes with the 32-bit offset; arm32 loads
+        # it (`ldr(.w) rN, [rM, #860]`) and calls through the register
+        # (`blx rN`, or a `bx rN` tail).
         carries_slot = any(token in compact for token in slot_tokens)
         # Argument registers are read BEFORE stepping the call: a call
         # clobbers them in the model, and they are the evidence.
@@ -254,6 +278,8 @@ def _walk_function(
         elif pending_vtable_reg is not None:
             if arch == "aarch64":
                 vtable_call = mnemonic in ("blr", "br")
+            elif arch == "arm":
+                vtable_call = mnemonic in ("blx", "bx") and "[" not in compact
             else:
                 vtable_call = mnemonic in ("call", "jmp") and "[" not in compact
         if vtable_call:
@@ -272,6 +298,11 @@ def _walk_function(
                 )
                 methods = methods if isinstance(methods, (int, tuple)) else None
                 count = count if isinstance(count, int) and 0 < count <= 4096 else None
+            elif arch == "arm":
+                # AAPCS: RegisterNatives(env, clazz, methods, count) reads
+                # its third and fourth arguments from r2/r3.
+                methods = _carried_register(state, "r2", adr_values)
+                count = _int_register(state, "r3")
             else:
                 methods = _carried_register(
                     state, "rdx" if arch != "aarch64" else "x2", adr_values
@@ -309,8 +340,14 @@ def _walk_function(
                     )
             last_class = None
             pending_vtable_reg = None
-        if mnemonic in ("bl", "call"):
-            target = _direct_target(instruction, text, arch, plt_stubs)
+        if mnemonic in ("bl", "call", "blx"):
+            target = _direct_target(
+                instruction,
+                text,
+                arch,
+                plt_stubs,
+                thumb=model.pc_read == 4 if arch == "arm" else None,
+            )
             if target is not None:
                 args = {}
                 if arch == "x86":
@@ -351,12 +388,45 @@ def _walk_function(
                         and size
                     ):
                         copies.append({"dst": dst, "src": src, "size": size})
+        # NEON copies (arm32): the registrar's stack copy of a static slice
+        # is a vld1/vst1 pair on the same D registers, not a memcpy call.
+        # The bases are read before the model steps (a writeback form
+        # invalidates the base), and the pair feeds the same copies list the
+        # memcpy branch fills.
+        if arch == "arm":
+            if match := _ARM32_VEC_LD_RE.match(text):
+                info = model.register(match.group("base"))
+                value = state.registers.get(info[0]) if info else None
+                if isinstance(value, (int, tuple)):
+                    vec_sources[match.group("regs").replace(" ", "")] = value
+            elif match := _ARM32_VLDR_RE.match(text):
+                info = model.register(match.group("base"))
+                value = state.registers.get(info[0]) if info else None
+                if isinstance(value, (int, tuple)):
+                    vec_sources[match.group("reg")] = value
+            elif match := _ARM32_VEC_ST_RE.match(text):
+                key = match.group("regs").replace(" ", "")
+                src = vec_sources.get(key)
+                info = model.register(match.group("base"))
+                dst = state.registers.get(info[0]) if info else None
+                if src is not None and isinstance(dst, (int, tuple)):
+                    copies.append({"dst": dst, "src": src, "size": 8 * max(1, key.count("d"))})
+            elif match := _ARM32_VSTR_RE.match(text):
+                src = vec_sources.get(match.group("reg"))
+                info = model.register(match.group("base"))
+                dst = state.registers.get(info[0]) if info else None
+                if src is not None and isinstance(dst, (int, tuple)):
+                    copies.append({"dst": dst, "src": src, "size": 8})
         span = (instruction.address, instruction.address + len(instruction.bytes))
         before = dict(state.registers)
         with contextlib.suppress(Exception):
             model.step(state, text, leaves_function=True, address_span=span)
         materialized: set[int] = set()
-        if arch != "aarch64":
+        if arch == "arm":
+            # the literal-pool load and the GOT slot read name words in this
+            # binary's own bytes; resolve them beside the model
+            _arm32_resolve_operand(state, model, instruction, text, sections, reloc_map)
+        elif arch != "aarch64":
             _apply_x86_sp_symbolic(state, model, text)
             materialized.update(_x86_rip_operands(parsed_obj, instruction, text))
         if arch == "x86":
@@ -383,7 +453,7 @@ def _walk_function(
             ):
                 register, value = resolved
                 state.registers[register] = value
-        match = _ADR_TEXT_RE.match(text)
+        match = _ADR_TEXT_RE.match(text) if arch == "aarch64" else None
         if match:
             with contextlib.suppress(ValueError):
                 target = instruction.address + int(match.group("delta").lstrip("#"), 0)
@@ -406,12 +476,25 @@ def _walk_function(
                 # thunk leaves the GOT base as one); the class-name shape
                 # check below filters what survives.
                 materialized.add(value)
+            elif (
+                arch == "arm"
+                and isinstance(value, int)
+                and text.startswith(("add", "adr"))
+                and "pc" in text
+            ):
+                # arm32 addresses arrive as the pool-word + pc completion's
+                # int (or adr's), which can sit far below i386's 0x1000
+                # floor - a fixture's rodata does - so the gate is the
+                # completing instruction itself, with the class-name shape
+                # check below filtering what survives.
+                materialized.add(value)
         materialized_addresses.update(materialized)
         for value in materialized:
-            if arch == "x86" and not _starts_a_string_object(parsed_obj, value):
-                # a GOTOFF operand can address a string's middle; only an
-                # object start (the byte after NUL, or after the L of a
-                # descriptor) names a class
+            if arch in ("x86", "arm") and not _starts_a_string_object(parsed_obj, value):
+                # a GOTOFF operand (i386) or a pool-word completion (arm32)
+                # can address a string's middle; only an object start (the
+                # byte after NUL, or after the L of a descriptor) names a
+                # class
                 continue
             name = _class_name_at(parsed_obj, value)
             if name:
@@ -586,6 +669,213 @@ def _i386_model():
     return I386_MODEL
 
 
+# -- arm32 (armeabi-v7a) --------------------------------------------------------
+#
+# A v7a library mixes Thumb and ARM functions (the .plt is always ARM-mode),
+# so the walk carries one nyxstone/model pair per instruction set state and
+# picks per function start. What the bytes prove, per dialect:
+#
+# - The pc-relative literal pool: `ldr rN, [pc, #K]` reads the word at
+#   align(pc, 4) + K - Thumb's pc is inst+4, ARM's inst+8 - and the
+#   completion `add rN, pc` (Thumb, rN += pc) / `add rN, pc, rN` (ARM)
+#   folds the pool word into the data address. The model cannot see pool
+#   bytes, so the walk resolves the load beside it, the way i386's GOT
+#   loads resolve.
+# - The GOT: `ldr rN, [rM]` off a completed pc-pair names a .got slot the
+#   linker relocated (fbjni's kDescriptor/MethodWrapper words on v7a are
+#   R_ARM_GLOB_DAT slots, not .data.rel.ro triples - A10's cause B).
+# - The RegisterNatives call: `ldr(.w) rN, [rM, #860]` then `blx rN` (or a
+#   `bx rN` tail), with (methods, count) in (r2, r3).
+
+_ARM32_REG_NAME = r"(?:r\d+|sp|lr|pc|ip|fp|sb|sl)"
+_IMM_ANY = r"#?-?(?:0x[0-9a-fA-F]+|[0-9][0-9a-fA-F]*h|[0-9]+)"
+_ARM32_POOL_LOAD_RE = re.compile(
+    rf"^ldr(?:\.w)?\s+(?P<reg>{_ARM32_REG_NAME})\s*,\s*\[pc(?:,\s*(?P<off>{_IMM_ANY}))?\]$",
+    re.IGNORECASE,
+)
+# The ARM-dialect register-offset pool form: ldr rN, [pc, rM].
+_ARM32_POOL_REG_LOAD_RE = re.compile(
+    rf"^ldr\s+(?P<reg>{_ARM32_REG_NAME})\s*,\s*\[pc,\s*(?P<base>{_ARM32_REG_NAME})\]$",
+    re.IGNORECASE,
+)
+# NEON copies: `vld1.64 {d16, d17}, [r1]!` reading a static slice into D
+# registers and the matching `vst1.64 {d16, d17}, [r2]!` writing them into the
+# stack buffer - a memcpy the call graph never sees, paired by register list.
+_ARM32_VEC_LD_RE = re.compile(
+    rf"^vld\d(?:\.\d+)?\s+\{{(?P<regs>[^}}]+)\}},\s*\[\s*(?P<base>{_ARM32_REG_NAME})\]"
+)
+_ARM32_VEC_ST_RE = re.compile(
+    rf"^vst\d(?:\.\d+)?\s+\{{(?P<regs>[^}}]+)\}},\s*\[\s*(?P<base>{_ARM32_REG_NAME})\]"
+)
+_ARM32_VLDR_RE = re.compile(rf"^vldr\s+(?P<reg>d\d+),\s*\[\s*(?P<base>{_ARM32_REG_NAME})\]")
+_ARM32_VSTR_RE = re.compile(rf"^vstr\s+(?P<reg>d\d+),\s*\[\s*(?P<base>{_ARM32_REG_NAME})\]")
+_ARM32_GOT_LOAD_RE = re.compile(
+    rf"^ldr(?:\.w)?\s+(?P<reg>{_ARM32_REG_NAME})\s*,\s*"
+    rf"\[\s*(?P<base>{_ARM32_REG_NAME})\s*(?:,\s*(?P<off>{_IMM_ANY}))?\]$",
+    re.IGNORECASE,
+)
+
+
+def _arm32_models():
+    """(thumb, arm) nyxstone/model pairs for armeabi-v7a, or None."""
+    try:
+        from nyxstone import Nyxstone
+
+        from blint.lib.absint import ARM32_ARM_MODEL, ARM32_MODEL
+
+        return {
+            "thumb": (
+                Nyxstone(target_triple="thumbv7-unknown-linux-android", immediate_style=0),
+                ARM32_MODEL,
+            ),
+            "arm": (
+                Nyxstone(target_triple="armv7-unknown-linux-android", immediate_style=0),
+                ARM32_ARM_MODEL,
+            ),
+        }
+    except Exception as exc:
+        LOG.debug(f"findclass confirmer: arm32 decode layer unavailable: {exc}")
+        return None
+
+
+def _arm32_mode_context(parsed_obj):
+    """The per-function mode evidence: dynsym Thumb parity plus the symtab's
+    ``$a``/``$t`` mapping labels as address ranges. A stripped library keeps
+    only the dynsym parity; a start neither source names (an exidx-only
+    discovery) defaults to Thumb - the NDK armeabi-v7a default."""
+    import lief
+
+    from blint.lib.disassembler import _arm32_mapping_symbol_modes
+
+    thumb = set()
+    arm = set()
+    for symbol in parsed_obj.dynamic_symbols:
+        try:
+            if symbol.value and "FUNC" in str(symbol.type):
+                (thumb if int(symbol.value) & 1 else arm).add(int(symbol.value) & ~1)
+        except (AttributeError, TypeError, ValueError):
+            continue
+    range_modes: list[tuple[int, str]] = []
+    symbols = getattr(parsed_obj, "symtab_symbols", None)
+    if symbols and not isinstance(symbols, lief.lief_errors):
+        for section_modes in _arm32_mapping_symbol_modes(parsed_obj).values():
+            range_modes.extend(section_modes)
+    range_modes.sort()
+    return thumb, arm, range_modes
+
+
+def _arm32_mode_for_start(start: int, thumb: set[int], arm: set[int], range_modes) -> str:
+    if start in thumb:
+        return "thumb"
+    if start in arm:
+        return "arm"
+    # the mapping label covering the start decides (labels are ranges)
+    from bisect import bisect_right
+
+    index = bisect_right(range_modes, (start, "zz")) - 1
+    if index >= 0 and range_modes[index][1] in ("arm", "thumb"):
+        return range_modes[index][1]
+    return "thumb"
+
+
+def _arm32_resolve_operand(state, model, instruction, text: str, sections, reloc_map) -> None:
+    """Resolve one arm32 instruction's data reads beside the model.
+
+    The literal-pool load and the GOT slot load name words in this binary's
+    own bytes; the text-based model cannot see them, so the walk reads them
+    here exactly as i386's GOT loads resolve. Everything else stays the
+    model's business.
+    """
+
+    def _word_at(address: int) -> int | None:
+        window = _window_bytes(sections, address, 4)
+        if not window or len(window) < 4:
+            return None
+        # the pool word is a signed displacement: a target below the pool
+        # (rodata before text, the fixture layouts) stores negative
+        return struct.unpack_from("<i", window)[0]
+
+    def _family(name: str) -> str | None:
+        info = model.register(name)
+        return info[0] if info else None
+
+    pc_read = model.pc_read
+    if match := _ARM32_POOL_LOAD_RE.match(text):
+        family = _family(match.group("reg"))
+        offset = _parse_offset(match.group("off"))
+        word = _word_at(((instruction.address + pc_read) & ~3) + offset) if family else None
+        if family and word is not None:
+            state.registers[family] = word
+        return
+    if match := _ARM32_POOL_REG_LOAD_RE.match(text):
+        # ldr rN, [pc, rM]: the pool anchor plus the register's pool word.
+        base_family = _family(match.group("base"))
+        base_value = state.registers.get(base_family) if base_family else None
+        family = _family(match.group("reg"))
+        if isinstance(base_value, int) and family:
+            word = _word_at(((instruction.address + pc_read) & ~3) + base_value)
+            if word is not None:
+                state.registers[family] = word
+            else:
+                state.registers.pop(family, None)
+        return
+    if match := _ARM32_GOT_LOAD_RE.match(text):
+        base_family = _family(match.group("base"))
+        base_value = state.registers.get(base_family) if base_family else None
+        if not isinstance(base_value, int):
+            return
+        offset = _parse_offset(match.group("off"))
+        family = _family(match.group("reg"))
+        slot = (base_value + offset) & 0xFFFFFFFF
+        if family and reloc_map and slot in reloc_map:
+            state.registers[family] = ("ptr", reloc_map[slot])
+
+
+def _parse_offset(token: str | None) -> int:
+    if not token:
+        return 0
+    text = token.strip().lstrip("#")
+    negative = text.startswith("-")
+    if negative:
+        text = text[1:]
+    try:
+        value = int(text, 0)
+    except ValueError:
+        return 0
+    return -value if negative else value
+
+
+def _disassemble_arm32(nyxstone, sections, start: int, length: int) -> list:
+    """Decode an arm32 window, skipping the literal-pool words that stop a
+    linear decode (a pool inside a function must not truncate the walk)."""
+    blob = _window_bytes(sections, start, length)
+    if blob is None:
+        return []
+    out: list = []
+    cursor = 0
+    while cursor < len(blob):
+        window = blob[cursor:]
+        try:
+            out.extend(nyxstone.disassemble_to_instructions(list(window), start + cursor))
+            return out
+        except ValueError as exc:
+            match = re.search(r"position (\d+)", str(exc))
+            if not match or int(match.group(1)) <= 1:
+                # A pool word the decoder refuses at offset zero: skip one
+                # aligned word and keep decoding past it.
+                cursor += 4
+                continue
+            position = int(match.group(1))
+            try:
+                out.extend(
+                    nyxstone.disassemble_to_instructions(list(window[:position]), start + cursor)
+                )
+            except ValueError:
+                pass
+            cursor += (position + 3) & ~3 if position else 4
+    return out
+
+
 def _x86_rip_operands(parsed_obj, instruction, text: str) -> set[int]:
     """The absolute addresses a rip-relative operand names (rip reads as
     the end of the instruction), kept only where the addressed byte starts
@@ -751,22 +1041,37 @@ def _stack_copy_origin(
     return None
 
 
-def _direct_target(instruction, text: str, arch: str, plt_stubs: dict[int, int]) -> int | None:
+def _direct_target(
+    instruction,
+    text: str,
+    arch: str,
+    plt_stubs: dict[int, int],
+    thumb: bool | None = None,
+) -> int | None:
     """A direct call's target from nyxstone's printed operand, PLT-resolved
     by the caller. ``bl`` prints a delta from the instruction's own
-    address; an x86 ``call`` prints the rel32, which encodes from the end
-    of the instruction."""
+    address on arm64; an x86 ``call`` prints the rel32, which encodes from
+    the end of the instruction. On arm32 every form encodes from a pc this
+    function names: Thumb ``bl`` from inst+4, Thumb ``blx #d`` (the call
+    into the ARM-mode PLT) from the word-aligned inst+4, and ARM ``bl``
+    from inst+8."""
     mnemonic = text.split(None, 1)[0].lower()
-    if mnemonic not in ("bl", "call"):
+    if mnemonic not in ("bl", "call", "blx"):
         return None
     for token in text.split()[1:]:
         with contextlib.suppress(ValueError):
             value = int(token.strip("<>,").lstrip("#"), 0)
-            base = (
-                instruction.address
-                if arch == "aarch64"
-                else instruction.address + len(instruction.bytes)
-            )
+            if arch == "aarch64":
+                base = instruction.address
+            elif arch == "arm":
+                if mnemonic == "blx":
+                    base = (instruction.address + 4) & ~3
+                elif thumb:
+                    base = instruction.address + 4
+                else:
+                    base = instruction.address + 8
+            else:
+                base = instruction.address + len(instruction.bytes)
             target = base + value
             return plt_stubs.get(target, target)
     return None
@@ -794,6 +1099,12 @@ def _starts_a_string_object(parsed_obj, address: int) -> bool:
 def _class_name_at(parsed_obj, address: int) -> str | None:
     text = _read_cstring(parsed_obj, address)
     if text and 5 < len(text) < 200 and _CLASS_NAME_RE.match(text):
+        # The materialisation can land on the descriptor's leading ``L``
+        # (an arm32 registrar passes FindClass the whole ``L...;`` form,
+        # where the 64-bit registrars slice the name out after it); the
+        # class the registration names is the inside either way.
+        if text.startswith("L") and "/" in text:
+            text = text[1:]
         return text.rstrip(";").replace("/", ".")
     return None
 
@@ -855,6 +1166,8 @@ def _naive_materializations(
                             out.append((base + offset - back, entry))
                         offset += 1
         return out
+    if arch == "arm":
+        return _arm32_pool_pair_proposals(sections, extents)
     out = []
     if arch == "aarch64":
         for base, blob in sections:
@@ -893,6 +1206,80 @@ def _naive_materializations(
                         break
                     disp = struct.unpack_from("<i", blob, i + 3)[0]
                     out.append((base + i, base + i + 7 + disp))
+    return out
+
+
+def _arm32_pool_pair_proposals(
+    sections: list[tuple[int, bytes]], extents: list[tuple[int, int, int]]
+) -> list[tuple[int, int]]:
+    """Candidate (site, target) pairs from arm32 pool-pair encodings.
+
+    The registrar's table materialisation is a pc-relative literal-pool load
+    completed by an ``add`` against pc - in Thumb ``ldr rN, [pc, #K]`` then
+    the narrow ``add rN, pc`` (0x4478|N), in ARM ``ldr rN, [pc, #K]`` (an
+    0xE59FnNNN word) then ``add rN, pc, rN`` (an 0xE08FNnNN word). Both
+    dialects' shapes are scanned; the pool word is read from the section
+    bytes and the proposal target is word + the add's pc (inst+4 Thumb,
+    inst+8 ARM). The target is only a proposal; the model recomputes it from
+    decoded instructions and a disagreement drops the candidate.
+    """
+
+    def in_extent(value: int) -> bool:
+        return any(lo <= value < hi for lo, hi, _ in extents)
+
+    out: list[tuple[int, int]] = []
+    for base, blob in sections:
+        # Thumb: add rN, pc (halfword 0x4478|N, r0-r7) after a pc-relative
+        # literal load of rN (the T1 0x48|N imm8 form or the T3 ldr.w).
+        for i in range(0, len(blob) - 4, 2):
+            if not (0x78 <= blob[i] <= 0x7F and blob[i + 1] == 0x44):
+                continue
+            reg = blob[i] & 7
+            pool_index = None
+            load_index = None
+            for j in range(max(0, i - 16), i, 2):
+                if blob[j + 1] == (0x48 | reg):
+                    # T1 (little-endian halfword 0x48|reg << 8 | imm8): the
+                    # displacement is imm8 words, pc = align(inst+4, 4)
+                    imm8 = blob[j]
+                    pool_index = ((base + j + 4) & ~3) + imm8 * 4 - base
+                    load_index = j
+                    break
+                if blob[j] == 0xDF and blob[j + 1] == 0xF8:
+                    halfword = blob[j + 2] | (blob[j + 3] << 8)
+                    if (halfword >> 12) == reg:
+                        # T3 ldr.w: imm12 bytes off the aligned inst+4
+                        pool_index = ((base + j + 4) & ~3) + (halfword & 0xFFF) - base
+                        load_index = j
+                        break
+            if pool_index is None or not (0 <= pool_index <= len(blob) - 4):
+                continue
+            word = struct.unpack_from("<i", blob, pool_index)[0]
+            target = word + base + i + 4
+            if in_extent(target):
+                # the decode starts at the load: the window must cover the
+                # completion add
+                out.append((base + load_index, target))
+        # ARM: add rN, pc, rN (word 0xE08FNnNN) after an 0xE59FN-words ldr.
+        for i in range(0, len(blob) - 4, 4):
+            w = struct.unpack_from("<I", blob, i)[0]
+            if (w & 0x0FFF0FF0) != 0x008F0000:
+                continue
+            src = w & 0xF
+            for j in range(max(0, i - 32), i, 4):
+                w2 = struct.unpack_from("<I", blob, j)[0]
+                if (w2 & 0x0FF00000) != 0x05900000 or (w2 & 0x000F0000) != 0x000F0000:
+                    continue
+                if ((w2 >> 12) & 0xF) != src:
+                    continue
+                pool_index = ((base + j + 8) & ~3) + (w2 & 0xFFF) - base
+                if not (0 <= pool_index <= len(blob) - 4):
+                    continue
+                word = struct.unpack_from("<i", blob, pool_index)[0]
+                target = word + base + i + 8
+                if in_extent(target):
+                    out.append((base + j, target))
+                break
     return out
 
 
@@ -986,13 +1373,14 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
     single table materialisation - names the range. What neither path
     resolves (a runtime-computed count, a chain naming two classes)
     stays unconfirmed unless the chain names exactly one class, in which
-    case its registrar's table confirms whole. ``arm64``, ``x86_64`` and
-    ``x86`` (i386) are modelled - the vtable slot and the entry stride
-    scale with the ABI's word size, and on i386 the arguments are read
-    from the cdecl stack slots with GOT loads resolved through the
-    relocation map beside the model; anything else - or a nyxstone that
-    cannot initialise - returns nothing and the caller keeps the entries
-    ambiguous.
+    case its registrar's table confirms whole. ``arm64``, ``x86_64``,
+    ``x86`` (i386) and ``arm`` (armeabi-v7a, Thumb and ARM states) are
+    modelled - the vtable slot and the entry stride scale with the ABI's
+    word size; on i386 the arguments are read from the cdecl stack slots
+    and on arm32 from r2/r3, both with the GOT/pool loads resolved through
+    the relocation map and the section bytes beside the model; anything
+    else - or a nyxstone that cannot initialise - returns nothing and the
+    caller keeps the entries ambiguous.
     """
     if not tables:
         return []
@@ -1003,9 +1391,14 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         arch = "x86_64"
     elif "I386" in machine or "EM_386" in machine:
         arch = "x86"
+    elif "ARM" in machine.upper() and "AARCH64" not in machine.upper():
+        arch = "arm"
     else:
         return []
     stride = _table_entry_stride(arch)
+    nyxstone = None
+    model = None
+    decoder_for = None
     try:
         from nyxstone import Nyxstone
 
@@ -1016,14 +1409,28 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
             _to_nyxstone_triple,
         )
 
-        nyxstone = Nyxstone(
-            target_triple=_to_nyxstone_triple(
-                arch if arch != "x86" else "i386-unknown-linux-android"
-            ),
-            features=_merge_features(_default_disassembly_features(arch), ""),
-            immediate_style=0,
-        )
-        model = {"aarch64": ARM64_MODEL, "x86_64": X86_64_MODEL, "x86": I386_MODEL}[arch]
+        if arch == "arm":
+            # One nyxstone/model pair per instruction set state; the mode is
+            # picked per function start (dynsym Thumb parity, mapping
+            # symbols, Thumb default).
+            pair = _arm32_models()
+            if pair is None:
+                return []
+            thumb_starts, arm_starts, range_modes = _arm32_mode_context(parsed_obj)
+
+            def decoder_for(start: int):
+                mode = _arm32_mode_for_start(start, thumb_starts, arm_starts, range_modes)
+                return pair[mode] + (mode,)
+
+        else:
+            nyxstone = Nyxstone(
+                target_triple=_to_nyxstone_triple(
+                    arch if arch != "x86" else "i386-unknown-linux-android"
+                ),
+                features=_merge_features(_default_disassembly_features(arch), ""),
+                immediate_style=0,
+            )
+            model = {"aarch64": ARM64_MODEL, "x86_64": X86_64_MODEL, "x86": I386_MODEL}[arch]
     except Exception as exc:
         LOG.debug(f"findclass confirmer: decode layer unavailable: {exc}")
         return []
@@ -1070,8 +1477,9 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
 
         plt_names = dict(_elf_plt_stub_names(parsed_obj))
     reloc_map: dict[int, int] = {}
-    if arch == "x86":
-        # i386 GOT slot loads resolve through the join's own relocation maps
+    if arch in ("x86", "arm"):
+        # i386 and arm32 GOT slot loads resolve through the join's own
+        # relocation maps (arm32's v7a fbjni words are R_ARM_GLOB_DAT slots)
         from blint.lib.jni import defined_symbol_relocation_map, relative_relocation_map
 
         reloc_map = relative_relocation_map(parsed_obj)[0]
@@ -1084,11 +1492,18 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
         got_base, thunks = _i386_pc_context(nyxstone, sections, starts)
 
     def materialized_in_window(site: int) -> tuple[set[int], int]:
-        instructions = _disassemble(nyxstone, sections, site, 64)
+        window_model = model
+        window_nyxstone = nyxstone
+        if arch == "arm":
+            start = _nearest_start(sorted_starts, site) or site
+            window_nyxstone, window_model, _mode = decoder_for(start)
+            instructions = _disassemble_arm32(window_nyxstone, sections, site, 64)
+        else:
+            instructions = _disassemble(window_nyxstone, sections, site, 64)
         if not instructions:
             return set(), site
         materialized: set[int] = set()
-        state = FrameState(model)
+        state = FrameState(window_model)
         if arch == "x86" and got_base is not None:
             # the window starts mid-function, after the pc idiom that set
             # the GOT base register; seed it so GOTOFF operands fold
@@ -1097,14 +1512,16 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
             text = instruction.assembly.strip()
             span = (instruction.address, instruction.address + len(instruction.bytes))
             with contextlib.suppress(Exception):
-                model.step(state, text, leaves_function=True, address_span=span)
-            match = _ADR_TEXT_RE.match(text)
+                window_model.step(state, text, leaves_function=True, address_span=span)
+            if arch == "arm":
+                _arm32_resolve_operand(state, window_model, instruction, text, sections, reloc_map)
+            match = _ADR_TEXT_RE.match(text) if arch == "aarch64" else None
             if match:
                 with contextlib.suppress(ValueError):
                     materialized.add(
                         instruction.address + int(match.group("delta").lstrip("#"), 0)
                     )
-            if arch != "aarch64":
+            if arch not in ("aarch64", "arm"):
                 # a one-entry registrar can address the table's words only
                 # through rip-relative loads - no lea, no register pointer
                 materialized.update(_x86_rip_operands(parsed_obj, instruction, text))
@@ -1120,7 +1537,11 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
                     and isinstance(value[1], int)
                 ):
                     materialized.add(value[1])
-                elif arch == "x86" and isinstance(value, int) and value > 0x1000:
+                elif isinstance(value, int) and (
+                    value > 0x1000
+                    if arch == "x86"
+                    else arch == "arm" and text.startswith(("add", "adr")) and "pc" in text
+                ):
                     materialized.add(value)
         return materialized, instructions[0].address
 
@@ -1170,17 +1591,20 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
             hops += 1
             callees: dict[int, tuple[dict | None, dict]] = {}
             for start, (incoming, context) in frontier.items():
+                walk_nyxstone, walk_model = nyxstone, model
+                if arch == "arm":
+                    walk_nyxstone, walk_model, _mode = decoder_for(start)
                 record = _walk_function(
                     parsed_obj,
-                    nyxstone,
-                    model,
+                    walk_nyxstone,
+                    walk_model,
                     sections,
                     sorted_starts,
                     plt_stubs,
                     plt_names,
                     start,
                     incoming,
-                    reloc_map=reloc_map if arch == "x86" else None,
+                    reloc_map=reloc_map if arch in ("x86", "arm") else None,
                     thunks=thunks or None,
                 )
                 chain_names.update(record["class_events"])
