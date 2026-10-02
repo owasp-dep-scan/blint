@@ -1800,7 +1800,7 @@ _ARM32_PAIR_RE = re.compile(
     re.IGNORECASE,
 )
 _ARM32_BLOCK_RE = re.compile(
-    rf"^\s*(?P<op>stm|ldm)(?P<variant>ia|db)?(?:\.w)?\s+(?P<base>{_ARM32_REG})(?P<wb>!)?"
+    rf"^\s*(?P<op>stm|ldm)(?P<variant>ib|ia|db)?(?:\.w)?\s+(?P<base>{_ARM32_REG})(?P<wb>!)?"
     rf"\s*,\s*\{{(?P<regs>[^}}]+)\}}\s*$",
     re.IGNORECASE,
 )
@@ -2188,20 +2188,23 @@ class Arm32Model(ArchModel):
         base_reg = match.group("base")
         names = _arm32_register_list(match.group("regs"))
         resolved = self.resolve_base(state, base_reg)
-        if resolved is None or variant != "ia":
+        if resolved is None or variant not in ("ia", "ib"):
             if op == "ldm":
                 for name in names:
                     state.invalidate(name)
             state.invalidate(base_reg)
             return
         base, adjustment = resolved
+        # `ib` addresses the first word one above the base before
+        # ascending; `ia` (the default spelling) starts at the base.
+        lead = 4 if variant == "ib" else 0
         if op == "stm":
             for index, name in enumerate(names):
                 info = self.register(name)
                 self._store_word(
                     state,
                     base,
-                    adjustment + 4 * index,
+                    adjustment + lead + 4 * index,
                     state.registers.get(info[0]) if info else None,
                 )
         else:
@@ -2209,7 +2212,7 @@ class Arm32Model(ArchModel):
                 if name == "pc":
                     continue
                 if info := self.register(name):
-                    value = state.load_word(base, adjustment + 4 * index)
+                    value = state.load_word(base, adjustment + lead + 4 * index)
                     if isinstance(value, (int, tuple)):
                         state.registers[info[0]] = value
                     else:

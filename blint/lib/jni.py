@@ -890,10 +890,15 @@ def build_jni_join_summary(
             if (abi_join.get("counts") or {}).get("unbound_dex_natives")
         }
         if unbound_abis:
-            from blint.lib.jni_findclass import recover_runtime_tables
+            from blint.lib.jni_findclass import external_pop_resolver, recover_runtime_tables
 
             try:
                 with LibraryReader(app_file) as reader:
+                    # i386 walks verify an imported callee's pop in the
+                    # same-ABI library that exports it (fbjni's
+                    # findClassLocal); without a resolver an imported
+                    # callee never shifts the frame.
+                    pop_resolvers: dict[str, object] = {}
                     for (name, abi), loc in lib_locations.items():
                         if abi not in unbound_abis:
                             continue
@@ -905,8 +910,20 @@ def build_jni_join_summary(
                         parsed = lief.ELF.parse(data)
                         if parsed is None or isinstance(parsed, lief.lief_errors):
                             continue
+                        if abi == "x86" and abi not in pop_resolvers:
+                            with contextlib.suppress(Exception):
+                                pop_resolvers[abi] = external_pop_resolver(
+                                    reader.read,
+                                    [
+                                        sibling
+                                        for (_lib, sibling_abi), sibling in lib_locations.items()
+                                        if sibling_abi == abi
+                                    ],
+                                )
                         with contextlib.suppress(Exception):
-                            registrations = recover_runtime_tables(parsed)
+                            registrations = recover_runtime_tables(
+                                parsed, pop_for_external=pop_resolvers.get(abi)
+                            )
                             if registrations:
                                 runtime_registrations[(name, abi)] = registrations
             except Exception as exc:

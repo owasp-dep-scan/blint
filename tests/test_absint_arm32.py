@@ -54,7 +54,12 @@ def _fixture_instructions(
         pytest.skip("nyxstone or the arm32 fixture is unavailable")
     section = next(s for s in parsed.sections if s.name == ".text")
     blob = bytes(parsed.get_content_from_virtual_address(section.virtual_address, section.size))
-    symbol = next(s for s in parsed.dynamic_symbols if symbol_needle in (s.name or ""))
+    # static registrars have only a symtab entry
+    symbol = next(
+        s
+        for s in (*parsed.dynamic_symbols, *parsed.symtab_symbols)
+        if symbol_needle in (s.name or "") and "FUNC" in str(s.type)
+    )
     start = int(symbol.value) & ~1
     out: list[tuple[int, str, int]] = []
     cursor, end = (
@@ -268,3 +273,31 @@ def test_aapcs_clobbering_keeps_the_saved_env_register():
             seen_after_call = True
             break
     assert seen_after_call
+
+
+@pytest.mark.skipif(
+    _nyxstone("armv7-unknown-linux-android") is None, reason="nyxstone is not installed"
+)
+def test_stmib_stores_the_first_word_one_above_the_base():
+    """The ARM-state a13 registrar stores its entry words through a real
+    `stmib sp, {r1, r2}` (liba13rt's lazy registrar): the first word lands
+    one above the base and the second two above, so a methods marker at
+    sp reads (name, signature) beside the separately stored fnPtr. The
+    same lead computation serves `ldmib`, which no committed fixture
+    contains."""
+    instructions = _fixture_instructions(
+        "liba13rt_armeabi-v7a.so", "armv7-unknown-linux-android", "a13_rt_register_lazy"
+    )
+    stmib = next((i for i in instructions if i[1].lower().startswith("stmib")), None)
+    assert stmib is not None, "the a13 ARM fixture's lazy registrar stmib is missing"
+    state = FrameState(ARM32_ARM_MODEL)
+    state.sp_adjustment = -0x10
+    state.registers["r1"] = ("ptr", 0xAAAA)
+    state.registers["r2"] = ("ptr", 0xBBBB)
+    ARM32_ARM_MODEL.step(
+        state, stmib[1], leaves_function=True, address_span=(stmib[0], stmib[0] + stmib[2])
+    )
+    assert state.load_word("sp", -0x10) is None
+    assert state.load_word("sp", -0x10 + 4) == ("ptr", 0xAAAA)
+    assert state.load_word("sp", -0x10 + 8) == ("ptr", 0xBBBB)
+    assert state.sp_adjustment == -0x10  # no writeback in this spelling

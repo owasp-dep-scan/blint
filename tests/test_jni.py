@@ -1699,3 +1699,325 @@ def test_runtime_table_fn_addrs_pass_the_start_oracle(abi: str) -> None:
         assert int(entry["fn_addr"], 16) in starts, entry
         checked += 1
     assert checked == 5
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize(
+    "apk",
+    ["a13-jni-singles.apk", "a13-jni-singles-thumb.apk"],
+)
+def test_runtime_singles_bind_in_both_dialects(apk: str) -> None:
+    """The 32-bit singles' registrar shapes: the lazy class (found only on
+    the cold init path below the RegisterNatives call), the sret class
+    finder (whose i386 callee pops its hidden result pointer, with the
+    caller's re-alignment between the entry stores and the methods lea)
+    and the pair-passing chain whose callee makes its own sret call all
+    bind through runtime_table on armeabi-v7a (both dialects) and x86.
+    The two-class refusal twin stays undecided, and the static control
+    keeps binding."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / apk)
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    expected = {
+        ("RtLazy", "rtOne"): "runtime_table",
+        ("RtPairSret", "rtOne"): "runtime_table",
+        ("RtPairSret", "rtShared"): "runtime_table",
+        ("RtSret", "rtOne"): "runtime_table",
+    }
+    for abi in ("armeabi-v7a", "x86"):
+        if abi not in join["per_abi"]:
+            continue
+        per_abi = join["per_abi"][abi]
+        bound = {
+            (e["class"].rsplit(".", 1)[-1], e["name"]): e.get("confirmed_by")
+            for e in per_abi["bound_dynamic"]
+        }
+        assert bound.pop(("RtControl", "rtStaticAdd")) is None, abi
+        assert bound == expected, (apk, abi)
+        # the refusal twin: its cold path names two classes, so the call
+        # that no class materialization precedes stays unread
+        ambiguous = {
+            (e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]
+        }
+        assert ("RtTwo", "rtOne") in ambiguous, (apk, abi)
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_runtime_singles_stay_unbound_off_the_32bit_walks() -> None:
+    """No ABI outside the two 32-bit walks carries a runtime_table binding,
+    and without --disassemble nothing runtime-built binds anywhere."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a13-jni-singles.apk")
+    native = scan_android_native(path)
+    join = build_jni_join_summary(path, native, confirm_findclass=True)
+    for abi in ("arm64-v8a", "x86_64"):
+        per_abi = join["per_abi"][abi]
+        unbound = {
+            (e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["unbound_dex_natives"]
+        }
+        assert ("RtTwo", "rtOne") in unbound, abi
+        assert ("RtLazy", "rtOne") in unbound, abi
+        assert not any(
+            e.get("confirmed_by") == "runtime_table" for e in per_abi["bound_dynamic"]
+        ), abi
+    plain = build_jni_join_summary(path, native, confirm_findclass=False)
+    for abi, per_abi in plain["per_abi"].items():
+        assert not any(
+            e.get("confirmed_by") == "runtime_table" for e in per_abi["bound_dynamic"]
+        ), abi
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize(
+    "plain_name,stripped_name,expected",
+    [
+        (
+            "liba13rt_x86.so",
+            "liba13rt_x86_stripped.so",
+            {"rtOne": "0x1a20", "rtShared": "0x1a30"},
+        ),
+        # the v7a twin is the -mthumb build: a stripped copy keeps no
+        # mapping symbols, and the NDK default (Thumb) is then the only
+        # mode evidence - right for this build. The ARM-state build's
+        # stripped copy has none either and its statics would decode as
+        # Thumb, so it is not a twin this recovery can read.
+        (
+            "liba13rt_thumb_armeabi-v7a.so",
+            "liba13rt_thumb_armeabi-v7a_stripped.so",
+            {"rtOne": "0x1698", "rtShared": "0x169c"},
+        ),
+    ],
+)
+def test_runtime_singles_stripped_twins_recover_the_same(
+    plain_name: str, stripped_name: str, expected: dict
+) -> None:
+    """The stripped twin recovers the same runtime registrations as the
+    unstripped copy: the walk's starts come from the dynsym plus the
+    unwind tables, not the symtab."""
+    import lief
+
+    from blint.lib.jni_findclass import recover_runtime_tables
+
+    def registrations(path: str) -> set[tuple]:
+        parsed = lief.ELF.parse(path)
+        return {
+            (
+                r["class"],
+                tuple((e["name"], e["signature"], e["fn_addr"]) for e in r["entries"]),
+            )
+            for r in recover_runtime_tables(parsed)
+        }
+
+    plain = registrations(str(FIXTURES / plain_name))
+    stripped = registrations(str(FIXTURES / stripped_name))
+    assert (
+        plain
+        == stripped
+        == {
+            (
+                "com.blint.a13.rt.RtLazy",
+                (("rtOne", "(I)I", expected["rtOne"]),),
+            ),
+            (
+                "com.blint.a13.rt.RtPairSret",
+                (
+                    ("rtOne", "(I)I", expected["rtOne"]),
+                    ("rtShared", "(J)J", expected["rtShared"]),
+                ),
+            ),
+            (
+                "com.blint.a13.rt.RtSret",
+                (("rtOne", "(I)I", expected["rtOne"]),),
+            ),
+        }
+    )
+
+
+@pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("abi", ["x86", "armeabi-v7a"])
+def test_runtime_singles_fn_addrs_pass_the_start_oracle(abi: str) -> None:
+    """Every fn_addr the singles' recovery reports is a function start of
+    that ABI copy's own bytes (llvm-readelf dynsym FUNCs plus eh_frame
+    FDEs, and .ARM.exidx on armeabi-v7a - never blint's own discovery)."""
+    import re
+    import subprocess
+
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a13-jni-singles.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    library = FIXTURES / f"liba13rt_{abi}.so"
+    starts = set()
+    readelf = _llvm_readelf()
+    out = subprocess.run(
+        [readelf, "--dyn-syms", str(library)], capture_output=True, text=True
+    ).stdout
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 8 and parts[3] == "FUNC" and parts[6] != "UND":
+            starts.add(int(parts[1], 16) & ~1)
+    objdump = readelf.replace("llvm-readelf", "llvm-objdump")
+    frames = subprocess.run(
+        [objdump, "--dwarf=frames", str(library)], capture_output=True, text=True
+    ).stdout
+    for match in re.finditer(r"pc=0*([0-9a-f]+)\.{2,3}0*[0-9a-f]+", frames):
+        starts.add(int(match.group(1), 16) & ~1)
+    if abi == "armeabi-v7a":
+        dump = subprocess.run(
+            [readelf, "-x", ".ARM.exidx", str(library)], capture_output=True, text=True
+        ).stdout
+        for line in dump.splitlines():
+            match = re.match(r"^\s*0x([0-9a-f]+)\s+((?:[0-9a-f]{8}\s+){1,4})", line)
+            if not match:
+                continue
+            base = int(match.group(1), 16)
+            for index, group in enumerate(match.group(2).split()):
+                if index % 2:
+                    continue
+                word = int.from_bytes(bytes.fromhex(group), "little")
+                offset = word & 0x7FFFFFFF
+                if word & 0x40000000:
+                    offset -= 1 << 31
+                starts.add((base + index * 4 + offset) & ~1)
+    checked = 0
+    for entry in per_abi["bound_dynamic"]:
+        if entry.get("confirmed_by") != "runtime_table":
+            continue
+        assert int(entry["fn_addr"], 16) in starts, entry
+        checked += 1
+    assert checked == 4, abi
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13ctl_x86.so", "liba13ctl_x86_stripped.so"])
+def test_sret_trigger_requires_the_callees_own_pop_proof(library: str) -> None:
+    """The i386 sret trigger fires only on a callee whose own returns
+    prove a callee-pop. A registrar that hands a frame pointer as its
+    first argument to a plain-`ret` LOCAL callee (CtlTouch), to an
+    external libc call no sibling defines (CtlFormat, snprintf), or to a
+    sibling-defined plain-`ret` callee (CtlExtTouch) - each between its
+    entry stores and its methods lea - still binds: those calls shift
+    nothing. A trigger without the proof loses all three."""
+    import lief
+
+    from blint.lib.jni_findclass import recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    registrations = {r["class"] for r in recover_runtime_tables(parsed)}
+    # the three false-fire rows bind; the genuine control needs its finder
+    # verified in the sibling, which the plain walk cannot do
+    for row in ("CtlTouch", "CtlFormat", "CtlExtTouch"):
+        assert f"com.blint.a13.ctl.{row}" in registrations, (library, row)
+    assert "com.blint.a13.ctl.CtlSret" not in registrations, library
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13ctl_x86.so", "liba13ctl_x86_stripped.so"])
+def test_external_pop_resolver_verifies_in_the_defining_sibling(library: str) -> None:
+    """An imported callee is verified in the sibling library that exports
+    it (liba13ctlfb stands in for libfbjni). The finder ends ``ret 4`` - a uniform callee pop - so the
+    CtlSret registrar's words align only when the resolver hands the walk
+    that proof; the sibling's plain-`ret` helper and an unknown symbol
+    resolve to no pop and never fire."""
+    import lief
+
+    from blint.lib.jni_findclass import external_pop_resolver, recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    sibling_bytes = (FIXTURES / "liba13ctlfb_x86.so").read_bytes()
+    resolver = external_pop_resolver(
+        lambda loc: sibling_bytes if loc.endswith("liba13ctlfb_x86.so") else None,
+        ["lib/x86/liba13ctl_x86.so", "lib/x86/liba13ctlfb_x86.so"],
+    )
+    assert resolver("_Z12a13_ctl_findP7_JNIEnvPKc") == 4
+    assert resolver("_Z17a13_ctl_touch_extPKv") == 0
+    assert resolver("memcpy") == 0
+    without = {
+        r["class"]: tuple((e["name"], e["signature"], e["fn_addr"]) for e in r["entries"])
+        for r in recover_runtime_tables(parsed)
+    }
+    with_resolver = {
+        r["class"]: tuple((e["name"], e["signature"], e["fn_addr"]) for e in r["entries"])
+        for r in recover_runtime_tables(parsed, pop_for_external=resolver)
+    }
+    assert set(without) < set(with_resolver), (library, without, with_resolver)
+    assert "com.blint.a13.ctl.CtlSret" in with_resolver, library
+    expected = (("ctlOne", "(I)I", with_resolver["com.blint.a13.ctl.CtlSret"][0][2]),)
+    assert with_resolver["com.blint.a13.ctl.CtlSret"] == expected
+    for row in ("CtlTouch", "CtlFormat", "CtlExtTouch", "CtlSret"):
+        assert (
+            with_resolver[f"com.blint.a13.ctl.{row}"] == with_resolver["com.blint.a13.ctl.CtlSret"]
+        ), (library, row)
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_callee_pop_needs_every_return_to_agree() -> None:
+    """A callee proves a pop only when every return in its window is the
+    same ``ret imm``. The finder's ``ret 4`` read together with its
+    plain-``ret`` neighbour, as when no start separates the two, proves
+    nothing; the finder alone proves 4."""
+    import lief
+    from nyxstone import Nyxstone
+
+    from blint.lib.jni_findclass import (
+        _exec_sections,
+        _exported_functions,
+        _function_starts,
+        _i386_callee_pop,
+    )
+
+    parsed = lief.ELF.parse(str(FIXTURES / "liba13ctlfb_x86.so"))
+    exported = _exported_functions(parsed)
+    finder = exported["_Z12a13_ctl_findP7_JNIEnvPKc"]
+    neighbour = exported["_Z17a13_ctl_touch_extPKv"]
+    starts = sorted(_function_starts(parsed))
+    assert starts[starts.index(finder) + 1] == neighbour
+    nyxstone = Nyxstone(target_triple="i386-unknown-linux-android", immediate_style=0)
+    sections = _exec_sections(parsed)
+    assert _i386_callee_pop(nyxstone, sections, starts, finder, {}) == 4
+    assert _i386_callee_pop(nyxstone, sections, starts, neighbour, {}) == 0
+    merged = [start for start in starts if start != neighbour]
+    assert _i386_callee_pop(nyxstone, sections, merged, finder, {}) == 0
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13held_x86.so", "liba13held_thumb_armeabi-v7a.so"])
+def test_held_registration_skips_a_consumed_class_name(library: str) -> None:
+    """A held registration pairs only with a class name no later vtable
+    call consumes. The registrar's first table goes into the jclass Java
+    passed in; the one class it names, found below that call, a second
+    RegisterNatives consumes - so heldOne is never attributed to it."""
+    import lief
+
+    from blint.lib.jni_findclass import recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    recovered = {
+        (r["class"], e["name"]) for r in recover_runtime_tables(parsed) for e in r["entries"]
+    }
+    assert ("com.blint.a13.held.HeldNamed", "heldOne") not in recovered, library
+    if library == "liba13held_x86.so":
+        assert recovered == {("com.blint.a13.held.HeldNamed", "heldTwo")}

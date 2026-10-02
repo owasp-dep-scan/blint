@@ -133,6 +133,9 @@ _REGISTER_NATIVES_TOKENS = ("#0x6b8", "#1720", "+0x6b8]", "+1720]")
 # registration sequence sits at the top of every observed registrar).
 _MAX_FUNCTION_BYTES = 0x2000
 _MAX_HOPS = 2
+# The i386 and arm32 model's frame-pointer bases: a value rooted in one of
+# them points into this function's (or its caller's) stack frame.
+_FRAME_BASES_32 = frozenset({"esp", "ebp", "caller_esp", "caller_ebp", "sp", "caller_sp"})
 _TABLE_ENTRY_STRIDE = 24  # 3 words; the join's tables are 64-bit parses
 
 # The integer argument registers of the two call-site ABIs, in position
@@ -158,6 +161,7 @@ def _walk_function(
     incoming: dict | None = None,
     reloc_map: dict[int, int] | None = None,
     thunks: dict[int, str] | None = None,
+    pop_for_external=None,
 ):
     """Decode one function and step the absint model over it.
 
@@ -174,17 +178,39 @@ def _walk_function(
     rip-relative operands resolve on x86-64; ``thunks`` names the
     ``__x86.get_pc_thunk.*`` start addresses so a call to one leaves the
     return address in the thunk's register as a materialised pointer.
+    ``pop_for_external`` (i386, optional) maps an imported symbol name to
+    the callee-pop amount the sibling library that defines it proves - the
+    resolver for sret calls that leave this binary (fbjni's
+    ``findClassLocal`` from libreactnative), without which external PLT
+    slots never fire.
 
     Returns a record: the ordered class-name materializations; the
     RegisterNatives calls whose methods/count the model could read (on
     i386 from the cdecl argument slots at [esp+8]/[esp+0xc], methods may
     be the carried stack marker), each paired with the most recent class
-    name above it; the direct calls with the argument registers as they
-    stood (PLT-resolved targets; on i386 the outgoing slot words beside
-    them); the memcpy-shaped calls with (dst, src, size); and the
-    function's own materialised addresses (adr text plus the model's
-    fresh ``("ptr", a)`` writes - on i386 fresh GOTOFF ints too, filtered
-    by the class-name shape check below).
+    name above it - a runtime-shaped call no materialization precedes is
+    held and pairs with the one class name the function materializes when
+    a materialization of it sits below every vtable call in address order
+    (registrar init paths sit below their hot path); two names, none, or
+    a name some later vtable call consumes decide nothing; the direct
+    calls with the argument registers as they stood (PLT-resolved targets; on i386 the outgoing
+    slot words beside them); the memcpy-shaped calls with (dst, src,
+    size); and the function's own materialised addresses (adr text plus
+    the model's fresh ``("ptr", a)`` writes - on i386 fresh GOTOFF ints
+    too, filtered by the class-name shape check below).
+
+    On i386 a direct call whose outgoing first argument is a pointer into
+    the caller's frame, placed there since the previous call, hands its
+    callee a hidden result slot (the sret form) when that callee's own
+    bytes prove a callee-pop return: a locally defined callee whose every
+    return is the same ``ret imm`` (``imm >= 4``), or an imported one the
+    ``pop_for_external`` resolver verified in its defining sibling. The
+    callee returns through that pointer and pops it, so the frame base
+    sits ``imm`` bytes above the neutral-call baseline the model keeps. A
+    callee that cannot be so verified - a plain ``ret``, disagreeing
+    immediates, or an unresolved external PLT slot - leaves the baseline
+    alone, so a buffer-touching helper or a libc call taking a frame
+    pointer as its first argument shifts nothing.
     """
     from bisect import bisect_left
 
@@ -248,6 +274,28 @@ def _walk_function(
     materialized_addresses: set[int] = set()
     pending_vtable_reg = None
     last_class: str | None = None
+    # True while the outgoing first-argument slot holds a frame pointer a
+    # store placed there since the previous call (an i386 sret call in the
+    # making: the callee may return its result through that pointer and
+    # pop it, which the callee's own return instructions must prove).
+    fresh_sret_arg = False
+    # The i386 callee-pop amount a fire verified for the call being
+    # stepped (0 = none): an sret callee returns through the caller-frame
+    # pointer handed as its hidden result slot and pops it, so the call's
+    # net stack effect is that many bytes up, not neutral.
+    pending_sret_pop = 0
+    # Verified callee-pop amounts for this walk's direct-call targets, so
+    # each callee decodes once however many sites call it.
+    callee_pops: dict[int, int] = {}
+    # Runtime-shaped vtable calls no class materialization preceded: the
+    # registrar may name its class only on the cold init path the compiler
+    # places below the call, so they are held until the walk knows every
+    # class name the function materializes. Only a materialization below
+    # every vtable call (the measured init-path placement, which no later
+    # call consumes) may pair with them.
+    unclassed_runtime: list[tuple] = []
+    class_event_addresses: list[int] = []
+    last_vtable_call: int | None = None
     # NEON copy pairing state: the D-register list a vld/vldr read, and the
     # base address it read from.
     vec_sources: dict[str, int | tuple] = {}
@@ -260,6 +308,18 @@ def _walk_function(
         text = instruction.assembly.strip()
         compact = text.replace(" ", "")
         mnemonic = text.split(None, 1)[0].lower() if text else ""
+        # i386 argument setup for the outgoing first slot: `push reg` or
+        # `mov [esp], reg` state what the callee receives as its first
+        # argument - a frame pointer there is the sret form's hidden
+        # result slot. Another register stored there clears it; the call
+        # re-reads the slot itself, so an immediate stored there fires
+        # nothing either.
+        if arch == "x86" and (match := _X86_ARG1_SETUP_RE.match(text)):
+            read = state.get_register(match.group("push") or match.group("mov"))
+            value = read[0] if read is not None else None
+            fresh_sret_arg = (
+                isinstance(value, tuple) and bool(value) and value[0] in _FRAME_BASES_32
+            )
         # The RegisterNatives vtable access names the call that follows:
         # arm64 loads the slot (`ldr xN, [xM, #1720]`) and branches
         # through it (`blr`/a `br` tail); x86-64 either calls through the
@@ -308,39 +368,48 @@ def _walk_function(
                     state, "rdx" if arch != "aarch64" else "x2", adr_values
                 )
                 count = _int_register(state, "ecx" if arch != "aarch64" else "w3")
-            if methods is not None and count and last_class:
-                registration_events.append(
-                    {"methods": methods, "count": count, "class": last_class}
+            runtime_shape = (
+                arch in ("x86", "arm")
+                and isinstance(methods, tuple)
+                and methods[0] in _FRAME_BASES_32
+            )
+            if methods is not None and count:
+                # A table built at run time: the entry words sit in the
+                # frame slots the methods pointer names. Each word is
+                # whatever a store left - an immediate address, a
+                # materialised pointer, or nothing (unreadable). They are
+                # read here, at the call: code after it may reuse the slots.
+                words = (
+                    [
+                        state.load_word(methods[0], methods[1] + 4 * index)
+                        for index in range(count * 3)
+                    ]
+                    if runtime_shape
+                    else None
                 )
-                if (
-                    arch in ("x86", "arm")
-                    and isinstance(methods, tuple)
-                    and methods[0]
-                    in (
-                        "esp",
-                        "ebp",
-                        "caller_esp",
-                        "caller_ebp",
-                        "sp",
-                        "caller_sp",
+                if last_class is not None:
+                    registration_events.append(
+                        {"methods": methods, "count": count, "class": last_class}
                     )
-                ):
-                    # A table built at run time: the entry words sit in the
-                    # frame slots the methods pointer names. Each word is
-                    # whatever a store left - an immediate address, a
-                    # materialised pointer, or nothing (unreadable).
-                    runtime_registrations.append(
-                        {
-                            "methods": methods,
-                            "count": count,
-                            "class": last_class,
-                            "words": [
-                                state.load_word(methods[0], methods[1] + 4 * index)
-                                for index in range(count * 3)
-                            ],
-                        }
-                    )
+                    if runtime_shape:
+                        runtime_registrations.append(
+                            {
+                                "methods": methods,
+                                "count": count,
+                                "class": last_class,
+                                "words": words,
+                            }
+                        )
+                elif runtime_shape:
+                    # no class materialization preceded the call: the
+                    # registrar may name its class only on the cold init
+                    # path below it, so the event waits until the walk
+                    # knows every class name the function materializes,
+                    # and only a materialization below the call may pair
+                    # with it.
+                    unclassed_runtime.append((methods, count, words))
             last_class = None
+            last_vtable_call = instruction.address
             pending_vtable_reg = None
         if mnemonic in ("bl", "call", "blx"):
             target = _direct_target(
@@ -376,6 +445,28 @@ def _walk_function(
                         "slots": dict(state.slots) if arch in ("x86", "arm") else None,
                     }
                 )
+                target_index = bisect_left(sorted_starts, target)
+                named_local = (
+                    target_index < len(sorted_starts) and sorted_starts[target_index] == target
+                )
+                # The sret fire needs the callee's own proof: a locally
+                # defined callee whose every return is the same `ret imm`
+                # with imm >= 4 (an sret callee pops its hidden result
+                # pointer on i386), or an imported one the resolver
+                # verified in the sibling library that defines it. A
+                # plain `ret`, disagreeing immediates, or an unresolvable
+                # external PLT slot (cdecl externals never pop) fire
+                # nothing - a buffer-touching helper or libc call taking a
+                # frame pointer as arg1 must not shift the baseline.
+                pending_sret_pop = 0
+                if fresh_sret_arg and isinstance(args.get(0), tuple):
+                    if named_local:
+                        pending_sret_pop = _i386_callee_pop(
+                            nyxstone, sections, sorted_starts, target, callee_pops
+                        )
+                    elif pop_for_external is not None and target in plt_names:
+                        pending_sret_pop = pop_for_external(plt_names[target])
+                fresh_sret_arg = False
                 if plt_names.get(target) in ("memcpy", "memmove"):
                     if arch == "x86":
                         dst = args.get(0)
@@ -425,6 +516,12 @@ def _walk_function(
         before = dict(state.registers)
         with contextlib.suppress(Exception):
             model.step(state, text, leaves_function=True, address_span=span)
+        if pending_sret_pop and state.sp_adjustment is not None:
+            # the verified sret callee popped its hidden result pointer:
+            # the frame base sits that many bytes above the neutral-call
+            # baseline
+            state.sp_adjustment += pending_sret_pop
+        pending_sret_pop = 0
         materialized: set[int] = set()
         if arch == "arm":
             # the literal-pool load and the GOT slot read name words in this
@@ -504,7 +601,27 @@ def _walk_function(
             name = _class_name_at(parsed_obj, value)
             if name:
                 class_events.append(name)
+                class_event_addresses.append(instruction.address)
                 last_class = name
+    if (
+        unclassed_runtime
+        and len(set(class_events)) == 1
+        and any(address > last_vtable_call for address in class_event_addresses)
+    ):
+        # The one class this function names sits on the cold init path the
+        # compiler placed below the hot path holding the vtable call, so no
+        # materialization preceded the call in address order. The whole
+        # function is that class's initializer. Two names, or none, decide
+        # nothing and the held events stay unrecorded. So does a name every
+        # materialization of which some vtable call follows: that call
+        # consumed it, and a held registration may belong to a class this
+        # function never names (a jclass its caller passed in).
+        event_class = next(iter(set(class_events)))
+        for methods, count, words in unclassed_runtime:
+            registration_events.append({"methods": methods, "count": count, "class": event_class})
+            runtime_registrations.append(
+                {"methods": methods, "count": count, "class": event_class, "words": words}
+            )
     return {
         "class_events": class_events,
         "registration_events": registration_events,
@@ -536,6 +653,145 @@ def _call_target_address(instruction, text: str) -> int | None:
             )
             return base + value
     return None
+
+
+# i386 first-argument setup: the store forms that place a register's value
+# into the outgoing slot at [esp] - `push reg` (the slot is [esp] once the
+# push lands) and `mov [esp], reg`.
+_X86_ARG1_SETUP_RE = re.compile(
+    r"^(?:push\s+(?P<push>[a-z0-9]{2,3})|mov\s+(?:dword\s+ptr\s+)?\[esp\]\s*,\s*(?P<mov>[a-z0-9]{2,3}))$",
+    re.IGNORECASE,
+)
+
+# An i386 return that pops its own stack: `ret imm` (a plain `ret` pops
+# nothing and does not match).
+_I386_RET_IMM_RE = re.compile(r"^ret\s+(?P<imm>0x[0-9a-f]+|\d+)$", re.IGNORECASE)
+
+
+def _i386_callee_pop(
+    nyxstone,
+    sections: list[tuple[int, bytes]],
+    sorted_starts: list[int],
+    target: int,
+    memo: dict[int, int],
+) -> int:
+    """The callee-pop amount a direct i386 callee's own bytes prove.
+
+    A callee that returns its result through a hidden sret pointer pops
+    that pointer on i386 (GCC's ``ix86_return_pops_args`` emits ``ret 4``
+    for it), and the ABI-level property makes every return in its body the
+    same ``ret imm``. That uniform immediate is the answer; anything else -
+    a plain ``ret``, disagreeing immediates, no return the window could
+    decode, or a target this binary's own starts do not name (an external
+    PLT slot: cdecl externals never pop) - is 0, so a buffer-touching
+    helper or libc call receiving a frame pointer as its first argument
+    cannot shift the caller's frame baseline. ``memo`` caches the verdict
+    per target for the walks that share it.
+    """
+    from bisect import bisect_left
+
+    if target in memo:
+        return memo[target]
+    pop = 0
+    index = bisect_left(sorted_starts, target)
+    if index < len(sorted_starts) and sorted_starts[index] == target:
+        end = (
+            sorted_starts[index + 1]
+            if index + 1 < len(sorted_starts)
+            else target + _MAX_FUNCTION_BYTES
+        )
+        # one entry per distinct return: its immediate, 0 for a plain
+        # `ret`, None for a spelling the pattern does not read
+        returns: set[int | None] = set()
+        for instruction in _disassemble(
+            nyxstone, sections, target, min(end - target, _MAX_FUNCTION_BYTES)
+        ):
+            text = instruction.assembly.strip()
+            mnemonic = text.split(None, 1)[0].lower() if text else ""
+            if mnemonic not in ("ret", "retl"):
+                continue
+            if text.lower() == mnemonic:
+                returns.add(0)
+            elif match := _I386_RET_IMM_RE.match(text):
+                imm = match.group("imm")
+                returns.add(int(imm, 16) if imm.lower().startswith("0x") else int(imm))
+            else:
+                returns.add(None)
+        if len(returns) == 1 and (only := next(iter(returns))) is not None and only >= 4:
+            pop = only
+    memo[target] = pop
+    return pop
+
+
+def _exported_functions(parsed_obj) -> dict[str, int]:
+    """Every defined dynamic FUNC name -> its start, aliases included."""
+    exported: dict[str, int] = {}
+    for symbol in parsed_obj.dynamic_symbols:
+        try:
+            if symbol.value and "FUNC" in str(symbol.type) and int(symbol.shndx or 0):
+                exported.setdefault(symbol.name, int(symbol.value) & ~1)
+        except Exception:
+            continue
+    return exported
+
+
+def external_pop_resolver(read_library, locations):
+    """A ``symbol -> pop`` resolver for i386 callees another library defines.
+
+    A walk cannot read an imported callee (fbjni's ``findClassLocal``,
+    called from libreactnative through its PLT stub), so the join hands it
+    a resolver over the app's same-ABI libraries: ``read_library(loc)``
+    returns a location's bytes and ``locations`` lists the candidates. The
+    callee is verified where it is exported, by the rule
+    :func:`_i386_callee_pop` applies to a local target. The libraries are
+    indexed on the first lookup, once, and each verdict caches. A symbol
+    no library exports, or one without a uniform ``ret imm``, is 0.
+    """
+    import lief
+    from nyxstone import Nyxstone
+
+    from blint.lib.disassembler import _default_disassembly_features, _merge_features
+
+    nyxstone = Nyxstone(
+        target_triple="i386-unknown-linux-android",
+        features=_merge_features(_default_disassembly_features("x86"), ""),
+        immediate_style=0,
+    )
+    cache: dict[str, int] = {}
+    # (exported names, sorted starts, executable sections, callee-pop memo)
+    libraries: list[tuple] | None = None
+
+    def index() -> list[tuple]:
+        indexed = []
+        for loc in locations or ():
+            with contextlib.suppress(Exception):
+                parsed = lief.ELF.parse(read_library(loc))
+                if parsed is None or isinstance(parsed, lief.lief_errors):
+                    continue
+                exported = _exported_functions(parsed)
+                sections = _exec_sections(parsed)
+                if exported and sections:
+                    indexed.append((exported, sorted(_function_starts(parsed)), sections, {}))
+        return indexed
+
+    def resolve(symbol: str) -> int:
+        nonlocal libraries
+        if symbol in cache:
+            return cache[symbol]
+        if libraries is None:
+            libraries = index()
+        pop = 0
+        for exported, sorted_starts, sections, memo in libraries:
+            if (target := exported.get(symbol)) is None:
+                continue
+            with contextlib.suppress(Exception):
+                pop = _i386_callee_pop(nyxstone, sections, sorted_starts, target, memo)
+            if pop:
+                break
+        cache[symbol] = pop
+        return pop
+
+    return resolve
 
 
 _X86_GOT_LOAD_RE = re.compile(
@@ -1827,7 +2083,7 @@ def _direct_callers(sections, targets: set[int]) -> set[int]:
     return callers
 
 
-def recover_runtime_tables(parsed_obj) -> list[dict]:
+def recover_runtime_tables(parsed_obj, pop_for_external=None) -> list[dict]:
     """Registrations whose ``JNINativeMethod`` table no static triple holds.
 
     The registrar builds the entries at run time (fbjni's 32-bit
@@ -1841,10 +2097,17 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     start this binary's own sources name (symbols, exports, unwind
     tables). A registration with any unreadable or invalid word is dropped
     whole rather than partially recovered, and a count computed at run
-    time reads as no constant and recovers nothing. Only i386 and arm32
-    (both instruction set states) are walked - the ABIs whose registrars
-    build one- and two-entry tables at run time; other architectures
-    return nothing.
+    time reads as no constant and recovers nothing. A registrar that
+    names its class only on the cold init path below its vtable call
+    still binds when that is the one class name it materializes and no
+    later vtable call consumes it. Only i386 and arm32 (both instruction set states) are
+    walked - the ABIs whose registrars build one- and two-entry tables at
+    run time; other architectures return nothing.
+
+    ``pop_for_external`` (optional, i386) maps an imported symbol name to
+    the callee-pop amount its defining sibling library proves; without it,
+    an sret call that leaves this binary never fires (an external PLT
+    slot is cdecl until verified elsewhere).
     """
     machine = str(getattr(parsed_obj.header, "machine_type", ""))
     if "I386" in machine or "EM_386" in machine:
@@ -1955,6 +2218,7 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
                 incoming,
                 reloc_map=reloc_map,
                 thunks=thunks or None,
+                pop_for_external=pop_for_external if arch == "x86" else None,
             )
             for event in record.get("runtime_registrations") or []:
                 entries = _runtime_entries(parsed_obj, event, exec_ranges, set(sorted_starts))
