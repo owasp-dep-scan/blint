@@ -179,12 +179,21 @@ def _walk_function(
     RegisterNatives calls whose methods/count the model could read (on
     i386 from the cdecl argument slots at [esp+8]/[esp+0xc], methods may
     be the carried stack marker), each paired with the most recent class
-    name above it; the direct calls with the argument registers as they
-    stood (PLT-resolved targets; on i386 the outgoing slot words beside
-    them); the memcpy-shaped calls with (dst, src, size); and the
-    function's own materialised addresses (adr text plus the model's
-    fresh ``("ptr", a)`` writes - on i386 fresh GOTOFF ints too, filtered
-    by the class-name shape check below).
+    name above it - a runtime-shaped call no materialization precedes is
+    held and pairs with the one class name the function materializes
+    (registrar init paths sit below their hot path in address order), two
+    names or none deciding nothing; the direct calls with the argument
+    registers as they stood (PLT-resolved targets; on i386 the outgoing
+    slot words beside them); the memcpy-shaped calls with (dst, src,
+    size); and the function's own materialised addresses (adr text plus
+    the model's fresh ``("ptr", a)`` writes - on i386 fresh GOTOFF ints
+    too, filtered by the class-name shape check below).
+
+    On i386 a direct call whose outgoing first argument is a pointer into
+    the caller's frame, placed there since the previous call, hands a
+    named callee its hidden result slot (the sret form): the callee
+    returns through that pointer and pops it, so the frame base sits one
+    word above the neutral-call baseline the model keeps.
     """
     from bisect import bisect_left
 
@@ -248,6 +257,17 @@ def _walk_function(
     materialized_addresses: set[int] = set()
     pending_vtable_reg = None
     last_class: str | None = None
+    # True while the outgoing first-argument slot holds a frame pointer a
+    # store placed there since the previous call (an i386 sret call in the
+    # making: the callee returns its result through that pointer and pops
+    # it, so the call's net stack effect is one word up, not neutral).
+    fresh_sret_arg = False
+    sret_pop = False
+    # Runtime-shaped vtable calls no class materialization preceded: the
+    # registrar may name its class only on the cold init path the compiler
+    # places below the call, so they are held until the walk knows every
+    # class name the function materializes.
+    unclassed_runtime: list[tuple] = []
     # NEON copy pairing state: the D-register list a vld/vldr read, and the
     # base address it read from.
     vec_sources: dict[str, int | tuple] = {}
@@ -260,6 +280,21 @@ def _walk_function(
         text = instruction.assembly.strip()
         compact = text.replace(" ", "")
         mnemonic = text.split(None, 1)[0].lower() if text else ""
+        # i386 argument setup for the outgoing first slot: `push reg` or
+        # `mov [esp], reg` state what the callee receives as its first
+        # argument - a frame pointer there is the sret form's hidden
+        # result slot. Anything else stored there clears it.
+        if arch == "x86" and (match := _X86_ARG1_SETUP_RE.match(text)):
+            read = state.get_register(match.group("push") or match.group("mov"))
+            value = read[0] if read is not None else None
+            fresh_sret_arg = isinstance(value, tuple) and bool(value) and value[0] in (
+                "esp",
+                "ebp",
+                "caller_esp",
+                "caller_ebp",
+                "sp",
+                "caller_sp",
+            )
         # The RegisterNatives vtable access names the call that follows:
         # arm64 loads the slot (`ldr xN, [xM, #1720]`) and branches
         # through it (`blr`/a `br` tail); x86-64 either calls through the
@@ -308,23 +343,37 @@ def _walk_function(
                     state, "rdx" if arch != "aarch64" else "x2", adr_values
                 )
                 count = _int_register(state, "ecx" if arch != "aarch64" else "w3")
-            if methods is not None and count and last_class:
-                registration_events.append(
-                    {"methods": methods, "count": count, "class": last_class}
-                )
-                if (
-                    arch in ("x86", "arm")
-                    and isinstance(methods, tuple)
-                    and methods[0]
-                    in (
-                        "esp",
-                        "ebp",
-                        "caller_esp",
-                        "caller_ebp",
-                        "sp",
-                        "caller_sp",
+            runtime_shape = arch in ("x86", "arm") and isinstance(methods, tuple) and methods[0] in (
+                "esp",
+                "ebp",
+                "caller_esp",
+                "caller_ebp",
+                "sp",
+                "caller_sp",
+            )
+            if methods is not None and count:
+                if last_class is not None:
+                    registration_events.append(
+                        {"methods": methods, "count": count, "class": last_class}
                     )
-                ):
+                elif runtime_shape:
+                    # no class materialization preceded the call: the
+                    # registrar may name its class only on the cold init
+                    # path below it, so the event waits for the walk to
+                    # know every class name the function materializes.
+                    # The words are read here, at the call - the init path
+                    # may reuse the slots after it.
+                    unclassed_runtime.append(
+                        (
+                            methods,
+                            count,
+                            [
+                                state.load_word(methods[0], methods[1] + 4 * index)
+                                for index in range(count * 3)
+                            ],
+                        )
+                    )
+                if runtime_shape and last_class is not None:
                     # A table built at run time: the entry words sit in the
                     # frame slots the methods pointer names. Each word is
                     # whatever a store left - an immediate address, a
@@ -376,6 +425,16 @@ def _walk_function(
                         "slots": dict(state.slots) if arch in ("x86", "arm") else None,
                     }
                 )
+                target_index = bisect_left(sorted_starts, target)
+                sret_pop = (
+                    fresh_sret_arg
+                    and isinstance(args.get(0), tuple)
+                    and (
+                        target_index < len(sorted_starts) and sorted_starts[target_index] == target
+                        or target in plt_names
+                    )
+                )
+                fresh_sret_arg = False
                 if plt_names.get(target) in ("memcpy", "memmove"):
                     if arch == "x86":
                         dst = args.get(0)
@@ -425,6 +484,11 @@ def _walk_function(
         before = dict(state.registers)
         with contextlib.suppress(Exception):
             model.step(state, text, leaves_function=True, address_span=span)
+        if sret_pop and state.sp_adjustment is not None:
+            # the sret callee popped its hidden result pointer: the frame
+            # base sits one word above the neutral-call baseline
+            state.sp_adjustment += 4
+        sret_pop = False
         materialized: set[int] = set()
         if arch == "arm":
             # the literal-pool load and the GOT slot read name words in this
@@ -505,6 +569,20 @@ def _walk_function(
             if name:
                 class_events.append(name)
                 last_class = name
+    if unclassed_runtime and len(set(class_events)) == 1:
+        # The one class this function names sits on the cold init path the
+        # compiler placed below the hot path holding the vtable call, so no
+        # materialization preceded the call in address order. The whole
+        # function is that class's initializer; two names, or none, decide
+        # nothing and the held events stay unrecorded.
+        event_class = next(iter(set(class_events)))
+        for methods, count, words in unclassed_runtime:
+            registration_events.append(
+                {"methods": methods, "count": count, "class": event_class}
+            )
+            runtime_registrations.append(
+                {"methods": methods, "count": count, "class": event_class, "words": words}
+            )
     return {
         "class_events": class_events,
         "registration_events": registration_events,
@@ -537,6 +615,14 @@ def _call_target_address(instruction, text: str) -> int | None:
             return base + value
     return None
 
+
+# i386 first-argument setup: the store forms that place a register's value
+# into the outgoing slot at [esp] - `push reg` (the slot is [esp] once the
+# push lands) and `mov [esp], reg`.
+_X86_ARG1_SETUP_RE = re.compile(
+    r"^(?:push\s+(?P<push>[a-z0-9]{2,3})|mov\s+(?:dword\s+ptr\s+)?\[esp\]\s*,\s*(?P<mov>[a-z0-9]{2,3}))$",
+    re.IGNORECASE,
+)
 
 _X86_GOT_LOAD_RE = re.compile(
     r"^mov\s+(?P<dest>[a-z]{2,3})\s*,\s*(?:dword\s+ptr\s+)?"
@@ -1841,10 +1927,12 @@ def recover_runtime_tables(parsed_obj) -> list[dict]:
     start this binary's own sources name (symbols, exports, unwind
     tables). A registration with any unreadable or invalid word is dropped
     whole rather than partially recovered, and a count computed at run
-    time reads as no constant and recovers nothing. Only i386 and arm32
-    (both instruction set states) are walked - the ABIs whose registrars
-    build one- and two-entry tables at run time; other architectures
-    return nothing.
+    time reads as no constant and recovers nothing. A registrar that
+    names its class only on the cold init path below its vtable call
+    still binds when that is the one class name it materializes. Only
+    i386 and arm32 (both instruction set states) are walked - the ABIs
+    whose registrars build one- and two-entry tables at run time; other
+    architectures return nothing.
     """
     machine = str(getattr(parsed_obj.header, "machine_type", ""))
     if "I386" in machine or "EM_386" in machine:
