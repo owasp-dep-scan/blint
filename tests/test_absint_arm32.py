@@ -13,6 +13,7 @@ ARM-mode). The fixtures were built by
 from __future__ import annotations
 
 import re
+import struct
 from pathlib import Path
 
 import pytest
@@ -268,3 +269,48 @@ def test_aapcs_clobbering_keeps_the_saved_env_register():
             seen_after_call = True
             break
     assert seen_after_call
+
+
+@pytest.mark.skipif(
+    _nyxstone("armv7-unknown-linux-android") is None, reason="nyxstone is not installed"
+)
+def test_stmib_stores_the_first_word_one_above_the_base():
+    """The ARM-state a13 registrar stores its entry words through a real
+    `stmib sp, {r1, r2}` (liba13rt's lazy registrar): the first word lands
+    one above the base and the second two above, so a methods marker at
+    sp reads (name, signature) beside the separately stored fnPtr. The
+    same lead computation serves `ldmib`, which no committed fixture
+    contains."""
+    nyxstone = _nyxstone("armv7-unknown-linux-android")
+    parsed = _lief("liba13rt_armeabi-v7a.so")
+    if nyxstone is None or parsed is None:
+        pytest.skip("nyxstone or the arm32 fixture is unavailable")
+    # the registrars are static (no dynsym entry), so the real stmib is
+    # located by its ARM encoding (stmib sp, {r1, r2}) and decoded where
+    # it lies - the instruction text still comes from the fixture bytes
+    section = next(s for s in parsed.sections if s.name == ".text")
+    blob = bytes(
+        parsed.get_content_from_virtual_address(section.virtual_address, section.size)
+    )
+    stmib = None
+    for offset in range(0, len(blob) - 4, 4):
+        word = struct.unpack_from("<I", blob, offset)[0]
+        if word != 0xE98D0006:
+            continue
+        decoded = nyxstone.disassemble_to_instructions(
+            list(blob[offset : offset + 4]), section.virtual_address + offset
+        )
+        stmib = (decoded[0].address, decoded[0].assembly.strip(), len(decoded[0].bytes))
+        break
+    assert stmib is not None, "the a13 ARM fixture's lazy registrar stmib is missing"
+    state = FrameState(ARM32_ARM_MODEL)
+    state.sp_adjustment = -0x10
+    state.registers["r1"] = ("ptr", 0xAAAA)
+    state.registers["r2"] = ("ptr", 0xBBBB)
+    ARM32_ARM_MODEL.step(
+        state, stmib[1], leaves_function=True, address_span=(stmib[0], stmib[0] + stmib[2])
+    )
+    assert state.load_word("sp", -0x10) is None
+    assert state.load_word("sp", -0x10 + 4) == ("ptr", 0xAAAA)
+    assert state.load_word("sp", -0x10 + 8) == ("ptr", 0xBBBB)
+    assert state.sp_adjustment == -0x10  # no writeback in this spelling

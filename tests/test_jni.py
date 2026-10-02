@@ -1893,3 +1893,71 @@ def test_runtime_singles_fn_addrs_pass_the_start_oracle(abi: str) -> None:
         assert int(entry["fn_addr"], 16) in starts, entry
         checked += 1
     assert checked == 4, abi
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13ctl_x86.so", "liba13ctl_x86_stripped.so"])
+def test_sret_trigger_requires_the_callees_own_pop_proof(library: str) -> None:
+    """The i386 sret trigger fires only on a callee whose own returns
+    prove a callee-pop. A registrar that hands a frame pointer as its
+    first argument to a plain-`ret` LOCAL callee (CtlTouch), to an
+    external libc call no sibling defines (CtlFormat, snprintf), or to a
+    sibling-defined plain-`ret` callee (CtlExtTouch) - each between its
+    entry stores and its methods lea - still binds: those calls shift
+    nothing. A trigger without the proof loses all three (measured on
+    this fixture: 812f980 bound only the genuine control)."""
+    import lief
+
+    from blint.lib.jni_findclass import recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    registrations = {r["class"] for r in recover_runtime_tables(parsed)}
+    # the three false-fire rows bind; the genuine control needs its finder
+    # verified in the sibling, which the plain walk cannot do
+    for row in ("CtlTouch", "CtlFormat", "CtlExtTouch"):
+        assert f"com.blint.a13.ctl.{row}" in registrations, (library, row)
+    assert "com.blint.a13.ctl.CtlSret" not in registrations, library
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13ctl_x86.so", "liba13ctl_x86_stripped.so"])
+def test_external_pop_resolver_verifies_in_the_defining_sibling(library: str) -> None:
+    """The sret fire's external half: an imported callee is verified in
+    the sibling library that defines it (liba13ctlfb stands in for
+    libfbjni). The finder ends ``ret 4`` - a uniform callee pop - so the
+    CtlSret registrar's words align only when the resolver hands the walk
+    that proof; the sibling's plain-`ret` helper and an unknown symbol
+    resolve to no pop and never fire."""
+    import lief
+
+    from blint.lib.jni_findclass import external_pop_resolver, recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    sibling_bytes = (FIXTURES / "liba13ctlfb_x86.so").read_bytes()
+    resolver = external_pop_resolver(
+        lambda loc: sibling_bytes if loc.endswith("liba13ctlfb_x86.so") else None,
+        ["lib/x86/liba13ctl_x86.so", "lib/x86/liba13ctlfb_x86.so"],
+    )
+    assert resolver("_Z12a13_ctl_findP7_JNIEnvPKc") == 4
+    assert resolver("_Z17a13_ctl_touch_extPKv") == 0
+    assert resolver("memcpy") == 0
+    without = {
+        r["class"]: tuple((e["name"], e["signature"], e["fn_addr"]) for e in r["entries"])
+        for r in recover_runtime_tables(parsed)
+    }
+    with_resolver = {
+        r["class"]: tuple((e["name"], e["signature"], e["fn_addr"]) for e in r["entries"])
+        for r in recover_runtime_tables(parsed, pop_for_external=resolver)
+    }
+    assert set(without) < set(with_resolver), (library, without, with_resolver)
+    assert "com.blint.a13.ctl.CtlSret" in with_resolver, library
+    expected = (("ctlOne", "(I)I", with_resolver["com.blint.a13.ctl.CtlSret"][0][2]),)
+    assert with_resolver["com.blint.a13.ctl.CtlSret"] == expected
+    for row in ("CtlTouch", "CtlFormat", "CtlExtTouch", "CtlSret"):
+        assert with_resolver[f"com.blint.a13.ctl.{row}"] == with_resolver[
+            "com.blint.a13.ctl.CtlSret"
+        ], (library, row)

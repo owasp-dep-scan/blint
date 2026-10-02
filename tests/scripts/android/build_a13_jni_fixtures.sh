@@ -22,6 +22,14 @@
 #   rtStaticAdd               static-table control beside them; binds
 #                            everywhere.
 #
+# liba13ctl_x86.so + liba13ctlfb_x86.so - the sret trigger's false-fire
+# controls (added by the A13 review): registrars that hand a frame pointer
+# to a plain-`ret` local callee, an external libc call, and the sibling's
+# plain-`ret` helper between their entry stores and their methods lea,
+# beside the sibling-defined genuine sret finder (`ret 4`, the libfbjni
+# findClassLocal shape). The first three bound before A13 and must keep
+# binding: the trigger must not fire without the callee's own pop proof.
+#
 # a13-jni-classes.dex - RtLazy/RtSret/RtPairSret/RtTwo/RtControl
 # declarations.
 # a13-jni-singles.apk  - the dex plus one copy of the library per ABI
@@ -81,6 +89,25 @@ cc="$toolchain/armv7a-linux-androideabi24-clang"
 "$toolchain/llvm-strip" --strip-all \
   -o "$out/liba13rt_thumb_armeabi-v7a_stripped.so" "$out/liba13rt_thumb_armeabi-v7a.so"
 
+# ------------------------------------------------- sret false-fire controls
+# x86-only: the callee-pop verification's regression pair. liba13ctlfb is
+# the libfbjni stand-in defining the external sret finder (`ret 4`) and a
+# plain-`ret` helper; liba13ctl's registrars hand a frame pointer as arg1
+# to a local plain-`ret` callee, an external libc call (snprintf), the
+# sibling's plain-`ret` helper, and the sibling's genuine sret finder,
+# each between the entry stores and the methods lea. -fomit-frame-pointer
+# matches the shipped RN libraries.
+cc="$toolchain/i686-linux-android24-clang"
+"$cc" -g -O2 -fPIC -funwind-tables -fomit-frame-pointer -c \
+  -o "$work/popctl_find.o" "$here/jni_sources/a13_rt/a13_rt_popctl_find.cpp"
+"$cc" -shared -o "$out/liba13ctlfb_x86.so" "$work/popctl_find.o"
+"$cc" -g -O2 -fPIC -funwind-tables -fomit-frame-pointer -c \
+  -o "$work/popctl.o" "$here/jni_sources/a13_rt/a13_rt_popctl.cpp"
+"$cc" -shared -o "$out/liba13ctl_x86.so" "$work/popctl.o" \
+  -L"$out" -l:liba13ctlfb_x86.so
+"$toolchain/llvm-strip" --strip-all -o "$out/liba13ctlfb_x86_stripped.so" "$out/liba13ctlfb_x86.so"
+"$toolchain/llvm-strip" --strip-all -o "$out/liba13ctl_x86_stripped.so" "$out/liba13ctl_x86.so"
+
 # ----------------------------------------------------------------- apks
 apkroot="$work/apk"
 mkdir -p "$apkroot/lib/arm64-v8a" "$apkroot/lib/armeabi-v7a" \
@@ -103,4 +130,4 @@ cp "$out/a13-jni-classes.dex" "$thumbroot/classes.dex"
   -I "$platform_jar" -o "$work/a13-jni-singles-thumb.apk"
 (cd "$thumbroot" && zip -q -r "$work/a13-jni-singles-thumb.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a13-jni-singles-thumb.apk" "$out/a13-jni-singles-thumb.apk"
-echo "built: liba13rt_<abi>.so (4 ABIs + thumb twin, stripped twins), a13-jni-classes.dex, a13-jni-singles.apk, a13-jni-singles-thumb.apk"
+echo "built: liba13rt_<abi>.so (4 ABIs + thumb twin, stripped twins), liba13ctl_x86.so + liba13ctlfb_x86.so (+ stripped), a13-jni-classes.dex, a13-jni-singles.apk, a13-jni-singles-thumb.apk"

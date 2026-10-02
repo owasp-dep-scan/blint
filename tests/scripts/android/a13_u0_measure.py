@@ -26,7 +26,9 @@ Measure only; no production change. Three answers:
         lea after it read the name word from the empty slot below.
     X2  the (methods, count) pair passes to the registerHybrid callee as
         ``initializer_list`` - 8 raw bytes through ``movsd`` - which the
-        model drops, so the seeded callee never reads its pair.
+        model already tracks; the defeat is inside the seeded callee,
+        whose own findClassLocal call (the X1 sret pop) shifts its frame
+        one word below the incoming pair.
 
 (b) The 64-bit census: element (x86_64) and RnHello (arm64-v8a), per
     library, the RegisterNatives vtable sites from llvm-objdump and the
