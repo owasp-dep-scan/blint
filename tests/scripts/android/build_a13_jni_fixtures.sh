@@ -30,6 +30,12 @@
 # findClassLocal shape). The first three bound before A13 and must keep
 # binding: the trigger must not fire without the callee's own pop proof.
 #
+# liba13held_x86.so + liba13held_thumb_armeabi-v7a.so - the held
+# registration's consumed-name control (added by the A13 review): a
+# registrar whose first table goes into the jclass Java passed in, and
+# whose one class name, found below that call, a second RegisterNatives
+# consumes. The first table must not be attributed to that class.
+#
 # a13-jni-classes.dex - RtLazy/RtSret/RtPairSret/RtTwo/RtControl
 # declarations.
 # a13-jni-singles.apk  - the dex plus one copy of the library per ABI
@@ -108,6 +114,16 @@ cc="$toolchain/i686-linux-android24-clang"
 "$toolchain/llvm-strip" --strip-all -o "$out/liba13ctlfb_x86_stripped.so" "$out/liba13ctlfb_x86.so"
 "$toolchain/llvm-strip" --strip-all -o "$out/liba13ctl_x86_stripped.so" "$out/liba13ctl_x86.so"
 
+# --------------------------------------------- held consumed-name control
+cc="$toolchain/i686-linux-android24-clang"
+"$cc" -g -O2 -fPIC -funwind-tables -fomit-frame-pointer -c \
+  -o "$work/held_x86.o" "$here/jni_sources/a13_rt/a13_rt_held.cpp"
+"$cc" -shared -o "$out/liba13held_x86.so" "$work/held_x86.o"
+cc="$toolchain/armv7a-linux-androideabi24-clang"
+"$cc" -g -O2 -fPIC -funwind-tables -mthumb -fomit-frame-pointer -c \
+  -o "$work/held_thumb.o" "$here/jni_sources/a13_rt/a13_rt_held.cpp"
+"$cc" -shared -o "$out/liba13held_thumb_armeabi-v7a.so" "$work/held_thumb.o"
+
 # ----------------------------------------------------------------- apks
 apkroot="$work/apk"
 mkdir -p "$apkroot/lib/arm64-v8a" "$apkroot/lib/armeabi-v7a" \
@@ -130,4 +146,4 @@ cp "$out/a13-jni-classes.dex" "$thumbroot/classes.dex"
   -I "$platform_jar" -o "$work/a13-jni-singles-thumb.apk"
 (cd "$thumbroot" && zip -q -r "$work/a13-jni-singles-thumb.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a13-jni-singles-thumb.apk" "$out/a13-jni-singles-thumb.apk"
-echo "built: liba13rt_<abi>.so (4 ABIs + thumb twin, stripped twins), liba13ctl_x86.so + liba13ctlfb_x86.so (+ stripped), a13-jni-classes.dex, a13-jni-singles.apk, a13-jni-singles-thumb.apk"
+echo "built: liba13rt_<abi>.so (4 ABIs + thumb twin, stripped twins), liba13ctl_x86.so + liba13ctlfb_x86.so (+ stripped), liba13held (x86, thumb v7a), a13-jni-classes.dex, a13-jni-singles.apk, a13-jni-singles-thumb.apk"

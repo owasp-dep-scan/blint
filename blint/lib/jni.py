@@ -894,19 +894,10 @@ def build_jni_join_summary(
 
             try:
                 with LibraryReader(app_file) as reader:
-                    sibling_locs = {
-                        abi: [
-                            loc
-                            for (_name, lib_abi), loc in lib_locations.items()
-                            if lib_abi == abi
-                        ]
-                        for abi in unbound_abis
-                    }
-                    # The sret fire's external half, one resolver per ABI:
-                    # imported callees (fbjni's findClassLocal) are verified
-                    # in the same-ABI siblings that define them, parsed once
-                    # however many libraries the loop walks; without it an
-                    # external PLT slot never fires.
+                    # i386 walks verify an imported callee's pop in the
+                    # same-ABI library that exports it (fbjni's
+                    # findClassLocal); without a resolver an imported
+                    # callee never shifts the frame.
                     pop_resolvers: dict[str, object] = {}
                     for (name, abi), loc in lib_locations.items():
                         if abi not in unbound_abis:
@@ -922,8 +913,12 @@ def build_jni_join_summary(
                         if abi == "x86" and abi not in pop_resolvers:
                             with contextlib.suppress(Exception):
                                 pop_resolvers[abi] = external_pop_resolver(
-                                    lambda library_loc: reader.read(library_loc),
-                                    sibling_locs[abi],
+                                    reader.read,
+                                    [
+                                        sibling
+                                        for (_lib, sibling_abi), sibling in lib_locations.items()
+                                        if sibling_abi == abi
+                                    ],
                                 )
                         with contextlib.suppress(Exception):
                             registrations = recover_runtime_tables(

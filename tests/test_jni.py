@@ -1740,7 +1740,9 @@ def test_runtime_singles_bind_in_both_dialects(apk: str) -> None:
         assert bound == expected, (apk, abi)
         # the refusal twin: its cold path names two classes, so the call
         # that no class materialization precedes stays unread
-        ambiguous = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]}
+        ambiguous = {
+            (e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["ambiguous_dynamic"]
+        }
         assert ("RtTwo", "rtOne") in ambiguous, (apk, abi)
 
 
@@ -1758,7 +1760,9 @@ def test_runtime_singles_stay_unbound_off_the_32bit_walks() -> None:
     join = build_jni_join_summary(path, native, confirm_findclass=True)
     for abi in ("arm64-v8a", "x86_64"):
         per_abi = join["per_abi"][abi]
-        unbound = {(e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["unbound_dex_natives"]}
+        unbound = {
+            (e["class"].rsplit(".", 1)[-1], e["name"]) for e in per_abi["unbound_dex_natives"]
+        }
         assert ("RtTwo", "rtOne") in unbound, abi
         assert ("RtLazy", "rtOne") in unbound, abi
         assert not any(
@@ -1816,23 +1820,27 @@ def test_runtime_singles_stripped_twins_recover_the_same(
 
     plain = registrations(str(FIXTURES / plain_name))
     stripped = registrations(str(FIXTURES / stripped_name))
-    assert plain == stripped == {
-        (
-            "com.blint.a13.rt.RtLazy",
-            (("rtOne", "(I)I", expected["rtOne"]),),
-        ),
-        (
-            "com.blint.a13.rt.RtPairSret",
+    assert (
+        plain
+        == stripped
+        == {
             (
-                ("rtOne", "(I)I", expected["rtOne"]),
-                ("rtShared", "(J)J", expected["rtShared"]),
+                "com.blint.a13.rt.RtLazy",
+                (("rtOne", "(I)I", expected["rtOne"]),),
             ),
-        ),
-        (
-            "com.blint.a13.rt.RtSret",
-            (("rtOne", "(I)I", expected["rtOne"]),),
-        ),
-    }
+            (
+                "com.blint.a13.rt.RtPairSret",
+                (
+                    ("rtOne", "(I)I", expected["rtOne"]),
+                    ("rtShared", "(J)J", expected["rtShared"]),
+                ),
+            ),
+            (
+                "com.blint.a13.rt.RtSret",
+                (("rtOne", "(I)I", expected["rtOne"]),),
+            ),
+        }
+    )
 
 
 @pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
@@ -1906,8 +1914,7 @@ def test_sret_trigger_requires_the_callees_own_pop_proof(library: str) -> None:
     external libc call no sibling defines (CtlFormat, snprintf), or to a
     sibling-defined plain-`ret` callee (CtlExtTouch) - each between its
     entry stores and its methods lea - still binds: those calls shift
-    nothing. A trigger without the proof loses all three (measured on
-    this fixture: 812f980 bound only the genuine control)."""
+    nothing. A trigger without the proof loses all three."""
     import lief
 
     from blint.lib.jni_findclass import recover_runtime_tables
@@ -1926,9 +1933,8 @@ def test_sret_trigger_requires_the_callees_own_pop_proof(library: str) -> None:
 )
 @pytest.mark.parametrize("library", ["liba13ctl_x86.so", "liba13ctl_x86_stripped.so"])
 def test_external_pop_resolver_verifies_in_the_defining_sibling(library: str) -> None:
-    """The sret fire's external half: an imported callee is verified in
-    the sibling library that defines it (liba13ctlfb stands in for
-    libfbjni). The finder ends ``ret 4`` - a uniform callee pop - so the
+    """An imported callee is verified in the sibling library that exports
+    it (liba13ctlfb stands in for libfbjni). The finder ends ``ret 4`` - a uniform callee pop - so the
     CtlSret registrar's words align only when the resolver hands the walk
     that proof; the sibling's plain-`ret` helper and an unknown symbol
     resolve to no pop and never fire."""
@@ -1958,6 +1964,60 @@ def test_external_pop_resolver_verifies_in_the_defining_sibling(library: str) ->
     expected = (("ctlOne", "(I)I", with_resolver["com.blint.a13.ctl.CtlSret"][0][2]),)
     assert with_resolver["com.blint.a13.ctl.CtlSret"] == expected
     for row in ("CtlTouch", "CtlFormat", "CtlExtTouch", "CtlSret"):
-        assert with_resolver[f"com.blint.a13.ctl.{row}"] == with_resolver[
-            "com.blint.a13.ctl.CtlSret"
-        ], (library, row)
+        assert (
+            with_resolver[f"com.blint.a13.ctl.{row}"] == with_resolver["com.blint.a13.ctl.CtlSret"]
+        ), (library, row)
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+def test_callee_pop_needs_every_return_to_agree() -> None:
+    """A callee proves a pop only when every return in its window is the
+    same ``ret imm``. The finder's ``ret 4`` read together with its
+    plain-``ret`` neighbour, as when no start separates the two, proves
+    nothing; the finder alone proves 4."""
+    import lief
+    from nyxstone import Nyxstone
+
+    from blint.lib.jni_findclass import (
+        _exec_sections,
+        _exported_functions,
+        _function_starts,
+        _i386_callee_pop,
+    )
+
+    parsed = lief.ELF.parse(str(FIXTURES / "liba13ctlfb_x86.so"))
+    exported = _exported_functions(parsed)
+    finder = exported["_Z12a13_ctl_findP7_JNIEnvPKc"]
+    neighbour = exported["_Z17a13_ctl_touch_extPKv"]
+    starts = sorted(_function_starts(parsed))
+    assert starts[starts.index(finder) + 1] == neighbour
+    nyxstone = Nyxstone(target_triple="i386-unknown-linux-android", immediate_style=0)
+    sections = _exec_sections(parsed)
+    assert _i386_callee_pop(nyxstone, sections, starts, finder, {}) == 4
+    assert _i386_callee_pop(nyxstone, sections, starts, neighbour, {}) == 0
+    merged = [start for start in starts if start != neighbour]
+    assert _i386_callee_pop(nyxstone, sections, merged, finder, {}) == 0
+
+
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the runtime-table recovery decodes through nyxstone"
+)
+@pytest.mark.parametrize("library", ["liba13held_x86.so", "liba13held_thumb_armeabi-v7a.so"])
+def test_held_registration_skips_a_consumed_class_name(library: str) -> None:
+    """A held registration pairs only with a class name no later vtable
+    call consumes. The registrar's first table goes into the jclass Java
+    passed in; the one class it names, found below that call, a second
+    RegisterNatives consumes - so heldOne is never attributed to it."""
+    import lief
+
+    from blint.lib.jni_findclass import recover_runtime_tables
+
+    parsed = lief.ELF.parse(str(FIXTURES / library))
+    recovered = {
+        (r["class"], e["name"]) for r in recover_runtime_tables(parsed) for e in r["entries"]
+    }
+    assert ("com.blint.a13.held.HeldNamed", "heldOne") not in recovered, library
+    if library == "liba13held_x86.so":
+        assert recovered == {("com.blint.a13.held.HeldNamed", "heldTwo")}

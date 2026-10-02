@@ -13,7 +13,6 @@ ARM-mode). The fixtures were built by
 from __future__ import annotations
 
 import re
-import struct
 from pathlib import Path
 
 import pytest
@@ -55,7 +54,12 @@ def _fixture_instructions(
         pytest.skip("nyxstone or the arm32 fixture is unavailable")
     section = next(s for s in parsed.sections if s.name == ".text")
     blob = bytes(parsed.get_content_from_virtual_address(section.virtual_address, section.size))
-    symbol = next(s for s in parsed.dynamic_symbols if symbol_needle in (s.name or ""))
+    # static registrars have only a symtab entry
+    symbol = next(
+        s
+        for s in (*parsed.dynamic_symbols, *parsed.symtab_symbols)
+        if symbol_needle in (s.name or "") and "FUNC" in str(s.type)
+    )
     start = int(symbol.value) & ~1
     out: list[tuple[int, str, int]] = []
     cursor, end = (
@@ -281,27 +285,10 @@ def test_stmib_stores_the_first_word_one_above_the_base():
     sp reads (name, signature) beside the separately stored fnPtr. The
     same lead computation serves `ldmib`, which no committed fixture
     contains."""
-    nyxstone = _nyxstone("armv7-unknown-linux-android")
-    parsed = _lief("liba13rt_armeabi-v7a.so")
-    if nyxstone is None or parsed is None:
-        pytest.skip("nyxstone or the arm32 fixture is unavailable")
-    # the registrars are static (no dynsym entry), so the real stmib is
-    # located by its ARM encoding (stmib sp, {r1, r2}) and decoded where
-    # it lies - the instruction text still comes from the fixture bytes
-    section = next(s for s in parsed.sections if s.name == ".text")
-    blob = bytes(
-        parsed.get_content_from_virtual_address(section.virtual_address, section.size)
+    instructions = _fixture_instructions(
+        "liba13rt_armeabi-v7a.so", "armv7-unknown-linux-android", "a13_rt_register_lazy"
     )
-    stmib = None
-    for offset in range(0, len(blob) - 4, 4):
-        word = struct.unpack_from("<I", blob, offset)[0]
-        if word != 0xE98D0006:
-            continue
-        decoded = nyxstone.disassemble_to_instructions(
-            list(blob[offset : offset + 4]), section.virtual_address + offset
-        )
-        stmib = (decoded[0].address, decoded[0].assembly.strip(), len(decoded[0].bytes))
-        break
+    stmib = next((i for i in instructions if i[1].lower().startswith("stmib")), None)
     assert stmib is not None, "the a13 ARM fixture's lazy registrar stmib is missing"
     state = FrameState(ARM32_ARM_MODEL)
     state.sp_adjustment = -0x10
