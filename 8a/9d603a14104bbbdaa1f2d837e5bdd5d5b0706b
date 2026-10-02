@@ -1,0 +1,46 @@
+tests/scripts/android/build_a13_jni_fixtures.sh
+  s_3ce4fa53ecd7da::t_c062b6dacd5e42 33-38,117-126,149
+tests/test_absint_arm32.py
+  s_3ce4fa53ecd7da::t_714d00871a863f 57-62,288-289,291
+blint/lib/jni.py
+  s_3ce4fa53ecd7da::t_7de16de866f821 897-900
+  s_3ce4fa53ecd7da::t_01a4bbfd21564a 916-921
+tests/scripts/android/jni_sources/a13_rt/a13_rt_held.cpp
+  s_3ce4fa53ecd7da::t_55190187bed9e0 1-57
+docs/METADATA.md
+  s_3ce4fa53ecd7da::t_882331af52f1fa 107
+tests/test_jni.py
+  s_3ce4fa53ecd7da::t_c062b6dacd5e42 2002-2023
+  s_3ce4fa53ecd7da::t_e61f8fde844fc6 1743-1745,1763-1765,1823-1826,1828-1829,1831-1843,1967-1969
+  s_3ce4fa53ecd7da::t_1557c624cea7eb 1917,1936-1937,1970-2001
+blint/lib/jni_findclass.py
+  s_3ce4fa53ecd7da::t_0129fcffbd7781 136-138
+  s_3ce4fa53ecd7da::t_eabc4b6e622cc8 293-295,298
+  s_3ce4fa53ecd7da::t_8674a565b9f1ea 194-196
+  s_3ce4fa53ecd7da::t_41f8d13a163774 314-316
+  s_3ce4fa53ecd7da::t_c062b6dacd5e42 320-321,383-386,396-401,774
+  s_3ce4fa53ecd7da::t_4a24faafc5858e 193
+  s_3ce4fa53ecd7da::t_32e999ca752e21 371-374,377-382,387-389,394-395,402,406-409
+  s_3ce4fa53ecd7da::t_e3517c3e50b18e 606-610,614-618,620-621
+  s_3ce4fa53ecd7da::t_ddbbd65ce4d409 726-735,739-748,761-773,775,778,781-782,784-786,788
+  s_3ce4fa53ecd7da::t_0b238610f71c62 2102-2103
+  s_3ce4fa53ecd7da::t_61d9dc090a84f8 410,412
+  s_3ce4fa53ecd7da::t_25243499c168ed 703-705,713-721
+  s_3ce4fa53ecd7da::t_9d6f781ff180b3 796
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8a9d603a14104bbbdaa1f2d837e5bdd5d5b0706b",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
