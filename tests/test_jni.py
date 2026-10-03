@@ -282,6 +282,7 @@ def test_app_join_summary_matches_the_fixture_source() -> None:
         "bound_dynamic": 5,
         "ambiguous_dynamic": 0,
         "unbound_dex_natives": 1,
+        "jna_direct": 0,
         "undeclared_exports": 1,
     }
     bound = {(b["class"], b["name"], b["library"], b["symbol"]) for b in abi["bound"]}
@@ -903,6 +904,7 @@ def test_fbjni_shape_binds_the_dex_declarations() -> None:
         "bound_dynamic": 10,
         "ambiguous_dynamic": 1,
         "unbound_dex_natives": 1,
+        "jna_direct": 0,
         "undeclared_exports": 0,
     }
     bound = {
@@ -1218,6 +1220,7 @@ def test_merged_table_splits_by_carried_registration(abi: str) -> None:
         "bound_dynamic": 4,
         "ambiguous_dynamic": 1,
         "unbound_dex_natives": 0,
+        "jna_direct": 0,
         "undeclared_exports": 0,
     }
     # the x86_64 twin's dynsym carries parameter lists on these names
@@ -1310,6 +1313,7 @@ def test_split_fixture_splits_in_the_thumb_dialect_too() -> None:
         "bound_dynamic": 4,
         "ambiguous_dynamic": 1,
         "unbound_dex_natives": 0,
+        "jna_direct": 0,
         "undeclared_exports": 0,
     }
     confirmed = {
@@ -2021,3 +2025,180 @@ def test_held_registration_skips_a_consumed_class_name(library: str) -> None:
     assert ("com.blint.a13.held.HeldNamed", "heldOne") not in recovered, library
     if library == "liba13held_x86.so":
         assert recovered == {("com.blint.a13.held.HeldNamed", "heldTwo")}
+
+
+# ------------------------------------------------- A14 W1: the jna_direct join
+
+
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"])
+def test_a14_jna_direct_binds_every_registered_shape(abi: str) -> None:
+    """The three register shapes bind through ``confirmed_by: jna_direct``
+    in every ABI that ships libjnidispatch.so: the constant at the call
+    (A14Direct), the constant the invoked helper returns (A14Helper,
+    uniffi's findLibraryName shape) and the call inside a method the
+    ``<clinit>`` runs (A14ViaInit)."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    per_abi = join["per_abi"][abi]
+    jna_rows = {(e["class"].rsplit(".", 1)[-1], e["name"]): e for e in per_abi["bound_dynamic"]}
+    for cls, method in (
+        ("A14Direct", "a14_direct_add"),
+        ("A14Helper", "a14_helper_mul"),
+        ("A14ViaInit", "a14_via_init"),
+    ):
+        row = jna_rows.get((cls, method))
+        assert row is not None, (abi, cls, method)
+        assert row["confirmed_by"] == "jna_direct", (abi, cls, method)
+        assert row["library"] == "liba14jna.so", (abi, cls, method)
+    assert per_abi["counts"]["jna_direct"] == 3, abi
+
+
+def test_a14_jna_constant_picks_between_exporters() -> None:
+    """liba14other.so also exports a14_helper_mul; A14Helper's register
+    constant names liba14jna.so, and only that library may bind the row -
+    the uniqueness the census found is per the registered library, not per
+    the whole ABI."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    for abi, per_abi in join["per_abi"].items():
+        row = next(e for e in per_abi["bound_dynamic"] if e["name"] == "a14_helper_mul")
+        assert row["library"] == "liba14jna.so", abi
+
+
+def test_a14_jna_two_exporters_stay_ambiguous() -> None:
+    """A14Ambiguous registers against the process library (no constant)
+    and both libraries export the name: the row stays ambiguous with
+    every exporter listed."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    for abi, per_abi in join["per_abi"].items():
+        row = next(e for e in per_abi["ambiguous_dynamic"] if e["name"] == "a14_ambiguous")
+        assert row["jna_exporters"] == ["liba14jna.so", "liba14other.so"], abi
+        assert "table_candidates" not in row, abi
+
+
+def test_a14_jna_negative_twin_stays_unbound() -> None:
+    """A14Twin declares the same natives against the same exports but
+    never calls Native.register - System.loadLibrary is the JNI path and
+    binds nothing by plain name."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    for abi, per_abi in join["per_abi"].items():
+        unbound = {e["name"] for e in per_abi["unbound_dex_natives"]}
+        assert "a14_twin_echo" in unbound, abi
+
+
+def test_a14_jna_needs_the_disassemble_flag() -> None:
+    """The Native.register evidence is a dex bytecode walk the default
+    join does not do; without --disassemble no row binds through it."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    native = scan_android_native(path)
+    plain = build_jni_join_summary(path, native, confirm_findclass=False)
+    for abi, per_abi in plain["per_abi"].items():
+        assert per_abi["counts"]["jna_direct"] == 0, abi
+        assert not per_abi["bound_dynamic"], abi
+        assert per_abi["counts"]["unbound_dex_natives"] == 7, abi
+
+
+def test_a14_jna_needs_libjnidispatch_in_the_abi() -> None:
+    """The nodispatch twin ships the same libraries without the dispatch
+    stub: JNA cannot load there, and no row binds in that ABI."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna-nodispatch.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    for abi, per_abi in join["per_abi"].items():
+        assert per_abi["counts"]["jna_direct"] == 0, abi
+        assert per_abi["counts"]["unbound_dex_natives"] == 7, abi
+
+
+def test_a14_jna_register_evidence_shapes() -> None:
+    """The dex walk reads the library constant from each shape: the call
+    itself, the helper's fallback, the helper behind the accessor - and
+    records the process-library registration without one."""
+    from blint.lib.binary import parse_dex
+    from blint.lib.jni import collect_jna_register_facts
+
+    evidence = collect_jna_register_facts(parse_dex(str(FIXTURES / "a14-jna-classes.dex")))
+    assert evidence["com.blint.a14.jna.A14Direct"] == {"library": "a14jna"}
+    assert evidence["com.blint.a14.jna.A14Helper"] == {"library": "a14jna"}
+    assert evidence["com.blint.a14.jna.A14ViaInit"] == {"library": "a14jna"}
+    assert evidence["com.blint.a14.jna.A14Ambiguous"] == {"library": None}
+    # the negative twin never registers
+    assert "com.blint.a14.jna.A14Twin" not in evidence
+
+
+@pytest.mark.skipif(_llvm_readelf() is None, reason="the fn_addr oracle reads llvm-readelf")
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"])
+def test_a14_jna_fn_addrs_pass_the_symbol_oracle(abi: str) -> None:
+    """Every jna_direct fn_addr equals the dynsym value llvm-readelf
+    reports for that name in that ABI's own copy - never another ABI's."""
+    import subprocess
+
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.jni import build_jni_join_summary
+
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    rows = [
+        e for e in join["per_abi"][abi]["bound_dynamic"] if e.get("confirmed_by") == "jna_direct"
+    ]
+    assert rows, abi
+    readelf = _llvm_readelf()
+    symbols: dict[tuple[str, str], str] = {}
+    for library, member in (
+        (f"liba14jna_{abi}.so", "liba14jna.so"),
+        (f"liba14other_{abi}.so", "liba14other.so"),
+    ):
+        out = subprocess.run(
+            [readelf, "--dyn-syms", str(FIXTURES / library)],
+            capture_output=True,
+            text=True,
+        ).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 8 and parts[3] == "FUNC" and parts[6] != "UND":
+                symbols[(member, parts[7].split("@")[0])] = f"0x{int(parts[1], 16):x}"
+    for row in rows:
+        assert symbols[(row["library"], row["name"])] == row["fn_addr"], (
+            abi,
+            row["library"],
+            row["name"],
+            row["fn_addr"],
+        )
+
+
+def test_a14_jna_cross_class_registration_binds_nothing() -> None:
+    """A14Bootstrap registers A14RegisteredByBootstrap, not itself: the
+    site names no declaring class, so the bootstrap's own decoy (whose
+    name the library exports) and the registered class's declaration both
+    stay unbound."""
+    from blint.lib.android_native import scan_android_native
+    from blint.lib.binary import parse_dex
+    from blint.lib.jni import build_jni_join_summary, collect_jna_register_facts
+
+    evidence = collect_jna_register_facts(parse_dex(str(FIXTURES / "a14-jna-classes.dex")))
+    assert "com.blint.a14.jna.A14Bootstrap" not in evidence
+    assert "com.blint.a14.jna.A14RegisteredByBootstrap" not in evidence
+    path = str(FIXTURES / "a14-jna.apk")
+    join = build_jni_join_summary(path, scan_android_native(path), confirm_findclass=True)
+    for abi, per_abi in join["per_abi"].items():
+        unbound = {e["name"] for e in per_abi["unbound_dex_natives"]}
+        assert "a14_bootstrap_decoy" in unbound, abi
+        assert "a14_bootstrap_real" in unbound, abi
