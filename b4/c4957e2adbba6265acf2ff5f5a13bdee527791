@@ -1,0 +1,57 @@
+blint/lib/jni.py
+  s_b9f6f98e1c3bda::t_220f043397b9e4 346-564,682-684,702-716,778-787,878-909,915-917,1008-1018,1024,1041-1042,1050-1052,1071-1073,1078-1081,1089-1092,1095-1096,1099-1100,1107-1117,1122,1150,1154-1155,1167-1169,1173-1174,1190-1198,1260-1262
+docs/METADATA.md
+  s_b9f6f98e1c3bda::t_984127ef53f710 105,107-108
+tests/data/android/a14-jni-fixtures-manifest.json
+  s_b9f6f98e1c3bda::t_3f158039667339 1-26
+tests/scripts/android/a14-w1-measurements.md
+  s_b9f6f98e1c3bda::t_f9ddcecbfbc6be 1-145
+tests/scripts/android/build_a14_jni_fixtures.sh
+  s_cc3ac20205c0f7::t_fca559ed701f4f 1-107
+tests/scripts/android/jni_sources/a14_jna/AndroidManifest.xml
+  s_cc3ac20205c0f7::t_8afd8d97080ed5 1-5
+tests/scripts/android/jni_sources/a14_jna/c/a14_jna.c
+  s_b9f6f98e1c3bda::t_64f290d90f0142 1-17
+tests/scripts/android/jni_sources/a14_jna/c/a14_jnidispatch_stub.c
+  s_cc3ac20205c0f7::t_aa7a61e8df314e 1-7
+tests/scripts/android/jni_sources/a14_jna/c/a14_other.c
+  s_cc3ac20205c0f7::t_b346abdee246ab 1-4
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14Ambiguous.java
+  s_b9f6f98e1c3bda::t_bdaa2f516cf5be 1-20
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14Bootstrap.java
+  s_b9f6f98e1c3bda::t_d336250bc33c3d 1-20
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14Direct.java
+  s_cc3ac20205c0f7::t_245a1698f9b4bd 1-14
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14Helper.java
+  s_cc3ac20205c0f7::t_0a928b4777f575 1-27
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14RegisteredByBootstrap.java
+  s_b9f6f98e1c3bda::t_f89407a87706de 1-8
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14Twin.java
+  s_cc3ac20205c0f7::t_fac828ff01e892 1-16
+tests/scripts/android/jni_sources/a14_jna/java/com/blint/a14/jna/A14ViaInit.java
+  s_cc3ac20205c0f7::t_8f4dd082225e9b 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4c4957e2adbba6265acf2ff5f5a13bdee527791",
+  "prompts": {},
+  "sessions": {
+    "s_b9f6f98e1c3bda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb6bce3d-1e28-48ad-a820-e339060a0abd",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    },
+    "s_cc3ac20205c0f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d8a8c3fa-9c04-4188-8d5e-e28b5f0838c1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
