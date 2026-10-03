@@ -1,4 +1,4 @@
-"""JNI surface facts for Android native libraries (A5).
+"""JNI surface facts for Android native libraries.
 
 Static registration: a native method's implementation is exported under a
 name the JNI specification's "Resolving Native Method Names" chapter
@@ -34,7 +34,6 @@ from blint.logger import LOG
 # positional: _1 _, _2 ;, _3 [, _0wxyz U+wxyz (lowercase hex).
 _ESCAPES = {"1": "_", "2": ";", "3": "["}
 _HEX4_RE = re.compile(r"^[0-9a-f]{4}$")
-_DESCRIPTOR_START = "L[BCSIJFDZ"
 
 JNI_ON_LOAD = "JNI_OnLoad"
 JNI_ON_UNLOAD = "JNI_OnUnload"
@@ -694,13 +693,13 @@ def _join_abi_lists(
     signature both match (the class is unknown in the table, so signature
     equality is required, and the pair must be unique on both sides;
     otherwise the declarations are listed as ambiguous_dynamic with the
-    number of candidate entries). A8 N3: an ambiguous declaration binds
-    when the registering function chain's constant class name - the
+    number of candidate entries). An ambiguous declaration binds when
+    the registering function chain's constant class name - the
     ``FindClass`` confirmer's answer, per (library, abi) and table - names
     exactly one of the pair's declaring classes and exactly one candidate
     entry names it; anything the confirmer cannot decide stays ambiguous.
-    A14 W1: what no table answers can still bind by name through JNA
-    direct mapping - the declaring class (or a method its ``<clinit>``
+    What no table answers can still bind by name through JNA direct
+    mapping - the declaring class (or a method its ``<clinit>``
     runs) invoked ``Native.register``, ``libjnidispatch.so`` ships in this
     ABI, and exactly one same-ABI library exports the name (the register
     call's constant names the library when there is one, JNA mapping
@@ -876,8 +875,8 @@ def _join_abi_lists(
                     record["candidates_registered_elsewhere"] = True
                 ambiguous.append(record)
                 continue
-            # A14 W1: no table answers this pair; JNA direct mapping may
-            # still bind it by exported name, when the declaring class
+            # No table answers this pair; JNA direct mapping may still
+            # bind it by exported name, when the declaring class
             # registered with JNA and this ABI ships libjnidispatch.so.
             if jna_here and cls in jna_registers:
                 register = jna_registers[cls].get("library")
@@ -944,14 +943,14 @@ def _confirm_ambiguous_tables(
     lib_locations: dict[tuple[str, str], dict],
 ) -> dict[tuple[str, str], list[dict]]:
     """Per (library, abi): the registration ranges the FindClass confirmer
-    resolved (A8 N3) - ``[{begin, end, class}]`` over the recovered
+    resolved - ``[{begin, end, class}]`` over the recovered
     tables' addresses.
 
     Runs only where the join can be ambiguous at all - (name, signature)
     pairs several dex classes declare, or pairs more than one recovered
     entry answers - and only re-reads the (library, abi) copies that hold
-    candidate tables. The 23 of 27 corpus APKs without such pairs pay one
-    pass over the dex facts and nothing else. Any failure degrades to "no
+    candidate tables. Apps without such pairs pay one pass over the dex
+    facts and nothing else. Any failure degrades to "no
     confirmation": the entries stay ambiguous, never guessed.
     """
     from collections import Counter, defaultdict
@@ -1013,8 +1012,8 @@ def _library_join_facts(
     library - the join's light parse (dynamic symbols plus F1's function
     starts for stripped builds, not full metadata). The plain map, when
     asked for, is ``{exported FUNC name: address}`` for every defined
-    dynamic function - the names JNA direct mapping binds by (A14 W1);
-    it is collected only when the app's dex carries ``Native.register``
+    dynamic function - the names JNA direct mapping binds by; it is
+    collected only when the app's dex carries ``Native.register``
     evidence, so every other app pays nothing for it."""
     from blint.lib.binary_elf import parse_symbols
     from blint.lib.funcdisc.unwind import discover_functions
@@ -1055,7 +1054,7 @@ def _library_join_facts(
 def build_jni_join_summary(
     app_file: str, native: dict, confirm_findclass: bool = False
 ) -> dict | None:
-    """The app-level dex <-> native static join (A5.2 E2).
+    """The app-level dex <-> native static join.
 
     Per ABI (ground rule 36: one result per ``(abi, library)``, never a
     silent first-or-best), every dex ``native`` declaration is bound to
@@ -1086,9 +1085,9 @@ def build_jni_join_summary(
 
     natives: list[dict] = []
     load_library: list[dict] = []
-    # A14 W1: JNA direct-mapping evidence, from a dex bytecode walk the
-    # default join does not do (it decodes only loadLibrary call sites), so
-    # it runs only under the confirmers' flag.
+    # JNA direct-mapping evidence, from a dex bytecode walk the default
+    # join does not do (it decodes only loadLibrary call sites), so it
+    # runs only under the confirmers' flag.
     jna_registers: dict[str, dict] = {}
     try:
         for adex, _ in _iter_app_dex_files(app_file):
@@ -1402,7 +1401,7 @@ def relative_relocation_map(parsed_obj) -> tuple[dict[int, int], list[str]]:
 
 def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
     """``{slot address: target VA}`` from absolute relocations whose symbol
-    is *defined in this object* (A8 N2: fbjni's merged tables).
+    is *defined in this object* (fbjni's merged tables).
 
     fbjni's ``makeNativeMethod`` emits ``{name, kDescriptor, &call}`` where
     the signature and fnPtr words name preemptible weak dynsym symbols -
@@ -1410,8 +1409,7 @@ def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
     ``.rodata``) and ``MethodWrapper<...>::call`` /
     ``FunctionWrapperWithJniEntryPoint<...>::call`` (FUNCs) - so the linker
     keeps ``R_*_ABS*`` against the symbol instead of folding the word to
-    ``R_*_RELATIVE`` (measured in N0(b): 167 of RnHello's 221 unbound
-    declarations sit in such triples). The target is the symbol's value
+    ``R_*_RELATIVE``. The target is the symbol's value
     plus a RELA addend; REL forms (arm32) keep theirs in the stored word.
     Imported symbols (section index 0) have no link-time value and are
     ignored.
@@ -1450,7 +1448,7 @@ def recover_register_natives_tables(
 
     A table is an array of ``{const char *name, const char *signature,
     void *fnPtr}`` whose three pointers are linker-relocated: R_*_RELATIVE
-    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape (A8 N2) - an
+    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape - an
     absolute relocation against the preemptible weak dynsym symbols the
     macro names (``jmethod_traits<F>::kDescriptor`` for the signature,
     ``MethodWrapper<...>::call`` for the fnPtr), which the linker cannot
