@@ -2,7 +2,7 @@
 
 `blint` allows users to define custom rules to extend its analysis capabilities, particularly for identifying specific behaviors or characteristics within binaries. These rules are defined using YAML files.
 
-To see every built-in check and review — ids, severities, exe types, evidence source, and whether a rule needs `--disassemble` to fire — run `blint capabilities --json`. Rule ids should not collide with existing ones; the catalog's `source_files` field shows where each id is defined today (some ids are deliberately reused across files for the same capability under different exe types).
+To see every built-in check and review, with ids, severities, exe types, evidence source, and whether a rule needs `--disassemble` to fire, run `blint capabilities --json`. Rule ids should not collide with existing ones; the catalog's `source_files` field shows where each id is defined today (some ids are deliberately reused across files for the same capability under different exe types).
 
 ## Rule File Structure
 
@@ -29,7 +29,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 - `summary` (Required): A brief summary of what the rule detects.
 - `description` (Required): A detailed description of the rule, explaining its purpose and the logic behind it.
 - `patterns` (Required for `METHOD_REVIEWS`, `SYMBOL_REVIEWS`, `IMPORT_REVIEWS`, `ENTRIES_REVIEWS`): A list of strings (case-insensitive) to search for within the target symbol/function/entry names. By default, one matching pattern is enough to trigger the rule; use `min_patterns` to require more than one distinct pattern match.
-- `exclude_patterns` (Optional for pattern-based review groups): A list of strings (case-insensitive). Any candidate value containing one of these substrings is skipped before `patterns` are evaluated, so it can neither trigger the rule nor appear as evidence. Useful for suppressing well-known false positives — for example the `ANDROID_CLEARTEXT_TRAFFIC` rule searches for `http://` but excludes XML/SVG/schema namespace URIs (`http://www.w3.org/`, `http://schemas.android.com/`, …) and loopback hosts, which are identifiers rather than network endpoints.
+- `exclude_patterns` (Optional for pattern-based review groups): A list of strings (case-insensitive). Any candidate value containing one of these substrings is skipped before `patterns` are evaluated, so it can neither trigger the rule nor appear as evidence. Useful for suppressing well-known false positives: for example the `ANDROID_CLEARTEXT_TRAFFIC` rule searches for `http://` but excludes XML/SVG/schema namespace URIs (`http://www.w3.org/`, `http://schemas.android.com/`, …) and loopback hosts, which are identifiers rather than network endpoints.
 - `min_patterns` (Optional for pattern-based review groups): Minimum number of distinct patterns from `patterns` that must match before the rule triggers. Each matched pattern must map to a distinct symbol/function/import name (a single name is consumed once per rule). Defaults to `1`.
 - `allow_shared_matches` (Optional for pattern-based review groups): If `true`, matched symbol/function/import names used by this rule are not consumed globally and may also satisfy other rules in the same review pass. Defaults to `false`.
 - `include_informative_strings` (Optional for `METHOD_REVIEWS` and `EXE_REVIEWS`): If `true`, blint also matches this rule's `patterns` against `informative_strings[*].value` when present in metadata. This is useful for cluster rules that rely on stable operational constants (for example `/dev/net/tun`, `IP_HDRINCL`, `BPF_SOCK_OPS_*`) that may not appear as symbols.
@@ -48,7 +48,7 @@ Each rule within the `rules` list is a dictionary containing the following keys:
 Separate from the review groups, blint ships hardening checks (`CHECK_*`) whose
 YAML carries the fields a check function evaluates: `mandatory_values`
 (matched against the structured `dll_characteristics` flags), `allowed_values`
-(manifest comparison), `format_limits` (a per-binary-type override of `limit`), `property_key` (a `security_properties` key — the rule
+(manifest comparison), `format_limits` (a per-binary-type override of `limit`), `property_key` (a `security_properties` key; the rule
 fires only when the key was **computed** and is not `true`; an omitted key
 means the source was absent, which is never a failure), `limit` /
 `baseline_version` (thresholds), and `exe_types`. Custom rules files can extend
@@ -70,14 +70,14 @@ musl and bionic binaries never fire the rule.
   `ARM64EC`, `ARM64X`, `AMD64`, `I386`, …) the rule applies to. **Absent means
   "all machine types"**, so existing rules behave unchanged. The binary's
   machine resolves through blint's own PE-spec table (`blint/lib/pe_constants.py`)
-  from the numeric `machine_type_value` in the metadata — never through a
-  dependency's enum rendering — and a binary whose machine cannot be resolved
+  from the numeric `machine_type_value` in the metadata, never through a
+  dependency's enum rendering, and a binary whose machine cannot be resolved
   never fires a machine-gated rule. Use this for architecture-specific
   hardware features (an ARMv8.3-only control must not fire on x86-64).
 
 Removed in W0.3 (PE-lane A.3): `CHECK_PAC`, `CHECK_PAC_STRICT`, `CHECK_XFG`,
 `CHECK_CET` and `CHECK_ENCLAVE`. Each fired "missing <feature>" findings on
-nearly every PE — including every stock Microsoft-signed binary — because the
+nearly every PE, including every stock Microsoft-signed binary, because the
 underlying properties were opt-in features whose absence was read as a
 failure. The properties live on in `security_properties`, computed from their
 named sources (`GuardFlags` bit decode, the EX_DLLCHARACTERISTICS debug entry,
@@ -184,7 +184,7 @@ rules:
 ### Mobile (MASVS) rules for iOS/macOS
 
 The shipped annotation file `blint/data/annotations/review_ios_masvs.yml` adds a
-set of OWASP MASVS-aligned rules for Mach-O binaries (`exe_type: MachO`). It
+set of [OWASP MASVS](https://mas.owasp.org/)-aligned rules for Mach-O binaries (`exe_type: MachO`). It
 combines a `SYMBOL_REVIEWS` block (matched against symbols, recovered selectors,
 and external classes) and an `EXE_REVIEWS` block that sets
 `include_informative_strings: true` to also match embedded strings and injected
@@ -203,16 +203,16 @@ rule that needs to reason over bundle-level metadata.
 Four further annotation files add privacy-focused detections for Mach-O
 binaries, each rule carrying a `category` and `severity`:
 
-- `review_ios_fingerprint.yml` — passive device fingerprinting that needs no
+- `review_ios_fingerprint.yml`: passive device fingerprinting that needs no
   permission: low-level platform identifiers, hardware/GPU attributes
   (`sysctl`, Metal), display metrics, font enumeration, network-interface
   enumeration, and device attestation (`DeviceCheck`/App Attest).
-- `review_ios_sidechannel.yml` — side channels such as installed-app probing
+- `review_ios_sidechannel.yml`: side channels such as installed-app probing
   (`canOpenURL`), local-network/Bonjour scanning, and Keychain persistence that
   survives reinstalls; plus an `EXE_REVIEWS` block for the bundle-level posture.
-- `review_ios_privacy_access.yml` — permission-gated access not covered by the
+- `review_ios_privacy_access.yml`: permission-gated access not covered by the
   generic Mach-O capability rules (EventKit, App Tracking Transparency).
-- `review_ios_privacy_posture.yml` — an `EXE_REVIEWS` block reasoning over the
+- `review_ios_privacy_posture.yml`: an `EXE_REVIEWS` block reasoning over the
   app's `Info.plist` and `PrivacyInfo.xcprivacy` posture: declared tracking, a
   missing privacy manifest, undeclared "required reason" API usage
   (App Store warning ITMS-91053), large app-query lists, and sensitive consent
@@ -220,7 +220,7 @@ binaries, each rule carrying a `category` and `severity`:
 
 Bundle-level signals that do not appear in the Mach-O are projected into the
 main binary's `informative_strings` as `PRIV_*` tokens (mirroring the `ATS_*`
-mechanism above) — for example `PRIV_NSPrivacyTracking`,
+mechanism above), for example `PRIV_NSPrivacyTracking`,
 `PRIV_PrivacyManifestMissing`, `PRIV_LSApplicationQueriesSchemes`, and
 `PRIV_UNDECLARED_<category>` for required-reason APIs used without a matching
 manifest declaration. The corresponding `EXE_REVIEWS` rules set
@@ -393,7 +393,7 @@ The implant rule group is defined in `blint/data/annotations/review_implants_pe.
 | Rule                                   | The contradiction it reports                                                                   |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `PE_IMPERSONATES_SYSTEM_MODULE`        | Version resource claims a Microsoft module name under a different publisher, unsigned          |
-| `PE_STUB_EXPORT_THUNK_TABLE`           | Exports at a uniform small stride, with no real forwarders — a generated thunk array           |
+| `PE_STUB_EXPORT_THUNK_TABLE`           | Exports at a uniform small stride, with no real forwarders: a generated thunk array            |
 | `PE_UNRESOLVED_SIBLING_MODULE_LOAD`    | A `LoadLibrary` target absent from the import table whose name is a near-miss of a real module |
 | `PE_HOST_PROCESS_NAME_GATE`            | A DLL comparing its host process against a runtime-assembled `.exe` name                       |
 | `PASSIVE_MULTI_TRANSPORT_LISTENER`     | Three or more inbound transports with no outbound destination anywhere                         |

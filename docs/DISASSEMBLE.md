@@ -72,13 +72,13 @@ Block-graph metrics computed from the truncated instruction list after the flat 
 
 Function addresses come from three cooperating sources, tried in order of confidence:
 
-1. **Symbols and load commands** — symbol tables, exports, `LC_FUNCTION_STARTS`, `.pdata` (x64 PE), ObjC method IMPs.
-2. **Unwind tables** — Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values. 32-bit ARM ELF carries `.ARM.exidx` (ARM EHABI) instead of `.eh_frame`: one PREL31-decoded row per function, starts only (no extents), read before any heuristic.
+1. **Symbols and load commands**: symbol tables, exports, `LC_FUNCTION_STARTS`, `.pdata` (x64 PE), ObjC method IMPs.
+2. **Unwind tables**: Mach-O `__TEXT,__unwind_info` and ELF `.eh_frame_hdr`/`.eh_frame` (see `discovered_functions` in the metadata docs). These survive `strip` and carry compiler-grade starts; the ELF path also recovers exact sizes from FDE `pc_range` values. 32-bit ARM ELF carries `.ARM.exidx` (ARM EHABI) instead of `.eh_frame`: one PREL31-decoded row per function, starts only (no extents), read before any heuristic.
 3. **Completion passes**:
-   - **Prologue scan** (only when symbols + unwind produced fewer than 32 functions): scans executable bytes for compiler frame setups — `push rbp; mov rbp, rsp`, `endbr64` + frame setup and Go's stack-guard prologues on x86-64; `paciasp`, the `stp x29, x30, [sp, #-N]!` frame-push and Go's `ldr x16, [x28+16]` guard on ARM64. Candidates are tagged `source: "prologue"` (lowest confidence).
+   - **Prologue scan** (only when symbols + unwind produced fewer than 32 functions): scans executable bytes for compiler frame setups, such as `push rbp; mov rbp, rsp`, `endbr64` + frame setup and Go's stack-guard prologues on x86-64, or `paciasp`, the `stp x29, x30, [sp, #-N]!` frame-push and Go's `ldr x16, [x28+16]` guard on ARM64. Candidates are tagged `source: "prologue"` (lowest confidence).
    - **Call-site promotion** (bounded to a fixpoint): a resolved _direct_-call target that sits in executable memory outside every known function extent (unwind sizes and completed disassemblies) is promoted into a new function and disassembled in turn. Tagged `source: "callsite"`.
 
-On a stripped Go ELF binary — no symbols, no `.eh_frame` — the completion passes recover a working function set (prologue precision measured at 1.00 against the unstripped symbol table on the evaluation corpus).
+On a stripped Go ELF binary (no symbols, no `.eh_frame`), the completion passes recover a working function set (prologue precision measured at 1.00 against the unstripped symbol table on the evaluation corpus).
 
 ### Function extents: the size precedence (ELF)
 
@@ -87,18 +87,18 @@ than one source declares a size, the first entry per address in the buckets
 the disassembler reads is reconciled by this precedence:
 
 1. **The symbol's `st_size`** (from the `symtab_symbols` / `dynamic_symbols`
-   buckets) — wins over both other sources;
+   buckets): wins over both other sources;
 2. **the unwind-table FDE range** (blint's own `.eh_frame` parse, exact
-   `pc_range` values) — wins over LIEF's `functions` size;
+   `pc_range` values): wins over LIEF's `functions` size;
 3. **LIEF's `Binary.functions` size** as listed.
 
-A winning size that is impossible — wrapped at 2^64, or running past the end
-of its containing section — is **dropped, not clamped**: the entry then takes
+A winning size that is impossible (wrapped at 2^64, or running past the end
+of its containing section) is **dropped, not clamped**: the entry then takes
 the next-known-start rule below. LIEF needs this repair: its eh_frame walk
 misreads CIE augmentations that carry a personality routine (`zPLR`) and
 hands out wrapped sizes on stripped C++ libraries (265 of 2,377 functions on
 RnHello's arm64 `libc++_shared.so`, each decoding ~162,000 instructions to
-the end of `.text` — 1.7 GB of metadata per file). The repair is counted in
+the end of `.text`, 1.7 GB of metadata per file). The repair is counted in
 `analysis_coverage.functions.function_sizes_rejected` (sizes dropped) and
 `function_sizes_corrected` (sizes replaced by a higher-precedence source).
 Symbol buckets are never mutated, so `st_size` stays comparable against
@@ -112,7 +112,7 @@ instruction set state cannot decode the file. Per function, the mode comes
 from, in order of confidence:
 
 1. **Mapping symbols** (`$a` ARM code / `$t` Thumb code / `$d` data, with
-   `.N` suffixes) from `.symtab`, scoped to the function's own section — a
+   `.N` suffixes) from `.symtab`, scoped to the function's own section (a
    `.text` label says nothing about `.plt` bytes. These also drive the span
    rules below. Only present on unstripped builds.
 2. **The symbol's Thumb bit**: `st_value & 1` marks a Thumb function and the
@@ -120,19 +120,19 @@ from, in order of confidence:
    `__dt_fini_array` functions keep this convention: an array entry's stored
    word is the function pointer, bit 0 included.
 3. **Call evidence**: a function already decoded in a known mode states its
-   immediate targets' modes — `bl` (and tail `b`) never changes state, so
+   immediate targets' modes: `bl` (and tail `b`) never changes state, so
    the target shares the caller's mode; `blx #imm` exists to switch state,
    so its target takes the opposite. Evidence accrues in worklist order, so
    a caller placed after the target (by address) cannot help it.
 4. **Data-pointer evidence**: a linker-relocated word (`.init_array` /
    `.fini_array` entries and other `R_ARM_RELATIVE` slots) that names a
    known function start states its mode by the same interworking bit 0.
-   Packed relocations LIEF cannot decode contribute nothing — evidence is
+   Packed relocations LIEF cannot decode contribute nothing; evidence is
    missed, never guessed.
 5. **Neither evidence** (stripped, or unwind-table discoveries): both states
    are decoded and scored; the higher score wins. A stream ending (after
-   trailing filler) on a terminator — a return, or a tail branch out of the
-   span — scores +2, the shape a real function ends in; every immediate
+   trailing filler) on a terminator (a return, or a tail branch out of the
+   span) scores +2, the shape a real function ends in; every immediate
    `b`/`bl`/`blx` votes +1 when its target is a known function start and −1
    when it leaves the executable ranges (wrong-mode decodes misread the
    halfwords into a spray of nonsense targets); landing exactly on the span
@@ -142,8 +142,8 @@ Each disassembled function records the outcome as `instruction_mode`
 (`thumb`/`arm`) and the deciding evidence as `instruction_mode_source`
 (`mapping_symbol`, `symbol_parity`, `call`, `data_pointer`, `arbiter`).
 
-Within a function extent, only `$a`/`$t`-labeled code regions are decoded —
-the rule `llvm-objdump` itself applies with mapping-symbol knowledge — so `$d`
+Within a function extent, only `$a`/`$t`-labeled code regions are decoded,
+the rule `llvm-objdump` itself applies with mapping-symbol knowledge, so `$d`
 literal pools, jump tables and un-labeled inter-section filler are never
 disassembled. The skipped ranges are recorded per function as `data_spans`
 (see `docs/METADATA.md`); a `instruction_lengths` prefix sum alone no longer
@@ -157,16 +157,16 @@ instruction probe only produces garbage.
 
 ### nyxstone triples for 32-bit ARM (measured, nyxstone 0.1.8 / LLVM 18)
 
-| triple                              | ARM state                     | Thumb state                     |
-| :---------------------------------- | :---------------------------- | :------------------------------ |
-| `arm-unknown-linux-android`         | partial — `bx lr` FAILS       | n/a (ARM triple)                |
-| `armv7-unknown-linux-android`       | correct (`mov r0, #1; bx lr`) | fails at first instruction      |
-| `thumbv7-unknown-linux-android`     | garbage (`movs r1, r0`, ...)  | correct (`movs r0, #1; bx lr`)  |
-| `armv7/thumbv7-…-linux-androideabi` | each correct in its own state | each correct in its own state   |
+| triple                              | ARM state                     | Thumb state                    |
+| :---------------------------------- | :---------------------------- | :----------------------------- |
+| `arm-unknown-linux-android`         | partial (`bx lr` FAILS)       | n/a (ARM triple)               |
+| `armv7-unknown-linux-android`       | correct (`mov r0, #1; bx lr`) | fails at first instruction     |
+| `thumbv7-unknown-linux-android`     | garbage (`movs r1, r0`, ...)  | correct (`movs r0, #1; bx lr`) |
+| `armv7/thumbv7-…-linux-androideabi` | each correct in its own state | each correct in its own state  |
 
 No single `*-linux-android` triple decodes both states, and blint's
 constructed tuple for this ABI (`arm-unknown-linux-android`) cannot decode
-core ARM instructions at all — so the disassembler builds two instances from
+core ARM instructions at all, so the disassembler builds two instances from
 the tuple's `armv7`/`thumbv7` spellings (environment preserved: `-android`,
 `-androideabi`, `-gnu` all behave the same way) and picks per span. Immediates
 print decimal (`mov r0, #1`), nyxstone's default style, in both states.
@@ -185,7 +185,7 @@ NDK r28c `llvm-objdump` oracle on the A4a fixtures:
   resolved target is masked to the aligned start. Immediates parse in every
   IntegerBase style nyxstone can print (`#50`, `#0x32`, `#32h`).
 - **Returns.** `bx lr` (any condition code), `pop {…, pc}` and the
-  post-indexed `ldr pc, [sp], #4` end a function's linear flow — the
+  post-indexed `ldr pc, [sp], #4` end a function's linear flow; the
   size-less-window truncation consults them, which is what stops a blind
   window from absorbing the next function's leading bytes.
 - **Tail calls.** A trailing unconditional `b #imm` whose target lies
@@ -200,7 +200,7 @@ NDK r28c `llvm-objdump` oracle on the A4a fixtures:
   completed base records the slot address. `blx` through such a register
   reports an `indirect_hint` named from the slot when the slot is a GOT
   entry with a relocation, and an unnamed hint when it is a vtable level
-  (JNIEnv-style double indirection resolves no name — that is the JNI
+  (JNIEnv-style double indirection resolves no name; that is the JNI
   wave's model, not a guess).
 - **PLT thunks.** A direct call or tail call to a `.plt` stub resolves the
   stub's exact address; the imported name is a relocation, so the edge
@@ -209,7 +209,6 @@ NDK r28c `llvm-objdump` oracle on the A4a fixtures:
   address: symbol `st_value`s carry the Thumb bit, resolved call targets do
   not, and the discovery/promotion/window sets all work in the aligned
   space so a Thumb callee is never re-discovered as its own twin.
-
 
 ### `instruction_metrics` Sub-structure
 
@@ -463,7 +462,7 @@ blint's disassembly engine is designed for resilience, especially when analyzing
 
 - _Strength:_ Hybrid Byte Fetching. blint first attempts a manual, segment-based calculation to find a function's bytes, which is highly effective for firmware where symbol addresses may not align with LIEF's standard view. If that fails, it falls back to LIEF's canonical virtual_address_to_offset method, which correctly handles standard ELF files. This hybrid approach maximizes the number of functions found.
 - _Strength:_ Multi-Mode Disassembly. Thanks to nyxstone and LLVM, blint supports a range of architecture and cpu supported by LLVM. For MIPS binaries, blint doesn't just assume one instruction set. It intelligently attempts to disassemble a function as MIPS32, then MIPS16, and finally microMIPS. This is crucial for correctly analyzing firmware binaries that mix standard and compressed instruction sets.
-- _Strength:_ Mach-O and PE coverage. nyxstone only initializes LLVM's ELF object backend, so blint remaps Mach-O (`*-apple-*`) and PE (`*-windows-msvc`) target triples onto an equivalent ELF triple for the disassembler instance only — instruction decoding is identical across object formats — while keeping the real `llvm_target_tuple` in the metadata. This is what enables disassembly of macOS/iOS and Windows binaries.
+- _Strength:_ Mach-O and PE coverage. nyxstone only initializes LLVM's ELF object backend, so blint remaps Mach-O (`*-apple-*`) and PE (`*-windows-msvc`) target triples onto an equivalent ELF triple for the disassembler instance only (instruction decoding is identical across object formats) while keeping the real `llvm_target_tuple` in the metadata. This is what enables disassembly of macOS/iOS and Windows binaries.
 - _Strength:_ Imported-call resolution. For Mach-O, blint resolves calls made through `__stubs` (via the indirect symbol table) and the GOT (via the dyld binding table) to their demangled imported symbol names. These are recorded at call sites and surfaced in the callgraph as external `import` edges instead of being misattributed to internal functions.
 - _Strength:_ Offset Probing. blint also probes small offsets (0-3 bytes) from the reported function address. This handles common cases where a symbol points to a data word or is slightly misaligned from the first true instruction.
 - _Limitation:_ Heuristic Register Analysis. The `regs_read` and `regs_written` attributes are generated by a _pattern-matching_ heuristic, not a full data-flow analysis. They provide a good overview but may be inaccurate for complex instructions or unusual addressing modes. They are best used for initial triage, not for precise exploit development.

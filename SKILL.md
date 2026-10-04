@@ -32,15 +32,16 @@ This file defines practical skills an AI agent should apply when working on `bli
 
 - `--disassemble` is optional; do not force it into default flows.
 - Avoid architecture-specific regressions:
-  - x86/x64
+  - x86/x64 (and 32-bit i386)
   - AArch64/ARM64
+  - 32-bit ARM (armeabi-v7a, both ARM and Thumb instruction states)
   - MIPS/microMIPS/MIPS16 fallback paths
 - Keep heuristics lightweight and deterministic.
 - Ensure new indicators are configurable/constants-based when possible.
 
 ## Skill: Maintain SBOM correctness
 
-- Preserve CycloneDX output validity (spec 1.6 model in this repo).
+- Preserve CycloneDX output validity (spec 1.7 model in this repo; `1.6` remains selectable with `--sbom-spec-version`).
 - Ensure each component has a stable `bom_ref`.
 - Avoid dependency self-loops.
 - Keep deep-mode details in properties, not default minimal output.

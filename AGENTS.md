@@ -97,12 +97,12 @@ Primary workflows:
 `blint/lib/binary_wasm.py::parse_wasm_metadata` (re-exported from `blint/lib/binary.py`) normalizes the `wasm_tools` library's report into blint metadata. When bumping the `wasm-tools` floor in `pyproject.toml` (and `poetry.lock`):
 
 1. Diff the library's release notes/changelog between the old and new pinned versions to find new `analysis` keys (capabilities, detections, findings) and new `types[]`/`sections[]`/`strings[]` fields.
-2. Map new attributes additively into `parse_wasm_metadata` — never rename or drop existing keys. Prefer small summary fields (e.g. `wasm_isa_capabilities`, `wasm_types_summary`, `wasm_debug_info_present`) over re-exporting the full raw structure; the full payload always stays available in the companion `*-wasm-report.json`.
-3. When summarizing counts by a category the library may extend later (e.g. type `kind`), don't hardcode the known kinds only — merge in any additional kind so per-key counts always sum to the reported `total`.
-4. Add fixtures under `tests/data/*.wasm` exercising the new decode paths (small hand-built modules are fine — see `tests/test_binary.py::_debug_wasm_module` for a minimal DWARF-bearing module built inline without a binary blob) and cover them in `tests/test_binary.py`.
+2. Map new attributes additively into `parse_wasm_metadata`; never rename or drop existing keys. Prefer small summary fields (e.g. `wasm_isa_capabilities`, `wasm_types_summary`, `wasm_debug_info_present`) over re-exporting the full raw structure; the full payload always stays available in the companion `*-wasm-report.json`.
+3. When summarizing counts by a category the library may extend later (e.g. type `kind`), don't hardcode the known kinds only; merge in any additional kind so per-key counts always sum to the reported `total`.
+4. Add fixtures under `tests/data/*.wasm` exercising the new decode paths (small hand-built modules are fine; see `tests/test_binary.py::_debug_wasm_module` for a minimal DWARF-bearing module built inline without a binary blob) and cover them in `tests/test_binary.py`.
 5. Update `docs/METADATA.md`'s WASM attribute table and the "wasm-tools X.Y attributes" prose section.
-6. Run the full test suite and, since `blint/lib/binary.py` changed, sanity-check against the [callgraph regression validation policy](#callgraph-regression-validation-policy) below — wasm-only field mapping changes are exempt from re-running native-architecture KPI baselines, but say so explicitly rather than skipping silently.
-7. Bump blint's own version (see below) — this is a feature addition, not a patch.
+6. Run the full test suite and, since `blint/lib/binary.py` changed, sanity-check against the [callgraph regression validation policy](#callgraph-regression-validation-policy) below; wasm-only field mapping changes are exempt from re-running native-architecture KPI baselines, but say so explicitly rather than skipping silently.
+7. Bump blint's own version (see below); this is a feature addition, not a patch.
 
 ### Extend blintdb-backed matching
 
@@ -149,7 +149,7 @@ both `--baseline` and `--labels`. Do not update one architecture baseline in iso
 without checking the others for silent drift.
 
 **Every KPI counter coming back `0` means the run never disassembled, not that the
-callgraph collapsed.** Two causes, both silent — the script reports the zeros as a
+callgraph collapsed.** Two causes, both silent, and the script reports the zeros as a
 full-scale regression against the baseline rather than as an error:
 
 - nyxstone imports successfully but disassembles nothing unless LLVM 18 is on `PATH`
@@ -163,7 +163,7 @@ full-scale regression against the baseline rather than as an error:
 
 Check `functions_total` is non-zero before believing any comparison. `compare_kpi`
 only flags counters that _drop_, so a baseline recorded from a weaker run keeps
-passing while silently losing its ability to catch a regression — which is why
+passing while silently losing its ability to catch a regression, which is why
 baselines need refreshing when output legitimately grows, not only when they fail.
 
 For fast iterative experiments (especially callgraph tuning), prefer quiet non-review runs:
@@ -175,20 +175,20 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 ## Bumping blint's version
 
 **Do not bump the version as part of an ordinary change.** The version is bumped
-deliberately, once, when a release is cut — not once per feature, packet or
+deliberately, once, when a release is cut, not once per feature, packet or
 pull request. A branch that bumps it conflicts with every other branch in
 flight, and a version that moves on every merge stops meaning anything to the
 people reading it. If you think a change warrants a release, say so in the PR
 and leave the version alone.
 
 When a release _is_ being cut, the version string is duplicated across several
-files with no single source of truth — update all of them together, in the same
+files with no single source of truth, so update all of them together, in the same
 commit:
 
 - `pyproject.toml` (`version = "..."`)
 - `Info.plist` (`CFBundleVersion`)
-- `file_version_info.txt` (`filevers`, `prodvers`, `FileVersion`, `ProductVersion` — note the four-part `x,y,z,0` tuple form alongside the dotted `x.y.z.0` strings)
-- `Dockerfile` (`org.opencontainers.image.version` — uses a trailing `.x` wildcard, e.g. `"3.4.x"`, not the exact patch version)
+- `file_version_info.txt` (`filevers`, `prodvers`, `FileVersion`, `ProductVersion`; note the four-part `x,y,z,0` tuple form alongside the dotted `x.y.z.0` strings)
+- `Dockerfile` (`org.opencontainers.image.version`, which uses a trailing `.x` wildcard, e.g. `"3.4.x"`, not the exact patch version)
 
 Use `grep -rn "<old-version>"` across the repo (excluding `.git`, `.venv`, `node_modules`) before committing to make sure nothing was missed.
 
