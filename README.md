@@ -12,27 +12,30 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 
 **Supported Binary Formats:**
 
-- ELF (for GNU and musl libc)
-- PE (Windows executables and DLLs)
+- ELF (for GNU, musl and Android's bionic libc)
+- PE (Windows executables, DLLs and drivers), including .NET assemblies (ECMA-335 metadata, ReadyToRun, NativeAOT and single-file publishes)
+- Windows packages and documents: MSIX/Appx packages and bundles, MSI/MSP databases, CAB archives, NuGet packages (`.nupkg`), ClickOnce manifests, installer self-extractors (NSIS, Inno Setup, InstallShield and 7-Zip SFX detection), Authenticode catalogs (`.cat`), and Office documents (OOXML, legacy `.doc`/`.xls`/`.ppt`, `.msg` and RTF)
 - Mach-O (macOS and iOS, x64 and arm64), including Objective-C and Swift metadata
 - iOS/macOS apps (`.ipa`, and on macOS also `.app`, `.framework`, and `.dSYM` bundles): the main executable, embedded frameworks, dylibs, and app extensions are all analyzed, and embedded provisioning profiles are decoded for the entitlements they grant
 - WASM (WebAssembly modules)
-- Android (APK, APKM, AAB, including DEX files in deep mode)
-- Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips (native), and Dalvik (DEX).
+- Android (APK, APKM, AAB, APKS and XAPK split bundles, including DEX files in deep mode), and the native libraries inside them for every ABI (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`, `riscv64`), or a standalone `.so`
+- Disassembler: AArch64, x86/x86-64, ARM (including Thumb), RISC-V, Mips, MicroMips (native), and Dalvik (DEX).
 
 ## Key Features & Use Cases
 
-- **Comprehensive Security Audits:** Automatically checks for common security mitigations like PIE, ASLR, NX, Stack Canaries, and RELRO. Ideal for ensuring your CI/CD pipeline produces hardened binaries.
-- **Software Bill-of-Materials (SBOM) Generation:** Creates CycloneDX SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
+- **Comprehensive Security Audits:** Automatically checks for common security mitigations like PIE, ASLR, NX, Stack Canaries, and RELRO. On Windows the PE hardening properties (DEP, high-entropy ASLR, SafeSEH, `/GS`, CFG, CET, force-integrity) are read from the PE's own structures, and on Android the bionic loader rules (text relocations, writable-and-executable segments, missing SONAME, absolute `DT_NEEDED`, 16 KB page compatibility, `extractNativeLibs`) are judged against the app's target SDK. Ideal for ensuring your CI/CD pipeline produces hardened binaries.
+- **Software Bill-of-Materials (SBOM) Generation:** Creates CycloneDX 1.7 SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management. .NET `AssemblyRef`s and `.nupkg` inputs become `pkg:nuget` components, MSIX and MSI packages carry their own identity, and an Android app's native libraries are identified as the frameworks they are (libc++, Flutter, React Native and Hermes, BoringSSL and OpenSSL, Qt and more) from version and symbol evidence, never from a file name alone.
 - **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
   - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
   - For the custom CycloneDX properties blint adds to the BOM, see the [Custom Properties Documentation](./docs/CUSTOM_PROPERTIES.md).
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
 - **Android Deep Analysis:** In deep mode blint parses the dex classes, detects bundled service and tracker SDKs, and runs a Dalvik behavioural review that decodes the bytecode and flags risky behaviours such as dynamic code loading, reflection, native command execution, weak cryptography, and cleartext networking. The findings are attached to the BOM as custom properties. When disassembly is enabled, blint also writes a Dalvik callgraph sidecar next to the BOM. Native code (`lib/<abi>/*.so` of an APK/AAB or a standalone `.so`) gets its own analysis path: per-ABI bionic ELF facts and loader/hardening checks, framework identification in the SBOM, and a dex↔native JNI join that binds declared natives to their implementations (see the [Android native guide](./docs/ANDROID.md)).
+- **Windows Analysis:** Authenticode is decoded into a structured `code_signature` block (signer chain, RFC 3161 and legacy countersignature timestamps, nested signatures, page hashes and a signing class), and `--catalog-dir` resolves the catalog-signed files that make up most of `System32`. blint names a chain; it never validates trust, and says so in the report. Managed assemblies get their CLI metadata (identity, references, P/Invoke surface, strong names, publish shape) and a managed capability review. Drivers get a kind, an HVCI and kernel-hardening posture, decoded IOCTL control codes with device ACLs, and a check against a known-vulnerable driver snapshot. User-mode images get direct-syscall, ETW/AMSI tampering and injection-primitive detection, and DLLs that a privileged host loads automatically (LSA packages, password filters, credential providers, print monitors and more) are named as such. Containers and documents are opened under fixed bounds: MSIX capabilities, MSI custom actions, Office macros, XLM and VBA stomping indicators, and external OOXML relationships. A `windows_posture` block summarises each image before the findings.
 - **iOS/macOS App Analysis:** Point blint at an `.ipa` and it unpacks the app bundle, reads the `Info.plist` context (bundle id, version, minimum OS, FairPlay encryption status), and analyzes the main executable along with every embedded framework, dylib, and app extension. For Mach-O binaries, blint recovers Objective-C metadata (classes, superclasses, methods, protocols, and referenced selectors) and demangles Swift symbols, then surfaces iOS privacy capabilities such as location, camera, microphone, contacts, photos, telephony, motion, biometrics, and device fingerprinting. It also reports privacy and fingerprinting behaviours: passive device fingerprinting, installed-app probing, local-network scanning, cross-app tracking, and the app's `PrivacyInfo.xcprivacy` posture including undeclared "required reason" API usage.
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
   - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
+- **Version Comparison:** `blint diff` compares two versions of a binary (or two `*-metadata.json` exports): symbol, dependency and layout deltas, hardening regressions, new capabilities, and, with `--disassemble`, the functions that were added, removed or changed.
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
 - **Fuzzing Target Identification:** Suggests interesting functions to target for fuzzing based on common patterns in function names (e.g., `parse`, `decode`, `copy`).
 - **Extensible with Custom Rules:** Define your own capabilities and checks using simple [YAML rule files](./docs/RULES.md).
@@ -86,6 +89,19 @@ Swift call sites are resolved to imported APIs):
 blint -i /path/to/app.ipa -o /tmp/blint --disassemble
 ```
 
+Analyze Windows artifacts. Point blint at a PE, a managed assembly, an MSIX or MSI package, or an Office document. For files signed through a catalog rather than an embedded signature, pass a copy of the `CatRoot` tree:
+
+```shell
+blint -i /path/to/app.msix -o /tmp/blint
+blint -i /path/to/System32 -o /tmp/blint --catalog-dir /path/to/CatRoot
+```
+
+Compare two releases of the same binary:
+
+```shell
+blint diff old/libfoo.so new/libfoo.so
+```
+
 Generate a CycloneDX SBOM for an Android application:
 
 ```shell
@@ -96,7 +112,7 @@ blint sbom -i /path/to/app.apk -o sbom.cdx.json
 docker run --rm -it -v /path/to:/app -w /app ghcr.io/owasp-dep-scan/blint:latest sbom -i /app/app.apk -o sbom.cdx.json
 ```
 
-For Android deep analysis, enable deep mode so the dex classes are parsed. This is what makes service and tracker detection and the Dalvik behavioural review possible. Deep mode also enables disassembly, which writes the Dalvik callgraph sidecar next to the BOM. Both `.apk` single files and `.apkm` split bundles are supported.
+For Android deep analysis, enable deep mode so the dex classes are parsed. This is what makes service and tracker detection and the Dalvik behavioural review possible. Deep mode also enables disassembly, which writes the Dalvik callgraph sidecar next to the BOM. Both `.apk` single files and `.apkm` split bundles are supported. For what blint does with an app's native libraries, including the dex↔native JNI join, see the [Android native guide](./docs/ANDROID.md).
 
 ```shell
 blint sbom -i /path/to/app.apkm -o sbom.cdx.json --deep

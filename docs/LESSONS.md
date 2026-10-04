@@ -1,10 +1,14 @@
 # Lessons from building blint v4
 
 blint v4 added the analysis engine, the Apple depth work, the blintdb hash
-layers, `blint diff`, and the Python API. Most of what follows was learned
-from a failure that CI or a verification gate caught, sometimes weeks after
-the code first looked correct. Each lesson names the code it now lives in,
-so this file doubles as a map of the sharp edges.
+layers, `blint diff`, and the Python API, then Windows depth (Authenticode
+and catalogs, .NET metadata, Windows containers and Office documents,
+drivers), a false-positive sweep over ELF and Mach-O, and Android native
+code (per-ABI facts and rules, framework identification, the dex↔native
+JNI join). Most of what follows was learned from a failure that CI, a
+verification gate or a review caught, sometimes weeks after the code first
+looked correct. Each lesson names the code it now lives in, so this file
+doubles as a map of the sharp edges.
 
 ## Validate the input before handing it to a parser
 
@@ -79,6 +83,17 @@ that can never fire passes every test that only checks it does not crash.
 Negative-path tests, an explicit PE `has_canary` verdict, and fixture names
 that state their format are the antidote.
 
+Saying what was not done applies to trust as much as to coverage. The PE
+`code_signature` block names a signer chain and states
+`trust_validation: "not_performed"`, so no consumer reads "signed" as
+"trusted"; without `--catalog-dir`, a file with no embedded signature
+carries `catalog_lookup: "not_performed"` instead of reading as unsigned,
+which is what most of `C:\Windows\System32` would otherwise be. And a
+placeholder is not a finding: a call-site rule that could not run on an ABI
+once emitted `not_evaluated` evidence, and because any non-empty evidence
+becomes a review row, the placeholder shipped as a detection. It now goes
+to `analysis_coverage` as a named degradation (`callsite_abi_not_modelled`).
+
 ## Do not encode what you cannot verify
 
 An early Objective-C metadata reader emitted relative-method encodings for
@@ -131,6 +146,137 @@ drives the layer design: exact project evidence first, fuzzy similarity
 hashes only as a recorded degradation, and false positives treated as more
 expensive than missed low-confidence hints, because a wrong component in an
 SBOM is reviewed by a human who cannot tell it from a right one.
+
+## Never match on a rendered enum
+
+LIEF 1.0 changed how it renders `DLL_CHARACTERISTICS`: flags that used to
+print as names printed as integers. Every check that searched the rendered
+text for `DYNAMIC_BASE` quietly stopped matching, so `aslr` read false on
+every PE and `CHECK_DLL_CHARACTERISTICS` fired at high severity on
+hardened, Microsoft-signed binaries. Nothing crashed and every test that
+only checked for a result kept passing. Rules and facts now read the
+numeric value and name the flags themselves (`blint/lib/pe_kernel_posture.py`
+restates the values it needs as named constants), and a rule that only
+means something on some machines says so: the `machine_types` gate in
+`blint/lib/analysis.py` reads the numeric machine type, which is what keeps
+ARM pointer-authentication checks off x86-64 binaries.
+
+The same release showed the cost of judging bytes before knowing what they
+are. The Authenticode signature sits after the last section, so it was
+counted as an overlay and fed the packing heuristic. `blint/lib/pe_overlay.py`
+now subtracts the security directory before it classifies the residue.
+
+## Untrusted containers need bounds you can cross
+
+Every archive blint opens (MSIX and Appx, MSI and CFBF, CAB, 7z
+self-extractors, NuGet packages, OOXML) is untrusted input, and each reader
+in `blint/lib/container.py` and its siblings carries caps on member count,
+total size and nesting. A cap counts only if a fixture crosses it: a bound
+that no test reaches is a guess, not a bound. Cleanup is asserted the same
+way. The NuGet tests snapshot the live temp directory before and after a
+parse and require an empty delta across success and every refusal, which
+is stronger than checking that the code calls `rmtree`.
+
+Unknown is reported as unknown. A NativeAOT image has no CLI header, yet it
+must never read as "not .NET"; a file with no evidence of any publish shape
+gets no shape block, which is silence rather than a native verdict
+(`blint/lib/pe_dotnet_shape.py`). A driver kind the evidence does not
+establish is `"unknown"`, never `"wdm"` by default
+(`blint/data/pe_driver_kinds.yml`). A negative that was never measured is a
+false positive waiting for a consumer.
+
+## Calibrate at real scale, on real shapes
+
+The false-positive sweep's defects shared one cause: a rule tuned on small
+inputs that was wrong at production scale or on a shape the samples did
+not have. Suppressing symbol names that several blintdb projects share
+looked like pure noise reduction on a small database; at production size
+it removed zlib's own identity from libz. Shared names now only stop
+counting toward a match that has no binary-name agreement. Version banners
+were demoted to mentions in any dynamic artifact that defined no API
+symbols, which demoted exactly the stripped, hidden-visibility vendored
+copies Android apps ship.
+
+The Android work added two cheap checks that catch this class. Rebuild the
+positive fixture at `-O0`, `-Os`, `-Oz`, with LTO and with an older NDK
+before trusting a filter: a filter that treated conditional returns as
+terminators dropped real `svc` sites on three of four builds. And measure
+on the inputs the code will meet, not on the KPI fixtures: LIEF reports
+wrapped 64-bit function sizes on stripped C++ libraries, the disassembler
+trusted them and decoded to the end of `.text` (a 1.3 MB `libc++_shared.so`
+produced 1.77 GB of metadata), and the KPI binaries never showed it because
+each had one function. blint's own unwind-based discovery had the right
+sizes all along.
+
+## Linking a framework is not being it
+
+A library that statically links BoringSSL is not BoringSSL, and a file name
+is a hint, not an identity. The first Android framework identifier replaced
+the identity of AOSP's NNAPI sample driver with BoringSSL because the
+driver re-exports `BORINGSSL_self_test`. The structural test is the
+`DT_SONAME`: a framework replaces a library's identity only when the
+library's own SONAME is one of the project's library names
+(`blint/lib/framework_ident.py`, `blint/lib/android_blintdb.py`); otherwise
+the match nests as a statically linked child. Versions come from the
+artifact, never from the database row, which records the packaging port's
+version rather than the bundled one (OsmAnd ships PROJ 8.2.0 while the
+port row says 9.8.1), and a linked library's version is never the
+artifact's own.
+
+## One answer per ABI
+
+An Android app ships the same library once per ABI, and each copy is a
+different binary. Every fact, rule and JNI row is computed from that ABI's
+own copy; a missing copy answers nothing for its ABI rather than borrowing
+another ABI's bytes, and a list never collapses to the first or best ABI.
+The ABIs also disagree about addresses: arm32 dynamic symbols carry the
+Thumb bit in bit 0, while x86 code legitimately starts at odd addresses, so
+an oracle that masks bit 0 on every ABI fails hundreds of correct x86 rows.
+A rule that cannot apply to an ABI does not run on it: 32-bit ABIs are
+exempt from the 16 KB page rule and never flagged.
+
+Severity follows the context too. The Play 16 KB requirement binds apps
+that target API 35 or later, so the rule is high for such an app, silent
+for an older target, and medium for a standalone system library that no
+known app ships. `CHECK_ABI_FLOOR` is `info` against the built-in glibc
+baseline and `medium` only against one the user set, and the arm64 BTI/PAC
+posture check is `low` because almost every NDK build lacks it.
+
+## Evidence must name what the runtime acts on
+
+A `RegisterNatives` table carries a method name, a signature and a
+function pointer, but no class. Matching it to dex declarations by name and
+signature is a binding only when exactly one class declares that pair;
+fennec declares `disposeNative` with the same signature eleven times, so
+those rows stay `ambiguous_dynamic` until the registering function's
+`FindClass` names the class. A validation that counts a name-and-signature
+match as correct cannot find this error, because it checks the rule against
+itself.
+
+JNA direct mapping repeated the lesson. `Native.register` binds the natives
+of the class the call names, not of the class that makes the call, so a
+class whose static initializer merely calls another class's registrar is
+not registered. The library name counts only when one constant holds on
+every path to the call: arguments are read through the flow-sensitive
+`blint/lib/dalvik_dataflow.analyze`, because a linear "last write before
+the call" walk keeps a constant after its register was overwritten. And a
+capped listing is for output only: the JNI callgraph edges once read the
+256-row metadata listing, so every row past the cap had no edge. Code that
+consumes the join reads the full join or its counts.
+
+## A green suite proves only what it can fail on
+
+The Windows work ended with more than thirty defects that a fully green
+suite had not found, and almost all had one shape: a claim the report
+made and the docstring stated, which no test in the repository could
+reach. The false-positive sweep found the same shape in smaller forms: an
+assertion ending in `or True`, a test that cleared the strings it was meant
+to check and so hid a duplicate banner, a docstring that contradicted its
+own test. Two habits counter it. A new rule ships with the fixture that
+fails without it, run against the old code before the fix lands. And a
+reviewer measures independently, with a different tool where one exists
+(`llvm-nm`, `llvm-readelf`, `dexdump`, `codesign`), rather than re-running
+the author's gate.
 
 ## Structure survives, scratch does not
 
