@@ -13,6 +13,7 @@ from typing import Any, Literal
 from xml.etree import ElementTree as ET
 
 import yaml
+from rich.markup import escape as rich_escape
 from rich.terminal_theme import MONOKAI
 
 from blint.config import FIRST_STAGE_WORDS, PII_WORDS, BlintOptions, get_int_from_env
@@ -679,15 +680,19 @@ def print_reviews_table(reviews: list[dict[str, Any]], files: list[str]) -> None
     table.add_column("Capabilities")
     table.add_column("Evidence (Top 5)", overflow="fold")
     for r in reviews:
+        # Cells render as rich markup and carry attacker-controlled content
+        # (exe_name is an archive member name; evidence labels are symbol/
+        # resource names lifted from the binary), so each is escaped at this
+        # boundary or an unescaped "[/bold]" aborts the whole report (CWE-74).
         evidences = [_evidence_label(e) for e in r.get("evidence") or []]
         evidences = list(islice((e for e in evidences if e), EVIDENCE_LIMIT))
-        row = [r.get("id")]
+        row = [rich_escape(str(r.get("id") or ""))]
         if len(files) > 1:
-            row.append(os.path.basename(r.get("exe_name") or ""))
+            row.append(rich_escape(os.path.basename(r.get("exe_name") or "")))
         if has_category:
-            row.append(r.get("category") or "")
-        row.append(r.get("summary"))
-        row.append("\n".join(evidences))
+            row.append(rich_escape(str(r.get("category") or "")))
+        row.append(rich_escape(str(r.get("summary") or "")))
+        row.append(rich_escape("\n".join(evidences)))
         table.add_row(*row)
     console.print(table)
 
@@ -1004,12 +1009,21 @@ def _inject_mermaid_into_html(html_file: Path, rendered_callgraphs: list[dict]) 
             f'<section><h3>{title}</h3><p><code>{file_name}</code></p><pre class="mermaid">{mermaid_block}</pre></section>'
         )
 
+    # securityLevel:'strict' (mermaid's default) runs every node label through
+    # DOMPurify and keeps htmlLabels off, so a binary symbol name that reaches
+    # a flowchart label cannot inject live HTML into the report DOM (CWE-79);
+    # 'loose' is what let a crafted symbol render an <img> here before. The CDN
+    # URL is pinned to an exact version rather than the floating major so the
+    # bytes the report loads do not change under it. Full tamper-proofing would
+    # need mermaid self-hosted in the report (Subresource Integrity cannot be
+    # attached to a bare `import` specifier and would not cover mermaid's
+    # lazily imported diagram chunks), which is a larger change than this wave.
     mermaid_section = (
         '<section id="blint-mermaid-callgraphs">'
         "<h2>Mermaid Callgraphs</h2>" + "".join(diagrams) + "</section>"
         '<script type="module">'
-        "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';"
-        "mermaid.initialize({startOnLoad:true,securityLevel:'loose'});"
+        "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';"
+        "mermaid.initialize({startOnLoad:true,securityLevel:'strict',htmlLabels:false});"
         "</script>"
     )
     if "</body>" in html_text:
@@ -1078,7 +1092,7 @@ def report(
                 f"{cache_stats.get('misses', 0)} miss(es), {cache_stats.get('stored', 0)} stored"
             )
     if not findings and not reviews and not should_emit_any_callgraph:
-        LOG.info(f":white_heavy_check_mark: No issues found in {blint_options.src_dir_image}!")
+        LOG.info(f"✅ No issues found in {blint_options.src_dir_image}!")
         return
     if not findings and not reviews:
         LOG.info(

@@ -29,6 +29,7 @@ import lief
 
 from blint.lib.entropy import shannon_entropy
 from blint.lib.pe_constants import VS_FILE_FLAGS, VS_FILE_OS, decode_flag_bits, resource_type_name
+from blint.lib.safe_xml import DefusedXmlException, safe_fromstring
 from blint.logger import LOG
 
 # Ground rule 30 limits. A hostile resource section can declare thousands of
@@ -74,8 +75,8 @@ def manifest_facts(manifest_xml: str | bytes | None) -> dict:
     if isinstance(manifest_xml, str):
         manifest_xml = manifest_xml.encode("utf-8", errors="replace")
     try:
-        root = ET.fromstring(manifest_xml)
-    except ET.ParseError as exc:
+        root = safe_fromstring(manifest_xml)
+    except (ET.ParseError, DefusedXmlException) as exc:
         LOG.debug(f"Unable to parse PE manifest: {exc}")
         facts["parse_status"] = "failed"
         return facts

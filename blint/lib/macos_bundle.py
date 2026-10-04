@@ -167,6 +167,14 @@ _NON_CODE_DIRS = frozenset({"Resources", "Headers", "Modules", "_CodeSignature",
 # so (``binary_walk_truncated``) instead of silently omitting the rest.
 _MAX_BINARIES = 2000
 
+# Bounds the nested-bundle recursion. A bundle can embed bundles (an app's
+# PlugIns hold .appex, a framework holds frameworks), but a symlink cycle such
+# as ``A.framework/Frameworks/B.framework -> ..`` would otherwise make the
+# walk recurse forever, or branch 2^depth until the OS path-length limit — a
+# denial of service from one crafted bundle. Every embedded bundle is entered
+# at most once (deduped by real path) and never past this depth.
+_MAX_BUNDLE_DEPTH = 32
+
 
 # Mach-O magic numbers (32/64-bit, both endiannesses) and fat-binary magic.
 # ``is_exe`` only checks that a file has binary content — .nib archives pass
@@ -330,6 +338,15 @@ def _add_binary(binaries: list[dict], path: str, role: str, bundle_dir: str) -> 
     if not (os.path.isfile(path) and is_exe(path)):
         return False
     real = os.path.realpath(path)
+    # Containment: the resolved binary must live inside the bundle. The
+    # executable name comes from an attacker-controlled Info.plist
+    # (CFBundleExecutable), so "../../../../etc/passwd" or an absolute path
+    # would otherwise make blint parse, hash and report a host file outside
+    # the scanned bundle (CWE-22); a symlink inside the bundle pointing out is
+    # caught the same way, since the check is on the real path.
+    bundle_root = os.path.realpath(bundle_dir)
+    if real != bundle_root and not real.startswith(bundle_root + os.sep):
+        return False
     if any(existing["real_path"] == real for existing in binaries):
         return False
     binaries.append(
@@ -344,7 +361,14 @@ def _add_binary(binaries: list[dict], path: str, role: str, bundle_dir: str) -> 
 
 
 def _walk_bundle(
-    bundle_dir: str, kind: str, bundle_info: dict, binaries: list[dict], root: bool = False
+    bundle_dir: str,
+    kind: str,
+    bundle_info: dict,
+    binaries: list[dict],
+    root: bool = False,
+    *,
+    visited: set[str] | None = None,
+    depth: int = 0,
 ) -> None:
     """Append the binaries of one bundle (and its embedded bundles).
 
@@ -361,6 +385,12 @@ def _walk_bundle(
     DriverKit extension reports the extension's host, not the app's
     (absent) one.
     """
+    # One shared realpath set for the whole recursive walk: a bundle entered
+    # once is never re-entered, which breaks symlink cycles (see
+    # _MAX_BUNDLE_DEPTH). Seeded with this bundle so a sub-bundle symlinking
+    # back to the root is caught.
+    if visited is None:
+        visited = {os.path.realpath(bundle_dir)}
     start = len(binaries)
     if kind == "dsym":
         dwarf_dir = os.path.join(bundle_dir, "Contents", "Resources", "DWARF")
@@ -416,7 +446,7 @@ def _walk_bundle(
                 full = os.path.join(walk_root, d)
                 if is_macos_bundle(full):
                     walk_dirs.remove(d)
-                    _walk_embedded_bundle(full, binaries, bundle_dir)
+                    _walk_embedded_bundle(full, binaries, bundle_dir, visited=visited, depth=depth)
             for entry in sorted(walk_files):
                 full = os.path.join(walk_root, entry)
                 if entry.endswith(".dylib") and os.path.isfile(full):
@@ -446,13 +476,21 @@ def _walk_bundle(
     # main executable, sub-bundle members) is skipped by real-path dedup.
     # Walked after the sub-bundles so a nested bundle's executable keeps
     # its bundle role and identity rather than being claimed as a tool.
-    _sweep_tool_binaries(bundle_dir, kind, binaries, bundle_dir)
+    _sweep_tool_binaries(bundle_dir, kind, binaries, bundle_dir, visited=visited, depth=depth)
     if host_plugin := bundle_info.get("host_plugin"):
         for entry in binaries[start:]:
             entry.setdefault("host_plugin", host_plugin)
 
 
-def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_dir: str) -> None:
+def _sweep_tool_binaries(
+    start_dir: str,
+    kind: str,
+    binaries: list[dict],
+    top_dir: str,
+    *,
+    visited: set[str] | None = None,
+    depth: int = 0,
+) -> None:
     """Collect remaining Mach-O executables under a bundle's code directories.
 
     Recursive for ``Contents/MacOS`` (tools live in subdirectories there) and
@@ -484,7 +522,7 @@ def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_di
                     full = os.path.join(root, d)
                     if is_macos_bundle(full):
                         dirs.remove(d)
-                        _walk_embedded_bundle(full, binaries, top_dir)
+                        _walk_embedded_bundle(full, binaries, top_dir, visited=visited, depth=depth)
                     elif d in _NON_CODE_DIRS:
                         # A framework's Versions tree carries its resource
                         # bundle, headers and module maps beside its code;
@@ -493,7 +531,9 @@ def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_di
                         # by name rather than collected as tools. App bundles
                         # do hide in Resources (Sparkle ships Autoupdate.app
                         # there), so bundles inside are still walked.
-                        _walk_bundles_under(os.path.join(root, d), binaries, top_dir)
+                        _walk_bundles_under(
+                            os.path.join(root, d), binaries, top_dir, visited=visited, depth=depth
+                        )
                         dirs.remove(d)
                 for entry in sorted(files):
                     _add_binary(binaries, os.path.join(root, entry), "tool", top_dir)
@@ -503,7 +543,14 @@ def _sweep_tool_binaries(start_dir: str, kind: str, binaries: list[dict], top_di
         _walk(sweep_root, recurse)
 
 
-def _walk_bundles_under(directory: str, binaries: list[dict], top_dir: str) -> None:
+def _walk_bundles_under(
+    directory: str,
+    binaries: list[dict],
+    top_dir: str,
+    *,
+    visited: set[str] | None = None,
+    depth: int = 0,
+) -> None:
     """Walk any bundle directories directly or nested under ``directory``."""
     if not os.path.isdir(directory):
         return
@@ -513,15 +560,34 @@ def _walk_bundles_under(directory: str, binaries: list[dict], top_dir: str) -> N
             full = os.path.join(root, d)
             if is_macos_bundle(full):
                 dirs.remove(d)
-                _walk_embedded_bundle(full, binaries, top_dir)
+                _walk_embedded_bundle(full, binaries, top_dir, visited=visited, depth=depth)
 
 
-def _walk_embedded_bundle(bundle_dir: str, binaries: list[dict], top_dir: str) -> None:
-    """Walk one embedded bundle, attributing its binaries to the top bundle."""
+def _walk_embedded_bundle(
+    bundle_dir: str,
+    binaries: list[dict],
+    top_dir: str,
+    *,
+    visited: set[str] | None = None,
+    depth: int = 0,
+) -> None:
+    """Walk one embedded bundle, attributing its binaries to the top bundle.
+
+    Entered at most once per real path and never past ``_MAX_BUNDLE_DEPTH``, so
+    a symlink cycle among embedded bundles cannot loop or explode the walk.
+    """
+    if visited is None:
+        visited = set()
+    real = os.path.realpath(bundle_dir)
+    if real in visited or depth >= _MAX_BUNDLE_DEPTH:
+        return
+    visited.add(real)
     kind = bundle_kind(bundle_dir)
     embedded_info = _bundle_info(bundle_dir, kind)
     before = len(binaries)
-    _walk_bundle(bundle_dir, kind, embedded_info, binaries, root=False)
+    _walk_bundle(
+        bundle_dir, kind, embedded_info, binaries, root=False, visited=visited, depth=depth + 1
+    )
     # Entries produced by this sub-bundle carry its identity (real product
     # name and version, not the host app's) and a bundle_path relative to the
     # top-level bundle.

@@ -340,9 +340,11 @@ def _iter_relationship_parts(archive: zipfile.ZipFile, members: list) -> list[st
 def _parse_rels(xml_bytes: bytes, source_part: str, relationships: list, refusals: list[str]) -> None:
     import xml.etree.ElementTree as ET
 
+    from blint.lib.safe_xml import DefusedXmlException, safe_fromstring
+
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
+        root = safe_fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException):
         refusals.append("relationship_xml_malformed")
         return
     for rel in root.iter():
@@ -1034,7 +1036,12 @@ def extract_msg_attachments(path: str, dest_dir: str, refusals: list[str]) -> di
             payload = reader.read_entry(stream, cap=MAX_MSG_ATTACHMENT_BYTES)
             if not payload:
                 continue
-            dest = os.path.join(dest_dir, f"attachment_{position}_{local}.bin")
+            # ``local`` is a CFBF stream name from the untrusted .msg. A name
+            # like "__substg1.0_3701\..\..\x" embeds Windows path separators,
+            # so joining it raw would write the attachment above dest_dir on
+            # Windows (CWE-22). Reduce it to a single safe filename component.
+            safe_local = re.sub(r"[^A-Za-z0-9_-]", "_", local)
+            dest = os.path.join(dest_dir, f"attachment_{position}_{safe_local}.bin")
             try:
                 with open(dest, "wb") as out:
                     out.write(payload)

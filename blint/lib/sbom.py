@@ -12,6 +12,7 @@ from typing import Any, Literal, TextIO, cast
 import orjson
 from custom_json_diff.lib.utils import file_read, file_write
 from packageurl import PackageURL
+from rich.markup import escape as _rich_escape
 from rich.progress import Progress
 
 from blint.config import SYMBOL_DELIMITER, BlintOptions
@@ -243,7 +244,7 @@ def generate(
                     # from being parsed as a PE.
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     components += process_nupkg_file(dependencies_dict, exe, sbom)
@@ -251,7 +252,7 @@ def generate(
                 if office_exe_type(exe):
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     refusals: list[str] = []
@@ -296,7 +297,7 @@ def generate(
                 if exe.lower().endswith(".application"):
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     components += process_clickonce_file(dependencies_dict, exe, sbom)
@@ -304,7 +305,7 @@ def generate(
                 if exe.lower().endswith((".msi", ".msp")):
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     components += process_msi_file(dependencies_dict, exe, sbom)
@@ -312,7 +313,7 @@ def generate(
                 if is_cab_file(exe):
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     components += process_cab_file(dependencies_dict, exe, sbom)
@@ -323,14 +324,14 @@ def generate(
                     # archive, never parsed as a bare PE.
                     progress.update(
                         task,
-                        description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                        description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                         advance=1,
                     )
                     components += process_msix_file(dependencies_dict, exe, sbom)
                     continue
                 progress.update(
                     task,
-                    description=f"Processing [bold]{os.path.basename(exe)}[/bold]",
+                    description=f"Processing [bold]{_rich_escape(os.path.basename(exe))}[/bold]",
                     advance=1,
                 )
                 components += process_exe_file(
@@ -356,7 +357,7 @@ def generate(
                 start=True,
             )
         for f in android_files:
-            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
+            progress.update(task, description=f"Processing [bold]{_rich_escape(str(f))}[/bold]", advance=1)
             components += process_android_file(
                 dependencies_dict,
                 blint_options.deep_mode,
@@ -373,7 +374,7 @@ def generate(
                 start=True,
             )
         for f in ios_files:
-            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
+            progress.update(task, description=f"Processing [bold]{_rich_escape(str(f))}[/bold]", advance=1)
             components += process_ios_file(dependencies_dict, blint_options.deep_mode, f, sbom)
             if blint_options.disassemble:
                 write_ios_callgraphs(f, cast(str, blint_options.sbom_output))
@@ -384,7 +385,7 @@ def generate(
                 start=True,
             )
         for f in macos_bundles:
-            progress.update(task, description=f"Processing [bold]{f}[/bold]", advance=1)
+            progress.update(task, description=f"Processing [bold]{_rich_escape(str(f))}[/bold]", advance=1)
             components += process_macos_bundle_file(
                 dependencies_dict, blint_options.deep_mode, f, sbom
             )
@@ -973,7 +974,7 @@ def _generate_exes_parallel(
             # as its result arrived. Advancing again would double-count.
             progress.update(
                 task,
-                description=f"Processed [bold]{os.path.basename(exe_files[idx])}[/bold]",
+                description=f"Processed [bold]{_rich_escape(os.path.basename(exe_files[idx]))}[/bold]",
             )
     return skipped_wasm
 

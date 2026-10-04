@@ -21,9 +21,19 @@ logging.basicConfig(
     format="%(message)s",
     datefmt="[%X]",
     handlers=[
+        # markup=False: log messages interpolate attacker-controlled strings
+        # (archive member names, symbol names, parser exception text). With
+        # markup on, a name such as "x[/bold]" raises rich.errors.MarkupError
+        # straight out of the LOG.*() call — and because several of those calls
+        # sit in except blocks, the error escapes the per-unit isolation and
+        # aborts the whole run (CWE-74); a crafted "[link=...]" would also
+        # inject into the recorded HTML report. No blint log string uses rich
+        # markup tags of its own, so disabling it costs nothing. Table cells
+        # that do need markup are rendered through rich.table with each
+        # untrusted cell escaped at its call site.
         RichHandler(
             console=console,
-            markup=True,
+            markup=False,
             show_path=False,
             enable_link_path=False,
         )

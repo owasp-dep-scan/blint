@@ -38,6 +38,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from blint.lib.container import member_path_unsafe, zip_member_is_symlink
+from blint.lib.safe_xml import DefusedXmlException, safe_fromstring
 
 # Measured maxima in the module docstring; every cap has a hostile fixture
 # in tests/test_nuget_package.py that exceeds it and is refused by name.
@@ -156,8 +157,8 @@ def _apply_nuspec(result: dict, data: bytes) -> None:
     the literal bytes or the refusal names it.
     """
     try:
-        root = ET.fromstring(data)
-    except ET.ParseError:
+        root = safe_fromstring(data)
+    except (ET.ParseError, DefusedXmlException):
         result["refusals"].append("nuspec_xml_malformed")
         return
     metadata = None

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import struct
 import tempfile
 import zipfile
@@ -692,13 +691,33 @@ def read_library_bytes(container: str, entry_name: str, limit: int = MAX_LIB_ENT
         return None
 
 
-def _spool_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> IO[bytes]:
-    """Copy one inner apk out of a bundle into an anonymous temp file."""
+def _spool_member(
+    zf: zipfile.ZipFile, info: zipfile.ZipInfo, cap: int = MAX_TOTAL_LIB_BYTES
+) -> IO[bytes]:
+    """Copy one inner apk out of a bundle into an anonymous temp file.
+
+    The copy is bounded against bytes actually read, not the declared
+    ``file_size``: a bundle member can understate its size, and a duplicate
+    member name resolved by ``getinfo`` can point at a far larger entry than
+    the one a size check admitted, so an unbounded ``copyfileobj`` would spool
+    gigabytes to disk from a small bundle (CWE-409). At the cap the copy stops;
+    the truncated spool simply fails to open as a zip and is handled as an
+    unreadable container.
+    """
     # The caller owns and closes the spool. Not SpooledTemporaryFile:
     # before Python 3.11 it lacks seekable(), which zipfile needs.
     spool = tempfile.TemporaryFile()  # noqa: SIM115
+    written = 0
     with zf.open(info) as fh:
-        shutil.copyfileobj(fh, spool, 1 << 20)
+        while True:
+            chunk = fh.read(1 << 20)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > cap:
+                LOG.debug("Spooled bundle member %s exceeds the cap; truncating", info.filename)
+                break
+            spool.write(chunk)
     spool.seek(0)
     return spool
 

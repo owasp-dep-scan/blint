@@ -1088,6 +1088,28 @@ def recover_rust_deps_from_panic(parsed_obj: lief.Binary) -> list[dict]:
     ]
 
 
+# Upper bound on the decompressed cargo-auditable dependency manifest (ground
+# rule 30). The ``.dep-v0`` section is attacker-controlled binary content; a
+# real manifest is a few hundred KB at most, so 32 MiB is generous while a
+# crafted zlib bomb in that section is refused instead of expanding without
+# limit on every ELF/PE/Mach-O parse (CWE-409).
+MAX_AUDIT_DECOMPRESSED = 32 * 1024 * 1024
+
+
+def _decompress_capped(data: bytes, cap: int) -> bytes:
+    """zlib-inflate ``data`` but never produce more than ``cap`` bytes.
+
+    Raises ``zlib.error`` when the stream would exceed the cap, so the caller's
+    existing ``zlib.error`` handling turns a bomb into the panic-message
+    fallback rather than an out-of-memory kill.
+    """
+    decompressor = zlib.decompressobj()
+    out = decompressor.decompress(data, cap)
+    if decompressor.unconsumed_tail:
+        raise zlib.error("decompressed size exceeds cap")
+    return out
+
+
 def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parse the rust build info section that are cargo-auditable to extract rust dependencies.
@@ -1105,7 +1127,9 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
             filter(lambda section: section.name == ".dep-v0", parsed_obj.sections), None
         )
         if audit_data_section is not None and audit_data_section.content:
-            json_string = zlib.decompress(audit_data_section.content)
+            json_string = _decompress_capped(
+                bytes(audit_data_section.content), MAX_AUDIT_DECOMPRESSED
+            )
             audit_data = orjson.loads(json_string)
 
             if audit_data and audit_data["packages"]:

@@ -52,6 +52,7 @@ from blint.lib.container import (
     walk_zip_members,
 )
 from blint.lib.pe_signature import walk_signature_list
+from blint.lib.safe_xml import DefusedXmlException, safe_fromstring
 
 MSIX_EXTENSIONS = (".msix", ".appx", ".msixbundle", ".appxbundle")
 BUNDLE_EXTENSIONS = (".msixbundle", ".appxbundle")
@@ -141,8 +142,8 @@ def parse_appx_manifest(xml_bytes: bytes, refusals: list[str]) -> dict:
         "applications": [],
     }
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
+        root = safe_fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException):
         refusals.append("manifest_xml_malformed")
         return facts
     identity = _find_local(root, "Identity")
@@ -217,8 +218,8 @@ def parse_blockmap(xml_bytes: bytes, refusals: list[str]) -> dict:
         "files": {},
     }
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
+        root = safe_fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException):
         refusals.append("blockmap_xml_malformed")
         return facts
     method = root.get("HashMethod") or ""
@@ -550,8 +551,8 @@ def _parse_bundle_manifest(xml_bytes: bytes, refusals: list[str]) -> tuple[dict,
     identity: dict = {}
     package_file_names: list[str] = []
     try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
+        root = safe_fromstring(xml_bytes)
+    except (ET.ParseError, DefusedXmlException):
         refusals.append("manifest_xml_malformed")
         return identity, package_file_names
     identity_element = _find_local(root, "Identity")
