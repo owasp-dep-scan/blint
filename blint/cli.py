@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import os
 import re
 import sys
@@ -879,6 +880,10 @@ def run_diff_command(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """Main function of the blint tool"""
+    # A frozen (PyInstaller) build re-executes this entry in every spawned
+    # pool worker; freeze_support reroutes those children into the worker
+    # loop before argument parsing or any heavy import runs.
+    multiprocessing.freeze_support()
     args = build_args()
     if args.subcommand_name == "callgraph-match":
         run_callgraph_match_command(args)

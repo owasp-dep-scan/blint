@@ -66,6 +66,10 @@ jobs:
         # Confirm the bundled disassembler is available in the frozen binary
         ./dist/${{ matrix.binary_name }} --help >/dev/null
         ./dist/${{ matrix.binary_name }} -i dist/${{ matrix.binary_name }} -o /tmp/reports
+        # A frozen build re-executes the entry in every pool worker; without
+        # freeze_support in main() this scan dies importing lief, so keep it
+        # in the smoke path for --jobs and the --cache apsw store.
+        BLINT_CACHE_DIR=/tmp/blint-smoke-cache ./dist/${{ matrix.binary_name }} --no-banner -q --jobs 2 --cache -i dist/${{ matrix.binary_name }} -o /tmp/reports-jobs
         sha256sum ./dist/${{ matrix.binary_name }} > ./dist/${{ matrix.binary_name }}.sha256
       env:
         PYTHONIOENCODING: utf-8
