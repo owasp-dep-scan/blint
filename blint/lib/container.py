@@ -223,6 +223,7 @@ def extract_zip_members(
     dest_dir: str,
     limits: ContainerLimits,
     refusals: list[str],
+    budget: "CumulativeExtractionBudget | None" = None,
 ) -> dict[str, str]:
     """Extract the named members into ``dest_dir`` under the reader's bounds.
 
@@ -234,11 +235,22 @@ def extract_zip_members(
     understates itself arrives as ``member_unreadable``. The cap is the
     bound blint enforces; the CRC is what catches the lie. Returns a mapping of
     member name → extracted path for the members that extracted cleanly;
-    refused members are named in ``refusals`` and simply do not appear in
-    the mapping. Destinations are pre-joined through ``os.path.join`` after
+    refused members are named in ``refusals`` and simply do not appear in the
+    mapping. Destinations are pre-joined through ``os.path.join`` after
     the path-safety check, which is what makes the drive-prefix refusal load-
     bearing (``ntpath.join`` would otherwise discard the base).
+
+    ``budget`` bounds the total bytes extracted across a whole nested
+    container scan unit (see ``CumulativeExtractionBudget``): each call's
+    total is clamped to what remains and bytes written are charged back.
     """
+    if budget is not None:
+        if budget.remaining <= 0:
+            refusals.append("extraction_budget_exhausted")
+            return {}
+        limits = replace(limits, max_total_uncompressed=min(
+            limits.max_total_uncompressed, budget.remaining
+        ))
     extracted: dict[str, str] = {}
     for info in members:
         name = info.filename
@@ -271,6 +283,8 @@ def extract_zip_members(
                 os.unlink(dest)
             continue
         extracted[name] = dest
+    if budget is not None and extracted:
+        budget.charge(sum(_size_of(path) for path in extracted.values()))
     return extracted
 
 
@@ -305,19 +319,22 @@ def extract_zip_to_dir(
         if budget.remaining <= 0:
             refusals.append("extraction_budget_exhausted")
             return {}
+        # Clamp BEFORE the walk: the walk's declared-total bound is what
+        # pre-refuses members, so clamping only the extraction would let the
+        # walk admit a full archive's worth of members into a budget with a
+        # fraction remaining.
         limits = replace(limits, max_total_uncompressed=min(
             limits.max_total_uncompressed, budget.remaining
         ))
     try:
         with zipfile.ZipFile(zip_path) as archive:
             members = walk_zip_members(archive, limits, refusals)
-            extracted = extract_zip_members(archive, members, dest_dir, limits, refusals)
+            return extract_zip_members(
+                archive, members, dest_dir, limits, refusals, budget=budget
+            )
     except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError):
         refusals.append("archive_unreadable")
         return {}
-    if budget is not None:
-        budget.charge(_tree_bytes(dest_dir))
-    return extracted
 
 
 class CumulativeExtractionBudget:
@@ -342,16 +359,12 @@ class CumulativeExtractionBudget:
         self.spent += max(0, int(nbytes))
 
 
-def _tree_bytes(root: str) -> int:
-    """Size of every regular file under ``root`` (the caller's fresh dest)."""
-    total = 0
-    for dir_path, _dirs, files in os.walk(root):
-        for name in files:
-            try:
-                total += os.path.getsize(os.path.join(dir_path, name))
-            except OSError:
-                continue
-    return total
+def _size_of(path: str) -> int:
+    """Size of one extracted file; 0 when it vanished (member_unreadable races)."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 
 class _MemberTooLarge(Exception):

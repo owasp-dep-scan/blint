@@ -104,19 +104,28 @@ OID_ORGANIZATION = "2.5.4.10"
 MAX_PLIST_BYTES = 4 * 1024 * 1024
 MAX_ASN1_BYTES = 8 * 1024 * 1024
 MAX_CERTIFICATES = 16
+# Nesting ceiling for the recursive BER/DER walkers. A signature blob is
+# attacker-controlled, and without this a few KB of nested TLVs walks Python
+# into RecursionError — which none of the callers' exception tuples catch,
+# losing the whole binary's metadata. Real entitlements/CMS nest a handful
+# of levels; the PE-side reader (pe_signature.MAX_BER_DEPTH) already uses 64.
+MAX_BER_DEPTH = 64
 
 
 class _Asn1Error(ValueError):
     """Raised when a DER/BER structure cannot be walked safely."""
 
 
-def _ber_read(data: bytes, pos: int, end: int) -> tuple[int, bytes, int]:
+def _ber_read(data: bytes, pos: int, end: int, depth: int = 0) -> tuple[int, bytes, int]:
     """Read one DER/BER TLV; returns (tag, content, next_pos).
 
     Handles the indefinite-length form (0x80, terminated by 00 00) that CMS
     blobs produced by codesign actually use, by recursively consuming
-    children until the terminator. Raises :class:`_Asn1Error` on truncation.
+    children until the terminator. Raises :class:`_Asn1Error` on truncation
+    or on nesting beyond ``MAX_BER_DEPTH``.
     """
+    if depth > MAX_BER_DEPTH:
+        raise _Asn1Error("ber nesting exceeds cap")
     if pos + 2 > end:
         raise _Asn1Error("truncated TLV header")
     tag = data[pos]
@@ -132,7 +141,7 @@ def _ber_read(data: bytes, pos: int, end: int) -> tuple[int, bytes, int]:
         while True:
             if pos + 2 <= end and data[pos] == 0 and data[pos + 1] == 0:
                 return tag, data[content_start:pos], pos + 2
-            _, _, pos = _ber_read(data, pos, end)
+            _, _, pos = _ber_read(data, pos, end, depth + 1)
     num_octets = length_byte & 0x7F
     if num_octets > 4 or pos + num_octets > end:
         raise _Asn1Error("unsupported or truncated long-form length")
@@ -231,7 +240,7 @@ def _certificate_names(certificate_content: bytes) -> dict:
                 names["subject_cn"] = (subject.get(OID_COMMON_NAME) or [None])[0]
                 names["subject_organization"] = (subject.get(OID_ORGANIZATION) or [None])[0]
                 break
-    except (_Asn1Error, IndexError):
+    except (_Asn1Error, IndexError, RecursionError):
         pass
     return names
 
@@ -335,7 +344,7 @@ def _certificate_serial(certificate_content: bytes) -> str | None:
             if tag == 0x02:  # serialNumber: the first untagged INTEGER
                 return value.hex()
             return None
-    except (_Asn1Error, IndexError):
+    except (_Asn1Error, IndexError, RecursionError):
         pass
     return None
 
@@ -374,7 +383,7 @@ def _signer_serial(signer_infos_set: bytes) -> str | None:
                 if tag == 0x02:
                     return value.hex()
             return None
-    except (_Asn1Error, IndexError):
+    except (_Asn1Error, IndexError, RecursionError):
         return None
     return None
 
@@ -436,8 +445,12 @@ def _parse_der_entitlement_entry(entry: bytes, errors: list[str]) -> tuple[str |
     return key, value
 
 
-def _parse_der_entitlement_value(tag: int, content: bytes) -> tuple[object, str | None]:
+def _parse_der_entitlement_value(
+    tag: int, content: bytes, depth: int = 0
+) -> tuple[object, str | None]:
     """Map one DER value to a JSON type; (None, error-reason) when it cannot."""
+    if depth > MAX_BER_DEPTH:
+        return None, "der_nesting_exceeds_cap"
     if tag in (0x0C, 0x13, 0x16):
         return content.decode("utf-8"), None
     if tag == 0x02:
@@ -453,8 +466,11 @@ def _parse_der_entitlement_value(tag: int, content: bytes) -> tuple[object, str 
         pos = 0
         end = len(content)
         while pos < end:
-            item_tag, item_content, pos = _ber_read(content, pos, end)
-            value, decode_error = _parse_der_entitlement_value(item_tag, item_content)
+            try:
+                item_tag, item_content, pos = _ber_read(content, pos, end, depth + 1)
+            except _Asn1Error as exc:
+                return None, f"ber_walk_failed:{exc}"
+            value, decode_error = _parse_der_entitlement_value(item_tag, item_content, depth + 1)
             if decode_error:
                 return None, decode_error
             items.append(value)

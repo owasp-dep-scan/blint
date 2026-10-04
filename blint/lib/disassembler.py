@@ -209,6 +209,13 @@ ARM64_PAC_INST = {
 ARM64_PAC_HINTS = {"25", "27", "29", "31"}
 MIPS_RET_INST = {"jr"}
 MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
+# Ceiling on one function's disassembly window. The size comes from the
+# binary's own metadata (ELF st_size, unwind tables — attacker-controlled
+# header fields), and the window is materialized several times over (text,
+# parsed instructions, register lists), so a symbol claiming a multi-GB
+# size must not drive a multi-GB read. Real functions are kilobytes; this
+# only ever clips crafted sizes.
+MAX_DISASSEMBLY_WINDOW = 16 * 1024 * 1024
 # 32-bit ARM mnemonic tables. nyxstone prints branch/call immediates as
 # PC-relative signed deltas ("bl #50", "b #-12"); the target is
 # addr + 4 + imm in Thumb state and addr + 8 + imm in ARM state (measured
@@ -3502,6 +3509,16 @@ def disassemble_functions(
         if size_to_disasm <= 0:
             LOG.debug(f"Function '{func_name}' has a size of 0. Skipping.")
             continue
+        if size_to_disasm > MAX_DISASSEMBLY_WINDOW:
+            # A declared size beyond any real function is a crafted header
+            # claim; clamp it so the read (and the per-instruction objects
+            # built from it) stay bounded.
+            LOG.debug(
+                f"Function '{func_name}' declares {size_to_disasm} bytes; "
+                f"clamping the disassembly window to {MAX_DISASSEMBLY_WINDOW}."
+            )
+            size_to_disasm = MAX_DISASSEMBLY_WINDOW
+            has_exact_size = False
         func_addr_va = func_addr
         if isinstance(parsed_obj, lief.PE.Binary):
             func_addr_va = func_addr + imagebase

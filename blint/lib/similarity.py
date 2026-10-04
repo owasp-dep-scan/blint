@@ -34,6 +34,12 @@ _IMPORT_DECORATIONS = (
 
 
 _ORIGIN_PREFIX = re.compile(r"^[\w.\-/]+(?:\.dll|\.dylib|\.so|\.tbd|[A-Za-z]\w*\.[A-Za-z])::")
+# The prefix pattern backtracks across the [\w.\-/]+ run, so a crafted
+# megabyte symbol name would cost quadratic time per import. Real origins
+# (library path + ::) are far shorter than this; anything longer skips the
+# strip and keeps its decoration, which only affects matching for a name
+# that was never a real import anyway.
+_MAX_ORIGIN_PREFIX_INPUT = 1024
 
 
 def _normalize_import_name(name: str) -> str:
@@ -41,7 +47,8 @@ def _normalize_import_name(name: str) -> str:
     name = (name or "").strip()
     if not name:
         return ""
-    name = _ORIGIN_PREFIX.sub("", name)
+    if len(name) <= _MAX_ORIGIN_PREFIX_INPUT:
+        name = _ORIGIN_PREFIX.sub("", name)
     name = _ELF_VERSION_SUFFIX.sub("", name)
     for decoration in _IMPORT_DECORATIONS:
         if name.startswith(decoration):
