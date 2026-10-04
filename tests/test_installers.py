@@ -1,8 +1,8 @@
-"""Tests for W4.3: ClickOnce manifests, installer detection, 7z-SFX payloads.
+"""Tests for ClickOnce manifests, installer detection, 7z-SFX payloads.
 
 The 7z reader is verified against archives created and listed by 7-Zip on
 the ground-truth VM (the corpus carries the resulting SFX); synthetic
-fixtures cover the hostile shapes (ground rules 22/30/33).
+fixtures cover the hostile shapes.
 """
 
 import base64
@@ -127,7 +127,7 @@ def test_detect_installer_nsis_detection_only(tmp_path):
     pe.write_bytes(Path(_PE).read_bytes() + b"\x00" * 4096 + struct.pack("<IIII", 0, 0xDEADBEEF, 4096, 100000))
     block = detect_installer(str(pe), "nsis")
     assert block["family"] == "nsis"
-    # Detection-only is stated in the block, not implied (rule 14).
+    # Detection-only is stated in the block, not implied.
     assert block["extraction"] == "detection_only"
     assert block["nsis_firstheader"]["length_of_all_following_data"] == 100000
 
@@ -196,7 +196,7 @@ def test_sevenz_crc_rejects_false_signature():
 
 def test_sfx_runner_members_and_leak_delta(tmp_path):
     """The runner analyzes a real SFX's PE members as sfx-member units and
-    leaves no temp directories (ground rule 18 asserted across the run)."""
+    leaves no temp directories (asserted across the run)."""
     logging.disable(logging.CRITICAL)
     from blint.config import BlintOptions
     from blint.lib.runners import run_default_mode
@@ -229,7 +229,7 @@ def test_sfx_runner_members_and_leak_delta(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# W4.4 — Office documents (OOXML, legacy CFBF, RTF)
+# Office documents (OOXML, legacy CFBF, RTF)
 # ---------------------------------------------------------------------------
 
 def _ovba_raw_chunk(payload: bytes) -> bytes:
@@ -388,7 +388,7 @@ def test_rtf_objdata_cfbf_extraction(tmp_path):
 
 
 def test_benign_document_population(tmp_path):
-    """Ground-rule-34 population: a benign document with an ordinary
+    """Benign population: a benign document with an ordinary
     hyperlink hits only the external-relationship fact (low severity), and
     a plain document hits nothing."""
     from blint.lib.office import analyze_ooxml, office_metadata
@@ -405,9 +405,9 @@ def test_benign_document_population(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# W4.4 — the paths the packet claimed but no test reached: .msg attachments,
+# The paths no other test reaches: .msg attachments,
 # XLM macro sheets, and a .ppt's nested OLE storage. Each fixture is checked
-# against an implementation that is not blint (ground rule 29): extract_msg
+# against an implementation that is not blint: extract_msg
 # 0.56.1 for the message, xlrd for the workbook, and the record layout
 # oletools' own ppt_record_parser reads for the presentation.
 # ---------------------------------------------------------------------------
@@ -484,7 +484,7 @@ def test_msg_attachments_are_found_and_extracted(tmp_path):
 
 def test_msg_attachment_becomes_its_own_unit(tmp_path):
     """The runner analyzes an extracted attachment as a ``msg-attachment``
-    unit and leaves no temp directory behind (rule 18 as a live delta)."""
+    unit and leaves no temp directory behind (asserted as a live delta)."""
     logging.disable(logging.CRITICAL)
     from blint.config import BlintOptions
     from blint.lib.runners import run_default_mode
@@ -659,7 +659,7 @@ def test_ppt_vba_lives_in_a_nested_ole_storage(tmp_path, compressed):
 
 def test_ppt_record_that_lies_about_its_length_is_named(tmp_path):
     """A record longer than the stream is a named degradation, not a crash
-    and not silence (rule 30/32)."""
+    and not silence."""
     from blint.lib.office import analyze_legacy_office
     from tests.test_cfbf import build_cfbf
 

@@ -521,7 +521,7 @@ def test_run_default_mode_records_unreadable_ipa_skip(tmp_path):
 
 
 def test_run_default_mode_non_dict_plist_ipas_no_crash_no_leak(tmp_path):
-    """The reviewer's must-fix repro, end-to-end and now succeeding.
+    """A must-fix review repro, end-to-end and now succeeding.
 
     Three .ipa archives whose Info.plist roots are not dicts used to raise
     TypeError out of _read_bundle_info (caught per-unit by isolation, but

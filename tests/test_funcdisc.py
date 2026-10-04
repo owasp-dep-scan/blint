@@ -360,13 +360,13 @@ def test_prologue_scan_arm64_patterns():
 
 
 
-# --- G1: the ELF extent precedence and the section-end invariant ------------
+# --- the ELF extent precedence and the section-end invariant ----------------
 # The precedence (symbol st_size > unwind FDE range > LIEF functions size) is
 # enforced by reconcile_function_extents over the first entry per address in
 # the buckets the disassembler reads. Tests run it against a real NDK-built
-# ELF fixture (rule 22: no hand-built binary bytes; the metadata dicts are
+# ELF fixture (no hand-built binary bytes; the metadata dicts are
 # blint's own shape) and compute addresses from the fixture's own sections in
-# the same run, never from recorded values (standing requirement 4).
+# the same run, never from recorded values.
 
 _RECONCILE_FIXTURE = Path(__file__).parent / "data" / "android" / "liba5_static_arm64-v8a.so"
 

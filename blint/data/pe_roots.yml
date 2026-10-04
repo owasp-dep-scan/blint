@@ -1,4 +1,4 @@
-# blint's shipped root-anchor fingerprints (PE lane W2.4, plan 02/C).
+# blint's shipped root-anchor fingerprints.
 #
 # What was hashed: the DER of every certificate in the machine trusted
 # root stores of the Windows ARM64 VM (10.0.26200.0),
@@ -12,7 +12,7 @@
 # flag to separate first-party Microsoft roots from public ones. This is
 # a statement about the file's shipped chain, not about the world: blint
 # performs no trust validation, consults no live store and fetches no
-# revocation data (plan 02/D), so a root outside this snapshot reads as
+# revocation data, so a root outside this snapshot reads as
 # "outside the shipped snapshot", never as "untrusted" in the CryptoAPI
 # sense.
 

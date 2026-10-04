@@ -26,7 +26,7 @@ def test_purl_field_coerces_numbers_and_drops_empty_values():
     assert purl_field(True) is None
 
 
-# F2a.4: the ELF symbol-version nodes are no longer emitted as components
+# The ELF symbol-version nodes are no longer emitted as components
 # (an interface floor is a requirement on the execution environment, not an
 # artifact identity); the raw node names ride the parent component as the
 # internal:symbols_version property, so the purl-coercion concerns those
@@ -50,7 +50,7 @@ def test_create_library_component_tolerates_missing_versions():
 
 
 def test_default_parent_still_finds_a_build_bom_identity_for_a_dll():
-    """W3.5 stopped a `.dll` filename from producing a `pkg:nuget` purl,
+    """The NuGet reader stopped a `.dll` filename from producing a `pkg:nuget` purl,
     which is right — but the build-BOM overlay was keyed on that same purl.
 
     `populate_purl_lookup` stores unversioned `pkg:nuget/<name>` keys only,
@@ -66,7 +66,7 @@ def test_default_parent_still_finds_a_build_bom_identity_for_a_dll():
     assert component.version.root == "13.0.3"
 
     # Without a BOM entry the filename proves nothing, which is the whole
-    # point of the W3.5 correction: no `pkg:nuget` from a name alone.
+    # point of the correction: no `pkg:nuget` from a name alone.
     assert default_parent(["/tmp/python313.dll"]).purl == "pkg:generic/python313"
 
 
@@ -103,9 +103,9 @@ def test_nupkg_identity_purls_escape_reserved_characters(tmp_path):
 
 
 def test_original_filename_identity_upgrade():
-    """W4.5: a PE whose VERSIONINFO states an OriginalFilename names the
+    """A PE whose VERSIONINFO states an OriginalFilename names the
     component from the resource, with the on-disk name carried as evidence
-    when it differs (ground rule 32: the mismatch is visible)."""
+    when it differs (the mismatch is visible)."""
 
     from blint.lib.sbom import (
         add_signer_evidence,
@@ -144,7 +144,7 @@ def test_original_filename_identity_upgrade():
 
 
 def test_original_filename_overlay_reaches_both_names():
-    """The W3.5 coupling lesson: the overlay lookup must be re-keyed under
+    """The purl coupling lesson: the overlay lookup must be re-keyed under
     the resource stem, or renaming the component makes the build-BOM
     overlay unreachable."""
 

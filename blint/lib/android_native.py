@@ -16,7 +16,7 @@ libraries are deduplicated by sha256 with every location kept.
 
 Every budget here has a hostile fixture (tests/scripts/android/
 make_hostile_fixtures.py) and a unit test that crosses it; a limit without
-its fixture is written down, not implemented (standing requirement 2).
+its fixture is written down, not implemented.
 Zip-slip style names are recorded, never written to disk.
 """
 
@@ -68,8 +68,8 @@ MAX_ZIP_ENTRIES = 65536
 
 BUNDLE_EXTENSIONS = (".apks", ".xapk", ".apkm")
 ELF_MAGIC = b"\x7fELF"
-# 16 KB page-size work (01/B): the 64-bit ABIs a 16 KB-page device judges;
-# 32-bit ABIs are exempt and never flagged (rule 35).
+# 16 KB page-size work: the 64-bit ABIs a 16 KB-page device judges;
+# 32-bit ABIs are exempt and never flagged.
 BIT64_ABIS = frozenset({"arm64-v8a", "x86_64", "riscv64"})
 PAGE_16K = 16384
 # PT_LOAD (System V ABI / LLVM ELF.h) and a cap on how many phdrs the scan
@@ -162,7 +162,7 @@ def classify_entry(entry_name: str, *, aab: bool = False) -> tuple[str, str]:
     directories are the bundle's own layout. Everything else (assets/,
     ``res/lib/<abi>/``, payloads anywhere else) is an asset location that
     never feeds ABI coverage: the loose ``"lib" in rel_path`` test this
-    replaces counted ``assets/arm64-v8a/x.so`` as arm64 coverage (V2).
+    replaces counted ``assets/arm64-v8a/x.so`` as arm64 coverage.
     """
     parts = entry_name.split("/")
     if len(parts) >= 3 and parts[-3] == "lib" and parts[-1].endswith(".so"):
@@ -361,7 +361,7 @@ def _dedupe(libraries: list[NativeLibrary]) -> list[NativeLibrary]:
 
 
 def abi_coverage(libraries: list[NativeLibrary]) -> dict[str, Any]:
-    """App-level ABI coverage summary (01/A.5)."""
+    """App-level ABI coverage summary."""
     per_abi: dict[str, set[str]] = {}
     retired: set[str] = set()
     for lib in libraries:
@@ -467,18 +467,18 @@ def is_16k_elf_compatible(page_facts: dict[str, Any] | None) -> bool | None:
 
 
 def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
-    """The app-level 16 KB page-size verdict (01/B), per ABI (rule 36).
+    """The app-level 16 KB page-size verdict, one result per ABI.
 
     Only 64-bit ABIs are judged — 32-bit ABIs are exempt on 16 KB-page
-    devices and are never flagged (rule 35); assets never feed ABI
+    devices and are never flagged; assets never feed ABI
     coverage. A library is compatible when its ELF layout is
     (min ``PT_LOAD`` p_align >= 16384 and every LOAD congruent modulo
     16384) and every *stored* zip location sits at a 16384-aligned
     offset. Deflated locations are not zip-judged: ``zipalign -c -P 16``
     does not require alignment for them (a compressed-but-unaligned .so
-    with ``extractNativeLibs=false`` is the loader rule, C1, not this
-    verdict). The verdict matches the two ground-truth tools rung for
-    rung: the ELF half against ``check_elf_alignment.sh``, the zip half
+    with ``extractNativeLibs=false`` is CHECK_ANDROID_EXTRACT_NATIVE_LIBS, not this
+    verdict). The verdict matches the two ground-truth tools fixture for
+    fixture: the ELF half against ``check_elf_alignment.sh``, the zip half
     against ``zipalign -c -P 16 -v 4``.
     """
     per_abi: dict[str, dict[str, Any]] = {}
@@ -539,7 +539,7 @@ def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
              if loc.location_kind == "lib_dir" and loc.abi and loc.abi not in BIT64_ABIS}
         ),
         # None when no 64-bit ABI ships: nothing was judged, so a
-        # 32-bit-only app is exempt and never flagged (rule 35).
+        # 32-bit-only app is exempt and never flagged.
         "compatible": (not incompatible_abis) if verdict_abis else None,
         "compatible_abis": compatible_abis,
         "incompatible_abis": incompatible_abis,

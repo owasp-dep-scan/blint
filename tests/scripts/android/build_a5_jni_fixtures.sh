@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A5 E0 (feat/an-a4b-a5) — the JNI R1 fixtures, every one a real build:
+# The JNI fixtures, every one a real build:
 #
 #   liba5_static_<abi>{,_stripped}.so    static natives, one export per
 #                                        mangling escape (_1, _2, _3,
@@ -68,7 +68,7 @@ done
 # ---------------------------------------------------------------- apks
 # Inside the APK the libraries carry their loadable names, so
 # System.loadLibrary("jnistat")/"jnidyn" in the dex resolve to real zip
-# members (the E2 mapping fact). The committed standalone twins keep the
+# members (the library-name mapping fact). The committed standalone twins keep the
 # liba5_* names documented in the manifest.
 for abi in arm64-v8a armeabi-v7a; do
   apkroot="$work/apk-$abi"

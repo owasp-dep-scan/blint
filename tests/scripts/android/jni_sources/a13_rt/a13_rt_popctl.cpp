@@ -1,5 +1,5 @@
 /*
- * A13 review - the sret trigger's false-fire controls (the callee-pop
+ * The sret trigger's false-fire controls (the callee-pop
  * verification's regression fixtures).
  *
  *   ctl_register_touched    the entry words are stored, then a NAMED

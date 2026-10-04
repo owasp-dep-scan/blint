@@ -21,7 +21,7 @@ rules:
       beside the string literals: an assembly image base64-blob or a
       byte-array-decrypt pattern next to it is worth escalating.
     severity: low
-    # Measured on the benign managed tier (W2.4 discipline): 2 of 60
+    # Measured on the benign managed tier: 2 of 60
     # tier-2 assemblies reference it, both serializer/plugin
     # infrastructure. High severity here would be an FP generator.
     patterns:

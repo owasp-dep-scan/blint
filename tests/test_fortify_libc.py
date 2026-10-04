@@ -1,6 +1,6 @@
-"""Tests for the FORTIFIED_LIBC_IN_USE annotation (issue #94, W6.3).
+"""Tests for the FORTIFIED_LIBC_IN_USE annotation (issue #94).
 
-The fixtures are real compiler output, built for this packet on
+The fixtures are real compiler output, built on
 Debian bookworm gcc with the identical program compiled twice:
 
     gcc -O2 -D_FORTIFY_SOURCE=2 -o fortified-libc-demo.elf prog.c
@@ -41,7 +41,7 @@ def test_fortified_build_reports_the_capability():
 
 
 def test_plain_build_with_stack_protector_reports_nothing():
-    # The negative fixture (rule 11): __stack_chk_fail is present (the
+    # The negative fixture: __stack_chk_fail is present (the
     # binary has the stack protector) and must NOT trip the FORTIFY rule.
     metadata, results = _review(_DATA / "plain-libc-demo.elf")
     names = [s.get("name", "") for s in metadata.get("dynamic_symbols") or []]

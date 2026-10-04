@@ -1,11 +1,11 @@
 /*
- * A4a R1 — one function, one mode: ~10 plain functions, no interworking.
+ * Rung 1 — one function, one mode: ~10 plain functions, no interworking.
  *
  * Built for all five ABIs with NDK r28 clang -g -shared -fPIC -fno-inline,
  * and for armeabi-v7a twice more with -mthumb / -marm, by
  * tests/scripts/android/build_a4a_fixtures.py. Every helper is static and
  * noinline so the symbol table keeps ten real functions (a plain -O2 build
- * inlines them all away), and the stripped twin (R3) keeps them out of
+ * inlines them all away), and the stripped twin (rung 3) keeps them out of
  * .dynsym so discovery has to come from the unwind tables; a4a_r1_run is the
  * single export.
  *

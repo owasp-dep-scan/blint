@@ -1,7 +1,7 @@
 /*
- * A7 K1 — the fire side of the six native capability families.
+ * The fire side of the six native capability families.
  *
- * Every shape here is the precise form the K2 rules target: a call-site
+ * Every shape here is the precise form the native rules target: a call-site
  * constant the abstract interpreter can recover (a request code, a path, a
  * property name) or an inline syscall instruction. One exported function
  * per family so a fixture failure names its family directly; the exported

@@ -1,14 +1,14 @@
-"""Pure-struct CFBF (Compound File Binary Format / OLE2) reader (W4.2).
+"""Pure-struct CFBF (Compound File Binary Format / OLE2) reader.
 
 MSI files, legacy Office documents (``.doc``/``.xls``/``.ppt``), Outlook
 messages (``.msg``) and ``vbaProject.bin`` macro projects are all CFBF
 storages: a header with FAT sector lists, a directory of storages and
 streams, and a 64-byte mini-FAT for streams below the 4,096-byte cutoff.
-One reader serves all of them (the plan's ``03/C`` first row); nothing here
+One reader serves all of them; nothing here
 imports LIEF or a Windows API, so a Linux run and a Windows run see the same
-bytes (ground rule 31).
+bytes.
 
-Sector-chain sanity is a first-class output (the plan: a malformed chain is
+Sector-chain sanity is a first-class output (a malformed chain is
 itself a finding, not a parse failure to swallow): every chain walk is
 loop-detected and range-checked, and a violation records a named degradation
 (``fat_chain_loop``, ``sector_out_of_range``, ``minifat_chain_loop``,
@@ -16,7 +16,7 @@ loop-detected and range-checked, and a violation records a named degradation
 never a silent skip and never a raised exception that would lose the rest of
 the tree.
 
-Caps (ground rules 30/33) are measured on the corpus reference artifacts:
+Caps are measured on the corpus reference artifacts:
 the 7z-x64.msi (2.0 MB, 512-byte sectors, 31 FAT sectors, 38 directory
 entries, largest stream 1.9 MB) and the tier-4 Office documents: 4,096
 directory entries (cap), 4,096 streams listed (cap), 256 MiB per-stream read
@@ -352,7 +352,7 @@ class CfbfReader:
             walk(root["child"], "", 0)
         if not out and any(e["type"] in (ENTRY_STREAM, ENTRY_STORAGE) for e in self.entries):
             # Tree walk saw nothing: fall back to a linear listing rather
-            # than presenting an empty storage (rule 32).
+            # than presenting an empty storage.
             self.degradations.append("directory_tree_unwalkable")
             for entry in self.entries:
                 if entry["type"] in (ENTRY_STREAM, ENTRY_STORAGE) and len(out) < MAX_STREAMS_LISTED:

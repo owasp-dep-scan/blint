@@ -1,4 +1,4 @@
-# blint's claimable-publisher identities (PE lane W2.4, plan 02/C).
+# blint's claimable-publisher identities.
 #
 # CHECK_SIGNER_MISMATCH arbitrates one narrow question: when VERSIONINFO
 # CompanyName *claims* a publisher from this table, does the signature's

@@ -534,7 +534,7 @@ def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bin
     # Mach-O filetype as a plain name (EXECUTE/DYLIB/BUNDLE/...). PIE is a
     # property of main executables - a dylib is position-independent by
     # construction - so the PIE rule needs the filetype to ask whether it
-    # applies (F1a).
+    # applies.
     metadata["macho_filetype"] = enum_to_str(parsed_obj.header.file_type)
     metadata["has_nx"] = parsed_obj.has_nx
     metadata["wx_segments"] = parse_mach0_wx_segments(parsed_obj)
@@ -1188,7 +1188,7 @@ def _macho_code_signature_block(exe_file: str, parsed_obj, code_signature) -> di
     binary), and ``blob_source`` says which read path produced the bytes. The legacy ``size``/``data_size`` keys keep their
     original string values (load-command size and blob size respectively).
 
-    Removed key, an explicit rule-15 exception: ``data`` used to hold the
+    Removed key, an explicit exception to additive-only metadata: ``data`` used to hold the
     hex of those same 16 load-command bytes under a name claiming signature
     content — it has never held signature data. Its entire information
     content (cmd, cmdsize, dataoff, datasize) is preserved by ``size``,

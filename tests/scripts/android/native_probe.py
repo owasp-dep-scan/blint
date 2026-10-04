@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""A4a T0 — per-function accuracy probe: blint's disassembly vs llvm tools.
+"""Per-function accuracy probe: blint's disassembly vs llvm tools.
 
 Prints, for every function an ``.so`` carries, blint's start/end/mode/
 instruction count/direct-call targets next to the same facts derived from the
 NDK's ``llvm-objdump``/``llvm-readelf`` over the same file in the same run,
 with a one-line diff summary per function and a global summary. Exit code is
-non-zero on any disagreement, so a packet's gate can be
+non-zero on any disagreement, so a change's gate can be
 ``native_probe.py <so> && ...``.
 
 Oracle construction (named tools, same run):
@@ -464,7 +464,7 @@ def build_oracle(
 ) -> tuple[dict[int, dict], dict]:
     """Run readelf + objdump and assemble per-function oracle records.
 
-    With ``twin`` (the R3 rung), the oracle's function set, sizes and
+    With ``twin`` (the stripped rung), the oracle's function set, sizes and
     mapping labels come from the unstripped twin's symbol table while the
     instruction timelines still decode the stripped file's bytes - the
     ladder's definition of the stripped-binary oracle.

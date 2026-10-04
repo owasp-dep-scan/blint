@@ -1,16 +1,16 @@
-"""The driver identity block (PE lane W5.1, plan 04/A).
+"""The driver identity block.
 
 A ``driver`` block is attached to every Windows image whose subsystem is
 NATIVE or WINDOWS_BOOT_APPLICATION, that imports ``ntoskrnl.exe``, or that
-imports the UMDF framework (the one addition to the plan's gate sentence,
+imports the UMDF framework (the one signal outside the kernel-driver gate,
 argued in the data table: a UMDF driver is a user-mode DLL and would never
-reach the block otherwise, yet ``umdf`` is a kind the plan's own enum
+reach the block otherwise, yet ``umdf`` is a kind the block's own enum
 names). The block is identity, not verdicts: kind, the WDF binding facts
 blint can actually see, the kernel objects the image names, the WDM
-callbacks its code registers, and the W2.4 signing class carried in from
+callbacks its code registers, and the signing class carried in from
 ``code_signature``.
 
-Determination discipline (this is the packet's load-bearing rule):
+Determination discipline (the block's load-bearing rule):
 
 - ``kind`` is established by the signal table in
   ``blint/data/pe_driver_kinds.yml`` and never defaulted. A gate-passing
@@ -25,8 +25,8 @@ Determination discipline (this is the packet's load-bearing rule):
 - The WDF *version* is deliberately not recovered. The version lives in the
   WDF_BIND_INFO structure behind a pointer argument of WdfVersionBind;
   decoding it statically would mean guessing a non-public struct layout,
-  and a plausible-looking wrong version is fabricated metadata (the W3.1
-  lesson). ``wdf.library`` and ``wdf.static`` are facts blint can see;
+  and a plausible-looking wrong version is fabricated metadata.
+  ``wdf.library`` and ``wdf.static`` are facts blint can see;
   ``wdf.version`` is omitted until it can be read honestly.
 """
 
@@ -59,7 +59,7 @@ _OBJECT_PATH_MAX_LEN = 120
 
 # Listing bound per bucket. This is a listing bound only - consumers key on
 # membership, never on the tail, and the fixtures include one past the bound
-# pinning that the bucket still speaks (the rule-33 discipline).
+# pinning that the bucket still speaks.
 OBJECT_PATH_LIMIT = 16
 
 # WDF binding: the loader DLL (dynamic) and the framework runtime
@@ -89,7 +89,7 @@ def _kinds_table() -> dict:
             ).open("r", encoding="utf-8") as handle:
                 _TABLE_CACHE = yaml.safe_load(handle) or {}
         except (OSError, yaml.YAMLError):
-            # An unreadable table determines nothing (rule 11): kinds stay
+            # An unreadable table determines nothing: kinds stay
             # unknown rather than half-derived from a partial file.
             _TABLE_CACHE = {}
     return _TABLE_CACHE
@@ -131,9 +131,9 @@ def imported_function_names(metadata: dict[str, Any]) -> set[str]:
 def is_windows_driver(metadata: dict[str, Any]) -> bool:
     """True when the metadata describes a Windows driver image.
 
-    The plan's gate: subsystem NATIVE or WINDOWS_BOOT_APPLICATION, or an
+    The gate: subsystem NATIVE or WINDOWS_BOOT_APPLICATION, or an
     ntoskrnl.exe import. The one addition (recorded in the data table
-    header) is the UMDF framework import, which is how the plan's own
+    header) is the UMDF framework import, which is how the
     ``umdf`` kind becomes reachable.
     """
     if not metadata:
@@ -414,7 +414,7 @@ def _register_callbacks_for_layout(
             # registers (`mov dword ptr [eax+0x34], 0x401000` - the address
             # of DriverUnload). That made the x86 layout unreachable - no
             # 32-bit driver could report a callback or a dispatch store at
-            # all, the same blind spot W5.3 fixed for ARM64.
+            # all, the same blind spot already fixed for ARM64.
             stored = line.rsplit(",", 1)[-1].strip()
             if _is_zero_immediate(stored):
                 continue
@@ -529,12 +529,12 @@ def recover_wdm_callbacks(
 
 
 def _driver_signing_view(code_signature: dict) -> dict[str, Any] | None:
-    """The signing view the driver lane reads, from the W2.4 block.
+    """The signing view the driver block reads, from ``code_signature``.
 
     Dual-signed drivers are the normal case for vendor hardware: the file
     carries the vendor's own commercial signature *and* Microsoft's WHQL
     attestation, and it loads into the kernel because of the second one.
-    The W2.4 ``signing_class`` derives from the first signature whose facts
+    Its ``signing_class`` derives from the first signature whose facts
     determine one, in walk order - the outer signature first, exactly the
     order Windows evaluates them - so a Parallels EV + WHQL-attestation
     driver classes as ``commercial_ev`` there, which is correct about its
@@ -542,7 +542,7 @@ def _driver_signing_view(code_signature: dict) -> dict[str, Any] | None:
 
     This view therefore scans every parsed signature for the kernel-trust
     programs first (kernelModeCodeSigning, then the WHQL pair, the same
-    EKU-to-class vocabulary as W2.4), and falls back to the block's class.
+    EKU-to-class vocabulary as the signature block), and falls back to the block's class.
     ``basis`` names which path decided, so the two blocks can be reconciled
     by a reader without either re-deriving the other.
     """
@@ -580,7 +580,7 @@ def build_driver_block(metadata: dict[str, Any], parsed_obj: lief.PE.Binary) -> 
         return None
     kind, kind_evidence = classify_driver_kind(metadata)
     block: dict[str, Any] = {
-        # Rule 32: "unknown" is a value the block carries - a kind blint
+        # "unknown" is a value the block carries - a kind blint
         # could not establish is stated as such, never silently read as wdm.
         "kind": kind or "unknown",
         "kind_evidence": kind_evidence,
@@ -612,7 +612,7 @@ def build_driver_block(metadata: dict[str, Any], parsed_obj: lief.PE.Binary) -> 
         if values:
             block[bucket] = values
         elif bucket in ("device_names", "symbolic_links"):
-            # The empty case is a case (rule 32): a driver that names no
+            # The empty case is a case: a driver that names no
             # device object and no symlink is stated as empty, not left
             # ambiguous with "not scanned".
             block[bucket] = []
@@ -624,14 +624,14 @@ def build_driver_block(metadata: dict[str, Any], parsed_obj: lief.PE.Binary) -> 
         block["object_paths_source"] = "section_scan"
     code_signature = metadata.get("code_signature") or {}
     if isinstance(code_signature, dict) and code_signature.get("parse_status") == "parsed":
-        # Carried in from W2.4 with the basis named: the block summarises the
+        # Carried in from code_signature with the basis named: the block summarises the
         # signature block (it does not re-derive it) and, for dual-signed
         # drivers, names the kernel-trust signature that loads the image.
         signing_view = _driver_signing_view(code_signature)
         if signing_view:
             signing_view["source"] = "code_signature"
             block["signing"] = signing_view
-    # W5.2: the kernel hardening posture (HVCI conditions, kernel CFG /
+    # The kernel hardening posture (HVCI conditions, kernel CFG /
     # retpoline facts, scored BYOVD primitive families) attaches here so the
     # block stays the one-stop driver identity+posture summary.
     apply_kernel_posture(block, metadata)
@@ -643,7 +643,7 @@ def refresh_driver_block_after_disassembly(metadata: dict[str, Any]) -> None:
 
     Called by binary.parse once ``disassembled_functions`` exists. Facts
     recovered by other blocks are summarised with their source named rather
-    than recomputed (rule 21: one place computes, the summary says where).
+    than recomputed (one place computes, the summary says where).
     """
     block = metadata.get("driver")
     if not isinstance(block, dict):

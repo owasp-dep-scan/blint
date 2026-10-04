@@ -1,4 +1,4 @@
-"""ARM32 disassembly capability tests (A4a T2).
+"""ARM32 disassembly capability tests.
 
 Every input is a real NDK r28 build committed under tests/data/android/
 (build commands in tests/data/android/a4a-fixtures-manifest.json). The pure
@@ -180,7 +180,7 @@ def test_parse_records_mode_and_data_spans() -> None:
         assert "instruction_mode" not in entry and "data_spans" not in entry
 
 
-# ------------------------------------------------------------ T3 semantics
+# --------------------------------------------------------- ARM32 semantics
 
 
 def test_arm32_immediate_styles() -> None:
@@ -227,7 +227,7 @@ def test_arm32_return_and_dispatch_classification() -> None:
 def test_function_end_trims_at_arm32_return() -> None:
     """A size-less window keeps trailing junk without the ARM32 return
     forms; with them the first return followed by padding ends the
-    function (the R4-dominant boundary-diff class before T3)."""
+    function (the dominant boundary-diff class on the corpus)."""
 
     class FakeInstr:
         def __init__(self, text):
@@ -242,7 +242,7 @@ def test_function_end_trims_at_arm32_return() -> None:
         FakeInstr("nop"),
         FakeInstr("movs r0, r0"),
     ]
-    # Without arch knowledge nothing terminates (the pre-T3 behavior).
+    # Without arch knowledge nothing terminates (the earlier behavior).
     assert _find_function_end_index(body, has_exact_size=False) == len(body) - 1
     assert (
         _find_function_end_index(
@@ -324,7 +324,7 @@ def test_literal_materialisation_tracks_got_slot() -> None:
     """The stringFromJNI shape from the real build (corpus fixture):
     ``ldr r4, [pc, #24]; add r4, pc`` materialises the GOT slot address the
     literal completes, and the JNIEnv call through it yields an unnamed
-    indirect hint - the vtable level is the JNI wave's model, not guessing."""
+    indirect hint - the vtable level is the JNI layer's model, not guessing."""
     import os
 
     so = Path(
@@ -398,7 +398,7 @@ class _FakeInstr:
         self.bytes = b""
 
 
-# -------------------------------------------------------------- A4b D1 arbiter
+# ----------------------------------------------------------- ARM/Thumb arbiter
 
 
 def test_arm32_stream_terminates_classifier() -> None:
@@ -453,7 +453,7 @@ def test_arm32_arbiter_prefers_terminator_over_landing_on_end() -> None:
     """Two candidate streams for the same 4-byte span: the Thumb mis-decode
     (`vrhadd.u16`, lands exactly on the span end) against the ARM decode
     (`bx lr`, return) - the +2 terminator score must outrank +1 exact
-    landing, the pre-D1 rule that defaulted these CRT helpers to Thumb."""
+    landing, the earlier rule that defaulted these CRT helpers to Thumb."""
     from blint.lib.disassembler import _arm32_arbiter_pick
 
     thumb = [_FakeTextInstr(0x1384, "vrhadd.u16 d14, d14, d31")]
@@ -468,7 +468,7 @@ def test_arm32_arbiter_counts_implausible_branch_targets() -> None:
     """The branch-plausibility vote: a stream whose immediate branches name
     known starts scores above one whose branches leave the executable
     ranges, even when both land short of the span end (the PLT-entry shape
-    from the R2 grid: ARM `ldr pc` tail with d4 padding vs a Thumb spray of
+    from the R2 fixture: ARM `ldr pc` tail with d4 padding vs a Thumb spray of
     nonsense targets)."""
     from blint.lib.disassembler import _arm32_arbiter_pick
 
@@ -493,7 +493,7 @@ def test_arm32_arbiter_counts_implausible_branch_targets() -> None:
     assert picked[0] == "arm"
 
 
-# ------------------------------------------------------------ T4 discovery
+# ------------------------------------------------------ function discovery
 
 
 def test_prel31_decode() -> None:
@@ -509,7 +509,7 @@ def test_prel31_decode() -> None:
 
 
 def test_arm_exidx_discovery_on_stripped_fixture() -> None:
-    """The committed stripped R1 twin: .ARM.exidx rows become
+    """The committed stripped liba4a_r1_thumb twin: .ARM.exidx rows become
     discovered_functions with source arm_exidx (no symtab exists to claim
     them through any other bucket)."""
     stripped = R2.parent / "liba4a_r1_thumb_stripped.so"
@@ -564,7 +564,7 @@ def test_no_eh_frame_regression_for_other_abis() -> None:
     assert "arm_exidx" not in sources
 
 
-# -------------------------------------------------------------- A4b D1 modes
+# ------------------------------------------------------------- ARM/Thumb modes
 
 R2_STRIPPED = R2.parent / "liba4a_r2_stripped.so"
 
@@ -580,7 +580,7 @@ def test_data_pointer_modes_read_fini_array_words() -> None:
 
 
 def test_data_pointer_modes_read_relative_relocation_words() -> None:
-    """The five JNINativeMethod fnPtr slots of the stripped A5 dynamic twin
+    """The five JNINativeMethod fnPtr slots of the stripped liba5 dynamic twin
     live in .data.rel.ro behind R_ARM_RELATIVE relocations, not in an init
     or fini array. The unstripped twin's llvm-objdump places dyn_a1..dyn_b2
     at 0x15cc/0x15d4/0x15ec/0x15f8/0x1600 in ARM state (raw clang, no
@@ -661,7 +661,7 @@ def test_arbiter_picks_arm_for_atexit_pool_bytes() -> None:
 
 @pytest.mark.skipif(not _nyxstone_available(), reason="nyxstone not installed")
 def test_stripped_twin_modes_match_unstripped_mapping_symbols() -> None:
-    """D1's R1 gate: every function the stripped twin decodes carries the
+    """Every function the stripped twin decodes carries the
     mode the unstripped twin's $a/$t mapping symbols state for its address
     (the twin's symbol table is the mode oracle; the bytes are identical)."""
     metadata = parse(str(R2_STRIPPED), disassemble=True)

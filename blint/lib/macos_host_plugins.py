@@ -1,4 +1,4 @@
-"""The macOS host-plugin surface (lane M1.1, plan ``07``).
+"""The macOS host-plugin surface.
 
 A binary a user runs and a binary macOS loads automatically into someone
 else's process are different security objects, and the second kind is
@@ -9,7 +9,7 @@ declared in its ``Info.plist`` — not observed in its code. This module is
 the interpretation layer over facts the bundle walker already collects:
 the bundle suffix, the ``Info.plist`` and the bundle's location. The kind
 table is data (``blint/data/macos_host_plugin_kinds.yml``) with the
-per-key declaration measurements this packet was scoped by recorded in its
+per-key declaration measurements behind its scope recorded in its
 header.
 
 Design decisions the measurement forced:
@@ -21,7 +21,7 @@ Design decisions the measurement forced:
   ``AudioServerPlugIn_MachServices`` is on 7 of 12. So the network key is
   reported when declared and no rule fires on ``_MachServices``: the service
   names are recorded in the block, and that is the honest shipping form
-  (the CHECK_SIGNER_MISMATCH shape from W2.4 — 152 hits on 178 benign
+  (the CHECK_SIGNER_MISMATCH shape — 152 hits on 178 benign
   files before re-scoping).
 - A ``.plugin`` bundle names a host only under a ``CoreMediaIO/Plug-Ins/DAL``
   path. The suffix alone is ambiguous (UserEventPlugins, Internet plug-ins
@@ -57,7 +57,7 @@ from blint.logger import LOG
 # the key (the one rule on declarations fires on the boolean network key),
 # and the largest real list measured on this system is 16
 # (AppleAVBAudio.driver's _IOKitUserClients), so 64 is 4x the largest
-# measured. Pinned by a fixture that exceeds it (rule 33).
+# measured. Pinned by a fixture that exceeds it.
 NAME_LIST_LIMIT = 64
 
 # The Info.plist keys reported as declarations, with the block key each
@@ -87,7 +87,7 @@ def _kinds_table() -> dict:
             ).open("r", encoding="utf-8") as handle:
                 _TABLE_CACHE = yaml.safe_load(handle) or {}
         except (OSError, yaml.YAMLError):
-            # An unreadable table determines nothing (rule 11): the block
+            # An unreadable table determines nothing: the block
             # is absent rather than half-derived from a partial file.
             _TABLE_CACHE = {}
     return _TABLE_CACHE
@@ -135,7 +135,7 @@ def _plugin_install_scope(kind: str, bundle_dir: str) -> str | None:
     A ``.systemextension`` / ``.dext`` shipped inside an application is not
     installed anywhere: the copy macOS runs is the activated one staged under
     ``/Library/SystemExtensions/<UUID>/``, and this one is inert payload. The
-    module docstring has said so since the packet was written, but the code
+    module docstring has always said so, but the code
     asked :func:`install_scope` about the path alone — so a vendor extension
     under ``/Library/Application Support/Acme/Acme.app/...`` came back
     ``machine``, which is how ``CHECK_UNSIGNED_HOST_PLUGIN`` (high) reaches an
@@ -175,7 +175,7 @@ def _table_entry(kind: str, bundle_dir: str) -> tuple[str, dict] | None:
     The marker itself comes from the entry's ``require_path_marker`` field.
     It was hardcoded here while the table also declared it, so the data file
     documented a rule the code did not read and editing the table would have
-    changed nothing (rule 21: one place for a fact). An entry that declares
+    changed nothing (one place for a fact). An entry that declares
     a marker and does not match it names no host.
     """
     table = _kinds_table().get("kinds") or {}
@@ -236,7 +236,7 @@ def _declarations(plist: object, status: str) -> dict | None:
     declaration, and the block never asserts a negative it did not read.
     A plist blint could not read yields no ``declarations`` key plus a
     ``declarations_status`` naming why, so "declared nothing" and "could
-    not be read" stay distinguishable (rule 14). A non-dict plist root is
+    not be read" stay distinguishable. A non-dict plist root is
     legal XML that carries no declarations at all.
     """
     if status != "read":

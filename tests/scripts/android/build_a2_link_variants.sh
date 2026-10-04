@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A2 (feat/an-a2-a3) — tier-1 link variants that ndk-build cannot express.
+# Tier-1 link variants that ndk-build cannot express.
 #
 # ndk-build always passes -Wl,-soname, so the two SONAME facts need a raw
 # NDK clang invocation (a real build; the command is this script):
@@ -51,7 +51,7 @@ for tag in r27 r28; do
       "$out/libhello_nosoname.so.unstripped"
 
     # hello_scs (arm64 only): -fsanitize=shadow-call-stack, whose x18
-    # push/pop prologue/epilogue is the expected fact (02/A). arm64-only:
+    # push/pop prologue/epilogue is the expected fact. arm64-only:
     # the SCS instrumentation uses x18, reserved on arm64 only.
     if [ "$abi" = "arm64-v8a" ]; then
       "$cc" -O2 -fPIC -fstack-protector-strong -fsanitize=shadow-call-stack \

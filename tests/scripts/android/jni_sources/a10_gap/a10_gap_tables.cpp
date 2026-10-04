@@ -1,5 +1,5 @@
 /*
- * A10 Q1 - the two honest 32-bit refusals A0 named, each pinned next to a
+ * The two honest 32-bit refusals the corpus showed, each pinned next to a
  * control that must keep binding (see GapNative.java for every entry's
  * expected fate, and a10_gap_nounwind.cpp for the wrapper without unwind
  * tables).
@@ -8,7 +8,7 @@
  * weakOnly    the fbjni kDescriptor shape: the signature word references a
  *             weak preemptible OBJECT dynsym, so the linker cannot fold the
  *             word to RELATIVE and the defined-symbol relocation map must
- *             read it (A8 N2) - on REL ABIs too.
+ *             read it - on REL ABIs too.
  * nounwindAdd a static triple whose fnPtr relocates correctly onto a real
  *             function that carries no unwind entry and no dynamic symbol
  *             (the RnHello v7a yoga wrappers) - no oracle-verifiable start,

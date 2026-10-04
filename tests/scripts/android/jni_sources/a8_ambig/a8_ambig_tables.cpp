@@ -1,5 +1,5 @@
 /*
- * A8 N3 - three classes registering the SAME name + signature through
+ * Three classes registering the SAME name + signature through
  * FindClass:
  *
  *   com.blint.a8.AmbigOne   - constant class name beside RegisterNatives
@@ -7,7 +7,7 @@
  *   com.blint.a8.AmbigThree - class name COMPOSED at runtime (snprintf),
  *                             so no constant names it: stays ambiguous
  *
- * The R1 oracle: One and Two must bind to their own table's entry;
+ * The oracle: One and Two must bind to their own table's entry;
  * Three must stay ambiguous.
  */
 #include <jni.h>

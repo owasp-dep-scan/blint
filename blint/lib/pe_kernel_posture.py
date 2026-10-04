@@ -1,29 +1,29 @@
-"""Kernel hardening posture (PE lane W5.2, plan 04/B).
+"""Kernel hardening posture.
 
-Three facts attach to the ``driver`` block (W5.1) and one finding family
+Three facts attach to the ``driver`` block and one finding family
 leaves with them:
 
 - ``hvci_compatibility``: Microsoft's documented HVCI (memory integrity)
   driver ruleset, encoded as individually evidenced conditions. A failure
   names *which* condition failed - "this driver is not compatible" says
-  nothing a reviewer can act on. Measured before the rule shipped (ground
-  rule 34): all 330 drivers on the VM's full System32\\drivers pass every
+  nothing a reviewer can act on. Measured before the rule shipped:
+  all 330 drivers on the VM's full System32\\drivers pass every
   condition, so a failure is a real signal, not noise.
 - ``kernel_hardening``: the kernel-relevant load-configuration and
   DLL-characteristics facts (kernel CFG, retpoline, XFG, RFG,
   /INTEGRITYCHECK, enclave configuration), each with its source named -
   this block summarises, it never recomputes what ``security_properties``
-  and ``load_configuration`` already state. One deliberate finding: the
-  plan's "import optimization" has no GuardFlags bit of its own in the
+  and ``load_configuration`` already state. One deliberate finding:
+  "import optimization" has no GuardFlags bit of its own in the
   Windows SDK table - retpoline presence is the flag that carries it - so
   no separate key exists to invent.
 - ``dangerous_imports``: the BYOVD primitive families, *scored*, not
-  listed. The measurement that decided what this block may claim (rule
-  34), over the 330-driver benign sub-tier: MmMapLockedPagesSpecifyCache
+  listed. The measurement that decided what this block may claim, over
+  the 330-driver benign sub-tier: MmMapLockedPagesSpecifyCache
   is imported by 138 benign drivers (42%), MmMapIoSpace by only 3, and 72
   drivers (22%) carry two or more primitive families. No rule may fire on
   a family count alone at any severity. The block is context for a
-  reviewer (and for W5.3, where exposure joins capability); the findings
+  reviewer (and for IOCTL depth, where exposure joins capability); the findings
   that fire on combinations with exposure already exist as review rules
   (DRIVER_INSECURE_DEVICE_OBJECT and siblings), which this block does not
   replace.
@@ -32,7 +32,7 @@ Boot-start discipline: ``/INTEGRITYCHECK`` absence is a finding only on a
 boot-start driver. Boot-start-ness is determined statically exactly once -
 subsystem WINDOWS_BOOT_APPLICATION, the images winload itself loads. For
 every other driver the StartType lives in the registry blint cannot read,
-so the fact stays ``undetermined`` and no rule fires (rule 11).
+so the fact stays ``undetermined`` and no rule fires.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ PAGE_SIZE = 0x1000
 
 _MSR_INSTRUCTION_RE = PRIVILEGED_HW_INSTRUCTION_PATTERNS
 
-# The BYOVD primitive families (plan 04/B), with the weight each family
+# The BYOVD primitive families, with the weight each family
 # contributes to capability_score. Weights reflect how directly the
 # primitive yields kernel read/write: physical-memory mapping and cross-
 # process access are the coin of the BYOVD realm; PCI config space is
@@ -121,7 +121,7 @@ DANGEROUS_FAMILIES: tuple[dict[str, Any], ...] = (
 MSR_FAMILY_WEIGHT = 2
 
 # Listing bound per family: a listing bound only, no consumer reads past
-# the first entries (rule 33 fixture pins the block still speaks past it).
+# the first entries (a fixture pins that the block still speaks past it).
 FAMILY_EVIDENCE_LIMIT = 8
 
 
@@ -214,7 +214,7 @@ def evaluate_hvci_compatibility(metadata: dict[str, Any]) -> dict[str, Any]:
     least one fails with its evidence in ``failed_conditions``, and the
     conditions whose source was absent are listed in
     ``undetermined_conditions`` rather than folded into either verdict
-    (rules 11/32: absence of a source is not a failed condition).
+    (absence of a source is not a failed condition).
     """
     conditions: list[dict[str, Any]] = []
     failed: list[str] = []
@@ -250,7 +250,7 @@ def evaluate_hvci_compatibility(metadata: dict[str, Any]) -> dict[str, Any]:
 
 
 # GuardFlags bits, from blint's winnt.h-derived table (pe_constants) - the
-# numeric values are the contract (ground rule 28), restated here as named
+# numeric values are the contract, restated here as named
 # keys the kernel posture block reports.
 _KERNEL_HARDENING_GUARD_BITS: tuple[tuple[str, int], ...] = (
     ("cfg_instrumented", 0x00000100),
@@ -265,7 +265,7 @@ def evaluate_kernel_hardening(metadata: dict[str, Any]) -> dict[str, Any]:
     """The ``kernel_hardening`` block, with each fact's source named.
 
     Summarises ``load_configuration`` and the DLL characteristics; it does
-    not recompute what ``security_properties`` states (rule 21). Keys are
+    not recompute what ``security_properties`` states. Keys are
     omitted when their source is absent - absence is "not determined",
     never False.
     """
@@ -341,7 +341,7 @@ def evaluate_dangerous_imports(metadata: dict[str, Any]) -> dict[str, Any] | Non
 
 
 def apply_kernel_posture(block: dict[str, Any], metadata: dict[str, Any]) -> None:
-    """Attach the posture facts to the W5.1 ``driver`` block, in place."""
+    """Attach the posture facts to the ``driver`` block, in place."""
     block["hvci_compatibility"] = evaluate_hvci_compatibility(metadata)
     kernel_hardening = evaluate_kernel_hardening(metadata)
     if kernel_hardening:
@@ -356,7 +356,7 @@ def refresh_kernel_posture_after_disassembly(metadata: dict[str, Any]) -> None:
 
     Called from binary.parse next to the driver-block refresh. The
     instruction patterns are the same ones the BYOVD_FUNCTION analysis
-    rules use (one source for the fact, rule 21); the finding text names
+    rules use (one source for the fact); the finding text names
     the instruction so the claim is checkable against the disassembly.
     """
     block = metadata.get("driver")

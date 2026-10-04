@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the structured PE ``code_signature`` block (W2.1, W2.2).
+"""Tests for the structured PE ``code_signature`` block.
 
-Real-artifact assertions (ground rules 22/29) run against four committed
+Real-artifact assertions run against four committed
 fixtures signed on the Windows VM with signtool — one per variant: an
 RFC 3161-timestamped signature, the same with ``/ph`` page hashes, a
 signature with no timestamp at all, and a SHA-1 digest signature. The
@@ -47,7 +47,7 @@ SIGNER_O = "Blint PE Lane"
 
 
 # ---------------------------------------------------------------------------
-# Real fixtures, signed by signtool on the Windows VM (rules 22/29).
+# Real fixtures, signed by signtool on the Windows VM.
 # ---------------------------------------------------------------------------
 def test_real_rfc3161_signature():
     metadata = parse(RFC3161)
@@ -147,14 +147,14 @@ def test_real_unsigned_scope_none_with_catalog_lookup_not_performed():
     # The absence case is a finding only once a catalog lookup was performed
     # and came back negative: with catalog_lookup "not_performed" (no
     # --catalog-dir) a catalog-signed file cannot be distinguished from an
-    # unsigned one, so an unsigned claim would be manufactured (rule 11).
+    # unsigned one, so an unsigned claim would be manufactured.
     assert check_authenticode(UNSIGNED, metadata, {}) is True
     assert check_signature_not_timestamped(UNSIGNED, metadata, {}) is True
     assert check_weak_signature_digest(UNSIGNED, metadata, {}) is True
 
 
 def test_legacy_authenticode_key_kept():
-    """Additive rule 15: the flat legacy key stays populated for one
+    """Additive schema change: the flat legacy key stays populated for one
     release, sourced from the first signature."""
     metadata = parse(RFC3161)
     authenticode = metadata["authenticode"]
@@ -179,7 +179,7 @@ def test_real_python313_rfc3161_and_shortlived_cert():
     assert block["parse_status"] == "parsed"
     signature = block["signatures"][0]
     assert signature["signer"]["cn"] == "Python Software Foundation"
-    # V5: the signing certificate is valid for three days — "was it valid
+    # The signing certificate is valid for three days — "was it valid
     # when the timestamp says it signed?" is the right question, and the
     # answer is yes.
     assert signature["signer"]["not_before"] == "2025-08-13T16:32:28Z"
@@ -196,7 +196,7 @@ def test_real_python313_rfc3161_and_shortlived_cert():
 
 
 def test_real_dual_signed_weak_digest_only_false():
-    """02/A.3 on a real artifact: a SHA-1 outer signature with a SHA-256
+    """On a real artifact: a SHA-1 outer signature with a SHA-256
     nested one must NOT read as a SHA-1-signed binary, and the PKCS#9
     countersignature must be extracted as the timestamp it is. Skipped when
     the corpus is absent."""
@@ -249,7 +249,7 @@ def test_real_nested_signature_inherits_outer_timestamp():
 
 
 # ---------------------------------------------------------------------------
-# Hand-built DER: hostile cases (rule 30) must degrade, never raise.
+# Hand-built DER: hostile cases must degrade, never raise.
 # ---------------------------------------------------------------------------
 def _tlv(tag: int, content: bytes) -> bytes:
     if len(content) < 0x80:
@@ -481,7 +481,7 @@ def test_non_cms_entry_type_counted(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Caps and exact counts (ground rule 33): fixtures larger than the windows.
+# Caps and exact counts: fixtures larger than the windows.
 # ---------------------------------------------------------------------------
 def test_signature_count_exact_past_the_walk_window():
     """Ten nested signatures: every one is counted and every one listed —
@@ -510,7 +510,7 @@ def test_signature_count_exact_past_the_walk_window():
 
 
 def test_walk_past_the_window_declines_the_weak_digest_verdict():
-    """Ground rule 33 for the signature window itself: a fixture with more
+    """A cap-crossing fixture for the signature window itself: a fixture with more
     nested signatures than ``MAX_SIGNATURES_WALKED``.
 
     The test above stops at ten, which is well inside the window, so nothing
@@ -667,7 +667,7 @@ def test_win_certificate_entry_truncation_recorded():
 
 
 # ---------------------------------------------------------------------------
-# Signing class (W2.4, 02/C)
+# Signing class
 # ---------------------------------------------------------------------------
 KERNEL_EKU = "1.3.6.1.4.1.311.61.1.1"
 WHQL_EKU = "1.3.6.1.4.1.311.10.3.5"
@@ -704,7 +704,7 @@ def test_real_self_signed_fixture_class_and_rule():
 
 def test_real_unsigned_carries_no_class():
     """Without a performed catalog lookup an unsigned claim is manufactured,
-    so the key is absent — its absence means undetermined (rule 11)."""
+    so the key is absent — its absence means undetermined."""
     block = parse(UNSIGNED)["code_signature"]
     assert "signing_class" not in block
     for rule in (check_self_signed, check_signature_unknown_root, check_kernel_signing_class):
@@ -751,7 +751,7 @@ def test_kernel_driver_shipping_its_own_root_classes_unknown_root():
     without the driver EKU, commercial_ov) signature and
     CHECK_SIGNATURE_UNKNOWN_ROOT could only ever fire on certificates that
     are not code-signing certificates at all. The class now follows the
-    chain, and the kernel fact the driver lane consumes survives it because
+    chain, and the kernel fact the driver block consumes survives it because
     the kernel rule reads the EKU rather than the class string.
     """
     certs = [
@@ -887,7 +887,7 @@ def test_class_microsoft_first_party_by_anchor_name():
 def test_first_party_anchor_basis_distinguishes_hash_from_name():
     """A forged chain reaches the same class as a real one by name alone.
 
-    Nothing here is a trust verdict — blint validates no chain (02/D) — but
+    Nothing here is a trust verdict — blint validates no chain — but
     the subject organization and the issuer CN are both strings the signer
     chose, so the first-party class they produce must not read the same as
     one anchored to a root fingerprint blint actually matched.
@@ -907,7 +907,7 @@ def test_first_party_anchor_basis_distinguishes_hash_from_name():
 def test_class_withheld_when_leaf_is_microsoft_named_but_anchor_unknown():
     """A Microsoft-named organization whose chain anchors outside the
     snapshot is not first-party Microsoft: the anchor decides, and the
-    class is withheld rather than guessed (rule 11)."""
+    class is withheld rather than guessed."""
     certs = [
         _cert_tlv(5, "Some Commercial CA", "Microsoft Windows", subject_org="Microsoft Corporation"),
         _cert_tlv(6, "Some Commercial Root", "Some Commercial CA", is_ca=True),
@@ -926,7 +926,7 @@ def test_class_withheld_when_leaf_is_microsoft_named_but_anchor_unknown():
 def test_class_absent_without_deciding_facts():
     """An organization-less, policy-less code-signing leaf (individual code
     signing) anchored below a named public root determines no class in the
-    02/C table — the key must be absent, not defaulted. The chain ships
+    signing-class table — the key must be absent, not defaulted. The chain ships
     leaf and intermediate only (the normal shape), the intermediate names
     the real DigiCert Trusted Root G4, and nothing else in the blob is a
     class fact."""
@@ -946,7 +946,7 @@ def test_class_absent_without_deciding_facts():
 
 
 def test_class_withheld_when_the_walk_was_truncated():
-    """Ground rule 33 against the verdict itself: more nested signatures
+    """A cap-crossing fixture against the verdict itself: more nested signatures
     than the walk window, the innermost one kernel-signed. A class decided
     from the walked prefix would be a sample verdict; the key must be
     absent and the kernel rule must stay silent."""
@@ -1066,7 +1066,7 @@ def test_signer_mismatch_rule():
     assert check_signer_mismatch(
         "f", metadata_for("Contoso Ltd", "Fabrikam Inc"), {}
     ) is True
-    # Missing facts determine nothing (rule 11).
+    # Missing facts determine nothing.
     assert check_signer_mismatch(
         "f",
         {"code_signature": {"parse_status": "parsed", "signatures": []},
@@ -1115,7 +1115,7 @@ def test_root_anchor_snapshot_shape():
 
 
 def test_class_on_real_corpus_files():
-    """Ground-truth classes on corpus files (rule 29): the PSF-signed
+    """Ground-truth classes on corpus files: the PSF-signed
     python.exe is commercial_ov over a complete chain anchored at the
     Microsoft-operated Identity Verification root (in the snapshot, not a
     Microsoft leaf); the Sysinternals Testlimit is Microsoft's own code

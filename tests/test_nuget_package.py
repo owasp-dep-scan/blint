@@ -1,9 +1,9 @@
-"""W3.5 — NuGet identity in the SBOM: the .nupkg reader and its bounds.
+"""NuGet identity in the SBOM: the .nupkg reader and its bounds.
 
-Tests here hold the rule-30 duty for the ``.nupkg`` container (every limit
+Tests here hold the untrusted-input duty for the ``.nupkg`` container (every limit
 with a hostile fixture that exceeds it and is refused by name, and a leak
 assertion across success and failure — the reader extracts nothing, so the
-assertion is the stronger "no temp entry is ever created"), the rule-11
+assertion is the stronger "no temp entry is ever created"), the
 negative fixtures for the retired ``.dll``-to-``pkg:nuget`` heuristic, the
 version-slot honesty contract (``internal:version_source`` on every nuget
 component that carries a version), and the token-qualifier move.
@@ -11,7 +11,7 @@ component that carries a version), and the token-qualifier move.
 Real-artifact assertions against the corpus ``.nupkg`` files skip when the
 corpus is absent; their ground truth is the NuGet client's own resolution
 (``dotnet list package``) and ``GetAssemblyName`` on the Windows VM, pasted
-in the packet commit.
+in the commit message.
 """
 
 import os
@@ -70,7 +70,7 @@ def _nuspec(id_="Example.Package", version="1.2.3", extra="", template=NUSPEC_20
 
 
 # ---------------------------------------------------------------------------
-# Identity: namespace variants (rule 10) and both dependency shapes
+# Identity: namespace variants and both dependency shapes
 # ---------------------------------------------------------------------------
 
 
@@ -135,12 +135,12 @@ def test_exact_pin_grammar():
 
 
 # ---------------------------------------------------------------------------
-# Rule 30: every limit refuses by name, with a fixture that exceeds it
+# Every limit refuses by name, with a fixture that exceeds it
 # ---------------------------------------------------------------------------
 
 
 def test_member_count_cap_refuses_by_name(tmp_path):
-    # Fixture larger than the walk window (rule 33): the nuspec sits past
+    # Fixture larger than the walk window: the nuspec sits past
     # the cap, so the walk stops before finding it.
     target = tmp_path / "many.nupkg"
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -201,7 +201,7 @@ def test_nuspec_size_cap_refuses_by_name(tmp_path):
     ],
 )
 def test_unsafe_member_paths_refuse_by_name(tmp_path, member_name):
-    # Ground rule 30's traversal class. A "\" in a member name is refused
+    # The untrusted-input traversal class. A "\" in a member name is refused
     # even though this reader never extracts, because a later extractor
     # could. (The "\" case has its own test below: on Windows,
     # ZipInfo.__init__ rewrites "\" to "/" at write time, so writestr can
@@ -318,7 +318,7 @@ def test_dependency_listing_cap_refuses_by_name(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Rule 18: the cleanup claim is asserted, not read — and the reader's
+# The cleanup claim is asserted, not read — and the reader's
 # stronger claim is that no temp entry ever exists, on any path
 # ---------------------------------------------------------------------------
 
@@ -340,7 +340,7 @@ def _temp_snapshot():
 def test_no_temp_entries_across_success_and_every_refusal(tmp_path, archive):
     """The reader extracts nothing, so cleanup-on-failure holds by not
     creating anything: the delta across each parse is empty, asserted
-    against the live temp directory (ground rule 18's checklist wants the
+    against the live temp directory (the cleanup check wants the
     delta, and this is its strongest form)."""
     targets = {
         "ok.nupkg": lambda p: _write_nupkg(p, _nuspec(extra=GROUPED_DEPS)),
@@ -401,7 +401,7 @@ def test_nupkg_components_carry_package_identity_and_ranges(tmp_path):
 
 
 def test_refused_nupkg_still_emits_a_component_naming_the_refusal(tmp_path):
-    # Rule 32: a .nupkg that produced no package identity must not vanish
+    # A .nupkg that produced no package identity must not vanish
     # or read as an ordinary generic binary — the refusals travel on the
     # component.
     from blint.lib.sbom import _scratch_sbom, process_nupkg_file
@@ -418,7 +418,7 @@ def test_refused_nupkg_still_emits_a_component_naming_the_refusal(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Rule 11: negative fixtures for the retired filename heuristic
+# Negative fixtures for the retired filename heuristic
 # ---------------------------------------------------------------------------
 
 
@@ -509,7 +509,7 @@ def test_build_bom_overlay_wins_over_assembly_version():
 
 
 # ---------------------------------------------------------------------------
-# Rule 32: the AssemblyRef coverage state
+# The AssemblyRef coverage state
 # ---------------------------------------------------------------------------
 
 
@@ -534,7 +534,7 @@ def test_assemblyref_state_matrix():
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts (ground rules 22/29) — skip when the corpus is absent
+# Real artifacts — skip when the corpus is absent
 # ---------------------------------------------------------------------------
 
 
@@ -615,7 +615,7 @@ def test_real_managed_assembly_parent_purl(tmp_path):
 
 
 def test_real_native_dll_parent_is_not_a_nuget_package(tmp_path):
-    # The packet's reason to exist, on a real artifact: python313.dll is
+    # The core case, on a real artifact: python313.dll is
     # CPython's native DLL — no CLI header, no NuGet package. The
     # component says generic, not pkg:nuget/python313.
     from blint.lib.sbom import _scratch_sbom, process_exe_file

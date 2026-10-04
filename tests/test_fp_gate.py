@@ -1,4 +1,4 @@
-"""Tests for the F0 measurement instrument (tests/scripts/fp_gate.py).
+"""Tests for the false-positive measurement instrument (tests/scripts/fp_gate.py).
 
 These tests exercise the derived-file partition on plain dicts: no corpus,
 no blint run and no filesystem semantics are involved, so they hold on every

@@ -1,4 +1,4 @@
-"""Tests for the A4a native accuracy probe (tests/scripts/android/native_probe.py).
+"""Tests for the native accuracy probe (tests/scripts/android/native_probe.py).
 
 The parsing tests assert against real recorded ``llvm-readelf`` /
 ``llvm-objdump`` output (``tests/data/android/native-probe/``); the commands
@@ -308,7 +308,7 @@ def test_compare_mode_only_gates_on_stated_oracle_mode() -> None:
     reason="needs nyxstone, NDK llvm tools and the tier-1 corpus fixture",
 )
 def test_probe_v7a_unstripped_agrees_after_semantics() -> None:
-    """The unstripped twin after T3: full agreement - functions, modes,
+    """The unstripped twin with branch semantics: full agreement - functions, modes,
     boundaries, counts, mnemonics and every direct bl/blx edge."""
     report_json = FIXTURE_DIR / "probe-v7a-report.json"
     code = native_probe.main([str(CORPUS_V7A_UNSTRIPPED), "--json", str(report_json)])
@@ -326,7 +326,7 @@ def test_probe_v7a_unstripped_agrees_after_semantics() -> None:
 def test_probe_v7a_stripped_state_recorded_for_t4() -> None:
     """The stripped twin: functions all found, but with no mapping symbols
     and no parity evidence a few PLT-veneer entries decode in a guessed
-    mode. Recorded as the before-picture for T4's discovery rung."""
+    mode. Recorded as the before-picture for function discovery."""
     report_json = FIXTURE_DIR / "probe-v7a-stripped.json"
     code = native_probe.main([str(CORPUS_V7A), "--json", str(report_json)])
     summary = __import__("json").loads(report_json.read_text())["summary"]

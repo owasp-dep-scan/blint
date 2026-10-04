@@ -1,15 +1,15 @@
 /*
- * A8 N2 - the merged registration tables, in the TU that only DECLARES the
+ * The merged registration tables, in the TU that only DECLARES the
  * symbols a8_hybrid_defs.cpp defines. Two classes' tables plus one decoy
  * structure land in one .data.rel.ro run, the way the linker merges the
  * react-native codegen's per-class tables:
  *
  *   - name words: plain string literals -> local .rodata -> R_*_RELATIVE;
  *   - signature + fnPtr words: the extern symbols -> R_*_ABS* against the
- *     defined dynsym symbol (the fbjni shape F1's RELATIVE-only walk
- *     cannot see, N0(b)).
+ *     defined dynsym symbol (the fbjni shape the RELATIVE-only walk
+ *     cannot see).
  *
- * The source tables below ARE the R1 oracle; the tests assert the recovery
+ * The source tables below ARE the oracle; the tests assert the recovery
  * equals them.
  */
 #include <jni.h>

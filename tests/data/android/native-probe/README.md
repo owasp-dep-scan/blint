@@ -13,7 +13,7 @@ llvm-objdump -d --no-show-raw-insn --triple=thumbv7-linux-androideabi libhello.s
 llvm-objdump -d --no-show-raw-insn --triple=i686-linux-android --x86-asm-syntax=intel libhello.so > libhello-x86-objdump-intel.txt
 ```
 
-The `.so` inputs are the A0.2 tier-1 NDK builds (sources in
+The `.so` inputs are the tier-1 NDK builds of the reference corpus (sources in
 `tests/scripts/android/jni_sources/`, built by
 `build_android_corpus.py tier1`); they are not committed, only these
 recorded outputs are. Tests assert against the recorded text (parsing),

@@ -1,9 +1,9 @@
-r"""Tests for the Windows posture summary and diff deltas (W5.5, 04/E).
+r"""Tests for the Windows posture summary and diff deltas.
 
 The posture block's whole contract is that it *summarises* - so the
 load-bearing tests are the ones that would catch a drift or a swap: absent
-vs unknown never merge (rule 32), the values equal their source blocks
-(rule 21: one place computes), and the diff layer's windows changes are
+vs unknown never merge, the values equal their source blocks
+(one place computes), and the diff layer's windows changes are
 mirror-symmetric.
 """
 
@@ -38,7 +38,7 @@ def test_posture_splits_hardening_into_present_absent_unknown():
     assert block["hardening"]["present"] == ["aslr", "dep", "nx"]
     # Computed-and-off: absent. This is a claim the source made.
     assert sorted(block["hardening"]["absent"]) == ["cfg", "force_integrity"]
-    # Source unreadable: unknown. Rule 32 - never merged into absent.
+    # Source unreadable: unknown, never merged into absent.
     assert block["hardening"]["unknown"] == ["cet_shadow_stack"]
 
 

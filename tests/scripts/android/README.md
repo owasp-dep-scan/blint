@@ -1,9 +1,6 @@
-# Android native lane — SDK setup and corpus tooling (A0)
+# Android native SDK setup and corpus tooling
 
-Working copies of the reviewer-owned scripts in `~/blint-android-native-plans/scripts/`;
-the proposal form of each script is in its A0 commit body.
-
-## A0.1 tool record (2026-09-24, this machine)
+## Tool record (2026-09-24, this machine)
 
 Everything installed under `~/Android/sdk` in user space by
 `setup_android_sdk.sh` — no sudo, no Homebrew casks. The pre-existing
@@ -59,8 +56,7 @@ reached statically instead: `system.img` is a GPT disk with an Android
 `super` partition holding EROFS logical partitions, so tier-0 x86_64 files
 are extracted by parsing the liblp metadata and loop-mounting the logical
 partitions inside the running arm64 emulator (see
-`build_android_corpus.py tier0-x86`), with `adb root` there. This is stated
-in the A0.2 commit with the extraction log.
+`build_android_corpus.py tier0-x86`), with `adb root` there.
 
 ## Scripts
 
@@ -70,24 +66,24 @@ in the A0.2 commit with the extraction log.
 | `build_android_corpus.sh` / `build_android_corpus.py` | tier 0 (emulator pulls), tier 1 (NDK planted variants + real APK packaging), tier 4 (hostile) |
 | `jni_sources/` | tier-1 planted-variant sources; built by the real NDK, every flag is the expected fact |
 | `make_hostile_fixtures.py` | tier-4 hostile inputs; each shape names the spec it is built to |
-| `baseline_android.py` | A0.3 baseline: SBOM components/build-id versions, standalone .so findings per rule/ABI, `--disassemble` functions per ABI |
+| `baseline_android.py` | Baseline: SBOM components/build-id versions, standalone .so findings per rule/ABI, `--disassemble` functions per ABI |
 
-## A0.2 corpus results (2026-09-24)
+## Corpus results (2026-09-24)
 
 | Tier | Collected | Notes |
 |---|---|---|
 | 0 arm64 | API 34/35/36 × {`/apex` (~280 MB), `/system/lib64` (~200 MB), `/vendor/lib64` (~80 MB)} via `adb root` | 1398-1541 ELF files per image; `_system_lib`/`_vendor_lib` are empty because the arm64-only images ship no 32-bit libs |
-| 0 x86_64 | **not collected** | images cannot boot on ARM64 hosts (A0.1) and static extraction is blocked — see the `tier0_extract_x86` docstring and the A0.2 commit |
+| 0 x86_64 | **not collected** | images cannot boot on ARM64 hosts (see above) and static extraction is blocked — see the `tier0_extract_x86` docstring |
 | 1 NDK | 122 files: 5 ABIs (incl. riscv64) × r27/r28 × {hello, page4k, page16k, textrels, static, + hwasan/memtag/bti on arm64}, stripped + unstripped, 9 APKs + 1 multi-ABI xapk | every planted fact verified with `llvm-readelf` from the same NDK in the same run; r27 defaults to 4 KiB LOAD alignment, r28 to 16 KiB |
-| 2 F-Droid | seed (26 APKs) unchanged, per the prompt | — |
+| 2 F-Droid | seed (26 APKs) unchanged | — |
 | 3 frameworks | React Native 0.76.9 hello app built locally (`com.blint.rnhello_1.apk`, 4 ABIs, Hermes) | Unity: no Unity editor/licence on this machine — not collected. .NET: `dotnet workload install` needs elevation on this machine (root-owned SDK manifest at /usr/local/share/dotnet, and `--to-path` still requires it) — not collected, no sudo available |
 | 4 hostile | 9 fixtures, generated from a real NDK `libhello.so` base | the ≤100 KB subset is committed under `tests/data/android/` |
 
-| `native_probe.py` | A4a per-function disassembly accuracy probe vs the NDK llvm tools |
-| `elf_facts_probe.py` | A2 fact probe: blint's bionic ELF facts next to `llvm-readelf -a --notes` on the same file, same run; exits non-zero on disagreement, `--strict` also fails facts blint does not emit yet |
-| `build_a2_link_variants.sh` | A2 tier-1 link variants ndk-build cannot express (`libhello_nosoname.so`, `libhello_absneeded.so`), raw NDK clang invocations |
+| `native_probe.py` | Per-function disassembly accuracy probe vs the NDK llvm tools |
+| `elf_facts_probe.py` | Fact probe: blint's bionic ELF facts next to `llvm-readelf -a --notes` on the same file, same run; exits non-zero on disagreement, `--strict` also fails facts blint does not emit yet |
+| `build_a2_link_variants.sh` | Tier-1 link variants ndk-build cannot express (`libhello_nosoname.so`, `libhello_absneeded.so`), raw NDK clang invocations |
 
-## A2 additions (2026-09-25, feat/an-a2-a3)
+## Tier-1 additions (2026-09-25)
 
 Tier 1 grew by four ndk-build modules (`hello_relr` `-Wl,-z,pack-relative-relocs`,
 `hello_aps2` `-Wl,--pack-dyn-relocs=android`, `hello_fortify` `-D_FORTIFY_SOURCE=2`,

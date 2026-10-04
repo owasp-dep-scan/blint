@@ -1,7 +1,7 @@
 package com.blint.a13.rt;
 
 /**
- * A13 U1 - the refusal twin. The registrar's cold init path names two
+ * The refusal twin. The registrar's cold init path names two
  * classes, so the RegisterNatives call that no class materialization
  * precedes stays unread and rtOne stays unbound on every ABI.
  */

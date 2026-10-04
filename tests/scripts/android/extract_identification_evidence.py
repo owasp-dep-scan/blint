@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Extract the R1 identification-evidence JSONs (H0's committed fixtures).
+"""Extract the committed framework identification-evidence JSONs.
 
-Rule 39: corpus binaries are never committed; the extracted evidence is.
+Corpus binaries are never committed; the extracted evidence is.
 For one corpus library per framework this writes ``tests/data/android/
 <framework>-evidence.json`` holding exactly the inputs blint's framework
 detectors consume (blint.lib.framework_ident), in the shape they read
 them: the note facts, the demangled symbol names that carry the symbol-set
 evidence, and the matched evidence strings. The llvm tools that confirm
-the same bytes in the same run (ground rule 29) are recorded per file with
+the same bytes in the same run are recorded per file with
 their command and version.
 
-The JSON is consumed by the R1 tests so the detectors run against real
+The JSON is consumed by the identification tests so the detectors run against real
 corpus evidence without the corpus. Regenerate with the same command
 recorded in each file when the corpus changes.
 
@@ -135,7 +135,7 @@ def extract(path: str, tools: dict) -> dict:
                     1 for n in symbol_names if SYMBOL_EVIDENCE_RE.match(n)
                 ),
                 "dynamic_symbols_total": len(symbol_names),
-                # Explicit flags so an R1 fixture never depends on the
+                # Explicit flags so an evidence fixture never depends on the
                 # matched_names cap.
                 "ndk1_namespace": any(n.startswith("std::__ndk1::") for n in symbol_names),
                 "operator_new_exported": any(

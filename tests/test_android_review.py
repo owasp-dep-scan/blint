@@ -1,6 +1,6 @@
-"""A1.2 - native code in the analysis path (01/C).
+"""Native code in the Android analysis path.
 
-The no-dex and multi-ABI fixtures are the committed A0.2 corpus files
+The no-dex and multi-ABI fixtures are the committed reference corpus files
 (real aapt2/zipalign/apksigner packaging over NDK-built libraries).
 """
 
@@ -31,7 +31,7 @@ def _run(src: Path, tmp_path: Path, **overrides) -> dict:
 
 
 def test_no_dex_apk_is_analyzed_not_skipped(tmp_path: Path) -> None:
-    # V7: an APK with native code and no dex used to skip as
+    # An APK with native code and no dex used to skip as
     # no_dex_bytecode; now the app is a container unit and the library is
     # an apk-so-member unit with its own exported metadata.
     coverage = _run(NO_DEX, tmp_path)
@@ -51,7 +51,7 @@ def test_no_dex_apk_is_analyzed_not_skipped(tmp_path: Path) -> None:
     assert container["role"] == "apk-so-member"
     assert container["abi"] == "arm64-v8a"
     assert container["member_path"] == "lib/arm64-v8a/libhello.so"
-    # The parse itself is a first-class ELF analysis (V3 reversed): the
+    # The parse itself is a first-class ELF analysis: the
     # hardening facts the SBOM path used to discard are on the unit.
     assert member_meta["binary_type"] == "ELF"
     assert member_meta["is_targeting_android"] is True
@@ -75,7 +75,7 @@ def test_all_abis_yield_per_abi_units(tmp_path: Path) -> None:
     assert member["failed"] == 0
     exports = [p.name for p in tmp_path.glob("*.json") if "!" in p.name]
     # One result per (app, abi, library): the five per-ABI builds are five
-    # distinct units (ground rule 36).
+    # distinct units.
     assert len(exports) == 5
     assert any("riscv64" in name for name in exports)
 
@@ -93,8 +93,8 @@ def test_dex_app_units_unchanged_plus_native(tmp_path: Path) -> None:
 
 
 def test_libc_portability_bionic_out_of_scope() -> None:
-    # Ground rule 35: the glibc-vs-musl measurement cannot judge bionic -
-    # __register_atfork is bionic-exported (A0.3: 604 tier-0 FPs).
+    # The glibc-vs-musl measurement cannot judge bionic, so it does not run -
+    # __register_atfork is bionic-exported (604 tier-0 FPs on the corpus).
     metadata = {
         "abi_analysis": {
             "libc": "bionic",
@@ -116,7 +116,7 @@ def test_libc_portability_bionic_out_of_scope() -> None:
 def test_rpath_rule_bionic_out_of_scope() -> None:
     # Bionic ignores DT_RPATH and resolves DT_RUNPATH only within the
     # naming library's namespace - the rule's ld.so semantics do not
-    # exist there, so it does not run (A0.3: the tier-0 hits included
+    # exist there, so it does not run (the tier-0 corpus hits included
     # bionic's own linker).
     bionic = {"has_rpath": True, "abi_analysis": {"libc": "bionic"}}
     assert check_rpath("x.so", bionic, {}) is True
@@ -126,7 +126,7 @@ def test_rpath_rule_bionic_out_of_scope() -> None:
 
 def test_bionic_runtime_not_tagged_glibc() -> None:
     # construct_binary_composition used to tag every bionic binary "glibc"
-    # via the libc.so DT_NEEDED check (V12).
+    # via the libc.so DT_NEEDED check.
     from blint.lib.binary import construct_binary_composition
 
     metadata = {

@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# A0.2 — Android native corpus builder (bash entrypoint).
+# Android native corpus builder (bash entrypoint).
 #
-# Working copy of the reviewer-owned scripts/build_android_corpus.sh lane in
-# ~/blint-android-native-plans; the heavy lifting lives in the python
+# The heavy lifting lives in the python
 # helpers next to this script. Tiers are run separately because tier 0 boots
 # one emulator per (api, abi) system image:
 #

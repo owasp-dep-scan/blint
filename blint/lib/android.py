@@ -154,7 +154,7 @@ def attach_app_framework_facts(parent_component: Component | None, app_facts: di
 
     The NDK version dates every NDK-built library of an ABI, so the
     distinct ``.note.android.ident`` NDK versions are recorded per ABI as
-    one property (ground rule 36: per-ABI facts, never the first or the
+    one property (per-ABI facts, never the first or the
     best).
     """
     if parent_component is None:
@@ -620,7 +620,7 @@ NDK_PLATFORM_LIBRARIES = frozenset({
 def _so_version_and_build_id(so_metadata: dict) -> tuple[str | None, str | None]:
     """Split the notes into a real version and a build-id.
 
-    The build-id is a content hash; reporting it as a version was V4 (84%
+    The build-id is a content hash; reporting it as a version was a defect (84%
     of tier-2 components carried one). A note version counts only when it
     is not a bare hex digest.
     """
@@ -651,8 +651,8 @@ def collect_so_files_metadata(
     ``(name, version)`` with per-ABI occurrences - a five-ABI app is five
     evidence lines on one component, not five near-duplicates, and a
     single-ABI app's count does not grow. The build-id never masquerades
-    as the version (V4): it rides the ``blint:build_id`` property keyed
-    by ABI. purls are built with PackageURL (V5: ``c++_shared`` encodes,
+    as the version: it rides the ``blint:build_id`` property keyed
+    by ABI. purls are built with PackageURL (``c++_shared`` encodes,
     names keep their ``lib`` prefix so libapp/libdata stop colliding as
     "app"/"data"), and the ABI is a qualifier. DT_NEEDED platform
     libraries are recorded as the ``blint:platform_needed`` fact on the
@@ -696,7 +696,7 @@ def collect_so_files_metadata(
         if so_metadata is None:
             continue
         if app_facts is not None:
-            # App-level per-ABI NDK facts (rule 36): every NDK-built library
+            # App-level per-ABI NDK facts: every NDK-built library
             # of the ABI dates it, so collect the distinct note versions.
             ident = (so_metadata.get("android") or {}).get("android_ident") or {}
             if ident.get("ndk_version"):
@@ -936,7 +936,7 @@ def _collect_group_blintdb_records(
     """One record per project for the group, minus framework-claimed ones.
 
     The strongest member's record stands for the project, and ``abis``
-    lists the ABIs whose copy matched: a child is a fact per ABI (rule 36).
+    lists the ABIs whose copy matched: a child is a fact per ABI.
     """
     merged: dict[str, dict] = {}
     abis: dict[str, set[str]] = {}

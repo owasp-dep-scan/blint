@@ -171,10 +171,10 @@ the tuple's `armv7`/`thumbv7` spellings (environment preserved: `-android`,
 `-androideabi`, `-gnu` all behave the same way) and picks per span. Immediates
 print decimal (`mov r0, #1`), nyxstone's default style, in both states.
 
-### ARM32 call and control-flow semantics (03/T3)
+### ARM32 call and control-flow semantics
 
 All rules are text tables over nyxstone's rendering, measured against the
-NDK r28c `llvm-objdump` oracle on the A4a fixtures:
+NDK r28c `llvm-objdump` oracle on the ARM32 fixtures:
 
 - **Calls.** `bl`/`blx` with an immediate operand are direct calls; `blx rN`
   is an indirect call through the register. The immediate is a signed
@@ -201,7 +201,7 @@ NDK r28c `llvm-objdump` oracle on the A4a fixtures:
   reports an `indirect_hint` named from the slot when the slot is a GOT
   entry with a relocation, and an unnamed hint when it is a vtable level
   (JNIEnv-style double indirection resolves no name — that is the JNI
-  wave's model, not a guess).
+  join's model, not a guess).
 - **PLT thunks.** A direct call or tail call to a `.plt` stub resolves the
   stub's exact address; the imported name is a relocation, so the edge
   surfaces in the callgraph as an external edge rather than a named target.

@@ -1,10 +1,9 @@
-# macOS host-plugin kinds (blint lane M1.1, plan 07).
+# macOS host-plugin kinds.
 #
 # Each entry names the host process a plugin bundle of that kind loads into,
 # that host's privilege, and how the plugin is activated. Pinned against
 # Apple's documented extension points, with the measurements that scoped the
-# rules re-taken on the machine this packet was built on (macOS 15.8, build
-# 24H23) rather than inherited from the plan's macOS 26 research system.
+# rules taken on macOS 15.8 (build 24H23).
 #
 # AudioServerPlugIn declaration keys across the 12 Apple HAL plugins in
 # /System/Library/Audio/Plug-Ins/HAL (third-party /Library/Audio/Plug-Ins/HAL
@@ -27,7 +26,7 @@
 # - CHECK_AUDIO_PLUGIN_MACH_SERVICES does NOT ship. 7 of 12 Apple plugins
 #   declare _MachServices (AirPlay.driver declares only that), so a rule on
 #   bare presence fires on the operating system's own plugins - the
-#   CHECK_SIGNER_MISMATCH shape from W2.4 (152 hits on 178 benign files
+#   CHECK_SIGNER_MISMATCH shape (152 hits on 178 benign files
 #   before it was re-scoped). The service names are recorded in
 #   host_plugin.declarations.mach_services and no rule fires on them.
 #
@@ -52,7 +51,7 @@
 #   administrator password and no dialog. A DriverKit extension runs in its
 #   own driver process while its containing application keeps ordinary
 #   network access, so nothing in this block may be read as "this software
-#   cannot reach the network" (plan 07's honesty requirement).
+#   cannot reach the network".
 
 kinds:
   driver:

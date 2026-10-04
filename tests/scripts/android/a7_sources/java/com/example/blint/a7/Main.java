@@ -1,5 +1,5 @@
 /*
- * A7 K1 — the fixture driver: exercises the RootBeer half and one benign
+ * The fixture driver: exercises the RootBeer half and one benign
  * native-adjacent read (an SDK probe string in the same dex, which must
  * not turn into a finding on its own).
  */

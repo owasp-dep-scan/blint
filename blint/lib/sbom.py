@@ -89,8 +89,8 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict | None = None) ->
     # Extract the name from the .rlib files
     if name.endswith(".rlib"):
         name = name.split("-")[0].removeprefix("lib")
-    # W3.5: a `.dll` filename is not evidence of a NuGet package (ground
-    # rule 11) — over corpus tiers 0/1/5, 217 of 219 `pkg:nuget` parents
+    # A `.dll` filename is not evidence of a NuGet package — over corpus
+    # tiers 0/1/5, 217 of 219 `pkg:nuget` parents
     # produced here sat on native DLLs with no CLI header (`pkg:nuget/
     # python313`, `pkg:nuget/libcrypto-3`). The purl type here is now
     # always generic; a `pkg:nuget` purl comes only from evidence — the
@@ -182,8 +182,8 @@ def generate(
     components = []
     dependencies = []
     dependencies_dict: dict[str, set] = {}
-    # W6.1: the emitted document declares the requested spec version. blint
-    # populates no CycloneDX 1.7-only field (see the W6.1 notes in
+    # The emitted document declares the requested spec version. blint
+    # populates no CycloneDX 1.7-only field (see the CycloneDX notes in
     # docs/METADATA.md), so a document declared 1.6 is exactly the 1.6 shape
     # and validates against the official 1.6 schema; 1.7 is the default.
     spec_version = getattr(blint_options, "sbom_spec_version", "1.7") or "1.7"
@@ -238,7 +238,7 @@ def generate(
                         skipped_wasm += 1
                     continue
                 if exe.lower().endswith(".nupkg"):
-                    # W3.5: a .nupkg is a package archive, not a binary —
+                    # A .nupkg is a package archive, not a binary —
                     # its identity comes from the .nuspec member, never
                     # from being parsed as a PE.
                     progress.update(
@@ -318,7 +318,7 @@ def generate(
                     components += process_cab_file(dependencies_dict, exe, sbom)
                     continue
                 if exe.lower().endswith(MSIX_EXTENSIONS):
-                    # W4.1: an MSIX/Appx package or bundle is a container —
+                    # An MSIX/Appx package or bundle is a container —
                     # identity from its AppxManifest, members from the
                     # archive, never parsed as a bare PE.
                     progress.update(
@@ -531,7 +531,7 @@ def _find_component_by_package_identity(
 
     Used by the banner layer to corroborate instead of duplicating: the
     blintdb match for the same library carries qualifiers in its purl, so
-    purl-string equality cannot see the overlap (F2a.2).
+    purl-string equality cannot see the overlap.
     """
     identity = _generic_package_identity(purl)
     if identity is None:
@@ -547,8 +547,8 @@ def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
 
     Two blintdb rows for the same project at different versions (a Homebrew
     machine holding two kegs of openssl@3) group under one key, so their
-    versions can be decided by artifact evidence rather than by score
-    (F2a.3). Qualifiers stay in the key: the same name under a different
+    versions can be decided by artifact evidence rather than by score.
+    Qualifiers stay in the key: the same name under a different
     tap or source hash is a different project row, not a version conflict.
     """
     try:
@@ -619,7 +619,7 @@ def _unversioned_purl(purl: str) -> str | None:
 def _resolve_version_conflicts(
     detected: set[str], evidence_by_purl: dict, exe: str, metadata: dict
 ) -> tuple[set[str], dict[str, dict[str, str]]]:
-    """Decide between several versions of one matched project (F2a.3).
+    """Decide between several versions of one matched project.
 
     Version-bearing evidence from the artifact outranks match score: when
     exactly one candidate version appears in the artifact's own path,
@@ -703,7 +703,7 @@ def format_abi_requirements(abi_analysis: dict) -> str:
     verify a surprising requirement instead of taking it on trust. These are
     requirements on the execution environment (interface versions), which is
     why they are a property on the binary's component and not components:
-    see the F2a.4 note in process_exe_file.
+    see the ABI-floor note in process_exe_file.
     """
     parts = []
     for requirement in abi_analysis.get("requirements") or []:
@@ -741,9 +741,9 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
         # Strip the extension and version suffix so the component name matches
         # what a package ecosystem calls the library.
         base = name.split(".so")[0].removesuffix(".dylib").removesuffix(".dll")
-        # W3.5: no `pkg:nuget` from a `.dll` filename here — this layer
+        # No `pkg:nuget` from a `.dll` filename here — this layer
         # knows a library name a binary loads at runtime, and a name is not
-        # evidence of a package (ground rule 11). Only ELF producers feed
+        # evidence of a package. Only ELF producers feed
         # this list, so the branch was unreachable in practice; it is gone
         # on principle, with a negative fixture holding the property.
         purl = PackageURL(type="generic", name=base).to_string()
@@ -849,7 +849,7 @@ def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
     scratch = _scratch_sbom()
     deps_updates: dict[str, set] = {}
     if file_path.lower().endswith(".nupkg"):
-        # W3.5: same routing as the sequential loop — a .nupkg's identity
+        # Same routing as the sequential loop — a .nupkg's identity
         # comes from its .nuspec member, not from PE parsing.
         components = process_nupkg_file(deps_updates, file_path, scratch)
         return {
@@ -1014,7 +1014,7 @@ def process_exe_file(
     metadata: dict[str, Any] = parse(exe, disassemble=disassemble, sdk_path=sdk_path)
     parent_component: Component = default_parent([exe], symbols_purl_map)
     parent_component.properties = []
-    # W3.5: a managed file's identity comes from its CLI header, not its
+    # A managed file's identity comes from its CLI header, not its
     # filename — the same evidence rule that removed the `.dll`-to-nuget
     # heuristic from default_parent. Files with a CLI header but no stated
     # assembly identity (apphosts, single-file bundles, unreadable streams)
@@ -1094,7 +1094,7 @@ def process_exe_file(
     if deep_mode:
         symbols_version: list[dict] = metadata.get("symbols_version", [])
         abi_analysis: dict = metadata.get("abi_analysis") or {}
-        # F2a.4: the ABI floor each version provider imposes (GLIBC_2.38,
+        # The ABI floor each version provider imposes (GLIBC_2.38,
         # GLIBCXX_3.4.32, ...) is a requirement the binary places on its
         # execution environment, not a software artifact the binary is
         # composed of, so it is recorded as properties on the binary's own
@@ -1309,7 +1309,7 @@ def process_exe_file(
             )
         if binaries_detected:
             LOG.debug(f"Found {len(binaries_detected)} possible component matches for {exe}.")
-            # F2a.3: when the database holds several versions of the same
+            # When the database holds several versions of the same
             # project (two kegs of a formula), artifact evidence decides
             # between them or the conflict collapses to one unversioned
             # component with an ambiguity property — score never picks a
@@ -1381,7 +1381,7 @@ def process_exe_file(
                     f" qualification={member['qualification']}"
                     for member in evidence.get("blintdb_members", [])
                 ],
-                # F2a.3 resolution notes: which artifact evidence separated
+                # Version-conflict resolution notes: which artifact evidence separated
                 # a version conflict, or the recorded ambiguity when none did.
                 **(version_notes.get(binary_purl) or {}),
             }
@@ -1406,7 +1406,7 @@ def process_exe_file(
     # (?source_hash=..., ?package_manager=homebrew&tap=...), and a homebrew
     # formula name may carry its own versioned suffix (openssl@3) — an exact
     # string compare leaves a second, unqualified component beside the
-    # match (F2a.2: zlib/libpng/openssl@3 each broke the small-corpus
+    # match (zlib/libpng/openssl@3 each broke the small-corpus
     # validator that way).
     banner_result = detect_vendored_banners(metadata)
     for banner in banner_result["banners"]:
@@ -1434,7 +1434,7 @@ def process_exe_file(
                 )
             )
     # Banner-shaped strings the artifact's symbols do not corroborate are
-    # mentions, not dependencies (F2b.2: assetutil's stale "deflate 1.2.5"
+    # mentions, not dependencies (assetutil's stale "deflate 1.2.5"
     # while linking libz.1.dylib at 1.2.12). Recorded on the parent so the
     # gap is visible without asserting a component the code cannot back.
     if banner_mentions := banner_result.get("mentions"):
@@ -1471,7 +1471,7 @@ def process_exe_file(
             metadata.get("dotnet_dependencies"), dependencies_dict
         )
         lib_components += pe_components
-    # W3.1: managed assemblies declare their dependencies in the CLI
+    # Managed assemblies declare their dependencies in the CLI
     # metadata AssemblyRef table; each becomes a pkg:nuget component. The
     # block is absent for native files and for assemblies whose metadata
     # could not be read — never an empty list that reads as "no deps".
@@ -2110,7 +2110,7 @@ def write_ios_callgraphs(app_file: str, sbom_output: str) -> None:
 def merge_dotnet_assembly_ref_components(
     lib_components: list[Component], assembly_refs: list[dict]
 ) -> list[Component]:
-    """Add AssemblyRef components, one per package name (W3.1 review).
+    """Add AssemblyRef components, one per package name.
 
     Deduplicated by package *name*, not by purl. The two managed paths
     carry different kinds of version: a `.deps.json` overlay names the
@@ -2134,12 +2134,12 @@ def merge_dotnet_assembly_ref_components(
 
 
 def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
-    """Managed assemblies' AssemblyRef rows as pkg:nuget components (W3.1).
+    """Managed assemblies' AssemblyRef rows as pkg:nuget components.
 
     The version is the four-part assembly version the metadata carries (the
     NuGet package version may differ; the assembly version is what the
     loading runtime binds against). The public key token rides as a purl
-    ``token`` qualifier (W3.5, section 03/D) — the identity qualifier every
+    ``token`` qualifier — the identity qualifier every
     NuGet consumer knows — and no longer as a property: a token in the
     purl is matchable, the same token in a property is only visible to a
     consumer that already found the component.
@@ -2150,8 +2150,7 @@ def process_dotnet_assembly_refs(assembly_refs: list[dict]) -> list[Component]:
     version 13.0.0.0) — every component says which one it carries in
     ``internal:version_source``. A consumer matching these purls against
     NuGet advisories would otherwise silently miss, and a version slot that
-    does not say what kind of version it holds is a claim blint cannot back
-    (ground rule 11).
+    does not say what kind of version it holds is a claim blint cannot back.
     """
     components = []
     seen: set[str] = set()
@@ -2193,14 +2192,14 @@ def upgrade_parent_to_original_filename(
 ) -> Component:
     """Restate a native file's parent identity from its VERSIONINFO resource.
 
-    Section 03/D: renaming a file is free, the `OriginalFilename` resource is
+    Renaming a file is free, the `OriginalFilename` resource is
     not — so the component is named by the resource while the on-disk name
     rides as evidence (`internal:filename_on_disk`, `internal:filename_
     original`), making a mismatch visible instead of silently normalizing
     it. The build-BOM overlay (`--src-dir-boms`) is consulted under BOTH
-    names — the W3.5 lesson: the lookup key and the computed purl are
-    coupled, and renaming the component without re-keying the lookup made
-    the overlay unreachable for every input last time. Nothing here invents
+    names: the lookup key and the computed purl are
+    coupled, and renaming the component without re-keying the lookup once made
+    the overlay unreachable for every input. Nothing here invents
     a `pkg:nuget` purl from a name: the overlay hit may yield one because a
     BOM naming the package is evidence.
     """
@@ -2259,7 +2258,7 @@ def add_signer_evidence(parent: Component, metadata: dict[str, Any]) -> None:
     """Authenticode signer CN and signing class as component evidence.
 
     The Windows answer to "who actually shipped this": the signer the
-    signature chain names (when the structured block parsed) and the W2.4
+    signature chain names (when the structured block parsed) and the
     signing class, carried as properties. Absent block, absent class —
     the undetermined states — stay absent, never rendered as "unsigned".
     """
@@ -2286,7 +2285,7 @@ def upgrade_parent_to_assembly_identity(
 ) -> Component:
     """Restate a managed file's parent component from its CLI-header identity.
 
-    Section 03/D: a managed assembly's component identity is
+    A managed assembly's component identity is
     ``pkg:nuget/<assembly name>@<assembly version>`` with the public key
     token as a ``token`` qualifier. The version slot holds the four-part
     assembly version and says so (``internal:version_source``); the NuGet
@@ -2333,7 +2332,7 @@ def upgrade_parent_to_assembly_identity(
 
 
 def dotnet_assemblyref_state(dotnet_metadata: dict) -> str | None:
-    """How complete the AssemblyRef evidence is, for the BOM's rule-32 duty.
+    """How complete the AssemblyRef evidence is, as the BOM states it.
 
     A managed component whose AssemblyRef table blint could not read must
     not read as "has no dependencies". States: ``read`` (every row listed —
@@ -2369,10 +2368,10 @@ def process_nupkg_file(
     Dependency entries carry nuspec version ranges; only an exact pin
     ``[1.2.3]`` becomes a purl version — a floor or interval stays the
     ``internal:version_range`` property, because a range is a version
-    blint does not have (ground rule 11).
+    blint does not have.
 
     A refused or nuspec-less archive still emits its component, generic,
-    with the refusals named as a property (rule 30/32): a `.nupkg` in the
+    with the refusals named as a property: a `.nupkg` in the
     scan that produced no package identity must not vanish silently.
     """
     nuspec = read_nupkg_nuspec(f)
@@ -2455,10 +2454,10 @@ def process_msix_file(
     and every member binary becomes a child component keyed by its place in
     the package. Member binaries are identified by their package context and
     content hash without a full parse, mirroring the ``.ipa`` SBOM path; the
-    parsed-member identity upgrade is the identity packet's (W4.5) business.
+    parsed-member identity upgrade is out of scope here.
 
     Container refusals reach the BOM, not only the metadata sidecar the CLI
-    does not ship (rule 32, per the W3.5 ``internal:dotnet_assemblyref_state``
+    does not ship (the ``internal:dotnet_assemblyref_state``
     precedent): a refused package or a bundle whose manifest was unreadable
     states it beside the component.
     """
@@ -2546,7 +2545,7 @@ def process_clickonce_file(
 
     The deployment identity (name, version, public key token) is the
     component; the update URL and requested trust ride as properties.
-    Refusals reach the BOM beside the component (rule 32).
+    Refusals reach the BOM beside the component.
     """
     block = parse_clickonce(f)
     if block is None:
@@ -2610,7 +2609,7 @@ def process_msi_file(
     """Process one ``.msi`` database: identity from its Property table.
 
     The parent component carries the product identity and codes; refusals
-    and degradations reach the BOM as properties (rule 32). Embedded
+    and degradations reach the BOM as properties. Embedded
     cabinets and Binary-table streams are named as properties without being
     emitted as components — the File table, not the CAB listing, is the
     package's own statement of what it ships.
@@ -2673,7 +2672,7 @@ def process_cab_file(
 
     Members are listed, not extracted, here: the component carries the
     member path and size. Refusals (unsupported folder compression, unsafe
-    paths) reach the BOM beside the parent (rule 32).
+    paths) reach the BOM beside the parent.
     """
     cab_block = parse_cab(f)
     purl = PackageURL(type="generic", name=os.path.basename(f)).to_string()
@@ -2759,7 +2758,7 @@ def process_dotnet_dependencies(
             scope=Scope.required,
             evidence=create_component_evidence(v.get("path"), 1.0) if v.get("path") else {},
             properties=[
-                # W3.5: the deps.json overlay is the one producer that
+                # The deps.json overlay is the one producer that
                 # states actual NuGet package versions; the property keeps
                 # it distinguishable from the assembly versions the
                 # AssemblyRef path carries in the same slot.

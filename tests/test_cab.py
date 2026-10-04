@@ -1,9 +1,9 @@
-"""Tests for the cabinet (MSCF) reader (W4.2).
+"""Tests for the cabinet (MSCF) reader.
 
 Hand-built stored- and MSZIP-folder cabinets exercise the happy paths and
 the hostile ones (truncation, unsupported method, unsafe member names,
-oversized members) — every refusal named (ground rule 30), every cap
-exceeded by a fixture (ground rule 33).
+oversized members) — every refusal named, every cap
+exceeded by a fixture.
 """
 
 import os
@@ -183,7 +183,7 @@ def test_member_count_cap_refused(tmp_path):
 def test_runner_cab_route_units_and_leak_delta(tmp_path):
     """The runner routes a .cab as a container unit; PE members analyze as
     cab-member units attributed to their member path; no temp dir leaks
-    (ground rule 18 asserted across the whole run)."""
+    (asserted across the whole run)."""
     import glob
     import json
     import logging

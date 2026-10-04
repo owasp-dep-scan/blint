@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Android native corpus builder (A0.2).
+"""Android native corpus builder.
 
-Working copy of the reviewer-owned ``scripts/build_android_corpus.sh`` lane in
-``~/blint-android-native-plans``; kept here so the build is reproducible from
-the blint checkout alone. Tiers per ``05-corpus.md``:
+The build is reproducible from the blint checkout alone. Tiers:
 
   tier0  emulator system trees (``/system/lib64``, ``/system/lib``,
          ``/system/bin``, every ``/apex/*/lib*``, ``/vendor/lib*``), pulled
@@ -16,7 +14,7 @@ the blint checkout alone. Tiers per ``05-corpus.md``:
 Every file lands in ``MANIFEST.json`` together with ground truth captured in
 the same run (``llvm-readelf``, ``zipalign -c -P 16``, ``aapt2 dump
 badging``). No app-store scraping: system images, NDK output and F-Droid APKs
-only (ground rule 39).
+only.
 """
 
 from __future__ import annotations
@@ -610,15 +608,14 @@ def _extract_partition(img: Path, spans: list[tuple[int, int]], dest: Path) -> s
 def tier0_extract_x86(api: str, out_root: Path) -> None:
     """Extract the x86_64 image's system/vendor trees without booting it.
 
-    OUTCOME on this machine (A0.2, 2026-09-24): the liblp metadata parses
+    OUTCOME on this machine (2026-09-24): the liblp metadata parses
     (partition names/sizes/counts cross-checked against the emulator's own
     ``lpdump -j`` run on the same bytes), but the extent -> filesystem
     mapping did not reconcile - no ext4/erofs superblock lands at any
     offset the extents imply under any unit interpretation, and the
     emulator's ``lpdump`` text mode refuses the same image ("Failed to
     read metadata") while its JSON mode omits extents. Tier-0 x86_64 was
-    therefore NOT collected; the finding and its blockers are recorded in
-    the A0.2 commit. Kept because the parser is correct for the metadata
+    therefore NOT collected. Kept because the parser is correct for the metadata
     half and a machine with loop mounts (or a bootable x86_64 host) makes
     the rest work.
     """

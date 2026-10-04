@@ -1,6 +1,6 @@
-"""A1.1 - Android native container model tests.
+"""Android native container model tests.
 
-Fixtures are the A0.2 corpus files committed under tests/data/android/
+Fixtures are the reference corpus files committed under tests/data/android/
 (built by the real Android toolchain: aapt2/zipalign/apksigner from
 build-tools 36.0.0 over NDK r28-built libraries) plus hostile inputs
 generated inline per the .ZIP Application Note layout the way
@@ -35,7 +35,7 @@ def _lib(model: dict, name: str) -> dict:
 
 def test_stored16k_layout_facts(tmp_path: Path) -> None:
     # zipalign -c -P 16 -v 4 on this apk passes for the stored entry; the
-    # model must read the same fact from the zip itself (A0.2 manifest).
+    # model must read the same fact from the zip itself (fixture manifest).
     model = scan_android_native(str(STORED16K))
     lib = _lib(model, "libhello.so")
     assert lib["e_machine"] == 183 and lib["elf_class"] == 2
@@ -53,12 +53,12 @@ def test_deflated_layout_and_extract_native_libs() -> None:
     model = scan_android_native(str(DEFLATED))
     (location,) = _lib(model, "libhello.so")["locations"]
     assert location["compression"] == "deflated"
-    # The manifest declares extractNativeLibs="true" (A0.2 packaging).
+    # The manifest declares extractNativeLibs="true".
     assert model["extract_native_libs"] == {"value": True, "source": "manifest"}
 
 
 def test_extract_native_libs_agp_default_matrix() -> None:
-    # Every branch of the boolean, including the unset case (rule 3).
+    # Every branch of the boolean, including the unset case.
     assert extract_native_libs_fact({"extractNativeLibs": False}) == {
         "value": False, "source": "manifest",
     }
@@ -72,11 +72,11 @@ def test_extract_native_libs_agp_default_matrix() -> None:
 
 
 def test_stored16k_extract_native_libs_declared_false() -> None:
-    # Both tier-1 manifests declare the attribute (the A0.2 packaging
+    # Both tier-1 manifests declare the attribute (the fixture packaging
     # writes it); the stored+16 KiB-aligned apk declares false, which is
     # the layout the loader enforces for minSdk >= 23. The agp_default
     # branch - attribute absent, minSdk >= 23 - is covered by the unit
-    # matrix above and exercised on real apps in A1.2.
+    # matrix above and exercised on real apps.
     model = scan_android_native(str(STORED16K))
     assert model["extract_native_libs"] == {"value": False, "source": "manifest"}
 
@@ -89,7 +89,7 @@ def test_no_dex_apk_has_native_libraries() -> None:
 
 def test_multiabi_bundle_is_one_logical_app() -> None:
     # The xapk holds a base apk plus per-ABI config splits; one logical
-    # app, every split walked, all five ABIs covered (01/A.4). The five
+    # app, every split walked, all five ABIs covered. The five
     # per-ABI libhello.so builds differ by architecture, so they are five
     # distinct libraries - dedupe applies to identical bytes, which the
     # next test exercises.
@@ -105,7 +105,7 @@ def test_multiabi_bundle_is_one_logical_app() -> None:
 
 def test_same_bytes_dedupe_keeps_every_location(tmp_path: Path) -> None:
     # Same .so bytes in base and in a split: one library, two locations
-    # (sha256 dedupe with all locations kept, 01/A.4).
+    # (sha256 dedupe with all locations kept).
     with zipfile.ZipFile(STORED16K) as zf:
         lib_bytes = zf.read("lib/arm64-v8a/libhello.so")
     base = tmp_path / "base.apk"
@@ -128,7 +128,7 @@ def test_same_bytes_dedupe_keeps_every_location(tmp_path: Path) -> None:
 
 
 def test_abi_mismatch_recorded_not_fatal() -> None:
-    # abi_mismatch.apk stores an aarch64 ELF under lib/x86_64/ (A0.2).
+    # abi_mismatch.apk stores an aarch64 ELF under lib/x86_64/.
     model = scan_android_native(str(DATA / "abi_mismatch.apk"))
     lib = _lib(model, "libwrongarch.so")
     assert any("e_machine 183 in a x86_64 directory" in reason for reason in lib["abi_mismatch"])
@@ -140,7 +140,7 @@ def test_classify_entry_dir_matrix() -> None:
     # AAB module layout is an ABI directory only for actual bundles.
     assert classify_entry("base/lib/arm64-v8a/x.so") == ("", "asset")
     assert classify_entry("base/lib/arm64-v8a/x.so", aab=True) == ("arm64-v8a", "lib_dir")
-    # The loose-path defects this model replaces (V2): assets and nested
+    # The loose-path defects this model replaces: assets and nested
     # lib dirs are never ABI coverage.
     assert classify_entry("assets/arm64-v8a/x.so") == ("", "asset")
     assert classify_entry("res/lib/x86_64/x.so") == ("", "asset")
@@ -173,7 +173,7 @@ def test_unsafe_names_recorded_never_written(tmp_path: Path) -> None:
 
 
 def test_backslash_name_refused_by_name(tmp_path: Path) -> None:
-    # Byte-patched fixture (A0.2): the backslash separator survived every
+    # Byte-patched fixture: the backslash separator survived every
     # write path, and the reader records it even though it never extracts.
     model = scan_android_native(str(DATA / "zip_slip_backslash.apk"))
     assert any(
@@ -211,7 +211,7 @@ def test_lib_count_cap_refuses_by_name(tmp_path: Path) -> None:
     model = scan_android_native(str(apk))
     assert "native_lib_count_exceeds_cap" in model["refusals"]
     # The cap bounds the collected set, and the refusal is visible beside
-    # it (rule 32: never reads as an empty app).
+    # it (never reads as an empty app).
     assert model["counts"]["libraries"] >= 1
 
 
@@ -256,7 +256,7 @@ def test_abi_coverage_missing_library_matrix() -> None:
     ]
     coverage = abi_coverage(libs)
     # libx is missing from x86_64 while libboth ships everywhere: the gap
-    # is stated per name, never silently first-or-best (rule 36).
+    # is stated per name, never silently first-or-best.
     assert coverage["missing_from_abi"] == {"libx.so": ["x86_64"]}
     assert coverage["requires_64_bit_coverage"] is False
 

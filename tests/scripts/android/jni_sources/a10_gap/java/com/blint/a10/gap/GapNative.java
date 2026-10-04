@@ -1,7 +1,7 @@
 package com.blint.a10.gap;
 
 /**
- * A10 Q1 - the five declarations of the 32-bit-gap fixture, one per shape.
+ * The five declarations of the 32-bit-gap fixture, one per shape.
  *
  * <ul>
  *   <li>plainAdd - control; must bind on every ABI.</li>

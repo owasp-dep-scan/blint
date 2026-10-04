@@ -1,5 +1,5 @@
 /*
- * A10 Q3 - the "registered nowhere" mark (see NwNative.java for each
+ * The "registered nowhere" mark (see NwNative.java for each
  * declaration's expected fate). One three-entry table:
  *
  *   [0] nwShared - registered for NwBound with a constant count, the

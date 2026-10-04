@@ -16,8 +16,8 @@ not a descriptor is the separator plus a ``_1``-escaped leading
 underscore in the method name).
 
 Dynamic registration (``RegisterNatives``) and the dex <-> native join
-live here too: F1 recovers ``JNINativeMethod`` tables from relocations,
-E2 joins dex ``native`` methods to both surfaces.
+live here too: ``JNINativeMethod`` tables are recovered from relocations,
+and dex ``native`` methods are joined to both surfaces.
 """
 
 from __future__ import annotations
@@ -671,8 +671,8 @@ def _join_abi_lists(
     """One ABI's join across every library that ships in it.
 
     ``surfaces``, ``register_tables`` and ``confirmed_ranges`` are keyed by
-    ``(library, abi)`` - each ABI's own copy of the library (ground rule
-    36), never another ABI's bytes standing in for a missing one. A dex
+    ``(library, abi)`` - each ABI's own copy of the library,
+    never another ABI's bytes standing in for a missing one. A dex
     declaration binds at most once (first library in name order):
     statically to a decoded export, or - for what no export answers -
     dynamically to a recovered JNINativeMethod table entry whose name and
@@ -762,7 +762,7 @@ def _join_abi_lists(
         for entry_range in ranges
     }
     # JNA direct mapping binds by exported name; the per-ABI view of the
-    # plain exports (ground rule 36) is built once.
+    # plain exports is built once.
     jna_name_exports: dict[str, list[tuple[str, str]]] = {}
     jna_here = bool(jna_registers) and abi in (jna_dispatch_abis or set())
     if jna_here:
@@ -793,7 +793,7 @@ def _join_abi_lists(
                 }
             )
             continue
-        # N3: a class binds when exactly one candidate entry sits in a
+        # A class binds when exactly one candidate entry sits in a
         # registration range the FindClass confirmer resolved to exactly
         # that class. An entry covered by ranges naming two declaring
         # classes decides nothing, and a class with two clean entries is
@@ -987,7 +987,7 @@ def _library_join_facts(
 ) -> tuple[dict | None, dict | None, dict[str, str] | None]:
     """The static JNI surface, the recovered ``RegisterNatives`` tables and
     (on request) the plain exported-FUNC map from one parsed copy of a
-    library - the join's light parse (dynamic symbols plus F1's function
+    library - the join's light parse (dynamic symbols plus unwind-table function
     starts for stripped builds, not full metadata). The plain map, when
     asked for, is ``{exported FUNC name: address}`` for every defined
     dynamic function - the names JNA direct mapping binds by; it is
@@ -999,7 +999,7 @@ def _library_join_facts(
     entries, _ = parse_symbols(parsed.dynamic_symbols)
     surface = parse_static_jni_surface(entries)
     plain_exports: dict[str, str] | None = {} if want_plain_exports else None
-    # F1: function starts from the defined dynamic FUNCs plus the unwind
+    # Function starts from the defined dynamic FUNCs plus the unwind
     # tables (stripped builds).
     starts: set[int] = set()
     addr_to_name: dict[int, str] = {}
@@ -1034,7 +1034,7 @@ def build_jni_join_summary(
 ) -> dict | None:
     """The app-level dex <-> native static join.
 
-    Per ABI (ground rule 36: one result per ``(abi, library)``, never a
+    Per ABI (one result per ``(abi, library)``, never a
     silent first-or-best), every dex ``native`` declaration is bound to
     the library whose decoded exports implement it; what no library in
     that ABI answers is reported as unbound (likely dynamic registration,
@@ -1093,7 +1093,7 @@ def build_jni_join_summary(
     }
     jna_active = bool(jna_registers)
 
-    # One light parse per (library, abi) copy (keyed ground-rule-36); the
+    # One light parse per (library, abi) copy (keyed per ABI); the
     # join needs only the dynamic-symbol surface, not full metadata.
     surfaces: dict[tuple[str, str], dict | None] = {}
     register_tables: dict[tuple[str, str], dict] = {}
@@ -1275,7 +1275,7 @@ def build_jni_join_summary(
     }
 
 
-# ------------------------------------------- F1: RegisterNatives tables
+# ------------------------------------------- RegisterNatives tables
 
 # JNI method signatures: "(" descriptors ")" and one return descriptor (V is
 # a return type only). Name strings must be Java identifiers.
@@ -1588,7 +1588,7 @@ def attach_register_natives_tables(metadata: dict, parsed_obj) -> None:
     jni_block["register_natives"] = tables
 
 
-# ------------------------------------------- F2: the dex->native edges
+# ------------------------------------------- the dex->native edges
 
 
 def extend_app_callgraph_with_jni(app_callgraph: dict, join: dict, native_units: list) -> dict:

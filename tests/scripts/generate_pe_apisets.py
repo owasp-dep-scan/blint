@@ -5,8 +5,8 @@ API sets (``api-ms-win-core-*``) are loader-virtual DLLs: the schema carried
 in ``C:\\Windows\\System32\\apisetschema.dll`` binds each contract name to
 the host DLL the loader actually maps. blint resolves imports through a
 generated snapshot of that schema so dependency lists, dependency-graph
-checks and SBOM ``dependsOn`` name real DLLs on modern Windows
-(plan 01/A.6). The snapshot records the Windows build it came from; a
+checks and SBOM ``dependsOn`` name real DLLs on modern Windows.
+The snapshot records the Windows build it came from; a
 contract newer than the snapshot simply stays unresolved.
 
 Schema layout (Windows 10+, documented by Geoff Chappell's API Set work and
@@ -160,7 +160,7 @@ def main() -> None:
                 downlevel_count += 1
 
     lines = [
-        "# blint's API set resolution snapshot (PE lane W1.2, plan 01/A.6).",
+        "# blint's API set resolution snapshot.",
         "#",
         f"# Source: apisetschema.dll from a Windows build {args.build} installation;",
         f"# schema sha256 {hashlib.sha256(data).hexdigest()}.",

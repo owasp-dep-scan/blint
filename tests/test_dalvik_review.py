@@ -53,7 +53,7 @@ def test_detects_reflection_invoke():
 
 def test_dynamic_invocation_via_invoke_polymorphic():
     # invoke-polymorphic {v0}, method@0, proto@0 (0xFA, 45cc) -> resolves to the
-    # MethodHandle descriptor in the method pool (Phase 0 decodes this correctly).
+    # MethodHandle descriptor in the method pool (the decoder resolves this correctly).
     bytecode = bytes([0xFA, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
     pools = _pools(
         ["Ljava/lang/invoke/MethodHandle;->invoke([Ljava/lang/Object;)Ljava/lang/Object;"]
@@ -63,7 +63,7 @@ def test_dynamic_invocation_via_invoke_polymorphic():
 
 
 def test_dynamic_invocation_via_invoke_custom_call_site():
-    # invoke-custom {}, call_site@0 (0xFC, 35c). Phase 0 resolves this to the
+    # invoke-custom {}, call_site@0 (0xFC, 35c). The decoder resolves this to the
     # call-site table (a "call_site@N" token), not a bogus method descriptor.
     bytecode = bytes([0xFC, 0x00, 0x00, 0x00, 0x00, 0x00])
     findings = analyze_dex({"methods": [_method(0, bytecode)]}, pools=_pools([]))

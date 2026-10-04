@@ -10,7 +10,7 @@ signature here requires the version to appear *inside* a string that also
 names the library. A bare ``"3.46.0"`` is never a sqlite banner no matter how
 likely that looks.
 
-A banner string alone does not prove the code is in the artifact (F2b.2).
+A banner string alone does not prove the code is in the artifact.
 macOS measured both shapes on one system: ``libcrypto.0.9.7.dylib`` carries
 "AES part of OpenSSL 0.9.7l 28 Sep 2006" AND exports the OpenSSL API
 (BN_new, EVP_*, 2714 symbols) - the library itself, the banner true as

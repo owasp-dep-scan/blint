@@ -853,7 +853,7 @@ def test_self_diff_of_a_real_binary_is_empty():
 
 
 def test_hardening_layer_carries_the_security_properties_scope(tmp_path):
-    """Rule 21: the summary block describes one slice of a universal binary,
+    """The summary block describes one slice of a universal binary,
     so the diff carries the scope through instead of comparing silently."""
     old_p = _write_meta(_mkdir(tmp_path, "old"), _meta())
     new_p = _write_meta(

@@ -1,7 +1,7 @@
 package com.blint.a11.rt;
 
 /**
- * A11 S3 - the runtime-table fixture's declarations.
+ * The runtime-table fixture's declarations.
  *
  * <ul>
  *   <li>rtStaticAdd - static-table control; must bind on every ABI.</li>

@@ -1,5 +1,5 @@
 # Tier-1 planted-variant modules. Built by ndk-build from the real NDK;
-# every module's flags ARE the expected fact (see 05-corpus.md tier 1):
+# every module's flags ARE the expected fact:
 #
 #   hello        plain dynamic JNI library (also built unstripped/stripped
 #                by ndk-build's two output trees)
@@ -78,7 +78,7 @@ LOCAL_SRC_FILES := hello_static.c
 LOCAL_LDFLAGS := -static
 include $(BUILD_EXECUTABLE)
 
-# --- A2 additions (feat/an-a2-a3, B0/B1): relocation-packing, SONAME and
+# --- Bionic ELF fact additions: relocation-packing, SONAME and
 # FORTIFY variants. Every module's flags ARE the expected fact, same rule
 # as the original tier-1 modules above. hello_nosoname and
 # hello_absneeded need a link line ndk-build cannot express (it always

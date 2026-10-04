@@ -474,7 +474,7 @@ class AnalysisRunner:
                     except Exception as e:
                         self._record_failure(f, "top-level", "process", e)
         finally:
-            # Rule 18: the cache adds a SQLite connection to the run; it is
+            # The cache adds a SQLite connection to the run; it is
             # released structurally, on every path, successful or not.
             if self.parse_cache is not None:
                 self.parse_cache.close()
@@ -755,7 +755,7 @@ class AnalysisRunner:
         self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
         self._mark_success("top-level")
         self.progress.advance(self.task)
-        # W4.3: a 7z-SFX carries its payload as an appended 7z archive; the
+        # A 7z-SFX carries its payload as an appended 7z archive; the
         # decodable members analyze as sfx-member units attributed to their
         # member path, beside the stub executable's own top-level unit.
         installer_block = metadata.get("installer") if isinstance(metadata, dict) else None
@@ -846,7 +846,7 @@ class AnalysisRunner:
                     entry.get("bundle_path"),
                     context_key="macos_bundle",
                 )
-                # A plugin-kind bundle member (M1.1) carries the bundle's
+                # A plugin-kind bundle member carries the bundle's
                 # host_plugin block on its entry; the metadata top level is
                 # where the checks read it, matching the PE shape.
                 if host_plugin := entry.get("host_plugin"):
@@ -967,8 +967,8 @@ class AnalysisRunner:
         against — and every member binary is its own unit under the
         ``msix-member`` role, so a bundle holding three packages of fifteen
         PEs accounts as one ``top-level`` unit, three ``msix-package`` units
-        and forty-five ``msix-member`` units, never one confused total
-        (ground rule 19). Member isolation matches the ``.ipa`` path: one bad
+        and forty-five ``msix-member`` units, never one confused total.
+        Member isolation matches the ``.ipa`` path: one bad
         member records a failure and the remaining members are still
         analyzed.
 
@@ -1074,7 +1074,7 @@ class AnalysisRunner:
                     "extracted_member_count": len(extracted),
                     # Extraction refusals ride the exported metadata, not
                     # just the log: a cabinet whose folder refused must not
-                    # read as an empty archive (rule 32).
+                    # read as an empty archive.
                     "extraction_refusals": sorted(set(refusals)),
                 },
                 "cab_members": cab_block.get("members") or [],
@@ -1118,7 +1118,7 @@ class AnalysisRunner:
         assert self.task is not None
         exe_name = metadata.get("name", f)
         wasm_report = metadata.get("wasm_report")
-        # Catalog signing resolution (W2.3): after parse (so the parse cache
+        # Catalog signing resolution: after parse (so the parse cache
         # carries only parse facts and stays valid for any catalog dir) and
         # before export/checks (so the exported metadata and the findings
         # read one resolved scope). No index: a no-op, and the block keeps
@@ -1177,7 +1177,7 @@ class AnalysisRunner:
         # --no-reviews so triage output stays consistent with other formats.
         if exe_type == "wasmbinary" and (finding := run_wasm_findings(f, metadata)):
             unit_findings += finding
-        # Stable finding IDs (D4) are attached per binary, after the binary's
+        # Stable finding IDs are attached per binary, after the binary's
         # findings exist but before they join the run-wide list.
         attach_finding_ids(f, metadata, unit_findings)
         self.findings += unit_findings
@@ -1196,12 +1196,12 @@ class AnalysisRunner:
         self, f: str, blint_options: BlintOptions, wants_callgraph_outputs: bool
     ) -> None:
         """Analyze an android app: the dex review metadata, then every
-        native library as a first-class binary (A1.2, 01/C).
+        native library as a first-class binary.
 
-        An APK with native code but no dex is analyzed, not skipped (V7):
+        An APK with native code but no dex is analyzed, not skipped:
         the app-level unit is a container whose metadata carries the
         native summary (ABI coverage, extractNativeLibs, refusals and
-        unsafe zip names - rule 32), and each ``(app, abi, library)`` is
+        unsafe zip names), and each ``(app, abi, library)`` is
         its own ``apk-so-member`` unit below, attributed to its member
         path beside the app.
         """
@@ -1264,13 +1264,13 @@ class AnalysisRunner:
         """Analyze each (app, abi, library) unit of a scanned app model.
 
         Units group every location of one library in one ABI - one result
-        per triple, with the other locations as provenance (ground rule
-        36). Heavy work stays behind --disassemble (the parse call gates
+        per triple, with the other locations as provenance.
+        Heavy work stays behind --disassemble (the parse call gates
         it) and the --android-abi filter drops non-matching ABIs (and
         asset payloads, which never feed ABI coverage) before any unit
         is attempted. Returns the per-unit records (abi, library,
         metadata) so the app-level callgraph can draw JNI edges to the
-        disassembled native side (A5.2 F2).
+        disassembled native side.
         """
         assert self.task is not None
         member_units: list[dict[str, Any]] = []
@@ -1326,8 +1326,8 @@ class AnalysisRunner:
                             for loc in locations
                         ],
                         "abi_mismatch": lib["abi_mismatch"],
-                        # Manifest facts the loader rules condition on
-                        # (ground rule 37): standalone .so runs have no
+                        # Manifest facts the loader rules condition on;
+                        # standalone .so runs have no
                         # app context and their findings say so instead.
                         "min_sdk": (native.get("manifest") or {}).get("min_sdk"),
                         "target_sdk": (native.get("manifest") or {}).get("target_sdk"),

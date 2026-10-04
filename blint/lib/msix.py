@@ -1,4 +1,4 @@
-"""MSIX / Appx package and bundle reader (W4.1).
+"""MSIX / Appx package and bundle reader.
 
 An ``.msix``/``.appx`` package is a zip archive: ``AppxManifest.xml`` states
 the package identity (name, version, publisher, architecture), the
@@ -15,7 +15,7 @@ to their place in the package (``container_path``, e.g.
 ``CascadiaPackage_1.22.12111.0_ARM64.msix/wt.exe`` for a bundle member), so a
 finding on a packaged binary names the binary and the package it shipped in.
 
-Caps (ground rule 30/33) are set at >= 2x the maximum measured over the
+Caps are set at >= 2x the maximum measured over the
 Windows Terminal 1.22 ``.msixbundle`` (3 packages x 258 members, 22.2 MB
 uncompressed, 4.4 MB largest member, depth 2, compression ratio 10.1) plus
 its AppxBundleManifest declared structure: 258 members max per package (cap
@@ -28,10 +28,10 @@ cap and assert the refusal by name.
 No rule reads the capped listings: ``capabilities`` is bounded per namespace
 class by ``MAX_LISTED_CAPABILITIES`` but the rule verdict reads the counted
 totals, so a package with more restricted capabilities than the cap still
-fires ``CHECK_MSIX_RESTRICTED_CAPABILITY`` (the W3.2 lesson: a listing cap
+fires ``CHECK_MSIX_RESTRICTED_CAPABILITY`` (a listing cap
 must not become a detection boundary).
 
-Cross-platform (ground rule 31): pure struct/ziplib — a Linux run and a
+Cross-platform: pure struct/ziplib — a Linux run and a
 Windows run produce the same facts for the same input; nothing here touches
 a Windows API or a Windows-only tool.
 """
@@ -248,7 +248,7 @@ def parse_blockmap(xml_bytes: bytes, refusals: list[str]) -> dict:
 
 
 def parse_signature_p7x(data: bytes) -> dict | None:
-    """Parse an ``AppxSignature.p7x`` blob through the W2.1 signature walk.
+    """Parse an ``AppxSignature.p7x`` blob through the PE signature walk.
 
     ``p7x`` is the four-byte ``PKCX`` magic ahead of the DER PKCS#7; the
     structured ``signatures[]`` shape (signer, chain, timestamps) is the
@@ -355,7 +355,7 @@ def _package_collection(
         # `len(pe_infos) > MAX_MEMBER_BINARIES` unsatisfiable, so a package
         # shipping more binaries than the cap analysed the first 512 and
         # reported nothing at all — the absence reading as a complete
-        # result (rule 32). The refusal is the only thing that says the
+        # result. The refusal is the only thing that says the
         # unit list is partial.
         if len(pe_infos) > MAX_MEMBER_BINARIES:
             package_refusals.append("member_binary_count_exceeds_cap")
@@ -408,7 +408,7 @@ def collect_msix_detailed(path: str) -> tuple[dict | None, str | None]:
     path *inside* this function removes the directory itself and re-raises
     on the way out, so a bad archive cannot leak one extracted package per
     scan; the leak tests assert the live-directory delta across success and
-    across every failure rather than reading this code (ground rule 18).
+    across every failure rather than reading this code.
     """
     if not is_msix_file(path) or not os.path.isfile(path):
         return None, "not_an_msix"
@@ -446,8 +446,8 @@ def _collect_package(path: str, kind: str, temp_dir: str, refusals: list[str]) -
         "packages": [package],
         "binaries": package["binaries"],
         # Sorted for determinism, deliberately NOT de-duplicated: a package
-        # with ten unsafe members reports ten refusals (rule 32 — the count
-        # is part of the fact).
+        # with ten unsafe members reports ten refusals (the count is part
+        # of the fact).
         "refusals": sorted(refusals + package["refusals"]),
     }
     return collection
@@ -577,7 +577,7 @@ def container_metadata(collection: dict, file_path: str) -> dict:
 
     This is the block the checks run against (``exe_type`` names the kind),
     the block exported as ``*-metadata.json``, and — through the SBOM
-    properties — the place container refusals reach the BOM (rule 32).
+    properties — the place container refusals reach the BOM.
     """
     capabilities = {"general": [], "restricted": [], "device": []}
     identities = []

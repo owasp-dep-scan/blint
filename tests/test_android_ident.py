@@ -1,12 +1,12 @@
-"""Tests for framework identification (04/B, rule 38) - H1-H5.
+"""Tests for framework identification.
 
-The R1 fixtures are the committed evidence files
+The fixture tests use the committed evidence files
 (``tests/data/android/<framework>-evidence.json``, generated from the
 corpus by ``tests/scripts/android/extract_identification_evidence.py``);
 each test rebuilds the parse()-shaped metadata the detectors read from the
-recorded evidence and asserts the identification against it. The R2 tests
+recorded evidence and asserts the identification against it. The corpus tests
 parse the corpus library directly when it is present on the machine and
-skip otherwise (rule 39: the corpus is never committed).
+skip otherwise (the corpus is never committed).
 """
 
 import json
@@ -104,7 +104,7 @@ def test_r1_a_bundled_static_libcxx_does_not_replace_its_host():
 
 
 def test_r1_file_name_alone_is_never_evidence():
-    """No note, no symbols, only a name: no identification (rule 38)."""
+    """No note, no symbols, only a name: no identification."""
     metadata = {"dynamic_symbols": []}
     parsed = _FakeElf()
     assert identify_frameworks(parsed, metadata) == []
@@ -147,10 +147,10 @@ def test_attach_frameworks_stores_records_under_frameworks():
         Path.home()
         / "sandbox/android-corpus/tier3-frameworks/com.blint.rnhello_1.apk"
     ).exists(),
-    reason="corpus not present on this machine (rule 39: never committed)",
+    reason="corpus not present on this machine (the corpus is never committed)",
 )
 def test_r2_corpus_libcxx_identifies_and_app_lib_does_not():
-    """R2: the real corpus library, parsed for real, when present."""
+    """The real corpus library, parsed for real, when present."""
     import os
     import tempfile
     import zipfile
@@ -173,7 +173,7 @@ def test_r2_corpus_libcxx_identifies_and_app_lib_does_not():
         assert records[0]["version"] == "r26-canary"
 
         # The bundled-static twin stays unidentified (no second copy of the
-        # runtime - H4's nested-only rule, checked on the app side).
+        # runtime - the nested-only rule, checked on the app side).
         transcoder_meta = parse(transcoder_path)
         assert not (transcoder_meta.get("frameworks") or [])
 
@@ -226,10 +226,10 @@ def test_r1_flutter_app_is_hint_only_with_the_snapshot_hash():
         Path.home()
         / "sandbox/android-corpus/tier2-fdroid/org.localsend.localsend_app_643.apk"
     ).exists(),
-    reason="corpus not present on this machine (rule 39: never committed)",
+    reason="corpus not present on this machine (the corpus is never committed)",
 )
 def test_r2_corpus_libflutter_nests_dart_and_libapp_stays_hint_only():
-    """R2: the real Flutter libraries, parsed for real, when present."""
+    """The real Flutter libraries, parsed for real, when present."""
     import os
     import tempfile
     import zipfile
@@ -325,10 +325,10 @@ def test_r1_hermes_hbc_header_fact():
         Path.home()
         / "sandbox/android-corpus/tier3-frameworks/com.blint.rnhello_1.apk"
     ).exists(),
-    reason="corpus not present on this machine (rule 39: never committed)",
+    reason="corpus not present on this machine (the corpus is never committed)",
 )
 def test_r2_corpus_rnhello_identifies_hermes_android_and_fbjni():
-    """R2: the real libraries and the bundle, parsed for real."""
+    """The real libraries and the bundle, parsed for real."""
     import os
     import tempfile
     import zipfile
@@ -484,10 +484,10 @@ def test_r1_qt_identifies_from_qt_version_str():
 
 @pytest.mark.skipif(
     not (Path.home() / "sandbox/android-corpus/tier2-fdroid").exists(),
-    reason="corpus not present on this machine (rule 39: never committed)",
+    reason="corpus not present on this machine (the corpus is never committed)",
 )
 def test_r2_corpus_vlc_and_qt_identify_with_versions():
-    """R2: the real VLC and Qt5 libraries, parsed for real."""
+    """The real VLC and Qt5 libraries, parsed for real."""
     import os
     import tempfile
     import zipfile
@@ -517,7 +517,7 @@ def test_r2_corpus_vlc_and_qt_identify_with_versions():
 
 
 def test_r3_regression_string_only_boringssl_never_replaces_its_host():
-    """R3 caught this: element v7a's libjingle (WebRTC) bundles BoringSSL.
+    """A corpus sweep caught this: element v7a's libjingle (WebRTC) bundles BoringSSL.
 
     The vendored-path strings leaked from the static copy, and the first
     cut of the detector replaced the host's identity - WebRTC labelled as
@@ -582,11 +582,11 @@ def test_nss_needs_the_export_not_an_import():
 
 
 def test_ossl_namespace_names_a_bannerless_openssl3_static_copy():
-    """J2: realm-core's OpenSSL 3 inside librealm-jni.so, by ossl_*.
+    """realm-core's OpenSSL 3 inside librealm-jni.so, by ossl_*.
 
     The names are llvm-nm's, from the committed openssl3 evidence:
     librealm-jni.so exports 1,618 ossl_* names and no OPENSSL_VERSION_TEXT
-    banner (H4 left it unidentified for exactly that reason). The record
+    banner (banner-based identification left it unidentified for exactly that reason). The record
     nests in the host, versionless.
     """
     from blint.lib.android import _nested_framework_components
@@ -610,7 +610,7 @@ def test_ossl_namespace_names_a_bannerless_openssl3_static_copy():
 
 
 def test_ossl_namespace_never_fires_on_boringssl_builds():
-    """J2: the tier-0 BoringSSL libcrypto.so exports zero ossl_* names.
+    """The tier-0 BoringSSL libcrypto.so exports zero ossl_* names.
 
     The names are llvm-nm's from the api36 system image's libcrypto.so
     (committed openssl3 evidence): the BORINGSSL_* provider surface and no
@@ -630,7 +630,7 @@ def test_ossl_namespace_never_fires_on_boringssl_builds():
 
 
 def test_blintdb_openssl_match_is_dropped_when_boringssl_is_identified():
-    """J2: the A6.1 record wins for the same bytes.
+    """The BoringSSL framework record wins for the same bytes.
 
     A blintdb openssl port match on a library whose framework record says
     BoringSSL (any grade) is dropped and counted, so the platform's

@@ -1,15 +1,15 @@
 # Builds the strong-name variant fixtures committed under
-# tests/data/pe/dotnet-strongname/ (W3.4, ground rule 29 provenance).
+# tests/data/pe/dotnet-strongname/.
 #
 # Run on the Windows 11 ARM64 VM (any .NET SDK >= 10 works) from any
 # directory; artifacts land in C:\Users\appthreat\w34 and are copied into
-# the repository by the packet. The key pair is generated fresh each run
+# the repository by hand. The key pair is generated fresh each run
 # (RSACryptoServiceProvider 1024-bit, CAPI blob = the SNK format), so a
 # rebuild produces different tokens than the ones pinned in
 # tests/test_pe_dotnet.py — regenerate the records with
 # tests/data/pe/dotnet-gt/gtdotnet.cs over the new files if you rebuild.
 #
-# Variants (facts measured in the packet commit):
+# Variants (facts measured on the built files):
 #   unsigned.dll      no key, no signature directory
 #   signed.dll        /keyfile - full signature, STRONGNAMESIGNED set
 #   delaysigned.dll   /delaysign+ - key embedded, null signature, flag clear
@@ -22,7 +22,7 @@
 # Measurement note: delayattr.dll from the development script also built
 # [assembly: AssemblyDelaySign(true)] explicitly in source with no
 # /delaysign switch - the attribute row is NOT emitted and the output is
-# fully signed, which is how the packet established that Roslyn consumes
+# fully signed, which is how it was established that Roslyn consumes
 # the pseudo-attribute and delay_sign can only read a row some other
 # toolchain (MSVC's managed emitter, the tier-5 MFC pair) wrote.
 $ErrorActionPreference = "Stop"

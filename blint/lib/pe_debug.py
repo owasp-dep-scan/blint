@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PE debug directory, CodeView/PDB and rich header decoding (W1.1, 01/A.4-A.5).
+"""PE debug directory, CodeView/PDB and rich header decoding.
 
 The debug directory answers "who built this and how do I find its symbols":
 per-entry facts, the CodeView PDB lookup key (GUID + age + path), the
@@ -8,7 +8,7 @@ and the extended DLL characteristics. The rich header answers "with which
 Microsoft tools": its comp.id records name the exact compiler/linker drops,
 and its checksum detects a tampered or spoofed header.
 
-Ground rule 28 applies throughout: entry types and comp.id products come
+Throughout, entry types and comp.id products come
 from blint-owned tables keyed by numeric values (pe_constants, the generated
 ``blint/data/pe_rich_compids.yml``), never from a dependency's rendered
 enums. A rich header that fails its checksum is a forensic signal reported
@@ -163,7 +163,7 @@ def _entry_payload(entry, exe_file: str) -> bytes:
 
     LIEF reads payloads through the mapped section; an entry whose raw data
     pointer lands outside the mapped sections (the EX_DLLCHARACTERISTICS
-    case W0.3 met) yields nothing, so the raw file offset is used instead —
+    case) yields nothing, so the raw file offset is used instead —
     capped so a hostile SizeOfData cannot drive a large read.
     """
     try:
@@ -186,7 +186,7 @@ def _entry_payload(entry, exe_file: str) -> bytes:
 
 
 def parse_pe_debug(parsed_obj, exe_file: str) -> dict:
-    """Build the ``debug`` block for one PE image (01/A.5).
+    """Build the ``debug`` block for one PE image.
 
     Every key is computed from the named source: ``entries`` from the debug
     directory itself, ``codeview`` from the first CODEVIEW payload,
@@ -332,7 +332,7 @@ def compute_rich_checksum(data: bytes, start_index: int, entries: list[tuple[int
 
 
 def decode_rich_header(exe_file: str) -> dict | None:
-    """Decode and validate the rich header of a PE file (01/A.4).
+    """Decode and validate the rich header of a PE file.
 
     Reads at most the first ``RICH_SCAN_LIMIT`` bytes. Returns None when the
     file is not a PE with a rich header; a header whose checksum does not

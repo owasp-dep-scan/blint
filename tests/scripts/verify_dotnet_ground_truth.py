@@ -1,4 +1,4 @@
-"""Reproduces the W3.1/W3.2 ground-truth comparison (ground rule 29).
+"""Reproduces the dotnet ground-truth comparison against an independent oracle.
 
 The oracle is `gt.csproj`/`gtdotnet.cs` in this directory: a spec-based
 System.Reflection.Metadata dumper built and run on the Windows 11 ARM64 VM
@@ -8,15 +8,15 @@ System.Reflection.Metadata dumper built and run on the Windows 11 ARM64 VM
 managed executable).
 
 This script re-parses the corpus side with blint and diffs the agreement
-fields the packet commits to: assembly identity, public key token, the
+fields: assembly identity, public key token, the
 full AssemblyRef list, ModuleRefs, the P/Invoke surface, entry-point
 token, CLI flags and counts. Every skipped file (corpus absent) is named.
 
-W3.2 adds three more compared groups whenever the records carry them —
+Three more groups are compared whenever the records carry them —
 resolved TypeRefs (``typerefs``), rendered MemberRefs (``memberrefs``) and
 the #US walk (``user_strings_count``/``user_strings_sha256``).
 
-W3.4 adds the strong-name comparison (``strong_name``/``ivt`` in the
+It also runs the strong-name comparison (``strong_name``/``ivt`` in the
 records, ``dotnet.strong_name`` in blint's block) and the records the
 shipped file now spans both sides of that boundary: the 62 corpus managed
 assemblies (all fully strong-named — not one delay-signed or unsigned
@@ -37,7 +37,7 @@ the repo is — no corpus needed.
 
 Usage: python tests/scripts/verify_dotnet_ground_truth.py [records.jsonl]
 
-The default record set is the 63 corpus files, and W3.1's review showed
+The default record set is the 63 corpus files, and a review showed
 that set is too narrow to be a gate on its own: every one of its
 assemblies happened to sit on the same side of a coded-index column-width
 threshold, so it agreed 63/63 while two real framework assemblies parsed
@@ -64,14 +64,14 @@ from blint.lib.pe_dotnet import (
 GT_FILE = Path(__file__).parent.parent / "data" / "pe" / "dotnet-gt" / "gt-output.jsonl"
 CORPUS = Path("~/sandbox/pe-corpus").expanduser()
 REPO = Path(__file__).resolve().parents[2]
-# helloexe.dll was built on the VM, not in the corpus; the packet commit
-# pastes its blint block verbatim.
+# helloexe.dll was built on the VM, not in the corpus; the commit that added
+# it pastes its blint block verbatim.
 INDEPENDENT = {"helloexe.dll"}
 # Listing caps: the oracle dumps whole tables, blint lists a capped prefix,
 # so the comparison slices the oracle's rows through the same window. These
 # are imported rather than restated — they were literals here, and a cap
 # changed in the parser left the oracle comparing against the old window
-# while still reporting agreement (ground rule 21).
+# while still reporting agreement.
 
 
 def main() -> int:
@@ -178,8 +178,8 @@ def compare(rec: dict, block: dict) -> list[str]:
         ep = block.get("entry_point", {})
         if ep.get("token") != rec["entry_point_token"]:
             issues.append(f"entry token {ep.get('token')} != {rec['entry_point_token']}")
-    # W3.2 fields: compared only when the records carry them, so the
-    # shipped W3.1 record set keeps validating the W3.1 fields.
+    # TypeRef/MemberRef/#US fields: compared only when the records carry
+    # them, so a record set without them keeps validating the base fields.
     if "typerefs" in rec:
         listed = min(int(rec["counts"].get("typeref", 0)), MAX_LISTED_TYPEREFS)
         # blint walks the first `listed` rows and omits the ones whose
@@ -225,7 +225,7 @@ def compare(rec: dict, block: dict) -> list[str]:
             )
         if block.get("user_strings_sha256") != oracle_sha:
             issues.append("user_strings_sha256")
-    # W3.4: the strong-name facts. Compared only when the record carries
+    # The strong-name facts. Compared only when the record carries
     # them. The oracle's nullable delay_sign_attribute normalizes to
     # blint's boolean (no row and a false row read identically); a
     # netmodule record (name None) skips the declared-key pair because the

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""A4a T1 — build the R1-R3 fixture ladder with NDK r28 clang.
+"""Build the three-rung disassembly fixture ladder with NDK r28 clang.
 
-Rungs (see the wave's GLM-PROMPT):
+Rungs:
 
-- R1: ``a4a_sources/r1_functions.c`` (10 static functions + one export) built
+- Rung 1: ``a4a_sources/r1_functions.c`` (10 static functions + one export) built
   ``-g -shared -fPIC`` for all five ABIs; armeabi-v7a gets explicit ``-mthumb``
   and ``-marm`` twins so each build is one function set in one mode.
-- R2: ``a4a_sources/r2_interwork.c`` (ARM/Thumb interworking, tbb/tbh switch
+- Rung 2: ``a4a_sources/r2_interwork.c`` (ARM/Thumb interworking, tbb/tbh switch
   tables, literal pools, mapping symbols) built the same way.
-- R3: llvm-stripped copies of the armeabi-v7a R1/R2 builds (dynsym only).
+- Rung 3: llvm-stripped copies of the armeabi-v7a rung 1/2 builds (dynsym only).
 
 Fixtures land in $ANDROID_CORPUS_ROOT/a4a-fixtures (default
 ~/sandbox/android-corpus/a4a-fixtures) with a MANIFEST.json naming the exact
@@ -103,17 +103,17 @@ def main(argv: list[str] | None = None) -> int:
         manifest["builds"][name] = {"command": " ".join(cmd), "source": source.name, "abi": abi}
         return out_path
 
-    # R1 across the five ABIs; armeabi-v7a gets explicit-mode twins.
+    # Rung 1 across the five ABIs; armeabi-v7a gets explicit-mode twins.
     for abi in ABI_CLANG:
         build(f"liba4a_r1_{abi}.so", SOURCES / "r1_functions.c", abi, [])
     build("liba4a_r1_thumb.so", SOURCES / "r1_functions.c", "armeabi-v7a", ["-mthumb"])
     build("liba4a_r1_arm.so", SOURCES / "r1_functions.c", "armeabi-v7a", ["-marm"])
-    # R2 on armeabi-v7a (interworking lives there) plus the other ABIs as controls.
+    # Rung 2 on armeabi-v7a (interworking lives there) plus the other ABIs as controls.
     for abi in ABI_CLANG:
         build(f"liba4a_r2_{abi}.so", SOURCES / "r2_interwork.c", abi, [])
     build("liba4a_r2.so", SOURCES / "r2_interwork.c", "armeabi-v7a", ["-mthumb"])
 
-    # R3: stripped twins (symtab gone, dynsym kept).
+    # Rung 3: stripped twins (symtab gone, dynsym kept).
     for unstripped, stripped in (
         ("liba4a_r1_thumb.so", "liba4a_r1_thumb_stripped.so"),
         ("liba4a_r1_arm.so", "liba4a_r1_arm_stripped.so"),

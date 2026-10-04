@@ -1,5 +1,5 @@
 /*
- * A9 P3 - the merged-table split fixture (see SplitNative.java for the
+ * The merged-table split fixture (see SplitNative.java for the
  * expected fate of each entry). The registrars and the per-class helpers
  * are noinline so the compiled shape keeps the registrar -> helper call
  * the carried-argument walk follows.

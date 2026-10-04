@@ -1,19 +1,18 @@
-"""Shared bounded container framework for blint's archive inputs (W4.1).
+"""Shared bounded container framework for blint's archive inputs.
 
-Every archive blint opens is untrusted input (ground rule 30): member counts,
+Every archive blint opens is untrusted input: member counts,
 total uncompressed sizes, per-member sizes, decompression ratios, member path
 depths and member path safety are bounded on every reader, every refusal is
 named rather than silent, and every extraction cleans up on every exit path
-including exceptions (ground rule 18). This module is the one place those
+including exceptions. This module is the one place those
 mechanisms live, so the per-format readers (``msix.py``, ``cab.py``,
 ``office.py``, ...) cannot drift into a fourth independent pattern. The
 ``.ipa`` reader (``ios.py``) predates it and still extracts through
 ``zipfile.extractall`` with zipfile's own member-name sanitisation; it does
-not carry size/count caps, which is stated here rather than claimed away —
-moving it onto this framework is the Apple lane's call, not this wave's.
+not carry size/count caps, which is stated here rather than claimed away.
 
 The path-safety check is the single implementation in the tree. It grew out of
-``nuget_package._member_path_unsafe`` after W3.5's review found the
+``nuget_package._member_path_unsafe`` after a review found the
 drive-relative check missed the drive-absolute form an archiver actually
 writes (``C:/evil/evil.dll``, which ``ntpath.join`` honours by discarding the
 base); that module now imports this one instead of keeping its own copy.
@@ -50,7 +49,7 @@ _EXTRACT_CHUNK = 1024 * 1024
 class ContainerLimits:
     """The bounds one container reader enforces.
 
-    Every field is part of the reader's contract (ground rule 30). Each
+    Every field is part of the reader's contract. Each
     format reader sets its own measured numbers and states the measurement
     in its module docstring; the framework does not guess defaults.
     Containers within containers (a .msixbundle holds .msix packages, an
@@ -70,7 +69,7 @@ class ContainerLimits:
 def member_path_unsafe(name: str) -> bool:
     """A member name blint must never treat as a path it could write to.
 
-    Ground rule 30's traversal class: ``..`` segments, rooted absolute
+    The path-traversal class: ``..`` segments, rooted absolute
     paths, UNC prefixes, Windows drive letters in *both* spellings, and
     backslash separators (the zip spec says ``/``; a ``\\`` is how an
     extracted path escapes on Windows). Readers whose format documents
@@ -151,7 +150,7 @@ def walk_zip_members(
             # extractor open a directory for writing and record the
             # resulting OSError as `member_unreadable` — a refusal that
             # reads as a finding about the archive when it is only an
-            # artefact of this loop (rule 14).
+            # artefact of this loop.
             continue
         if len(name.rstrip("/").split("/")) > limits.max_member_depth:
             refusals.append("member_depth_exceeds_cap")
@@ -205,7 +204,7 @@ def read_zip_member_bounded(
 def bounded_temp_dir(prefix: str):
     """A temp directory removed on every exit path, exceptions included.
 
-    Ground rule 18's structural form: one ``finally`` around the whole body,
+    One ``finally`` around the whole body,
     not a cleanup call repeated at each return. The leak tests assert the
     live-directory delta across success and across every failure path
     rather than reading this code.

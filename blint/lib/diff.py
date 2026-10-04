@@ -82,7 +82,7 @@ HARDENING_POLARITY: dict[str, str] = {
     "get_task_allow": "risk",
     "packed": "risk",
     "stripped": "observe",
-    # PE-lane A.3 properties: every hardening control the PE rewrite computes
+    # PE properties: every hardening control the PE reader computes
     # from a named source, plus the architecture facts and the debug-info
     # posture, which inform but do not protect.
     "aslr": "hardening",
@@ -108,7 +108,7 @@ HARDENING_POLARITY: dict[str, str] = {
     "arm64x": "observe",
     "debug_info": "observe",
     "debug_info_pdb_path": "observe",
-    # A scope change (embedded → catalog, once W2.3 resolves it) is worth
+    # A scope change (embedded → catalog, once catalog signing resolves it) is worth
     # reporting but is not itself a loss of protection; ``is_signed`` carries
     # the hardening polarity.
     "authenticode_scope": "observe",
@@ -524,13 +524,13 @@ def _packing_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[s
 
 
 def _windows_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[str, Any]:
-    """Windows update-triage deltas (04/E): the changes a Windows reviewer
+    """Windows update-triage deltas: the changes a Windows reviewer
     asks for first.
 
     - changed signer (the re-sign that is the shape of a tampered update)
     - signing-class change
     - driver kind change
-    - IOCTL surface gained or lost codes (W5.3 recovered sets)
+    - IOCTL surface gained or lost codes (the recovered code sets)
     - P/Invoke targets gained or lost (the managed/native boundary moved)
     - manifest execution level changed (an update that silently asks for
       more privilege)
@@ -539,8 +539,7 @@ def _windows_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict[s
 
     Lost hardening flags are deliberately NOT here - the hardening layer
     owns ``security_properties`` and classifies those changes with
-    polarity; restating them would be a second place for the same fact
-    (rule 21).
+    polarity; restating them would be a second place for the same fact.
     """
     delta: dict[str, Any] = {}
 
@@ -711,7 +710,7 @@ def _hardening_delta(old_meta: dict[str, Any], new_meta: dict[str, Any]) -> dict
         "regression_count": sum(1 for c in changes if c["classification"] == "regression"),
         "improvement_count": sum(1 for c in changes if c["classification"] == "improvement"),
         "unclassified_count": sum(1 for c in changes if c["classification"] == "change"),
-        # Rule 21: the summary block describes one slice of a universal
+        # The summary block describes one slice of a universal
         # binary; the diff carries the scope through so a reader knows what
         # the compared values mean.
         "scope": new_meta.get("security_properties_scope"),

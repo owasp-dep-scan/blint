@@ -1,6 +1,6 @@
-"""Office container and indicator analyzer (W4.4).
+"""Office container and indicator analyzer.
 
-The scoping decision (03/C): blint is an Office *container and indicator*
+The scoping decision: blint is an Office *container and indicator*
 analyzer, not a VBA emulator. Structure, macros and relationships are
 extracted and fed to the existing rule engine; deobfuscation beyond the
 format's own compression stays with oletools, which already does it.
@@ -10,7 +10,7 @@ Families:
 - **OOXML** (``.docx``/``.docm``/``.xlsx``/``.xlsm``/``.pptx``/``.pptm``):
   the relationship graph with **external relationships** called out (remote
   template injection, linked OLE objects — the highest-signal Office
-  indicator there is), ``vbaProject.bin`` routed through the W4.2 CFBF
+  indicator there is), ``vbaProject.bin`` routed through the CFBF
   reader, macro module source via the MS-OVBA decompressor, embedded
   objects, ``printerSettings``/ActiveX stream-smuggling spots, DDE field
   codes in the main part, and macro signatures.
@@ -23,10 +23,10 @@ Families:
 - **RTF**: detection plus ``objdata``/``objupdate`` OLE object extraction —
   no full parser, stated.
 
-Findings, not verdicts (ground rule 34): the metadata says what a document
+Findings, not verdicts: the metadata says what a document
 contains and references, never whether it is "malicious".
 
-Bounds (ground rules 30/33): OOXML walks through the W4.1 zip framework
+Bounds: OOXML walks through the shared zip framework
 caps; VBA module decompression is capped (``MAX_VBA_MODULE_BYTES``); the
 number of relationship rows and macro modules listed is capped while the
 counts stay exact. No rule reads the capped listings.
@@ -434,7 +434,7 @@ def analyze_ooxml(path: str, refusals: list[str], degradations: list[str]) -> di
             # Both listings are bounded, so both carry their full count
             # beside them: everywhere else in this reader a capped list
             # rides with an uncapped `_count`, and a list that silently
-            # stopped at the cap would read as the whole document (rule 32).
+            # stopped at the cap would read as the whole document.
             embedded_total = 0
             printer_total = 0
             for name, info in by_name.items():
@@ -485,7 +485,7 @@ def iter_ppt_ole_objects(stream_bytes: bytes, degradations: list[str]):
     ``oletools.ppt_record_parser`` reads the same two shapes). Without this
     unwrap the generic storage walk sees a ``.ppt``'s macros not at all.
 
-    Every bound here faces untrusted input (rule 30): the record walk is
+    Every bound here faces untrusted input: the record walk is
     capped, each decompression is capped at ``MAX_VBA_MODULE_BYTES``
     against bytes actually produced, and a record that lies about its
     length or decompresses to something that is not a CFBF is named as a
@@ -749,7 +749,7 @@ def _is_attachment_storage(path: str, entry_type: str) -> bool:
     ``"__attach_version1.0_/"`` instead required a storage literally named
     ``__attach_version1.0_`` with children under it, which no message
     writer produces: every real ``.msg`` reported zero attachments, and
-    said nothing about it (rule 32).
+    said nothing about it.
     """
     return entry_type == "storage" and "/" not in path and path.startswith("__attach_version1.0_")
 

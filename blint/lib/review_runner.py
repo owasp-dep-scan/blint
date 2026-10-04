@@ -107,7 +107,7 @@ class ReviewRunner:
         return self.results
 
     def _review_office(self, metadata: dict[str, Any]) -> None:
-        """Reviews the office evidence families (W4.4): macro source lines,
+        """Reviews the office evidence families: macro source lines,
         relationship rows and OLE stream names — the document equivalents
         of functions/imports/symbols."""
         candidates: list[str] = []
@@ -123,7 +123,7 @@ class ReviewRunner:
     def _review_imports(self, metadata: dict[str, Any]) -> None:
         """Reviews imports in the metadata."""
         imports_list = [f.get("name", "") for f in metadata.get("imports", [])]
-        # W3.2: a managed assembly's import surface is its metadata — the
+        # A managed assembly's import surface is its metadata — the
         # referenced types and members, the P/Invoke scopes, and the string
         # literals the IL loads. They ride the same pattern-review
         # machinery the native import table feeds.

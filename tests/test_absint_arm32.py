@@ -185,7 +185,7 @@ def test_thumb_registrar_reads_methods_marker_and_constant_count():
 def test_thumb_pair_chain_carries_the_incoming_pair():
     """The pair registrar passes its incoming (methods, count) - an r1/r2
     pair - through callee-saved registers to the vtable call, the shape the
-    A9 P3 argument carrying seeds."""
+    registrar argument carrying seeds."""
     instructions = _fixture_instructions(
         "liba12rt_armeabi-v7a.so", "thumbv7-unknown-linux-android", "a11_rt_register_pairP"
     )

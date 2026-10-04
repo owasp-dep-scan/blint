@@ -1,4 +1,4 @@
-"""MSI (Microsoft Installer) reader on top of the CFBF reader (W4.2).
+"""MSI (Microsoft Installer) reader on top of the CFBF reader.
 
 An ``.msi`` is a CFBF storage whose streams are database tables. Table
 streams carry encoded names (the MSI name encoding — see
@@ -6,7 +6,7 @@ streams carry encoded names (the MSI name encoding — see
 the real 7z-x64.msi corpus artifact); row data lives in ``!_StringPool`` /
 ``!_StringData`` plus one stream per table.
 
-What blint extracts, per the plan's ``03/B`` row: product/package/upgrade
+What blint extracts: product/package/upgrade
 codes, the ``File``/``Component``/``Binary`` tables, the ``CustomAction``
 table with its deferred/impersonated flags and embedded script text — the
 persistent-install attack surface — embedded CABs (the ``Media`` table's
@@ -355,7 +355,7 @@ def decode_custom_action_type(action_type: int) -> dict:
 def parse_msi(path: str, refusals: list[str], degradations: list[str]) -> dict:
     """Parse one ``.msi`` file into blint's facts block.
 
-    Reads the tables the plan names plus the summary and signature streams;
+    Reads the tables the module docstring names plus the summary and signature streams;
     never reads Binary-table stream bytes (names and sizes only).
     """
 

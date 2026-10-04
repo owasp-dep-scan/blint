@@ -2,7 +2,7 @@
 
 The instruction text is never hand-written: every test decodes the committed
 NDD-built fixture ``tests/data/android/liba11rt_x86.so`` with nyxstone (the
-registrar functions whose shapes A11 S0 measured live there) and steps the
+measured registrar function shapes live there) and steps the
 model over the real text. The fixtures were built by
 ``tests/scripts/android/build_a11_jni_fixtures.sh`` with NDK r28c
 (28.2.13676358).

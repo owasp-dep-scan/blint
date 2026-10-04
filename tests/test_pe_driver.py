@@ -1,6 +1,6 @@
-r"""Tests for the driver identity block (PE lane W5.1, plan 04/A).
+r"""Tests for the driver identity block.
 
-Two fixture levels, mirroring the lane's discipline:
+Two fixture levels:
 
 - Metadata-level unit tests feed import/subsystem shapes straight into the
   classifier, so every kind signal and the gate have a fixture that reaches
@@ -77,7 +77,7 @@ def test_ntoskrnl_import_passes_gate_without_native_subsystem():
 
 
 def test_umdf_dll_passes_gate_and_classifies_umdf():
-    """The plan's own enum names umdf; a UMDF DLL is user-mode, so the
+    """The kind enum names umdf; a UMDF DLL is user-mode, so the
     framework import is what makes the kind reachable at all."""
     metadata = _kernel_metadata(
         subsystem="WINDOWS_CUI", dlls={"WUDFx02000.dll": ["WdfDriverCreate"]}
@@ -98,7 +98,7 @@ def test_user_mode_image_without_driver_imports_has_no_block():
 
 
 # ---------------------------------------------------------------------------
-# Kind: determined, never defaulted (rule 32)
+# Kind: determined, never defaulted
 # ---------------------------------------------------------------------------
 
 
@@ -295,7 +295,7 @@ def test_refresh_skips_non_driver_metadata():
 
 def test_dual_signed_driver_reads_whql_attestation():
     """The netkvm.sys/prl_* shape: an outer commercial EV signature and a
-    nested WHQL attestation. The W2.4 block class stays commercial_ev (its
+    nested WHQL attestation. The signature block class stays commercial_ev (its
     documented walk-order contract); the driver view reads the signature
     that loads the kernel image."""
     block = {
@@ -321,7 +321,7 @@ def test_dual_signed_driver_reads_whql_attestation():
     view = _driver_signing_view(block)
     assert view["class"] == "attestation_signed"
     assert view["basis"] == "kernel_trust_signature"
-    # The W2.4 block's own class is untouched - one derivation each, named.
+    # The signature block's own class is untouched - one derivation each, named.
     assert block["signing_class"] == "commercial_ev"
 
 
@@ -356,7 +356,7 @@ def test_driver_view_absent_when_nothing_determines():
 
 def test_driver_block_signing_requires_parsed_block():
     """A signature block that failed to parse determines nothing - the
-    signing key stays absent rather than claiming a class (rule 11)."""
+    signing key stays absent rather than claiming a class."""
     parsed = _FakeParsed([_FakeSection(".rdata", b"\\Device\\X\x00")])
     metadata = _kernel_metadata(dlls={"ntoskrnl.exe": ["IoCreateDevice"]})
     metadata["code_signature"] = {"parse_status": "parse_failed", "signing_class": "whql"}
@@ -455,7 +455,7 @@ def test_fixture_driver_block(fixture_driver):
 
 
 # ---------------------------------------------------------------------------
-# Object path listing bound (rule 33): a fixture past the cap
+# Object path listing bound: a fixture past the cap
 # ---------------------------------------------------------------------------
 
 
@@ -482,7 +482,7 @@ def test_object_path_listing_bound_names_truncation():
 
 
 def test_object_path_empty_driver_is_stated_empty():
-    """Rule 32: a driver naming no device object is stated as empty, not
+    """A driver naming no device object is stated as empty, not
     left to read as "not scanned"."""
     parsed = _FakeParsed([_FakeSection(".rdata", b"no paths here\x00")])
     metadata = _kernel_metadata(dlls={"ntoskrnl.exe": ["IoCreateDevice"]})
@@ -566,7 +566,7 @@ def test_x86_driver_registers_callbacks_through_absolute_immediates():
     Treating any operand beginning with `0` as NULL refused every one of
     them, so no 32-bit driver could report a callback or reach the
     MajorFunction corroboration at all - the x86 layout was unreachable,
-    the same blind spot W5.3 fixed for ARM64.
+    the same blind spot already fixed for ARM64.
     """
     lines = [
         "mov dword ptr [eax + 0x38], 0x401000",

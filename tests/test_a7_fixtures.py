@@ -127,7 +127,7 @@ def test_manifest_names_the_build_commands() -> None:
                 continue
             if rule == "ANDROID_INLINE_SYSCALLS":
                 # The instruction-text rule evaluates everywhere; since
-                # A7.2 M3 stopped 32-bit ARM extents at the literal pools,
+                # 32-bit ARM extents stop at the literal pools,
                 # its armeabi-v7a cells state a fire/silent verdict.
                 assert "not evaluated" not in table["armeabi-v7a"], (rule, lib)
             else:
@@ -199,7 +199,7 @@ def _functions_holding_inline_syscalls(metadata: dict) -> set[str]:
     import re
 
     # blint renders x86's int 0x80 in decimal (int 128); arm64 and Thumb
-    # render svc #0 (the A4a disassembly).
+    # render svc #0.
     pattern = re.compile(r"\bsvc\s+#?0\b|\bsyscall\b|\bint\s+(?:0x80|128)\b")
     holders: set[str] = set()
     for key, func_data in (metadata.get("disassembled_functions") or {}).items():

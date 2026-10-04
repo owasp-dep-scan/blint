@@ -861,7 +861,7 @@ def enum_to_str(enum_obj) -> str:
     # metadata differed in kind between two supported interpreters
     # (``>=3.10,<3.15``) — and on the newer half it was the numeric
     # rendering that silently broke the PE hardening checks in the first
-    # place (verification-log finding V1).
+    # place.
     #
     # ``name`` is also consulted *before* the raw-integer branch, because
     # some LIEF enums are arithmetic (int subclasses) and some are not:

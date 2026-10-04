@@ -1,12 +1,12 @@
 /*
- * A11 S3 - tables built at run time, one registrar per shape (see
+ * Tables built at run time, one registrar per shape (see
  * RtNative.java for each declaration's expected fate). The entry words are
  * built per field so no constant aggregate exists for the compiler to
  * place in .data.rel.ro: the name and signature are file-scope objects
  * reached through PIC (GOTOFF for the local ones, the GOT for the exported
  * signature), and the fnPtr goes through a noinline identity function so
  * it can never be folded into a static template. The 32-bit builds are the
- * S0 cause-B shape (fbjni ThreadScope::OnLoad / ComponentFactory); the
+ * measured fbjni shape (ThreadScope::OnLoad / ComponentFactory); the
  * same source on arm64/x86_64 gives the jni.hpp-style store sequence
  * maplibre ships on every ABI.
  */

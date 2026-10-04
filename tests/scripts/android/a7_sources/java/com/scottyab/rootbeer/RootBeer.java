@@ -1,12 +1,12 @@
 /*
- * A7 K1 — the caller that moves the su paths from dex to native.
+ * The caller that moves the su paths from dex to native.
  *
  * Cut down from scottyab/rootbeer (Apache-2.0) rootbeerlib
  * src/main/java/com/scottyab/rootbeer/RootBeer.java at 0.1.2:
  * checkForBinary/checkForRootNative are the two halves the fixture needs —
  * the directory list plus the "su" slug build the paths in Java, and the
  * native checkForRoot receives them as a String[] (which is why the native
- * library holds no constant su path; GLM-PROMPT.md measurement 4).
+ * library holds no constant su path).
  */
 package com.scottyab.rootbeer;
 

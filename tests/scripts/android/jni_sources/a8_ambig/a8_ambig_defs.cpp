@@ -1,5 +1,5 @@
 /*
- * A8 N3 - the ambiguity fixture's shared symbols, in the fbjni shape
+ * The ambiguity fixture's shared symbols, in the fbjni shape
  * (preemptible dynsym definitions away from the tables that name them;
  * see a8_hybrid_defs.cpp). The three classes' tables all carry an entry
  * with the SAME name + signature - the shape that leaves the join's

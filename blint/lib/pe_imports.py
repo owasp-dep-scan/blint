@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PE import depth: delay-load, ordinal resolution, apiset resolution (W1.2).
+"""PE import depth: delay-load, ordinal resolution, apiset resolution.
 
 The import table answers "which DLLs does this image need and which functions
 does it call". Three facts make that answer wrong or blind on modern Windows:
@@ -8,13 +8,13 @@ does it call". Three facts make that answer wrong or blind on modern Windows:
   use. They are real dependencies and a classic evasion surface precisely
   because the common tools read only the first table, so they are parsed into
   ``delay_imports[]`` in the same shape as ``imports`` and never merged with
-  it — the distinction is the signal (plan 01/A.6).
+  it — the distinction is the signal.
 - **Ordinal-only imports** carry a number instead of a name. For the DLLs
   where ordinals are stable and common (``ws2_32``, ``mpr``, ``oleaut32``,
   ``shlwapi``, ``netapi32``, ``wsock32``) the number is resolved through the
   generated ``blint/data/pe_ordinals.yml`` snapshot; entries resolved this way
   carry ``resolution: "ordinal_table"`` and the ones that are not stay
-  ordinals with ``resolution: "unresolved"`` — never conflated (rule 14).
+  ordinals with ``resolution: "unresolved"`` — never conflated.
 - **API sets** (``api-ms-win-core-*``) are loader-virtual DLLs: the schema in
   ``apisetschema.dll`` binds each one to the host DLL that is actually mapped.
   Every dependency list, dependency-graph check and SBOM ``dependsOn`` is
@@ -24,7 +24,7 @@ does it call". Three facts make that answer wrong or blind on modern Windows:
   generated from.
 
 Both tables are generated data with a provenance header and a regenerator in
-``tests/scripts/``; nothing is fetched at runtime. Ground rule 28 applies:
+``tests/scripts/``; nothing is fetched at runtime. Never match on a rendered enum:
 table keys are the on-disk names and numbers, never a dependency's rendering.
 """
 
@@ -58,13 +58,13 @@ ORDINAL_FLAG_PE32 = 0x80000000
 # keep the evidence source explicit beside the plain ``NEEDED`` entry.
 TAG_DELAYLOAD = "DELAYLOAD"
 TAG_FORWARDER = "FORWARDER"
-# W3.2: a managed assembly's P/Invoke scopes (DllImport / ImplMap). Unlike a
+# A managed assembly's P/Invoke scopes (DllImport / ImplMap). Unlike a
 # delay-load entry a P/Invoke module is mapped at first call, not at image
 # load — which is exactly why it never appears in the import table — so it
 # is a declared dependency of its own kind, not a loader-level NEEDED one.
 TAG_PINVOKE = "PINVOKE"
 
-# Resolution vocabulary for an entry's function name (plan 01/A.6: resolved
+# Resolution vocabulary for an entry's function name (resolved
 # ordinal-table entries and unresolved ordinals are distinct outcomes).
 RESOLUTION_ORDINAL_TABLE = "ordinal_table"
 RESOLUTION_UNRESOLVED = "unresolved"
@@ -323,7 +323,7 @@ def parse_pe_delay_imports(
     delay_imports, imagebase: int, pe32: bool = False
 ) -> tuple[list[dict], list[dict]]:
     """
-    Parses the delay-load import table (01/A.6).
+    Parses the delay-load import table.
 
     Same shape as :func:`parse_pe_imports`' result, tagged ``DELAYLOAD`` in
     its DLL list so the SBOM and dependency consumers can keep the two tables
@@ -344,7 +344,7 @@ def parse_pe_delay_imports(
 def summarize_resolution(
     imports_list: list[dict], delay_list: list[dict], dll_lists: list[list[dict]]
 ) -> dict:
-    """Summarize how completely this image's imports resolved (01/A.6).
+    """Summarize how completely this image's imports resolved.
 
     Facts only: how many ordinal imports the snapshot named and how many
     stayed ordinals, and per-DLL apiset coverage — a DLL entry whose name is
@@ -391,7 +391,7 @@ def delay_import_hash(delay_imports_list: list[dict]) -> str:
 
     Same normalization as the cross-format ``import_hash`` so the two hashes
     are comparable; evasive loading hides in delay tables precisely because
-    the common imphash implementations never see them (verification log V6).
+    the common imphash implementations never see them.
     """
     names = [
         row.get("name")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A5 E0 — JNI surface probe: blint's facts next to the NDK/SDK oracles.
+"""JNI surface probe: blint's facts next to the NDK/SDK oracles.
 
 For every input (``.so``, ``.dex`` or ``.apk``) this prints, and checks
 against named tools run in the same invocation:
@@ -25,7 +25,7 @@ SDK build-tools). The dex side also runs LIEF the way blint's
 ``parse_dex`` does, so the LIEF-vs-dexdump agreement is itself checked.
 Exit code is non-zero on any disagreement.
 
-What blint already has (recorded here for the E1/E2 packets): exports
+What blint already has: exports
 come from ``parse()`` metadata, dex methods from LIEF
 ``DEX.File.methods`` (``access_flags`` carries ACC_NATIVE), the dex
 callgraph node id is the method-pool index (``dalvik_callgraph.py``),
@@ -113,7 +113,7 @@ def run_tool(tool: Path, args: list[str]) -> str:
 
 
 # ------------------------------------------------------------ name decoding
-# The decoder lives in blint.lib.jni (E1) and is imported here so the
+# The decoder lives in blint.lib.jni and is imported here so the
 # probe's oracle decode and the metadata block can never drift apart.
 from blint.lib.jni import decode_jni_symbol
 
@@ -308,7 +308,7 @@ def decode_join(export_names: set[str], dex_natives: list[dict]) -> dict:
 def probe_so(so: Path, nm: Path) -> dict:
     """One .so: decoded exports vs llvm-nm -D, OnLoad/OnUnload presence.
 
-    From E1 on, blint's own ``metadata["android"]["jni"]`` block is
+    blint's own ``metadata["android"]["jni"]`` block is also
     compared against the same oracle: same Java_* set, same decode, same
     lifecycle facts. A ``Java_`` export that does not decode must carry
     ``decode_error`` in the block - never be dropped.
@@ -336,14 +336,14 @@ def probe_so(so: Path, nm: Path) -> dict:
             f"blint JNI names differ from llvm-nm -D: only-blint={sorted(blint_jni - oracle_jni)} "
             f"only-nm={sorted(oracle_jni - blint_jni)}"
         )
-    # E1: the metadata jni block against the same-run decode + oracle.
+    # The metadata jni block against the same-run decode + oracle.
     from blint.lib.binary import parse
 
     metadata = parse(str(so))
     jni_block = (metadata.get("android") or {}).get("jni")
     if oracle_jni and jni_block is None:
         if not metadata.get("is_targeting_android"):
-            # The whole android block is note-gated by design (B1); a
+            # The whole android block is note-gated by design; a
             # library without .note.android.ident is reported, not counted
             # as a disagreement (fennec's libjnidispatch shape).
             report["triage"] = report.get("triage", []) + [
@@ -514,7 +514,7 @@ def probe_apk(apk: Path, nm: Path, dexdump: Path) -> dict:
     diffs = [d for r in so_reports for d in r["diffs"]] + (
         dex_report["diffs"] if dex_report else []
     )
-    # E2: blint's own app-level join (the android_jni metadata block) against
+    # blint's own app-level join (the android_jni metadata block) against
     # this probe's per-ABI join - same bound/unbound/undeclared partition.
     blint_join = None
     with contextlib.suppress(Exception):

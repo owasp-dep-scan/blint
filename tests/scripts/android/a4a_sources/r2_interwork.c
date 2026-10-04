@@ -1,5 +1,5 @@
 /*
- * A4a R2 — ARM32 interworking: Thumb <-> ARM bl/blx, bx lr, pop {..., pc},
+ * Rung 2 — ARM32 interworking: Thumb <-> ARM bl/blx, bx lr, pop {..., pc},
  * literal pools, tbb/tbh switch tables, and the $a/$t/$d mapping symbols the
  * assembler emits for the mode changes.
  *

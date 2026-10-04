@@ -1,4 +1,4 @@
-"""Installer detection for PE overlays (W4.3), extending the W0.2 classifier.
+"""Installer detection for PE overlays, extending the overlay classifier.
 
 The overlay classifier labels an installer-shaped residue (``nsis``,
 ``inno``, ``installshield``, ``sfx_7z``); this module turns those labels
@@ -35,7 +35,7 @@ from blint.lib.sevenz import parse_sevenz_blob
 
 NSIS_FIRSTHEADER_MAGIC = 0xDEADBEEF
 
-# Bounds (ground rule 30): a NSIS data block is never decompressed here, so
+# Bounds: a NSIS data block is never decompressed here, so
 # the caps only bound how much of the file is *scanned* and how large a 7z
 # directory may be (sevenz.py carries its own measured caps).
 MAX_INSTALLER_SCAN_BYTES = 8 * 1024 * 1024
@@ -45,7 +45,7 @@ MAX_NSIS_HEADER_OFFSET = 4 * 1024 * 1024
 def detect_installer(path: str, overlay_classification: str | None) -> dict | None:
     """Build the ``installer`` block for one PE, or None when not an installer.
 
-    ``overlay_classification`` is the W0.2 residue label; only installer
+    ``overlay_classification`` is the overlay residue label; only installer
     families get a block. Facts never read as verdicts: the block states
     which container shape the executable carries, not what it might do.
     """

@@ -398,7 +398,7 @@ def test_entitlements_xml_only_and_der_only():
 
 
 def test_entitlements_undecodable_recorded_not_fatal():
-    # Rule 14: an undecodable entitlements payload must never read as "no
+    # An undecodable entitlements payload must never read as "no
     # entitlements"; the failure is recorded on the slot it belongs to.
     detail = parse_superblob(
         _superblob(
@@ -556,7 +556,7 @@ def test_signature_summary_failed_parse():
 
 
 def test_superblob_output_is_plain_json():
-    # Rule 20: the parse cache refuses entries it cannot serialize, so a
+    # The parse cache refuses entries it cannot serialize, so a
     # bytes/memoryview leaking into the detail would silently make every
     # signed binary uncached. Assert at the source.
     entitlements = {"a.b": [True, 1, "x"]}

@@ -1,4 +1,4 @@
-"""Cabinet (MSCF) archive reader (W4.2).
+"""Cabinet (MSCF) archive reader.
 
 CABs are what MSI carries (drivers, update packages, the merged installer
 payload), so a scanner that cannot open one cannot see what an installer
@@ -9,7 +9,7 @@ stdlib; Quantum (2/3) and LZX (4) do not — a member whose folder uses them
 refuses by name (``member_compression_unsupported``) rather than silently
 listing as analyzable.
 
-Bounds (ground rules 30/33) measured on the corpus CABs plus the merged
+Bounds measured on the corpus CABs plus the merged
 ``product.cab`` inside 7z-x64.msi (1.9 MB, thousands of members): 16,384
 members listed (cap), 512 MiB total uncompressed (cap), 256 MiB per member
 (cap), 64 MiB per CFDATA block decode (cap), member path depth 16 (cap).
@@ -193,7 +193,7 @@ def parse_cab(path: str) -> dict:
 
     Members are listed with sizes, folder method and path-safety verdicts;
     refused members are named (unsafe paths, unsupported compression,
-    truncated archives) and never read as absent (rule 32). No member bytes
+    truncated archives) and never read as absent. No member bytes
     are decompressed on this path.
     """
     block: dict = {

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# A12 fixtures (T1/T2/T3): the a8/a9/a11 registrar shapes built for Thumb.
+# The a8/a9/a11 fixtures' registrar shapes built for Thumb.
 #
 # liba12rt_armeabi-v7a.so    - the a11_rt registrar sources (constant-count
 #                              word stores, the volatile-count twin, the
 #                              realigned registrar, the pair-passing chain)
-#                              compiled with -mthumb, because the A8-A11 v7a
+#                              compiled with -mthumb, because the a8-a11 v7a
 #                              fixtures all came out ARM-mode and every
 #                              shipped app library on armeabi-v7a is Thumb.
 # liba12split_armeabi-v7a.so - the a9_split merged-table sources, -mthumb:

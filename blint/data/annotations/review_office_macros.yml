@@ -20,7 +20,7 @@ rules:
       legitimate automation pattern in template documents. The finding names
       the entry point reached; weigh what else the macro does beside it.
     severity: medium
-    # Measured (W4.4 gate): benign generated documents and template-free
+    # Measured: benign generated documents and template-free
     # corpus documents carry no auto-exec entry points.
     patterns:
       - autoopen

@@ -1,4 +1,4 @@
-"""Tests for the public Python API (``blint.analyze``, D4)."""
+"""Tests for the public Python API (``blint.analyze``)."""
 
 import dataclasses
 import json
@@ -42,7 +42,7 @@ def test_analyze_returns_typed_result_on_wasm_fixture():
         "failed": 0,
         "skipped": 0,
     }
-    # The per-binary blind-spot block stays where it always was (03/A.2);
+    # The per-binary blind-spot block stays where it always was;
     # result.coverage is the run-level shape, not a second invention.
     # (Wasm metadata does not carry the per-binary block; native parses do —
     # asserted below on the .ipa member.)

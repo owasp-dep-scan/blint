@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PE resource tree, VERSIONINFO and manifest depth (W1.3, 01/A.7).
+"""PE resource tree, VERSIONINFO and manifest depth.
 
 The resource tree is attacker-controlled input and this parser treats it
-like one (ground rule 30): every traversal and every read is bounded, and a
+like one: every traversal and every read is bounded, and a
 limit that fires records a ``degradation`` — never a silent skip. What the
 module recovers:
 
@@ -31,7 +31,7 @@ from blint.lib.entropy import shannon_entropy
 from blint.lib.pe_constants import VS_FILE_FLAGS, VS_FILE_OS, decode_flag_bits, resource_type_name
 from blint.logger import LOG
 
-# Ground rule 30 limits. A hostile resource section can declare thousands of
+# Untrusted-input limits. A hostile resource section can declare thousands of
 # entries, tree depths, and sizes; everything past a limit is counted and
 # recorded as a degradation instead of being processed or silently dropped.
 MAX_RESOURCE_DATA_NODES = 1024
@@ -42,8 +42,8 @@ MAX_RESOURCE_HASH_BYTES = 1024 * 1024
 MAX_RESOURCE_TOTAL_HASH_BYTES = 32 * 1024 * 1024
 # Entropy is measured over two windows (start and end) of each resource so a
 # large resource is never copied or scanned in full; the type summary samples
-# the first window of the type's resources. Ground rule 33 shapes the
-# fixtures that prove where these windows end.
+# the first window of the type's resources. Crossing fixtures prove
+# where these windows end.
 RESOURCE_ENTROPY_WINDOW = 0x10000
 MAX_EMBEDDED_PE_REPORTS = 32
 VS_FIXEDFILEINFO_SIGNATURE = 0xFEEF04BD
@@ -59,7 +59,7 @@ SUPPORTED_OS_GUIDS: dict[str, str] = {
 
 
 def manifest_facts(manifest_xml: str | bytes | None) -> dict:
-    """Parse the embedded manifest into its security-relevant facts (01/A.7).
+    """Parse the embedded manifest into its security-relevant facts.
 
     ``requestedExecutionLevel`` (with ``uiAccess``), the dpi awareness
     declarations, ``longPathAware``, ``activeCodePage``, the supportedOS
@@ -187,7 +187,7 @@ def _entropy_windows(content: bytes) -> bytes:
     """Two bounded windows — the start and the end of a resource.
 
     The tail matters as much as the head: an appended payload hides at the
-    end of a large blob (the W0.2 overlay lesson, ground rule 33).
+    end of a large blob.
     """
     if len(content) <= RESOURCE_ENTROPY_WINDOW * 2:
         return content
@@ -213,7 +213,7 @@ def _embedded_pe_facts(content: bytes) -> dict | None:
 
 
 def parse_pe_resources(parsed_obj: lief.PE.Binary, resources: dict) -> dict:
-    """Build the W1.3 resource extensions from an already-parsed tree.
+    """Build the resource extensions from an already-parsed tree.
 
     ``resources`` is the dict ``process_pe_resources`` produced (it carries
     the raw manifest and the has_* booleans); the returned dict holds only

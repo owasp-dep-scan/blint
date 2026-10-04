@@ -1,5 +1,5 @@
 /*
- * A13 U1 - the pair-passing callee. In its own translation unit so the call
+ * The pair-passing callee. In its own translation unit so the call
  * crosses the PLT like fbjni's registerHybrid, and it makes its own sret
  * call (the class finder) before reading the incoming pair - the shape that
  * shifts an un-compensated i386 frame baseline below the pair.

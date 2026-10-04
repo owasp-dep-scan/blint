@@ -1,7 +1,7 @@
 package com.blint.a10.nowhere;
 
 /**
- * A10 Q3 - the registered-nowhere mark.
+ * The registered-nowhere mark.
  *
  * <ul>
  *   <li>NwBound.nwShared - binds through the FindClass confirmer (the

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the PE resource tree, VERSIONINFO and manifest depth (W1.3)."""
+"""Tests for the PE resource tree, VERSIONINFO and manifest depth."""
 
 import hashlib
 import struct
@@ -330,7 +330,7 @@ def test_version_info_marketing_string_is_not_a_mismatch(tmp_path):
     Only the major component is comparable between the two: the rest of the
     string table is marketing text a vendor writes however it likes. A
     component-wise comparison called 34 of the 177 tier-0/1 files tampered,
-    which is the false-positive class this lane exists to remove — and it
+    which is exactly the false-positive class to remove — and it
     escaped the gate because ``mismatches`` is a metadata field with no rule
     behind it, so fp_gate never counted it.
     """
@@ -369,8 +369,8 @@ def test_version_resource_survives_a_node_budget_spent_on_icons(tmp_path):
     id, so an image with more icons (type 3) than the node budget would walk
     past the budget before reaching its VERSIONINFO.
 
-    A fixture below the budget cannot see this (ground rule 33 in its
-    node-count form): the whole tree fits, so every node is reached whatever
+    A fixture below the budget cannot see this: the
+    whole tree fits, so every node is reached whatever
     order the walk takes.
     """
     icons = [(i + 1, 1033, b"\xff" * 16) for i in range(MAX_RESOURCE_DATA_NODES + 256)]
@@ -466,7 +466,7 @@ def test_mz_prefix_without_pe_structure_is_not_embedded(tmp_path):
 
 
 def test_resource_larger_than_the_windows_is_hashed_and_capped(tmp_path):
-    """Ground rule 33: a 1.5 MB RCDATA blob exceeds both the 64 KiB entropy
+    """A 1.5 MB RCDATA blob exceeds both the 64 KiB entropy
     window and the 1 MiB hash cap. The summary must still see the blob's
     true size, the hash records its truncation, and the tail (high entropy)
     must be included in the sampled entropy."""
@@ -491,7 +491,7 @@ def test_resource_larger_than_the_windows_is_hashed_and_capped(tmp_path):
 
 
 def test_hostile_resource_tree_counts_and_degrades(tmp_path):
-    """Ground rule 30: more data nodes than the limit is a recorded
+    """More data nodes than the limit is a recorded
     degradation, and the parser survives."""
     types = {
         RT_RCDATA: [
@@ -512,7 +512,7 @@ def test_hostile_resource_tree_counts_and_degrades(tmp_path):
 
 
 def test_real_resource_manager_extension_on_python313():
-    """Real-artifact assertion (rule 22): the tier-0 header slice plus the
+    """Real-artifact assertion: the tier-0 header slice plus the
     committed corpus are outside the repo, so this asserts against the
     real python.org version block embedded in the committed header fixture's
     sibling values. Skipped when the corpus is absent."""
@@ -537,7 +537,7 @@ HELLO = "tests/data/pe/msvc-hello-x64.exe"
 
 
 def test_real_msvc_fixture_version_resources():
-    """Ground rule 22 on a committed real artifact: the values are the
+    """A committed real artifact: the values are the
     build machine's own (PowerShell VersionInfo and the Win32 resource
     enumeration on the VM agree with every number here)."""
     metadata = parse(HELLO)

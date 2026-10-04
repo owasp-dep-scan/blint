@@ -175,7 +175,7 @@ poetry run blint -q --no-banner --no-reviews -i /path/to/binary -o /path/to/repo
 ## Bumping blint's version
 
 **Do not bump the version as part of an ordinary change.** The version is bumped
-deliberately, once, when a release is cut — not once per feature, packet or
+deliberately, once, when a release is cut — not once per feature or
 pull request. A branch that bumps it conflicts with every other branch in
 flight, and a version that moves on every merge stops meaning anything to the
 people reading it. If you think a change warrants a release, say so in the PR

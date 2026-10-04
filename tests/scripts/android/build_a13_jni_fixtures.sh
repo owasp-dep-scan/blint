@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A13 U1 fixtures (the 32-bit singles' registrar shapes).
+# JNI fixtures for the 32-bit singles' registrar shapes.
 #
 # liba13rt_<abi>.so - one registrar per shape (see the java declarations'
 # expected fates):
@@ -23,15 +23,15 @@
 #                            everywhere.
 #
 # liba13ctl_x86.so + liba13ctlfb_x86.so - the sret trigger's false-fire
-# controls (added by the A13 review): registrars that hand a frame pointer
+# controls: registrars that hand a frame pointer
 # to a plain-`ret` local callee, an external libc call, and the sibling's
 # plain-`ret` helper between their entry stores and their methods lea,
 # beside the sibling-defined genuine sret finder (`ret 4`, the libfbjni
-# findClassLocal shape). The first three bound before A13 and must keep
+# findClassLocal shape). The first three bind without the trigger and must keep
 # binding: the trigger must not fire without the callee's own pop proof.
 #
 # liba13held_x86.so + liba13held_thumb_armeabi-v7a.so - the held
-# registration's consumed-name control (added by the A13 review): a
+# registration's consumed-name control: a
 # registrar whose first table goes into the jclass Java passed in, and
 # whose one class name, found below that call, a second RegisterNatives
 # consumes. The first table must not be attributed to that class.

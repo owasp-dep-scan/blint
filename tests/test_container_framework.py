@@ -1,8 +1,8 @@
-"""Tests for the shared bounded container framework (W4.1).
+"""Tests for the shared bounded container framework.
 
-Ground rule 30: every cap the framework enforces gets a hostile fixture that
+Every cap the framework enforces gets a hostile fixture that
 *exceeds* it — a cap approached is a cap untested — and asserts the refusal
-by name. Ground rule 18: extraction cleanup is asserted as a live
+by name. Extraction cleanup is asserted as a live
 temp-directory delta, never read from the code.
 """
 
@@ -45,7 +45,7 @@ def _live_framework_temp_dirs() -> set[str]:
         "//server/share/x",
         "C:evil.dll",
         # The drive-absolute form, which is what an archiver actually
-        # writes and what ntpath.join actually honours (the W3.5 review
+        # writes and what ntpath.join actually honours (a review
         # finding): joining an output directory with it discards the base.
         "C:/evil/evil.dll",
         "c:/evil.dll",
@@ -211,8 +211,7 @@ def test_member_count_cap_counts_members_examined_not_accepted(tmp_path):
     the central directory and the refusal list grew one entry per member,
     while `member_count_exceeds_cap` — the refusal that says the listing is
     partial — was never named. ``nuget_package`` has always counted every
-    member under this name; two counting rules behind one refusal name is
-    the thing rule 21 forbids.
+    member under this name; one refusal name must have one counting rule.
     """
     path = tmp_path / "manyrefused.zip"
     with zipfile.ZipFile(path, "w") as zf:
@@ -235,7 +234,7 @@ def test_directory_entries_are_not_members_and_never_refuse(tmp_path):
     A directory entry names no bytes. Passed to the extractor it became an
     `open()` on a directory, and the OSError was recorded as
     `member_unreadable` — a refusal that reads as a finding about the
-    archive when it was only an artefact of the loop (rule 14). Unsafe and
+    archive when it was only an artefact of the loop. Unsafe and
     symlinked directory names are still named, which is asserted here too.
     """
     path = tmp_path / "withdirs.zip"

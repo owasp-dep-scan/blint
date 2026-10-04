@@ -1,4 +1,4 @@
-"""Tests for the blint-owned PE constant tables (ground rule 28)."""
+"""Tests for the blint-owned PE constant tables."""
 
 import sys
 
@@ -21,7 +21,7 @@ from blint.lib.pe_constants import (
 
 
 def test_decode_dll_characteristics_python313_value():
-    # V1's exact bitfield: 352 = HIGH_ENTROPY_VA | DYNAMIC_BASE | NX_COMPAT,
+    # The exact bitfield: 352 = HIGH_ENTROPY_VA | DYNAMIC_BASE | NX_COMPAT,
     # the value on the tier-0 python313.dll reference binary. Names must come
     # from blint's PE-spec table in ascending bit order, never from a
     # dependency's enum rendering.
@@ -97,8 +97,8 @@ def test_decode_flag_bits_surfaces_bits_above_the_tables_range():
 
 
 def test_guard_flags_decode_matches_dumpbin_ground_truth():
-    """Every GuardFlags bit is named, pinned against the Windows VM oracle
-    (ground rule 29): `dumpbin /nologo /loadconfig` on tier-0 files decoded
+    """Every GuardFlags bit is named, pinned against the Windows VM oracle:
+    `dumpbin /nologo /loadconfig` on tier-0 files decoded
     python313.dll's 0x100 to "CF instrumented" and vcruntime140.dll's
     0x10417500 to CF instrumented / FID table present / Protect delayload
     IAT / Delayload IAT in its own section / Export suppression info present
@@ -130,7 +130,7 @@ def test_guard_flags_decode_matches_dumpbin_ground_truth():
         "XFG_ENABLED",
         "UNKNOWN(2097152)",
     ]
-    # Unknown bits stay visible (ground rule 28): an untabled GuardFlags bit
+    # Unknown bits stay visible: an untabled GuardFlags bit
     # renders UNKNOWN(<bit>) rather than silently disappearing.
     assert decode_guard_flags(0x00000001) == ["UNKNOWN(1)"]
 
@@ -161,7 +161,7 @@ def test_ex_dll_characteristics_decode():
 
 
 def test_lief_dll_characteristics_rendering_is_pinned():
-    """Tripwire (ground rule 28, verification-log finding V1).
+    """Tripwire: never match on a rendered enum.
 
     LIEF renders DLL_CHARACTERISTICS members as bare integers on Python
     3.11 and newer — ``str(DYNAMIC_BASE)`` is ``"64"``, not a name — which
@@ -169,7 +169,7 @@ def test_lief_dll_characteristics_rendering_is_pinned():
     the joined string. blint no longer consumes that rendering for
     dll_characteristics, so this test does not protect behavior directly; it
     exists so that a rendering change is *noticed*: when it fails, re-run the
-    V1 enum_to_str audit before trusting any rendered PE enum anywhere.
+    enum_to_str audit before trusting any rendered PE enum anywhere.
 
     **The rendering is a property of the interpreter, not of LIEF.** Measured
     with one and the same wheel (lief 1.0.0-d05b3499b): Python 3.10.17 gives

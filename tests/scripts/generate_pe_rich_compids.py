@@ -79,7 +79,7 @@ def main() -> None:
             continue
         skipped.append(line)
 
-    out = ["# blint's rich header comp.id tables (PE lane W1.1, plan 01/A.4).",
+    out = ["# blint's rich header comp.id tables.",
            "#",
            "# Source: https://github.com/dishather/richprint/blob/master/comp_id.txt",
            "# (the community-maintained @Comp.ID table; the same data adapted by mirar's",

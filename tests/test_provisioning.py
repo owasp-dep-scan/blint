@@ -244,7 +244,7 @@ def test_macos_profile_entitlements_published_in_full(tmp_path):
 
 
 def test_entitlements_absent_empty_and_malformed_stay_distinct(tmp_path):
-    """Rule 14: no Entitlements key, an empty one, and a malformed non-dict
+    """No Entitlements key, an empty one, and a malformed non-dict
     one must not collapse into the same answer."""
     if not OPENSSL:
         pytest.skip("needs openssl")

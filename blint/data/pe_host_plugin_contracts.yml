@@ -1,4 +1,4 @@
-# blint's privileged-host plugin contract table (PE lane W5.6, plan 04/F).
+# blint's privileged-host plugin contract table.
 #
 # A DLL reaches a privileged host by satisfying an *export contract*: the
 # host (or its loader) GetProcAddress-es a documented set of entry points,
@@ -10,8 +10,8 @@
 # fact about the export set rather than a guess from the filename.
 #
 # Every export name below is pinned against the cited Microsoft Learn page
-# (transcribed from the documentation, never from blint's own output - the
-# W3.1 lesson), and every contract's hit count was measured over a full
+# (transcribed from the documentation, never from blint's own output), and
+# every contract's hit count was measured over a full
 # C:\Windows\System32 (3,380 DLLs, 3,191 with named exports, Windows 11
 # ARM64 10.0.26100, 2026-09-21) before any rule that reads this table was
 # given a severity. The measured counts:

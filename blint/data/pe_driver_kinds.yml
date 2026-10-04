@@ -1,10 +1,10 @@
-# Driver-kind classification signals (PE lane W5.1, plan 04/A).
+# Driver-kind classification signals.
 #
 # A driver's kind changes what every other signal means: an IOCTL surface on
 # a minifilter is ordinary, the same surface on an unsigned WDM driver that
 # maps physical memory is a BYOVD candidate. So kind is *determined* from the
 # evidence below, never defaulted - a driver whose kind blint cannot
-# establish is reported as "unknown" (ground rule 32), and "wdm" itself is a
+# establish is reported as "unknown", and "wdm" itself is a
 # determination (the image imports the WDM interface surface from
 # ntoskrnl.exe and no framework evidence contradicts it), not a fallback.
 #
@@ -15,11 +15,10 @@
 #                   reflection-based UMDF framework (WUDFx02000.dll on
 #                   Windows 8+; the 02003 variant ships in later builds).
 #                   Microsoft Learn, "Getting Started with UMDF".
-#                   This is the one signal the plan's gate sentence does not
-#                   name (a UMDF DLL imports neither ntoskrnl.exe nor a
-#                   NATIVE subsystem), and the only way the plan's own kind
-#                   enum entry "umdf" is reachable; the addition is recorded
-#                   in the packet commit.
+#                   This is the one signal outside the kernel-driver gate
+#                   (a UMDF DLL imports neither ntoskrnl.exe nor a
+#                   NATIVE subsystem), and the only way the kind "umdf"
+#                   is reachable.
 # - minifilter      File system minifilter drivers register with the Filter
 #                   Manager, which lives in fltmgr.sys; only a minifilter
 #                   imports it. Microsoft Learn, "About Filter Manager"

@@ -83,7 +83,7 @@ def build_symbol_provider_map(metadata: dict) -> tuple[dict[str, str], list[str]
 
     # Managed P/Invoke names both halves of the edge directly: the entry
     # point is the native export, the ModuleRef scope the DLL that exports
-    # it (W3.2). The import table wins where both speak (mixed-mode
+    # it. The import table wins where both speak (mixed-mode
     # images), which setdefault gives for free.
     pinvoke_pairs = 0
     for entry in (metadata.get("dotnet") or {}).get("pinvoke") or []:
@@ -240,8 +240,8 @@ def declared_libraries(metadata: dict) -> list[str]:
         tag = entry.get("tag")
         if tag == "NEEDED" or tag == TAG_PINVOKE:
             # A P/Invoke scope is a declaration on a managed image: the
-            # DllImport names both the DLL and the export it must provide
-            # (W3.2). It is not a loader-level NEEDED entry — the DLL maps
+            # DllImport names both the DLL and the export it must provide.
+            # It is not a loader-level NEEDED entry — the DLL maps
             # at first call — but as a declaration of dependency it is
             # exactly as explicit.
             add(entry.get("name", ""))

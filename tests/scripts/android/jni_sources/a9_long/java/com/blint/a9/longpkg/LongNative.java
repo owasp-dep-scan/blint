@@ -1,7 +1,7 @@
 package com.blint.a9.longpkg;
 
 /**
- * A9 P2 - the string-bound fixtures for the RegisterNatives recovery.
+ * The string-bound fixtures for the RegisterNatives recovery.
  *
  * sigUnder: 17 GrandParent.Parent.Child parameters, a 954-byte descriptor
  *           - over the recovery's old 256-byte read, under

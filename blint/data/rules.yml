@@ -4,7 +4,7 @@
   description: |
     This exact file (matched by SHA-256 or MD5 digest, never by name) is listed in blint's shipped snapshot of the loldrivers.io dataset and/or the Microsoft recommended driver block rules: a legitimately signed driver with a published vulnerability that bring-your-own-vulnerable-driver (BYOVD) chains load to gain kernel read/write, defeat HVCI and PPL, and disable security software. The finding names the driver entry and the source that lists it.
     The snapshot ships as data with its fetch date and source URLs (blint/data/pe_vulnerable_drivers.json); refreshing it is a data PR - there is no network call at scan time, ever. Matching is exact-digest only because driver filenames collide across vendors and this accusation is specific enough that a name match would be a false positive by construction. Measured: zero hits across all 330 drivers on a Windows 11 system's full C:\Windows\System32\drivers (the benign sub-tier), and the published control codes of CVE-2025-7771 (ThrottleStop.sys 0x80006498/0x8000649C) reproduce from the matched sample.
-    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (the W5.6 measurement).
+    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (measured on the reference corpus).
   severity: high
   exe_types:
     - PE32
@@ -16,7 +16,7 @@
   description: |
     This driver's image violates Microsoft's documented HVCI (hypervisor-protected code integrity / memory integrity) compatibility ruleset, so with memory integrity enabled the kernel refuses to load it - or the driver's vendor ships it with memory integrity effectively unusable on the machines it protects. Each violation names its condition: an x86 machine target (x86 kernels are never HVCI-compatible), a section that is both writable and executable (HVCI forbids W+X kernel pages), section alignment below one page (executable pages are managed at page granularity), or stripped base relocations (a driver without relocations cannot load at randomized addresses).
     Measured before this rule shipped: all 330 drivers on a Windows 11 ARM64 system's full C:\Windows\System32\drivers pass every condition, so a failure is a signal, not noise. blint evaluates the statically decidable conditions only; it does not emulate Microsoft's checker beyond them, and a condition whose header source could not be read is reported undetermined rather than failed.
-    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (the W5.6 measurement: 3 of 177 Windows PEs land outside PE32/PE64).
+    Scope covers gobinary and genericbinary alongside PE32/PE64 because exe_type is a toolchain label that overwrites the PE one (measured: 3 of 177 Windows PEs land outside PE32/PE64).
   severity: high
   exe_types:
     - PE32
@@ -28,7 +28,7 @@
   description: |
     This driver is loaded by the Windows boot loader (subsystem WINDOWS_BOOT_APPLICATION - the set winload itself loads) and does not set /INTEGRITYCHECK (FORCE_INTEGRITY), which is mandatory for boot-start drivers: the flag is what lets the loader enforce the image's integrity before the kernel exists to do so.
     Boot-start-ness is determined statically exactly once, from the subsystem; for every other driver the StartType lives in the registry blint does not read, so this rule stays silent rather than assume a driver is boot-start. The flag's absence must also be computed from a readable DLL-characteristics source - an undetermined flag is not an absent one.
-    Measured population: no WINDOWS_BOOT_APPLICATION image exists in the lane's driver corpus (the VM's System32\drivers carries none), so this rule fires zero times on the benign population; the fixtures prove both the firing and the silent shapes.
+    Measured population: no WINDOWS_BOOT_APPLICATION image exists in the reference driver corpus (the VM's System32\drivers carries none), so this rule fires zero times on the benign population; the fixtures prove both the firing and the silent shapes.
   severity: medium
   exe_types:
     - PE32
@@ -40,7 +40,7 @@
   description: |
     Most modern CPUs protect against executing non-executable memory regions (heap, stack, etc). This is known either as `Non-eXecute (NX) or eXecute-Disable (XD)`. This protection reduces the areas an attacker can use to perform arbitrary code execution.
     An operating system with support for the NX bit may mark certain areas of memory as non-executable. The processor will then refuse to execute any code residing in these areas of memory. The general technique, known as executable space protection, also called Write XOR Execute, is used to prevent certain types of malicious software from taking over computers by inserting their code into another program's data storage area and running their own code from within this section; one class of such attacks is known as the buffer overflow attack.
-    Scope: the rule applies to loadable images. An ET relocatable object (a kernel module or `.o` file) has no program headers and therefore no `PT_GNU_STACK` at all - readelf -l reports no GNU_STACK line - so "stack is executable" is not a claim the artifact supports and the rule stays silent for `elf_type: REL`. Measured on the ELF/Mach-O tier-0 benign corpus (F0): all 12 findings were ET_REL kernel modules, every one false against readelf; a genuine executable-stack finding (GNU_STACK RWE on a loadable ELF) still fires.
+    Scope: the rule applies to loadable images. An ET relocatable object (a kernel module or `.o` file) has no program headers and therefore no `PT_GNU_STACK` at all - readelf -l reports no GNU_STACK line - so "stack is executable" is not a claim the artifact supports and the rule stays silent for `elf_type: REL`. Measured on the ELF/Mach-O tier-0 benign corpus: all 12 findings were ET_REL kernel modules, every one false against readelf; a genuine executable-stack finding (GNU_STACK RWE on a loadable ELF) still fires.
     Do not disable this protection. Check and remove the below gcc flags.
 
     ```bash
@@ -89,7 +89,7 @@
     declaration fact for review, not a verdict about the package, and blint
     performs no review of the package's store approval.
 
-    Measured population (ground rule 34, Windows 11 ARM64 VM,
+    Measured population (Windows 11 ARM64 VM,
     C:\Program Files\WindowsApps, 2026-09-22): 17 of 56 ordinary installed
     Store packages declare at least one restricted capability —
     `runFullTrust` 11, `unvirtualizedResources` 8, `appLicensing` 6,
@@ -123,7 +123,7 @@
   exe_types:
     - PE32
     - PE64
-    # W3.1 (rule-15 exception): managed images used to hide from this rule
+    # Managed images used to hide from this rule
     # under PE32/PE64; a TLS callback on a pure-IL image would be exactly
     # the anomaly an info finding exists for, so the scope follows the type.
     - dotnetbinary
@@ -151,7 +151,7 @@
     `Position-Independent Executable (PIE)` executes properly regardless of its absolute address. PIE binaries are used in some security-focused Linux distributions to allow PaX or Exec Shield to use address space layout randomization to prevent attackers from knowing where existing executable code is during a security attack using exploits that rely on knowing the offset of the executable code in the binary, such as return-to-libc attacks.
     Apple's macOS and iOS fully support PIE executables; a warning is issued when non-PIE iOS executables are submitted for approval to Apple's App Store.
     Android enabled support for PIEs in Jelly Bean and removed non-PIE linker support in Lollipop.
-    Scope: the rule fires only on main executables. PIE is a property of the image the loader places at a random base — a Mach-O dylib (otool -hv filetype DYLIB), an ELF shared object (readelf -h type DYN without an interpreter) and an ET_REL relocatable object are position-independent or relocated by the loader by construction, so a PIE finding on them is false by construction. Measured on the ELF/Mach-O tier-0 benign corpus (F0): 274 of 276 findings were on exactly those files, every one confirmed false against otool/readelf; the two true findings were ET_EXEC executables and keep firing.
+    Scope: the rule fires only on main executables. PIE is a property of the image the loader places at a random base — a Mach-O dylib (otool -hv filetype DYLIB), an ELF shared object (readelf -h type DYN without an interpreter) and an ET_REL relocatable object are position-independent or relocated by the loader by construction, so a PIE finding on them is false by construction. Measured on the ELF/Mach-O tier-0 benign corpus: 274 of 276 findings were on exactly those files, every one confirmed false against otool/readelf; the two true findings were ET_EXEC executables and keep firing.
     For go binary builds, enable pie by specifying the buildmode=pie as described in the [documentation](https://pkg.go.dev/cmd/go#hdr-Build_modes). The below command line enables pie along with relro and other protections.
 
     ```bash
@@ -225,7 +225,7 @@
     - x86_64-dyn
     - x86-dyn
     - riscv-dyn
-    # W3.1 (rule-15 exception): dotnetbinary left the scope. has_canary on
+    # dotnetbinary left the scope. has_canary on
     # PE comes from native CRT marker symbols or the load-config guard
     # flag; a pure-IL assembly carries neither by construction, so the
     # rule's only possible verdict there was the false "not protected" —
@@ -255,7 +255,7 @@
   severity: medium
   exe_types:
     - genericbinary
-    # W3.1 (rule-15 exception): dotnetbinary left the scope. RPATH/RUNPATH
+    # dotnetbinary left the scope. RPATH/RUNPATH
     # are ELF loader concepts; has_rpath is only ever set by the ELF path,
     # so the check's only possible verdict on a managed PE was the false
     # "no rpath" — it would have fired on every managed DLL once exe_type
@@ -273,7 +273,7 @@
     ```
   severity: medium
   limit: 30MB
-  # F1b.3: per-format calibration, measured over the benign corpora (PE
+  # Per-format calibration, measured over the benign corpora (PE
   # tier-0: p50 0.1 / p95 5.0 / max 6.5 MiB over 62 files; ELF tier-0:
   # p50 0.1 / p95 3.2 / max 37.4 MiB over 107 files, the max being a stock
   # static Go net/http build). `limit` stays the default for any format
@@ -283,9 +283,9 @@
   exe_types:
     - genericbinary
     - gobinary
-    # W3.1 review: this scope predates the packet and did not move, but
+    # This scope did not move, but
     # the files reaching it did — managed PEs were PE32/PE64 and out of
-    # scope before W3.1 and are in scope now. Kept: virtual size is a
+    # scope before they became dotnetbinary and are in scope now. Kept: virtual size is a
     # format-independent fact and the check reads nothing native. Zero
     # findings added across the managed corpus (no assembly near 30 MB).
     - dotnetbinary
@@ -393,7 +393,7 @@
   description: |
     This binary's export set satisfies the contract of a Windows extension point: a host process that loads the DLL automatically - once it is registered, which takes administrator rights exactly once - and keeps it loaded with no per-load prompt and no consent surface after the install. Each finding names the contract and the host: LSA security packages and password filters load into lsass.exe (SYSTEM, protected), print monitors and providers into spoolsv.exe (SYSTEM), time providers into the W32Time svchost (LocalService), network providers into winlogon (SYSTEM), Winsock service and namespace providers into every socket-using or name-resolving process, AppCert DLLs into every CreateProcess caller, credential providers into LogonUI.exe and Audio Processing Objects into audiodg.exe.
     This is context for a reviewer, not an accusation: legitimate audio, print and authentication software looks exactly like this, which is why the severity is informational. The contract table (blint/data/pe_host_plugin_contracts.yml) is pinned against Microsoft's documentation with its hit counts measured over a full System32 before this rule shipped: bare COM in-proc exports are on 45% of System32 (1,443 DLLs) and never fire this rule alone; the two COM contracts (credential provider, APO) additionally require an in-binary reference to their registration path and report that evidence. An absent host_plugin block reads as "no plugin contract evidenced", never as "verified not a plugin": a binary whose export table blint could not read gets an export_table_unreadable degradation in analysis_coverage instead.
-    The scope covers gobinary and genericbinary alongside PE32/PE64/dotnetbinary, because exe_type is a language/toolchain label that overwrites the PE one: measured across tier-0 and tier-1, 3 of 177 Windows PE files land outside PE32/PE64 - node.exe on both architectures is labelled gobinary by the .rdata Go heuristic, and the MinGW build of ripgrep is genericbinary. A Go c-shared DLL exports named entry points like any other, so a scope of PE32/PE64 alone would silently exclude exactly the binaries an implant is most likely to be built as. CHECK_SIGNER_MISMATCH (W2.4) already carries gobinary for the same reason.
+    The scope covers gobinary and genericbinary alongside PE32/PE64/dotnetbinary, because exe_type is a language/toolchain label that overwrites the PE one: measured across tier-0 and tier-1, 3 of 177 Windows PE files land outside PE32/PE64 - node.exe on both architectures is labelled gobinary by the .rdata Go heuristic, and the MinGW build of ripgrep is genericbinary. A Go c-shared DLL exports named entry points like any other, so a scope of PE32/PE64 alone would silently exclude exactly the binaries an implant is most likely to be built as. CHECK_SIGNER_MISMATCH already carries gobinary for the same reason.
   severity: info
   exe_types:
     - PE32
@@ -415,7 +415,7 @@
   title: Audio Plugin Network Declaration
   description: |
     This Audio Server Plug-In's Info.plist declares AudioServerPlugIn_Network - the documented key by which an audio plugin asks its host to extend the plugin's sandbox to allow network access. The finding is about the declaration, a request the bundle made that blint read statically; it is not a claim that the plugin was seen using the network. There is no consent surface after installation and the macOS firewall is inbound-only, so this declaration is the plugin's entire network gate.
-    Measured on a stock macOS 15.8 system: 0 of the 12 Apple HAL plugins declare the key, including Apple's own network-audio plugins (AirPlay.driver, AppleAVBAudio.driver), which reach the network by handing off to companion processes over Mach IPC declared through AudioServerPlugIn_MachServices instead. The rule is therefore quiet by construction on the benign population, which is exactly why the declaration is worth reporting when it appears. AudioServerPlugIn_MachServices itself fires no rule: 7 of those 12 Apple plugins declare it, so bare presence is noise on the operating system's own plugins - the service names are recorded in the host_plugin block instead (the CHECK_SIGNER_MISMATCH shape from W2.4).
+    Measured on a stock macOS 15.8 system: 0 of the 12 Apple HAL plugins declare the key, including Apple's own network-audio plugins (AirPlay.driver, AppleAVBAudio.driver), which reach the network by handing off to companion processes over Mach IPC declared through AudioServerPlugIn_MachServices instead. The rule is therefore quiet by construction on the benign population, which is exactly why the declaration is worth reporting when it appears. AudioServerPlugIn_MachServices itself fires no rule: 7 of those 12 Apple plugins declare it, so bare presence is noise on the operating system's own plugins - the service names are recorded in the host_plugin block instead (the CHECK_SIGNER_MISMATCH shape).
   severity: medium
   exe_types:
     - MachO
@@ -424,9 +424,9 @@
 - id: CHECK_UNSIGNED_HOST_PLUGIN
   title: Unsigned Privileged-Host Plugin
   description: |
-    This binary satisfies a privileged-host plugin contract (see CHECK_PRIVILEGED_HOST_PLUGIN) and nothing vouches for it: the W2.4 signing class is unsigned (a performed, complete catalog lookup found no signature), self_signed (the signer vouches for itself) or unknown_root (the chain terminates outside the shipped root snapshot). Auto-loaded into a SYSTEM or protected host on every boot, installed once with admin rights, vouched for by nobody - this is the finding that matters in the plugin surface, because it is how an attacker's DLL becomes a permanent, invisible tenant of lsass.exe or spoolsv.exe.
+    This binary satisfies a privileged-host plugin contract (see CHECK_PRIVILEGED_HOST_PLUGIN) and nothing vouches for it: the signing class is unsigned (a performed, complete catalog lookup found no signature), self_signed (the signer vouches for itself) or unknown_root (the chain terminates outside the shipped root snapshot). Auto-loaded into a SYSTEM or protected host on every boot, installed once with admin rights, vouched for by nobody - this is the finding that matters in the plugin surface, because it is how an attacker's DLL becomes a permanent, invisible tenant of lsass.exe or spoolsv.exe.
     The verdict follows signing_class exactly and stays silent when the class is undetermined (absent): blint's default invocation performs no catalog lookup, and absence of a determination is neither signed nor unsigned. Every plugin DLL on a stock System32 is Microsoft-signed, so this fires zero times on the benign system population.
-    On Mach-O (M1.1) the same finding covers a macOS plugin bundle in a system or machine-wide install scope that is neither an Apple platform binary nor Developer-ID-signed: an unsigned or ad-hoc-signed .driver in /Library/Audio/Plug-Ins/HAL is loaded into the audio hosts on every boot, installed once with an admin password, vouched for by nobody. It stays silent when the signature is undetermined (blint could not parse the blob), when the identity is something blint cannot classify, and when the bundle has no install scope - a plugin in a downloads folder is not installed anywhere yet. The Mach-O scope covers gobinary and genericbinary for the same toolchain-label reason as CHECK_MACOS_HOST_PLUGIN.
+    On Mach-O the same finding covers a macOS plugin bundle in a system or machine-wide install scope that is neither an Apple platform binary nor Developer-ID-signed: an unsigned or ad-hoc-signed .driver in /Library/Audio/Plug-Ins/HAL is loaded into the audio hosts on every boot, installed once with an admin password, vouched for by nobody. It stays silent when the signature is undetermined (blint could not parse the blob), when the identity is something blint cannot classify, and when the bundle has no install scope - a plugin in a downloads folder is not installed anywhere yet. The Mach-O scope covers gobinary and genericbinary for the same toolchain-label reason as CHECK_MACOS_HOST_PLUGIN.
   severity: high
   exe_types:
     - PE32
@@ -439,7 +439,7 @@
   title: LSA Password Filter Plugin
   description: |
     This binary exports the LSA password filter / notification package contract (InitializeChangeNotify, PasswordChangeNotify or PasswordFilter): registered under HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Notification Packages, the LSA loads it into lsass.exe - SYSTEM and protected - and calls it with the account's plaintext password on every password change. This is the classic credential-capture implant surface: a password filter sees every password, in the clear, forever.
-    Only the password-filter exports fire this at high severity. SpLsaModeInitialize (the SSP/AP contract) deliberately does not: measured over a full System32 it is exported by every core logon protocol - msv1_0, kerberos, schannel, wdigest, TSpkg, pku2u, negoexts, cloudap and SFAPM, nine DLLs - and a high-severity finding on the operating system's own authentication stack would be the false-positive shape this lane has already paid for twice (W1.3, W2.4). That contract is reported by CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN. The narrowing and its measurement are recorded in blint/data/pe_host_plugin_contracts.yml.
+    Only the password-filter exports fire this at high severity. SpLsaModeInitialize (the SSP/AP contract) deliberately does not: measured over a full System32 it is exported by every core logon protocol - msv1_0, kerberos, schannel, wdigest, TSpkg, pku2u, negoexts, cloudap and SFAPM, nine DLLs - and a high-severity finding on the operating system's own authentication stack would be the false-positive shape blint has already paid for twice. That contract is reported by CHECK_PRIVILEGED_HOST_PLUGIN and feeds CHECK_UNSIGNED_HOST_PLUGIN. The narrowing and its measurement are recorded in blint/data/pe_host_plugin_contracts.yml.
   severity: high
   exe_types:
     - PE32
@@ -558,7 +558,7 @@
     - PE64
     - dotnetbinary
 # CHECK_PAC, CHECK_PAC_STRICT, CHECK_XFG, CHECK_CET and CHECK_ENCLAVE were
-# removed in the W0.3 rewrite (PE-lane A.3, verification finding V4). All five
+# removed when the PE security properties were rewritten. All five
 # fired "missing <feature>" findings on nearly every PE — including every
 # stock Microsoft-signed binary in the benign corpus and files blint could not
 # even parse as PE — because their properties were read as False whenever
@@ -568,9 +568,9 @@
 # configuration's enclave pointer for enclave presence), and no PE source
 # exists at all for PAC — the GuardFlags RF bits are Return Flow Guard, not
 # pointer authentication, and no Windows toolchain flag records PAC in a PE.
-# An always-firing advisory on an opt-in feature is noise (ground rule 27);
+# An always-firing advisory on an opt-in feature is noise;
 # posture questions are answered by the metadata, and better-scoped rules can
-# return with the driver/HVCI work (W5.2).
+# return with the driver/HVCI work.
 - id: CHECK_LIBC_PORTABILITY
   title: Depends on C Library Implementation Internals
   description: |
@@ -665,8 +665,8 @@
     - x86_64-exec
     - MachO
     - mips-executable
-    # W3.2: a managed binary's used/declared sets are its P/Invoke surface
-    # and its ImplMap scopes — inputs W3.1 first read and this packet wires
+    # A managed binary's used/declared sets are its P/Invoke surface
+    # and its ImplMap scopes — inputs the CLI metadata reader reads and blint wires
     # into the dependency graph, so the check now evaluates managed images
     # on evidence instead of being out of scope for them. A DllImport scope
     # is itself the declaration, so a pure-IL assembly computes clean; the
@@ -687,7 +687,7 @@
     - MachO
     - PE32
     - PE64
-    # W3.1 review: managed images must stay in scope. The evidence is
+    # Managed images must stay in scope. The evidence is
     # section entropy, packer section signatures and the overlay — all
     # computed for any PE, none of them native-only — and a packed or
     # obfuscator-protected .NET assembly is one of the commonest hostile
@@ -707,7 +707,7 @@
     32-bit, because 64-bit never supported text relocations." The linker warned
     from API 19 and refuses from API 23; the doc notes the flag alone is
     decisive ("the Android dynamic linker trusts the entry/flag").
-    Enforcement is conditional on the app's targetSdk (rule 37): with app
+    Enforcement is conditional on the app's targetSdk: with app
     context the rule stays silent while targetSdk < 23, and without app context
     the finding states the API level instead of assuming one.
   severity: high
@@ -722,7 +722,7 @@
     W (for Writable) and E (for Executable) flags should be mutually exclusive.
     This wasn't historically enforced, but is now." CHECK_WX_SEGMENTS skips
     bionic binaries so this rule owns the case with the enforcement context.
-    Conditional on targetSdk (rule 37); without app context the finding states
+    Conditional on targetSdk; without app context the finding states
     the API level.
   severity: high
 - id: CHECK_ANDROID_NO_SONAME
@@ -735,7 +735,7 @@
     soname) indicates a misconfiguration in your build system. A missing SONAME
     may lead to runtime issues such as the wrong library being loaded: the
     filename is used instead when this attribute is missing."
-    Conditional on targetSdk (rule 37); without app context the finding states
+    Conditional on targetSdk; without app context the finding states
     the API level.
   severity: medium
 - id: CHECK_ANDROID_ABS_NEEDED
@@ -749,7 +749,7 @@
     DT_NEEDED exactly and so it won't be able to load the library if it is not
     present in that exact location on the device." The doc also names broken
     third-party build systems that insert a build-host path.
-    Conditional on targetSdk (rule 37); without app context the finding states
+    Conditional on targetSdk; without app context the finding states
     the API level.
   severity: high
 - id: CHECK_ANDROID_PAGE_16K
@@ -763,8 +763,8 @@
     targeting Android 15 (API level 35) and higher must support 16 KB memory
     page sizes on 64-bit devices on Google Play. Starting February 1, 2027, if
     your app updates don't support 16 KB memory page sizes, you won't be able
-    to release these updates." 32-bit ABIs are exempt and never flagged
-    (rule 35). Conditional on targetSdk (rule 37); without an app targetSdk
+    to release these updates." 32-bit ABIs are exempt and never flagged.
+    Conditional on targetSdk; without an app targetSdk
     (a standalone .so) the finding states the policy level at medium
     severity, since no known app is bound by the policy.
   severity: high
@@ -788,7 +788,7 @@
     its indirect branches are not protected (rebuild with
     -mbranch-protection=standard). AArch64-only by construction: the
     GNU_PROPERTY_AARCH64_FEATURE_1_AND property exists on arm64 only, and a
-    rule that cannot apply to an ABI does not run on it (ground rule 35) —
+    rule that cannot apply to an ABI does not run on it —
     arm32, x86 and riscv64 files never see this check.
     Severity is low because the NDK does not enable branch protection by
     default: the gap is near-universal (5229 of 5364 tier-0 system libraries,
@@ -801,8 +801,8 @@
     The .so declares its Memory Tagging Extension posture in
     .note.android.memtag: which memory (heap/stack) the loader must prepare
     for MTE and in which tag-check mode (async/sync; LLVM ELF.h
-    NT_ANDROID_TYPE_MEMTAG bits, decoded per the tags named in B0's
-    constants table). Informational and arm64-only (rule 35): presence is
+    NT_ANDROID_TYPE_MEMTAG bits, decoded per the tags named in blint's
+    constants table). Informational and arm64-only: presence is
     the finding — a positive hardening posture fact like FORTIFIED_LIBC_IN_USE
     — and absence is the Android norm today, which fires nowhere.
   severity: info

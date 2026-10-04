@@ -172,7 +172,7 @@ def infer_toolchain(metadata: dict) -> dict:
                 "confidence": "medium",
             }
         )
-    # The decoded rich header names the exact MSVC drop (W1.1): the linker
+    # The decoded rich header names the exact MSVC drop: the linker
     # comp.id's build number is the cl/link build, so its label is the
     # strongest PE toolchain signal and outranks the optional header pair.
     rich_toolchain = (metadata.get("rich_header") or {}).get("toolchain") or {}

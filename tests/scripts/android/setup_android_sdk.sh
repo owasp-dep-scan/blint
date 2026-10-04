@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# A0.1 — install a self-contained Android SDK in user space for the Android
-# native lane. No sudo, no Homebrew casks; everything lands under
+# Install a self-contained Android SDK in user space for the Android
+# native corpus. No sudo, no Homebrew casks; everything lands under
 # $ANDROID_SDK_ROOT (default ~/Android/sdk), leaving any pre-existing
 # ~/Library/Android/sdk untouched.
 #
-# Components (A0.1 contract):
+# Components:
 #   - command-line tools (sdkmanager/avdmanager)
 #   - platform-tools (adb), build-tools 36.0.0, emulator
 #   - platforms android-34/35/36 (android.jar for tier-1 builds)

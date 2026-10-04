@@ -1,4 +1,4 @@
-"""Stable Python API for analyzing binaries with blint (D4).
+"""Stable Python API for analyzing binaries with blint.
 
 ``blint.analyze()`` runs the same engine path the CLI runs —
 ``AnalysisRunner.start()`` over the parsed metadata, the same rule loading,

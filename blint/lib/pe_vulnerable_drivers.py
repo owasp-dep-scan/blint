@@ -1,7 +1,7 @@
-"""Known-vulnerable-driver matching against the shipped snapshot (W5.3).
+"""Known-vulnerable-driver matching against the shipped snapshot.
 
 ``CHECK_KNOWN_VULNERABLE_DRIVER`` is the single most operationally useful
-Windows rule blint could ship (plan 04/C.4), and it ships as *data*: a
+Windows rule blint could ship, and it ships as *data*: a
 snapshot of the loldrivers.io dataset plus the Microsoft recommended
 driver block rules (``blint/data/pe_vulnerable_drivers.json``, generated
 by ``tests/scripts/generate_pe_vulnerable_drivers.py``, carrying both
@@ -11,7 +11,7 @@ There is no network call at scan time, ever. Matching is by exact file
 hash only - SHA-256 and MD5, the two digests the snapshot carries for
 every sample. A filename or signer match never fires the rule: driver
 filenames collide across vendors, and accusing a file whose bytes blint
-has not pinned is the false-positive shape this lane rejects (the gate
+has not pinned is the false-positive shape blint rejects (the gate
 is zero hits on the 330-driver benign sub-tier, every one of them a
 legitimately signed driver).
 """
@@ -31,7 +31,7 @@ def _snapshot() -> dict[str, Any]:
     """The shipped snapshot, loaded once.
 
     An unreadable snapshot is a named blind spot, not an empty answer:
-    ``lookup_status`` reports it and the rule stays silent (rule 11 - a
+    ``lookup_status`` reports it and the rule stays silent (a
     lookup that could not happen never claims "not vulnerable").
     """
     global SNAPSHOT_CACHE

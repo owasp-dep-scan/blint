@@ -518,7 +518,7 @@ def test_banner_signatures_match_library_anchored_strings():
 
 
 def test_banner_signatures_reject_unanchored_versions():
-    """Rule 11 negative fixtures: what each signature must NOT match."""
+    """Negative fixtures: what each signature must NOT match."""
     negatives = [
         "deflate",  # library name without a version
         "3.46.0",  # a bare version is no banner, however plausible
@@ -545,7 +545,7 @@ def test_banner_signatures_reject_unanchored_versions():
 
 
 def test_banner_vendored_case_library_code_in_the_artifact():
-    """F2b.2 vendored case: the artifact defines the library's own API.
+    """Vendored case: the artifact defines the library's own API.
 
     The measured shape of libcrypto.0.9.7.dylib - per-module banner strings
     plus 2714 exported OpenSSL API symbols - must emit the banner as
@@ -569,7 +569,7 @@ def test_banner_vendored_case_library_code_in_the_artifact():
 
 
 def test_banner_mention_case_stale_string_no_library_code():
-    """F2b.2 mention case: the string names a version, the code is absent.
+    """Mention case: the string names a version, the code is absent.
 
     The measured shape of assetutil - "deflate 1.2.5 Copyright" banner while
     linking /usr/lib/libz.1.dylib at 1.2.12 and defining no zlib symbol.

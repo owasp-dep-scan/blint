@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""A0.3 — baseline measurements of today's blint over the Android corpus.
+"""Baseline measurements of today's blint over the Android corpus.
 
 Measures, per tier, against the blint checkout this script is run from:
 
   sbom        tier-2 apps: SBOM components per app and how many use a
-              build-id (hex string) where a version belongs (V4).
+              build-id (hex string) where a version belongs.
   standalone  tier-0/tier-1: findings when each .so is scanned standalone,
               per rule and per ABI, with the median findings per file.
   functions   --disassemble functions_total per ABI over tier-1

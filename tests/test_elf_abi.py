@@ -367,7 +367,7 @@ def test_link_closure_is_empty_without_dependencies():
 
 
 def test_abi_requirements_property_carries_the_derived_floor():
-    """F2a.4: the floor is a property on the binary, not a component.
+    """The floor is a property on the binary, not a component.
 
     The interface version an ABI node names is a requirement on the
     execution environment, so asserting it as a pkg:generic component
@@ -450,7 +450,7 @@ def test_abi_floor_user_baseline_keeps_medium_and_names_the_env(monkeypatch):
 
 
 def test_abi_floor_never_fires_on_musl_or_bionic(monkeypatch):
-    # Ground rule 35: a glibc baseline is meaningless against a binary that
+    # A glibc baseline is meaningless against a binary that
     # carries no GLIBC version nodes, so even a synthetic floor on a musl or
     # bionic binary must not fire.
     monkeypatch.setenv("BLINT_GLIBC_BASELINE", "2.17")
@@ -593,7 +593,7 @@ def test_libc_portability_fires_only_on_the_libc_specific_subset():
     }
     assert check_libc_portability("f", shared_only, {}) is True
 
-    # The F0 defect case: a musl binary importing dl_iterate_phdr and
+    # The measured defect case: a musl binary importing dl_iterate_phdr and
     # pthread_getattr_np - musl's own interface - was called glibc-bound.
     musl_shared_only = {
         "abi_analysis": {
@@ -666,7 +666,7 @@ def test_libc_portability_on_real_binaries():
 
     musl_abi = analyze_elf_abi(snapshot("x86_64-musl"))
     # The musl build binds only interfaces both libcs export, so the rule
-    # that F0 measured firing here 4 times is now silent on it.
+    # a corpus measurement found firing here 4 times is now silent on it.
     assert check_libc_portability("f", {"abi_analysis": musl_abi}, {}) is True
 
     # A real committed glibc ELF whose only non-standard import is
@@ -678,7 +678,7 @@ def test_libc_portability_on_real_binaries():
 
 
 class TestVirtualSizePerFormatLimit:
-    """F1b.3: the 30MB cap came from PE practice; ELF gets its own, from the
+    """The 30MB cap came from PE practice; ELF gets its own, from the
     measured benign distribution. Both sides of every limit, plus the Mach-O
     and rule-without-format_limits shapes."""
 
@@ -727,7 +727,7 @@ class TestVirtualSizePerFormatLimit:
 
 
 class TestRuntimeLoadingStatesItsEvidence:
-    """F1b.4: the finding's evidence is a string paired with imported loader
+    """The finding's evidence is a string paired with imported loader
     entry points, and a binary that cannot open a library by name is never
     reported as loading one."""
 

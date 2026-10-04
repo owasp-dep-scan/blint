@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Build the tier-0 benign ELF/Mach-O false-positive corpus (~/sandbox/fp-corpus).
 
-This is the F0.1 corpus builder for the ELF/Mach-O false-positive lane. It
-assembles a benign (nothing in it is an attack) corpus of Mach-O and ELF
-binaries with a ``MANIFEST.json`` in the same entry shape as the PE lane's
-``~/sandbox/pe-corpus``: one entry per file with ``path`` (relative to the
+The builder assembles a benign (nothing in it is an attack) corpus of Mach-O
+and ELF binaries with a ``MANIFEST.json`` in the same entry shape as the PE
+corpus, ``~/sandbox/pe-corpus``: one entry per file with ``path`` (relative to the
 corpus root), ``tier``, ``sha256``, ``bytes``, ``source`` (provenance string
 naming the distro image + package + version, or the toolchain that built the
 file) and ``fetched`` (UTC timestamp). Entries reconstructed from another
 artifact additionally carry ``derived`` naming the derivation — dyld-cache
 extractions carry ``"dyld-cache-extraction"`` — because an extracted image is
 unsigned however its on-system original was signed, and gates must be able to
-keep those findings out of the benign headline (F1b.0).
+keep those findings out of the benign headline.
 
 Why a builder rather than a committed corpus: Apple system binaries and
 distro packages cannot be committed. The builder is deterministic for a fixed
@@ -185,8 +184,8 @@ class CorpusBuilder:
 
         ``derived`` records that the file is a reconstruction from another
         artifact rather than a byte-for-byte original, so downstream gates can
-        tell "unsigned because it was extracted" from "unsigned as shipped"
-        (F1b.0). Only dyld-cache extraction sets it today.
+        tell "unsigned because it was extracted" from "unsigned as shipped".
+        Only dyld-cache extraction sets it today.
         """
         if not src.is_file() or src.is_symlink():
             return

@@ -1,4 +1,4 @@
-r"""Tests for the macOS host-plugin surface (lane M1.1, plan 07).
+r"""Tests for the macOS host-plugin surface.
 
 Cross-platform coverage is synthetic: plugin bundles built to the real
 layout measured on this system (``Contents/Info.plist`` +
@@ -6,7 +6,7 @@ layout measured on this system (``Contents/Info.plist`` +
 stock macOS ships), driven through the real bundle walker and the real
 rule engine — including one full ``run_default_mode`` scan, because a rule
 whose check function is absent from the dispatch import list fires
-nowhere, and only an end-to-end run sees that (the P5 lesson: a capability
+nowhere, and only an end-to-end run sees that (a capability
 the suite does not reach is not a capability).
 
 The positive cases that do not exist on any stock system — a ``.driver``
@@ -14,11 +14,11 @@ declaring ``AudioServerPlugIn_Network``, an unsigned machine-wide plugin —
 are synthetic for that reason and that reason is measured: 0 of the 12
 Apple HAL plugins on this machine declare the network key.
 
-Real-artifact ground truth (rule 29) runs where the artifacts exist and is
+Real-artifact ground truth runs where the artifacts exist and is
 skip-guarded otherwise. These tests run ``codesign`` on the same file in
 the same run and compare blint's answer to its output, rather than to
 values recorded on one machine: both did the latter first, and both failed
-on the reviewer's Mac. ``Platform identifier`` is the macOS major version
+on another Mac. ``Platform identifier`` is the macOS major version
 (16 on macOS 15.8, 26 on macOS 26.6.2), and the activated system extension
 a Mac happens to have is whichever one its owner installed — neither is a
 constant, while "carries a platform identifier" and "is Developer-ID
@@ -30,7 +30,7 @@ Originally recorded 2026-09-22 on macOS 15.8 (build 24H23):
 origin ``Software Signing``; ``codesign -dv`` on that machine's activated
 Tailscale extension printed ``TeamIdentifier=W5364U7YZB`` with
 ``spctl -a -vv`` origin ``Developer ID Application: Tailscale Inc.
-(W5364U7YZB)``. blint agreed with all of it. Re-measured on the reviewer's
+(W5364U7YZB)``. blint agreed with all of it. Re-measured on a second Mac's
 macOS 26.6.2: ``Platform identifier=26``, blint's ``platform_id`` 26.
 """
 
@@ -102,7 +102,7 @@ def _fired(results, cid):
 
 
 # --------------------------------------------------------------------------
-# install scope: every branch, including the out-of-context one (rule 32).
+# install scope: every branch, including the out-of-context one.
 
 
 def test_install_scope_branches():
@@ -162,7 +162,7 @@ def test_plugin_bundle_is_dal_camera_only_under_dal_path():
     )
     assert dal and dal["kind"] == "dal_plugin"
     assert "camera" in dal["host"]
-    # The negative fixture (rule 11): the same suffix anywhere else names no
+    # The negative fixture: the same suffix anywhere else names no
     # host, and the honest answer is no block at all, not a guess.
     other = classify_host_plugin("/System/Library/UserEventPlugins/x.plugin", "plugin", {}, "read")
     assert other is None
@@ -205,7 +205,7 @@ def test_driver_name_lists_recorded():
 
 
 def test_driver_name_list_cap_is_a_listing_bound_not_detection_bound():
-    # Rule 33: a fixture larger than the window, with the signal spread
+    # A fixture larger than the window, with the signal spread
     # past it, asserting the cap by name.
     services = [f"com.example.service{i}" for i in range(NAME_LIST_LIMIT + 9)]
     block = classify_host_plugin(
@@ -221,7 +221,7 @@ def test_driver_name_list_cap_is_a_listing_bound_not_detection_bound():
 
 
 def test_declarations_absent_when_key_absent():
-    # The empty case (rule 32): no declaration keys, no declarations block,
+    # The empty case: no declaration keys, no declarations block,
     # and no field claiming a negative that was not read.
     block = classify_host_plugin(
         "/Library/Audio/Plug-Ins/HAL/V.driver", "driver", {"CFBundleExecutable": "V"}, "read"
@@ -234,7 +234,7 @@ def test_declarations_absent_when_key_absent():
     "status", ["info_plist_absent", "info_plist_unreadable", "info_plist_not_a_dict"]
 )
 def test_declarations_status_names_why_the_plist_was_not_read(status):
-    # Rule 14: "declared nothing" and "could not be read" stay
+    # "Declared nothing" and "could not be read" stay
     # distinguishable.
     block = classify_host_plugin("/Library/Audio/Plug-Ins/HAL/V.driver", "driver", None, status)
     assert block, "the host is known from the suffix even without a plist"
@@ -257,7 +257,7 @@ def test_forged_non_boolean_network_value_does_not_trip_the_rule():
 
 
 # --------------------------------------------------------------------------
-# the .dext honesty requirement (rule 11 through and through).
+# the .dext honesty requirement: never claim a value that was not read.
 
 
 def _app_with_dext(tmp_path):
@@ -395,7 +395,7 @@ def test_check_audio_plugin_network_positive_and_negative():
     results = run_checks("V", _plugin_metadata(fired_block))
     fired = _fired(results, "CHECK_AUDIO_PLUGIN_NETWORK")
     assert fired and fired[0]["severity"] == "medium"
-    # Rule 11, pinned: the finding is worded as a declaration blint read,
+    # Pinned: the finding is worded as a declaration blint read,
     # never as behaviour it observed.
     assert "declaration" in fired[0]["title"]
     assert "did not watch" in fired[0]["title"]
@@ -530,7 +530,7 @@ def test_run_default_mode_exports_host_plugin_and_fires_the_info_rule(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# real-artifact ground truth (rule 29) — this Mac only, skip-guarded.
+# real-artifact ground truth — this Mac only, skip-guarded.
 
 
 @pytest.mark.skipif(
@@ -557,7 +557,7 @@ def test_real_airplay_driver_is_a_platform_binary_system_plugin():
     # codesign -dv on this bundle prints `Platform identifier=<n>` and
     # `Identifier=com.apple.audio.Halogen`. The *number* is the macOS major
     # version (16 on macOS 15.8, 26 on macOS 26.6.2), so asserting a literal
-    # pins the suite to one OS release — it failed on the reviewer's Mac for
+    # pins the suite to one OS release — it failed on another Mac for
     # exactly that reason. What the rule actually reads is the presence of a
     # platform identifier, which is what makes this an Apple platform binary,
     # so that is what is asserted; the value is cross-checked against
@@ -606,8 +606,8 @@ def test_real_activated_sysext_is_developer_id_signed_machine_scope():
     # Ground truth from codesign itself, on whatever extension this machine
     # has activated. The original form asserted one vendor's team identifier
     # and common name (Tailscale's), which the skipif did not guarantee was
-    # present: any Mac with a different activated extension failed, and the
-    # reviewer's did. What is machine-independent is the property the rule
+    # present: any Mac with a different activated extension failed, and one
+    # did. What is machine-independent is the property the rule
     # reads — an activated extension is Developer-ID signed — so blint's
     # answer is compared against codesign's on the same file instead of
     # against a constant from another machine.
@@ -705,7 +705,7 @@ def test_a_plugin_kind_declaring_a_path_marker_reads_it_from_the_table(monkeypat
 
     `require_path_marker` sat in macos_host_plugin_kinds.yml while the DAL
     check compared against a hardcoded copy of the same string, so editing
-    the table changed nothing (rule 21).
+    the table changed nothing.
     """
     import blint.lib.macos_host_plugins as mod
 

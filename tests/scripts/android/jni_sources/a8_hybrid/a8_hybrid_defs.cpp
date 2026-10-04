@@ -1,11 +1,11 @@
 /*
- * A8 N2 - the fbjni "merged registration" shape: the signature descriptors
+ * The fbjni "merged registration" shape: the signature descriptors
  * and the wrapper entry points live in THIS translation unit as preemptible
  * dynsym symbols (default visibility), while the tables that name them
  * live in a8_hybrid_tables.cpp. A -fPIC -shared NDK link then emits
  * R_*_ABS* relocations against the symbols for the signature and fnPtr
  * words instead of folding them to R_*_RELATIVE - the exact relocation
- * shape libreactnative.so's fbjni tables carry (N0(b): jmethod_traits<F>::
+ * shape libreactnative.so's fbjni tables carry (jmethod_traits<F>::
  * kDescriptor OBJECT symbols and MethodWrapper<>::call / FunctionWrapper-
  * WithJniEntryPoint<>::call FUNC symbols, all weak, all defined in .dynsym).
  *
@@ -78,7 +78,7 @@ __attribute__((visibility("default"))) jlong a8_hyb_other_tick_call(
 }
 
 /*
- * The adjacent FALSE shape (A7.2 review lesson: every acceptance needs a
+ * The adjacent FALSE shape (every acceptance needs a
  * refused neighbour): a descriptor + a "fnPtr" word that relocates against
  * a defined OBJECT symbol in .rodata, not a function. A vtable-ish pair
  * must not become a table entry.

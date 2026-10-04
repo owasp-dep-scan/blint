@@ -1,4 +1,4 @@
-"""Call-site constant-argument recovery (A4 slice 2).
+"""Call-site constant-argument recovery.
 
 Two layers:
 

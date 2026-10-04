@@ -1,4 +1,4 @@
-"""7z container reader for 7z-SFX payloads (W4.3).
+"""7z container reader for 7z-SFX payloads.
 
 A 7z-SFX installer is a small PE stub followed by a whole 7z archive, so
 "the payload is documented and stable" means reading 7z: the 32-byte
@@ -12,9 +12,9 @@ Only the directory is decompressed on the parse path. Member extraction
 (:func:`extract_members`) decodes pack streams per folder; coders blint
 cannot decode (BCJ2, PPMd, encrypted 7zAES) refuse by name with the method
 named, and the folder's members are listed as refused rather than silently
-absent (rule 32).
+absent.
 
-Bounds (ground rules 30/33), measured on the corpus 7z-SFX installers
+Bounds, measured on the corpus 7z-SFX installers
 (7-Zip 25.01, ~1.6 MB, 50-100 members): 16,384 members (cap), 512 MiB
 total unpacked (cap), 256 MiB per member (cap), 64 MiB header blob (cap),
 256 MiB per pack stream decode (cap). Hostile fixtures exceed each cap.

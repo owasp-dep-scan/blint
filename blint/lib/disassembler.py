@@ -212,7 +212,7 @@ MIPS_UNCONDITIONAL_JMP_INST = {"j", "jalr", "jalx", "b"}
 # 32-bit ARM mnemonic tables. nyxstone prints branch/call immediates as
 # PC-relative signed deltas ("bl #50", "b #-12"); the target is
 # addr + 4 + imm in Thumb state and addr + 8 + imm in ARM state (measured
-# against the NDK r28c llvm-objdump oracle over the A4a fixtures; see
+# against the NDK r28c llvm-objdump oracle over the ARM32 fixtures; see
 # docs/DISASSEMBLE.md). The .w suffixed spellings are Thumb wide encodings.
 ARM32_CALL_INST = {"bl", "bl.w", "blx", "blx.w"}
 ARM32_UNCONDITIONAL_JMP_INST = {"b", "b.w"}
@@ -3064,7 +3064,7 @@ def _arm32_arbiter_pick(
     span, the shape a real function ends in; the immediate-branch
     plausibility sum (known-start targets vs addresses outside the
     executable ranges); and +1 when the raw stream lands exactly on the
-    span end, the previous A4a rule. Ties keep the caller's order (Thumb
+    span end, the previous rule. Ties keep the caller's order (Thumb
     first, the NDK armeabi-v7a default), so the new score only changes a
     decision the old rule could not make.
     """

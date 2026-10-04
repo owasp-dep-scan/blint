@@ -1,5 +1,5 @@
 /*
- * A13 U1 - the 32-bit singles' registrar shapes (see the java declarations'
+ * The 32-bit singles' registrar shapes (see the java declarations'
  * expected fates). The entry words are built per field like the a11
  * fixture's, so no constant aggregate exists for the compiler to place in
  * .data.rel.ro.

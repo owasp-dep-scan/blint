@@ -75,7 +75,7 @@ musl and bionic binaries never fire the rule.
   never fires a machine-gated rule. Use this for architecture-specific
   hardware features (an ARMv8.3-only control must not fire on x86-64).
 
-Removed in W0.3 (PE-lane A.3): `CHECK_PAC`, `CHECK_PAC_STRICT`, `CHECK_XFG`,
+Removed: `CHECK_PAC`, `CHECK_PAC_STRICT`, `CHECK_XFG`,
 `CHECK_CET` and `CHECK_ENCLAVE`. Each fired "missing <feature>" findings on
 nearly every PE — including every stock Microsoft-signed binary — because the
 underlying properties were opt-in features whose absence was read as a

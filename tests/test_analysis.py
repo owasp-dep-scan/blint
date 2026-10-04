@@ -1215,7 +1215,7 @@ def test_check_wx_segments_passes_without_offending_segments():
 
 
 def test_check_dll_characteristics_prefers_structured_flags():
-    """V1: mandatory-value membership is exact against the decoded flag list.
+    """Mandatory-value membership is exact against the decoded flag list.
 
     The substring path exists only for metadata exported before the
     structured block (parse cache); both must answer identically.
@@ -1271,7 +1271,7 @@ def test_check_dll_characteristics_reports_everything_on_a_zero_bitfield():
 
     Its joined compat string is empty, so a truthiness test on that string
     skips the comparison entirely and the image passes — the false negative
-    mirroring the false positive V1 describes.
+    mirroring the substring false positive.
     """
     from blint.lib.checks import check_dll_characteristics
 
@@ -1291,7 +1291,7 @@ def test_check_dll_characteristics_reports_everything_on_a_zero_bitfield():
 
 
 def test_pac_rules_removed_with_their_false_recommendations():
-    """W0.3: CHECK_PAC/CHECK_PAC_STRICT no longer exist.
+    """CHECK_PAC/CHECK_PAC_STRICT no longer exist.
 
     The findings they fired on every ARM64 PE were false recommendations:
     no PE source records PAC at all. The GuardFlags bit blint read as PAC
@@ -1316,7 +1316,7 @@ def test_pac_rules_removed_with_their_false_recommendations():
 
 
 def test_optin_feature_rules_removed_from_the_registry():
-    """W0.3: CHECK_XFG/CHECK_CET/CHECK_ENCLAVE no longer exist.
+    """CHECK_XFG/CHECK_CET/CHECK_ENCLAVE no longer exist.
 
     Each fired "missing <feature>" on essentially every PE: the features are
     opt-in (66/66 stock Microsoft-signed tier-0 binaries lack an enclave
@@ -1332,9 +1332,9 @@ def test_optin_feature_rules_removed_from_the_registry():
 
 def test_check_security_property_omitted_key_is_not_a_failure():
     """The tristate discipline at the rule layer: a property absent from
-    security_properties means its source was absent (P2.4), so there is
+    security_properties means its source was absent, so there is
     nothing to claim. Reading omission as a failure is what made the
-    property rules fire on unparseable files (V4)."""
+    property rules fire on unparseable files."""
     from blint.lib.checks import check_security_property
 
     rule = {"property_key": "cet_shadow_stack"}
@@ -1390,7 +1390,7 @@ def test_rule_machine_type_gate_resolution_rules():
     assert _rule_machine_type_allows({"machine_type": "AMD64"}, {"machine_types": []})
 
 
-# --- F1a.1: CHECK_PIE applies only to main executables ----------------------
+# --- CHECK_PIE applies only to main executables -----------------------------
 
 
 def _pie_fires(metadata):
@@ -1401,7 +1401,7 @@ def _pie_fires(metadata):
 def test_check_pie_not_applicable_to_mach_o_dylib():
     """otool -hv filetype DYLIB: position-independent by construction.
 
-    F0 measured 236 false CHECK_PIE findings on dylibs (every one confirmed
+    A corpus measurement found 236 false CHECK_PIE findings on dylibs (every one confirmed
     against otool); the rule must stay silent for them.
     """
     assert not _pie_fires(
@@ -1461,7 +1461,7 @@ def test_check_pie_keeps_legacy_metadata_behavior():
     assert _pie_fires({"exe_type": "genericbinary", "binary_type": "ELF", "is_pie": False})
 
 
-# --- F1a.2: CHECK_NX applies only to loadable images -------------------------
+# --- CHECK_NX applies only to loadable images --------------------------------
 
 
 def _nx_fires(metadata):
@@ -1471,7 +1471,7 @@ def _nx_fires(metadata):
 
 def test_check_nx_not_applicable_to_relocatable_object():
     """readelf -h type REL / readelf -l without any GNU_STACK: an object
-    file has no stack to make executable. All 12 F0 NX findings were
+    file has no stack to make executable. All 12 measured NX findings were
     kernel modules in exactly this shape."""
     assert not _nx_fires(
         {

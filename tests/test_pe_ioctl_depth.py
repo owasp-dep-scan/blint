@@ -1,4 +1,4 @@
-r"""Tests for IOCTL depth (PE lane W5.3, plan 04/C).
+r"""Tests for IOCTL depth.
 
 Unit level: the input-length constraint recovery (x64 and ARM64 shapes),
 the SDDL device-ACL scan (ASCII and UTF-16LE via the wide view), the
@@ -259,7 +259,7 @@ def test_filename_alone_never_matches():
     reason="no driver corpus on this machine",
 )
 def test_benign_subtier_never_matches_snapshot():
-    """Ground rule 34 / gate P5: zero snapshot hits across the benign
+    """Benign-population check: zero snapshot hits across the benign
     driver sub-tier."""
     root = SLICE_DRIVERS if SLICE_DRIVERS.exists() else WINDOWS_DRIVERS
     from blint.lib.binary import parse

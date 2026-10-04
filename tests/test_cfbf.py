@@ -1,9 +1,9 @@
-"""Tests for the CFBF reader (W4.2).
+"""Tests for the CFBF reader.
 
 The builder below constructs real CFBF images byte-by-byte (header, FAT,
 directory, stream data) so the hostile variants — a FAT chain that loops, a
 chain pointing past the file, an oversized stream, a tree that loops — are
-genuine format-shaped fixtures, not mocks (ground rules 10, 17, 30).
+genuine format-shaped fixtures, not mocks.
 """
 
 import struct
@@ -298,7 +298,7 @@ def test_chain_loop_is_a_named_degradation():
     data = reader.read_entry(entry)
     assert "fat_chain_loop" in reader.degradations
     assert len(data) < 4096 * 2  # cut off at the loop, never absorbed
-    # The rest of the tree is still listed and readable (rule 32).
+    # The rest of the tree is still listed and readable.
     assert reader.find("fine") is not None
     assert reader.read_entry(reader.find("fine")) == b"ok"
 

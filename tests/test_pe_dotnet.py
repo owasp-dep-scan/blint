@@ -1,19 +1,19 @@
-"""Tests for the ECMA-335 CLR metadata reader (blint.lib.pe_dotnet, W3.1).
+"""Tests for the ECMA-335 CLR metadata reader (blint.lib.pe_dotnet).
 
-Fixture strategy follows the plan's rules:
+Fixture strategy:
 
 - Real assemblies from the pe-corpus tier-2/tier-5 directories carry the
-  real-artifact assertions (ground rules 22/29); their expected values were
+  real-artifact assertions; their expected values were
   produced by a spec-based System.Reflection.Metadata dumper on the Windows
-  11 ARM64 VM and pasted in the packet commit. Tests skip when the corpus is
+  11 ARM64 VM and recorded in the commit message. Tests skip when the corpus is
   absent so the suite stays green on machines without it.
 - Hostile and variant fixtures are built byte-for-byte inline so every cap
   and every malformed cross-reference has a fixture that *exceeds* the cap,
-  not one that approaches it (ground rule 33), and every format variant —
+  not one that approaches it, and every format variant —
   `#~`/`#-`, wide/narrow heap indexes, netmodule, MethodSpec entry point —
-  has a fixture (ground rule 10).
+  has a fixture.
 - The one exception is the strong-name variants under
-  `tests/data/pe/dotnet-strongname/` (W3.4), seven small SDK-built
+  `tests/data/pe/dotnet-strongname/`, seven small SDK-built
   assemblies committed as binaries. A real strong-name signature is an RSA
   signature over the assembly with the signature region excluded, so the
   signed/delay-signed/public-signed shapes cannot be synthesized inline
@@ -807,7 +807,7 @@ def test_parse_is_deterministic():
 
 
 # --------------------------------------------------------------------------
-# Hostile fixtures: every cap is exceeded, not approached (rule 33)
+# Hostile fixtures: every cap is exceeded, not approached
 # --------------------------------------------------------------------------
 
 
@@ -1070,7 +1070,7 @@ def test_coded_index_slots_match_the_spec():
     Every other fixture in this file encodes its rows *through*
     ``pe_dotnet.CODED_INDEXES``, so a wrong slot list is invisible to all of
     them — the fixture and the parser agree with each other and disagree
-    with the world. The shipped W3.1 list had MemberRef, TypeRef, TypeSpec,
+    with the world. The first shipped list had MemberRef, TypeRef, TypeSpec,
     ExportedType and six others missing from ``HasCustomAttribute`` and
     MethodSpec standing in for MemberRef in ``MethodDefOrRef``; because the
     widest constituent table sets the column width, that narrowed the
@@ -1116,7 +1116,7 @@ def test_layout_that_does_not_account_for_the_stream_withholds_rows():
     not the writer's, so every row it reads is some other table's bytes.
     Reporting what those bytes decode to is how the coded-index defect
     produced a plausible assembly name and a plausible public key token for
-    netstandard.dll — so the derived facts are withheld (ground rule 11)
+    netstandard.dll — so the derived facts are withheld
     while ``counts``, which comes from the header rather than the layout,
     stays.
     """
@@ -1133,7 +1133,7 @@ def test_layout_that_does_not_account_for_the_stream_withholds_rows():
 
 
 # --------------------------------------------------------------------------
-# Wire-up, SBOM, coverage, tuple (rule 21 recomputes)
+# Wire-up, SBOM, coverage, tuple
 # --------------------------------------------------------------------------
 
 
@@ -1148,7 +1148,7 @@ def test_sbom_components_from_assembly_refs():
         {"name": "Foo.Resources", "version": "1.0.0.0", "culture": "zh-Hans"},
     ]
     comps = process_dotnet_assembly_refs(refs)
-    # W3.5: the token is a purl qualifier (03/D), not a property — a token
+    # The token is a purl qualifier, not a property — a token
     # in the purl is matchable by a consumer that has not found the
     # component yet; the unsigned ref carries no qualifier at all rather
     # than an empty one.
@@ -1237,7 +1237,7 @@ def test_analysis_coverage_carries_dotnet_degradations():
 
 
 def test_llvm_target_tuple_managed_uses_machine_type():
-    # Rule 21 recompute: exe_type no longer decides the architecture.
+    # exe_type no longer decides the architecture.
     from blint.lib.binary import construct_llvm_target_tuple
 
     assert construct_llvm_target_tuple({
@@ -1252,7 +1252,7 @@ def test_llvm_target_tuple_managed_uses_machine_type():
 
 
 # --------------------------------------------------------------------------
-# Real-artifact assertions (ground rules 22/29) — skip when corpus absent
+# Real-artifact assertions — skip when corpus absent
 # --------------------------------------------------------------------------
 
 
@@ -1267,16 +1267,16 @@ def _corpus_path(relative: str):
 
 def test_real_newtonsoft_net45_identity_and_refs():
     # Ground truth: spec-based System.Reflection.Metadata dumper on the
-    # Windows 11 ARM64 VM (pasted in the packet commit). Agreement fields:
-    # assembly identity, public key token, AssemblyRef list, counts — and,
-    # since W3.2, the resolved TypeRef/MemberRef listings and the #US walk
+    # Windows 11 ARM64 VM (recorded in the commit message). Agreement fields:
+    # assembly identity, public key token, AssemblyRef list, counts — and
+    # the resolved TypeRef/MemberRef listings and the #US walk
     # (count and content digest), which the shared oracle emits too.
     path = _corpus_path(
         "tier2-managed/newtonsoft.json-13.0.3/lib/net45/Newtonsoft.Json.dll"
     )
     block = parse_pe_dotnet(_lief_parse(path), path)
-    # W3.2 review: the most-downloaded package on NuGet parses clean. At
-    # the packet's 2,048-row MemberRef cap this assembly's 2,149 rows were
+    # The most-downloaded package on NuGet parses clean. At
+    # the earlier 2,048-row MemberRef cap this assembly's 2,149 rows were
     # capped and it reported `partial` — and since the capped list is what
     # the capability rules match on, the last hundred rows were also
     # invisible to them. The cap now clears every assembly measured.
@@ -1310,7 +1310,7 @@ def test_real_newtonsoft_net45_identity_and_refs():
     assert counts["assembly_ref"] == 8
     assert counts["implmap"] == 0
     assert "pinvoke" not in block  # genuine zero, not a cap or failure
-    # W3.2 ground truth, oracle-record values (the oracle dumps whole
+    # Ground truth, oracle-record values (the oracle dumps whole
     # tables; blint lists a capped prefix, so the typeref listing happens
     # to be complete and the memberref listing is the capped window).
     typerefs = block["typerefs"]
@@ -1320,7 +1320,7 @@ def test_real_newtonsoft_net45_identity_and_refs():
     memberrefs = block["memberrefs"]
     # All 2,125 rows are listed now that the cap clears real assemblies;
     # 1,128 of them have TypeSpec (generic instantiation) parents, which
-    # blint reads but does not render — 997 named rows. At the packet's
+    # blint reads but does not render — 997 named rows. At the earlier
     # 2,048 cap this read 994, and the 77 rows past the cap were invisible
     # to the capability rules as well as to the listing.
     assert len(memberrefs) == 997
@@ -1371,7 +1371,7 @@ def test_real_mixed_mode_native_entrypoint_and_pinvoke():
     # are counted in counts.implmap but are not P/Invoke entries.
     path = _corpus_path("tier5-system/system32/mfcm140.dll")
     block = parse_pe_dotnet(_lief_parse(path), path)
-    # Bit order, not alphabetical: the names table is blint-owned (rule 28).
+    # Bit order, not alphabetical: the names table is blint-owned.
     assert sorted(block["cli_flags"]) == ["NATIVE_ENTRYPOINT", "STRONGNAMESIGNED"]
     assert block["cli_flags_value"] == 0x18
     assert block["entry_point"] == {"token": "0x000044f0", "kind": "native"}
@@ -1403,9 +1403,9 @@ def test_real_parse_exetype_and_block_shape():
     assert metadata["exe_type"] == "dotnetbinary"
     assert metadata["is_dotnet"] is True
     block = metadata["dotnet"]
-    # JSON-serializable, no bytes anywhere (rule 20).
+    # JSON-serializable, no bytes anywhere.
     json.dumps(block)
-    # W3.2: the #US strings are promoted to the top level with their
+    # The #US strings are promoted to the top level with their
     # provenance named, and the byte scan is unioned in behind them.
     assert block["parse_status"] == "parsed"
     assert metadata["strings_source"] == "user_strings_heap+binary_scan"
@@ -1464,7 +1464,7 @@ def test_real_managed_exetype_change_does_not_break_ordinal_width():
 def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
     """Moving managed PEs to `dotnetbinary` must not drop a check quietly.
 
-    W3.1 changed `exe_type` for every managed binary, so every rule scoped
+    That move changed `exe_type` for every managed binary, so every rule scoped
     to PE32/PE64 and not to dotnetbinary stopped reaching them. Two of
     those were argued in rules.yml and are the point of the change
     (CHECK_CANARY and CHECK_RPATH could only ever return their false
@@ -1472,7 +1472,7 @@ def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
     was not intended: it reads section entropy, packer section signatures
     and the overlay, none of which are native-only, and a packed or
     obfuscator-protected assembly is one of the commonest hostile managed
-    shapes. The packet's own before/after showed no firing move, because
+    shapes. The change's own before/after showed no firing move, because
     all 62 managed corpus files score packed_likelihood low — a rule
     silently leaving scope does not announce itself by changing a count on
     a benign corpus, which is why this is a scope assertion and not a
@@ -1494,10 +1494,10 @@ def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
         r["id"] for r in rules if "dotnetbinary" in (r.get("exe_types") or [])
     }
     # Every scope change must be argued beside the scope itself.
-    # CHECK_CANARY / CHECK_RPATH: W3.1 - meaningless on pure-IL images,
+    # CHECK_CANARY / CHECK_RPATH: meaningless on pure-IL images,
     # their PE scopes were dropped entirely.
     argued_removals = {"CHECK_CANARY", "CHECK_RPATH"}
-    # W5.2: rules whose subject is a native kernel image and which would
+    # Rules whose subject is a native kernel image and which would
     # be dead weight (or a lie) in managed scope. The conditions are
     # defined on section flags and alignment, relocations and the boot
     # loader's subsystem; the driver gate (pe_driver.is_windows_driver)
@@ -1507,7 +1507,7 @@ def test_managed_exe_type_loses_no_rule_without_an_argued_reason():
     argued_pe_only_scopes = {
         "CHECK_HVCI_COMPATIBLE",
         "CHECK_BOOT_START_INTEGRITYCHECK",
-        # W5.3: the rule reports "this exact image is a kernel driver on
+        # The rule reports "this exact image is a kernel driver on
         # the blocklist"; a managed assembly is not a kernel image, and
         # exe_type dotnetbinary is set precisely when a CLI header exists,
         # which no driver in the snapshot has.
@@ -1539,7 +1539,7 @@ def test_real_assemblies_leave_only_an_alignment_tail():
 
     ``MAX_TABLE_STREAM_LEFTOVER`` is only as good as its threshold, and the
     threshold is a measurement: re-run it here against whatever the corpus
-    actually holds rather than trusting the number in a packet report. A
+    actually holds rather than trusting a recorded number. A
     file that trips the guard is either a layout blint computes wrongly or
     a real shape the threshold is too tight for — both are review material,
     and both are invisible to the inline fixtures, which encode their rows
@@ -1576,7 +1576,7 @@ def _lief_parse(path):
 
 
 # --------------------------------------------------------------------------
-# W3.2: TypeRef/MemberRef resolution and the #US heap
+# TypeRef/MemberRef resolution and the #US heap
 # --------------------------------------------------------------------------
 
 def _us_heap(values: list[str]) -> bytes:
@@ -1622,7 +1622,7 @@ def test_user_strings_walk_reports_count_digest_and_strings():
 
 
 def test_user_strings_empty_heap_is_zero_not_absent():
-    """An empty #US heap reports a walk of zero entries (ground rule 32).
+    """An empty #US heap reports a walk of zero entries.
 
     A heap blint could not walk leaves these fields absent and names
     ``us_heap_missing``; a heap that walked cleanly and held nothing is a
@@ -1656,7 +1656,7 @@ def test_user_strings_truncated_heap_names_the_refusal():
 
     The prefix entries still report their count and digest — the facts
     blint did determine stay facts — and the shortfall is a named
-    degradation, never silence (ground rule 14).
+    degradation, never silence.
     """
     heap = bytearray(_us_heap(["First entry", "Second entry"]))
     # Claim six bytes more than the final entry has.
@@ -1718,7 +1718,7 @@ def test_user_strings_walk_bytes_cap_is_exceeded_not_approached():
     # blint's own budget is not a defect in the file. Reporting the heap as
     # truncated here would accuse a well-formed assembly of being malformed
     # because blint stopped reading it — the two outcomes are different
-    # facts and must not share a name (ground rule 14).
+    # facts and must not share a name.
     assert "user_strings_heap_truncated" not in degr.sorted()
     per_entry_utf8 = (pe_dotnet.MAX_US_ENTRY_BYTES // 2) * len(
         "\u4e2d".encode("utf-8")
@@ -1765,7 +1765,7 @@ def test_typeref_nil_scope_is_omitted_and_named():
 
     Netmodules legitimately carry scopeless TypeRefs. The row must not
     read as a type provided by the current module — absent, with a named
-    degradation, is the honest output (ground rule 14).
+    degradation, is the honest output.
     """
     tables = {
         MODULE: [[0, "mod.netmodule", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
@@ -1906,7 +1906,7 @@ def test_managed_binary_without_these_tables_stays_quiet():
 
     System.Private.CoreLib ships zero TypeRefs; facades ship no #US heap.
     Neither may read as a parse refusal, and neither may produce an empty
-    list that pretends blint listed something (ground rule 32).
+    list that pretends blint listed something.
     """
     tables = {
         MODULE: [[0, "core.dll", b"\x01" * 16, b"\x00" * 16, b"\x00" * 16]],
@@ -1925,7 +1925,7 @@ def test_managed_binary_without_these_tables_stays_quiet():
 
 
 # --------------------------------------------------------------------------
-# W3.2: the P/Invoke dependency graph and the managed review surface
+# The P/Invoke dependency graph and the managed review surface
 # --------------------------------------------------------------------------
 
 def _managed_metadata() -> dict:
@@ -2150,7 +2150,7 @@ def test_user_strings_walk_survives_a_nonzero_root_offset():
 
 
 # --------------------------------------------------------------------------
-# W3.4: strong names — presence facts, never one verdict
+# Strong names — presence facts, never one verdict
 # --------------------------------------------------------------------------
 
 VARIANTS_DIR = "tests/data/pe/dotnet-strongname"
@@ -2239,7 +2239,7 @@ def test_strong_name_absent_directory_reports_absent_not_false():
     """No signature directory: present false, size zero, all-zero ABSENT.
 
     The emptiest artifact is the one a signing check most needs to state
-    honestly (ground rule 32): ``signature_all_zero`` is withheld rather
+    honestly: ``signature_all_zero`` is withheld rather
     than written false, because an absent region vacuously satisfies "all
     zero" and that reading would turn unsigned into null-signed.
     """
@@ -2252,7 +2252,7 @@ def test_strong_name_absent_directory_reports_absent_not_false():
 
 
 def test_strong_name_unreadable_signature_withholds_the_verdict():
-    # Unmapped RVA: the gap is named, all_zero stays absent (rule 14).
+    # Unmapped RVA: the gap is named, all_zero stays absent.
     region = make_assembly(
         strong_name_signature=(None, 128, "strong_name_signature_unmapped"),
     )
@@ -2329,7 +2329,7 @@ def _patched_strong_name_directory(variant: str, *, rva=None, size=None):
 def test_strong_name_read_cap_exceeded_on_a_real_pe():
     """The signature read cap, exceeded by a real file's patched header.
 
-    Ground rule 33: the fixture must exceed the window, so this patches a
+    The fixture must exceed the window, so this patches a
     real assembly's CLI header (the committed delaysigned.dll) to declare a
     StrongNameSignature size past MAX_STRONG_NAME_SIGNATURE_READ and runs
     the full file-level path - the cap is refused by name and the
@@ -2362,8 +2362,7 @@ def test_strong_name_half_declared_directory_is_named_not_normalised():
     nothing to read - but the header still contradicts itself, and that is
     a fact about the file. Reporting ``signature_size: 0`` alone would put
     a number blint never read where the header says something else and
-    leave the contradiction invisible, which is the shape ground rule 11
-    forbids. The size stays 0 because no region exists; the contradiction
+    leave the contradiction invisible. The size stays 0 because no region exists; the contradiction
     lives in the named degradation.
     """
     with _patched_strong_name_directory("signed.dll", rva=0) as path:
@@ -2459,10 +2458,10 @@ def test_internals_visible_to_nil_string_names_nothing():
 
 
 def test_internals_visible_to_cap_is_exceeded_not_approached():
-    """The IVT listing window: one row past the cap (ground rule 33).
+    """The IVT listing window: one row past the cap.
 
     The cap is a listing bound only - no rule reads this list (the
-    distribution measurement decided against any rule this packet), so a
+    distribution measurement decided against any rule), so a
     row past it is unlisted, not unexamined. The true count survives.
     """
     specs = [f"Friend.{i:04d}" for i in range(pe_dotnet.MAX_LISTED_IVT + 29)]
@@ -2482,7 +2481,7 @@ def test_ivt_row_on_a_non_assembly_parent_is_not_a_target():
 
     The runtime honours assembly-scoped attributes and the ground-truth
     oracle walks GetAssemblyDefinition().GetCustomAttributes(); a hostile
-    row parented on a TypeDef is listed by neither (ground rule 11: the
+    row parented on a TypeDef is listed by neither (the
     negative fixture for the parent filter).
     """
     tables = {
@@ -2511,7 +2510,7 @@ def test_ivt_row_on_a_non_assembly_parent_is_not_a_target():
 
 
 def test_target_framework_cap_no_longer_stops_the_sweep():
-    """W3.4 merged the attribute sweeps; the TF value cap must bound the
+    """The attribute sweeps are merged; the TF value cap must bound the
     value list, not leave the loop - InternalsVisibleTo rows after the
     cap would never be reached otherwise."""
     tables = {

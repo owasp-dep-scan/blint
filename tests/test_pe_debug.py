@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the PE debug directory and rich header decoding (W1.1)."""
+"""Tests for the PE debug directory and rich header decoding."""
 
 import struct
 
@@ -22,7 +22,7 @@ LE_GUID = bytes.fromhex("57750F7FF529E34789CCE15613B51A64")
 
 
 def _pe64_image(dll_characteristics: int = 0, subsystem: int = 3) -> bytes:
-    """A minimal PE32+ image, mirroring the W0.1 builder in test_binary."""
+    """A minimal PE32+ image, mirroring the builder in test_binary."""
     dos = bytearray(0x80)
     dos[0:2] = b"MZ"
     struct.pack_into("<I", dos, 0x3C, 0x80)
@@ -148,7 +148,7 @@ def test_parse_codeview_payload_unknown_signature():
 def test_parse_codeview_payload_truncated_entry_does_not_raise():
     """A CodeView entry whose SizeOfData falls short of its own layout.
 
-    The debug directory is attacker-controlled (ground rule 30) and the
+    The debug directory is attacker-controlled and the
     caller's per-entry suppression covers AttributeError/TypeError/ValueError
     only — an UnboundLocalError from a half-decoded payload would abort the
     whole PE parse, not just the entry. The two lengths below straddle the
@@ -171,7 +171,7 @@ def test_pdb_filename_windows_and_posix():
 
 
 def test_decode_comp_id_known_and_fallback():
-    # The pair this packet validated against python313.dll's linker record.
+    # The pair validated against python313.dll's linker record.
     row = decode_comp_id(0x0102, 35213)
     assert row["tool"] == "LNK"
     assert "VS2022" in row["label"]

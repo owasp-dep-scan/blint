@@ -121,7 +121,7 @@ def test_nofire_fixture_stays_silent(abi: str) -> None:
 
 @pytest.mark.parametrize("abi_flag", ["arm64-v8a_Os", "arm64-v8a_Oz", "x86_64_Os", "x86_64_Oz"])
 def test_flag_variant_fixture_matches_the_manifest_table(abi_flag: str) -> None:
-    # The -Os/-Oz twins (A7.2 R1) are pinned to the manifest's expected
+    # The -Os/-Oz twins are pinned to the manifest's expected
     # table, which records what each flag does to each rule: the loop-held
     # su-path table silences the root probe everywhere, the arm64 -Oz
     # outliner hides dlopen until a pure thunk is followed, and the x86_64
@@ -316,7 +316,7 @@ def test_plt_stub_names_decode_the_fixture_table() -> None:
     assert len(stubs_x86) >= 3, "liba9_split_x86.so"
     assert "__cxa_finalize" in stubs_x86.values(), "liba9_split_x86.so"
     # The arm32 PLT entry (add ip, pc, #A; add ip, ip, #B; ldr pc,
-    # [ip, #C]!) decodes into names since A12: the stub set names this
+    # [ip, #C]!) decodes into names: the stub set names this
     # fixture's imports, cross-checkable against its .rel.plt.
     parsed_v7a = lief.ELF.parse(str(DATA / "liba7_fire_armeabi-v7a.so"))
     stubs_v7a = _elf_plt_stub_names(parsed_v7a)

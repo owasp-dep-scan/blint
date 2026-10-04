@@ -1,4 +1,4 @@
-r"""Tests for the privileged-host plugin surface (PE lane W5.6, plan 04/F).
+r"""Tests for the privileged-host plugin surface.
 
 The fixtures are hand-built minimal PE DLLs (no binary blobs committed -
 the same discipline as the inline wasm builder in test_binary.py), because
@@ -248,7 +248,7 @@ def test_print_monitor_contract(write_pe):
 
 
 def test_no_exports_no_block_and_no_gap(write_pe):
-    """The empty case is a case (rule 32): a plain DLL with no export
+    """The empty case is a case: a plain DLL with no export
     directory produces no block - and no degradation, because nothing
     failed to be read."""
     path = write_pe("plain.dll", _build_pe_dll(rdata_strings=["nothing to see"]))
@@ -261,7 +261,7 @@ def test_no_exports_no_block_and_no_gap(write_pe):
 
 
 def test_corrupt_export_directory_is_a_named_gap_not_a_verdict(write_pe):
-    """Rules 14/32: an export directory lief could not read must not read
+    """An export directory lief could not read must not read
     as "not a plugin". There is no block, and the gap reaches
     analysis_coverage by name."""
     path = write_pe(
@@ -275,7 +275,7 @@ def test_corrupt_export_directory_is_a_named_gap_not_a_verdict(write_pe):
 
 
 def test_export_names_are_matched_exactly_not_by_substring(write_pe):
-    """Rule 11 negative fixture: names that contain a contract export as a
+    """Negative fixture: names that contain a contract export as a
     substring, or share its prefix, satisfy nothing."""
     path = write_pe(
         "lookalike.dll",
@@ -358,7 +358,7 @@ def test_credential_provider_reference_found_in_wide_chars(write_pe):
 
 
 def test_detection_does_not_depend_on_the_strings_listing(write_pe):
-    """The W3.2 property: registration evidence is scanned from section
+    """Independence from the strings listing: registration evidence is scanned from section
     bytes, so a reference the metadata strings gates out (short, no
     registry-shape prefix, ordinary entropy) is still detected."""
     fragment = "Authentication\\Credential Providers\\{F8A0B131-5F68-486c-8040-7E8FC3C85BB6}"
@@ -381,7 +381,7 @@ def test_detection_does_not_depend_on_the_strings_listing(write_pe):
 
 
 def test_registration_evidence_listing_is_bounded_but_detection_is_not(write_pe):
-    """Rule 33: the evidence listing caps at REGISTRATION_EVIDENCE_LIMIT
+    """The evidence listing caps at REGISTRATION_EVIDENCE_LIMIT
     entries; a fixture with more matches than the cap still fires (the
     cap bounds metadata, never detection - no rule reads past entry 0)."""
     extra = [
@@ -415,7 +415,7 @@ def test_audio_processing_object_contract(write_pe):
 
 
 # ---------------------------------------------------------------------------
-# The unsigned gate (W2.4 signing class)
+# The unsigned gate (signing class)
 # ---------------------------------------------------------------------------
 
 
@@ -488,7 +488,7 @@ def test_unsigned_rule_silent_without_contracts():
 
 
 # ---------------------------------------------------------------------------
-# ARM64X slices (rule 21)
+# ARM64X slices
 # ---------------------------------------------------------------------------
 
 
@@ -554,7 +554,7 @@ def test_contract_table_shape():
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts (rule 29)
+# Real artifacts
 # ---------------------------------------------------------------------------
 
 
@@ -632,7 +632,7 @@ def test_scecli_fires_the_lsa_rule_on_windows():
 )
 def test_slice_histogram_no_lsa_or_unsigned_findings():
     """On the whole 240-file slice only the two print monitors carry any
-    contract, so the high-severity W5.6 rules fire zero times there."""
+    contract, so the high-severity host-plugin rules fire zero times there."""
     lsa = unsigned = 0
     for name in sorted(os.listdir(SLICE_ROOT)):
         path = os.path.join(SLICE_ROOT, name)
@@ -647,7 +647,7 @@ def test_slice_histogram_no_lsa_or_unsigned_findings():
 
 
 # ---------------------------------------------------------------------------
-# What the review of W5.6 found: the coverage mirroring, the dead table key,
+# What review of the host-plugin surface found: the coverage mirroring, the dead table key,
 # and the rule scope.
 # ---------------------------------------------------------------------------
 
@@ -657,8 +657,8 @@ def test_slice_variance_reaches_analysis_coverage(write_pe, monkeypatch):
     coverage mirroring must read them from there.
 
     It read them from the top level of metadata instead, where nothing ever
-    wrote them, so analysis_coverage never carried either key and the rule-21
-    promise METADATA.md makes was unmet on every ARM64X image. No test looked
+    wrote them, so analysis_coverage never carried either key and the
+    mirroring promise METADATA.md makes was unmet on every ARM64X image. No test looked
     at analysis_coverage, which is why the block-level assertions passed.
     """
     from blint.lib import binary as binary_mod
@@ -731,7 +731,7 @@ def test_rule_scope_covers_the_toolchain_exe_types():
     .rdata Go heuristic and the MinGW ripgrep build is ``genericbinary``. A
     Go c-shared DLL exports named entry points like any other, so a scope of
     PE32/PE64 alone silently excludes the binaries an implant is most likely
-    to be built as - the CHECK_PACKED defect of W3.1, repeated on two
+    to be built as - the earlier CHECK_PACKED scope defect, repeated on two
     high-severity rules.
     """
     from blint.lib import analysis as analysis_mod

@@ -1,4 +1,4 @@
-# blint's ordinal resolution table (PE lane W1.2, plan 01/A.6).
+# blint's ordinal resolution table.
 #
 # Source: System32 DLLs from a Windows build 10.0.26100.9278 installation.
 # Ordinal assignments are per-build facts; the sha256 values below pin

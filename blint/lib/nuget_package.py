@@ -1,4 +1,4 @@
-"""Bounded NuGet package (``.nupkg``) reader for SBOM identity (W3.5).
+"""Bounded NuGet package (``.nupkg``) reader for SBOM identity.
 
 A ``.nupkg`` is a zip archive whose ``.nuspec`` member is the one place the
 real NuGet package id and package version are stated. Assembly metadata
@@ -9,7 +9,7 @@ version (measured over the tier-2 corpus and a 21-package VM oracle set:
 zero of 50 identities are string-equal, and 31 differ semantically —
 Newtonsoft.Json 13.0.3 ships assembly version 13.0.0.0).
 
-An untrusted-input container parser (ground rule 30): member count, total
+An untrusted-input container parser: member count, total
 uncompressed size, member path depth and member path safety (``..``
 segments, absolute paths, drive letters, backslash separators, symlink
 entries) are bounded while walking the central directory, and the one
@@ -22,7 +22,7 @@ No extraction happens anywhere: the single ``.nuspec`` member is read into
 memory, so there is no temp directory to clean up on any path. The leak test
 asserts the stronger form of that claim: no temp entry is ever created,
 across success and across every refusal. That property is why this reader is
-*not* a client of the W4.1 extraction framework (``blint.lib.container``) —
+*not* a client of the shared extraction framework (``blint.lib.container``) —
 not extracting is stronger than extracting safely — but the member
 path-safety and symlink checks are the framework's shared implementations
 (``member_path_unsafe`` / ``zip_member_is_symlink``), imported rather than
@@ -87,8 +87,8 @@ def read_nupkg_nuspec(path: str) -> dict:
       may hold — a range is carried as a property, never synthesised into
       a version.
     - ``member_count`` — members walked before any cap stopped the walk.
-    - ``refusals`` — every limit and hostile shape encountered, by name
-      (ground rule 30). Refusals do not abort the identity: a package whose
+    - ``refusals`` — every limit and hostile shape encountered, by name.
+      Refusals do not abort the identity: a package whose
       member listing was capped still reports the nuspec it was found in,
       with the cap named beside it.
     """
@@ -228,7 +228,7 @@ def _exact_pin(version_range: str) -> str | None:
     ``1.2.3`` means ">= 1.2.3" (a floor, not a resolution — the restored
     version is decided by the client, not stated here) and ``[1.0, 2.0)``
     is an interval. A floor or interval in a purl version slot would be a
-    version blint does not have (ground rule 11), so it stays a property.
+    version blint does not have, so it stays a property.
     """
     text = version_range.strip()
     if (

@@ -323,7 +323,7 @@ def test_read_bundle_info_rejects_non_dict_plist_roots(tmp_path):
 
 
 def test_collect_ios_app_non_dict_plist_root_no_crash_no_leak(tmp_path):
-    """The reviewer's repro: <plist version="1.0"/> must collect, not crash.
+    """A review repro: <plist version="1.0"/> must collect, not crash.
 
     The binaries inside are still analyzable (bundle info is simply empty),
     and the extraction directory must be gone when collection fails or

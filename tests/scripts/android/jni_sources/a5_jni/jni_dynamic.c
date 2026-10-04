@@ -1,11 +1,11 @@
 /*
- * A5 E0/F1 - dynamic registration: five methods across two classes,
+ * Dynamic registration: five methods across two classes,
  * registered from JNI_OnLoad through RegisterNatives.
  *
  * The JNINativeMethod arrays are `static const` with relocated pointers
  * (name/signature string addresses, function addresses), so a PIE NDK
  * build lands them in .data.rel.ro with R_*_RELATIVE relocations - the
- * table shape F1 recovers without disassembly.
+ * table shape the RELATIVE-only table walk recovers without disassembly.
  *
  * jni.h constants (NDK r28c 28.2.13676358 sysroot, jni.h):
  *   JNINativeMethod {const char *name; const char *signature; void *fnPtr;}

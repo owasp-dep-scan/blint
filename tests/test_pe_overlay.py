@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""Overlay classification tests (W0.2, V3).
+"""Overlay classification tests.
 
-Ground rule 10: the classifier claims a label vocabulary, so each label gets
-its own fixture. Ground rule 22: the magics are pinned against real
+The classifier claims a label vocabulary, so each label gets
+its own fixture. The magics are pinned against real
 artifacts — the certificate-table values against the tier-0 python313.dll
-measurements recorded in the verification log, the 7z SFX signature against
+measurements, the 7z SFX signature against
 the tier-0 installers, and the .NET bundle marker against a real
 `dotnet publish -p:PublishSingleFile=true` artifact (see
 scripts/windows/build_sfx.ps1).
@@ -75,7 +75,7 @@ LABEL_PAYLOADS = {
 
 
 def test_classifier_labels_each_documented_magic():
-    """One fixture per A.2 label (ground rule 10); authenticode is not a
+    """One fixture per documented label; authenticode is not a
     residue label — the certificate table is subtracted before this runs."""
     for label, payload in LABEL_PAYLOADS.items():
         assert classify_overlay(payload) == label, label
@@ -107,7 +107,7 @@ def test_security_directory_range_reads_directory_four():
 
 
 def test_classify_pe_overlay_subtracts_certificate_table(tmp_path):
-    """V3: python313.dll's whole 14168-byte overlay *was* its certificate
+    """python313.dll's whole 14168-byte overlay *was* its certificate
     table. The same shape — section end, certificate, nothing after — must
     classify as no overlay at all, with the cert region named in band."""
     section_end = 0x600
@@ -167,7 +167,7 @@ def test_classify_pe_overlay_finds_the_bundle_marker_past_the_head_window(tmp_pa
     unknown_high_entropy — the one label that counts towards packing
     evidence.
 
-    W3.3 correction: this fixture's layout is not the one a real .NET 11
+    Correction: this fixture's layout is not the one a real .NET 11
     single-file publish has. There the signature sits inside the sections
     (offset 9,718,712, sections ending at 11,757,568), so it never reaches
     this function at all and a real bundle's residue classifies

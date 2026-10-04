@@ -1,6 +1,6 @@
-"""Kernel-adjacent user-mode surface (PE lane W5.4, plan 04/D).
+"""Kernel-adjacent user-mode surface.
 
-The same reviewer question the driver lane answers, asked of a user-mode
+The same question the driver block answers, asked of a user-mode
 image: how does this reach the kernel, another process, or a permanent
 foothold? The blocks here are *facts* blint recovers; the judgements live
 in the review rules (``review_usermode_win.yml``) and are tagged with the
@@ -10,10 +10,10 @@ ATT&CK and D3FEND techniques they evidence as the rules are written
 - ``com_registration``: CLSIDs and AppIDs the image references, from
   ``CLSID\\{...}`` / ``AppID\\{...}`` registry-path strings in the section
   bytes (both encodings). COM CLSIDs are a genuine identity signal and
-  nothing in the checksec family had them. This is also the registry-
-  string recovery the W5.6 host-plugin note points at: a later packet may
-  re-point ``pe_host_plugins``' registration evidence at it (its own
-  measured behaviour is pinned, so that re-point is not done here).
+  nothing in the checksec family had them. This is also a registry-
+  string recovery ``pe_host_plugins``' registration evidence could be
+  re-pointed at later (its own measured behaviour is pinned, so that
+  re-point is not done here).
 - ``rpc_interfaces`` (requires ``--disassemble``): interface UUIDs from
   the ``RPC_SERVER_INTERFACE`` structures an ``RpcServerRegisterIf*``
   call site receives (the GUID at offset +0x04, per rpcdce.h's
@@ -24,8 +24,8 @@ ATT&CK and D3FEND techniques they evidence as the rules are written
 - ``persistence_surfaces``: the documented autostart/extension registry
   and file surfaces the image names - Run keys, IFEO, AppInit/AppCert,
   WMI event consumers, scheduled-task XML, the Services control set -
-  from section bytes, never the gated strings list (the W3.2 cap
-  lesson). Presence of a string is a *reference*, not a behaviour; every
+  from section bytes, never the gated strings list (its cap would be a
+  detection boundary). Presence of a string is a *reference*, not a behaviour; every
   rule consuming this block says so.
 """
 
@@ -40,7 +40,7 @@ from blint.lib.binary_common import is_string_bearing_section
 
 # Listing bounds. Listing bounds only: every rule consuming these blocks
 # fires on membership/counts, never on the tail, and the fixtures pin
-# that the counts survive past the listing (rule 33).
+# that the counts survive past the listing.
 COM_LISTING_LIMIT = 16
 PERSISTENCE_LISTING_LIMIT = 4
 
@@ -118,8 +118,7 @@ def collect_com_registration(parsed_obj: lief.PE.Binary) -> dict[str, Any] | Non
     # the cap that appears three times in .rdata (the ordinary case - a
     # class is named by its registration table and by its call sites) added
     # three to the count, so 20 distinct CLSIDs reported clsid_count 28.
-    # A count that is not a count of anything is worse than no count
-    # (rule 11).
+    # A count that is not a count of anything is worse than no count.
     seen: dict[bytes, set[str]] = {b"CLSID": set(), b"APPID": set()}
     for view in _iter_section_views(parsed_obj):
         for match in guid_re.finditer(view):

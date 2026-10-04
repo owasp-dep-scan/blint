@@ -403,7 +403,7 @@ def construct_llvm_target_tuple(metadata: dict) -> str:
     if metadata.get("is_dotnet"):
         # The architecture comes from the machine type, not from exe_type:
         # a managed image is dotnetbinary whatever its PE format width or
-        # ISA is (W3.1 moved managed files out of PE32/PE64, which used to
+        # ISA is (managed files moved out of PE32/PE64, which used to
         # decide this aggregate — the same tuple, now computed from the
         # fact that actually names the machine).
         machine_type = (metadata.get("machine_type") or "").upper()
@@ -592,7 +592,7 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
         properties = _macho_security_properties(metadata, parsed_obj)
     elif isinstance(parsed_obj, lief.PE.Binary):
         # PE: each property from its named source, omitted rather than
-        # guessed when the source is absent (A.3/V4); the PE-specific body
+        # guessed when the source is absent; the PE-specific body
         # lives with the rest of the PE parsing.
         properties, gaps = construct_pe_security_properties(
             metadata, parsed_obj, metadata["file_path"]
@@ -627,7 +627,7 @@ def construct_binary_composition(metadata: dict, parsed_obj: lief.Binary) -> dic
     if metadata.get("is_targeting_android"):
         # bionic: libc.so here is Android's C library, not glibc (the old
         # tag reported "glibc" on every bionic binary via the libc.so
-        # DT_NEEDED check below - A0.3 V12 evidence).
+        # DT_NEEDED check below).
         runtimes.add("bionic")
     elif metadata.get("is_musl"):
         runtimes.add("musl")
@@ -664,7 +664,7 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
     Adds various derived, high-level attributes to the metadata dictionary.
     """
     metadata["hashes"] = calculate_hashes(metadata["file_path"])
-    # W5.3: exact-digest matching against the shipped loldrivers.io /
+    # Exact-digest matching against the shipped loldrivers.io /
     # Microsoft-blocklist snapshot. Runs after the digests exist, which is
     # why it lives here and not in the format parsers. Data with
     # provenance, never a scan-time network call.
@@ -697,9 +697,9 @@ def add_derived_attributes(metadata: dict, parsed_obj: lief.Binary | None) -> di
             )
     if build_info:
         metadata["build_info"] = build_info
-    # W5.5: the at-a-glance Windows posture summary. Runs last in this
+    # The at-a-glance Windows posture summary. Runs last in this
     # function so every block it summarises (code_signature,
-    # security_properties, driver, dotnet, the container lane) is already
+    # security_properties, driver, dotnet, the container blocks) is already
     # in place; it reads those blocks and recomputes nothing.
     if posture := build_windows_posture(metadata):
         metadata["windows_posture"] = posture
@@ -1297,7 +1297,7 @@ def parse(
                 metadata["swift_metadata"] = swift_metadata
                 metadata = merge_swift_functions(metadata)
             metadata = discover_and_merge_functions(metadata, parsed_obj)
-            # A5.2 F1: JNINativeMethod tables behind RegisterNatives, from
+            # JNINativeMethod tables behind RegisterNatives, from
             # the relative relocations. Needs every function start including
             # the unwind-table discoveries stripped builds live on, so it
             # runs after the merge, not inside the ELF facts pass.
@@ -1311,7 +1311,7 @@ def parse(
         # ELF sets this in add_elf_metadata. PE and Mach-O previously produced no
         # strings at all, which silently disabled secret and string-based reviews
         # for those formats.
-        # W3.2: a managed assembly's real string literals live in its #US
+        # A managed assembly's real string literals live in its #US
         # heap and are moved out of the dotnet block when it read them —
         # the byte-level scan finds only noise on a pure-IL image (two
         # strings in a 700 KB assembly). The scan is unioned in behind the
@@ -1320,7 +1320,7 @@ def parse(
         # and replacing would silently discard them. A heap blint could
         # not walk leaves the block without the key and the scan below
         # stays the fallback, so an unwalkable heap never reads as "this
-        # assembly has no strings" (ground rule 14).
+        # assembly has no strings".
         dotnet_block = metadata.get("dotnet") or {}
         if "strings" in dotnet_block:
             heap_strings = dotnet_block.pop("strings")
@@ -1336,7 +1336,7 @@ def parse(
                 metadata["strings_source"] = "user_strings_heap"
         if "strings" not in metadata:
             metadata["strings"] = parse_strings(parsed_obj)
-        # W5.6: the privileged-host plugin surface (04/F) - which plugin
+        # The privileged-host plugin surface - which plugin
         # contracts the export set satisfies and the host each loads into.
         # An interpretation of already-parsed facts (the export listings and
         # the section bytes for registration references), computed here
@@ -1368,7 +1368,7 @@ def parse(
                 _file_size = os.path.getsize(exe_file)
             # For PE the overlay numbers come from the classified residue
             # (certificate table subtracted, pe_overlay), so the packing
-            # analysis never counts a signature as overlay evidence (V3).
+            # analysis never counts a signature as overlay evidence.
             pe_overlay = (
                 metadata.get("overlay_info") if isinstance(parsed_obj, lief.PE.Binary) else None
             )
@@ -1429,7 +1429,7 @@ def parse(
                 if scs := parse_shadow_call_stack(metadata):
                     metadata["android"]["shadow_call_stack"] = scs
             if isinstance(parsed_obj, lief.PE.Binary) and metadata.get("pre_main_execution"):
-                # W1.4: with disassembly available, the pre-main summary
+                # With disassembly available, the pre-main summary
                 # refreshes so the anti-debug reachability fact can read the
                 # callbacks' call targets.
                 metadata["pre_main_execution"] = parse_pre_main_execution(parsed_obj, metadata)
@@ -1458,7 +1458,7 @@ def parse(
             metadata["call_site_arguments_coverage"] = callsite_coverage
             if callsite_entries:
                 metadata["call_site_arguments"] = callsite_entries
-            # W5.4: RPC interface UUIDs, anchored to the registration call
+            # RPC interface UUIDs, anchored to the registration call
             # sites the abstract interpreter resolved.
             if rpc_interfaces := collect_rpc_interfaces(parsed_obj, callsite_entries):
                 metadata["rpc_interfaces"] = rpc_interfaces
@@ -1468,7 +1468,7 @@ def parse(
                     sections=_pe_data_section_bytes(parsed_obj),
                 ):
                     metadata["driver_ioctls"] = driver_ioctls
-                # W5.3: input-length validation per recovered control code,
+                # Input-length validation per recovered control code,
                 # correlated at the handler-function level (the block states
                 # the confidence). Runs whether or not dispatch stores were
                 # recovered - the constraints are facts about the functions
@@ -1484,7 +1484,7 @@ def parse(
                         # Keyed by the handler function, not just by the
                         # sizes: the map's key is the only thing that says
                         # *which* routine does the checking, and dropping it
-                        # left a list of constants naming nothing (rule 11).
+                        # left a list of constants naming nothing.
                         metadata["driver"]["input_length_constraints"] = [
                             {"function": function, **facts}
                             for function, facts in sorted(driver_ioctls.items())
@@ -1497,16 +1497,16 @@ def parse(
         if isinstance(parsed_obj, lief.PE.Binary):
             if driver_interface := classify_driver_strings(metadata):
                 metadata["driver_interface"] = driver_interface
-            # W5.3: the device DACL, from the SDDL strings an image that
+            # The device DACL, from the SDDL strings an image that
             # calls IoCreateDeviceSecure installs with its device object.
             if device_acl := recover_device_acl(parsed_obj):
                 if isinstance(metadata.get("driver"), dict):
                     metadata["driver"]["device_acl"] = device_acl
-            # W5.1: with disassembly available, the driver block gains the
+            # With disassembly available, the driver block gains the
             # facts only disassembly can see (registered WDM callbacks, the
             # dispatch routine summary from driver_ioctls).
             refresh_driver_block_after_disassembly(metadata)
-            # W5.2: the MSR/port-instruction evidence for the scored
+            # The MSR/port-instruction evidence for the scored
             # dangerous-import families is disassembly-level.
             refresh_kernel_posture_after_disassembly(metadata)
             # Embedded cryptographic constants and opaque data regions are
@@ -1558,9 +1558,9 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
         degradations.append("disassembly_unavailable")
     if metadata.get("is_encrypted"):
         degradations.append("fairplay_encrypted")
-    # W5.6: an export directory lief could not read is a named blind spot -
+    # An export directory lief could not read is a named blind spot -
     # the host-plugin contracts are export-keyed, so the gap must reach the
-    # coverage block rather than reading as "not a plugin" (rules 14/32).
+    # coverage block rather than reading as "not a plugin".
     if metadata.get("exports_read_status") == "failed":
         degradations.append("export_table_unreadable")
     if (metadata.get("link_hygiene") or {}).get("attribution_status") == "unresolved":
@@ -1623,14 +1623,14 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     # properties the other slices disagree about.
     if variance := metadata.get("security_properties_slice_variance"):
         coverage["security_properties_slice_variance"] = list(variance)
-    # Same rule-21 reason for code_signature: the top-level block speaks for
+    # Same reason for code_signature: the top-level block speaks for
     # the primary slice, and a consumer must be able to see that plus which
     # signature aspects the other slices disagree about.
     if scope := metadata.get("code_signature_scope"):
         coverage["code_signature_scope"] = scope
     if variance := metadata.get("code_signature_slice_variance"):
         coverage["code_signature_slice_variance"] = list(variance)
-    # Same rule-21 reason for the host-plugin surface (W5.6): the block
+    # Same reason for the host-plugin surface: the block
     # speaks for one export listing whenever the ARM64X slices disagree,
     # and a consumer of the coverage block alone must see that. Unlike the
     # signature keys above, these two live inside the host_plugin block
@@ -1647,7 +1647,7 @@ def _build_analysis_coverage(metadata: dict, disassemble: bool) -> dict:
     if (metadata.get("code_signature") or {}).get("parse_status") == "parse_failed":
         degradations.append("code_signature_parse_failed")
         coverage["degradations"] = sorted(degradations)
-    # Same rule-32 reason for managed metadata (W3.1): a CLI header blint
+    # Same blind-spot reason for managed metadata: a CLI header blint
     # found but could not fully read must not read as a clean native file,
     # and a partially-read table stream must not read as "no AssemblyRefs".
     dotnet_parse_status = (metadata.get("dotnet") or {}).get("parse_status")
@@ -1749,7 +1749,7 @@ def analyze_import_deps(metadata: dict) -> dict:
             else:
                 continue
             _add_pe_dependency(lib_name, func_name)
-        # W3.2: a managed assembly's P/Invoke surface is a dependency edge
+        # A managed assembly's P/Invoke surface is a dependency edge
         # the import table never carries. The ModuleRef scope is the DLL,
         # the entry point the native export it must provide.
         for pinvoke_entry in (metadata.get("dotnet") or {}).get("pinvoke") or []:
@@ -1758,7 +1758,7 @@ def analyze_import_deps(metadata: dict) -> dict:
             if not lib_name or not func_name:
                 continue
             _add_pe_dependency(lib_name, func_name)
-        # W1.2: export forwarders name DLLs the loader must map even though
+        # Export forwarders name DLLs the loader must map even though
         # no import-table entry does. They are dependencies of a distinct
         # kind — recorded so the graph is complete, and typed apart from
         # "imported" so link hygiene never reads them as symbol suppliers.

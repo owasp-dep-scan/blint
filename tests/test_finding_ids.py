@@ -1,4 +1,4 @@
-"""Tests for stable finding IDs (D4): determinism, distinctness, and the
+"""Tests for stable finding IDs: determinism, distinctness, and the
 documented identity semantics."""
 
 import os
@@ -100,7 +100,7 @@ def _finding_ids_via_subprocess(fixture: Path) -> list[str]:
 
 
 def test_finding_ids_identical_across_two_processes():
-    """Same bytes, two fresh interpreters: identical ids (rule 22 form)."""
+    """Same bytes, two fresh interpreters: identical ids."""
     first = _finding_ids_via_subprocess(SECRETS_WASM)
     second = _finding_ids_via_subprocess(SECRETS_WASM)
     in_process = [f["finding_id"] for f in analyze(SECRETS_WASM).findings]

@@ -383,7 +383,7 @@ def _is_covert_channel_path(path: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# W5.4: kernel-adjacent user-mode surface. Every rule here is a *review*
+# Kernel-adjacent user-mode surface. Every rule here is a *review*
 # signal, not a findings rule, by measurement: the benign populations
 # (System32 slice + tiers 0/1) carry injection chains on debug and
 # Sysinternals tooling, ETW/AMSI patch shapes on OS components and
@@ -392,7 +392,7 @@ def _is_covert_channel_path(path: str) -> bool:
 # primitives; they never render a verdict on their own.
 # ---------------------------------------------------------------------------
 
-# The three cross-process injection stages (plan 04/D). Each set holds the
+# The three cross-process injection stages. Each set holds the
 # imports that realize the stage; the Ex/Nt forms take a target-process
 # handle, which is what makes them cross-process by construction.
 INJECTION_STAGES: dict[str, set[str]] = {
@@ -457,7 +457,7 @@ def _is_ntdll(metadata: dict) -> bool:
 
 
 def _evaluate_usermode_surface(rule_id: str, metadata: dict, import_names: set[str]) -> list[dict]:
-    """The W5.4 review-rule evaluators."""
+    """The kernel-adjacent user-mode review-rule evaluators."""
 
     if rule_id == "USERMODE_DIRECT_SYSCALL":
         # A kernel image never syscalls (it calls ntoskrnl exports), and

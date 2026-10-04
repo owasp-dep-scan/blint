@@ -1,5 +1,5 @@
 /*
- * A9 P2 - three JNINativeMethod entries whose name/signature strings cross
+ * Three JNINativeMethod entries whose name/signature strings cross
  * the recovery's read bounds (see LongNative.java for the expected fate of
  * each). The descriptors are exact repetitions of the Child segment, so
  * they match the Java declarations byte for byte.

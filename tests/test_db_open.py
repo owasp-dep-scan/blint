@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>
 #
 # SPDX-License-Identifier: MIT
-"""blint.db.get() open-path behaviour (F2a.1).
+"""blint.db.get() open-path behaviour.
 
 A blintdb that cannot be opened must degrade the run to no-blintdb with a
-warning, never crash the SBOM (ground rule: a false positive is a defect of
-the same severity as a crash — and so is a crash). The macOS reproducer from
-D0 is BLINTDB_HOME=/tmp/...: SQLITE_OPEN_NOFOLLOW refuses any symlinked path
+warning, never crash the SBOM (a false positive is a defect of
+the same severity as a crash — and so is a crash). The macOS reproducer
+is BLINTDB_HOME=/tmp/...: SQLITE_OPEN_NOFOLLOW refuses any symlinked path
 component, and /tmp is one. The fix resolves the containing directory with
 realpath and keeps NOFOLLOW on the file name.
 """
@@ -39,7 +39,7 @@ def real_v2_db(tmp_path: Path) -> Path:
 
 
 def test_get_opens_through_symlinked_directory_component(real_v2_db: Path, tmp_path: Path):
-    """The D0 reproducer shape: a symlinked BLINTDB_HOME component opens."""
+    """The macOS reproducer shape: a symlinked BLINTDB_HOME component opens."""
     linked_home = tmp_path / "linked-home"
     os.symlink(real_v2_db.parent, linked_home)
     connection = get(str(linked_home / "blint.db"))

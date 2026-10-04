@@ -1,4 +1,4 @@
-"""A4a R1-R3 fixture tests.
+"""Android arm32 interworking fixture tests.
 
 The fixtures are real NDK r28 builds (commands and versions in
 ``tests/data/android/a4a-fixtures-manifest.json``, sources in
@@ -8,7 +8,7 @@ The fixtures are real NDK r28 builds (commands and versions in
   Thumb bit, target tuple, stripped twins) — these run everywhere blint's
   parser does.
 - Probe before-state measurements — these need the NDK llvm tools, skip
-  where absent, and are the numbers the T2 commit flips to agreement.
+  where absent, and are the numbers the Thumb fix flips to agreement.
 """
 
 from __future__ import annotations
@@ -118,8 +118,8 @@ def test_stripped_twins_keep_only_the_export() -> None:
 )
 @pytest.mark.usefixtures("no_cover")
 def test_probe_after_thumb_fix_r1_thumb() -> None:
-    """After T2: every function matched, modes/boundaries/counts/mnemonics
-    exact. Direct edges are T3's deliverable and still resolve to none."""
+    """Every function matched, with modes, boundaries, counts, mnemonics and
+    direct edges exact against the llvm-objdump oracle."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -137,9 +137,9 @@ def test_probe_after_thumb_fix_r1_thumb() -> None:
 )
 @pytest.mark.usefixtures("no_cover")
 def test_probe_after_thumb_fix_r2_interworking() -> None:
-    """The interworking rung: all 46 functions matched exactly across
+    """The interworking fixture: all 46 functions matched exactly across
     ARM/Thumb modes, tbb/tbh tables and literal pools excluded on both
-    sides; only the bl/blx edges are still missing (T3)."""
+    sides, and every direct bl/blx edge agrees."""
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -147,7 +147,7 @@ def test_probe_after_thumb_fix_r2_interworking() -> None:
         code = native_probe.main([str(R2), "--json", str(report_json)])
         summary = json.loads(report_json.read_text())["summary"]
     # Full agreement: functions, modes, boundaries, counts, mnemonics and
-    # every direct bl/blx edge - the R2 gate of the semantics packet.
+    # every direct bl/blx edge.
     assert code == 0
     assert summary["agreement"] is True
     assert summary["edge_precision"] == 1.0 and summary["edge_recall"] == 1.0
@@ -158,7 +158,7 @@ def test_probe_after_thumb_fix_r2_interworking() -> None:
 )
 @pytest.mark.usefixtures("no_cover")
 def test_probe_r2_oracle_has_interworking_and_jump_tables() -> None:
-    """The oracle side of the R2 rung: tbb/tbh tables, Thumb->ARM blx and
+    """The oracle side of the R2 fixture: tbb/tbh tables, Thumb->ARM blx and
     mapping symbols all present in the real build, from the same run."""
     bin_dir, _ = native_probe.resolve_llvm_bin(None)
     functions, mapping = native_probe.parse_readelf_symbols(

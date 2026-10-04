@@ -107,7 +107,7 @@ from blint.lib.utils import (
 )
 from blint.logger import LOG
 
-# Bionic ELF facts (02/A). Every constant is confirmed at a named tag, not
+# Bionic ELF facts. Every constant is confirmed at a named tag, not
 # copied: the DT_ANDROID_* tags from bionic's elf.h (NDK r28.2 sysroot
 # usr/include/elf.h lines 235-253, identical in AOSP bionic
 # libc/include/elf.h), the memtag note bits and the AArch64 GNU-property
@@ -126,7 +126,7 @@ NT_MEMTAG_STACK = 8
 DF_TEXTREL = 0x4
 PAGE_16K = 16384
 
-# Sanitizer runtime evidence (02/A): the NDK links the sanitizer runtime
+# Sanitizer runtime evidence: the NDK links the sanitizer runtime
 # statically into the shipped .so, so the markers appear both as imports
 # (__hwasan_init) and defined exports (__asan_report_*); matching the
 # dynamic symbol table either way is the fact. __cfi_check is the CFI
@@ -441,7 +441,7 @@ def _elf_has_canary(parsed_obj: lief.ELF.Binary) -> bool | None:
 def _is_aarch64(metadata: dict) -> bool:
     """Whether this ELF is arm64 — the only ABI with MTE and BTI/PAC.
 
-    Arm64-only facts are emitted only for arm64 (ground rule 35): a rule
+    Arm64-only facts are emitted only for arm64: a rule
     or fact that cannot apply to an ABI must not be present for it, because
     a reader cannot tell "absent" from "not applicable" otherwise.
     """
@@ -506,7 +506,7 @@ def _decode_aarch64_property_note(note) -> list[str]:
 
 
 def parse_android_sanitizers(symbol_names: set[str]) -> dict | None:
-    """Sanitizer runtime markers in the dynamic symbol table (02/A)."""
+    """Sanitizer runtime markers in the dynamic symbol table."""
     found = sorted(
         kind
         for kind, prefix in SANITIZER_PREFIXES.items()
@@ -517,7 +517,7 @@ def parse_android_sanitizers(symbol_names: set[str]) -> dict | None:
 
 
 def parse_android_fortify(symbol_names: set[str]) -> dict | None:
-    """bionic ``__*_chk`` imports (02/A).
+    """bionic ``__*_chk`` imports.
 
     The FORTIFY annotation (FORTIFIED_LIBC_IN_USE) reviews the same
     evidence; the fact records the names. ``__stack_chk_*`` is the canary,
@@ -532,7 +532,7 @@ def parse_android_fortify(symbol_names: set[str]) -> dict | None:
 
 
 def parse_android_unwind(parsed_obj: lief.ELF.Binary) -> dict | None:
-    """Unwind-table presence (02/A): .eh_frame / .ARM.exidx / .gnu_debugdata.
+    """Unwind-table presence: .eh_frame / .ARM.exidx / .gnu_debugdata.
 
     ``.eh_frame`` on every ABI, ``.ARM.exidx`` on arm32; ``.gnu_debugdata``
     is the mini-debuginfo a release build ships alongside a stripped
@@ -551,7 +551,7 @@ def parse_android_unwind(parsed_obj: lief.ELF.Binary) -> dict | None:
 
 
 def parse_shadow_call_stack(metadata: dict) -> dict | None:
-    """arm64 shadow-call-stack prologue/epilogue evidence (02/A), text-based.
+    """arm64 shadow-call-stack prologue/epilogue evidence, text-based.
 
     A ``-fsanitize=shadow-call-stack`` function keeps its return address on
     a separate stack held in x18, so the disassembly shows a store through
@@ -590,13 +590,13 @@ def parse_shadow_call_stack(metadata: dict) -> dict | None:
 
 
 def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | None:
-    """Collects the bionic-specific ELF facts (02/A) under one nested key.
+    """Collects the bionic-specific ELF facts under one nested key.
 
     The block is emitted only for binaries that target Android
     (``.note.android.ident`` present), and the arm64-only facts (memtag,
     aarch64_features) only for AArch64 — a fact that cannot apply to an
-    ABI is not present for it, so "absent" never means "not checked"
-    (ground rule 35). Everything here is additive: the notes, dynamic
+    ABI is not present for it, so "absent" never means "not checked".
+    Everything here is additive: the notes, dynamic
     entries and segments it reads are parsed once by the existing paths.
 
     The fact shapes mirror what ``llvm-readelf -a --notes`` reports for
@@ -685,7 +685,7 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
     if segments and not isinstance(segments, lief.lief_errors):
         loads = [s for s in segments if s.type == lief.ELF.Segment.TYPE.LOAD]
         if loads:
-            # 16 KB page-size fact (01/B): the minimum PT_LOAD p_align and
+            # 16 KB page-size fact: the minimum PT_LOAD p_align and
             # whether every LOAD's p_offset and p_vaddr are congruent
             # modulo 16384. The fact is emitted for every Android ELF; the
             # 16 KB *verdict* is 64-bit-only, and lives in the app summary.
@@ -717,7 +717,7 @@ def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | N
         facts["fortify"] = fortify
     if unwind := parse_android_unwind(parsed_obj):
         facts["unwind"] = unwind
-    # Static JNI surface (A5.1): Java_* exports and the lifecycle hooks,
+    # Static JNI surface: Java_* exports and the lifecycle hooks,
     # decoded from the dynamic symbols both twins of a build carry.
     if jni_surface := parse_static_jni_surface(metadata.get("dynamic_symbols")):
         facts["jni"] = jni_surface
@@ -752,7 +752,7 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     # ELF header type as a plain name (EXEC/DYN/REL). PIE and NX are
     # properties of loadable images: a REL object has no segments and a DYN
     # without an interpreter is a shared library, so rules keyed on those
-    # facts need the type to ask whether they apply at all (F1a).
+    # facts need the type to ask whether they apply at all.
     metadata["elf_type"] = enum_to_str(parsed_obj.header.file_type)
     metadata["is_targeting_android"] = parsed_obj.is_targeting_android
     metadata["virtual_size"] = parsed_obj.virtual_size
@@ -808,14 +808,14 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["dynamic_symbols"], exe_type = parse_symbols(parsed_obj.dynamic_symbols)
     if exe_type:
         metadata["exe_type"] = exe_type
-    # Bionic-specific facts (02/A), one nested key, Android-targeting ELFs
+    # Bionic-specific facts, one nested key, Android-targeting ELFs
     # only (arm64-only facts gated again inside); None on other binaries.
     # Runs after the dynamic symbol tables are in metadata because the
     # sanitizer and fortify facts read their names.
     android_facts = parse_android_facts(parsed_obj, metadata)
     if android_facts is not None:
         metadata["android"] = android_facts
-    # Framework/runtime identification (04/B, rule 38): evidence-keyed only,
+    # Framework/runtime identification: evidence-keyed only,
     # stored under "frameworks" when anything matches. Runs after the android
     # facts (the NDK-note detector reads them) and the symbol tables.
     metadata = attach_frameworks(metadata, parsed_obj)

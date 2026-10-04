@@ -353,7 +353,7 @@ def find_dispatch_handlers(disassembled_functions: dict) -> list[dict]:
     """Find functions that install an IRP_MJ_DEVICE_CONTROL dispatch routine.
 
     All three nyxstone renderings are matched: Intel x64, Intel x86, and
-    AArch64 (`str xN, [xM, #224]` - the W5.3 addition; the lane's own
+    AArch64 (`str xN, [xM, #224]`; the reference
     driver corpus is ARM64 and without it no inbox driver reported a
     dispatch routine at all). A 32-bit driver installing its dispatch
     routine is invisible to the x64 offsets alone, and an ARM64 driver was

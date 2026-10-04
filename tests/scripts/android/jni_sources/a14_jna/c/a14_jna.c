@@ -1,5 +1,5 @@
 /*
- * A14 W1 fixtures - the JNA direct-mapping library side.
+ * JNA direct-mapping fixtures - the library side.
  *
  * Every function is a plain exported C symbol: JNA's Native.register
  * binds a class's static native methods to the exported symbols of the

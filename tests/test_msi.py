@@ -1,10 +1,10 @@
-"""Tests for the MSI reader (W4.2).
+"""Tests for the MSI reader.
 
 Builds a real database over the byte-level CFBF builder (test_cfbf): encoded
 table-stream names, ``_StringPool``/``_StringData``, the schema tables and a
 ``CustomAction`` table with hostile flags. The name encoding is the inverse
 of msitools' decoder, which the reader was verified against on the real
-7z-x64.msi corpus artifact (ground rule 29 test below, skipped without the
+7z-x64.msi corpus artifact (ground-truth test below, skipped without the
 corpus).
 """
 
@@ -216,9 +216,8 @@ def test_msi_database_corrupt_table_names_degradation():
     reason="corpus tier3 not present",
 )
 def test_real_7z_msi_ground_truth():
-    """Rules 22/29: the real 7-Zip MSI, facts cross-checked on the Windows
-    11 VM against the WindowsInstaller COM database dump (see the packet's
-    gate block)."""
+    """The real 7-Zip MSI, facts cross-checked on the Windows
+    11 VM against the WindowsInstaller COM database dump."""
     refusals: list[str] = []
     degradations: list[str] = []
     block = parse_msi(

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Catalog signing (W2.3; 02/B): ``.cat`` files as a first-class input.
+"""Catalog signing: ``.cat`` files as a first-class input.
 
 Most of ``C:\\Windows\\System32`` carries no embedded Authenticode blob;
 those files are signed by catalog files under ``C:\\Windows\\System32\\CatRoot``
@@ -12,10 +12,10 @@ question per PE: is your authentihash a member of one of these catalogs?
 The CMS structures are walked by the *same* code the embedded block uses
 (``pe_signature``): the catalog's signer, chain and timestamp come out of
 ``walk_signature_list``, so ``code_signature.signatures`` has exactly one
-shape for both scopes and a consumer reads one block (rule 21). A second
+shape for both scopes and a consumer reads one block. A second
 CMS walk in a second module is the thing not to build.
 
-Three states, and the honesty each requires (rules 11/14):
+Three states, and the honesty each requires:
 
 - no ``--catalog-dir``: ``catalog_lookup: "not_performed"`` — a
   catalog-signed file cannot be distinguished from an unsigned one, so
@@ -29,7 +29,7 @@ Three states, and the honesty each requires (rules 11/14):
   refused or truncated any catalog cannot prove absence, and reports
   ``catalog_lookup: "index_incomplete"`` instead. "Not found in the part
   of the index we built" is not "not signed". A negative is likewise the
-  only state from which ``signing_class: "unsigned"`` is claimed (02/C);
+  only state from which ``signing_class: "unsigned"`` is claimed;
   a positive match derives the class from the catalog's own signer
   through the same walk, and every other state leaves the class absent.
 
@@ -40,7 +40,7 @@ by ``parse_pe_authenticode``. Catalogs do not name an entry's hash
 algorithm in band; the algorithm is implied by the digest width and
 recorded from it.
 
-Ground rule 30: a ``.cat`` file is untrusted input and a catalog directory
+A ``.cat`` file is untrusted input and a catalog directory
 is an unbounded number of them. Every limit below ships a fixture that
 exceeds it; refusal is a recorded degradation that marks the index
 incomplete, never a silent skip and never an exception through the parse.
@@ -97,7 +97,7 @@ HASH_ALGORITHM_BY_WIDTH = {
     64: "SHA512",
 }
 
-# --- Limits (ground rule 30: every cap ships a fixture that exceeds it,
+# --- Limits (every cap ships a fixture that exceeds it,
 # and every count beside a capped listing stays exact). ---------------------
 # Real Windows 11 CatRoot: ~3,630 catalogs, ~109 MB total, largest ~1.3 MB,
 # up to ~7k entries per catalog, ~150k distinct member hashes overall. The
@@ -254,7 +254,7 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
         except _SignatureFormatError:
             catalog["parse_error"] = "ctl_entries_truncated"
             # The walk stopped mid-stream: the count is a floor, not the
-            # total, and the stored hashes are a sample of it (rule 33).
+            # total, and the stored hashes are a sample of it.
             catalog["members_truncated"] = True
             break
         if tag not in (0x30, 0xA1):
@@ -346,7 +346,7 @@ def _parse_ctl_entries(ctl_content: bytes, catalog: dict) -> list[list[str]]:
                 # A member entry by shape whose digest none of the three
                 # layouts yielded. It is not in the index, so files it
                 # covers cannot be found there — a different outcome from
-                # the storage cap, and recorded as one (rule 14): both
+                # the storage cap, and recorded as one: both
                 # mark the index incomplete, and conflating them would
                 # report a cap that was never reached.
                 undecodable += 1
@@ -620,7 +620,7 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
     wrote it). Embedded signatures win — Windows uses the embedded blob
     first, so a catalog result cannot upgrade or question it. A positive
     match repopulates ``signatures[]`` from the catalog's own signer so the
-    block reads the same for both scopes (rule 21); ``parse_status`` then
+    block reads the same for both scopes; ``parse_status`` then
     describes the signature facts the block now carries.
     """
     if not index:
@@ -646,7 +646,7 @@ def apply_catalog_signature(metadata: dict, index: dict | None) -> None:
         # still answers positively for every file it did index.
         block["catalog_lookup"] = "negative" if index["complete"] else "index_incomplete"
         if block["catalog_lookup"] == "negative":
-            # The one state from which "unsigned" may be claimed (02/C): the
+            # The one state from which "unsigned" may be claimed: the
             # lookup was performed against a complete index and the file is
             # in none of its catalogs. Every other state leaves the class
             # absent, and absence means undetermined — never "unsigned".

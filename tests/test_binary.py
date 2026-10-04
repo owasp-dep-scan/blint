@@ -1090,7 +1090,7 @@ def test_universal_binary_attributes_properties_per_slice(tmp_path):
 def test_macho_canary_detected_from_symtab(tmp_path):
     # The canary property needs both directions: a build with the stack
     # protector reports it, and a -fno-stack-protector build of the same
-    # source must not (rule 11's negative fixture).
+    # source must not (the negative fixture).
     hardened = _compile_darwin_binary(
         tmp_path, "canary-on", ["-arch", "arm64", "-fstack-protector-all"]
     )
@@ -1145,7 +1145,7 @@ def test_parse_synthetic_signed_macho(tmp_path):
     assert signature["data_offset"] > 0
     # The legacy keys keep their values and types: size is the load command,
     # data_size the blob size. "data" (which used to hold the load command
-    # bytes under a signature-data name) is gone — explicit rule-15 exception.
+    # bytes under a signature-data name) is gone — an explicit exception to additive-only keys.
     assert signature["size"] == "16"
     assert signature["data_size"] == str(len(blob))
     assert "data" not in signature
@@ -1220,7 +1220,7 @@ def test_parse_truncated_signature_blob_records_gap(tmp_path):
 
 
 def test_universal_slices_carry_own_signatures_and_variance(tmp_path):
-    # Rule 21 with signatures: each slice signs itself. Two slices with
+    # Per-slice facts with signatures: each slice signs itself. Two slices with
     # different entitlements and different cdhashes must surface per slice,
     # with the variance named and the top-level block declared as the
     # primary slice's answer.
@@ -3141,7 +3141,7 @@ def _go_inline_blob(version, modinfo_text):
 def go_fixtures(tmp_path_factory):
     """Real Go binaries built by the host toolchain, or skip.
 
-    Rule 22: a hand-built byte blob cannot validate a parser of a real
+    A hand-built byte blob cannot validate a parser of a real
     format, so every positive assertion here runs against binaries the
     installed toolchain produced. The host toolchain also embeds its own
     version, which `go version <binary>` reads back as independent ground
@@ -3546,7 +3546,7 @@ def _pe64_image(machine: int = 0x8664, dll_characteristics: int = 0, subsystem: 
 
 
 def test_parse_pe_dll_characteristics_structured_block(tmp_path):
-    # V1: the bitfield decodes through blint's PE-spec table; the value 352
+    # The bitfield decodes through blint's PE-spec table; the value 352
     # is the tier-0 python313.dll bitfield LIEF 1.0 rendered as integers.
     exe_file = tmp_path / "hardened.exe"
     exe_file.write_bytes(_pe64_image(dll_characteristics=352))
@@ -3563,7 +3563,7 @@ def test_parse_pe_dll_characteristics_structured_block(tmp_path):
     assert metadata["machine_type_value"] == 0x8664
     assert metadata["subsystem"] == "WINDOWS_CUI"
     assert metadata["subsystem_value"] == 3
-    # aslr no longer contradicts is_pie on a DYNAMIC_BASE image (V1).
+    # aslr no longer contradicts is_pie on a DYNAMIC_BASE image.
     assert metadata["security_properties"]["aslr"] is True
     assert metadata["security_properties"]["pie"] is True
 
@@ -3664,7 +3664,7 @@ def _pe64_image_with_load_config(
 
 
 def test_parse_pe_security_properties_empty_image_records_gaps(tmp_path):
-    """Ground rule 32, empty case: an image with no load configuration, no
+    """Empty case: an image with no load configuration, no
     debug directory and no signature reports honestly — bitfield answers as
     False, sourced answers omitted, and the blind spots named in
     security_properties_gaps rather than defaulted."""
@@ -3791,7 +3791,7 @@ def test_parse_pe_security_properties_seh_is_x86_only(tmp_path):
 
 
 def test_parse_pe_overlay_signature_only_overlay_is_not_evidence(tmp_path):
-    """V3 end to end: a signed-shaped image whose overlay is entirely a
+    """End to end: a signed-shaped image whose overlay is entirely a
     certificate table reports no overlay, low packing likelihood and no
     file_overlay finding; an appended zip classifies and still does not
     raise the likelihood on its own."""
@@ -3828,7 +3828,7 @@ def metadata_gaps(metadata: dict) -> list:
 
 
 def test_check_packed_fires_on_upx_evidence_and_not_on_classified_overlay():
-    """The W0.2 gate, at the check layer: UPX packing evidence still fires
+    """The overlay classification gate, at the check layer: UPX packing evidence still fires
     CHECK_PACKED; a classified overlay alone leaves the check silent."""
     from blint.lib.checks import check_packed
 
@@ -3857,11 +3857,11 @@ def test_check_packed_fires_on_upx_evidence_and_not_on_classified_overlay():
     assert check_packed("installer.exe", overlay_only, rule_obj={}) is True
 
 
-# --- F1a.1: file-class facts the PIE applicability gate reads ----------------
+# --- file-class facts the PIE applicability gate reads -----------------------
 
 
 def test_elf_metadata_exposes_header_type():
-    """elf_type names the ELF header type (F1a: PIE/NX applicability)."""
+    """elf_type names the ELF header type (PIE/NX applicability)."""
     metadata = parse(str(TEST_DATA_DIR / "fortified-libc-demo.elf"))
     assert metadata.get("elf_type") == "DYN"
     assert metadata.get("interpreter", "").startswith("/lib/ld-")

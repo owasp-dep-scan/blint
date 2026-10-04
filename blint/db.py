@@ -29,7 +29,7 @@ DB_QUERY_LIMIT = 50
 DB_EVIDENCE_LIMIT = 25
 SYMBOL_ONLY_MATCH_THRESHOLD = max(3, MIN_MATCH_SCORE // 2)
 # Symbol-only attribution without a binary-name agreement needs far more
-# than the floor above (F2b.1). Measured on tier-0 after import and spread
+# than the floor above. Measured on tier-0 after import and spread
 # suppression: every remaining false attribution was a nameless match of
 # 6-9 coincidental local symbol names (/bin/csh -> openssl@3 on 6;
 # libAppleDeviceQueryArmory -> ripgrep on 9), while every true component on
@@ -77,12 +77,12 @@ FUZZY_ONLY_MATCH_THRESHOLD = 8
 FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
 # A symbol name defined by this many distinct project NAMES in the queried
 # database carries no project identity, so it does not count towards a
-# nameless attribution (F2b.1). It still matches, and still counts for a
+# nameless attribution. It still matches, and still counts for a
 # candidate whose binary name agrees.
 # Distinct names, not distinct project rows: a project ingested at two
 # versions (two Homebrew kegs) shares nearly every symbol with itself, and
-# that repetition is version ambiguity to resolve with artifact evidence
-# (F2a.3), not low information.
+# that repetition is version ambiguity to resolve with artifact evidence,
+# not low information.
 # Measured on tier-0 after import suppression: what still cross-matched
 # projects was mechanically emitted names (_main, __mh_execute_header,
 # _OUTLINED_FUNCTION_N - present in every Mach-O build that has them) and
@@ -95,14 +95,14 @@ FUZZY_ONLY_MIN_QUERY_COVERAGE = 0.5
 LOW_INFORMATION_PROJECT_SPREAD = 2
 
 # Names the toolchain emits, not the project chooses, so they can never
-# identify a project however many of them match (F2b.1). Measured on tier-0:
+# identify a project however many of them match. Measured on tier-0:
 # frc.dylib matched ripgrep on 31 _OUTLINED_FUNCTION_<n> names - clang
 # numbers outlined functions per binary, and the numbers happened to overlap;
 # __mh_execute_header sits in every Mach-O image; main/_start/_init/_fini
 # are the loader's fixed names. Blocking the shape, not a number range:
 # _OUTLINED_FUNCTION_14 in one binary is not the same function as
 # _OUTLINED_FUNCTION_14 in another.
-# The same class, measured on the Android NDK corpus (A6.3 J0):
+# The same class, measured on the Android NDK corpus:
 # - sub_<hex> - the synthetic name blint's ELF reader gives an address-only
 #   function; a stripped app library and a corpus .so "share" 25-140 of them
 #   by pure address coincidence (libmla -> ffmpeg on 45 dumped names, all
@@ -133,8 +133,8 @@ IMPORT_HASH_MATCH_WEIGHT = 4.0
 CFG_HASH_MATCH_WEIGHT = 0.0
 CALLGRAPH_ONLY_MATCH_THRESHOLD = 8
 # Exact hashes are strong evidence per function, but a handful of shared
-# functions is not a shared project. Measured on tier-0 in --deep mode
-# (F2b.1): one instruction hash (plus one fuzzy) attributed bzip2 to a Rust
+# functions is not a shared project. Measured on tier-0 in --deep mode:
+# one instruction hash (plus one fuzzy) attributed bzip2 to a Rust
 # binary and zstd to Apple's libcrypto - compiler-emitted thunks compile
 # identically everywhere - and NINE attributed ripgrep to Apple's
 # libGPUCompilerImpl. A count bar alone cannot separate those from a real
@@ -396,7 +396,7 @@ def _supported_schema_version(meta: dict[str, str]) -> bool:
 def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
     """Extract source-aware symbol buckets matching the blintdb v2 schema.
 
-    Imported symbols are excluded (F2b.1): an import names the library that
+    Imported symbols are excluded: an import names the library that
     *provides* it, not the artifact, so matching on imports makes every
     macOS binary "match" every macOS-built project on their shared libSystem
     imports - measured on tier-0, /bin/cat attracted five projects per
@@ -407,7 +407,7 @@ def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
     Mechanically-emitted names (``MECHANICALLY_EMITTED_SYMBOL_RE``) are
     dropped here as well as at the attribution gate: they cannot identify a
     project, and querying thousands of them costs SQL time and score noise
-    for matches that can never be evidence (A6.3 J0: an unstripped arm64
+    for matches that can never be evidence (on the Android NDK corpus an unstripped arm64
     query offered up to 4,400 ``$d.<n>`` mapping symbols, and a stripped one
     up to 2,400 ``sub_<hex>`` synthetic function names).
     """
@@ -849,7 +849,7 @@ def _build_binary_filters(binary_metadata: dict | None) -> tuple[str, list[str]]
 
 
 def _build_binary_type_filter(binary_metadata: dict | None) -> tuple[str, list[str]]:
-    """The fallback filter: binary_type agreement only (F2b.1).
+    """The fallback filter: binary_type agreement only.
 
     The first pass requires binary_type AND llvm_target_tuple to agree and
     falls back when it finds nothing, but the fallback used to drop every
@@ -1401,7 +1401,7 @@ def lookup_project_matches(
         for source, names in (symbol_source_map or {}).items()
         # The imports bucket names what the artifact links against, not what
         # it is; matching on it made every macOS binary match every
-        # macOS-built project on their shared libSystem imports (F2b.1).
+        # macOS-built project on their shared libSystem imports.
         # build_symbol_source_map already drops imported entries from every
         # bucket; this keeps hand-built maps honest too.
         if source != "imports" and _clean_nonempty_values(names)
@@ -1432,7 +1432,7 @@ def lookup_project_matches(
         )
         target_binary_names = {target_binary_name} if target_binary_name else set()
         capabilities = blintdb_hash_capabilities(database_file)
-        # DB-side import suppression (F2b.1): a stored imported symbol names
+        # DB-side import suppression: a stored imported symbol names
         # the library it came from, not the project, and matching a query's
         # defined symbol against another project's import row attributes
         # code the project does not contain. Applied only when the column
@@ -1609,7 +1609,7 @@ def lookup_project_matches(
             low_information_names=low_information_names,
         )
         def _qualifies(match: dict) -> bool:
-            """Per-candidate attribution gate (F2b.1).
+            """Per-candidate attribution gate.
 
             A candidate attributes the artifact when its OWN evidence carries
             the claim: a binary-name agreement corroborated by at least one
@@ -1661,7 +1661,7 @@ def lookup_project_matches(
             ]
         # Both return paths use the same per-candidate gate: hash or callgraph
         # evidence somewhere in the lookup never waives the bar for every
-        # other candidate (F2b.1 deep measurement: with the waiver, a 3-symbol
+        # other candidate (measured in deep mode: with the waiver, a 3-symbol
         # c-ares match on libsystem_c.dylib and two 1-hash matches rode along
         # on other files' hash hits).
         return [match for match in matches if _qualifies(match)][:limit]

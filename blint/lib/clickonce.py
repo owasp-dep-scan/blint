@@ -1,4 +1,4 @@
-"""ClickOnce deployment/application manifest reader (W4.3).
+"""ClickOnce deployment/application manifest reader.
 
 A ClickOnce app ships two XML manifests: ``.application`` (the deployment
 manifest — identity, update URL, requested trust) and an application
@@ -10,7 +10,7 @@ the XML-DSig signature presence — and never treating a plain PE-sidecar
 ``.manifest`` as ClickOnce unless its namespace actually is one.
 
 Cross-platform: pure XML parsing; a Linux run and a Windows run produce the
-same facts (ground rule 31).
+same facts.
 """
 
 # SPDX-FileCopyrightText: AppThreat <cloud@appthreat.com>

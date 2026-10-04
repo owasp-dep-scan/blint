@@ -263,7 +263,7 @@ def analyze_packing(
     given it replaces the raw file-size math below: a classified overlay
     (installer payload, appended archive, bundle) is reported but is not
     packing evidence, and even an ``unknown_high_entropy`` residue only
-    supports the likelihood alongside another independent signal (A.2).
+    supports the likelihood alongside another independent signal.
     """
     findings: list[str] = []
     packers = set()
@@ -319,8 +319,8 @@ def analyze_packing(
     overlay_size = 0
     overlay_classification = None
     if pe_overlay is not None:
-        # PE path: the residue already excludes the certificate table
-        # (V3), so a signed stock binary contributes no overlay evidence.
+        # PE path: the residue already excludes the certificate table,
+        # so a signed stock binary contributes no overlay evidence.
         overlay_size = int(pe_overlay.get("size") or 0)
         overlay_classification = pe_overlay.get("classification")
         if overlay_size > 0x1000:
@@ -343,8 +343,8 @@ def analyze_packing(
                 findings.append("file_overlay")
 
     # An overlay is packing evidence only when the residue resisted
-    # classification with high entropy AND an independent signal agrees
-    # (A.2). A lone file_overlay — the installer tail, the bundle payload,
+    # classification with high entropy AND an independent signal agrees.
+    # A lone file_overlay — the installer tail, the bundle payload,
     # the once-miscounted certificate table — is a fact to report, not
     # packing evidence.
     non_overlay_findings = [f for f in findings if f != "file_overlay"]

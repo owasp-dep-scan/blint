@@ -35,8 +35,8 @@ their output.
 | `build_corpus.py` | Materializes `tests/corpus/` fixtures from local toolchains. |
 | `build_static_linkage_corpus.py` | Builds the static-linkage measurement corpus. |
 | `build_fp_corpus.py` | Builds the tier-0 benign ELF/Mach-O false-positive corpus (`~/sandbox/fp-corpus`) with a PE-corpus-shaped `MANIFEST.json`. |
-| `fp_gate.py` | Findings per rule/severity/file and the median per file, split by format and architecture, over any MANIFEST.json corpus (ELF/Mach-O and the PE lane's corpus). Measurement tool: always exits 0. |
-| `fp_classify.py` | F0.2 classification: derives a true/false/unverifiable verdict per finding from external tools (otool/codesign/dyld_info/nm on the host, readelf via a Debian container) and records the reason and tool for each. |
+| `fp_gate.py` | Findings per rule/severity/file and the median per file, split by format and architecture, over any MANIFEST.json corpus (the ELF/Mach-O and PE corpora). Measurement tool: always exits 0. |
+| `fp_classify.py` | Derives a true/false/unverifiable verdict per finding from external tools (otool/codesign/dyld_info/nm on the host, readelf via a Debian container) and records the reason and tool for each. |
 
 ## Running the gates
 

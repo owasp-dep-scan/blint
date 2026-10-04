@@ -2,7 +2,7 @@
 #   filename:  bom-1.7.schema.json
 #   timestamp: 2026-09-22T23:44:16+00:00
 #
-# Regenerated for CycloneDX 1.7 (blint W6.1) from the official schema at
+# Regenerated for CycloneDX 1.7 from the official schema at
 # https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.7.schema.json
 # (sibling refs spdx.schema.json and jsf-0.82.schema.json resolved locally).
 # Exact command (datamodel-codegen 0.82.0, with the datamodel-code-generator[http]

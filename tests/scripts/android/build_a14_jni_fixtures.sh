@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A14 W1 fixtures (the JNA direct-mapping join).
+# JNA direct-mapping join fixtures.
 #
 # The dex side is a real JNA direct-mapped build: javac/d8 compile the
 # classes against the JNA jar from Maven Central (net.java.dev.jna:jna,

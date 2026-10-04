@@ -1,4 +1,4 @@
-r"""Tests for the kernel hardening posture (PE lane W5.2, plan 04/B).
+r"""Tests for the kernel hardening posture.
 
 Unit level: every HVCI condition, the boot-start /INTEGRITYCHECK rule, the
 scored dangerous-import families and their caps, fed with metadata dicts -
@@ -6,7 +6,7 @@ all four conditions read header facts blint already records, so no binary
 is needed to reach them.
 
 Real artifacts: the corpus tier-5 benign driver sub-tier asserts the
-measurement the severities were decided from (ground rule 34) - every
+measurement the severities were decided from - every
 sampled benign driver passes every HVCI condition, and the dangerous-import
 block never fires a rule anywhere on it.
 """
@@ -97,7 +97,7 @@ def test_hvci_stripped_relocations_fail_both_shapes():
 
 
 def test_hvci_undetermined_is_not_failed():
-    """Rule 32: a condition whose source is absent never reads as failed."""
+    """A condition whose source is absent never reads as failed."""
     block = evaluate_hvci_compatibility(
         _driver_metadata(
             data_directories=None, wx_segments=None, section_alignment=None, machine_type_value=None
@@ -214,7 +214,7 @@ def test_dangerous_imports_families_and_score():
 
 
 def test_dangerous_imports_cap_is_a_listing_bound():
-    """Rule 33: a fixture past the cap - the family still speaks, and the
+    """A fixture past the cap - the family still speaks, and the
     count states what the listing does not."""
     imports = [{"name": f"ntoskrnl.exe::MmMapIoSpace{i}"} for i in range(1, 4)]
     imports += [{"name": "ntoskrnl.exe::MmMapLockedPages"}] * 0
@@ -296,7 +296,7 @@ def test_rules_fire_through_engine_and_stay_silent_on_user_mode():
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts: the benign sub-tier proves the measurement (rule 34)
+# Real artifacts: the benign sub-tier proves the measurement
 # ---------------------------------------------------------------------------
 
 
@@ -305,7 +305,7 @@ def test_rules_fire_through_engine_and_stay_silent_on_user_mode():
     reason="no driver corpus on this machine",
 )
 def test_benign_subtier_is_hvci_clean_and_never_fires():
-    """Every benign driver passes every HVCI condition; no W5.2 rule fires
+    """Every benign driver passes every HVCI condition; no kernel posture rule fires
     anywhere on the sub-tier. This is the measurement the severities were
     chosen from, kept as a regression gate."""
     root = SLICE_DRIVERS if SLICE_DRIVERS.exists() else WINDOWS_DRIVERS
@@ -335,7 +335,7 @@ def test_undetermined_hvci_conditions_do_not_fire_the_incompatibility_rule():
     CHECK_HVCI_COMPATIBLE is titled "Driver Incompatible with HVCI" and is
     high severity. Returning a string when a condition's *source* could not
     be read rendered "blint could not tell" under that title at that
-    severity - two outcomes under one rule id (ground rule 14) - and
+    severity - two outcomes under one rule id - and
     accused a driver of a violation blint never observed. The gap is
     carried by the block instead, which is where a blind spot belongs.
     """

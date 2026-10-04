@@ -43,7 +43,7 @@ def _user_glibc_baseline() -> str:
 def check_nx(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool:
     # NX is a property of a loadable image. An ET_REL object (kernel
     # module, object file) has no program headers at all, so there is no
-    # PT_GNU_STACK for has_nx to have read: F0 measured every ET_REL file
+    # PT_GNU_STACK for has_nx to have read: measurement found every ET_REL file
     # in the benign corpus firing a critical NX finding on exactly that
     # absence (readelf -l: no GNU_STACK, type REL). Metadata shapes without
     # elf_type keep the pre-gate behavior.
@@ -60,7 +60,7 @@ def check_wx_segments(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
     # memory-write primitive into direct code execution, so the offending
     # segments are reported by name. On a bionic binary the finding belongs
     # to CHECK_ANDROID_WX_LOAD, which carries the loader's API-26
-    # enforcement context (ground rule 37) — reporting both would be noise.
+    # enforcement context — reporting both would be noise.
     if metadata.get("is_targeting_android"):
         return True
     names = [
@@ -120,7 +120,7 @@ def _is_main_executable(metadata: dict[str, Any]) -> bool:
 
     PIE is a property of main executables: a Mach-O dylib and an ELF shared
     object are position-independent or loaded at a slide by construction,
-    and an ET_REL object has no load address at all. F0 measured the PIE
+    and an ET_REL object has no load address at all. Measurement found the PIE
     rule firing on exactly those files 274 of 276 times on the benign
     tier-0 corpus, every finding false by construction (otool -hv filetype
     DYLIB, readelf -h type DYN/REL). The type fields are absent from
@@ -160,8 +160,8 @@ def check_rpath(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> b
     # DT_RPATH outright and resolves DT_RUNPATH only within the loader
     # namespace of the library that named it (android-changes-for-ndk-
     # developers.md, "DT_RUNPATH support"). On bionic binaries the rule's
-    # concept does not exist, so it does not run there (ground rule 35;
-    # A0.3 tier-0 evidence: the 3 hits included bionic's own linker).
+    # concept does not exist, so it does not run there (on the tier-0
+    # corpus the 3 hits included bionic's own linker).
     if (metadata.get("abi_analysis") or {}).get("libc") == "bionic":
         return True
     return not metadata.get("has_rpath") and not metadata.get("has_runpath")
@@ -179,7 +179,7 @@ def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     """Reports a mapped memory footprint above the format's calibrated limit.
 
     The limits are per format because virtual size means something different
-    on each (F1b.3): a PE's SizeOfImage over 30 MB is anomalous - the benign
+    on each: a PE's SizeOfImage over 30 MB is anomalous - the benign
     PE corpus tops out at 6.5 MB - while an ELF's PT_LOAD sum is dominated by
     legitimate whole-runtime reservations: a stock static Go build with
     net/http maps 37.4 MB and is normal, so the ELF limit sits at 128 MB
@@ -200,7 +200,7 @@ def check_virtual_size(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
 
 
 def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    """Reports files whose authenticity blint could not establish (02/B).
+    """Reports files whose authenticity blint could not establish.
 
     The verdict follows the ``code_signature`` scope, and the finding states
     which of the three states it fired on:
@@ -214,7 +214,7 @@ def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
     - ``scope: "none"`` with ``catalog_lookup: "not_performed"`` (no
       directory supplied) or ``"index_incomplete"`` (the index refused or
       truncated catalogs) — "unsigned" was not determined, so the rule
-      stays silent rather than manufacture the verdict (rule 11).
+      stays silent rather than manufacture the verdict.
     - ``scope: "embedded"`` — the legacy verification below: a signature
       blob LIEF cannot verify (or a missing signer on it) is a finding.
 
@@ -245,7 +245,7 @@ def check_authenticode(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any
 def check_signature_not_timestamped(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports signatures that carry no countersignature timestamp (02/A.1).
+    """Reports signatures that carry no countersignature timestamp.
 
     A signature without an RFC 3161 or PKCS#9 timestamp stops being
     verifiable the moment the signing certificate expires — with the
@@ -271,7 +271,7 @@ def check_signature_not_timestamped(
 def check_weak_signature_digest(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports files where no signature uses a modern digest (02/A.3).
+    """Reports files where no signature uses a modern digest.
 
     Dual signing is the normal shape for anything that must run on older
     Windows: a SHA-1 outer signature with a SHA-256 one nested inside it.
@@ -312,7 +312,7 @@ def _deciding_signer(block: dict) -> dict:
 
 
 def check_self_signed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    """Reports a signature whose signer certificate is its own root (02/C).
+    """Reports a signature whose signer certificate is its own root.
 
     A self-signed signer vouches for itself: no certificate authority
     stands behind the identity the signature states, so nothing anchors it
@@ -333,7 +333,7 @@ def check_signature_unknown_root(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
     """Reports a complete chain terminating outside the shipped root
-    snapshot (02/C).
+    snapshot.
 
     The signature blob carried its whole chain up to a self-signed root,
     and that root's SHA-256 fingerprint is not in blint's shipped anchor
@@ -361,20 +361,20 @@ def check_signature_unknown_root(
 def check_kernel_signing_class(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports the kernel-mode code-signing class (02/C), informational.
+    """Reports the kernel-mode code-signing class, informational.
 
     The signer carries the kernel-mode code signing EKU
     (``1.3.6.1.4.1.311.61.1.1``), meaning the binary is signed for (or
     claims to be signed for) execution as a kernel component. This is a
     posture fact for the analyst — kernel code runs with the operating
-    system's privileges — not a defect claim, and the driver lane consumes
+    system's privileges — not a defect claim, and the driver checks consume
     it directly.
 
     It reads the EKU rather than ``signing_class == "kernel_mode"``: a
     chain fact outranks the leaf's claims in the class, so a kernel-EKU
     driver whose chain terminates outside the shipped snapshot classes as
     ``unknown_root`` — and that is precisely the file whose kernel signing
-    the driver lane must still see. The class must have been *determined*
+    the driver checks must still see. The class must have been *determined*
     for this to speak, which keeps the truncation discipline: a walk that
     hit its window yields no class and no finding here.
     """
@@ -420,7 +420,7 @@ def _load_yaml_data(filename: str) -> dict:
 def check_signer_mismatch(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports a VERSIONINFO company claim the signature does not back (02/C).
+    """Reports a VERSIONINFO company claim the signature does not back.
 
     Fires only in the impersonation direction: ``CompanyName`` claims a
     publisher from the identity table, and the signature's signer carries
@@ -433,7 +433,7 @@ def check_signer_mismatch(
     178 tier-0/1 files with both facts differ benignly, so a symmetric
     comparison would be wrong, not the corpus. Companies absent from the
     table are never arbitrated, and a missing signer or CompanyName
-    determines nothing (rule 11).
+    determines nothing.
     """
     block = _parsed_signature_block(metadata)
     if not block:
@@ -480,7 +480,7 @@ def _host_plugin_contracts(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     The block exists only when a contract matched, so an absent block is
     "no evidence of a plugin contract", never "verified not a plugin":
     a binary whose export table blint could not read produces no block and
-    an ``export_table_unreadable`` degradation instead (rules 14/32).
+    an ``export_table_unreadable`` degradation instead.
     """
     block = metadata.get("host_plugin")
     if isinstance(block, dict):
@@ -527,7 +527,7 @@ def _macos_host_plugin(metadata: dict[str, Any]) -> dict[str, Any] | None:
 def check_macos_host_plugin(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports that this bundle is a plugin loaded into a named host (M1.1).
+    """Reports that this bundle is a plugin loaded into a named host.
 
     Context for a reviewer, not an accusation: legitimate audio, camera and
     indexing software looks exactly like this, which is why the severity is
@@ -557,7 +557,7 @@ def check_macos_host_plugin(
 def check_audio_plugin_network(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports an Audio Server Plug-In declaring network access (M1.1).
+    """Reports an Audio Server Plug-In declaring network access.
 
     The finding is about a declaration, not observed behaviour: the
     bundle's Info.plist carries ``AudioServerPlugIn_Network`` and blint
@@ -588,15 +588,15 @@ def check_audio_plugin_network(
 def check_unsigned_host_plugin(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports a host-plugin contract not vouched for by any signer (04/F, M1.1).
+    """Reports a host-plugin contract not vouched for by any signer.
 
-    The PE form follows the W2.4 ``signing_class`` exactly: it fires on
+    The PE form follows the ``signing_class`` exactly: it fires on
     ``unsigned``, ``self_signed`` and ``unknown_root``, and stays silent
     when the class is absent (undetermined - blint's default invocation
     performs no catalog lookup, and absence of a class is neither signed
     nor unsigned) or when the walk was truncated.
 
-    The macOS form (M1.1) fires on a plugin bundle in a system or
+    The macOS form fires on a plugin bundle in a system or
     machine-wide install scope that is neither an Apple platform binary
     nor Developer-ID-signed: auto-loaded into the named host on every
     boot, installed once, vouched for by nobody. It stays silent when the
@@ -720,7 +720,7 @@ def check_known_vulnerable_driver(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
     """Reports a binary whose digest pins it in the vulnerable-driver
-    snapshot (04/C.4).
+    snapshot.
 
     The snapshot (loldrivers.io plus the Microsoft recommended driver block
     rules) ships as data with provenance; refreshing it is a data PR and
@@ -744,7 +744,7 @@ def check_known_vulnerable_driver(
 
 
 def _driver_block(metadata: dict[str, Any]) -> dict[str, Any] | None:
-    """The W5.1 ``driver`` block when this image is a driver."""
+    """The ``driver`` block when this image is a driver."""
     block = metadata.get("driver")
     if isinstance(block, dict):
         return block
@@ -753,15 +753,15 @@ def _driver_block(metadata: dict[str, Any]) -> dict[str, Any] | None:
 
 def check_hvci_compatible(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
     """Reports the HVCI conditions a driver fails, with per-condition
-    evidence (04/B).
+    evidence.
 
     Memory integrity (HVCI) refuses kernel drivers whose image cannot be
     mapped safely at randomized addresses: x86 code, writable+executable
     pages, sub-page section alignment, stripped relocations. Microsoft's
     own checker is a documented ruleset, so the finding names *which*
     condition failed and why - "not compatible" alone says nothing a
-    reviewer can act on. Measured before this rule shipped (ground rule
-    34): all 330 drivers on the VM's full System32\\drivers pass every
+    reviewer can act on. Measured before this rule shipped:
+    all 330 drivers on the VM's full System32\\drivers pass every
     condition, so a failure is a signal, not noise. Conditions whose
     source could not be read are ``undetermined``, not failed, and an
     image with any undetermined condition states the gap instead of a
@@ -781,18 +781,18 @@ def check_hvci_compatible(f: str, metadata: dict[str, Any], rule_obj: dict[str, 
     # An undetermined condition does NOT fire this rule. The rule is titled
     # "Driver Incompatible with HVCI" at high severity; rendering "blint
     # could not read the section characteristics" under that title is the
-    # two-outcomes-one-rule conflation ground rule 14 forbids, and it would
+    # conflation of two different outcomes under one rule, and it would
     # accuse a driver of a violation blint never observed. The gap is not
     # swallowed either: hvci_compatibility.compatible is null and
     # undetermined_conditions names each one, which is where a blind spot
-    # belongs (rule 32).
+    # belongs.
     return True
 
 
 def check_boot_start_integritycheck(
     f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
 ) -> bool | str:
-    """Reports a boot-start driver without /INTEGRITYCHECK (04/B).
+    """Reports a boot-start driver without /INTEGRITYCHECK.
 
     ``/INTEGRITYCHECK`` (FORCE_INTEGRITY) is mandatory for boot-start
     drivers - the images winload loads before the kernel can enforce
@@ -800,7 +800,7 @@ def check_boot_start_integritycheck(
     statically exactly once: the WINDOWS_BOOT_APPLICATION subsystem. For
     every other driver, StartType lives in the registry blint does not
     read, so the fact is undetermined and this rule stays silent rather
-    than assume (rule 11). The flag's absence must be *computed* - a
+    than assume. The flag's absence must be *computed* - a
     driver whose DLL-characteristics source was absent is undetermined
     and passes silently (the key is then not in kernel_hardening).
     """
@@ -814,7 +814,7 @@ def check_boot_start_integritycheck(
         return "/INTEGRITYCHECK (FORCE_INTEGRITY) is absent on a boot-start driver"
     # force_integrity absent from the block means the DLL-characteristics
     # source was unreadable: undetermined, not absent - the rule stays
-    # silent (ground rule 32).
+    # silent.
     return True
 
 
@@ -829,8 +829,8 @@ def check_msix_restricted_capability(
     each one is named in the finding because each names a different
     capability surface. The verdict follows the declared facts only —
     blint performs no review of the package's store approval — and reads
-    the counted total, so a manifest past the listing cap still fires (the
-    W3.2 lesson: a listing bound must not become a detection boundary).
+    the counted total, so a manifest past the listing cap still fires (a
+    listing bound must not become a detection boundary).
     """
     container = metadata.get("container")
     if not isinstance(container, dict):
@@ -842,7 +842,7 @@ def check_msix_restricted_capability(
     if not restricted:
         # Counted but unlisted. The engine treats any string as a finding,
         # so returning the empty join would have titled it "(...)" with
-        # nothing inside — a finding that names nothing (rule 11). The
+        # nothing inside — a finding that names nothing. The
         # count is what blint determined, so the count is what it says.
         return f"{counted} restricted capabilities"
     return ", ".join(str(name) for name in restricted[:10])
@@ -855,7 +855,7 @@ def check_dll_characteristics(
 
     Membership is tested against the structured ``flags`` list decoded from
     the numeric bitfield (pe_constants), never against rendered enum text:
-    LIEF 1.0 renders DLL_CHARACTERISTICS members as integers (V1), which made
+    LIEF 1.0 renders DLL_CHARACTERISTICS members as integers, which made
     every value read as missing. The joined-string fallback keeps metadata
     exported before the structured block existed (parse cache) working.
 
@@ -1000,10 +1000,10 @@ def check_libc_portability(
     the libc cannot be identified, any implementation-specific binding is
     named with its provider rather than guessed at.
 
-    Bionic is out of scope (ground rule 35): the measurement spans glibc and
+    Bionic is out of scope: the measurement spans glibc and
     musl only, and judging a bionic binary by it calls bionic-exported
     interfaces "glibc-specific" - on the tier-0 corpus the driver is
-    __register_atfork, which bionic's libc.so exports (A0.3: 604 false
+    __register_atfork, which bionic's libc.so exports (604 false
     positives across the three images, zero after this gate).
     """
     abi = metadata.get("abi_analysis") or {}
@@ -1050,7 +1050,7 @@ def check_abi_floor(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) 
     Only GLIBC floors are compared - a glibc baseline says nothing about the
     GLIBCXX/libstdc++ floor or any other provider, whose requirements stay in
     ``abi_analysis.requirements``. musl and bionic binaries carry no GLIBC
-    version nodes, so the rule cannot apply to them (ground rule 35: a rule
+    version nodes, so the rule cannot apply to them (a rule
     must not fire where its concept does not exist).
     """
     abi = metadata.get("abi_analysis") or {}
@@ -1168,10 +1168,10 @@ def check_security_property(f: str, metadata: dict[str, Any], rule_obj: dict[str
     """Fire only on a property that was computed and found False.
 
     The tristate discipline at the rule layer: a property key absent from
-    ``security_properties`` means the source it is computed from was absent
-    (P2.4), so there is nothing to claim and the rule stays silent. Reading
+    ``security_properties`` means the source it is computed from was absent,
+    so there is nothing to claim and the rule stays silent. Reading
     an omitted key as a failure is what made CHECK_ENCLAVE/CHECK_XFG/
-    CHECK_CET fire on every file blint could not even parse as a PE (V4).
+    CHECK_CET fire on every file blint could not even parse as a PE.
     """
     properties = metadata.get("security_properties") or {}
     key = rule_obj.get("property_key")
@@ -1199,7 +1199,7 @@ def check_packed(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> 
     return f"packing evidence ({likelihood}): {detail}" if detail else True
 
 
-# --- A3 (02/B): the bionic loader's own rules (ground rule 37) ---------------
+# --- The bionic loader's own rules -------------------------------------------
 #
 # Every rule in this family is bionic's behaviour, quoted at a named tag of
 # android-changes-for-ndk-developers.md, and each states the API level the
@@ -1353,7 +1353,7 @@ def check_android_page_16k(f: str, metadata: dict[str, Any], rule_obj: dict[str,
     Android 15 (API level 35) and higher must support 16 KB memory page
     sizes on 64-bit devices on Google Play. Starting February 1, 2027, if
     your app updates don't support 16 KB memory page sizes, you won't be
-    able to release these updates." 32-bit ABIs are exempt (rule 35).
+    able to release these updates." 32-bit ABIs are exempt.
     """
     facts = _android_facts(metadata)
     page = (facts or {}).get("page_alignment")
@@ -1362,7 +1362,7 @@ def check_android_page_16k(f: str, metadata: dict[str, Any], rule_obj: dict[str,
     machine = str(metadata.get("machine_type") or "").upper()
     # LIEF renders the riscv64 machine as RISCV; the ELF class decides
     # 64-bit-ness (LIEF 1.0 exposes no is_64 header attribute). The 32-bit
-    # ABIs (armeabi-v7a, x86) are exempt and never flagged (rule 35).
+    # ABIs (armeabi-v7a, x86) are exempt and never flagged.
     if machine not in ("AARCH64", "X86_64", "RISCV") or metadata.get("class") != "ELF64":
         return True
     incompatible = page["min_load_align"] < 16384 or page["mod_16384_incongruent"]
@@ -1426,7 +1426,7 @@ def check_android_extract_native_libs(
 
 
 def check_android_bti_pac(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    """arm64 library built without BTI/PAC (hardening gap, rule 35).
+    """arm64 library built without BTI/PAC (hardening gap).
 
     Branch protection is an AArch64-only property (LLVM
     GNU_PROPERTY_AARCH64_FEATURE_1_AND); on arm32/x86 this rule never
@@ -1442,7 +1442,7 @@ def check_android_bti_pac(f: str, metadata: dict[str, Any], rule_obj: dict[str, 
 
 
 def check_android_memtag(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
-    """MTE posture of an arm64 library, informational (rule 35).
+    """MTE posture of an arm64 library, informational.
 
     The .note.android.memtag note says the loader must prepare heap and/or
     stack tagging and in which mode (bionic reads it at load; LLVM's

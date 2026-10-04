@@ -1,5 +1,5 @@
 /*
- * A10 Q1 - compiled with -fno-unwind-tables
+ * Compiled with -fno-unwind-tables
  * -fno-asynchronous-unwind-tables (see build_a10_jni_fixtures.sh): the
  * wrapper is a real function - llvm-objdump shows its body - but it carries
  * no .ARM.exidx/.eh_frame entry, and being hidden it has no dynamic symbol

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for PE import depth: delay-load, ordinals, apisets (W1.2, 01/A.6).
+"""Tests for PE import depth: delay-load, ordinals, apisets.
 
 The import and delay-import tables are hand-built the way the Windows linker
 lays them out, the same discipline test_pe_debug uses for the debug
-directory, so every variant ground rule 10 asks for exists as a fixture:
+directory, so every format variant exists as a fixture:
 named imports, ordinal imports (snapshot-covered and not), api sets
 (resolved and unresolved), delay-load directories (named and ordinal), and
 forwarded exports.
@@ -311,8 +311,8 @@ def test_ordinal_name_lookups():
 
 def test_ordinal_imports_resolved_and_unresolved(tmp_path):
     """Named and ordinal imports in one table; the covered ordinal resolves
-    through the snapshot and the uncovered one stays an ordinal (rule 14:
-    the two outcomes never merge)."""
+    through the snapshot and the uncovered one stays an ordinal
+    (the two outcomes never merge)."""
     image = _imports_image(
         [
             (b"WS2_32.dll", [], [3]),
@@ -455,9 +455,9 @@ def test_forwarder_helpers():
 
 
 def test_real_fixture_named_imports_keep_their_shape():
-    """The W1.2 rewrite must leave the historical entry shape intact on a
-    real MSVC image (ground rule 29 shape check; full ground truth against
-    dumpbin is pasted in the packet commit)."""
+    """The import-depth rewrite must leave the historical entry shape intact on a
+    real MSVC image (shape check; full ground truth against
+    dumpbin is recorded in the commit message)."""
     md = parse("tests/data/pe/msvc-hello-x64.exe", False)
     assert md["imports"], "the real fixture must import something"
     for entry in md["imports"][:20]:
@@ -469,7 +469,7 @@ def test_real_fixture_named_imports_keep_their_shape():
 
 
 def test_tables_ship_more_rows_than_any_sample_cap():
-    """Ground rule 33: the snapshots are generated data larger than the
+    """The snapshots are generated data larger than the
     summary's sample cap, so the cap can never hide a coverage failure."""
     import importlib.resources
 

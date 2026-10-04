@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Blint-owned PE constant tables.
 
-Ground rule 28 (never match on a rendered enum) lives here: every bit-to-name
+Never match on a rendered enum: every bit-to-name
 mapping a check or a rule needs is keyed by the numeric value fixed by the
 PE specification, not by whatever string a dependency's enum ``__str__``
 happens to render this release. LIEF 1.0 renders ``DLL_CHARACTERISTICS``
-members as bare integers (verification-log finding V1), which silently broke
+members as bare integers, which silently broke
 every PE hardening check that substring-matched the joined string; these
 tables are the replacement source of truth.
 
@@ -200,7 +200,7 @@ IMAGE_DEBUG_TYPE_CODEVIEW = 0x02
 IMAGE_DEBUG_TYPE_VC_FEATURE = 0x0C
 IMAGE_DEBUG_TYPE_POGO = 0x0D
 # /Brepro builds record a 16-byte image hash here; presence is the honest
-# answer to "is this a reproducible build" (plan 01/A.5).
+# answer to "is this a reproducible build".
 IMAGE_DEBUG_TYPE_REPRO = 0x10
 IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS = 0x14
 

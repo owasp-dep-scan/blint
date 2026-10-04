@@ -1,4 +1,4 @@
-"""A2/B1 — bionic ELF fact tests (02/A) against real NDK-built fixtures.
+"""Bionic ELF fact tests against real NDK-built fixtures.
 
 Every fixture is a real NDK r28.2.13676358 build (commands next to the
 sha256 in ``tests/data/android/a2-fixtures-manifest.json``; sources and
@@ -28,7 +28,7 @@ NOSONAME = DATA / "libhello_nosoname.so"
 ABSNEEDED = DATA / "libhello_absneeded.so"
 MEMTAG = DATA / "libhello_memtag.so"
 BTI = DATA / "libhello_bti.so"
-# arm32 Android library from the A4a set: the rule-35 negative twin.
+# arm32 Android library from the liba4a set: the negative twin for arm64-only facts.
 ARM32 = DATA / "liba4a_r1_arm.so"
 # Non-Android ELF: the bionic facts block must not exist there.
 NON_ANDROID = Path(__file__).parent / "data" / "plain-libc-demo.elf"
@@ -126,7 +126,7 @@ def test_app_16k_verdict_multiabi_per_abi() -> None:
     from blint.lib.android_native import scan_android_native
 
     verdict = scan_android_native(str(DATA / "tier1_multiabi.xapk"))["page_size_16k"]
-    # Rule 36: the aggregation names every 64-bit ABI, never first-or-best.
+    # The aggregation names every 64-bit ABI, never first-or-best.
     assert verdict["incompatible_abis"] == ["riscv64"]
     assert verdict["compatible_abis"] == ["arm64-v8a", "x86_64"]
     assert "armeabi-v7a" in verdict["exempt_abis"]
@@ -166,7 +166,7 @@ def test_fortify_fact() -> None:
 def test_unwind_fact() -> None:
     facts = android_facts(CLEAN)["unwind"]
     assert facts == {"eh_frame": True, "arm_exidx": False, "gnu_debugdata": False}
-    # arm32 unwind tables live in .ARM.exidx (A4a fixture, real NDK build).
+    # arm32 unwind tables live in .ARM.exidx (liba4a fixture, real NDK build).
     exidx = android_facts(ARM32)["unwind"]
     assert exidx["arm_exidx"] is True and exidx["eh_frame"] is False
 
@@ -186,7 +186,7 @@ def test_shadow_call_stack_fact() -> None:
 
 
 def test_arm64_only_facts_absent_on_arm32() -> None:
-    """Rule 35: MTE/BTI-PAC facts do not exist for a 32-bit Android ELF."""
+    """MTE/BTI-PAC facts do not exist for a 32-bit Android ELF."""
     metadata = parse(str(ARM32))
     assert metadata["is_targeting_android"] is True
     block = metadata["android"]
@@ -205,8 +205,8 @@ def test_no_android_block_on_non_android_elf() -> None:
     reason="needs the NDK's llvm-readelf",
 )
 def test_probe_agrees_with_readelf_on_fixtures(tmp_path: Path) -> None:
-    """The B0 probe (oracle: llvm-readelf, same run) on every committed R1
-    fixture: no disagreements. B2/B3 facts are not implemented yet, so the
+    """The ELF facts probe (oracle: llvm-readelf, same run) on every committed
+    fixture: no disagreements. Some probed facts are not implemented yet, so the
     run is non-strict."""
     fixtures = [CLEAN, TEXTRELS, RELR, APS2, NOSONAME, ABSNEEDED, MEMTAG, BTI,
                 DATA / "libhello_page4k.so", DATA / "libhello_page16k.so",

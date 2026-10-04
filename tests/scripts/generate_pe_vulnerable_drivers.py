@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the vulnerable-driver snapshot shipped as blint data (W5.3).
+"""Generate the vulnerable-driver snapshot shipped as blint data.
 
 Combines two sources into ``blint/data/pe_vulnerable_drivers.json``:
 
@@ -11,7 +11,7 @@ Combines two sources into ``blint/data/pe_vulnerable_drivers.json``:
 
 The snapshot is *data with provenance*: refreshing it is a data PR that
 re-runs this script with fresh downloads and commits the result - there is
-no network call at scan time, ever (plan 04/C.4). Matching is by exact
+no network call at scan time, ever. Matching is by exact
 hash only; a filename alone never fires the rule, because driver filenames
 collide across vendors and a false accusation here is worse than a miss.
 

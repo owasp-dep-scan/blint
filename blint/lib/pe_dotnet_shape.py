@@ -1,6 +1,6 @@
-"""The shape a .NET application was published in (PE lane W3.3, plan 03/A.3).
+"""The shape a .NET application was published in.
 
-`03/A.1` and `A.2` read the CLI metadata of an assembly that *has* CLI
+``pe_dotnet`` reads the CLI metadata of an assembly that *has* CLI
 metadata. Modern .NET also ships in three shapes where that reader alone
 answers the wrong question:
 
@@ -12,8 +12,8 @@ answers the wrong question:
   that stops at the section table.
 - **NativeAOT** has no CLI header at all. A file whose entire reason for
   existing is C#, reported as an ordinary native PE, is the failure this
-  packet exists to prevent: absence of CLI metadata must not read as
-  "not .NET" (ground rule 32).
+  module exists to prevent: absence of CLI metadata must not read as
+  "not .NET".
 
 Everything here is decided from measured facts, and the measurements are in
 ``tests/test_pe_dotnet_shape.py`` against the six publish shapes built with
@@ -51,7 +51,7 @@ What this module deliberately does not claim: whether a publish was
 framework-dependent, self-contained or trimmed. Those differ only in what
 sits in the output *directory* (5, 200 and 27 files in the measurement),
 not in any byte of the binary blint is handed, so reporting them would be a
-value blint did not determine (ground rule 11).
+value blint did not determine.
 """
 
 from __future__ import annotations
@@ -93,12 +93,12 @@ NATIVE_AOT_EXPORTS = frozenset(
 # bound is set well above the shapes measured rather than at them. No rule
 # reads this list - it is metadata for a reader and for the SBOM, not a
 # detection surface - so the cap bounds metadata size and nothing else
-# (the W3.2 lesson: a cap a rule reads is a detection boundary; this one is
+# (a cap a rule reads is a detection boundary; this one is
 # not, and that is why it may be a round number).
 MAX_LISTED_BUNDLE_MEMBERS = 4096
 
 # Bounds on the manifest walk itself, because the header offset comes from
-# the file being analysed (ground rule 30). A path longer than this, or a
+# the file being analysed. A path longer than this, or a
 # member count beyond it, is a malformed claim rather than something to
 # allocate for.
 MAX_BUNDLE_MEMBER_PATH = 1024
@@ -154,7 +154,7 @@ def read_bundle_manifest(data: bytes, header_offset: int) -> dict[str, Any] | No
     runtimeconfig.json locations and a flags word, then one entry per
     embedded file. From major 6 each entry also carries a compressed size.
     Every field is bounds-checked against the buffer, because the offset
-    that got us here came out of the file (ground rule 30).
+    that got us here came out of the file.
     """
     if header_offset <= 0 or header_offset + 12 > len(data):
         return None
@@ -325,7 +325,7 @@ def classify_dotnet_shape(
             return {"kind": "ready_to_run", "evidence": evidence}
         if int(dotnet.get("managed_native_header_rva") or 0) > 0:
             # A native header blint cannot identify is named as that, not
-            # folded into a shape it might not be (ground rule 14).
+            # folded into a shape it might not be.
             evidence.append("managed_native_header_unrecognised")
             return {"kind": "native_image_unknown", "evidence": evidence}
         flags = int(dotnet.get("cli_flags_value") or 0)
@@ -353,7 +353,7 @@ def classify_dotnet_shape(
                 }
             # The signature and a plausible offset, but no manifest we can
             # decode: say that, rather than downgrading to "apphost" and
-            # implying the file carries no payload (rule 14).
+            # implying the file carries no payload.
             return {
                 "kind": "single_file_bundle",
                 "evidence": [
@@ -381,7 +381,7 @@ def classify_dotnet_shape(
 # A deps.json past this is not a dependency manifest blint will read into
 # memory: the largest measured (a self-contained console app, 184 members)
 # is 27,856 bytes, and an application with thousands of packages is still
-# far below this (ground rule 30 - the size comes out of the file).
+# far below this (the size comes out of the file).
 MAX_DEPS_JSON_BYTES = 32 * 1024 * 1024
 
 

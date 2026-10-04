@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PE overlay classification (PE-lane packet W0.2, verification finding V3).
+"""PE overlay classification.
 
 The bytes a PE appends after its last section — the overlay — are where
 installers stash their payload, single-file bundles their embedded files, and
@@ -7,11 +7,11 @@ Authenticode its certificate table. blint historically reported that region as
 one undifferentiated ``overlay_size``, which made every signed binary in
 existence read as packing evidence: the certificate table lives at the overlay
 start by construction, so ``python.exe`` carried 14 KB of "overlay" that was
-entirely its signature (V3) and ``CHECK_PACKED`` fired on all 62 tier-0
+entirely its signature and ``CHECK_PACKED`` fired on all 62 tier-0
 Microsoft-signed binaries.
 
-This module fixes the input side and adds the classifier the installer work
-(W4.3) consumes:
+This module fixes the input side and adds the classifier that installer
+detection (``installers.py``) consumes:
 
 1. :func:`security_directory_range` locates the ``IMAGE_DIRECTORY_ENTRY_SECURITY``
    region, which the PE specification defines in file-offset terms.
@@ -120,7 +120,7 @@ def classify_overlay(
 ) -> str:
     """Label one residue byte string. Pure and shared with tests.
 
-    The label vocabulary is the A.2 contract: ``zip``, ``cab``, ``msi``,
+    The label vocabulary is a fixed contract: ``zip``, ``cab``, ``msi``,
     ``nsis``, ``inno``, ``installshield``, ``sfx_7z``,
     ``dotnet_single_file_bundle``, ``go_buildinfo``, then the entropy
     verdicts. ``authenticode`` is deliberately absent — the certificate table
@@ -132,7 +132,7 @@ def classify_overlay(
     is a window rather than the whole residue, because anything recognisable
     can sit at either end of a multi-megabyte residue.
 
-    **Measured correction (W3.3).** This function used to say the .NET bundle
+    **Measured correction.** This function used to say the .NET bundle
     marker sits at the end of the file. It does not. On a single-file publish
     built with the .NET 11 SDK the 32-byte signature is at offset 9,718,712,
     inside the *sections* (which end at 11,757,568) — the host template

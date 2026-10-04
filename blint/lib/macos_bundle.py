@@ -34,7 +34,7 @@ from blint.logger import LOG
 
 # Bundle directory suffixes, matched case-insensitively (macOS volumes are
 # commonly case-insensitive, so ``Foo.app`` and ``Foo.APP`` are the same shape).
-# The plugin kinds (M1.1, plan 07) all use the same ``Contents/Info.plist`` +
+# The plugin kinds all use the same ``Contents/Info.plist`` +
 # ``Contents/MacOS`` layout the app kinds do, measured on this system across
 # .driver, .qlgenerator, .mdimporter, .component and .systemextension bundles.
 MACOS_BUNDLE_SUFFIXES: tuple[str, ...] = (

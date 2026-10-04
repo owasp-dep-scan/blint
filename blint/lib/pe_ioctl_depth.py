@@ -1,4 +1,4 @@
-"""IOCTL depth (PE lane W5.3, plan 04/C).
+"""IOCTL depth.
 
 Two facts turn the recovered control-code list into a severity:
 
@@ -26,8 +26,8 @@ Two facts turn the recovered control-code list into a severity:
   administrators only) passes silently; a grant to ``WD`` (Everyone),
   ``AN`` (Anonymous) or ``BU`` (Builtin Users) is named. The block is
   absent when no SDDL string exists - "no descriptor found" is stated by
-  the W5.1 device-creation facts (``IoCreateDevice`` vs
-  ``IoCreateDeviceSecure``), not by an empty block here (rules 14/32).
+  the driver block's device-creation facts (``IoCreateDevice`` vs
+  ``IoCreateDeviceSecure``), not by an empty block here.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ _LENGTH_WINDOW = 12
 
 # Listing bound on the constraints reported per driver. A listing bound
 # only: the per-IOCTL annotation reads the per-function map, which is
-# complete regardless of what the listing shows (rule 33).
+# complete regardless of what the listing shows.
 CONSTRAINT_LISTING_LIMIT = 16
 
 
@@ -197,7 +197,7 @@ def collect_input_length_constraints(
             # that follows a stack-location load is InputBufferLength. +0x0C
             # is an offset every other structure in the function uses too,
             # so without the window one stack-location load licensed every
-            # `[reg+0xc]` access to the end of the function (rule 9).
+            # `[reg+0xc]` access to the end of the function.
             if stack_location_at is None or index - stack_location_at > _LENGTH_WINDOW:
                 continue
             # Intel: a compare straight against the memory operand.
@@ -251,7 +251,7 @@ SDDL_DEVICE_RE_ASCII = re.compile(rb"D:P?[NRX]?" + _SDDL_ACE + rb"(?:" + _SDDL_A
 # grant, so `D:P(D;;GA;;;WD)(A;;GA;;;SY)` - a descriptor that explicitly
 # locks Everyone out, the most restricted shape there is - reported
 # world_accessible and turned the IOCTL list into "unprivileged attack
-# surface" backwards (rule 14).
+# surface" backwards.
 _WORLD_SID_RE = re.compile(rb"\(A;;[A-Za-z0-9;-]+;;;(?:WD|AN|BU|AU)\)")
 
 # How many SDDL strings are listed as evidence (a listing bound only; the

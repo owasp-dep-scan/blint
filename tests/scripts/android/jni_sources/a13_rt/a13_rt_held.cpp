@@ -1,5 +1,5 @@
 /*
- * A13 review - the held registration's consumed-name control.
+ * The held registration's consumed-name control.
  *
  *   Java_com_blint_a13_held_HeldNamed_nativeInit
  *       registers its first table into the jclass Java passed in (no class

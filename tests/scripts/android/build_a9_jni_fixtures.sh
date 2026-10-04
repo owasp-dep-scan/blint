@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# A9 P2 + P1 fixtures.
+# JNI string-bound, merged-table split and multi-ABI fixtures.
 #
-# P2: liba9_long_<abi>.so - three JNINativeMethod entries whose name and
+# liba9_long_<abi>.so - three JNINativeMethod entries whose name and
 # signature strings cross the recovery's read bounds (an 802-byte descriptor
 # that must bind, a 1037-byte descriptor and a 1120-char name that must stay
 # refused). Compiled with the same NDK r28c toolchain and flags as the a5/a8
 # fixtures (-funwind-tables so the stripped twin keeps .ARM.exidx rows).
 #
-# P1: a9-jni-multiabi.apk - repackages the committed A8 builds and
+# a9-jni-multiabi.apk - repackages the committed liba8_* builds and
 # a8-classes.dex into ONE apk that carries several ABIs' own bytes, so the
 # per-(abi, library) join can be tested against copies whose addresses
 # differ per ABI. liba8amb.so ships in arm64-v8a and x86_64 only: a library
-# missing from an ABI answers nothing there (ground rule 36), which the join
+# missing from an ABI answers nothing there, which the join
 # must report as unbound - never filled in from another ABI's tables.
 set -euo pipefail
 
@@ -26,14 +26,14 @@ platform_jar="$HOME/Android/sdk/platforms/android-34/android.jar"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# ---------------------------------------------------------------- P2 dex
+# ---------------------------------------------------------------- long dex
 javac --release 11 -d "$work/classes" \
   $(find "$here/jni_sources/a9_long/java" -name '*.java' | sort)
 "$build_tools/d8" --release --min-api 24 --lib "$platform_jar" \
   --output "$work" $(find "$work/classes" -name '*.class' | sort)
 cp "$work/classes.dex" "$out/a9-classes.dex"
 
-# ---------------------------------------------------------------- P2 libs
+# ---------------------------------------------------------------- long libs
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   case "$abi" in
     arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
@@ -49,14 +49,14 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
     -o "$out/liba9_long_${abi}_stripped.so" "$work/liba9_long_${abi}.so"
 done
 
-# ---------------------------------------------------------------- P3 dex
+# ---------------------------------------------------------------- split dex
 javac --release 11 -d "$work/classes-split" \
   $(find "$here/jni_sources/a9_split/java" -name '*.java' | sort)
 "$build_tools/d8" --release --min-api 24 --lib "$platform_jar" \
   --output "$work" $(find "$work/classes-split" -name '*.class' | sort)
 cp "$work/classes.dex" "$out/a9-split-classes.dex"
 
-# ---------------------------------------------------------------- P3 libs
+# ---------------------------------------------------------------- split libs
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   case "$abi" in
     arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
@@ -73,7 +73,7 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
 done
 
 # ---------------------------------------------------------------- apks
-# P1: the multi-ABI join fixture (committed a8 bytes).
+# The multi-ABI join fixture (committed a8 bytes).
 apkroot="$work/apk"
 mkdir -p "$apkroot/lib/arm64-v8a" "$apkroot/lib/armeabi-v7a" \
   "$apkroot/lib/x86_64" "$apkroot/lib/x86"
@@ -90,7 +90,7 @@ cp "$out/liba8_ambig_x86_64.so" "$apkroot/lib/x86_64/liba8amb.so"
 (cd "$apkroot" && zip -q -r "$work/a9-multiabi.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a9-multiabi.apk" "$out/a9-jni-multiabi.apk"
 
-# P2: the string-bound fixture, one copy per ABI.
+# The string-bound fixture, one copy per ABI.
 longroot="$work/long"
 mkdir -p "$longroot/lib/arm64-v8a" "$longroot/lib/armeabi-v7a" \
   "$longroot/lib/x86_64" "$longroot/lib/x86"
@@ -104,7 +104,7 @@ done
 (cd "$longroot" && zip -q -r "$work/a9-long.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a9-long.apk" "$out/a9-jni-long.apk"
 
-# P3: the merged-table split fixture, one copy per ABI.
+# The merged-table split fixture, one copy per ABI.
 splitroot="$work/split"
 mkdir -p "$splitroot/lib/arm64-v8a" "$splitroot/lib/armeabi-v7a" \
   "$splitroot/lib/x86_64" "$splitroot/lib/x86"

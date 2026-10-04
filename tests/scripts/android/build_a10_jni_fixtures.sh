@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A10 Q1 fixtures.
+# JNI 32-bit-gap and registered-nowhere fixtures.
 #
-# liba10_gap_<abi>.so - the two honest 32-bit refusals A10 Q0 named, each
+# liba10_gap_<abi>.so - the two honest 32-bit refusals the corpus showed, each
 # beside a control that must keep binding:
 #   plainAdd    control (constant-initialized table) - binds everywhere.
 #   weakOnly    the fbjni kDescriptor shape (signature word against a weak
@@ -18,9 +18,9 @@
 #
 # a10-classes.dex - GapNative's five declarations (the join oracle).
 # a10-jni-gap.apk - the dex plus one copy of the library per ABI, each ABI's
-#               own bytes (ground rule 36).
+#               own bytes.
 #
-# A10 Q3 fixture (same script, one toolchain):
+# Registered-nowhere fixture (same script, one toolchain):
 # liba10_nowhere_<abi>.so - one three-entry table registered for NwBound
 #               with a constant count (the confirmer resolves its range)
 #               and for NwRtA/NwRtB through volatile-count stack copies (no
@@ -88,14 +88,14 @@ done
 (cd "$apkroot" && zip -q -r "$work/a10-gap.apk" .)
 "$build_tools/zipalign" -f 4 "$work/a10-gap.apk" "$out/a10-jni-gap.apk"
 
-# ------------------------------------------------------- Q3: nowhere dex
+# ------------------------------------------------------- nowhere dex
 javac --release 11 -d "$work/classes-nowhere" \
   $(find "$here/jni_sources/a10_nowhere/java" -name '*.java' | sort)
 "$build_tools/d8" --release --min-api 24 --lib "$platform_jar" \
   --output "$work" $(find "$work/classes-nowhere" -name '*.class' | sort)
 cp "$work/classes.dex" "$out/a10-nowhere-classes.dex"
 
-# ---------------------------------------------------- Q3: nowhere libs
+# ---------------------------------------------------- nowhere libs
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   case "$abi" in
     arm64-v8a) cc="$toolchain/aarch64-linux-android24-clang" ;;
@@ -111,7 +111,7 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do
     -o "$out/liba10_nowhere_${abi}_stripped.so" "$work/liba10_nowhere_${abi}.so"
 done
 
-# -------------------------------------------------- Q3: nowhere apk
+# -------------------------------------------------- nowhere apk
 nwapkroot="$work/nowhere-apk"
 mkdir -p "$nwapkroot/lib/arm64-v8a" "$nwapkroot/lib/armeabi-v7a" \
   "$nwapkroot/lib/x86_64" "$nwapkroot/lib/x86"

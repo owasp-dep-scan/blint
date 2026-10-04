@@ -1,4 +1,4 @@
-r"""Tests for the .NET publish shape (PE lane W3.3, plan 03/A.3).
+r"""Tests for the .NET publish shape.
 
 The properties under test are structural, so most fixtures are built here
 rather than committed: a bundle manifest is a byte layout, and a synthetic
@@ -8,7 +8,7 @@ does.
 The real artifacts are the six publish shapes built with the .NET 11 SDK on
 the Windows ARM64 VM (``dotnet publish`` with the framework-dependent,
 self-contained, single-file, ReadyToRun, trimmed and NativeAOT options).
-Those tests are the ground truth for this packet - the publish command is
+Those tests are the ground truth - the publish command is
 the oracle, blint's answer is what is being checked - and they skip where
 the tree is absent.
 """
@@ -101,12 +101,12 @@ def test_manifest_round_trip():
 
 
 def test_member_listing_cap_is_exceeded_by_the_fixture():
-    """Rule 33: the cap has a fixture that goes past it, and the entries
+    """The cap has a fixture that goes past it, and the entries
     beyond it are declared rather than dropped in silence.
 
     No rule reads this list - it is metadata for a reader and for the SBOM -
     so the cap bounds metadata size and not detection. That distinction is
-    the W3.2 lesson and it is why the number may be round.
+    the MemberRef-cap lesson and it is why the number may be round.
     """
     over = MAX_LISTED_BUNDLE_MEMBERS + 50
     members = [(f"Member{i}.dll", 4096 * (i + 1), 16, 1) for i in range(over)]
@@ -120,7 +120,7 @@ def test_member_listing_cap_is_exceeded_by_the_fixture():
 
 def test_manifest_cut_mid_entry_is_named_not_silent():
     """A manifest that stops inside an entry is a truncated file, which is
-    a different fact from blint's own listing bound (ground rule 14)."""
+    a different fact from blint's own listing bound."""
     members = [(f"Member{i}.dll", 4096, 16, 1) for i in range(20)]
     data = b"\x00" * 64 + _manifest(members)
     parsed = read_bundle_manifest(data[: len(data) - 60], 64)
@@ -131,7 +131,7 @@ def test_manifest_cut_mid_entry_is_named_not_silent():
 
 def test_absurd_declared_count_is_refused():
     """The count comes out of the file, so it is bounded before it is
-    trusted (ground rule 30)."""
+    trusted."""
     data = b"\x00" * 64 + _manifest([], declared=10_000_000)
     assert read_bundle_manifest(data, 64) is None
 
@@ -146,7 +146,7 @@ def test_offset_outside_the_buffer_is_refused():
 def test_bundle_signature_matches_the_overlay_classifier():
     """One constant, two readers. The overlay classifier labels a residue
     and this module decodes the manifest; they must agree on what they are
-    looking for (ground rule 21)."""
+    looking for."""
     from blint.lib.pe_overlay import DOTNET_BUNDLE_MARKER
 
     assert BUNDLE_SIGNATURE == DOTNET_BUNDLE_MARKER
@@ -224,7 +224,7 @@ def test_il_only_when_the_flag_is_set(tmp_path):
 
 
 def test_native_header_blint_cannot_identify_is_named(tmp_path):
-    """Rule 14: a header that is present but not a ReadyToRun one is
+    """A header that is present but not a ReadyToRun one is
     reported as unrecognised, not folded into il_only, which would claim
     there is no native code when blint does not know that."""
     path = _write(tmp_path, "odd.dll", b"\x00" * 0x400)
@@ -272,7 +272,7 @@ def test_written_offset_makes_it_a_bundle(tmp_path):
 
 
 def test_bundle_offset_that_decodes_to_nothing_still_says_bundle(tmp_path):
-    """Rule 14 again: a written offset whose manifest blint cannot read is
+    """Again: a written offset whose manifest blint cannot read is
     a bundle it could not decode, not an apphost with no payload."""
     prefix = b"\x00" * 64 + struct.pack("<q", 0) + BUNDLE_SIGNATURE
     payload = bytearray(prefix + b"\xff" * 64)
@@ -331,7 +331,7 @@ def test_a_plain_native_pe_says_nothing(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts (ground rule 29): the publish command is the oracle
+# Real artifacts: the publish command is the oracle
 # ---------------------------------------------------------------------------
 
 

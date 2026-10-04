@@ -1,4 +1,4 @@
-r"""Tests for CycloneDX 1.7 emission (W6.1).
+r"""Tests for CycloneDX 1.7 emission.
 
 The generated model (``blint/cyclonedx/spec.py``) is the official 1.7
 schema; blint declares ``specVersion`` 1.7 by default and keeps 1.6
@@ -9,7 +9,7 @@ exactly the 1.6 shape — the two emissions differ only in ``specVersion``
 generated module serves both emit paths, and it is what was validated by
 hand against the official ``bom-1.6.schema.json`` and
 ``bom-1.7.schema.json`` (jsonschema, Draft7Validator, both PASS for both
-declarations — recorded in the W6.1 commit) and against Dependency-Track
+declarations — recorded in the commit that added 1.7 emission) and against Dependency-Track
 ingestion (``POST /api/v1/bom`` on an ephemeral apiserver container, both
 declarations parsed with the expected component count).
 """
@@ -65,7 +65,7 @@ def test_1_6_emit_is_exactly_the_1_6_shape(tmp_path):
     doc17 = _emit(tmp_path, "1.7")
     doc16 = _emit(tmp_path, "1.6")
     assert doc16["specVersion"] == "1.6"
-    # The W6.1 property: nothing 1.7-only is populated, so apart from the
+    # The parity property: nothing 1.7-only is populated, so apart from the
     # declaration (and per-run uuid/timestamp) the documents are identical.
     assert _stable(doc16) == _stable(doc17)
 

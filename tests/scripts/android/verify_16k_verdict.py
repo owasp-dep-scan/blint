@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A2/B2 — R4 gate: blint's 16 KB verdict vs zipalign and check_elf_alignment.sh.
+"""Page-size gate: blint's 16 KB verdict vs zipalign and check_elf_alignment.sh.
 
 For every input APK/AAB/xapk this runs three tools over the same file in
 the same run and compares them per (abi, library):
@@ -12,7 +12,7 @@ the same run and compares them per (abi, library):
 - ``zipalign -v -c -P 16 4`` (build-tools): per-entry zip-alignment
   verdict for stored ``lib/`` members.
 
-Exempt 32-bit ABIs are never flagged by blint (rule 35) even when the
+Exempt 32-bit ABIs are never flagged by blint even when the
 script reports them UNALIGNED — the script itself notes that "only
 arm64-v8a/x86_64 libs need to be aligned"; those rows are reported as
 exempt, not as disagreements. Every real disagreement is printed with

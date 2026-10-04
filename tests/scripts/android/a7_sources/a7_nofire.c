@@ -1,9 +1,9 @@
 /*
- * A7 K1 — the no-fire side: the benign shapes the reviewer measured as the
+ * The no-fire side: the benign shapes measured on the corpus as the
  * false-positive population of every single-signal form.
  *
  * Each function here carries one signal alone, in the exact shape the
- * benign carriers carry it, and must stay silent under the K2 rules:
+ * benign carriers carry it, and must stay silent under the native rules:
  *
  *   a7_unwinder          an unwinder/crash reporter reading /proc/self/maps;
  *   a7_crash_handler     ptrace on a *child* (PTRACE_ATTACH / SEIZE /

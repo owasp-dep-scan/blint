@@ -412,7 +412,7 @@ def _rule_machine_type_allows(metadata: dict[str, Any], rule_obj: dict[str, Any]
     exactly as before. When a rule declares machine types, the binary's
     machine resolves through blint's own PE-spec table (pe_constants) from the
     numeric ``machine_type_value`` — never through a dependency's enum
-    rendering (ground rule 28) — falling back to the recorded machine-type
+    rendering — falling back to the recorded machine-type
     string for metadata that predates the numeric field. A binary whose
     machine cannot be resolved never fires a machine-gated rule: an
     architecture claim with no architecture behind it is exactly the
@@ -457,7 +457,7 @@ def run_checks(f: str, metadata: dict[str, Any]) -> list[dict[str, Any]]:
         # An unresolvable exe_type never fires a scoped rule — the same
         # principle as the machine_types gate: a scope claim with no type
         # behind it is how CHECK_ENCLAVE/XFG/CET ended up firing on .cat and
-        # .zip files blint could not parse at all (V4).
+        # .zip files blint could not parse at all.
         if rule_exe_types and exe_type not in rule_exe_types:
             continue
         # Skip rules whose machine_types gate excludes this binary's machine

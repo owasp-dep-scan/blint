@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A7 K1 (feat/an-a7) — the native capability-review R1 fixtures, every one
+# The native capability-review fixtures, every one
 # a real NDK build:
 #
 #   liba7_fire_<abi>{,_stripped}.so     the six fire shapes, one exported
@@ -21,7 +21,7 @@
 #   libtoolChecker_<abi>{,_stripped}.so scottyab/rootbeer tag 0.1.2
 #                                       rootbeerlib/src/main/cpp/
 #                                       toolChecker.{cpp,h} built verbatim
-#                                       (the R2 real-world case: its su
+#                                       (the real-world case: its su
 #                                       paths arrive from Java, so it
 #                                       carries no constant)
 #   a7-classes.dex                      the RootBeer 0.1.2 java half
@@ -67,7 +67,7 @@ cc_for_abi() {
 }
 
 # ---------------------------------------------------------------- libs
-# -funwind-tables mirrors the A5 choice: real RegisterNatives libraries are
+# -funwind-tables mirrors build_a5_jni_fixtures.sh: real RegisterNatives libraries are
 # C++ with unwind tables, and the arm32 stripped twin needs .ARM.exidx rows
 # for function discovery. toolChecker links -llog for __android_log_print.
 for abi in arm64-v8a armeabi-v7a x86_64; do
@@ -106,7 +106,7 @@ for abi in arm64-v8a armeabi-v7a x86_64; do
   "$build_tools/zipalign" -f 4 "$work/a7-$abi.apk" "$out/a7-jni-$abi.apk"
 done
 
-# ------------------------------------------------- size-optimised twins (A7.2 R1)
+# ------------------------------------------------- size-optimised twins
 # -Os and -Oz builds of the same sources for the two call-site-modelled
 # ABIs: at -Os/-Oz the root probe's su paths stay in a pointer table read
 # inside a loop the compiler does not unroll, arm64 -Oz moves the dlopen

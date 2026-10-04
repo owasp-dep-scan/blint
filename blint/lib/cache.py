@@ -76,7 +76,7 @@ from blint.logger import LOG
 #
 # Frozen at 10 for the rest of v4 pre-release; it is not bumped per change.
 # The counter earned its reputation honestly — a warm cache once served a
-# pre-W3.2 shape and left every new managed rule matching nothing — but the
+# stale metadata shape and left every new managed rule matching nothing — but the
 # population a bump protects is people holding caches written by a *released*
 # blint, and there are none: this whole module postdates v3.4.0, the last
 # tag, and no release tag contains any value this constant has ever held.

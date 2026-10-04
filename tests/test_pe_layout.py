@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for PE layout forensics and the pre-main summary (W1.4, 01/B.5, B.1).
+"""Tests for PE layout forensics and the pre-main summary.
 
-Every anomaly field ground rule 34 measures gets a fixture per variant: the
+Every measured anomaly field gets a fixture per variant: the
 entry point outside ``.text`` / inside the last section, zero raw size with a
 large virtual size, raw exceeding virtual, a ``SizeOfImage`` mismatch, a
 truncated last section, timestamp sanity, and the section-name correlation
@@ -115,8 +115,8 @@ def test_entry_point_inside_text_is_clean(tmp_path):
 
 def test_single_section_image_omits_the_vacuous_field(tmp_path):
     """With one section, ``entry_point_in_last_section`` is vacuous — every
-    section is the last — so the field is omitted, not defaulted (ground
-    rule 32: the empty case stays visible as absence, not a thin False)."""
+    section is the last — so the field is omitted, not defaulted (the
+    empty case stays visible as absence, not a thin False)."""
     image = _layout_image(
         [(b".text\0\0\0", 0x1000, 0x400, 0x60000020)], entry_point_rva=SECTION_RVA + 0x10
     )
@@ -319,7 +319,7 @@ def test_pre_main_execution_states_a_read_only_callback_array(tmp_path):
 
 
 def test_pre_main_counts_are_exact_past_the_listing_caps(tmp_path):
-    """Ground rule 33 for this module's own windows: a fixture larger than
+    """Cap-crossing fixtures for this module's own windows: a fixture larger than
     MAX_LISTED_CALLBACKS and MAX_LISTED_CTORS.
 
     The listings are capped, but ``callback_count``/``initializer_count`` are
@@ -352,7 +352,7 @@ def test_pre_main_counts_are_exact_past_the_listing_caps(tmp_path):
 def test_pre_main_execution_deduplicates_lief_ctors(tmp_path):
     """LIEF derives PE ctor_functions from the TLS callback array; when the
     initializers are exactly the callbacks, one fact is stated instead of
-    listing the functions twice (ground rule 21)."""
+    listing the functions twice."""
     image = _tls_image([0x1230])
     path = tmp_path / "tls_ctor.exe"
     path.write_bytes(image)

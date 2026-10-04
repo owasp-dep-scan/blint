@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for catalog signing (W2.3): ``.cat`` parsing, the hash → catalog
+"""Tests for catalog signing: ``.cat`` parsing, the hash → catalog
 index and the three-state ``catalog_lookup``.
 
-Real-artifact assertions (ground rules 22/29) run against the tier-5
+Real-artifact assertions run against the tier-5
 CatRoot copy in the corpus and are skipped where it is absent — Microsoft's
 own catalogs are tier-5 artifacts, so they stay on the corpus machines and
 are never committed here. The corpus carries the CatRoot from the same
@@ -17,7 +17,7 @@ Layout variants: real Windows 11 package catalogs use a simplified CTL
 pair); the classic RFC 5283-style CTL (version INTEGER first, entries
 under [1] IMPLICIT with CatalogNameValue/MemberInfo attributes naming
 members) is covered by a hand-built DER fixture in that shape. Hostile
-and cap fixtures exceed the caps they test (ground rule 33): a catalog
+and cap fixtures exceed the caps they test: a catalog
 past the *default* member cap, a file past the default size cap,
 truncated CTLs, cyclic trees — every refusal must degrade to a recorded
 degradation that marks the index incomplete, never raise, and never let a
@@ -203,7 +203,7 @@ def _member_metadata(sha1_hex: str, sha256_hex: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Real artifacts (rules 22/29): the corpus CatRoot, never committed here.
+# Real artifacts: the corpus CatRoot, never committed here.
 # ---------------------------------------------------------------------------
 def _corpus_catalogs() -> list[str]:
     if not os.path.isdir(CATROOT):
@@ -266,7 +266,7 @@ def test_real_catalog_parse_and_index():
 
 
 def test_real_slice_driver_resolves_through_corpus_catalog():
-    """The packet's rule-29 assertion: blint computes a slice file's
+    """The ground-truth assertion: blint computes a slice file's
     authentihash, finds no embedded blob (scope "none"), and matches it as
     a member hash Windows' own tooling stored in the real corpus
     CatRoot catalog — the same match ``Get-AuthenticodeSignature`` reports as
@@ -315,7 +315,7 @@ def test_real_slice_driver_resolves_through_corpus_catalog():
 
 
 # ---------------------------------------------------------------------------
-# Layout variants (ground rule 10).
+# Layout variants.
 # ---------------------------------------------------------------------------
 def test_modern_layout_members_signer_and_counts(tmp_path):
     blob = _cat_content_info(
@@ -419,7 +419,7 @@ def test_not_a_catalog_content_type_refused(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Hostile input (ground rule 30): degrade, record, never raise.
+# Hostile input: degrade, record, never raise.
 # ---------------------------------------------------------------------------
 def test_hostile_truncated_ctl_keeps_real_hashes_and_marks_incomplete(tmp_path):
     """A hostile CTL whose last TLV declares more bytes than the file has:
@@ -462,7 +462,7 @@ def test_incomplete_index_still_answers_the_members_it_did_index(tmp_path):
     in the tree was refused. Deciding ``index_incomplete`` before looking
     turned one corrupt .cat anywhere in a CatRoot tree into "unknown" for
     every catalog-signed file in the scan — the feature switching itself off
-    on the first bad file, which is the one outcome W2.3 exists to prevent.
+    on the first bad file, which is the one outcome catalog signing exists to prevent.
     """
     ctl = _modern_ctl([_modern_member_entry(SHA1_HASH), _modern_member_entry(SHA256_HASH)])
     _write_cat(tmp_path, "good.cat", _cat_content_info(ctl))
@@ -497,7 +497,7 @@ def test_hostile_oversized_file_past_the_default_cap(tmp_path):
 
 
 def test_member_cap_exceeded_reports_incomplete_not_negative(tmp_path):
-    """The packet's subject: a hash the catalog carries but the capped index
+    """The core case: a hash the catalog carries but the capped index
     does not store must never read as "not signed"."""
     entries = [_modern_member_entry(f"{index:064x}") for index in range(7)]
     _write_cat(tmp_path, "cap.cat", _cat_content_info(_modern_ctl(entries)))
@@ -520,7 +520,7 @@ def test_member_cap_exceeded_reports_incomplete_not_negative(tmp_path):
 
 
 def test_default_member_cap_exceeded_exact_count(tmp_path):
-    """Ground rule 33 against the shipped constant: one entry past the
+    """A cap-crossing fixture against the shipped constant: one entry past the
     default window, and the count beside the capped store stays exact."""
     count = MAX_CATALOG_MEMBERS + 1
     entries = [_modern_member_entry(f"{index:064x}") for index in range(count)]
@@ -575,7 +575,7 @@ def test_walk_cap_and_cyclic_symlinks(tmp_path):
 
 
 def test_empty_directory_is_incomplete(tmp_path):
-    """Ground rule 32, the empty case: a directory with no catalogs cannot
+    """The empty case: a directory with no catalogs cannot
     answer "negative" — a wrong --catalog-dir must not sign off a tree."""
     index = build_catalog_index(str(tmp_path))
     assert index["catalog_count"] == 0
@@ -587,7 +587,7 @@ def test_empty_directory_is_incomplete(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The three states and the rule (rules 11, 14, 32).
+# The three states and the rule.
 # ---------------------------------------------------------------------------
 def test_lookup_prefers_sha256_and_falls_back_to_sha1():
     index = {
@@ -706,13 +706,13 @@ def test_non_pe_metadata_is_ignored():
 
 
 # ---------------------------------------------------------------------------
-# Signing class on the catalog path (W2.4, 02/C)
+# Signing class on the catalog path
 # ---------------------------------------------------------------------------
 def test_negative_lookup_claims_unsigned_incomplete_claims_nothing(tmp_path):
     """``signing_class: "unsigned"`` follows only from a performed lookup
     against a complete index. The same miss against an incomplete index
     determines nothing, so the key stays absent — absence means
-    undetermined, never "unsigned" (rule 11)."""
+    undetermined, never "unsigned"."""
     _write_cat(
         tmp_path,
         "other.cat",
@@ -761,7 +761,7 @@ def test_positive_match_derives_class_from_the_catalog_signer(tmp_path):
 
 
 def test_real_catalog_members_are_microsoft_first_party():
-    """The four rule-29 slice members are catalog-signed by Microsoft
+    """The four ground-truth slice members are catalog-signed by Microsoft
     Windows through a chain whose top shipped link names a Microsoft root;
     the class says microsoft_1st_party. Skipped when the corpus CatRoot
     copy does not cover them (the same keying as the member test)."""
@@ -803,7 +803,7 @@ def test_classic_tag_layout_members_indexed(tmp_path):
     ntprint.cat and friends): the entry's leading OCTET STRING is the
     member's digest rendered as a NUL-terminated UTF-16 hex tag, and the
     digest bytes ride the entry's SpcIndirectData attribute. Both routes
-    must index the member — W2.3's parser read these catalogs as parsed
+    must index the member — the first parser read these catalogs as parsed
     and empty, which silently dropped every classic member from the
     index."""
     tag_sha1 = ("a" * 40).encode("ascii").decode()
@@ -878,7 +878,7 @@ def test_member_whose_digest_no_layout_yields_is_not_a_cap(tmp_path):
     Both outcomes leave the index short of the catalog's members and both
     must make a negative lookup read as ``index_incomplete`` — but they are
     different facts, and reporting an undecodable member as
-    ``member_cap_exceeded`` names a limit that was never reached (rule 14).
+    ``member_cap_exceeded`` names a limit that was never reached.
     The full 3,630-catalog Windows store decodes every member, so this
     shape is reachable only from a fixture.
     """

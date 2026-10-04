@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""R3 — identification sweep: every identification blint makes.
+"""Identification sweep: every identification blint makes.
 
 Walks the given files (ELFs, APKs or directories of either), runs the same
 ``parse()`` the detectors run inside, and prints one JSON line per
 identification: the file, the engine (framework detector or blintdb), the
 grade (replace / nested / hint), the version (if the evidence pins one) and
 the version's source - the table the zero-false-identification gate is
-graded on. APK members are read in place through the A1.1 model.
+graded on. APK members are read in place through the APK member model.
 
 With --use-blintdb, APK native libraries are also matched against the local
 blintdb exactly as ``blint sbom --use-blintdb`` would, and bare .so files

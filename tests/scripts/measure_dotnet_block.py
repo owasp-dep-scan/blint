@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""W3.1 measurements: the rule-15 exe_type before/after and the rule-34
-distributions the packet commit must report.
+"""Measurements for the dotnet metadata block: the exe_type before/after and
+the dotnet field distributions that go with it.
 
 The before/after is computed mechanically with the real rule machinery: for
-each file the packet tree's metadata is produced once, then run_checks runs
-twice — once with the metadata as the pre-W3.1 tree would have shaped it
+each file the current tree's metadata is produced once, then run_checks runs
+twice — once with the metadata as the tree before the dotnet block shaped it
 (exe_type PE32/PE64 from the optional-header magic, no dotnet block) and
 once as shaped now (dotnetbinary + dotnet block). The per-binary rule-ID
-delta is the firing-set change the packet must argue.
+delta is the firing-set change the dotnet block causes.
 
 Usage: python tests/scripts/measure_dotnet_block.py <tier-dir> [...]
 """
@@ -59,8 +59,8 @@ def main(tier_dirs):
             if block is not None:
                 managed_files.append((str(path.relative_to(tier)), metadata))
 
-            # The rule-15 firing-set delta, per binary: the rules and the
-            # reviews, each run against the pre-W3.1 shape and the current
+            # The firing-set delta, per binary: the rules and the
+            # reviews, each run against the pre-dotnet-block shape and the current
             # shape of the same file.
             old_meta = dict(metadata)
             old_meta.pop("dotnet", None)
@@ -95,7 +95,7 @@ def main(tier_dirs):
                     review_moves[f"stops: {rid}"] += 1
                 for rid in sorted(new_reviews - old_reviews):
                     review_moves[f"starts: {rid}"] += 1
-                # llvm_target_tuple before/after (rule 21 recompute).
+                # llvm_target_tuple before/after, recomputed from each shape.
                 old_tuple = construct_llvm_target_tuple(old_meta)
                 new_tuple = construct_llvm_target_tuple(metadata)
                 if old_tuple != new_tuple:
@@ -141,7 +141,7 @@ def main(tier_dirs):
             print(f"  has P/Invoke: {name} -> {entries}")
     print()
     print("== rule 15 counterfactual: pre-packet rules.yml scopes ==")
-    # With exe_type moved, the PRE-packet scope table (dotnetbinary inside
+    # With exe_type moved, the earlier scope table (dotnetbinary inside
     # CHECK_CANARY and CHECK_RPATH) would have fired both on managed files.
     # Measured by invoking those checks with the old scope restored.
     from blint.lib.checks import check_canary, check_rpath

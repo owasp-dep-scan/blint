@@ -1,4 +1,4 @@
-r"""Tests for the kernel-adjacent user-mode surface (PE lane W5.4, plan 04/D).
+r"""Tests for the kernel-adjacent user-mode surface.
 
 Unit level: the COM/persistence/AMSI section scans on hand-built section
 bytes, the RPC interface read through a fake address space, the four

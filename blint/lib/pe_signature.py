@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Structured Authenticode ``code_signature`` block for PE (W2.1, W2.2; 02/A-A.3).
+"""Structured Authenticode ``code_signature`` block for PE.
 
 The block replaces none of the existing keys and mirrors the Mach-O
 ``code_signature`` shape so both formats answer the same questions: who
@@ -12,11 +12,11 @@ The PKCS#7/CMS structures are walked at the byte level from the certificate
 table's DER (``WIN_CERTIFICATE`` entries of type ``PKCS_SIGNED_DATA``),
 not through a dependency's object model: the fields a reader acts on
 (digest algorithms, chain termination, exact counts) must not move when a
-dependency changes how it renders its enums (ground rule 28). LIEF is used
+dependency changes how it renders its enums. LIEF is used
 for exactly one fact: the file's authentihash, which is the computed half
 of ``structural_integrity.digest_match``.
 
-W2.2 facts carried by the same walk:
+Timestamp, nesting and page-hash facts carried by the same walk:
 
 - Timestamps, both forms — the RFC 3161 countersignature
   (``1.3.6.1.4.1.311.3.3.1``) and the legacy PKCS#9 countersignature
@@ -33,12 +33,12 @@ W2.2 facts carried by the same walk:
   block-level ``weak_digest_only`` is computed over every signature,
   including ones past the listing cap.
 - Page hashes from ``SpcPeImageData``: presence, exact count, algorithm.
-  Presence is reported; this packet does not recompute them, and nothing
+  Presence is reported; blint does not recompute them, and nothing
   here claims verification.
 
-W2.4 facts carried by the same walk:
+Signing-class facts carried by the same walk:
 
-- ``signing_class`` on the block (02/C): ``unsigned`` (only from a
+- ``signing_class`` on the block: ``unsigned`` (only from a
   performed catalog lookup that came back negative — set by
   ``pe_catalog.apply_catalog_signature``, never here), ``self_signed``,
   ``unknown_root``, ``commercial_ov`` / ``commercial_ev``,
@@ -151,7 +151,7 @@ STATEMENT_TYPE_NAMES = {
     "1.3.6.1.4.1.311.2.1.22": "commercial_code_signing",
 }
 
-# --- Limits (ground rule 30: this is an untrusted-input parser; every cap
+# --- Limits (this is an untrusted-input parser; every cap
 # ships a fixture that exceeds it, and every count beside a capped listing
 # is exact and flagged when the listing stops short). ----------------------
 # A certificate table is a few hundred KiB in practice (page hashes add
@@ -990,7 +990,7 @@ def _cert_fingerprint(cert: dict) -> str | None:
 
 def _timestamp_entry(countersignature: dict, cert: dict | None) -> dict:
     """The ``timestamp`` block for one signature, with the validity statement
-    made relative to the timestamp (A.1): the question is whether the
+    made relative to the timestamp: the question is whether the
     certificate was valid *when the timestamp says it signed*, never whether
     it is valid now."""
     entry = {
@@ -1013,7 +1013,7 @@ def _strip_counter(value: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Shipped anchor data and the signing class (02/C)
+# Shipped anchor data and the signing class
 # ---------------------------------------------------------------------------
 _ROOT_ANCHOR_CACHE: dict | None = None
 _PUBLISHER_CACHE: dict | None = None
@@ -1098,7 +1098,7 @@ def _microsoft_anchor(entry: dict) -> str | None:
 
 
 def signing_class_for_signature(entry: dict) -> str | None:
-    """The 02/C class one signature's facts determine, or None.
+    """The signing class one signature's facts determine, or None.
 
     The order is what the *chain* establishes before what the leaf claims
     about itself, because the leaf's own fields are the forgeable ones: a
@@ -1120,7 +1120,7 @@ def signing_class_for_signature(entry: dict) -> str | None:
     is outside the snapshot.
 
     Every None here means undetermined — the block stays without
-    ``signing_class`` rather than defaulting (rule 11).
+    ``signing_class`` rather than defaulting.
     """
     signer = entry.get("signer") or {}
     if not signer:
@@ -1155,8 +1155,8 @@ def derive_signing_class(signatures: list[dict], walk_truncated: bool) -> tuple[
 
     A truncated walk determines nothing: the signature that would decide
     the class may be one of the ones past the window, so a verdict from
-    the walked sample would be a sample verdict (ground rule 33 — the
-    same discipline ``weak_digest_only`` already follows). Returns
+    the walked sample would be a sample verdict (the same discipline
+    ``weak_digest_only`` already follows). Returns
     ``(class, index)`` or None.
     """
     if walk_truncated:
@@ -1172,7 +1172,7 @@ def apply_signing_class(block: dict, walk_truncated: bool) -> None:
     """Write the class facts onto *block*, in place, or leave it without them.
 
     One place writes the class for both scopes — embedded blobs and the
-    catalog's own signer go through the same derivation (rule 21) — and
+    catalog's own signer go through the same derivation — and
     ``signing_class_anchor`` travels with ``microsoft_1st_party`` so the
     class never states more than the evidence behind it.
     """
@@ -1262,7 +1262,7 @@ def _parse_signature(
         entry["chain_complete"] = False
         if certificates_truncated:
             # The signer's own certificate may be one of the ones past the
-            # parse window: "not found here" is not "not carried" (rule 14).
+            # parse window: "not found here" is not "not carried".
             entry["signer_certificate_not_parsed"] = True
             entry["chain_complete"] = None
 
@@ -1405,7 +1405,7 @@ def _authentihash_factory(parsed_obj: lief.PE.Binary):
 
 
 def walk_signature_list(root_ders: list[bytes], authentihash_fn=None) -> dict:
-    """Walk one blob's signature list, nested signatures included (02/A.3).
+    """Walk one blob's signature list, nested signatures included.
 
     Shared by the PE certificate table (``parse_pe_code_signature``) and the
     catalog signer (``pe_catalog``) so both answer with the same
@@ -1462,15 +1462,15 @@ def walk_signature_list(root_ders: list[bytes], authentihash_fn=None) -> dict:
 
 
 def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
-    """The structured ``code_signature`` block for one PE file (02/A).
+    """The structured ``code_signature`` block for one PE file.
 
     ``parse_status``: ``"absent"`` (no certificate table), ``"malformed"``
     (a table or signature blint could not walk — never folded into
     "unsigned"), or ``"parsed"``. ``scope``: ``"embedded"`` whenever a
     certificate table is present, ``"none"`` otherwise, with
     ``catalog_lookup: "not_performed"`` stating that a catalog-signed file
-    cannot be distinguished from an unsigned one until W2.3 supplies a
-    catalog directory.
+    cannot be distinguished from an unsigned one until ``--catalog-dir``
+    supplies a catalog directory.
     """
     block: dict = {
         "parse_status": "absent",
@@ -1532,7 +1532,7 @@ def parse_pe_code_signature(parsed_obj: lief.PE.Binary, exe_file: str) -> dict:
 
     if signature_count:
         block["parse_status"] = "parsed"
-        # The signing class (02/C) rides on the parsed signature facts. It
+        # The signing class rides on the parsed signature facts. It
         # is absent — not "unsigned" — whenever nothing determines it: no
         # deciding signature, or a walk that stopped at its window.
         apply_signing_class(block, walk["signature_walk_truncated"])

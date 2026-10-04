@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F0.2 classification: verdict per tier-0 finding, from tools that are not blint.
+"""Classification: verdict per tier-0 finding, from tools that are not blint.
 
 For every finding in a corpus reports directory this script derives the
 ground-truth fact with a named external tool and records a verdict:
@@ -367,7 +367,7 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
         )
     if rule == "CHECK_LIBC_PORTABILITY":
         title = str(finding.get("title") or "")
-        # F1b.2 title shape: "<kind>-specific (measured against ...): names"
+        # Title shape: "<kind>-specific (measured against ...): names"
         kind_match = re.search(r"\b(glibc|musl)-specific[^:]*:\s*(.*)$", title)
         if not kind_match:
             return "unverifiable", f"unrecognised title shape: {title[:80]}"
@@ -398,7 +398,7 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
         )
     if rule == "CHECK_VIRTUAL_SIZE":
         mib = facts["pt_load_memsum"] / 1024 / 1024
-        # F1b.3: per-format limits - 128MB ELF (benign corpus max 37.4 MiB, a
+        # Per-format limits - 128MB ELF (benign corpus max 37.4 MiB, a
         # stock static Go build), 30MB default otherwise.
         limit = 128 if facts.get("type") in ("EXEC", "DYN", "REL") else 30
         if mib >= limit:
@@ -413,7 +413,7 @@ def classify_elf_finding(finding: dict, rel_path: str, facts: dict, corpus_root:
         )
     if rule == "CHECK_RUNTIME_LOADING":
         title = str(finding.get("title") or "")
-        # F1b.4 title shape: "library-name strings (a, b) paired with imported
+        # Title shape: "library-name strings (a, b) paired with imported
         # loader entry points (dlopen); the strings are evidence, not observed loads"
         m = re.search(r"library-name strings \(([^)]*)\).*entry points \(([^)]*)\)", title)
         if not m:

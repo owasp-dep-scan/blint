@@ -95,7 +95,7 @@ def _create_v2_blintdb(db_file):
     connection.executemany(
         "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, ?)",
         [
-            # F2b.1: each project carries its own identity names. A name two
+            # Each project carries its own identity names. A name two
             # projects share (the old fixture had helper and puts in both) is
             # low information by definition - spread suppression drops it -
             # and imports never identify a project anyway.
@@ -233,7 +233,7 @@ def _create_v3_blintdb(db_file, *, populate=True):
     connection.executemany(
         "INSERT INTO Symbols(binary_id, name, source) VALUES(?, ?, ?)",
         [
-            # distinct identity names per project (F2b.1 spread suppression)
+            # distinct identity names per project (spread suppression)
             (1, "helper", "symtab_symbols"),
             (1, "puts", "imports"),
             (2, "other_helper", "symtab_symbols"),
@@ -305,12 +305,12 @@ def test_lookup_project_matches_prefers_function_hashes(tmp_path):
 
     # A population of exact hashes (HASH_ONLY_MATCH_THRESHOLD = 8): one
     # shared 4-instruction thunk is a compiler artifact, not a shared project
-    # (measured on tier-0 deep mode, F2b.1).
+    # (measured on tier-0 deep mode).
     instruction_hashes = ["b" * 63 + digit for digit in "01234567"]
     matches = lookup_project_matches(
         {
             "symtab_symbols": ["helper"],
-            # The imports bucket is skipped entirely (F2b.1): it names what
+            # The imports bucket is skipped entirely: it names what
             # the artifact links against, not what it is.
             "imports": ["puts"],
             "dynamic_symbols": ["strlen"],
@@ -382,7 +382,7 @@ def test_process_exe_file_uses_blintdb_hash_matches(tmp_path, monkeypatch):
     assert matched.purl == "pkg:generic/demo@1.0.0"
     assert prop_map["internal:blintdb_matched_instruction_hash_count"] == "1"
     assert prop_map["internal:blintdb_binary_name_match"] == "True"
-    # F2b.1: puts and strlen are libc imports of the demo binary - an import
+    # puts and strlen are libc imports of the demo binary - an import
     # names the provider library, not the artifact, so only the demo's own
     # defined symbol counts as a match.
     assert prop_map["internal:blintdb_matched_symbols"] == "helper"
@@ -437,7 +437,7 @@ def test_execute_returns_rows_for_matching_aggregate(tmp_path):
             "SELECT binary_id, COUNT(*) AS cnt FROM Symbols WHERE name = ? GROUP BY binary_id",
             ["helper"],
         )
-        # helper is demo's identity name alone since F2b.1 - the shared-name
+        # helper is demo's identity name alone - the shared-name
         # fixture rows were low information and are gone.
         assert len(rows) == 1
         assert rows[0]["binary_id"] == 1
@@ -958,7 +958,7 @@ def test_supported_version_stamp_with_a_foreign_layout_is_refused_not_raised(tmp
     assert lookup_project_matches({"imports": ["puts"]}, db_file=str(db_file)) == []
 
 
-# --- F2a.2: banner attribution merges into the qualified blintdb component ----
+# --- banner attribution merges into the qualified blintdb component -----------
 
 
 def _create_blintdb_with_purl(db_file, project_purl, binary_name="libz.1.dylib"):
@@ -1050,7 +1050,7 @@ def _run_process_exe_with_db(tmp_path, monkeypatch, project_purl, metadata, bina
 
 
 def test_banner_merges_into_qualified_blintdb_component(tmp_path, monkeypatch):
-    """One component, both evidence sources (F2a.2's defect shape).
+    """One component, both evidence sources (the measured defect shape).
 
     The blintdb match carries ?source_hash in its purl; the banner's purl is
     unqualified. An exact-string compare left both components in the BOM,
@@ -1094,7 +1094,7 @@ def test_banner_merges_into_homebrew_versioned_formula_component(tmp_path, monke
             ],
         },
         # the DB binary carries the artifact's name so the six symbols ride
-        # the name-match door (F2b.1); the floor for nameless matches is 30.
+        # the name-match door; the floor for nameless matches is 30.
         binary_name="openssl",
     )
     openssl_components = [c for c in components if "openssl" in (c.purl or "")]
@@ -1120,7 +1120,7 @@ def test_banner_of_a_different_version_stays_separate(tmp_path, monkeypatch):
     ]
 
 
-# --- F2b.2: vendored banners vs version-mention strings -------------------
+# --- vendored banners vs version-mention strings --------------------------
 
 
 def test_mention_only_banner_is_not_a_component(tmp_path, monkeypatch):
@@ -1170,7 +1170,7 @@ def test_vendored_banner_component_carries_the_corroboration_count(tmp_path, mon
     assert props["internal:vendored_attribution"] == "vendored_banner"
 
 
-# --- F2a.3: version conflicts between matched versions of one project ----
+# --- version conflicts between matched versions of one project -----------
 
 
 def _create_two_version_blintdb(db_file):
@@ -1268,7 +1268,7 @@ def _run_openssl_sbom(tmp_path, monkeypatch, exe_path, metadata):
 
 def test_version_conflict_resolved_by_artifact_path(tmp_path, monkeypatch):
     """The artifact's own install path names the keg it came from; that
-    evidence outranks score and drops the other version (F2a.3)."""
+    evidence outranks score and drops the other version."""
     components = _run_openssl_sbom(
         tmp_path,
         monkeypatch,
@@ -1304,7 +1304,7 @@ def test_version_conflict_without_artifact_evidence_records_ambiguity(tmp_path, 
 def test_version_conflict_resolved_by_banner_naming_the_project(tmp_path, monkeypatch):
     """A version banner for the project under decision is artifact evidence:
     it separates the kegs, and the banner then corroborates the kept
-    component instead of standing beside it (review of F2a.2/F2a.3)."""
+    component instead of standing beside it (found in review)."""
     components = _run_openssl_sbom(
         tmp_path, monkeypatch, "/tmp/demo/openssl", _openssl_metadata()
     )
@@ -1326,7 +1326,7 @@ def test_linked_dylib_versions_never_decide_a_version_conflict(tmp_path, monkeyp
 
 
 def test_deep_elf_abi_floor_is_a_parent_property_not_a_component(monkeypatch):
-    """F2a.4 end to end: under --deep the GLIBC floor is recorded on the
+    """End to end: under --deep the GLIBC floor is recorded on the
     binary's own component and no pkg:generic/gnu/libc component appears."""
     metadata = {
         "name": "demo",
@@ -1363,7 +1363,7 @@ def test_deep_elf_abi_floor_is_a_parent_property_not_a_component(monkeypatch):
     assert props["internal:symbols_version"] == "GLIBC_2.34, fake.dll"
 
 
-# --- F2b.1: a fixture crossing every suppression ---------------------------
+# --- a fixture crossing every suppression ----------------------------------
 
 
 def _create_typed_blintdb(db_file, rows, fingerprints=None):
@@ -1454,7 +1454,7 @@ def test_imported_symbols_never_enter_the_query_map():
 
 
 def test_fallback_retry_never_crosses_binary_type(tmp_path):
-    """The retry keeps the format predicate (F2b.1).
+    """The retry keeps the format predicate.
 
     A static ELF Rust binary matched the Mach-O ripgrep build on 984 shared
     Rust-std names through the previously unfiltered retry; identical
@@ -1518,7 +1518,7 @@ def test_fallback_retry_never_crosses_binary_type(tmp_path):
 
 
 def test_low_information_spread_suppression(tmp_path):
-    """A name two project names define cannot identify either (F2b.1).
+    """A name two project names define cannot identify either.
 
     _main, __mh_execute_header and _OUTLINED_FUNCTION_N reached every
     project; the boundary fixture asserts exactly two defining project
@@ -1553,7 +1553,7 @@ def test_low_information_spread_suppression(tmp_path):
 
 
 def test_mechanically_emitted_names_never_match(tmp_path):
-    """Toolchain-emitted names are not identity (F2b.1).
+    """Toolchain-emitted names are not identity.
 
     frc.dylib matched ripgrep on 31 _OUTLINED_FUNCTION_<n> names - clang
     numbers outlined functions per binary, and the numbers happened to
@@ -1584,13 +1584,13 @@ def test_mechanically_emitted_names_never_match(tmp_path):
         assert not MECHANICALLY_EMITTED_SYMBOL_RE.match(chosen), chosen
     for mechanical in (
         "_OUTLINED_FUNCTION_0", "__mh_execute_header", "_main", "main", "_start", "init", "fini",
-        # A6.3 J0: the synthetic sub_<hex> function names blint's ELF reader
+        # The synthetic sub_<hex> function names blint's ELF reader
         # mints, and ARM/AArch64 mapping symbols ($a/$t/$d/$x, numbered per
         # binary by llvm).
         "sub_1fd0f4", "sub_227488", "$d.0", "$d.1044", "$x.17", "$a.3", "$t.9", "$d", "$x",
     ):
         assert MECHANICALLY_EMITTED_SYMBOL_RE.match(mechanical), mechanical
-    # The query side never offers them either (A6.3 J0: an unstripped arm64
+    # The query side never offers them either (an unstripped arm64
     # query carried up to 4,400 $d.<n> names into the SQL IN lists).
     source_map = build_symbol_source_map(
         {"symtab_symbols": ["$d.0", "$d.1", "ZSTD_compress"],
@@ -1600,7 +1600,7 @@ def test_mechanically_emitted_names_never_match(tmp_path):
 
 
 def test_nameless_symbol_only_floor(tmp_path):
-    """A nameless symbol-only match needs 30 identity symbols (F2b.1).
+    """A nameless symbol-only match needs 30 identity symbols.
 
     The measured false shapes matched 6-9 coincidental local names; a real
     identity match carries 79-338. 29 stays out, 30 passes, and a
@@ -1637,7 +1637,7 @@ def test_nameless_symbol_only_floor(tmp_path):
 
 
 class TestDeepModeQualification:
-    """F2b.1 deep measurement: every false attribution found on tier-0 in
+    """Deep measurement: every false attribution found on tier-0 in
     --deep mode, and the door that keeps each true shape."""
 
     def _db(self, tmp_path, name="deep.db"):

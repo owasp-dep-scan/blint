@@ -239,7 +239,7 @@ def test_path_inside_any_bundle_filters_discovered_files(tmp_path):
 
 
 def test_suffixes_tuple_shape():
-    # The plugin kinds (M1.1) extend the tuple; .app kinds first, plugin
+    # The plugin kinds extend the tuple; .app kinds first, plugin
     # kinds after, so the tuple reads in declaration order.
     assert MACOS_BUNDLE_SUFFIXES == (
         ".app",

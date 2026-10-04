@@ -24,7 +24,7 @@ Phases nest inside ``parse``; the unattributed remainder is visible as
 ``parse_other`` so a phase can never hide inside it.
 
 Every artifact also reports the serialized metadata size and the largest
-top-level blocks, because metadata is a budget (03/B.6): ssh's --disassemble
+top-level blocks, because metadata is a budget: ssh's --disassemble
 metadata is 16.7 MB and 18% of it is CFG block/edge listings.
 
 Usage:

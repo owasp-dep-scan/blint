@@ -1,7 +1,7 @@
-"""blintdb identification of Android native libraries (A6.3 J1).
+"""blintdb identification of Android native libraries.
 
-R1 of the packet's ladder: a v3 database built in the test whose rows are
-symbol names extracted from the real I2 build output, and query metadata
+Fixture level: a v3 database built in the test whose rows are
+symbol names extracted from the real blint-db build output, and query metadata
 whose exports come from ``llvm-nm -D --defined-only`` on the corpus library
 - both stored in ``tests/data/android/blintdb-zstd-evidence.json`` with the
 extracting commands. The oracle for the overlap is llvm-nm, not blint's
@@ -189,7 +189,7 @@ def test_artifact_version_named_published_mappings():
     assert artifact_version("proj", [b"Rel. 8.2.0, November 1st, 2021"])[0] == "8.2.0"
     # libpng: prefixed banner beats the bare string.
     assert artifact_version("libpng", [b"1.3.1", b"libpng version 1.6.50"])[0] == "1.6.50"
-    # openssl: the H4 banner, or nothing (the artifact decides, not the row).
+    # openssl: the OpenSSL version banner, or nothing (the artifact decides, not the row).
     assert artifact_version("openssl", [b"OpenSSL 3.0.2 15 Mar 2022"])[0] == "3.0.2"
     assert artifact_version("openssl", [b"ossl provider"])[0] is None
     # freetype has no accepted mapping: versionless.
@@ -220,7 +220,7 @@ def test_artifact_version_refuses_conflicting_named_strings():
 
 
 def test_superseded_by_framework_drops_boringssl_shadowed_openssl():
-    """An A6.1 BoringSSL record wins over an openssl port match."""
+    """A BoringSSL framework record wins over an openssl port match."""
     records = [
         {"project": "openssl", "project_purl": "pkg:generic/openssl@3.6.2"},
         {"project": "zstd", "project_purl": "pkg:generic/zstd@1.5.7"},
@@ -260,12 +260,12 @@ def test_collect_group_blintdb_records_merges_by_project():
 
 
 def test_standalone_path_never_reports_openssl_for_boringssl(tmp_path, monkeypatch):
-    """J2 on the standalone path: the platform libcrypto.so stays BoringSSL.
+    """On the standalone path: the platform libcrypto.so stays BoringSSL.
 
     The names are llvm-nm's from the api36 system image's BoringSSL
     libcrypto.so and from librealm-jni.so (committed openssl3 evidence):
     the BoringSSL provider's EVP/X509 surface matches the openssl port,
-    and only the A6.1 BoringSSL record stops the component.
+    and only the BoringSSL framework record stops the component.
     process_exe_file drops the match and counts it in
     internal:blintdb_superseded_by_framework.
     """
@@ -404,7 +404,7 @@ def test_standalone_path_keeps_openssl_match_under_an_openssl_record():
 
 
 def test_nested_child_carries_only_the_abis_whose_copy_matched():
-    """Rule 36: a static copy found in one ABI's build is a fact for that ABI."""
+    """A static copy found in one ABI's build is a fact for that ABI."""
     members = [
         (
             {"locations": [{"abi": "arm64-v8a"}]},

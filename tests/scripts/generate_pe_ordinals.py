@@ -6,7 +6,7 @@ unread: ``ws2_32`` (its first 23 ordinals are the classic WinSock calls),
 ``mpr``, ``oleaut32`` (the BSTR/VARIANT pair), ``shlwapi``, ``netapi32`` and
 ``wsock32``. blint resolves those imports through this generated snapshot and
 marks the entries ``resolution: "ordinal_table"``; ordinals outside the
-snapshot stay ordinals with ``resolution: "unresolved"`` (plan 01/A.6).
+snapshot stay ordinals with ``resolution: "unresolved"``.
 
 Ordinal assignments are per-build facts, so the snapshot records the Windows
 build and the exact source files (sha256) it was generated from. Regenerate
@@ -58,7 +58,7 @@ def main() -> None:
     args = parser.parse_args()
 
     lines = [
-        "# blint's ordinal resolution table (PE lane W1.2, plan 01/A.6).",
+        "# blint's ordinal resolution table.",
         "#",
         f"# Source: System32 DLLs from a Windows build {args.build} installation.",
         "# Ordinal assignments are per-build facts; the sha256 values below pin",

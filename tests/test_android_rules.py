@@ -1,5 +1,5 @@
-"""A3 — bionic loader rule tests (C1, 02/B, ground rule 37) and the
-per-ABI hardening rules (C2).
+"""Bionic loader rule tests and the
+per-ABI hardening rules.
 
 Every planted defect is a real NDK r28.2.13676358 build (commands and
 same-run readelf ground truth in ``tests/data/android/a2-fixtures-manifest.json``);
@@ -21,7 +21,7 @@ DATA = Path(__file__).parent / "data" / "android"
 
 CLEAN = DATA / "libhello.so"
 ARM32 = DATA / "liba4a_r1_arm.so"
-# The C1 loader rules; the C2 hardening rules (BTI/MTE) are asserted in
+# The loader rules; the hardening rules (BTI/MTE) are asserted in
 # their own tests because the plain NDK build fires BTI_PAC by design.
 LOADER_RULES = {
     "CHECK_ANDROID_TEXTREL", "CHECK_ANDROID_WX_LOAD", "CHECK_ANDROID_NO_SONAME",
@@ -166,7 +166,7 @@ def test_bti_pac_arm64_only() -> None:
     assert "CHECK_ANDROID_BTI_PAC" in _all_ids(fired)
     # The -mbranch-protection=standard twin is silent.
     assert android_ids(findings_for(DATA / "libhello_bti.so")) == []
-    # Rule 35: the check never runs on arm32 — the arm32 twin (also raw
+    # The check never runs on arm32 — the arm32 twin (also raw
     # clang, also without branch protection) gets no BTI finding.
     fired = findings_for(ARM32)
     assert "CHECK_ANDROID_BTI_PAC" not in _all_ids(fired)

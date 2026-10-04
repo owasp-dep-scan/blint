@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
-"""A2 B0 — bionic ELF fact probe: blint's facts next to llvm-readelf's, same run.
+"""Bionic ELF fact probe: blint's facts next to llvm-readelf's, same run.
 
 For every input ``.so`` this runs blint's ``parse()`` and one
-``llvm-readelf -a --notes`` pass over the same file (ground rule 29: the
-oracle is named, external, and read in the same run) and prints every fact
-from ``02-bionic-elf-depth.md`` section A from both sides with a verdict.
-The exit code is non-zero on any disagreement, so a packet's gate is
-``elf_facts_probe.py <so>...``.
+``llvm-readelf -a --notes`` pass over the same file (the oracle is named,
+external, and read in the same run) and prints every bionic ELF fact from
+both sides with a verdict. The exit code is non-zero on any disagreement,
+so a change's gate is ``elf_facts_probe.py <so>...``.
 
-Facts blint does not emit yet are printed with the packet planned to add
-them (B1/B2/B3) and do not fail the run; ``--strict`` turns them into
-failures, which is the gate from B1 onward. Facts blint emits are compared
-hard: ``AGREE`` or ``DISAGREE``, and the raw oracle values are printed
-either way so a disagreement is readable without a rerun.
+Facts blint does not emit yet are printed with the tag of the change planned
+to add them and do not fail the run; ``--strict`` turns them into failures.
+Facts blint emits are compared hard: ``AGREE`` or ``DISAGREE``, and the raw
+oracle values are printed either way so a disagreement is readable without
+a rerun.
 
 ``shadow_call_stack`` is the one disassembly-only fact: an x18 prologue is
 an instruction-stream fact with no readelf oracle, so both sides stay
-``None`` until B3 wires the --disassemble comparison.
+``None`` until the --disassemble comparison is wired.
 
 Usage:
   poetry run python tests/scripts/android/elf_facts_probe.py <so>... \
       [--strict] [--readelf PATH] [--json PATH]
 
-Constants the oracle side decodes were confirmed at named tags (B0 commit
-body): DT_ANDROID_REL* and DT_ANDROID_RELR* in bionic's ``elf.h`` (NDK
+Constants the oracle side decodes were confirmed at named tags:
+DT_ANDROID_REL* and DT_ANDROID_RELR* in bionic's ``elf.h`` (NDK
 r28.2 sysroot ``usr/include/elf.h`` lines 235-238, 250-253), the standard
 DT_RELR* tags in glibc's ``elf/elf.h`` lines 925-927, NT_ANDROID_TYPE_* and
 the NT_MEMTAG_* bits plus GNU_PROPERTY_AARCH64_FEATURE_1_* in LLVM's
@@ -484,7 +483,7 @@ def blint_wx_segments(metadata: dict):
 # Fact registry: (name, packet, blint reader, oracle reader, comparator).
 #
 # A fact whose blint reader is None has no metadata source yet: the row is
-# reported as blint-missing with the packet that will add it. Comparators
+# reported as blint-missing with the change tag that adds it. Comparators
 # compare the blint shape against the oracle shape directly.
 
 
@@ -542,7 +541,7 @@ FACTS = [
 
 
 # Fact names implemented by the current blint version, versioned with the
-# code: each packet adds its names in the same commit. A None blint value
+# code: each change adds its names in the same commit. A None blint value
 # for a fact outside this set means "not implemented yet" (blint-missing);
 # a None value for an implemented fact is a real absence and compares
 # against the oracle normally.

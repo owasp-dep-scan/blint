@@ -1,5 +1,5 @@
 /*
- * A7 K1 — the su-path list, from the same source tree and tag as the
+ * The su-path list, from the same source tree and tag as the
  * native side: scottyab/rootbeer (Apache-2.0) rootbeerlib
  * src/main/java/com/scottyab/rootbeer/Const.java at 0.1.2, suPaths and
  * getPaths() only.

@@ -1,4 +1,4 @@
-"""The privileged-host plugin surface (PE lane W5.6, plan 04/F).
+"""The privileged-host plugin surface.
 
 A driver is not the only way a binary gets loaded into a privileged
 process and kept there: Windows hosts a long list of *extension points*
@@ -10,11 +10,10 @@ usually running as SYSTEM, with no per-load prompt and no consent surface
 after the one-time admin registration.
 
 This module is the interpretation layer over facts blint already parses:
-the export table (W1.2) and the section bytes. The contract table itself
+the export table and the section bytes. The contract table itself
 is data (``blint/data/pe_host_plugin_contracts.yml``) pinned against
 Microsoft's documentation with the tier-5/full-system32 measurement
-recorded in its header - never transcribed from blint's own output, the
-W3.1 lesson.
+recorded in its header - never transcribed from blint's own output.
 
 Design decisions the measurement forced:
 
@@ -25,12 +24,12 @@ Design decisions the measurement forced:
   scanned from section bytes rather than the ``strings`` list: the list
   is gate-filtered (entropy/length/shape) and its fallback path is
   capped, and a rule reading a capped or filtered listing turns that
-  bound into a detection boundary - the W3.2 lesson.
+  bound into a detection boundary.
 - The export read status is a fact, not an implication. A binary whose
   export directory blint could not read gets no ``host_plugin`` block,
   ``exports_read_status: "failed"`` beside the empty export list, and a
   named ``analysis_coverage`` degradation - an unread gap must never read
-  as "not a plugin" (ground rules 14 and 32).
+  as "not a plugin".
 - Ordinal-only exports are invisible here by construction, and that is
   sound: every host in the table resolves its contract entry points by
   name (``GetProcAddress``), so a name the binary does not export is a
@@ -48,7 +47,7 @@ from blint.lib.binary_common import is_string_bearing_section
 
 # How many registration strings are listed per contract as evidence. The
 # contract fires on the first hit and no rule reads past the first entry,
-# so this bounds metadata size without bounding detection (rule 33: the
+# so this bounds metadata size without bounding detection (the
 # cap is a listing bound, stated here, and pinned by a fixture that
 # exceeds it).
 REGISTRATION_EVIDENCE_LIMIT = 4
@@ -70,7 +69,7 @@ def _contracts_table() -> dict:
             ).open("r", encoding="utf-8") as handle:
                 _TABLE_CACHE = yaml.safe_load(handle) or {}
         except (OSError, yaml.YAMLError):
-            # An unreadable table determines nothing (rule 11): the block
+            # An unreadable table determines nothing: the block
             # is absent rather than half-derived from a partial file.
             _TABLE_CACHE = {}
     return _TABLE_CACHE
@@ -92,7 +91,7 @@ def _registration_evidence(parsed_obj, pattern: str) -> list[str]:
     Scanned directly over the string-bearing sections in both ASCII and
     UTF-16LE rather than over ``metadata['strings']``: the strings list is
     entropy/length/shape gated and its extraction fallback is capped, and
-    detection must not inherit those bounds (the W3.2 cap lesson). Forwarded
+    detection must not inherit those bounds. Forwarded
     strings, registry-script fragments and GUID-suffixed paths all match
     wherever they sit in the section.
     """
@@ -228,7 +227,7 @@ def classify_host_plugins(metadata: dict[str, Any], parsed_obj) -> dict | None:
     whose nested exports could, the block speaks for the nested listing
     and says so (``host_plugin_scope``), and when both are readable and
     disagree, ``host_plugin_slice_variance`` names the contracts they
-    differ on (rule 21: adding a dimension must not silently let the
+    differ on (adding a dimension must not silently let the
     summary speak for one slice).
     """
     table = _contracts_table()
@@ -260,7 +259,7 @@ def classify_host_plugins(metadata: dict[str, Any], parsed_obj) -> dict | None:
         # nested listing takes over and the scope says so. With neither,
         # there is no block - the gap is carried by exports_read_status
         # and the analysis_coverage degradation instead of by a silent
-        # "not a plugin" (rules 14/32).
+        # "not a plugin".
         if nested_contracts:
             block["contracts"] = nested_contracts
             block["host_plugin_scope"] = "nested_binary"

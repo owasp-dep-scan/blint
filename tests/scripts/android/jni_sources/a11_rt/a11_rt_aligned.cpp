@@ -1,5 +1,5 @@
 /*
- * A11 S1 - the alignment registrar, compiled with -mstackrealign so the
+ * The alignment registrar, compiled with -mstackrealign so the
  * 32-bit prologue realigns esp (`and esp, -16`) before the entry stores:
  * the rebase the i386 model must survive for the stores and the methods
  * lea to still name the same buffer. 64-bit builds of this TU exercise

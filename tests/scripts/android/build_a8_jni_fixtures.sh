@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A8 N2/N3 (feat/an-a8) — the JNI R1 fixtures, every one a real build:
+# The JNI registration fixtures, every one a real build:
 #
 #   liba8_hybrid_<abi>{,_stripped}.so    fbjni's merged registration
 #                                        shape: JNINativeMethod tables in
@@ -10,7 +10,7 @@
 #                                        preemptible dynsym symbols defined
 #                                        in a8_hybrid_defs.cpp (the
 #                                        jmethod_traits<F>::kDescriptor /
-#                                        MethodWrapper<>::call shape N0(b)
+#                                        MethodWrapper<>::call shape
 #                                        measured in libreactnative.so).
 #                                        Includes the refused neighbour: a
 #                                        decoy triple whose fnPtr word
@@ -19,7 +19,7 @@
 #                                        SAME name + signature through
 #                                        FindClass: two with constant class
 #                                        names beside RegisterNatives
-#                                        (bind through the N3 confirmer),
+#                                        (bind through the FindClass confirmer),
 #                                        one with a runtime-composed name
 #                                        (stays ambiguous).
 #   a8-classes.dex                       both fixtures' dex (javac
@@ -54,7 +54,7 @@ javac --release 11 -d "$work/classes" \
 cp "$work/classes.dex" "$out/a8-classes.dex"
 
 # ---------------------------------------------------------------- libs
-# -funwind-tables: same rationale as the A5 fixtures (the arm32 stripped
+# -funwind-tables: same rationale as build_a5_jni_fixtures.sh (the arm32 stripped
 # twin needs .ARM.exidx rows for the table scan's fnPtr validation).
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   case "$abi" in

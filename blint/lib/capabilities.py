@@ -1,4 +1,4 @@
-"""Machine-readable catalog of what blint can detect (D4).
+"""Machine-readable catalog of what blint can detect.
 
 The index is generated from the rule state the engine itself loads —
 ``initialize_rules`` plus the module globals in ``blint.lib.analysis`` —

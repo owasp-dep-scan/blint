@@ -1,6 +1,6 @@
-"""A1.3 - android native SBOM shape (01/D).
+"""Android native SBOM shape.
 
-The fixtures are the committed A0.2 corpus files (real aapt2/zipalign/
+The fixtures are the committed reference corpus files (real aapt2/zipalign/
 apksigner packaging over NDK-built libraries).
 """
 
@@ -44,13 +44,13 @@ def _props(component: dict) -> dict:
 def test_singleabi_shape_and_count_parity(tmp_path: Path) -> None:
     doc = _emit(DATA / "tier1_singleabi_stored16k.apk", tmp_path)
     sos = _so_components(doc)
-    # One library, one ABI: one component - the count does not grow (01/D).
+    # One library, one ABI: one component - the count does not grow.
     assert len(sos) == 1
     component = sos[0]
     assert component["name"] == "libhello.so"
     purl = PackageURL.from_string(component["purl"])
     assert purl.qualifiers["abi"] == "arm64-v8a"
-    # No version where only a build-id exists (V4): it is a property.
+    # No version where only a build-id exists: it is a property.
     assert component.get("version") is None
     props = _props(component)
     assert props["blint:build_id"].startswith("arm64-v8a:")

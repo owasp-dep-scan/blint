@@ -2,8 +2,8 @@
 
 Reads the `#~` (compressed) or `#-` (uncompressed) table stream plus the
 `#Strings`, `#Blob`, `#GUID` and `#US` heaps of a managed assembly and
-reports the identity-and-references block (plan 03/A.1), the capability
-surface (plan 03/A.2) and the strong-name facts (plan 03/A.4): assembly
+reports the identity-and-references block, the capability
+surface and the strong-name facts: assembly
 identity, AssemblyRefs, ModuleRefs, the P/Invoke surface, referenced types
 (TypeRef, resolved through its ResolutionScope to the providing assembly),
 referenced members (MemberRef, resolved through its MemberRefParent), the
@@ -34,8 +34,8 @@ string is an index into `#Strings`, a type is a coded index into another
 table, and a malformed file points them anywhere. Every heap read and every
 table walk is bounds-checked against the region the CLI header declared,
 and every refusal is recorded as a named degradation in the block rather
-than read as clean (ground rule 30). Counts and listings are separate facts
-(ground rule 14): ``counts`` carries the row counts the stream header
+than read as clean. Counts and listings are separate facts:
+``counts`` carries the row counts the stream header
 declared for tables whose rows were verifiably within the stream, while the
 listed blocks (``assembly_refs``, ``module_refs``, ``pinvoke``,
 ``typerefs``, ``memberrefs``, ``strings``, and the strong-name block's
@@ -211,7 +211,7 @@ MAX_BLOB_READ = 65536  # Public-key blobs top out near 2 KB.
 MAX_LISTED_ASSEMBLY_REFS = 1024  # Real counts: low hundreds at most.
 MAX_LISTED_MODULE_REFS = 256
 MAX_LISTED_PINVOKE = 512
-# W3.2: the TypeRef/MemberRef listings and the #US walk. Real maxima over
+# The TypeRef/MemberRef listings and the #US walk. Real maxima over
 # 790 assemblies (corpus tiers 0/1/2/5 plus the .NET 10 shared framework):
 # typeref 626, memberref 8,126, #US entries 3,519.
 #
@@ -228,15 +228,15 @@ MAX_LISTED_PINVOKE = 512
 # the backstop for anything larger still.
 MAX_LISTED_TYPEREFS = 1024
 MAX_LISTED_MEMBERREFS = 16384
-# W3.4: the strong-name facts (03/A.4). The StrongNameSignature read bound:
+# The strong-name facts. The StrongNameSignature read bound:
 # real strong-name signatures are the RSA signature size — 128 bytes across
 # every assembly measured (1,248: the corpus managed set, the .NET 10 shared
 # framework, and the VM-built variants); 4,096 clears anything a sane key
 # produces while bounding a forged header's claim.
 #
 # The InternalsVisibleTo listing cap is a listing bound only: no rule reads
-# this list (the distribution measurement decided against any rule this
-# packet), so a row past the cap is unlisted, not unexamined. The largest
+# this list (the distribution measurement decided against any rule), so a
+# row past the cap is unlisted, not unexamined. The largest
 # count measured across the same 1,248 assemblies is 55
 # (System.Private.Windows.Core.dll); 128 clears it with the same headroom
 # ratio MAX_LISTED_MEMBERREFS carries over its own measured maximum.
@@ -378,7 +378,7 @@ def read_cli_header(window: bytes) -> dict | None:
     metadata_rva, metadata_size = struct.unpack_from("<II", window, 8)
     flags = struct.unpack_from("<I", window, 16)[0]
     entry_point_token = struct.unpack_from("<I", window, 20)[0]
-    # W3.3: ManagedNativeHeader (II.25.3.3, the last of the header's eight
+    # ManagedNativeHeader (II.25.3.3, the last of the header's eight
     # fields). It is what separates a ReadyToRun image from a plain IL
     # assembly, so it is read whenever the header declares itself long
     # enough to contain it - a shorter cb is an older header that simply
@@ -388,8 +388,7 @@ def read_cli_header(window: bytes) -> dict | None:
         managed_native_header_rva, managed_native_header_size = struct.unpack_from(
             "<II", window, 64
         )
-    # W3.4: StrongNameSignature (II.25.3.3, offset 32) - the directory W3.3
-    # did not read, sitting two fields before the one it did. Whether the
+    # StrongNameSignature (II.25.3.3, offset 32). Whether the
     # region it names exists and whether it is all zero bytes are the two
     # facts that separate a signed, a delay-signed and a public-signed
     # assembly, so the directory is read under the same cb rule.
@@ -491,7 +490,7 @@ class _HeapReader:
 
     Every read validates its index against the heap size the stream header
     declared; refusals are recorded by name and returned as None so a bad
-    index can never masquerade as an empty value (ground rule 14).
+    index can never masquerade as an empty value.
     """
 
     def __init__(self, data: bytes, offset: int, size: int, degr: _Degradations):
@@ -516,7 +515,7 @@ class _HeapReader:
             # No terminator inside the read window: either the entry is
             # genuinely unterminated or it is longer than the window. The
             # rest of the heap knows which — search it before naming the
-            # refusal (ground rule 14: name what actually happened).
+            # refusal.
             if self.data.find(b"\x00", limit, self.end) >= 0:
                 self.degr.add("strings_entry_truncated_by_cap")
                 raw = self.data[start:limit]
@@ -581,8 +580,8 @@ class _HeapReader:
     def us_string_bytes(self, index: int) -> bytes | None:
         """Raw UTF-16LE payload of a #US entry (terminal flag byte stripped).
 
-        Only structural reads happen this packet; the strings themselves
-        feed the review engine in the managed-capability packet (W3.2).
+        Only structural reads happen here; the strings themselves feed
+        the managed-capability review.
         """
         if index == 0:
             return None
@@ -825,11 +824,11 @@ def _walk_user_strings(
     plus a 0x00 separator — the same digest the ground-truth oracle
     computes, so the two walks can be compared byte for byte.
 
-    Walk-level caps bound the work (ground rule 30): entry count, total
+    Walk-level caps bound the work: entry count, total
     decoded bytes and a per-entry size past which an entry is skipped and
     named rather than decoded. A walk that stops early — truncated heap,
     any cap — still reports the prefix's count and digest, and the refusal
-    is a named degradation, never silence (ground rule 14).
+    is a named degradation, never silence.
     """
     values: list[str] = []
     seen: set[str] = set()
@@ -894,7 +893,7 @@ def _walk_user_strings(
             values.append(value)
         if total_bytes > MAX_USER_STRINGS_TOTAL_BYTES:
             # blint's own budget, not a defect in the file: recorded as the
-            # cap it is and nothing else (ground rule 14). Reporting the
+            # cap it is and nothing else. Reporting the
             # heap as truncated here would accuse a well-formed assembly
             # of being malformed because blint stopped reading it.
             bytes_capped = True
@@ -922,7 +921,7 @@ def _typeref_scope(
     names an enclosing TypeRef (a nested type) is followed to the row that
     carries a resolvable scope, up to MAX_SCOPE_DEPTH; a scope that cannot
     be resolved returns None and the row is omitted rather than read as
-    provided by this module (ground rule 14).
+    provided by this module.
     """
     tag_table, rid = coded
     for _ in range(MAX_SCOPE_DEPTH):
@@ -1021,7 +1020,7 @@ def _memberref_parent(
     ``method:<name>``. A TypeSpec parent is a signature blob, not a name —
     generic instantiations resolve their members through it — and blint
     does not render signatures, so those rows are omitted and named rather
-    than attributed to some guessed parent (ground rule 14).
+    than attributed to some guessed parent.
     """
     tag_table, rid = coded
     if tag_table == TYPE_DEF:
@@ -1075,7 +1074,7 @@ def parse_metadata_stream(
     entry_point_token: int | None = None,
     strong_name_signature: tuple[bytes | None, int, str | None] | None = None,
 ) -> dict:
-    """Parse one metadata root region into the 03/A.1 block (pure bytes).
+    """Parse one metadata root region into the identity-and-references block (pure bytes).
 
     ``data`` is the byte string holding the metadata region (usually a
     window read at the CLI header's metadata RVA); ``root_offset`` is where
@@ -1165,8 +1164,8 @@ def parse_metadata_stream(
     blobs = _HeapReader(data, *blob_heap, degr) if blob_heap else None
     if not us_heap:
         # Every managed image ships a #US heap; a region without one is a
-        # structural anomaly worth naming (the managed-capability packet
-        # W3.2 reads its strings — this packet only requires its presence
+        # structural anomaly worth naming (the managed-capability review
+        # reads its strings — this reader only requires its presence
         # and its stream bounds, which _read_streams checked).
         degr.add("us_heap_missing")
     if not strings_heap:
@@ -1202,7 +1201,7 @@ def parse_metadata_stream(
         # shapes) change where the rows begin, and no assembly measured —
         # 375, all `#~`, HeapSizes 0x00/0x01/0x05 — sets one, so blint has
         # never seen the shape it would have to lay out. Name it rather
-        # than lay the rows out on an assumption (ground rule 11); the
+        # than lay the rows out on an assumption; the
         # leftover check below is the backstop if one is ever wrong.
         degr.add(f"table_stream_heapsizes_unhandled:0x{heapsizes:02x}")
     valid_mask = int.from_bytes(data[tables_offset + 8:tables_offset + 16],
@@ -1264,8 +1263,8 @@ def parse_metadata_stream(
             # writer used and every row read under them is some other
             # table's bytes. The row counts stay (they come from the
             # header, not the layout); everything derived from a row is
-            # withheld rather than reported as a value blint determined
-            # (ground rule 11) — a fabricated assembly name is worse than
+            # withheld rather than reported as a value blint determined:
+            # a fabricated assembly name is worse than
             # an absent one, and the SBOM would carry it.
             degr.add(f"tables_layout_short:{tables_end - extent}")
             layout = {}
@@ -1285,7 +1284,7 @@ def parse_metadata_stream(
     # Real streams leave zero-row tables out of the Valid mask, so a mask
     # bit that is simply unset means zero rows (the reader looked). Only a
     # table the overrun logic dropped, or a mask that was never read, is
-    # undeterminable — its key stays absent (rule 14).
+    # undeterminable — its key stays absent.
     counts: dict = {}
     for table, key in (
         (TYPE_DEF, "typedef"), (METHOD_DEF, "methoddef"), (FIELD, "field"),
@@ -1356,7 +1355,7 @@ def parse_metadata_stream(
         # from row_counts entirely leaves the key facts absent instead: that
         # is also the netmodule shape, but it is equally the shape of a
         # row-count array truncated before the table's count was read, and
-        # the two must not share an output (ground rule 14).
+        # the two must not share an output.
         strong_name["declares_public_key"] = False
         strong_name["public_key_size"] = 0
 
@@ -1463,7 +1462,7 @@ def parse_metadata_stream(
     # comes from — the managed analogue of an import table grouped by DLL.
     # Rows whose scope cannot be resolved are omitted and named: an
     # unresolvable scope must not read as a type provided by the current
-    # module (ground rule 14).
+    # module.
     typeref_cache: dict[int, str | None] = {}
     typedef_cache: dict[int, str | None] = {}
     if TYPE_REF in row_counts and row_counts[TYPE_REF] > 0:
@@ -1536,7 +1535,7 @@ def parse_metadata_stream(
     # the literals the compiler stored, not a scan's best guess. They are
     # promoted to the top-level ``strings`` key by binary.parse; a heap
     # blint could not walk leaves the block without the key and the native
-    # scan stays the fallback (ground rule 14).
+    # scan stays the fallback.
     if us_heap:
         # heap_reader() hands back an *absolute* offset (it already added
         # root_offset), so the walk bounds are absolute from here.
@@ -1669,7 +1668,7 @@ def parse_metadata_stream(
                 continue
             # The value window is capped by refusing further appends, not
             # by leaving the loop: InternalsVisibleTo rows anywhere in the
-            # table must still be reached (W3.4 merged the sweeps).
+            # table must still be reached (one sweep reads both attributes).
             if len(target_frameworks) >= MAX_TARGET_FRAMEWORK_VALUES:
                 degr.add("target_framework_values_capped")
             else:
@@ -1694,7 +1693,7 @@ def parse_metadata_stream(
         # An empty CustomAttribute table is a determination: no DelaySign
         # row exists. A table missing from row_counts entirely may have
         # been dropped or truncated before its count was read, so the fact
-        # is withheld there instead (ground rule 14).
+        # is withheld there instead.
         strong_name["delay_sign"] = False
 
     # --- entry point ----------------------------------------------------------------
@@ -1772,7 +1771,7 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
                     "parse_status": "malformed",
                     "degradations": ["cli_header_unreadable"],
                 }
-            # The StrongNameSignature region (W3.4): mapped through the
+            # The StrongNameSignature region: mapped through the
             # section table like every other directory, read bounded, and
             # handed to the metadata parser as (bytes, declared size, gap).
             # The gap names why the bytes are missing - unmapped RVA, or a
@@ -1801,7 +1800,7 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
                 # the header contradicts itself and names no region. There is
                 # nothing to report a size for, but the contradiction is a
                 # fact about the file and is named rather than normalised
-                # away into a size of zero blint never read (rule 11).
+                # away into a size of zero blint never read.
                 strong_name_signature = (
                     None, 0, "strong_name_signature_directory_half_declared",
                 )
@@ -1838,9 +1837,9 @@ def parse_pe_dotnet(parsed_obj, exe_file: str) -> dict | None:
         entry_point_token=header["entry_point_token"],
         strong_name_signature=strong_name_signature,
     )
-    # W3.3 reads these to tell a ReadyToRun image from a plain IL assembly.
+    # pe_dotnet_shape reads these to tell a ReadyToRun image from a plain IL assembly.
     # They are carried on the block rather than re-read from the file there,
-    # so the CLI header is decoded in exactly one place (ground rule 21).
+    # so the CLI header is decoded in exactly one place.
     if isinstance(block, dict):
         block["managed_native_header_rva"] = header["managed_native_header_rva"]
         block["managed_native_header_size"] = header["managed_native_header_size"]

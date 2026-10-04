@@ -1,5 +1,5 @@
 /*
- * A13 review - the sibling library for the popctl fixture
+ * The sibling library for the popctl fixture
  * (liba13ctlfb_x86.so, the libfbjni stand-in). It defines the external
  * callees the registrar library reaches through its PLT: the sret class
  * finder (one word with a non-trivial destructor returns through a hidden

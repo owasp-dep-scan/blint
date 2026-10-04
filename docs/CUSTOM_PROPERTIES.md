@@ -62,7 +62,7 @@ These properties appear on the components that represent the files inside the ap
 
 ## Android native library properties
 
-Native libraries are components read from the app's zip in place (A1, the
+Native libraries are components read from the app's zip in place (the
 container model in `blint/lib/android_native.py`). There is one component
 per `(library name, version)` per logical app: every ABI the app ships for
 that library is an occurrence on the same component, so a five-ABI app does
@@ -82,16 +82,16 @@ its version.
 
 ## NuGet component properties
 
-These properties appear on `pkg:nuget` components (W3.5). A `pkg:nuget` purl is emitted only where blint has evidence a NuGet consumer can match: a CLI-header assembly identity for a managed binary, a `.deps.json` overlay for a published application, or the `.nuspec` inside a `.nupkg` archive input. A `.dll` filename alone produces `pkg:generic` — over corpus tiers 0/1/5, 217 of 219 `pkg:nuget` parents the old filename heuristic produced sat on native DLLs with no CLI header (`pkg:nuget/python313`, `pkg:nuget/libcrypto-3`), none of them a NuGet package id.
+These properties appear on `pkg:nuget` components. A `pkg:nuget` purl is emitted only where blint has evidence a NuGet consumer can match: a CLI-header assembly identity for a managed binary, a `.deps.json` overlay for a published application, or the `.nuspec` inside a `.nupkg` archive input. A `.dll` filename alone produces `pkg:generic` — over a corpus of reference, open-source and Windows system binaries, 217 of 219 `pkg:nuget` parents the old filename heuristic produced sat on native DLLs with no CLI header (`pkg:nuget/python313`, `pkg:nuget/libcrypto-3`), none of them a NuGet package id.
 
-The assembly version and the package version are different numbers (measured over the tier-2 corpus and a 21-package `dotnet list package` oracle: zero of 50 identities are string-equal, 31 differ semantically — Newtonsoft.Json 13.0.3 ships assembly version 13.0.0.0), so every `pkg:nuget` component that carries a version states which kind it holds. A package version is never synthesised from an assembly version.
+The assembly version and the package version are different numbers (measured over a corpus of .NET assemblies and a 21-package `dotnet list package` oracle: zero of 50 identities are string-equal, 31 differ semantically — Newtonsoft.Json 13.0.3 ships assembly version 13.0.0.0), so every `pkg:nuget` component that carries a version states which kind it holds. A package version is never synthesised from an assembly version.
 
 | Property                           | Object                        | Value type   | When emitted                                                    | What it captures                                                                                                                                                                                              |
 | ---------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `internal:version_source`          | every versioned pkg:nuget component | single value | Always, beside a version                                        | `assembly_version` (the four-part version the CLR binds against) or `package_version` (stated by a `.nuspec`, a `.deps.json` overlay, or a build BOM from `--src-dir-boms`). The one property a consumer matching these purls against NuGet advisories must read first. |
 | `internal:version_range`           | pkg:nuget dependency component | single value | `.nupkg` nuspec dependencies that are not exact pins             | The nuspec version grammar as written (`9.0.0` is a `>=` floor, `[4.5.0,)` an interval). Only an exact pin `[1.2.3]` becomes a purl version; a floor or interval is a version blint does not have.               |
 | `internal:dotnet_assemblyref_state`| managed binary parent component | single value | Whenever the file carries a CLI header                          | `read` (every AssemblyRef row listed — including a genuine zero, the netmodule shape), `capped`, or the dotnet block's `parse_status` (`partial`, `malformed`, `no_cli_metadata`). A managed component with no AssemblyRef components beside it must be distinguishable from one whose table blint could not read. |
-| `internal:nupkg_refusals`          | `.nupkg` input component       | comma list   | When the archive reader refused anything                         | Every rule-30 limit or hostile shape met while walking the archive (`member_path_unsafe`, `member_is_symlink`, `member_count_exceeds_cap`, `total_uncompressed_exceeds_cap`, `nuspec_member_exceeds_cap`, `member_depth_exceeds_cap`, `no_nuspec_member`, `multiple_nuspec_members`, `dependencies_listed_capped`, `archive_unreadable`), so a `.nupkg` that produced no package identity names why instead of vanishing. |
+| `internal:nupkg_refusals`          | `.nupkg` input component       | comma list   | When the archive reader refused anything                         | Every untrusted-input limit or hostile shape met while walking the archive (`member_path_unsafe`, `member_is_symlink`, `member_count_exceeds_cap`, `total_uncompressed_exceeds_cap`, `nuspec_member_exceeds_cap`, `member_depth_exceeds_cap`, `no_nuspec_member`, `multiple_nuspec_members`, `dependencies_listed_capped`, `archive_unreadable`), so a `.nupkg` that produced no package identity names why instead of vanishing. |
 | `internal:culture`                 | pkg:nuget AssemblyRef component | single value | Non-neutral cultures only                                       | The satellite assembly's culture, e.g. `zh-Hans`.                                                                                                                                                              |
 
 The public key token is a purl **qualifier**, not a property: `pkg:nuget/Newtonsoft.Json@13.0.0.0?token=30ad4fe6b2a6aeed`. A token in the purl is matchable by a consumer that has not found the component yet; the same token in a property is only visible after the component is found. Unsigned assemblies and unsigned AssemblyRefs carry no qualifier rather than an empty one.
@@ -280,7 +280,7 @@ The behavioural properties support static triage. A high severity behaviour such
 
 The service properties support data flow and third party review. The combination of `internal:detection` set to static and a nonzero `internal:reachableFlows` distinguishes an SDK that is merely bundled from one that the application actually uses, and the `data.flow` direction supports egress and ingress analysis.
 
-## Windows component identity (W4.5)
+## Windows component identity
 
 This section documents the purl schemes and identity properties blint uses for Windows inputs. The principle across all of them: the purl states only what the container or the binary itself declares, and every naming decision carries its evidence beside it, so a consumer can always tell a resource-named component from a filename-named one.
 
@@ -294,7 +294,7 @@ A native PE's parent component is named from its `OriginalFilename` VERSIONINFO 
 | `internal:filename_on_disk`  | The on-disk name, carried only when it differs from the resource — a mismatch is evidence, not noise. |
 | `internal:version_source`    | `version_info` (the resource), `package_identity` (a manifest), `deployment_identity` (ClickOnce), `assembly_version`/`package_version` (managed). |
 | `internal:signer_cn`         | The Authenticode signer common name, when a signature block parsed.        |
-| `internal:signing_class`     | The W2.4 signing class (`commercial_ov`, `microsoft_1st_party`, `self_signed`, ...). Absent when undetermined — absence never reads as `unsigned`. |
+| `internal:signing_class`     | The signing class (`commercial_ov`, `microsoft_1st_party`, `self_signed`, ...). Absent when undetermined — absence never reads as `unsigned`. |
 
 The purl stays `pkg:generic` unless a build BOM (`--src-dir-boms`) names the package: the overlay is consulted under the on-disk stem, the resource stem, and the `pkg:nuget/<name>` keys the BOM store holds, and an overlay hit may yield a `pkg:nuget` purl because a BOM naming the package is evidence, unlike a filename.
 

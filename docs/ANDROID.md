@@ -161,7 +161,7 @@ native side and `jni_static` / `jni_dynamic` edges for each bound row
 
 ## Known limits
 
-Every group the join leaves unbound, from the closing census over the
+Every group the join leaves unbound, measured over the reference
 corpus (43 APK/XAPK entries; `--disassemble` on, listing cap lifted;
 the counts are corpus-wide across every APK and ABI):
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""G0 — function-extent probe: blint's sizes next to .eh_frame FDEs, same run.
+"""Function-extent probe: blint's sizes next to .eh_frame FDEs, same run.
 
 LIEF's ``Binary.functions`` hands out wrapped sizes on stripped C++ libraries
 (a negative ``int32`` from its eh_frame walk sign-extended into ``uint64``),
 and every such function decodes from its start to the end of ``.text`` — on
 RnHello's arm64 ``libc++_shared.so`` that is 1,772 MB of metadata in 491 s.
-This probe measures, per file, exactly what the reviewer measured:
+This probe measures, per file:
 
 1. ``entries_past_exec_section`` — function entries from every list
    ``disassemble_functions`` reads (``FUNCTION_SYMBOLS`` buckets, first entry
@@ -17,8 +17,8 @@ This probe measures, per file, exactly what the reviewer measured:
    covers, how many carry a *positive* size that traces to neither named
    source: it is not the ``st_size`` the symbol buckets carry for that
    address (a symbol's st_size wins over both other sources) and it is not
-   the FDE range ``llvm-dwarfdump --eh-frame`` reports (ground rule 29: the
-   oracle is llvm-dwarfdump, named with its version, read in the same run).
+   the FDE range ``llvm-dwarfdump --eh-frame`` reports (the oracle
+   is llvm-dwarfdump, named with its version, read in the same run).
    An entry whose size *is* its st_size but whose st_size disagrees with the
    FDE is a source disagreement, not a blint defect; those are reported as
    ``symbol_vs_fde_disagreements`` and do not fail the run. Entries with no
@@ -30,7 +30,7 @@ This probe measures, per file, exactly what the reviewer measured:
 
 The exit code is non-zero when any entry the disassembler would use is wrong
 (past the section end, or a positive size disagreeing with the oracle), so a
-packet's gate is ``extent_probe.py <so>...``. arm32 (.ARM.exidx) inputs have
+change's gate is ``extent_probe.py <so>...``. arm32 (.ARM.exidx) inputs have
 no FDE oracle: counts 2 and 3 are then 0 with ``oracle: none`` printed, and
 only count 1 fails the run.
 

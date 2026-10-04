@@ -1,5 +1,5 @@
 /*
- * A7 K1 — the dex half of the RootBeer JNI-join fixture.
+ * The dex half of the RootBeer JNI-join fixture.
  *
  * Verbatim from scottyab/rootbeer (Apache-2.0) rootbeerlib
  * src/main/java/com/scottyab/rootbeer/RootBeerNative.java at tag 0.1.2

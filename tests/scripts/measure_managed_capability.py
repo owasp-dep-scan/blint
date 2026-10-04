@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""W3.2 measurements: the managed capability surface's finding deltas.
+"""Measurements: the managed capability surface's finding deltas.
 
-Three questions the packet commit must answer with numbers, not adjectives:
+Three questions to answer with numbers, not adjectives:
 
 1. What fired that did not fire before, per rule, per tier? The "before" is
-   the same metadata with this packet's new inputs removed (the dotnet
+   the same metadata with the managed surface's inputs removed (the dotnet
    block's typerefs/memberrefs/#US fields, the top-level strings
-   promotion, the PINVOKE dependency entries) — i.e. the W3.1 tree's view
+   promotion, the PINVOKE dependency entries) — i.e. the earlier tree's view
    of the same file — run through the same rule machinery.
 2. Which of the new managed rules fire on benign corpora, how often, and
-   with what evidence — the W2.4 CHECK_SIGNER_MISMATCH discipline:
+   with what evidence — the CHECK_SIGNER_MISMATCH discipline:
    measure before writing the severity down.
-3. The rule-34 distributions for the new fields: parse_status, the new
+3. The distributions for the new fields: parse_status, the new
    degradations, the typespec-parent counts, the #US export sizes.
 
 Usage: python tests/scripts/measure_managed_capability.py <tier-dir> [...]
@@ -49,10 +49,10 @@ def find_pe_files(tier_dir: Path):
 
 
 def strip_new_inputs(metadata: dict, parsed_obj) -> dict:
-    """Return the metadata as the W3.1 tree would have shaped it."""
+    """Return the metadata as the tree before the managed surface shaped it."""
     old = deepcopy(metadata)
     old.pop("strings_source", None)
-    # The W3.1 tree's strings key was the native byte scan; this packet
+    # The earlier strings key was the native byte scan; the managed surface
     # replaced it with the promoted #US literals.
     old["strings"] = parse_strings(parsed_obj)
     dotnet = old.get("dotnet")

@@ -3,7 +3,7 @@
 
 The table maps the SHA-256 fingerprint of every certificate in a Windows
 machine's trusted root stores to its subject facts, and flags the roots
-Microsoft operates. The signing-class derivation (plan 02/C) uses it to
+Microsoft operates. The signing-class derivation uses it to
 name the root a signature chain terminates at — a statement about the
 file, never a trust verdict: blint does not consult a live store, fetch
 CRL/OCSP data or build chains beyond what the signature blob itself ships
@@ -67,7 +67,7 @@ def main() -> int:
     # store names are Windows paths.
     store_list = "\n".join(f"  - 'LocalMachine\\{s}'" for s in stores)
     header = f"""\
-# blint's shipped root-anchor fingerprints (PE lane W2.4, plan 02/C).
+# blint's shipped root-anchor fingerprints.
 #
 # What was hashed: the DER of every certificate in the machine trusted
 # root stores of the Windows ARM64 VM ({export['host_build']}),
@@ -81,7 +81,7 @@ def main() -> int:
 # flag to separate first-party Microsoft roots from public ones. This is
 # a statement about the file's shipped chain, not about the world: blint
 # performs no trust validation, consults no live store and fetches no
-# revocation data (plan 02/D), so a root outside this snapshot reads as
+# revocation data, so a root outside this snapshot reads as
 # "outside the shipped snapshot", never as "untrusted" in the CryptoAPI
 # sense.
 

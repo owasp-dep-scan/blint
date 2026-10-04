@@ -1582,7 +1582,7 @@ def _arm32_pool_pair_proposals(
 
 
 def _function_starts(parsed_obj) -> dict[int, str]:
-    """Defined dynamic FUNCs plus the unwind-table discoveries (F1's set)."""
+    """Defined dynamic FUNCs plus the unwind-table discoveries (the join's set)."""
     from blint.lib.funcdisc.unwind import discover_functions
 
     starts: dict[int, str] = {}

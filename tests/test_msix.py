@@ -1,10 +1,10 @@
-"""Tests for the MSIX/Appx container reader (W4.1).
+"""Tests for the MSIX/Appx container reader.
 
-Ground rule 10: every format variant gets a fixture that reaches it —
+Every format variant gets a fixture that reaches it —
 plain package, bundle of nested packages, manifest-less archive, malformed
-manifest, hostile member paths, oversized packages. Ground rule 18: the
+manifest, hostile member paths, oversized packages. The
 temp-directory count delta is asserted across success and across every
-failure path, not read from the code. The real-artifact tests (rules 22/29)
+failure path, not read from the code. The real-artifact tests
 run against the Windows Terminal ``.msixbundle`` in the corpus and are
 skipped where the corpus is absent.
 """
@@ -175,7 +175,7 @@ def test_package_without_manifest_refused_by_name(tmp_path):
     assert reason is None
     shutil.rmtree(collection["temp_dir"], ignore_errors=True)
     assert "appx_manifest_missing" in collection["refusals"]
-    # The container metadata still states the refusal (rule 32) rather than
+    # The container metadata still states the refusal rather than
     # reading as a package with no facts.
     metadata = container_metadata(collection, package)
     assert "appx_manifest_missing" in metadata["container"]["refusals"]
@@ -215,7 +215,7 @@ def test_symlink_member_refused(tmp_path):
 
 
 def test_oversized_nested_package_refused(tmp_path):
-    """Ground rule 33: the cap has a fixture that exceeds it. A nested
+    """The cap has a fixture that exceeds it. A nested
     package past the declared-size cap is refused by the walk before a byte
     is decompressed, and the manifest-listed package that never extracted is
     named too."""
@@ -280,7 +280,7 @@ def test_container_metadata_shape_and_exe_type(tmp_path):
 
 
 def test_leak_delta_across_success_and_failures(tmp_path):
-    """Ground rule 18 asserted, not read: zero live blint_msix_ directories
+    """Cleanup asserted, not read: zero live blint_msix_ directories
     beyond the one the caller still owns, after every path."""
     before = _live_msix_temp_dirs()
 
@@ -328,8 +328,7 @@ def test_parse_signature_p7x_rejects_non_p7x_bytes():
 
 def test_sbom_process_msix_file(tmp_path):
     """The BOM carries the package as parent (manifest identity, not
-    filename), members keyed by container path, and refusals as a property
-    (rule 32)."""
+    filename), members keyed by container path, and refusals as a property."""
     from blint.lib.sbom import _scratch_sbom, process_msix_file
 
     package = _build_package(tmp_path / "sbom.msix")
@@ -369,9 +368,9 @@ def _corpus_bundle():
 
 @pytest.mark.skipif(_corpus_bundle() is None, reason="corpus tier3 not present")
 def test_real_windows_terminal_bundle_ground_truth():
-    """Rules 22/29: the real Store bundle. The facts asserted here were
+    """The real Store bundle. The facts asserted here were
     cross-checked against the Windows 11 VM's MakeAppx unpack and
-    Get-AppxPackage (see the packet's gate block)."""
+    Get-AppxPackage."""
     collection, reason = collect_msix_detailed(_corpus_bundle())
     assert reason is None
     try:
@@ -455,7 +454,7 @@ def test_real_bundle_metadata_exports_and_container_findings(tmp_path):
 def test_binary_count_cap_is_named_not_silently_truncated(tmp_path, monkeypatch):
     """A package shipping more PE members than the cap says so.
 
-    Ground rule 33: the fixture exceeds the cap rather than sitting under
+    The fixture exceeds the cap rather than sitting under
     it. The refusal was previously appended after the list had already been
     sliced to the cap, so the condition could not hold for any input and a
     package over the cap analysed the first ``MAX_MEMBER_BINARIES`` members

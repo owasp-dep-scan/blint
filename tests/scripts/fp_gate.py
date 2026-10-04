@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """False-positive gate: findings counts per rule, severity and file, by format and architecture.
 
-This is the F0 measurement instrument for the ELF/Mach-O false-positive lane
-(and it covers the PE lane's corpus unchanged — the PE lane's fp_gate.sh was
+This is the measurement instrument for the ELF/Mach-O false-positive corpus
+(and it covers the PE corpus unchanged — the PE-side fp_gate.sh was
 never committed, so this is written new rather than extended). It is a
 *measurement tool*, not a verdict gate: it always exits 0 (unless blint
 itself fails to run), and the numbers it emits are the input to the
-human-run classification in F0.2.
+human-run classification (fp_classify.py).
 
 What it does:
 
@@ -33,7 +33,7 @@ What it does:
    - findings per severity;
    - findings per file;
    - the median findings per file, over files with at least one finding and
-     over all corpus files (both stated — the PE lane's historical medians
+     over all corpus files (both stated — the PE corpus's historical medians
      are over files with findings);
    - findings whose ``filename`` does not map to any manifest entry (these
      are reported, not silently dropped: a blint run that analyzed files the

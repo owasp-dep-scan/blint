@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tier-4 hostile fixtures for the Android native lane (A0.2 / A1.1).
+"""Tier-4 hostile fixtures for the Android native corpus.
 
 Every input here is deliberately malformed; none of it can come from a real
 tool, so each fixture is built to the format spec and names it:

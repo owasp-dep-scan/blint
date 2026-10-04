@@ -1,17 +1,17 @@
-"""The Windows posture summary (PE lane W5.5, plan 04/E).
+"""The Windows posture summary.
 
 One block that answers "what am I looking at" before the findings list:
 the signing class, the hardening properties split into present / absent /
 unknown, the driver kind, the container origin and the managed shape.
 
-Two rules this block exists to obey, both the reviewer's:
+Two rules this block exists to obey:
 
 - **It summarises, it never recomputes.** Every value is read from the
   block of record (``code_signature``, ``security_properties``,
   ``driver``, ``dotnet``, the container blocks) in the same parse, and
   ``sources`` names where each fact came from. Nothing here re-derives a
-  fact a second block already states, so the two cannot drift (rule 21).
-- **Absent and unknown are different values** (rule 32). A hardening
+  fact a second block already states, so the two cannot drift.
+- **Absent and unknown are different values**. A hardening
   property the source computed and found off is ``absent``; a property
   whose source was unreadable - the ``security_properties_gaps`` - is
   ``unknown``. A reader must never see "this driver lacks
@@ -48,7 +48,7 @@ _HARDENING_PROPERTIES: tuple[str, ...] = (
     "pie",
 )
 
-# The exe_types a Windows container/package reports (W4 lane) - the
+# The exe_types a Windows container/package reports - the
 # "container origin" the posture names.
 _CONTAINER_EXE_TYPES: set[str] = {
     "msi",
@@ -91,9 +91,9 @@ def build_windows_posture(metadata: dict[str, Any]) -> dict[str, Any] | None:
         return None
     block: dict[str, Any] = {}
 
-    # Signing: the W2.4 class, verbatim, only when it was determined. The
+    # Signing: the signing class, verbatim, only when it was determined. The
     # driver block's kernel-trust view is named as the second source when
-    # it exists (W5.1) so a reader sees both derivations and where each
+    # it exists so a reader sees both derivations and where each
     # came from.
     code_signature = metadata.get("code_signature") or {}
     if code_signature.get("signing_class"):
@@ -107,7 +107,7 @@ def build_windows_posture(metadata: dict[str, Any]) -> dict[str, Any] | None:
 
     hardening = _hardening_split(metadata)
     block["hardening"] = hardening
-    # Rule 21: the security summary speaks for one slice of an ARM64X
+    # The security summary speaks for one slice of an ARM64X
     # image; the posture carries the scope through rather than restating
     # the values without it.
     if metadata.get("security_properties_scope"):
@@ -121,16 +121,16 @@ def build_windows_posture(metadata: dict[str, Any]) -> dict[str, Any] | None:
     if driver.get("kind"):
         block["driver_kind"] = driver.get("kind")
 
-    # Container origin: the W4 packaging lane stamps exe_type with the
+    # Container origin: the container readers stamp exe_type with the
     # package kind; the container block's kind is the same fact one level
     # down and is named as the source when it is the one speaking.
     exe_type = str(metadata.get("exe_type") or "")
     if exe_type in _CONTAINER_EXE_TYPES:
         block["container_origin"] = exe_type
 
-    # Managed shape: the W3.3 shape kind when evidence produced one. A PE
+    # Managed shape: the shape kind when evidence produced one. A PE
     # with no CLI header and no shape evidence is NOT stamped "native" -
-    # that was W3.3's discipline and the posture keeps it (silence, not a
+    # that is the shape reader's rule and the posture keeps it (silence, not a
     # native verdict).
     dotnet = metadata.get("dotnet") or {}
     shape = dotnet.get("shape") or {}
@@ -141,7 +141,7 @@ def build_windows_posture(metadata: dict[str, Any]) -> dict[str, Any] | None:
 
     # No emptiness guard: `hardening` and `sources` are set unconditionally
     # above, so every PE carries a block - which is what the module
-    # docstring says and what rule 32 wants (a PE with nothing notable is
+    # docstring says (a PE with nothing notable is
     # still a PE blint looked at). The guard this replaced tested
     # `len(block) <= 1` and could never be true.
     return block

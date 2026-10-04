@@ -1,7 +1,7 @@
 package com.blint.a9.split;
 
 /**
- * A9 P3 - one merged JNINativeMethod table registered piecemeal through
+ * One merged JNINativeMethod table registered piecemeal through
  * per-class registrars, the fbjni registerNatives/registerHybrid shape.
  *
  * The table's five entries, in order:

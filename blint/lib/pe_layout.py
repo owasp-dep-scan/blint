@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PE layout forensics and the pre-main execution summary (W1.4, 01/B.5, B.1).
+"""PE layout forensics and the pre-main execution summary.
 
 The layout block turns the section-table and header facts a reverse engineer
 checks by hand into named fields: raw-vs-virtual size anomalies, zero raw
@@ -8,13 +8,12 @@ do not fit the toolchain the rich header names, the entry point outside
 ``.text`` or inside the last section, a ``SizeOfImage`` that disagrees with
 the section table, a truncated last section, and header-timestamp sanity.
 The fields are facts — every anomaly a reader could act on is measured over
-the benign corpus tiers and defended in the packet commit (ground rule 34);
-the rule layer, not the field, decides guilt.
+the benign corpus tiers; the rule layer, not the field, decides guilt.
 
 ``pre_main_execution`` is the one answer to "what runs before ``main``": TLS
 callbacks resolved to discovered functions, the writability of the TLS
 directory and callback array, and the static initializers LIEF recovers,
-under one summary per format (ground rule 21 — no second place to look).
+under one summary per format (no second place to look).
 """
 
 import contextlib
@@ -157,8 +156,8 @@ def _section_name(section) -> str:
 def _detect_section_toolchain(metadata: dict) -> str:
     """The toolchain the section-name expectation is keyed to.
 
-    Reads the provenance the other packets established: the .NET and Go
-    markers, then the rich header's linker record (W1.1). A MinGW build
+    Reads the provenance established elsewhere in the parse: the .NET and Go
+    markers, then the rich header's linker record. A MinGW build
     carries no rich header, so a ``.eh_frame``/``.gcc_*`` section names it —
     the one case where the sections themselves pick the expectation.
     """
@@ -197,7 +196,7 @@ def _align_up(value: int, alignment: int) -> int:
 
 
 def parse_pe_layout(parsed_obj: lief.PE.Binary, exe_file: str, metadata: dict) -> dict:
-    """The layout-forensics block for one PE image (01/B.5).
+    """The layout-forensics block for one PE image.
 
     Every field is computed from the section table, the optional header and
     the file size — never from another field's verdict. Fields that would be
@@ -361,7 +360,7 @@ def _section_writability(parsed_obj: lief.PE.Binary, section) -> bool | None:
 
 
 def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict:
-    """The one pre-``main`` summary for a PE image (01/B.1).
+    """The one pre-``main`` summary for a PE image.
 
     Unifies what the format offers: TLS callbacks (resolved to discovered
     functions when the address matches), the writability of the TLS
@@ -437,7 +436,7 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
             )
             if writable is not None:
                 # Stated either way, like ``tls_directory_writable``: a
-                # read-only array is a fact the reviewer wants, and only an
+                # read-only array is a fact a reviewer wants, and only an
                 # array no section covers leaves the field out.
                 block["tls_callback_array_writable"] = writable
                 block["tls_callback_array_section"] = _section_name(array_section)
@@ -477,7 +476,7 @@ def parse_pre_main_execution(parsed_obj: lief.PE.Binary, metadata: dict) -> dict
         # LIEF derives a PE image's ctor_functions from the TLS callback
         # array, so when the initializers are exactly the callbacks they
         # are one fact, not two: state the relationship instead of listing
-        # the same functions twice (ground rule 21).
+        # the same functions twice.
         ctors_are_callbacks = bool(callback_addresses) and all(
             func.get("address") in callback_addresses for func in all_ctors
         )

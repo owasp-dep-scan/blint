@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A11 fixtures (S1/S2/S3).
+# JNI run-time table registrar fixtures.
 #
 # liba11rt_<abi>.so - registrars for the tables built at run time, one shape
 # per registrar (see RtNative.java for each declaration's fate):

@@ -406,7 +406,7 @@ def enrich_with_bundle_context(
     """
     if not isinstance(metadata, dict):
         return metadata
-    # ``host_plugin`` (macOS plugin bundles, M1.1) reaches the metadata top
+    # ``host_plugin`` (macOS plugin bundles) reaches the metadata top
     # level through the walker's binary entries rather than the context
     # block, so the checks read one shape for PE and Mach-O and the block is
     # not duplicated under macos_bundle.
