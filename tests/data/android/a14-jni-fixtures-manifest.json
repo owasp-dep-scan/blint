@@ -1,5 +1,5 @@
 {
-    "packet": "A14 W1 (feat/an-a14)",
+    "packet": "A14 W1 and its review (feat/an-a14)",
     "host": "the reviewer Mac (macOS arm64, darwin 27.0.0)",
     "tools": {
         "ndk": "28.2.13676358 (r28c)",
@@ -15,9 +15,9 @@
     "build_script": "tests/scripts/android/build_a14_jni_fixtures.sh",
     "sources": "tests/scripts/android/jni_sources/a14_jna",
     "outputs": [
-        "liba14jna_<abi>.so (4 ABIs) - plain exported C symbols: a14_direct_add, a14_helper_mul, a14_via_init, a14_twin_echo, a14_ambiguous, a14_bootstrap_decoy, a14_bootstrap_real",
-        "liba14other_<abi>.so (4 ABIs) - the second exporter: a14_ambiguous (a real two-library ambiguity) and a14_helper_mul (the decoy the register constant must refuse)",
-        "a14-jna-classes.dex - five register shapes: A14Direct (constant at the call), A14Helper (constant from findLibraryName's fallback, uniffi's shape), A14ViaInit (the call inside a method the <clinit> runs), A14Ambiguous (process-library registration, no constant), A14Twin (no register anywhere), A14Bootstrap + A14RegisteredByBootstrap (a cross-class registration: evidence for no class)",
+        "liba14jna_<abi>.so (4 ABIs) - plain exported C symbols: a14_direct_add, a14_helper_mul, a14_via_init, a14_twin_echo, a14_ambiguous, a14_bootstrap_decoy, a14_bootstrap_real, a14_caller_decoy, a14_self_registrar, a14_stale, a14_branch, a14_outer_fn",
+        "liba14other_<abi>.so (4 ABIs) - the second exporter: a14_ambiguous, a14_stale and a14_branch (two-library ambiguities with no constant naming the library) and a14_helper_mul (the decoy the register constant must refuse)",
+        "a14-jna-classes.dex - the register shapes: A14Direct (constant at the call), A14Helper (constant from findLibraryName's fallback, uniffi's shape), A14ViaInit (the call inside a method the <clinit> runs), A14Ambiguous (process-library registration, no constant), A14Twin (no register anywhere), A14Bootstrap + A14RegisteredByBootstrap (a literal registering another class: that class binds), A14Caller + A14SelfRegistrar (a <clinit> running another class's self-registration: only the registrar's class binds), A14Stale and A14Branch (no constant on every path: ambiguous), A14Outer + A14Outer$Init (the caller-class overload from a nested class without natives: the enclosing class binds)",
         "a14-jna.apk - the dex plus liba14jna.so, liba14other.so and the libjnidispatch.so name-presence stub in all four ABIs",
         "a14-jna-nodispatch.apk - the arm64 copies without the dispatch stub: no binding where JNA cannot load"
     ],

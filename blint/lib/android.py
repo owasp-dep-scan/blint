@@ -1495,8 +1495,7 @@ def collect_files_metadata(
     unzip_unsafe(unpack_target or app_file, app_temp_dir)
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
     # Native libraries come from the zip in place (the container model),
-    # not from
-    # the unzip tree.
+    # not from the unzip tree.
     file_components += collect_so_files_metadata(
         app_file, app_facts=app_facts, use_blintdb=use_blintdb
     )

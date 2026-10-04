@@ -86,19 +86,24 @@ strings and a bound native).
 `blint sbom` emits:
 
 - one application component for the app (`pkg:android/<package>`);
-- one library component per shipped `.so`
-  (`pkg:android/<name>?arch=<abi>`), with the binary's own version
-  evidence where it exists;
-- **nested** components for identified frameworks — emitted only from
-  version-bearing evidence (a version string, a symbol set, or a blintdb
-  hash named in the identifying commit; a file name alone is a hint
-  property, never a component): NDK libc++, Flutter, React Native /
-  Hermes / fbjni, BoringSSL / OpenSSL / NSS, VLC, Qt5 and more
-  (`blint/lib/banners.py`, `blint/lib/android_blintdb.py`). `--use-blintdb`
-  enriches identification from the blint-db corpus; `--use-blintdb
-  --deep` adds disassembly-hash matching before the symbol fallback.
-- the dependency graph: the app depends on every native component, and a
-  nested framework attaches to the library that carries its evidence.
+- one library component per shipped library name and version
+  (`pkg:android/<name>@<version>?abi=<abi>,<abi>`): a library that ships
+  in five ABIs is one component with five evidence lines, never five
+  near-duplicates;
+- framework identification from named evidence only (a version string,
+  a symbol set, or a blintdb match; a file name alone is the
+  `blint:hint:file_name` property, never a component): NDK libc++,
+  Flutter, React Native / Hermes / fbjni, BoringSSL / OpenSSL / NSS,
+  VLC, Qt5 and more (`blint/lib/banners.py`,
+  `blint/lib/android_blintdb.py`). When every copy of a library carries
+  the same identification, the framework component takes the library
+  component's place; a statically linked framework nests as a child of
+  the library that carries it. `--use-blintdb` adds blint-db symbol
+  matching (a match nests as a child, and replaces the library's
+  identity only when its `DT_SONAME` is one of the project's own
+  library names); `--use-blintdb --deep` adds disassembly-hash matching
+  before the symbol fallback.
+- the dependency graph: the app depends on every native component.
 
 ## The dex↔native JNI join
 
@@ -122,18 +127,21 @@ is in `docs/METADATA.md`). Five lists, and what each row proves:
     run time (no static triple exists); only the i386 and arm32
     word-store shapes recover, every word is a store the walk saw and
     every fnPtr passes the function-start oracle;
-  - `confirmed_by: "jna_direct"` — JNA direct mapping: the declaring
-    class (or a method its `<clinit>` runs) invokes
-    `com.sun.jna.Native.register` in the dex, `libjnidispatch.so` ships
-    in that ABI, and exactly one same-ABI library exports the method
-    name as a defined dynamic `FUNC` — the register call's constant
-    library name (at the call, or the one constant the invoked helper
-    returns) picks the candidate library, JNA mapping `foo` to
-    `libfoo.so`. This is how uniffi bindings bind (Mozilla's
-    applications-services megazord and glean-in-libxul, element's
-    matrix-sdk-crypto): the VM never looks these names up, JNA's
-    `Native.register` binds each static native to the exported symbol
-    of the same name, so the join reads the same evidence JNA does.
+  - `confirmed_by: "jna_direct"` — JNA direct mapping: a
+    `com.sun.jna.Native.register` call in the dex registers the
+    declaring class (its class literal on every path to the call, or,
+    for the overloads without a `Class` argument, the calling class or
+    the nearest enclosing class that declares a native method),
+    `libjnidispatch.so` ships in that ABI, and exactly one same-ABI
+    library exports the method name as a defined dynamic `FUNC`. The
+    register call's library name, when one constant holds on every path
+    (at the call, or the one constant the invoked helper returns), picks
+    the candidate library, JNA mapping `foo` to `libfoo.so`. This is how
+    uniffi bindings bind (Mozilla's application-services megazord and
+    glean in libxul, element's matrix-sdk-crypto): the VM never looks
+    these names up; `Native.register` binds each native method of the
+    registered class to the exported symbol of the same name, so the
+    join reads the same evidence JNA does.
 - **`ambiguous_dynamic`** — the name and signature match recovered table
   entries, but the class-less evidence cannot say which declaration it
   implements (several declaring classes, or several entries); a row that
@@ -159,15 +167,15 @@ the counts are corpus-wide across every APK and ABI):
 
 | Group | Rows | Why it stays unbound | Could more code reach it? |
 |---|---|---|---|
-| maplibre jni.hpp (`org.maplibre.android.*`, element) | 2,112 (528 × 4 per-ABI builds) | registrations built at run time: the entries pass as vararg references to stack temporaries (bulk copy) or through a builder storing via a stack-passed pointer | not without 64-bit stack-argument seeding plus builder modelling — deliberately out of scope (A13 U2) |
+| maplibre jni.hpp (`org.maplibre.android.*`, element) | 2,112 (528 × 4 per-ABI builds) | registrations built at run time: the entries pass as vararg references to stack temporaries (bulk copy) or through a builder storing via a stack-passed pointer | not without 64-bit stack-argument seeding plus builder modelling — out of scope |
 | netty + jansi (vlc) | 1,024 (256 × 4 per-ABI builds) | no implementing library ships in the APK (optional natives; the loader falls back silently) | no — there is nothing to bind to |
 | Qt5 (`org.qtproject.qt5.android.*`, osmand) | 292 (73 × 4 per-ABI builds) | Qt's platform plugin (`libqtforandroid.so`) does not ship; libQt5Core's own `initJNI` table binds its 7 rows already | no — there is nothing to bind to |
-| `androidx.graphics.path` (every Compose app) | 120 (8 × 15 app-ABIs) | the `RegisterNatives` tables are static and relocated, but every fnPtr lands on a function with no dynsym symbol and no eh_frame row (5 FDEs total, none on the JNI functions) — the function-start oracle refuses, honestly | only by weakening the fn-start oracle; refused (A10's "cause A" ruling) |
+| `androidx.graphics.path` (every Compose app) | 120 (8 × 15 app-ABIs) | the `RegisterNatives` tables are static and relocated, but every fnPtr lands on a function with no dynsym symbol and no eh_frame row (5 FDEs total, none on the JNI functions) — the function-start oracle refuses, honestly | only by weakening the fn-start oracle, which the join refuses |
 | soloader composition (`com.facebook.react.soloader.*`) | 21 per ABI | the composition happens at run time in Java (`SoLoader` merges libraries); no static table exists | no — out of reach by construction |
 | yoga wrappers (RnHello, v7a) | 54 per app-ABI | the fnPtrs point at symbol-less, exidx-less Thumb tail-call wrappers | no — the refusal is the oracle working |
-| RnHello no-ABI singles (`pushLong`, `putLong`, `installGlobals`, `JSCExecutor.initHybrid`), `nativeReadByte`, x86 `runStdFunctionImpl` | 7 per app | registered by registrars whose class materialization sits on a cold path the linear walk cannot pair (x86 epilogue crossing), or a static fn-start refusal | documented residue (A13) |
+| RnHello no-ABI singles (`pushLong`, `putLong`, `installGlobals`, `JSCExecutor.initHybrid`), `nativeReadByte`, x86 `runStdFunctionImpl` | 7 per app | registered by registrars whose class materialization sits on a cold path the linear walk cannot pair (x86 epilogue crossing), or a static fn-start refusal | residue |
 | realm / zstd-jni / webrtc / gecko / flutter-embedding / vlc-medialibrary optional natives | ~204 | optional natives whose implementing library is not shipped or registered from code the join does not model | no |
 
-Everything else that was unbound at A13 on this corpus — the 6,045
-JNA-direct rows of fennec, element and glean — binds with A14
-(`confirmed_by: "jna_direct"`).
+Outside these groups, the corpus's uniffi declarations — 6,045 rows in
+fennec (application-services and glean) and element — bind through JNA
+direct mapping (`confirmed_by: "jna_direct"`).

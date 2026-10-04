@@ -362,135 +362,103 @@ def _jna_register_indices(methods: list) -> list[int]:
     return indices
 
 
-def _jna_string_argument(instructions, position: int) -> tuple[str | None, str | None]:
-    """``(constant, helper)`` for the register call's String argument: the
-    const-string at the call itself, or - when the argument is a
-    move-result - the invoke whose returned value reaches it (its own
-    constant is then read by ``_jna_helper_constant``)."""
-    from blint.lib.dalvik_semantics import is_invoke
-
-    reaching: dict[int, tuple[str, str | None]] = {}
-    pending_invoke: str | None = None
-    for inst in instructions[:position]:
-        if is_invoke(inst) and inst.target:
-            pending_invoke = str(inst.target)
-        elif inst.name in ("const-string", "const-string/jumbo") and inst.target is not None:
-            if inst.registers:
-                reaching[inst.registers[0]] = ("const", inst.target)
-        elif inst.name in ("move-result-object", "move-result") and inst.registers:
-            reaching[inst.registers[0]] = ("result", pending_invoke)
-    for register in reversed(instructions[position].registers or []):
-        kind, value = reaching.get(register, (None, None))
-        if kind == "const":
-            return value, None
-        if kind == "result":
-            return None, value
-    return None, None
+def _jna_direct_mapped_class(
+    caller: str, native_classes: set[str], defined_classes: set[str]
+) -> str | None:
+    """The class JNA's caller-class ``register`` overloads bind: the calling
+    class when it declares a native method, else the nearest enclosing
+    class that does (JNA's ``findDirectMappedClass``). None when the walk
+    reaches a class this dex does not define."""
+    cls = caller
+    while cls in defined_classes:
+        if cls in native_classes:
+            return cls
+        if "$" not in cls:
+            return None
+        cls = cls.rsplit("$", 1)[0]
+    return None
 
 
 def _jna_helper_constant(
     methods_by_key: dict[str, object], pools, helper: str | None, depth: int = 2
 ) -> str | None:
-    """The one constant a helper returns, when exactly one const-string
-    flows into its ``return-object`` (uniffi's findLibraryName fallback
-    behind a Kotlin ``access$`` accessor). An accessor that just returns
-    another method's result is followed, one step per ``depth``."""
+    """The one constant a helper returns: the string constant held on every
+    path to a ``return-object``, or the constant a returned call's own
+    helper yields (one step per ``depth``, uniffi's Kotlin ``access$``
+    accessor in front of ``findLibraryName``). A return of a computed value
+    (uniffi's property override) names no constant. None unless exactly one
+    constant remains."""
     if not helper or depth < 0:
         return None
     method = methods_by_key.get(helper)
-    if method is None:
+    if method is None or not getattr(method, "bytecode", None):
         return None
     from blint.lib.dalvik import disassemble_method
-    from blint.lib.dalvik_semantics import is_invoke
+    from blint.lib.dalvik_dataflow import INVOKE_RESULT, STRING, analyze
 
     try:
         instructions = disassemble_method(method, pools)
+        flow = analyze(instructions)
     except Exception:  # one malformed method must not drop the evidence
         return None
-    reaching: dict[int, str] = {}
-    pending_invoke: str | None = None
     constants: set[str] = set()
-    tail_calls: list[str] = []
     for inst in instructions:
-        if is_invoke(inst) and inst.target:
-            pending_invoke = str(inst.target)
-        elif inst.name in ("const-string", "const-string/jumbo") and inst.target is not None:
-            if inst.registers:
-                reaching[inst.registers[0]] = inst.target
-        elif inst.name in ("move-result-object", "move-result") and inst.registers:
-            reaching.pop(inst.registers[0], None)
-            if pending_invoke:
-                tail_calls.append(pending_invoke)
-        elif inst.name == "return-object" and inst.registers:
-            value = reaching.get(inst.registers[0])
-            if value is not None:
-                constants.add(value)
-    if len(constants) == 1:
-        return next(iter(constants))
-    for tail in tail_calls:
-        constant = _jna_helper_constant(methods_by_key, pools, tail, depth - 1)
-        if constant is not None:
-            return constant
-    return None
-
-
-def _jna_class_argument(instructions, position: int) -> str | None:
-    """The register call's ``Class`` argument, as dotted class name:
-    ``"self"`` for the one-argument overloads (JNA's caller-class forms),
-    the ``const-class`` literal's type when the overload takes a leading
-    ``Class``, and ``None`` when such an argument reaches the call
-    unresolvable (a passed-in parameter, not a class literal - the class
-    being registered cannot be named, so the site names no class)."""
-    invoke = instructions[position]
-    takes_class = f"{_JNA_NATIVE_CLASS}->register(Ljava/lang/Class;" in str(invoke.target)
-    registers = invoke.registers or []
-    if not takes_class:
-        return "self"
-    reaching: dict[int, str] = {}
-    for inst in instructions[:position]:
-        if inst.name == "const-class" and inst.registers and inst.target is not None:
-            reaching[inst.registers[0]] = str(inst.target)
-        elif inst.name in ("move-result-object", "move-result") and inst.registers:
-            reaching.pop(inst.registers[0], None)
-    if not registers:
-        return None
-    literal = reaching.get(registers[0])
-    return _dotted_class(literal) if literal else None
+        if inst.name != "return-object" or not inst.registers:
+            continue
+        value = flow.state_before.get(inst.offset, {}).get(inst.registers[0])
+        if value is None:
+            continue
+        if value.kind == STRING:
+            constants.add(value.value)
+        elif value.kind == INVOKE_RESULT:
+            constant = _jna_helper_constant(methods_by_key, pools, str(value.value), depth - 1)
+            if constant is not None:
+                constants.add(constant)
+    return next(iter(constants)) if len(constants) == 1 else None
 
 
 def collect_jna_register_facts(dex_metadata: dict) -> dict[str, dict]:
     """JNA direct-mapping registration evidence from one dex.
 
-    Returns ``{dotted class: {"library": name-or-None}}`` for every class
-    whose ``<clinit>`` runs ``com.sun.jna.Native.register`` - the call
-    itself, or one in a method the ``<clinit>`` invokes. JNA binds each
-    static native of such a class, at run time, to the exported symbol of
-    the same name in the registered library, so this evidence is what
-    makes a plain-name export a candidate for those declarations. A
-    ``Class``-taking overload counts only when its class argument is the
-    caller's own class literal (JNA's self-registration idiom); a call
-    registering another class, or one whose class argument is a parameter,
-    is evidence for no class here. ``library`` is the constant the call
-    passes, or the one constant the invoked helper returns
-    (``findLibraryName``'s fallback); None when the name is computed.
-    Several sites keep the first that names a library.
+    Returns ``{dotted class: {"library": name-or-None}}`` for every class a
+    ``com.sun.jna.Native.register`` call in this dex registers. JNA binds
+    each native method of the registered class, at run time, to the
+    exported symbol of the same name in the registered library, so this
+    evidence is what makes a plain-name export a candidate for those
+    declarations. The registered class is the call's ``Class`` argument
+    when a class literal holds it on every path to the call; the
+    caller-class overloads register the calling class, or the nearest
+    enclosing class that declares a native method. A ``Class`` argument
+    the dex does not name (a parameter) is evidence for no class, and a
+    class that merely calls another class's registrar is never the
+    registered one. ``library`` is the string constant the call passes on
+    every path, or the one constant the invoked helper returns (uniffi's
+    ``findLibraryName`` fallback); None when the name is computed, or when
+    two calls registering the class disagree.
     """
     from blint.lib.dalvik import DexPools, disassemble_method
-    from blint.lib.dalvik_semantics import is_invoke
+    from blint.lib.dalvik_dataflow import CLASS, INVOKE_RESULT, STRING, analyze
 
     methods = dex_metadata.get("methods") or []
     register_indices = _jna_register_indices(methods)
     if not register_indices:
         return {}
-    pools: DexPools | None = None
-    methods_by_key: dict[str, object] = {}
+    native_classes: set[str] = set()
+    defined_classes: set[str] = set()
     for method in methods:
-        rendered = DexPools._render_method(method)
-        if rendered and "->" in rendered:
-            methods_by_key.setdefault(rendered, method)
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            if not method.has_class:
+                continue
+            owner = _dotted_class(method.cls.fullname)
+            if _is_native_access(method.access_flags):
+                native_classes.add(owner)
+                defined_classes.add(owner)
+            elif getattr(method, "bytecode", None):
+                defined_classes.add(owner)
+    pools: DexPools | None = None
+    methods_by_key: dict[str, object] | None = None
     patterns = [index.to_bytes(2, "little") for index in register_indices]
-    # (dotted class, method name) -> the site's library constant, if any
-    sites: dict[tuple[str, str], str | None] = {}
+    registered: dict[str, set[str | None]] = {}
     for method in methods:
         bytecode = getattr(method, "bytecode", None)
         if not bytecode:
@@ -498,67 +466,52 @@ def collect_jna_register_facts(dex_metadata: dict) -> dict[str, dict]:
         raw = bytes(bytecode)
         if not any(pattern in raw for pattern in patterns):
             continue
+        caller = ""
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            caller = _dotted_class(method.cls.fullname) if method.has_class else ""
+        if not caller or caller.startswith("com.sun.jna."):
+            continue
         if pools is None:
             try:
                 pools = DexPools.from_metadata(dex_metadata)
             except (AttributeError, TypeError, ValueError):
                 break
         try:
-            instructions = disassemble_method(method, pools)
+            flow = analyze(disassemble_method(method, pools))
         except Exception:
             continue
-        caller = ""
-        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
-            caller = _dotted_class(method.cls.fullname) if method.has_class else ""
-        if not caller or caller == "com.sun.jna.Native":
-            continue
-        for position, inst in enumerate(instructions):
-            if not (is_invoke(inst) and inst.target):
+        for site in flow.call_sites:
+            target = str(site.method or "")
+            if not target.startswith(f"{_JNA_NATIVE_CLASS}->register("):
                 continue
-            if f"{_JNA_NATIVE_CLASS}->register" not in str(inst.target):
+            if target.startswith(f"{_JNA_NATIVE_CLASS}->register(Ljava/lang/Class;"):
+                literal = site.arguments[0] if site.arguments else None
+                cls = (
+                    _dotted_class(str(literal.value))
+                    if literal is not None and literal.kind == CLASS
+                    else None
+                )
+            else:
+                cls = _jna_direct_mapped_class(caller, native_classes, defined_classes)
+            if cls is None:
                 continue
-            class_argument = _jna_class_argument(instructions, position)
-            if class_argument is None or (class_argument != "self" and class_argument != caller):
-                # registers another class, or a class the walk cannot name
-                continue
-            constant, helper = _jna_string_argument(instructions, position)
-            if constant is None:
-                constant = _jna_helper_constant(methods_by_key, pools, helper)
-            key = (caller, str(method.name))
-            if key not in sites or (sites[key] is None and constant is not None):
-                sites[key] = constant
-    if not sites:
-        return {}
-    by_class: dict[str, str | None] = {}
-    for (caller, _method_name), constant in sites.items():
-        if caller not in by_class or (by_class[caller] is None and constant is not None):
-            by_class[caller] = constant
-    # a <clinit> that runs a helper method carrying the call itself
-    for method in methods:
-        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
-            if str(method.name) != "<clinit>" or not method.has_class:
-                continue
-            owner = _dotted_class(method.cls.fullname)
-        if owner in by_class or not getattr(method, "bytecode", None):
-            continue
-        if pools is None:
-            break
-        try:
-            instructions = disassemble_method(method, pools)
-        except Exception:
-            continue
-        for inst in instructions:
-            if not (is_invoke(inst) and inst.target):
-                continue
-            target = str(inst.target)
-            for (helper_class, helper_name), constant in sites.items():
-                if helper_class == owner or helper_name == "<clinit>":
-                    continue
-                if not target.startswith(f"L{helper_class.replace('.', '/')};->{helper_name}("):
-                    continue
-                if owner not in by_class or (by_class[owner] is None and constant is not None):
-                    by_class[owner] = constant
-    return {cls: {"library": constant} for cls, constant in by_class.items()}
+            library = None
+            name = site.arguments[-1] if "Ljava/lang/String;)" in target else None
+            if name is not None and name.kind == STRING:
+                library = name.value
+            elif name is not None and name.kind == INVOKE_RESULT:
+                if methods_by_key is None:
+                    methods_by_key = {}
+                    for candidate in methods:
+                        rendered = DexPools._render_method(candidate)
+                        if rendered and "->" in rendered:
+                            methods_by_key.setdefault(rendered, candidate)
+                library = _jna_helper_constant(methods_by_key, pools, str(name.value))
+            registered.setdefault(cls, set()).add(library)
+    return {
+        cls: {"library": next(iter(libraries)) if len(libraries) == 1 else None}
+        for cls, libraries in registered.items()
+    }
 
 
 # ----------------------------------------------------- the static join
@@ -643,8 +596,40 @@ def join_static(dex_natives: list[dict], surface: dict | None) -> dict:
 # ---------------------------------------------------- the app-level summary
 
 # Listing bound for the exported summary, the same shape of cap the other
-# app summaries use (a listing bound only; no rule reads these lists).
+# app summaries use. The callgraph's JNI edges and the reviews read the
+# full join (``build_jni_join_summary(..., capped=False)``); only the
+# metadata copy is cut (``cap_jni_join``).
 JOIN_LISTING_CAP = 256
+_JOIN_LISTS = (
+    "bound",
+    "bound_dynamic",
+    "ambiguous_dynamic",
+    "unbound_dex_natives",
+    "undeclared_exports",
+)
+
+
+def _cap_join_lists(abi_join: dict) -> dict:
+    """One ABI's join with each list cut to its first ``JOIN_LISTING_CAP``
+    entries and a ``<list>_truncated`` flag beside a cut one."""
+    capped = dict(abi_join)
+    for key in _JOIN_LISTS:
+        full = abi_join.get(key) or []
+        capped[key] = full[:JOIN_LISTING_CAP]
+        if len(full) > JOIN_LISTING_CAP:
+            capped[f"{key}_truncated"] = True
+    return capped
+
+
+def cap_jni_join(join: dict) -> dict:
+    """The metadata copy of a full join summary: every listing cut to
+    ``JOIN_LISTING_CAP`` entries, the counts untouched."""
+    capped = dict(join)
+    capped["load_library"] = (join.get("load_library") or [])[:JOIN_LISTING_CAP]
+    capped["per_abi"] = {
+        abi: _cap_join_lists(abi_join) for abi, abi_join in (join.get("per_abi") or {}).items()
+    }
+    return capped
 
 
 def _slot_address(table_entry: dict) -> int | None:
@@ -681,6 +666,7 @@ def _join_abi_lists(
     jna_registers: dict[str, dict] | None = None,
     jna_dispatch_abis: set[str] | None = None,
     plain_exports: dict[tuple[str, str], dict[str, str] | None] | None = None,
+    capped: bool = True,
 ) -> dict:
     """One ABI's join across every library that ships in it.
 
@@ -699,8 +685,8 @@ def _join_abi_lists(
     exactly one of the pair's declaring classes and exactly one candidate
     entry names it; anything the confirmer cannot decide stays ambiguous.
     What no table answers can still bind by name through JNA direct
-    mapping - the declaring class (or a method its ``<clinit>``
-    runs) invoked ``Native.register``, ``libjnidispatch.so`` ships in this
+    mapping - a ``Native.register`` call in the dex registers the
+    declaring class, ``libjnidispatch.so`` ships in this
     ABI, and exactly one same-ABI library exports the name (the register
     call's constant names the library when there is one, JNA mapping
     ``foo`` to ``libfoo.so``); those rows carry ``confirmed_by:
@@ -711,8 +697,9 @@ def _join_abi_lists(
     the confirmer resolved, in an ABI where no resolved registration
     names its class, carries ``candidates_registered_elsewhere``: a mark,
     not a binding. Its own registration, if any, is in a table the join
-    did not recover. Counts reflect the full sets; the lists are capped
-    at ``JOIN_LISTING_CAP`` with a ``truncated`` flag.
+    did not recover. Counts reflect the full sets; unless ``capped`` is
+    False the lists are cut at ``JOIN_LISTING_CAP`` with a ``truncated``
+    flag.
     """
     bound: list[dict] = []
     bound_dynamic: list[dict] = []
@@ -918,22 +905,13 @@ def _join_abi_lists(
             "unbound_dex_natives": len(unbound),
             "undeclared_exports": len(undeclared),
         },
-        "bound": bound[:JOIN_LISTING_CAP],
-        "bound_dynamic": bound_dynamic[:JOIN_LISTING_CAP],
-        "ambiguous_dynamic": ambiguous[:JOIN_LISTING_CAP],
-        "unbound_dex_natives": unbound[:JOIN_LISTING_CAP],
-        "undeclared_exports": undeclared[:JOIN_LISTING_CAP],
+        "bound": bound,
+        "bound_dynamic": bound_dynamic,
+        "ambiguous_dynamic": ambiguous,
+        "unbound_dex_natives": unbound,
+        "undeclared_exports": undeclared,
     }
-    for key_list, full in (
-        ("bound", bound),
-        ("bound_dynamic", bound_dynamic),
-        ("ambiguous_dynamic", ambiguous),
-        ("unbound_dex_natives", unbound),
-        ("undeclared_exports", undeclared),
-    ):
-        if len(full) > JOIN_LISTING_CAP:
-            result[f"{key_list}_truncated"] = True
-    return result
+    return _cap_join_lists(result) if capped else result
 
 
 def _confirm_ambiguous_tables(
@@ -1052,7 +1030,7 @@ def _library_join_facts(
 
 
 def build_jni_join_summary(
-    app_file: str, native: dict, confirm_findclass: bool = False
+    app_file: str, native: dict, confirm_findclass: bool = False, capped: bool = True
 ) -> dict | None:
     """The app-level dex <-> native static join.
 
@@ -1072,7 +1050,8 @@ def build_jni_join_summary(
     of every copy's parse.
     ``System.loadLibrary`` call sites map to ``lib<name>.so`` members.
     Bounded: counts always, the first ``JOIN_LISTING_CAP`` entries of
-    each list, ``truncated`` flags beside. ``confirm_findclass`` (set by
+    each list, ``truncated`` flags beside - or, with ``capped=False``,
+    every entry (``cap_jni_join`` cuts that copy later). ``confirm_findclass`` (set by
     ``--disassemble``) runs the FindClass confirmer over the
     (library, abi) copies that hold ambiguous tables and the JNA
     direct-mapping evidence walk over the app's dex; without it no row
@@ -1195,6 +1174,7 @@ def build_jni_join_summary(
             jna_registers=jna_registers,
             jna_dispatch_abis=jna_dispatch_abis,
             plain_exports=plain_exports,
+            capped=capped,
         )
     # Tables built at run time: where the join leaves dex natives unbound,
     # the registrar walk may still read the entry words off the stack.
@@ -1259,6 +1239,7 @@ def build_jni_join_summary(
                     jna_registers=jna_registers,
                     jna_dispatch_abis=jna_dispatch_abis,
                     plain_exports=plain_exports,
+                    capped=capped,
                 )
 
     # loadLibrary("x") -> libx.so member presence, per ABI where it ships.
@@ -1287,7 +1268,9 @@ def build_jni_join_summary(
             "load_library_sites": len(load_library),
             "abis": len(abis),
         },
-        "load_library": load_library_summary[:JOIN_LISTING_CAP],
+        "load_library": load_library_summary[:JOIN_LISTING_CAP]
+        if capped
+        else load_library_summary,
         "per_abi": per_abi,
     }
 
