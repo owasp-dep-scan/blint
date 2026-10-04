@@ -274,5 +274,33 @@ def extract_zip_members(
     return extracted
 
 
+def extract_zip_to_dir(
+    zip_path: str,
+    dest_dir: str,
+    limits: ContainerLimits,
+    refusals: list[str],
+) -> dict[str, str]:
+    """Open a zip at ``zip_path`` and extract its accepted members into
+    ``dest_dir`` under ``limits``.
+
+    The one bounded replacement for a bare ``ZipFile(...).extractall()`` on
+    untrusted input: it walks the central directory through
+    :func:`walk_zip_members` (member-count, total-size, per-member-size,
+    compression-ratio, depth, path-safety and symlink bounds, each refusal
+    named) and extracts the survivors through :func:`extract_zip_members`
+    (streamed, size enforced against bytes actually read). A container that
+    cannot be opened at all is named ``archive_unreadable`` rather than
+    raising, so a scan survives a hostile archive the same way it survives a
+    hostile member.
+    """
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            members = walk_zip_members(archive, limits, refusals)
+            return extract_zip_members(archive, members, dest_dir, limits, refusals)
+    except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError):
+        refusals.append("archive_unreadable")
+        return {}
+
+
 class _MemberTooLarge(Exception):
     """Internal: the extracted bytes exceeded the declared size or cap."""

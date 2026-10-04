@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any, Literal
 
+from rich.markup import escape as _rich_escape
 from rich.progress import Progress, TaskID
 
 from blint.config import BlintOptions
@@ -674,8 +675,26 @@ class AnalysisRunner:
             wasm_call_graph=blint_options.wasm_call_graph,
             sdk_path=blint_options.sdk_path,
         )
-        if file_sha and cache.put(file_sha, self._parse_options_digest, metadata):
-            self._mark_cache("stored", unit_role)
+        # Re-hash after parse and store only when the file's bytes did not
+        # change between the pre-parse hash and now (CWE-367). Without this,
+        # a file swapped mid-parse — a scanner racing a build that rewrites
+        # the artifact, or any writer to a shared input — would store the new
+        # content's metadata under the old content's hash and replay it
+        # forever. The parse cache is best-effort, so a detected swap simply
+        # skips the store rather than failing the scan; the just-parsed
+        # metadata is still returned for this run.
+        post_sha = sha256_file(file_path)
+        if file_sha and post_sha == file_sha:
+            if cache.put(file_sha, self._parse_options_digest, metadata):
+                self._mark_cache("stored", unit_role)
+        elif file_sha and post_sha != file_sha:
+            LOG.debug(
+                "Not caching %s: file content changed during parse "
+                "(sha %s -> %s)",
+                file_path,
+                file_sha[:12],
+                (post_sha or "unreadable")[:12] if post_sha else "unreadable",
+            )
         return metadata
 
     def _process_files(self, f: str, blint_options: BlintOptions) -> None:
@@ -684,7 +703,7 @@ class AnalysisRunner:
         """
         assert self.task is not None
         self.progress.update(
-            self.task, description=f"Processing [bold]{os.path.basename(f)}[/bold]"
+            self.task, description=f"Processing [bold]{_rich_escape(os.path.basename(f))}[/bold]"
         )
         wants_callgraph_outputs = (
             blint_options.render_mermaid_callgraph
@@ -787,7 +806,7 @@ class AnalysisRunner:
                 role = entry["role"]
                 self.progress.update(
                     self.task,
-                    description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
+                    description=f"Processing [bold]{_rich_escape(os.path.basename(bin_path))}[/bold] ({role})",
                 )
                 # Each contained binary is its own unit: a member that fails to
                 # parse must not take the whole archive down with it.
@@ -832,7 +851,7 @@ class AnalysisRunner:
             role = entry["role"]
             self.progress.update(
                 self.task,
-                description=f"Processing [bold]{os.path.basename(bin_path)}[/bold] ({role})",
+                description=f"Processing [bold]{_rich_escape(os.path.basename(bin_path))}[/bold] ({role})",
             )
             # Each member is its own unit: a member that fails to parse must
             # not take the whole bundle down with it.
@@ -881,7 +900,7 @@ class AnalysisRunner:
                     continue
                 self.progress.update(
                     self.task,
-                    description=f"Processing [bold]{member_name}[/bold] (sfx-member)",
+                    description=f"Processing [bold]{_rich_escape(member_name)}[/bold] (sfx-member)",
                 )
                 self._mark_attempted("sfx-member")
                 try:
@@ -937,7 +956,7 @@ class AnalysisRunner:
                 try:
                     self.progress.update(
                         self.task,
-                        description=f"Processing [bold]{member_name}[/bold] (msg-attachment)",
+                        description=f"Processing [bold]{_rich_escape(member_name)}[/bold] (msg-attachment)",
                     )
                     attachment_metadata = self._parse_with_cache(
                         member_path, blint_options, "msg-attachment"
@@ -1007,8 +1026,8 @@ class AnalysisRunner:
                     self.progress.update(
                         self.task,
                         description=(
-                            f"Processing [bold]{os.path.basename(bin_path)}[/bold] "
-                            f"({entry.get('container_path')})"
+                            f"Processing [bold]{_rich_escape(os.path.basename(bin_path))}[/bold] "
+                            f"({_rich_escape(str(entry.get('container_path') or ''))})"
                         ),
                     )
                     self._mark_attempted("msix-member")
@@ -1085,7 +1104,7 @@ class AnalysisRunner:
                     continue
                 self.progress.update(
                     self.task,
-                    description=f"Processing [bold]{member_name}[/bold] (cab-member)",
+                    description=f"Processing [bold]{_rich_escape(member_name)}[/bold] (cab-member)",
                 )
                 self._mark_attempted("cab-member")
                 try:
@@ -1164,7 +1183,7 @@ class AnalysisRunner:
             )
         self.progress.update(
             self.task,
-            description=f"Checking [bold]{os.path.basename(f)}[/bold] against rules",
+            description=f"Checking [bold]{_rich_escape(os.path.basename(f))}[/bold] against rules",
         )
         unit_findings: list[dict[str, Any]] = []
         # Native security-property checks (PAC, CET, etc.) are meaningless for
@@ -1295,7 +1314,7 @@ class AnalysisRunner:
                 flat_name = display.replace(os.sep, "~").replace("/", "~")
                 self.progress.update(
                     self.task,
-                    description=f"Processing [bold]{flat_name}[/bold] (apk-so-member)",
+                    description=f"Processing [bold]{_rich_escape(flat_name)}[/bold] (apk-so-member)",
                 )
                 self._mark_attempted("apk-so-member")
                 try:
@@ -1359,7 +1378,7 @@ class AnalysisRunner:
         """
         assert self.task is not None
         self.progress.update(
-            self.task, description=f"Disassembling [bold]{os.path.basename(f)}[/bold]"
+            self.task, description=f"Disassembling [bold]{_rich_escape(os.path.basename(f))}[/bold]"
         )
         return analyze_android_app(f, build_cg=True)
 

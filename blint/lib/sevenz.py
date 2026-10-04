@@ -27,8 +27,11 @@ against real archives created and listed by 7-Zip on the ground-truth VM.
 # SPDX-License-Identifier: Apache-2.0
 
 import lzma
+import os
 import struct
 import zlib
+
+from blint.lib.container import member_path_unsafe
 
 SEVENZ_MAGIC = b"7z\xbc\xaf\x27\x1c"
 
@@ -504,9 +507,17 @@ class SevenZipArchive:
                 if len(chunk) < entry_size:
                     self.refusals.append("archive_truncated")
                     return None
-                import os
-
-                dest = os.path.join(dest_dir, *name.replace("\\\\", "/").split("/"))
+                # Same traversal gate as extract_sevenz_members: normalise the
+                # backslash separator (a Windows-created 7z uses it) then refuse
+                # any name that would escape dest_dir. The old spelling here was
+                # replace("\\\\", "/"), which only collapsed *doubled*
+                # backslashes and left a single "\" — a Windows separator — in
+                # place with no unsafe-path check at all.
+                safe_name = name.replace("\\", "/")
+                if member_path_unsafe(safe_name):
+                    self.refusals.append("member_path_unsafe")
+                    return None
+                dest = os.path.join(dest_dir, *safe_name.split("/"))
                 parent = os.path.dirname(dest)
                 if parent:
                     os.makedirs(parent, exist_ok=True)
@@ -572,6 +583,7 @@ def extract_sevenz_members(
     # Members map to folders through the substream lists, in order.
     substream_cursor = 0
     decoded_cursor = 0
+    total_unpacked = 0
     for member in archive.members:
         if decoded_cursor >= len(decoded_folders):
             break
@@ -583,8 +595,27 @@ def extract_sevenz_members(
         if member["size"] > MAX_MEMBER_SIZE:
             refusals.append("member_size_exceeds_cap")
             continue
+        # The total-unpacked cap (ground rule 30) bounds the whole archive,
+        # not just each member: a thousand members just under the per-member
+        # cap must still be refused. Enforced before the write, so the cap is
+        # a ceiling on bytes written, not merely on bytes already written.
+        if total_unpacked + member["size"] > MAX_TOTAL_UNPACKED:
+            refusals.append("total_uncompressed_exceeds_cap")
+            break
         if blob is None:
             refusals.append("member_compression_unsupported")
+            continue
+        # Member names are attacker-controlled (rule 30's traversal class):
+        # a name with ``..`` segments, an absolute/rooted path, a drive
+        # prefix or a backslash separator must never be joined onto the
+        # destination directory. Backslash is normalised to ``/`` first (a
+        # Windows-created 7z uses it as a separator), so a legitimate
+        # ``dir\file.exe`` extracts under ``dir/`` while ``..\..\x`` is
+        # refused as traversal — the single shared gate every other
+        # extractor already applies (container.member_path_unsafe).
+        name = member["name"].replace("\\", "/")
+        if member_path_unsafe(name):
+            refusals.append("member_path_unsafe")
             continue
         offset = 0
         for entry in archive.members:
@@ -595,9 +626,6 @@ def extract_sevenz_members(
         if len(chunk) < member["size"]:
             refusals.append("archive_truncated")
             continue
-        import os
-
-        name = member["name"].replace("\\", "/")
         dest = os.path.join(dest_dir, *name.split("/"))
         parent = os.path.dirname(dest)
         if parent:
@@ -608,6 +636,7 @@ def extract_sevenz_members(
         except OSError:
             refusals.append("member_unreadable")
             continue
+        total_unpacked += member["size"]
         extracted[member["name"]] = dest
     return extracted
 
@@ -668,4 +697,10 @@ def parse_sevenz_blob(data: bytes, refusals: list[str], degradations: list[str])
     block["members"] = archive.members[:MAX_MEMBERS]
     block["member_count"] = len(archive.members)
     block["total_unpacked"] = sum(m["size"] or 0 for m in archive.members if m["size"])
+    # A member whose name would escape the extraction directory is a fact
+    # about the archive worth naming at listing time too (rule 32), not only
+    # when extraction later refuses it: the listing is what rides the exported
+    # metadata and the parse cache.
+    if any(member_path_unsafe((m.get("name") or "").replace("\\", "/")) for m in archive.members):
+        refusals.append("member_path_unsafe")
     return block

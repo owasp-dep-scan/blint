@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import zipfile
 
+from blint.lib.container import ContainerLimits, extract_zip_to_dir
 from blint.lib.provisioning import (
     decode_provisioning_profile,
     load_embedded_profile,
@@ -24,6 +25,21 @@ from blint.lib.utils import is_exe
 from blint.logger import LOG
 
 IOS_APP_EXTNS = (".ipa",)
+
+# Bounded caps for unpacking an .ipa (ground rule 30). An .ipa is a zip of
+# untrusted input, so extraction goes through the shared container framework
+# instead of ``zipfile.extractall``: member counts, total/per-member
+# uncompressed sizes, path depth, path safety and the per-member compression
+# ratio (the zip-bomb bound) are enforced and every refusal is named. The
+# numbers suit real apps (App Store binaries unpack to a few hundred MB) while
+# the ratio cap refuses a decompression bomb before a byte is written.
+IPA_LIMITS = ContainerLimits(
+    max_members=131072,
+    max_total_uncompressed=4 * 1024 * 1024 * 1024,
+    max_member_size=2 * 1024 * 1024 * 1024,
+    max_member_depth=64,
+    max_member_compression_ratio=200,
+)
 
 # Keys lifted from the app bundle's Info.plist into binary metadata.
 _INFO_PLIST_KEYS = {
@@ -266,9 +282,18 @@ def _collect_bundle_binaries(app_dir: str, bundle_info: dict) -> list[dict]:
     seen: set[str] = set()
 
     payload_dir = os.path.dirname(app_dir)
+    app_root = os.path.realpath(app_dir)
 
     def _add(path: str, role: str, component_info: dict | None = None):
         if not path or path in seen:
+            return
+        # Containment: the executable name comes from an attacker-controlled
+        # Info.plist (CFBundleExecutable), so "../../../../etc/passwd" or an
+        # absolute path would otherwise make blint parse, hash and (in SBOM
+        # mode) report a host file outside the app bundle (CWE-22). Resolve
+        # symlinks first so a link inside the bundle pointing out is caught too.
+        real = os.path.realpath(path)
+        if real != app_root and not real.startswith(app_root + os.sep):
             return
         if os.path.isfile(path) and is_exe(path):
             seen.add(path)
@@ -348,13 +373,24 @@ def collect_ios_app_detailed(app_file: str) -> tuple[dict | None, str | None]:
 
 def _collect_ios_app_in(temp_dir: str, app_file: str) -> tuple[dict | None, str | None]:
     """Collect an .ipa extracted into ``temp_dir``; caller owns cleanup."""
+    refusals: list[str] = []
     try:
-        with zipfile.ZipFile(app_file) as zf:
-            zf.extractall(temp_dir)
+        extract_zip_to_dir(app_file, temp_dir, IPA_LIMITS, refusals)
     except (zipfile.BadZipFile, OSError) as e:
         LOG.warning(f"Could not extract iOS app {app_file}: {e}")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None, "extract_failed"
+    if "archive_unreadable" in refusals:
+        LOG.warning(f"Could not extract iOS app {app_file}: archive unreadable")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None, "extract_failed"
+    if refusals:
+        LOG.warning(
+            "Bounded extraction of %s refused %d member(s): %s",
+            os.path.basename(app_file),
+            len(refusals),
+            ", ".join(sorted(set(refusals))),
+        )
 
     payload_dir = os.path.join(temp_dir, "Payload")
     if not os.path.isdir(payload_dir):

@@ -161,7 +161,22 @@ class CfbfReader:
         if len(seen) > MAX_DIRECTORY_ENTRIES:
             self.degradations.append("difat_chain_loop")
             return
+        # The FAT holds one entry per sector in the file, so it can never
+        # legitimately exceed sector_count entries. A DIFAT that lists the
+        # same FAT sector thousands of times (each a full sector of entries,
+        # up to 262,144 at a 1 MiB sector size) would otherwise inflate
+        # self.fat to ~1e9 entries / multiple GB from a few-MiB file
+        # (CWE-409). Bound the accumulated FAT to the sectors the file
+        # actually contains and skip duplicate FAT-sector ids.
+        max_fat_entries = self.sector_count + entries_per_sector
+        seen_fat_sectors: set[int] = set()
         for fat_sector in fat_sector_ids[:MAX_DIRECTORY_ENTRIES]:
+            if len(self.fat) >= max_fat_entries:
+                self.degradations.append("fat_entries_exceeds_cap")
+                break
+            if fat_sector in seen_fat_sectors:
+                continue
+            seen_fat_sectors.add(fat_sector)
             if fat_sector >= self.sector_count and self.sector(fat_sector) == b"":
                 self.degradations.append("sector_out_of_range")
                 continue

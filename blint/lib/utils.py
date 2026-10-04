@@ -7,7 +7,6 @@ import re
 import shutil
 import string
 import tempfile
-import zipfile
 from collections.abc import Iterable
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, distribution
@@ -23,6 +22,7 @@ from defusedxml.ElementTree import ParseError, fromstring
 from oras.logger import setup_logger
 from orjson import orjson
 from rich import box
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from blint.config import (
@@ -329,6 +329,37 @@ def is_ignored_file(file_name: str) -> bool:
     return any(file_name.endswith(ie) for ie in ignore_files)
 
 
+# Registries blintdb is published to and trusted from. A reference outside
+# this set is honoured (operators run private mirrors) but called out loudly,
+# because the reference can come from the ``BLINTDB_IMAGE_URL`` environment
+# variable and a poisoned-but-schema-valid DB fully controls SBOM attribution
+# (CWE-494). Pin a digest (``...@sha256:<hex>``) to make the pulled bytes
+# verifiable rather than trusting a mutable tag.
+BLINTDB_TRUSTED_REGISTRIES = ("ghcr.io",)
+
+
+def _validate_blintdb_ref(ref: str) -> str | None:
+    """Return the registry host of a well-formed OCI image reference, else None.
+
+    Rejects references that carry a URL scheme, whitespace, control characters
+    or ``..`` traversal — an ``oras`` target is ``registry/repo[:tag|@digest]``,
+    never a URL or a path — so a malformed or injected value is refused before
+    any network pull instead of being handed to the client verbatim.
+    """
+    if not ref or not isinstance(ref, str):
+        return None
+    if "://" in ref or ".." in ref or any(c.isspace() for c in ref):
+        return None
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in ref):
+        return None
+    host = ref.split("/", 1)[0]
+    # A registry host carries a dot or a port, or is localhost; a bare first
+    # segment with neither is a Docker-Hub short name, which blintdb never uses.
+    if host != "localhost" and "." not in host and ":" not in host:
+        return None
+    return host
+
+
 def blintdb_setup(args: BlintOptions) -> None:
     """
     This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg' using oras client
@@ -352,6 +383,26 @@ def blintdb_setup(args: BlintOptions) -> None:
     try:
         oras_client = oras.client.OrasClient()
         target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
+        host = _validate_blintdb_ref(target_url)
+        if host is None:
+            LOG.error(
+                "Refusing to pull blintdb from a malformed image reference: %r. "
+                "Expected registry/repo[:tag|@sha256:<digest>].",
+                target_url,
+            )
+            return
+        if host not in BLINTDB_TRUSTED_REGISTRIES:
+            LOG.warning(
+                "blintdb image %s is not on a trusted registry (%s); a poisoned "
+                "database controls SBOM attribution. Pin a digest to verify it.",
+                target_url,
+                ", ".join(BLINTDB_TRUSTED_REGISTRIES),
+            )
+        elif "@sha256:" not in target_url:
+            LOG.debug(
+                "blintdb image %s is pinned by tag, not digest; the pulled bytes are not verified",
+                target_url,
+            )
         LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
         oras_client.pull(
             target=target_url,
@@ -570,18 +621,24 @@ def print_findings_table(findings: list[dict[str, Any]], files: list[str]) -> No
     table.add_column("Severity")
     for f in findings:
         severity = (f.get("severity") or "").upper()
+        # severity_fmt is blint's own intentional markup and must not be
+        # escaped. Every other cell can carry attacker-controlled content
+        # (exe_name is an archive member name; a finding title or id can echo
+        # a binary string), and rich renders cells as markup, so an unescaped
+        # "[/bold]" aborts the whole report with a MarkupError (CWE-74). Escape
+        # them at this boundary.
         severity_fmt = f"{'[bright_red]' if severity in ('CRITICAL', 'HIGH') else ''}{severity}"
         if len(files) > 1:
             table.add_row(
-                f.get("id"),
-                f.get("exe_name"),
-                f.get("title"),
+                rich_escape(str(f.get("id") or "")),
+                rich_escape(str(f.get("exe_name") or "")),
+                rich_escape(str(f.get("title") or "")),
                 severity_fmt,
             )
         else:
             table.add_row(
-                f.get("id"),
-                f.get("title"),
+                rich_escape(str(f.get("id") or "")),
+                rich_escape(str(f.get("title") or "")),
                 severity_fmt,
             )
     console.print(table)
@@ -637,12 +694,6 @@ def gen_file_list(src: list[str]) -> list[str]:
             if is_exe(full_path):
                 files.append(full_path)
     return files
-
-
-def unzip_unsafe(zf: str, to_dir: str) -> None:
-    """Method to unzip the file in an unsafe manne"""
-    with zipfile.ZipFile(zf, "r") as zip_ref:
-        zip_ref.extractall(to_dir)
 
 
 def check_command(cmd: str) -> bool:

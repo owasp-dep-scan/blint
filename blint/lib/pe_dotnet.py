@@ -802,7 +802,12 @@ def _declaring_typedef(reader: _TableReader, row_counts, method_rid: int):
         else:
             end = method_count + 1
         if method_ptr_count:
-            for ptr_rid in range(start, end):
+            # start/end come from attacker-controlled MethodList columns; a
+            # crafted run end (e.g. 0xFFFFFFFF) would otherwise spin this loop
+            # billions of times, since reader.row() just returns None past the
+            # table. The run can never extend past the MethodPtr table, so
+            # clamp it there (CWE-834).
+            for ptr_rid in range(start, min(end, method_ptr_count + 1)):
                 ptr_row = reader.row(METHOD_PTR, ptr_rid)
                 if ptr_row is not None and ptr_row[0] == method_rid:
                     return row
