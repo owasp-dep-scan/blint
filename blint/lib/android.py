@@ -337,7 +337,7 @@ def read_manifest_attributes(apk_file: str) -> dict:
         }
     )
     attributes["mainActivity"] = find_main_activity(root)
-    # The loader-enforced native-lib layout (01/A.2): declared on
+    # The loader-enforced native-lib layout: declared on
     # <application>; AGP's default when unset is minSdk >= 23, which
     # android_native.extract_native_libs_fact derives from minSdkVersion.
     application = root.find("application")
@@ -644,9 +644,9 @@ def collect_so_files_metadata(
     app_facts: dict | None = None,
     use_blintdb: bool = False,
 ) -> list[Component]:
-    """Collect SBOM components for the app's native libraries (A1.3, 01/D).
+    """Collect SBOM components for the app's native libraries.
 
-    Reads the libraries through the A1.1 container model (zip in place,
+    Reads the libraries through the container model (zip in place,
     ABI directories, split/bundle provenance) and emits ONE component per
     ``(name, version)`` with per-ABI occurrences - a five-ABI app is five
     evidence lines on one component, not five near-duplicates, and a
@@ -658,7 +658,7 @@ def collect_so_files_metadata(
     libraries are recorded as the ``blint:platform_needed`` fact on the
     needing component, never emitted as components.
 
-    With ``use_blintdb`` (A6.3 J1) every unique sha256 is matched against
+    With ``use_blintdb`` every unique sha256 is matched against
     the local blintdb once - the same ``detect_binaries_utilized`` the
     standalone binary path uses. A match is symbol evidence: it nests as
     a child component of the host, and replaces the host's identity only
@@ -754,7 +754,7 @@ def collect_so_files_metadata(
             Property(name="internal:abis", value=",".join(abis)),
             Property(name="internal:functions", value=SYMBOL_DELIMITER.join(functions)),
         ]
-        # Framework identification (04/B, rule 38): when every member of
+        # Framework identification: when every member of
         # this group carries the same replace-grade identification, the
         # framework component takes the file component's slot - the file is
         # the distribution unit of the project, and emitting both would
@@ -1494,8 +1494,8 @@ def collect_files_metadata(
     app_temp_dir = tempfile.mkdtemp(prefix="blint_android_app")
     unzip_unsafe(unpack_target or app_file, app_temp_dir)
     file_components += collect_version_files_metadata(app_file, app_temp_dir)
-    # Native libraries come from the zip in place (A1.1 model), not from
-    # the unzip tree.
+    # Native libraries come from the zip in place (the container model),
+    # not from the unzip tree.
     file_components += collect_so_files_metadata(
         app_file, app_facts=app_facts, use_blintdb=use_blintdb
     )

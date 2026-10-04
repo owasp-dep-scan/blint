@@ -29,7 +29,7 @@ from blint.lib.ios import (
     enrich_with_bundle_context,
     is_ios_app,
 )
-from blint.lib.jni import build_jni_join_summary, extend_app_callgraph_with_jni
+from blint.lib.jni import build_jni_join_summary, cap_jni_join, extend_app_callgraph_with_jni
 from blint.lib.macos_bundle import (
     collect_macos_bundle_detailed,
     find_macos_bundles,
@@ -1221,12 +1221,16 @@ class AnalysisRunner:
                 "exe_type": "androidapp",
             }
         metadata["android_native"] = _android_native_summary(native)
-        # The dex <-> native static JNI join (A5.2 E2), next to the native
+        # The dex <-> native static JNI join, next to the native
         # summary; absent when the app declares no natives (nothing to join).
-        jni_join = build_jni_join_summary(f, native, confirm_findclass=blint_options.disassemble)
+        # The full join feeds the callgraph's JNI edges; the metadata keeps
+        # the capped listing.
+        jni_join = build_jni_join_summary(
+            f, native, confirm_findclass=blint_options.disassemble, capped=False
+        )
         if jni_join:
-            metadata["android_jni"] = jni_join
-        # Members first: the app callgraph's JNI edges (A5.2 F2) point at
+            metadata["android_jni"] = cap_jni_join(jni_join)
+        # Members first: the app callgraph's JNI edges point at
         # the disassembled native nodes, which exist only after the members
         # parse (--disassemble); without them the join stays a fact and no
         # edge is drawn.

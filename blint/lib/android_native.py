@@ -1,4 +1,4 @@
-"""Android native-code container model (A1.1).
+"""Android native-code container model.
 
 Reads the ``.so`` entries of an APK (or split bundle) from the zip itself
 instead of unzipping the archive to a directory: stored entries are recorded
@@ -53,13 +53,12 @@ RETIRED_ABIS: dict[str, dict[str, int]] = {
     "mips64": {"e_machine": 8, "elf_class": 2},
 }
 
-# --- budgets (ground rules 30/33; each has a hostile fixture) -----------------
-# Values measured over the A0.2 corpus (tier-0 trees, tier-1 planted builds
-# and tier-2 F-Droid apps): the largest app ships ~150 .so entries and well
-# under 1 GiB of native code, so these budgets refuse nothing benign while
-# bounding hostile inputs. See the module docstring for the crossing
-# fixtures; a budget approached but never crossed by a test is not
-# implemented.
+# --- budgets (each has a hostile fixture) ------------------------------------
+# Sized so real apps pass: the largest app in the reference corpus ships
+# ~150 .so entries and well under 1 GiB of native code, so these budgets
+# refuse nothing benign while bounding hostile inputs. See the module
+# docstring for the crossing fixtures; a budget approached but never
+# crossed by a test is not implemented.
 MAX_NATIVE_LIBS = 512  # .so entries per logical app
 MAX_TOTAL_LIB_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB uncompressed .so budget
 MAX_LIB_ENTRY_BYTES = 1024 * 1024 * 1024  # 1 GiB for a single .so entry
@@ -110,7 +109,7 @@ class NativeLibrary:
     e_type: int = 0
     abi_mismatch: list[str] = field(default_factory=list)
     not_elf: bool = False
-    # 16 KB page facts from the raw phdrs (01/B); None when unreadable.
+    # 16 KB page facts from the raw phdrs; None when unreadable.
     page_alignment: dict[str, Any] | None = None
     locations: list[LibLocation] = field(default_factory=list)
 
@@ -394,7 +393,7 @@ def abi_coverage(libraries: list[NativeLibrary]) -> dict[str, Any]:
         "ships_32_bit": has_32,
         "ships_64_bit": has_64,
         # Play requires 64-bit wherever 32-bit ships; the fact is stated,
-        # not judged (rule 34: the policy date belongs to a rule, A3).
+        # not judged (the policy date belongs to a rule, not a fact).
         "requires_64_bit_coverage": has_32 and not has_64,
         "abi_retired": sorted(retired),
     }
@@ -472,7 +471,7 @@ def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
 
     Only 64-bit ABIs are judged — 32-bit ABIs are exempt on 16 KB-page
     devices and are never flagged (rule 35); assets never feed ABI
-    coverage (01/A.3). A library is compatible when its ELF layout is
+    coverage. A library is compatible when its ELF layout is
     (min ``PT_LOAD`` p_align >= 16384 and every LOAD congruent modulo
     16384) and every *stored* zip location sits at a 16384-aligned
     offset. Deflated locations are not zip-judged: ``zipalign -c -P 16``
@@ -555,7 +554,7 @@ def page_size_16k_verdict(libraries: list[NativeLibrary]) -> dict[str, Any]:
 def manifest_sdk_fact(manifest_attrs: dict[str, Any]) -> dict[str, int | None]:
     """minSdkVersion/targetSdkVersion as ints, None when absent or not numeric.
 
-    The loader rules (A3, ground rule 37) condition on these: a rule whose
+    The loader rules condition on these: a rule whose
     enforcement the loader only applies to apps targeting some API level
     stays silent when the app's targetSdk predates it.
     """
@@ -570,7 +569,7 @@ def manifest_sdk_fact(manifest_attrs: dict[str, Any]) -> dict[str, int | None]:
 
 
 def extract_native_libs_fact(manifest_attrs: dict[str, Any]) -> dict[str, Any]:
-    """The ``extractNativeLibs`` fact with its provenance (01/A.2).
+    """The ``extractNativeLibs`` fact with its provenance.
 
     ``manifest`` when the attribute was decoded from AndroidManifest.xml;
     ``agp_default`` when it is absent and minSdk >= 23 (the AGP default,
