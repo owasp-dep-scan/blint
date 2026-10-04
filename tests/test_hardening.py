@@ -608,11 +608,9 @@ def _patched_dotnet_fixture(tmp_path, ca_rows):
     """The repo's managed fixture with a patched CustomAttribute row count
     plus one unknown-table Valid bit (the extent-check bypass shape)."""
     import struct
+    from pathlib import Path
 
-    src = (
-        __file__.rsplit("/", 1)[0]
-        + "/data/pe/dotnet-strongname/delaysigned.dll"
-    )
+    src = Path(__file__).parent / "data" / "pe" / "dotnet-strongname" / "delaysigned.dll"
     with open(src, "rb") as fixture:
         data = bytearray(fixture.read())
     off = data.find(b"BSJB")
