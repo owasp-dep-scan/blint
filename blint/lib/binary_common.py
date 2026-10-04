@@ -95,6 +95,11 @@ MACHO_SYNTHETIC_FUNCTION_NAME_RE = re.compile(r"^sub_[0-9a-f]+$")
 
 MIN_ENTROPY = get_float_from_env("SECRET_MIN_ENTROPY", 0.39)
 MIN_LENGTH = get_int_from_env("SECRET_MIN_LENGTH", 80)
+# Longest string the secret/banner regex banks are run against (see
+# parse_strings). Extracted strings can be section-sized; the regex passes
+# are backtracking and several bank patterns are quadratic, so a length
+# bound is what keeps a crafted one-string binary from stalling the scan.
+MAX_SECRET_SCAN_STRING = 4096
 
 # Resolving the dynamic link closure walks the scanning host's filesystem, so it
 # is only correct when that host is the binary's intended runtime. Enable it with
@@ -503,16 +508,20 @@ def parse_strings(parsed_obj: lief.Binary) -> list[dict]:
                 s = coerce_to_text(raw_string)
                 if s and "[]" not in s and "{}" not in s:
                     entropy = calculate_entropy(s)
-                    secret_type = check_secret(s)
+                    # The secret/banner regex banks are backtracking patterns
+                    # applied to attacker-controlled text; several shapes are
+                    # quadratic, so a section-sized "string" could burn minutes
+                    # of CPU per match attempt (measured: 274s at 160 KB).
+                    # No real secret, token, or vendored banner is anywhere
+                    # near this long — gate the regex passes on length and
+                    # keep the entropy signal (linear) for long strings.
+                    regex_bounded = len(s) <= MAX_SECRET_SCAN_STRING
+                    secret_type = check_secret(s) if regex_bounded else ""
                     if (
                         (entropy and (entropy > MIN_ENTROPY or len(s) > MIN_LENGTH))
                         or secret_type
+                        or (regex_bounded and is_probable_banner_string(s))
                         or is_review_relevant_string(s)
-                        # Vendored-source version banners are short plain text
-                        # that both entropy and length gates reject; the
-                        # banner detection reads this list, so strings
-                        # matching its library-anchored signatures are kept.
-                        or is_probable_banner_string(s)
                     ):
                         strings_list.append(
                             {

@@ -300,6 +300,12 @@ def check_secret(data: str) -> str:
 
     for category, rlist in secrets_regex.items():
         for regex in rlist:
+            # Linear prefilter for the hostname-style detectors: the pattern
+            # only runs when its anchor literal is present, so a crafted run
+            # of hostname characters cannot reach the backtracker at all.
+            required = getattr(regex, "required_substring", None)
+            if required is not None and required not in data:
+                continue
             if regex.search(data):
                 return category
 

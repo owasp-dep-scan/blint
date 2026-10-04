@@ -47,6 +47,7 @@ import zipfile
 
 from blint.lib.container import (
     ContainerLimits,
+    CumulativeExtractionBudget,
     extract_zip_members,
     read_zip_member_bounded,
     walk_zip_members,
@@ -70,6 +71,11 @@ MSIX_LIMITS = ContainerLimits(
 )
 MAX_NESTED_PACKAGES = 64
 MAX_NESTED_PACKAGE_SIZE = 256 * 1024 * 1024
+# Total bytes one bundle scan may write across its nested package copies and
+# every package's member extraction (copies + extraction, one shared budget).
+# Per-package caps alone would allow 64 x 256 MiB copies plus a fresh
+# extraction budget per package — tens of GiB from one small bundle input.
+MAX_MSIX_EXTRACTION_BUDGET = 6 * 1024 * 1024 * 1024
 # PE members actually extracted and analyzed, per package. Measured 15 per
 # package / 45 per bundle in the reference fixture; the cap bounds the unit
 # fan-out a single package input can cause.
@@ -300,6 +306,7 @@ def _package_collection(
     package_path: str,
     package_name: str,
     temp_dir: str,
+    budget: "CumulativeExtractionBudget | None" = None,
 ) -> dict:
     """Walk one .msix/.appx package: facts, then its PE members extracted.
 
@@ -307,6 +314,10 @@ def _package_collection(
     bundle's ``FileName``, or the package file itself) and is what member
     attribution is keyed on. Packages never nest inside packages in this
     format, so there is no recursion and no depth growth here.
+
+    ``budget`` is the scan unit's shared extraction budget (see
+    ``MAX_MSIX_EXTRACTION_BUDGET``): a bundle charges every nested package's
+    extraction against one total instead of facing each afresh.
     """
     collection: dict = {
         "container_path": package_name,
@@ -361,7 +372,9 @@ def _package_collection(
         if len(pe_infos) > MAX_MEMBER_BINARIES:
             package_refusals.append("member_binary_count_exceeds_cap")
             pe_infos = pe_infos[:MAX_MEMBER_BINARIES]
-        extracted = extract_zip_members(archive, pe_infos, temp_dir, MSIX_LIMITS, package_refusals)
+        extracted = extract_zip_members(
+            archive, pe_infos, temp_dir, MSIX_LIMITS, package_refusals, budget=budget
+        )
     verification = {"verified_files": 0, "verified_blocks": 0, "mismatches": []}
     for member_name, file_path in sorted(extracted.items()):
         if not _looks_like_pe(file_path):
@@ -456,6 +469,9 @@ def _collect_package(path: str, kind: str, temp_dir: str, refusals: list[str]) -
 
 def _collect_bundle(path: str, kind: str, temp_dir: str, refusals: list[str]) -> dict:
     """A bundle: its own manifest and signature, then each nested package."""
+    # One budget spans the nested package copies AND every package's
+    # extraction: per-package caps alone multiply across the fan-out.
+    budget = CumulativeExtractionBudget(MAX_MSIX_EXTRACTION_BUDGET)
     collection: dict = {
         "kind": kind,
         "temp_dir": temp_dir,
@@ -504,23 +520,36 @@ def _collect_bundle(path: str, kind: str, temp_dir: str, refusals: list[str]) ->
                 # extracted is recorded here too.
                 refusals.append("nested_package_unreadable")
                 continue
+            if budget.remaining <= 0:
+                # The nested copies and every package's extraction share one
+                # budget: per-package caps alone would face each afresh and
+                # multiply (64 x 256 MiB copies plus per-package extraction).
+                refusals.append("extraction_budget_exhausted")
+                break
             package_dir = os.path.join(temp_dir, _safe_dir_name(package_name))
             os.makedirs(package_dir, exist_ok=True)
             nested_path = os.path.join(package_dir, os.path.basename(package_name))
+            copied = 0
             try:
                 with archive.open(info) as src, open(nested_path, "wb") as out:
-                    remaining = min(info.file_size, MAX_NESTED_PACKAGE_SIZE)
+                    remaining = min(
+                        info.file_size, MAX_NESTED_PACKAGE_SIZE, budget.remaining
+                    )
                     while True:
                         chunk = src.read(min(_CHUNK, remaining))
                         if not chunk:
                             break
                         out.write(chunk)
+                        copied += len(chunk)
                         remaining -= len(chunk)
+                budget.charge(copied)
             except (zipfile.BadZipFile, OSError, RuntimeError):
                 refusals.append("nested_package_unreadable")
                 continue
             try:
-                package = _package_collection(nested_path, package_name, package_dir)
+                package = _package_collection(
+                    nested_path, package_name, package_dir, budget=budget
+                )
             except zipfile.BadZipFile:
                 # Member isolation: one corrupt package must not take the
                 # bundle's other packages down with it (the .ipa rule).

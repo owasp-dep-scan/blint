@@ -56,6 +56,10 @@ _MAX_IVARS_PER_LIST = 500
 _MAX_PROPERTIES_PER_LIST = 200
 _MAX_DEGRADATIONS = 32
 _MAX_STRING = 512
+# Ceiling on one pointer-array section walk (see _parse_pointer_array_section):
+# iteration counts iterations, not resolved entries, so a hostile section
+# header cannot drive an unbounded walk under the success-only caps.
+_MAX_SECTION_SLOTS = 262144
 
 
 # Mach-O ABI64 flag in the cpu_type field; set for arm64/x86_64 binaries.
@@ -362,7 +366,21 @@ def _parse_pointer_array_section(sections: dict, name: str, ptr_size: int = 8) -
     section = sections.get(name)
     if section is None:
         return
-    for i in range(section.size // ptr_size):
+    # The iteration bound is the section header's own size — an attacker
+    # field that need not match the file — and the caps downstream only
+    # count *resolved* entries, so a section of never-resolving slots would
+    # otherwise walk billions of failed pointer reads. Real ObjC pointer
+    # arrays are thousands of slots; this is a ceiling, not a semantic bound.
+    declared_slots = section.size // ptr_size
+    slots = min(declared_slots, _MAX_SECTION_SLOTS)
+    if declared_slots > slots:
+        LOG.debug(
+            "objc section %s declares %d pointer slots; clamping the walk to %d",
+            name,
+            declared_slots,
+            slots,
+        )
+    for i in range(slots):
         yield section.virtual_address + i * ptr_size
 
 

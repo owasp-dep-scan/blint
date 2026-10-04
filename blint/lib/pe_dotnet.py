@@ -1232,6 +1232,37 @@ def parse_metadata_stream(
         tables_dropped = {t for t in row_counts if t >= first_unknown}
         degr.add("tables_partial")
         tables_partial = True
+        # The tables that WERE laid out still face the stream-fit check:
+        # their declared row counts are exactly as attacker-controlled when
+        # an unknown table is present — without this, a Valid mask carrying
+        # one unknown bit plus a huge declared count (0xFFFFFFFF for
+        # CustomAttribute, say) skips the extent check entirely and every
+        # listing loop walks billions of out-of-range row reads.
+        extent = pos + max(
+            (
+                layout[t][0] + layout[t][1] * row_counts.get(t, 0)
+                for t in layout
+            ),
+            default=0,
+        )
+        if extent > tables_end:
+            degr.add("tables_exceed_stream")
+            drop_from = None
+            for t in sorted(layout):
+                offset, row_size = layout[t]
+                if pos + offset + row_size * row_counts.get(t, 0) > tables_end:
+                    drop_from = t
+                    break
+            for t in sorted(layout):
+                if drop_from is not None and t >= drop_from:
+                    degr.add(f"table_unreadable:0x{t:02x}")
+            if drop_from is not None:
+                tables_dropped |= {t for t in layout if t >= drop_from}
+                row_counts = {
+                    t: c for t, c in row_counts.items() if t not in tables_dropped
+                }
+                layout = {t: v for t, v in layout.items() if t not in tables_dropped}
+            tables_partial = True
     else:
         # The rows' true end: the largest table's (offset + rows * width).
         extent = pos + max(

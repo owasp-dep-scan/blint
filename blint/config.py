@@ -1131,13 +1131,18 @@ secrets_regex: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"""(?i)aws(.{0,20})?['"][0-9a-zA-Z/+]{40}['"]"""),
         re.compile(r"""amzn.mws.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""),
         re.compile(r"da2-[a-z0-9]{26}"),
-        re.compile(r"s3.amazonaws.com"),
-        re.compile(r"ec2-[0-9a-z.-_]+.compute(-1)?.amazonaws.com"),
-        re.compile(r"[0-9a-z.-_]+.elb.[0-9a-z.-_]+.amazonaws.com"),
-        re.compile(r"[0-9a-z.-_]+.rds.amazonaws\\.com"),
-        re.compile(r"[0-9a-z.-_]+.cache.amazonaws.com"),
-        re.compile(r"[0-9a-z.-_]+.s3-website[0-9a-z.-_]+.amazonaws.com"),
-        re.compile(r"[0-9a-z]+.execute-api.[0-9a-z.\-_]+.amazonaws.com"),
+        re.compile(r"s3\.amazonaws\.com"),
+        # Hostname detectors use label grammar — dot is only ever a literal
+        # separator, never a member of a quantified class — plus a required
+        # substring prefilter (see _REQUIRED_SUBSTRING) so a hostile
+        # string of hostname characters fails in one linear scan instead
+        # of quadratic backtracking across every start position.
+        re.compile(r"ec2-(?:[0-9a-z_-]+\.)*[0-9a-z_-]+\.compute(-1)?\.amazonaws\.com"),
+        re.compile(r"[0-9a-z-]+(?:\.[0-9a-z-]+)*\.elb\.[0-9a-z-]+\.amazonaws\.com"),
+        re.compile(r"[0-9a-z-]+(?:\.[0-9a-z-]+)*\.rds\.amazonaws\.com"),
+        re.compile(r"[0-9a-z-]+(?:\.[0-9a-z-]+)*\.cache\.amazonaws\.com"),
+        re.compile(r"[0-9a-z-]+(?:\.[0-9a-z-]+)*\.s3-website[0-9a-z-]+(?:\.[0-9a-z-]+)*\.amazonaws\.com"),
+        re.compile(r"[0-9a-z]+\.execute-api\.[0-9a-z_-]+(?:\.[0-9a-z_-]+)*\.amazonaws\.com"),
     ],
     "github": [re.compile(r"""(?i)github.{0,3}(token|api|key).{0,10}?([0-9a-zA-Z]{35,40})""")],
     "slack": [re.compile(r"""xox[baprs]-([0-9a-zA-Z]{10,48})?""")],
@@ -1182,13 +1187,49 @@ secrets_regex: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"(authorization)\s*:\s*(bearer|token|basic)\s+[0-9a-z.\-_]{6,}"),
         re.compile(r"eyJ[A-Za-z0-9_/+-]*\.[A-Za-z0-9._/+-]*"),
     ],
-    "email": [re.compile(r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+.[a-zA-Z0-9.-]+")],
+    "email": [re.compile(r"(?<=mailto:)[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*")],
     "ip": [
         re.compile(
             r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]).){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(:[0-9]+)?$"
         )
     ],
 }
+
+# A literal every match of the pattern must contain, used by check_secret as
+# a linear prefilter: a hostile string of hostname/alphanumeric characters
+# cannot force quadratic backtracking when the pattern is only run against
+# strings that already contain its anchor literal. The wrapper carries the
+# literal next to the compiled pattern (re.Pattern forbids attributes).
+class _PrefilteredPattern:
+    __slots__ = ("pattern", "required_substring")
+
+    def __init__(self, pattern: re.Pattern[str], required_substring: str) -> None:
+        self.pattern = pattern
+        self.required_substring = required_substring
+
+    def search(self, data: str):
+        return self.pattern.search(data)
+
+
+_REQUIRED_SUBSTRING: dict[tuple[str, int], str] = {
+    ("aws", 5): "amazonaws.com",
+    ("aws", 6): "amazonaws.com",
+    ("aws", 7): "amazonaws.com",
+    ("aws", 8): "amazonaws.com",
+    ("aws", 9): "amazonaws.com",
+    ("aws", 10): "amazonaws.com",
+    ("email", 0): "mailto:",
+}
+
+
+def _attach_required_substrings() -> None:
+    for (category, index), literal in _REQUIRED_SUBSTRING.items():
+        patterns = secrets_regex.get(category)
+        if patterns and index < len(patterns):
+            patterns[index] = _PrefilteredPattern(patterns[index], literal)
+
+
+_attach_required_substrings()
 
 SYMBOL_DELIMITER = "~~"
 

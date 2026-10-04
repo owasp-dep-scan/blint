@@ -36,6 +36,7 @@ from blint.lib.codesign_macho import (
     _parse_cms_signature,
     _plist_to_plain,
 )
+from blint.logger import LOG
 
 # Caps mirroring the code-signature parser: a hostile payload must degrade
 # into a parse failure, not a memory or CPU problem.
@@ -132,7 +133,7 @@ def decode_provisioning_profile(data: bytes) -> dict:
         if encap_oid is not None and encap_oid != CMS_OID_DATA:
             detail["parse_error"] = f"unexpected_encap_content_type:{encap_oid}"
             return detail
-    except (_Asn1Error, IndexError) as e:
+    except (_Asn1Error, IndexError, RecursionError) as e:
         detail["parse_error"] = f"asn1:{e}"
         return detail
     detail["cms"] = _cms_summary(data)
@@ -240,8 +241,20 @@ def load_embedded_profile(app_dir: str) -> tuple[str, bytes] | None:
     ):
         path = os.path.join(app_dir, *relative.split("/"))
         try:
+            # Stat before reading: the profile sits at a well-known path in
+            # an attacker-supplied bundle, and the size cap below is only
+            # enforced after decode_provisioning_profile has the bytes —
+            # a multi-GB file there must not become multi-GB RSS first.
+            if os.path.getsize(path) > MAX_PROFILE_BYTES:
+                LOG.warning(
+                    "Skipping %s: %s exceeds the %d byte profile cap",
+                    name,
+                    path,
+                    MAX_PROFILE_BYTES,
+                )
+                return None
             with open(path, "rb") as fp:
-                return name, fp.read()
+                return name, fp.read(MAX_PROFILE_BYTES + 1)
         except OSError:
             continue
     return None
