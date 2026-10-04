@@ -2238,6 +2238,9 @@ def test_a14_jna_library_constant_holds_on_every_path() -> None:
             )
 
 
+@pytest.mark.skipif(
+    not _nyxstone_available(), reason="the JNI edges need the disassembled native graph"
+)
 def test_jni_edges_and_counts_read_the_full_join(monkeypatch) -> None:
     """The listing cap cuts the metadata copy only: the callgraph's JNI edges
     come from the full join, so a declaration past the cap still gains its
