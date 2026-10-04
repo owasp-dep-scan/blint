@@ -64,7 +64,7 @@ runs on it:
 
 | Rule | Scope |
 |---|---|
-| `CHECK_ANDROID_PAGE_16K` | app-level: a 64-bit ABI's ELF layout or zip placement breaks 16 KB mapping (Play requires it for targetSdk 35+; 32-bit ABIs exempt) |
+| `CHECK_ANDROID_PAGE_16K` | per 64-bit library: its ELF layout breaks 16 KB-page mapping (32-bit ABIs exempt). High when the app targets API 35+ (Play requires 16 KB support there), silent below that, medium without an app targetSdk (a standalone `.so`) |
 | `CHECK_ANDROID_EXTRACT_NATIVE_LIBS` | app-level: `extractNativeLibs=false` but a member is compressed or unaligned (the loader refuses from API 23) |
 | `CHECK_ANDROID_TEXTREL` | per library: text relocations (`DT_TEXTREL`/`DF_TEXTREL`) |
 | `CHECK_ANDROID_WX_LOAD` | per library: a writable **and** executable segment |

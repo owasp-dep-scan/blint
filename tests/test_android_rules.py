@@ -89,6 +89,13 @@ def test_page_16k_conditional_on_target_sdk() -> None:
                                     min_sdk=24, target_sdk=34)) == []
     fired = findings_for(DATA / "libhello_page4k.so", min_sdk=24, target_sdk=35)
     assert "CHECK_ANDROID_PAGE_16K" in android_ids(fired)
+    # An app bound by the policy gets the rule's severity; a standalone
+    # .so (no app targetSdk) gets the layout fact at medium.
+    by_id = {f["id"]: f for f in fired}
+    assert by_id["CHECK_ANDROID_PAGE_16K"]["severity"] == "high"
+    standalone = {f["id"]: f for f in findings_for(DATA / "libhello_page4k.so")}
+    assert standalone["CHECK_ANDROID_PAGE_16K"]["severity"] == "medium"
+    assert "from targetSdk 35" in standalone["CHECK_ANDROID_PAGE_16K"]["title"]
     # The 16 KB-clean twin never fires, whatever the target.
     assert android_ids(findings_for(DATA / "libhello_page16k.so",
                                     min_sdk=24, target_sdk=35)) == []
