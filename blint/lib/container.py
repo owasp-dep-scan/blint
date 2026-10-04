@@ -39,7 +39,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # Chunked copy bound for extraction: one member's read loop never holds more
 # than this plus the destination buffer.
@@ -279,6 +279,7 @@ def extract_zip_to_dir(
     dest_dir: str,
     limits: ContainerLimits,
     refusals: list[str],
+    budget: "CumulativeExtractionBudget | None" = None,
 ) -> dict[str, str]:
     """Open a zip at ``zip_path`` and extract its accepted members into
     ``dest_dir`` under ``limits``.
@@ -292,14 +293,65 @@ def extract_zip_to_dir(
     cannot be opened at all is named ``archive_unreadable`` rather than
     raising, so a scan survives a hostile archive the same way it survives a
     hostile member.
+
+    ``budget`` bounds *nested* extraction: ``ContainerLimits`` alone cap one
+    archive, and a bundle whose every member is itself an archive gets a fresh
+    cap per level, so caps multiply across levels instead of adding. A budget
+    shared across a scan unit's extractions clamps each call's total to what
+    remains and charges what was written, so nesting can no longer amplify
+    beyond one budget.
     """
+    if budget is not None:
+        if budget.remaining <= 0:
+            refusals.append("extraction_budget_exhausted")
+            return {}
+        limits = replace(limits, max_total_uncompressed=min(
+            limits.max_total_uncompressed, budget.remaining
+        ))
     try:
         with zipfile.ZipFile(zip_path) as archive:
             members = walk_zip_members(archive, limits, refusals)
-            return extract_zip_members(archive, members, dest_dir, limits, refusals)
+            extracted = extract_zip_members(archive, members, dest_dir, limits, refusals)
     except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError):
         refusals.append("archive_unreadable")
         return {}
+    if budget is not None:
+        budget.charge(_tree_bytes(dest_dir))
+    return extracted
+
+
+class CumulativeExtractionBudget:
+    """Total bytes one scan unit may extract across every nested archive.
+
+    Per-archive ``ContainerLimits`` bound a single zip; they deliberately say
+    nothing about a bundle of bundles, where each inner archive would otherwise
+    face the same caps afresh (a 200:1 ratio cap per level still multiplies
+    across levels). One budget threaded through a unit's extractions — a
+    bundle, its inner apks, the dex re-reads — turns that product into a sum.
+    """
+
+    def __init__(self, cap: int) -> None:
+        self.cap = max(0, int(cap))
+        self.spent = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.cap - self.spent)
+
+    def charge(self, nbytes: int) -> None:
+        self.spent += max(0, int(nbytes))
+
+
+def _tree_bytes(root: str) -> int:
+    """Size of every regular file under ``root`` (the caller's fresh dest)."""
+    total = 0
+    for dir_path, _dirs, files in os.walk(root):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(dir_path, name))
+            except OSError:
+                continue
+    return total
 
 
 class _MemberTooLarge(Exception):

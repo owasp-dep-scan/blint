@@ -25,7 +25,11 @@ from blint.lib.android_blintdb import (
 )
 from blint.lib.android_native import LibraryReader, scan_android_native
 from blint.lib.binary import parse, parse_dex
-from blint.lib.container import ContainerLimits, extract_zip_to_dir
+from blint.lib.container import (
+    ContainerLimits,
+    CumulativeExtractionBudget,
+    extract_zip_to_dir,
+)
 from blint.lib.dalvik_review import DEX_EXE_TYPE, Finding, analyze_dex, build_review_metadata
 from blint.lib.framework_ident import framework_identity
 from blint.lib.utils import (
@@ -52,17 +56,34 @@ ANDROID_LIMITS = ContainerLimits(
     max_member_compression_ratio=200,
 )
 
+# One budget for everything a single app/bundle scan unit may extract,
+# across every nesting level (bundle -> inner apks -> their contents).
+# Per-archive caps alone multiply across levels — a bundle of N inner apks
+# gets a fresh cap each, so a modest upload under the ratio cap could still
+# unpack N x 4 GiB (measured: 0.68 MiB -> 254 MiB over two levels). A shared
+# budget turns that product into a sum. Generous for real apps — the largest
+# Play titles unpack to ~4 GiB — while capping a hostile nested bundle at
+# one 6 GiB write budget per scanned app.
+MAX_APP_EXTRACTION_BUDGET = 6 * 1024 * 1024 * 1024
 
-def _extract_app_zip(zip_path: str, to_dir: str) -> list[str]:
+
+def _extract_app_zip(
+    zip_path: str, to_dir: str, budget: CumulativeExtractionBudget | None = None
+) -> list[str]:
     """Bounded extraction of an app/bundle zip into ``to_dir``.
 
     Replaces the former ``unzip_unsafe``: the same on-disk result for benign
     apps, but hostile archives (zip bombs, traversal names) are refused by
     name instead of exhausting the disk or escaping the directory. Refusals
     are logged so a truncated extraction never reads as a clean one.
+
+    ``budget`` bounds the total this scan unit may extract across nested
+    archives; a caller that passes none gets a fresh one for this archive.
     """
+    if budget is None:
+        budget = CumulativeExtractionBudget(MAX_APP_EXTRACTION_BUDGET)
     refusals: list[str] = []
-    extract_zip_to_dir(zip_path, to_dir, ANDROID_LIMITS, refusals)
+    extract_zip_to_dir(zip_path, to_dir, ANDROID_LIMITS, refusals, budget=budget)
     if "archive_unreadable" in refusals:
         # The file is not a readable zip at all (as opposed to a zip with
         # individual members refused). Raise so the unit is isolated and
@@ -106,6 +127,21 @@ elif resolved_apkanalyzer := shutil.which("apkanalyzer"):
     APKANALYZER_CMD = resolved_apkanalyzer
 
 
+# Characters cmd.exe treats as operators/escapes. On Windows, executing a
+# .bat/.cmd launcher routes the command line through cmd.exe even with
+# ``shell=False``; Pythons carrying the BatBadBut fix (>=3.11.9, >=3.12.2)
+# quote these away, but blint also supports 3.10, so an argument carrying
+# them is refused outright rather than trusted to the interpreter's quoting.
+_BAT_UNSAFE_CHARS = re.compile(r'[&|<>^"%]')
+
+
+def _bat_unsafe_args(args: list[str]) -> list[str]:
+    """Arguments a cmd.exe-routed batch launcher must not receive verbatim."""
+    if not args or not str(args[0]).lower().endswith((".bat", ".cmd")):
+        return []
+    return [a for a in args[1:] if _BAT_UNSAFE_CHARS.search(a)]
+
+
 def exec_tool(
     args: list[str], cwd: str | None = None, stdout: int = subprocess.PIPE
 ) -> subprocess.CompletedProcess | None:
@@ -120,8 +156,18 @@ def exec_tool(
     attacker-controlled values (an apk path derived from an archive member
     name), and a shell would let a crafted name such as ``x&calc.exe&base.apk``
     inject commands on Windows (CWE-78); passing an argument vector to the
-    program directly removes the shell from the chain entirely.
+    program directly removes the shell from the chain entirely. Batch
+    launchers on Windows are the one residual shell in that chain, so their
+    arguments are additionally screened (see ``_bat_unsafe_args``).
     """
+    if os.name == "nt" and (unsafe := _bat_unsafe_args(args)):
+        LOG.warning(
+            "Refusing to run %s with shell metacharacter(s) in %d argument(s): "
+            "a crafted archive member name must not reach cmd.exe",
+            args[0],
+            len(unsafe),
+        )
+        return None
     try:
         LOG.debug(f'⚡︎ Executing "{" ".join(args)}"')
         return subprocess.run(
@@ -247,11 +293,15 @@ def collect_bundle_metadata(
         tuple: The parent component and the list of contained components.
     """
     bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
+    # One extraction budget for the bundle and every apk unpacked from it:
+    # per-archive caps alone would face each inner apk afresh and multiply
+    # across the nesting levels (see MAX_APP_EXTRACTION_BUDGET).
+    budget = CumulativeExtractionBudget(MAX_APP_EXTRACTION_BUDGET)
     file_components = []
     parent_component: Component | None = None
     app_facts: dict = {"hermes_bundles": scan_hermes_bundles(app_file)}
     try:
-        _extract_app_zip(app_file, bundle_temp_dir)
+        _extract_app_zip(app_file, bundle_temp_dir, budget=budget)
         bundle_info = read_bundle_info(bundle_temp_dir)
         apk_files = sorted(find_files(bundle_temp_dir, [".apk"]))
         if not apk_files:
@@ -262,7 +312,7 @@ def collect_bundle_metadata(
         for apk in apk_files:
             file_components += collect_files_metadata(
                 app_file, parent_component, deep_mode, unpack_target=apk,
-                app_facts=app_facts, use_blintdb=use_blintdb,
+                app_facts=app_facts, use_blintdb=use_blintdb, budget=budget,
             )
     finally:
         shutil.rmtree(bundle_temp_dir, ignore_errors=True)
@@ -1298,17 +1348,18 @@ def _iter_app_dex_files(app_file: str) -> Iterator[tuple[str, str]]:
     """
     bundle_temp_dir = None
     app_temp_dirs = []
+    budget = CumulativeExtractionBudget(MAX_APP_EXTRACTION_BUDGET)
     try:
         if app_file.endswith(BUNDLE_EXTENSIONS):
             bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
-            _extract_app_zip(app_file, bundle_temp_dir)
+            _extract_app_zip(app_file, bundle_temp_dir, budget=budget)
             targets = sorted(find_files(bundle_temp_dir, [".apk"]))
         else:
             targets = [app_file]
         for apk in targets:
             app_temp_dir = tempfile.mkdtemp(prefix="blint_android_dex")
             app_temp_dirs.append(app_temp_dir)
-            _extract_app_zip(apk, app_temp_dir)
+            _extract_app_zip(apk, app_temp_dir, budget=budget)
             for adex in sorted(find_files(app_temp_dir, [".dex"])):
                 yield adex, app_temp_dir
     finally:
@@ -1371,10 +1422,11 @@ def build_app_dex_callgraph(app_file: str) -> dict:
 
     targets = []
     bundle_temp_dir = None
+    budget = CumulativeExtractionBudget(MAX_APP_EXTRACTION_BUDGET)
     try:
         if app_file.endswith(BUNDLE_EXTENSIONS):
             bundle_temp_dir = tempfile.mkdtemp(prefix="blint_android_bundle")
-            _extract_app_zip(app_file, bundle_temp_dir)
+            _extract_app_zip(app_file, bundle_temp_dir, budget=budget)
             targets = sorted(find_files(bundle_temp_dir, [".apk"]))
         else:
             targets = [app_file]
@@ -1382,7 +1434,7 @@ def build_app_dex_callgraph(app_file: str) -> dict:
         for apk in targets:
             app_temp_dir = tempfile.mkdtemp(prefix="blint_android_cg")
             try:
-                _extract_app_zip(apk, app_temp_dir)
+                _extract_app_zip(apk, app_temp_dir, budget=budget)
                 for adex in find_files(app_temp_dir, [".dex"]):
                     per_dex.append(build_callgraph(parse_dex(adex)))
             finally:
@@ -1527,6 +1579,7 @@ def collect_files_metadata(
     unpack_target: str | None = None,
     app_facts: dict | None = None,
     use_blintdb: bool = False,
+    budget: CumulativeExtractionBudget | None = None,
 ) -> list[Component]:
     """
     Unzip the app (or a specific apk within a bundle) and collect metadata.
@@ -1537,6 +1590,9 @@ def collect_files_metadata(
         deep_mode (bool): Flag indicating whether to parse dex files.
         unpack_target (str): Specific apk to unpack. Defaults to ``app_file``.
         use_blintdb (bool): Match native libraries against the local blintdb.
+        budget (CumulativeExtractionBudget or None): Shared extraction budget
+            for the whole bundle when unpacking inner apks; a fresh one is
+            used when the app stands alone.
 
     Returns:
         list: A list of Component objects.
@@ -1547,7 +1603,7 @@ def collect_files_metadata(
     # exception anywhere below would otherwise leave the whole extracted APK on
     # disk (ground rule 18).
     try:
-        _extract_app_zip(unpack_target or app_file, app_temp_dir)
+        _extract_app_zip(unpack_target or app_file, app_temp_dir, budget=budget)
         file_components += collect_version_files_metadata(app_file, app_temp_dir)
         # Native libraries come from the zip in place (A1.1 model), not from
         # the unzip tree.

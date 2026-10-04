@@ -1,7 +1,10 @@
+import contextlib
+import hashlib
 import logging
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -73,6 +76,11 @@ from blint.lib.utils import (
     reset_hex_truncation_count,
 )
 from blint.logger import LOG
+
+# Copy granularity for the parse spool (see _parse_with_cache): 1 MiB keeps
+# the extra sequential read+write of a cache-enabled miss in the same league
+# as the sha256 pass the cache already pays on every unit.
+_PARSE_SPOOL_CHUNK = 1 << 20
 
 
 def _validate_sdk_path(blint_options: BlintOptions) -> None:
@@ -668,33 +676,73 @@ class AnalysisRunner:
             self._mark_cache("hit", unit_role)
             return cached
         self._mark_cache("miss", unit_role)
-        metadata = parse(
-            file_path,
-            should_disassemble,
-            wasm_strings=blint_options.wasm_strings,
-            wasm_call_graph=blint_options.wasm_call_graph,
-            sdk_path=blint_options.sdk_path,
-        )
-        # Re-hash after parse and store only when the file's bytes did not
-        # change between the pre-parse hash and now (CWE-367). Without this,
-        # a file swapped mid-parse — a scanner racing a build that rewrites
-        # the artifact, or any writer to a shared input — would store the new
-        # content's metadata under the old content's hash and replay it
-        # forever. The parse cache is best-effort, so a detected swap simply
-        # skips the store rather than failing the scan; the just-parsed
-        # metadata is still returned for this run.
-        post_sha = sha256_file(file_path)
-        if file_sha and post_sha == file_sha:
-            if cache.put(file_sha, self._parse_options_digest, metadata):
-                self._mark_cache("stored", unit_role)
-        elif file_sha and post_sha != file_sha:
-            LOG.debug(
-                "Not caching %s: file content changed during parse "
-                "(sha %s -> %s)",
-                file_path,
-                file_sha[:12],
-                (post_sha or "unreadable")[:12] if post_sha else "unreadable",
+        # Hash-and-parse must consume the same bytes, or the cache can be
+        # poisoned: a writer that swaps the file's content for the parse and
+        # restores it afterwards (CWE-367 — a scanner racing a build that
+        # rewrites the artifact, a FUSE filesystem, any writer to a shared
+        # input) used to be able to store one content's metadata under
+        # another content's hash, and the wrong entry then replayed forever.
+        # Re-hashing around the parse cannot catch a swap-and-restore, so on
+        # a miss the file is copied once to a spool and the *spool* is both
+        # hashed and parsed: the key then describes exactly the bytes the
+        # payload was parsed from, whatever the live file did meanwhile. A
+        # rename-swap during the copy leaves the source fd on the original
+        # inode; an in-place rewrite tears, but the torn snapshot is hashed
+        # and parsed as one, so key and payload still agree.
+        spool_fd, spool_path = tempfile.mkstemp(prefix="blint_parse_spool_")
+        spooled = False
+        hasher = hashlib.sha256()
+        try:
+            try:
+                with os.fdopen(spool_fd, "wb") as dst, open(file_path, "rb") as src:
+                    while True:
+                        chunk = src.read(_PARSE_SPOOL_CHUNK)
+                        if not chunk:
+                            break
+                        hasher.update(chunk)
+                        dst.write(chunk)
+                spooled = True
+            except OSError as exc:
+                # The file cannot be copied (permissions, special file): parse
+                # the original directly and skip the store rather than fail —
+                # the cache is best-effort.
+                LOG.debug("Not caching %s: could not spool bytes for parse (%s)", file_path, exc)
+            if not spooled:
+                return parse(
+                    file_path,
+                    should_disassemble,
+                    wasm_strings=blint_options.wasm_strings,
+                    wasm_call_graph=blint_options.wasm_call_graph,
+                    sdk_path=blint_options.sdk_path,
+                )
+            spool_sha = hasher.hexdigest()
+            if spool_sha != file_sha:
+                LOG.debug(
+                    "%s changed between the cache lookup and the spool copy "
+                    "(sha %s -> %s); caching the spooled snapshot",
+                    file_path,
+                    (file_sha or "unreadable")[:12],
+                    spool_sha[:12],
+                )
+            metadata = parse(
+                spool_path,
+                should_disassemble,
+                wasm_strings=blint_options.wasm_strings,
+                wasm_call_graph=blint_options.wasm_call_graph,
+                sdk_path=blint_options.sdk_path,
             )
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(spool_path)
+        # parse() embedded the spool's path in its output; rewrite it to the
+        # real path with the same exact-match walk a cache replay performs,
+        # so a miss and a hit return identical metadata for identical bytes.
+        metadata = ParseCache._rewrite_stored_path(metadata, spool_path, file_path)
+        metadata["file_path"] = file_path
+        if "name" in metadata:
+            metadata["name"] = file_path
+        if cache.put(spool_sha, self._parse_options_digest, metadata):
+            self._mark_cache("stored", unit_role)
         return metadata
 
     def _process_files(self, f: str, blint_options: BlintOptions) -> None:

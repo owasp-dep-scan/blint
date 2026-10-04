@@ -302,3 +302,207 @@ def test_ios_bundle_executable_cannot_escape(tmp_path):
     binaries = ios._collect_bundle_binaries(str(app), bundle_info)
     real_secret = os.path.realpath(secret)
     assert all(os.path.realpath(b["path"]) != real_secret for b in binaries)
+
+
+# ---------------------------------------------------------------------------
+# F3 — exec_tool never spawns a shell; batch launchers screen their args
+# ---------------------------------------------------------------------------
+
+
+def test_exec_tool_uses_no_shell(monkeypatch):
+    from blint.lib import android
+
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+
+        class _Result:
+            returncode = 0
+            stdout = "pkg\t1.0\n"
+
+        return _Result()
+
+    monkeypatch.setattr(android.subprocess, "run", fake_run)
+    android.exec_tool(["apkanalyzer", "apk", "summary", "x.apk"])
+    assert captured["shell"] is False
+
+
+def test_bat_launcher_refuses_metacharacter_args():
+    from blint.lib.android import _bat_unsafe_args
+
+    # A member name such as x&calc.exe&base.apk must never reach a
+    # cmd.exe-routed batch launcher verbatim.
+    assert _bat_unsafe_args(
+        ["C:\\tools\\apkanalyzer.bat", "apk", "summary", "C:\\t\\x&calc.exe&base.apk"]
+    )
+    # Plain paths are fine, and non-batch executables are not screened here.
+    assert not _bat_unsafe_args(["C:\\tools\\apkanalyzer.bat", "apk", "summary", "C:\\t\\base.apk"])
+    assert not _bat_unsafe_args(["apkanalyzer", "apk", "summary", "C:\\t\\x&calc.exe&base.apk"])
+
+
+# ---------------------------------------------------------------------------
+# F4 — the parse cache key must describe exactly the bytes that were parsed
+# ---------------------------------------------------------------------------
+
+
+def test_parse_with_cache_survives_swap_and_restore(tmp_path, monkeypatch):
+    """A writer that swaps the file for the parse and restores it afterwards
+    must not be able to cache one content's metadata under another's hash.
+
+    The fake parse mirrors the attack: while "parsing", it flips the live
+    file to content B and restores content A. Before the spool fix, parse
+    read the live file (B) and its metadata was stored under A's hash, so a
+    later scan of A replayed B's metadata. With the spool, parse reads the
+    pre-copied snapshot, whose hash is the stored key.
+    """
+    import hashlib
+
+    from blint.config import BlintOptions
+    from blint.lib import runners
+
+    monkeypatch.setenv("BLINT_CACHE_DIR", str(tmp_path / "cache"))
+
+    content_a = b"\x7fELF" + b"A-content" * 64
+    content_b = b"MZ" + b"B-content" * 64
+    live = tmp_path / "victim.bin"
+    live.write_bytes(content_a)
+
+    def fake_parse(path, *args, **kwargs):
+        with open(path, "rb") as fh:
+            parsed = fh.read()
+        # The racing writer: swap B in, then restore A, around the read.
+        live.write_bytes(content_b)
+        live.write_bytes(content_a)
+        return {
+            "name": path,
+            "file_path": path,
+            "exe_type": "FAKE",
+            "binary_type": "genericbinary",
+            "parsed_sha": hashlib.sha256(parsed).hexdigest(),
+        }
+
+    monkeypatch.setattr(runners, "parse", fake_parse)
+
+    def opts():
+        return BlintOptions(
+            src_dir_image=[str(tmp_path)],
+            reports_dir=str(tmp_path / "reports"),
+            use_cache=True,
+        )
+
+    def new_runner():
+        runner = runners.AnalysisRunner(export_artifacts=False)
+        assert runner._setup_parse_cache(opts())
+        return runner
+
+    r1 = new_runner()
+    md1 = r1._parse_with_cache(str(live), opts(), "top-level")
+    r1.parse_cache.close()
+
+    sha_a = hashlib.sha256(content_a).hexdigest()
+    sha_b = hashlib.sha256(content_b).hexdigest()
+    assert md1["parsed_sha"] == sha_a, "parse consumed the spooled A snapshot, not the live swap"
+    assert md1["file_path"] == str(live) and md1["name"] == str(live)
+    assert r1.cache_stored == 1
+
+    # Replay for content A must describe content A, not the swapped-in B.
+    r2 = new_runner()
+    md2 = r2._parse_with_cache(str(live), opts(), "top-level")
+    r2.parse_cache.close()
+    assert md2["parsed_sha"] == sha_a
+    assert md2["parsed_sha"] != sha_b
+
+
+# ---------------------------------------------------------------------------
+# NEW — one extraction budget bounds a nested bundle, not just each archive
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_budget_bounds_nested_archives(tmp_path):
+    """Per-archive caps alone multiply across nesting levels; a shared
+    budget must turn that product into a sum."""
+    import io
+    import zipfile
+
+    from blint.lib.container import ContainerLimits, CumulativeExtractionBudget, extract_zip_to_dir
+
+    def semi_compressible(n_bytes):
+        # ~1% random bytes keeps the deflate ratio near 100, comfortably
+        # under a 200:1 cap, so nothing is refused by the ratio bound.
+        block = bytearray(b"\x41" * 65536)
+        rand = os.urandom(656)
+        block[: len(rand)] = rand
+        return (bytes(block) * (n_bytes // 65536 + 1))[:n_bytes]
+
+    member_data = semi_compressible(2 * 1024 * 1024)
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for i in range(4):
+            z.writestr(f"r{i}.bin", member_data)
+    inner_bytes = inner.getvalue()
+
+    outer = tmp_path / "nest.xapk"
+    with zipfile.ZipFile(outer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for j in range(3):
+            z.writestr(f"inner{j}.apk", inner_bytes)
+
+    limits = ContainerLimits(
+        max_members=1000,
+        max_total_uncompressed=256 * 1024 * 1024,
+        max_member_size=64 * 1024 * 1024,
+        max_member_depth=32,
+        max_member_compression_ratio=200,
+    )
+    cap = 6 * 1024 * 1024  # far below the ~24 MiB the two levels would unpack
+    budget = CumulativeExtractionBudget(cap)
+
+    level1 = tmp_path / "lvl1"
+    level1.mkdir()
+    refusals: list[str] = []
+    extract_zip_to_dir(str(outer), str(level1), limits, refusals, budget=budget)
+
+    total = 0
+    for j in range(3):
+        dest = tmp_path / f"lvl2_{j}"
+        dest.mkdir()
+        extract_zip_to_dir(str(level1 / f"inner{j}.apk"), str(dest), limits, refusals, budget=budget)
+        total += sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+    # The whole nested extraction stayed inside the one budget.
+    assert total <= cap
+    assert budget.spent <= cap
+
+    # And once the budget is spent, further archives are refused by name.
+    budget.charge(budget.remaining)
+    spent_refusals: list[str] = []
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    more = extract_zip_to_dir(str(level1 / "inner0.apk"), str(extra), limits, spent_refusals, budget=budget)
+    assert "extraction_budget_exhausted" in spent_refusals
+    assert more == {}
+    assert not any(extra.rglob("*"))
+
+
+# ---------------------------------------------------------------------------
+# F6 — the HTML report must initialize mermaid in strict mode, version-pinned
+# ---------------------------------------------------------------------------
+
+
+def test_mermaid_report_is_strict_and_version_pinned(tmp_path):
+    import re
+
+    from blint.lib.analysis import _inject_mermaid_into_html
+
+    html_file = tmp_path / "blint-output.html"
+    html_file.write_text("<html><body></body></html>")
+    _inject_mermaid_into_html(
+        html_file,
+        [{"exe_name": "b", "file_name": "b.mmd", "mermaid_text": "graph TD\n    A-->B"}],
+    )
+    html = html_file.read_text()
+    assert "securityLevel:'strict'" in html
+    assert "htmlLabels:false" in html
+    assert "securityLevel:'loose'" not in html
+    # An exact version, not a floating major: the bytes the report loads
+    # must not change under it.
+    assert re.search(r"mermaid@\d+\.\d+\.\d+/", html)
