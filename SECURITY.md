@@ -2,13 +2,11 @@
 
 ## Reporting Security Issues
 
-The OWASP dep-scan team and community take security bugs seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contri
-butions.
+The OWASP dep-scan team and community take security bugs seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
 
 To report a security issue, email [team@appthreat.com](mailto:team@appthreat.com) and include the word **"SECURITY"** in the subject line.
 
-The OWASP dep-scan team will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the pro
-gress towards a fix and full announcement, and may ask for additional information or guidance.
+The OWASP dep-scan team will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
 
 Report security bugs in third-party modules to the person or team maintaining the module.
 
@@ -93,8 +91,8 @@ When unsure, report privately with a minimal reproducer and impact narrative.
 
 Security fixes are supported for the most recent two tagged versions:
 
-- latest stable release (for example `v3.1.2` at the time of writing)
-- previous (`v3.1.1` which is the previous release at the time of writing)
+- latest stable release (for example `v4.0.0` at the time of writing)
+- previous (`v3.4.0` which is the previous release at the time of writing)
 
 Older versions may not receive security fixes. Please upgrade before reporting if
 you are running a release older than the two versions listed above.

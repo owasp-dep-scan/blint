@@ -94,6 +94,8 @@ jobs:
             # Confirm the bundled disassembler is available in the frozen binary
             "./dist/$BINARY_NAME" --help >/dev/null
             "./dist/$BINARY_NAME" -i "dist/$BINARY_NAME" -o /tmp/reports
+            # Frozen worker-pool and parse-cache smoke; see the linux workflow note.
+            BLINT_CACHE_DIR=/tmp/blint-smoke-cache "./dist/$BINARY_NAME" --no-banner -q --jobs 2 --cache -i "dist/$BINARY_NAME" -o /tmp/reports-jobs
             sha256sum "./dist/$BINARY_NAME" > "./dist/$BINARY_NAME.sha256"
 
             # Files are created as root in the container; hand them back to the

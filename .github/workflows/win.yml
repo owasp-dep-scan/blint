@@ -44,6 +44,9 @@ jobs:
         (Get-FileHash .\dist\blint.exe).hash | Out-File -FilePath .\dist\blint.exe.sha256
         set PYTHONIOENCODING=UTF-8
         .\dist\blint.exe -i .\dist\blint.exe -o reports --no-banner
+        # Frozen worker-pool and parse-cache smoke; see the linux workflow note.
+        $env:BLINT_CACHE_DIR = "$env:TEMP\blint-smoke-cache"
+        .\dist\blint.exe --no-banner -q --jobs 2 --cache -i .\dist\blint.exe -o reports-jobs
       env:
         PYTHONIOENCODING: utf-8
         LANG: en_US.utf-8

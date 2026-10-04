@@ -1,0 +1,28 @@
+# Anything a developer workstation or a test run leaves behind must not enter
+# the image: poetry auto-detects an in-project .venv and refuses the install,
+# and build artifacts bloat the layer. CI checkouts start clean; this file
+# makes a local `docker build .` behave the same way.
+.git
+.github
+.venv
+venv
+env
+dist
+build
+*.spec
+out
+reports
+blintdb
+node_modules
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+.DS_Store
+.idea
+.vscode

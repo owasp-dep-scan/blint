@@ -10,20 +10,38 @@
 
 blint is a tool for reverse engineers, security analysts, and developers to quickly assess the security posture and composition of a binary file. In an age of statically-linked Golang, Rust, and .NET applications, understanding what's inside a binary is more important than ever. blint automates this initial triage process.
 
+The default scan flows like this:
+
+```mermaid
+flowchart TD
+    A["Inputs: binaries, directories, container images, app and package archives"] --> B["Discover analysis units (one per binary, bundle member, or container member)"]
+    B --> P["Parse each unit (ELF, PE, Mach-O, WASM readers plus the Android, installer, and bundle unpackers)"]
+    P --> M["*-metadata.json and analysis-coverage.json"]
+    P --> C["Security checks (rules.yml)"]
+    P --> R["Capability reviews (annotation rules)"]
+    D["--disassemble, opt-in: nyxstone plus abstract interpretation"] --> C
+    D --> R
+    D --> G["Callgraph exports (.mmd, .graphml, .gexf)"]
+    C --> O["findings.json, reviews.json, blint-output.html"]
+    R --> O
+    P -.->|"blint sbom"| S["CycloneDX 1.7 SBOM (1.6 selectable), optional blintdb and deep matching"]
+```
+
 **Supported Binary Formats:**
 
 - ELF (for GNU and musl libc)
-- PE (Windows executables and DLLs)
+- PE (Windows executables and DLLs), including .NET assemblies: metadata tables, strong-name facts, and publish shape (ReadyToRun, NativeAOT, single-file bundles)
 - Mach-O (macOS and iOS, x64 and arm64), including Objective-C and Swift metadata
 - iOS/macOS apps (`.ipa`, and on macOS also `.app`, `.framework`, and `.dSYM` bundles): the main executable, embedded frameworks, dylibs, and app extensions are all analyzed, and embedded provisioning profiles are decoded for the entitlements they grant
-- WASM (WebAssembly modules)
+- Windows packages and documents: `.msi`/`.msp` databases, `.cab` archives, `.msix`/`.appx` packages and bundles, ClickOnce deployments, `.nupkg` archives, and Office documents (including VBA macro analysis)
 - Android (APK, APKM, AAB, including DEX files in deep mode)
-- Disassembler: AArch64, x86/x86-64, ARM, Mips, MicroMips (native), and Dalvik (DEX).
+- WASM (WebAssembly modules)
+- Disassembler: AArch64, x86/x86-64, i386, ARM and Thumb (armeabi-v7a), Mips, MicroMips (native), and Dalvik (DEX).
 
 ## Key Features & Use Cases
 
 - **Comprehensive Security Audits:** Automatically checks for common security mitigations like PIE, ASLR, NX, Stack Canaries, and RELRO. Ideal for ensuring your CI/CD pipeline produces hardened binaries.
-- **Software Bill-of-Materials (SBOM) Generation:** Creates CycloneDX SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
+- **Software Bill-of-Materials (SBOM) Generation:** Creates [CycloneDX](https://cyclonedx.org/specification/overview/) SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
 - **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
   - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
   - For the custom CycloneDX properties blint adds to the BOM, see the [Custom Properties Documentation](./docs/CUSTOM_PROPERTIES.md).
@@ -33,6 +51,9 @@ blint is a tool for reverse engineers, security analysts, and developers to quic
 - **iOS/macOS App Analysis:** Point blint at an `.ipa` and it unpacks the app bundle, reads the `Info.plist` context (bundle id, version, minimum OS, FairPlay encryption status), and analyzes the main executable along with every embedded framework, dylib, and app extension. For Mach-O binaries, blint recovers Objective-C metadata (classes, superclasses, methods, protocols, and referenced selectors) and demangles Swift symbols, then surfaces iOS privacy capabilities such as location, camera, microphone, contacts, photos, telephony, motion, biometrics, and device fingerprinting. It also reports privacy and fingerprinting behaviours: passive device fingerprinting, installed-app probing, local-network scanning, cross-app tracking, and the app's `PrivacyInfo.xcprivacy` posture including undeclared "required reason" API usage.
 - **Capability Analysis:** Identifies potentially sensitive capabilities by reviewing imported functions and symbols, such as network access, filesystem operations, or cryptographic API usage.
   - Includes cluster-style behavioral reviews for low-level networking patterns (for example eBPF sock_ops usage, TUN interception stacks, raw packet injection primitives, and local DoH redirection indicators).
+- **Windows Depth:** Windows inputs get a structured Authenticode walk (signers, timestamps, chains, signing class), kernel-driver posture (frameworks, IOCTL surfaces, HVCI compatibility, known vulnerable driver matching against a shipped loldrivers.io and Microsoft blocklist snapshot), installer and container unpacking (MSI, CAB, MSIX, 7z SFX, ClickOnce), and a .NET metadata reader that recovers assembly references, P/Invoke surfaces, and publish shape without executing anything.
+- **Binary Diffing:** `blint diff` compares two versions of one binary (or two `*-metadata.json` exports) and reports metadata deltas, hardening regressions with per-property polarity, finding deltas paired across rebuilds, and, with `--disassemble`, a function-level delta keyed on content hashes.
+- **Performance:** `--jobs N` analyzes binaries in parallel worker processes with byte-identical output, and `--cache` turns on a content-addressed parse cache so unchanged binaries are parsed once. `blint capabilities` prints the full catalog of checks and reviews the engine will run, in text or JSON.
 - **CI/CD Integration:** Can be added to build pipelines to enforce security policies, such as requiring code signing on all release artifacts.
 - **Fuzzing Target Identification:** Suggests interesting functions to target for fuzzing based on common patterns in function names (e.g., `parse`, `decode`, `copy`).
 - **Extensible with Custom Rules:** Define your own capabilities and checks using simple [YAML rule files](./docs/RULES.md).
@@ -119,6 +140,7 @@ blint produces several JSON artifacts in the specified reports directory.
 | `exename-metadata.json`     | **Raw, detailed metadata** extracted from the binary. This is the source for all other reports. | Contains everything: headers, symbols, functions, dependencies, signature info, and more. See the **[Technical Metadata Documentation](./docs/METADATA.md)** for a full breakdown.                                                                                                             |
 | `exename-wasm-report.json`  | **Raw WASM parser report** for WebAssembly inputs.                                              | Generated for `.wasm` files and contains the full `wasm_tools` parser output, including section/function/instruction detail, extracted strings with secret/IoC screening, the labeled call graph, toolchain fingerprint, and the `component` interface inventory for Component Model binaries. |
 | `findings.json`             | A summary of the **security properties audit**. Designed for CI/CD integration.                 | Lists security mitigations like PIE, NX, and Stack Canaries and whether they are present. For WASM inputs, the `wasm_tools` analysis findings (`WASM-*`) are passed through as findings.                                                                                                       |
+| `analysis-coverage.json`    | A run-level account of **what was actually analyzed**.                                          | Counts units attempted, succeeded, failed, and skipped (per role), and records every failure and skip with a reason, so a clean result can never be mistaken for a blind one.                                                                                                                  |
 | `reviews.json`              | A summary of the **capability review**.                                                         | Lists detected capabilities (e.g., "networking", "file-read", "crypto") based on the symbols and functions found.                                                                                                                                                                              |
 | `fuzzables.json`            | A list of **suggested functions to fuzz**, generated when using the `--suggest-fuzzable` flag.  | Identifies functions with names that suggest data parsing or manipulation, which are often good candidates for fuzzing.                                                                                                                                                                        |
 | `exename-callgraph.mmd`     | Mermaid callgraph export generated with `--export-callgraph-mermaid`.                           | Includes internal and unresolved edges; also embedded into `blint-output.html`.                                                                                                                                                                                                                |
