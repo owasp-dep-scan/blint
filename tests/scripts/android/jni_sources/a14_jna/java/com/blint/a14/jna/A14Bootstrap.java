@@ -3,11 +3,10 @@ package com.blint.a14.jna;
 import com.sun.jna.Native;
 
 /**
- * The cross-class registrar boundary: this class registers another class,
- * not itself, so the site is evidence for no class - its own decoy
- * declaration (whose name the library exports) must stay unbound, and so
- * must the registered class's own declaration (its <clinit> never
- * invokes register).
+ * The cross-class registrar: this class registers another class by its
+ * literal, not itself. JNA binds the registered class's natives, so
+ * A14RegisteredByBootstrap's declaration binds, while this class's own
+ * decoy declaration (whose name the library exports) must stay unbound.
  */
 public final class A14Bootstrap {
     static {

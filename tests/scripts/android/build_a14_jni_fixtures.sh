@@ -17,13 +17,26 @@
 #   A14Twin         the negative twin: same natives, same exports, but
 #                   only System.loadLibrary - no register call anywhere;
 #                   must stay unbound.
-#   A14Ambiguous    registered through the class-only overload (no
+#   A14Ambiguous    registered against the process library (no
 #                   constant); the name is exported by both libraries in
 #                   every ABI, so the row must stay ambiguous with both
 #                   exporters listed.
+#   A14Bootstrap    registers A14RegisteredByBootstrap by its literal:
+#                   that class binds, the bootstrap's own decoy does not.
+#   A14Caller       its <clinit> runs A14SelfRegistrar's registrar, which
+#                   registers A14SelfRegistrar: that class binds, the
+#                   caller's own decoy does not.
+#   A14Stale        the name argument is a field read in a register that
+#                   held "a14jna" earlier; A14Branch passes "a14other" or
+#                   "a14jna" by branch. Both names are exported by both
+#                   libraries: no constant holds on every path, so both
+#                   rows stay ambiguous.
+#   A14Outer        Native.register(String) from the nested Init class,
+#                   which declares no natives: JNA registers A14Outer.
 #
-# liba14jna_<abi>.so exports the five plain C names; liba14other_<abi>.so
-# exports the decoy pair (a14_ambiguous, a14_helper_mul). The JNA dispatch
+# liba14jna_<abi>.so exports every plain C name; liba14other_<abi>.so
+# exports the decoys (a14_ambiguous, a14_stale, a14_branch, a14_helper_mul).
+# The JNA dispatch
 # library is a name-presence stub (libjnidispatch.so, an empty library) -
 # the join reads the name, and JNA's real dispatch artifact is LGPL and
 # stays out of the repository.
