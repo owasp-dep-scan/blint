@@ -1458,15 +1458,19 @@ os.makedirs(BLINTDB_HOME, exist_ok=True)
 
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
 if not os.path.exists(BLINTDB_LOC):
-    alternate_blintdb_loc = os.path.join(BLINTDB_HOME, "blint-v2.db")
-    if os.path.exists(alternate_blintdb_loc):
-        BLINTDB_LOC = alternate_blintdb_loc
+    # blint-db names its databases after the blint major version they target,
+    # so accept both the current v4 artifacts and the earlier v2 ones.
+    for alternate_blintdb_name in ("blint-v4.db", "blint-v2.db"):
+        alternate_blintdb_loc = os.path.join(BLINTDB_HOME, alternate_blintdb_name)
+        if os.path.exists(alternate_blintdb_loc):
+            BLINTDB_LOC = alternate_blintdb_loc
+            break
 
 BLINTDB_IMAGE_URL = os.getenv(
     "BLINTDB_IMAGE_URL",
-    "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2"
+    "ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v4"
     if SYSTEM == "darwin"
-    else "ghcr.io/appthreat/blintdb-vcpkg:v2",
+    else "ghcr.io/appthreat/blintdb-vcpkg:v4",
 )
 # Only the listed spellings enable a refresh. The default was False, a bool,
 # so every other value stayed the truthy string os.getenv returned and

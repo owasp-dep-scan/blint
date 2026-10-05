@@ -256,7 +256,7 @@ options:
                         exports.
   --suggest-fuzzable    Suggest functions and symbols for fuzzing based on a
                         dictionary.
-  --use-blintdb         Use blintdb v2 for symbol resolution where supported.
+  --use-blintdb         Use blintdb v4 for symbol resolution where supported.
                         Defaults to true if the file exists at
                         /Users/appthreat/Library/Application
                         Support/blintdb/blint.db. Use environment variables:
@@ -358,7 +358,7 @@ options:
   --bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]
                         Directories containing pre-build and build BOMs. Use
                         to improve the precision.
-  --use-blintdb         Use blintdb v2 for symbol and disassembly-hash
+  --use-blintdb         Use blintdb v4 for symbol and disassembly-hash
                         resolution. Defaults to true if the file exists at
                         <user data dir>/blintdb/blint.db. Use environment variables:
                         BLINTDB_IMAGE_URL, BLINTDB_HOME, and BLINTDB_REFRESH
@@ -543,7 +543,7 @@ options:
 
 ```shell
 usage: blint db [-h] [--download]
-                [--image-url {ghcr.io/appthreat/blintdb-vcpkg:v2,ghcr.io/appthreat/blintdb-vcpkg-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-musl:v2,ghcr.io/appthreat/blintdb-meson:v2,ghcr.io/appthreat/blintdb-meson-arm64:v2,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v2,ghcr.io/appthreat/blintdb-meson-musl:v2}]
+                [--image-url {ghcr.io/appthreat/blintdb-vcpkg:v4,ghcr.io/appthreat/blintdb-vcpkg-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-musl:v4,ghcr.io/appthreat/blintdb-meson:v4,ghcr.io/appthreat/blintdb-meson-arm64:v4,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v4,ghcr.io/appthreat/blintdb-meson-musl:v4}]
 
 options:
   -h, --help            show this help message and exit
@@ -551,9 +551,9 @@ options:
                         <user data dir>/blintdb
                         directory. Use the environment variable `BLINTDB_HOME`
                         to override.
-  --image-url {ghcr.io/appthreat/blintdb-vcpkg:v2,ghcr.io/appthreat/blintdb-vcpkg-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2,ghcr.io/appthreat/blintdb-vcpkg-musl:v2,ghcr.io/appthreat/blintdb-meson:v2,ghcr.io/appthreat/blintdb-meson-arm64:v2,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v2,ghcr.io/appthreat/blintdb-meson-musl:v2}
+  --image-url {ghcr.io/appthreat/blintdb-vcpkg:v4,ghcr.io/appthreat/blintdb-vcpkg-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-musl:v4,ghcr.io/appthreat/blintdb-meson:v4,ghcr.io/appthreat/blintdb-meson-arm64:v4,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v4,ghcr.io/appthreat/blintdb-meson-musl:v4}
                         Blintdb image url. Defaults to
-                        ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v2. The
+                        ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v4. The
                         environment variable `BLINTDB_IMAGE_URL` is an
                         alternative way to set this value.
 ```

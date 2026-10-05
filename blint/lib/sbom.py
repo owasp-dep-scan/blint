@@ -1282,7 +1282,7 @@ def process_exe_file(
             )
 
     if use_blintdb:
-        LOG.debug("Utilizing blintdb v2 for SBOM component matching")
+        LOG.debug("Utilizing blintdb v4 for SBOM component matching")
         symbol_source_map = build_symbol_source_map(metadata)
         function_hash_index = build_function_hash_index(metadata)
         callgraph_canon_names = build_callgraph_canon_names(metadata)

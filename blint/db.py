@@ -261,9 +261,13 @@ def _resolve_db_file(db_file: str | None = None) -> str | None:
     if database_file and os.path.exists(database_file):
         return database_file
     if database_file and os.path.basename(database_file) == "blint.db":
-        candidate = os.path.join(os.path.dirname(database_file), "blint-v2.db")
-        if os.path.exists(candidate):
-            return candidate
+        # blint-db names its databases after the blint major version they
+        # target, so accept both the current v4 artifacts and the earlier
+        # v2 ones.
+        for alternate_name in ("blint-v4.db", "blint-v2.db"):
+            candidate = os.path.join(os.path.dirname(database_file), alternate_name)
+            if os.path.exists(candidate):
+                return candidate
     return database_file
 
 
@@ -394,7 +398,7 @@ def _supported_schema_version(meta: dict[str, str]) -> bool:
 
 
 def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
-    """Extract source-aware symbol buckets matching the blintdb v2 schema.
+    """Extract source-aware symbol buckets matching the blintdb schema.
 
     Imported symbols are excluded (F2b.1): an import names the library that
     *provides* it, not the artifact, so matching on imports makes every
@@ -1821,7 +1825,7 @@ def detect_binaries_utilized(
     db_file: str | None = None,
     limit: int = 20,
 ) -> tuple[set, dict]:
-    """Resolve likely component purls using the local blintdb v2 schema."""
+    """Resolve likely component purls using the local blintdb database."""
     if symbol_source_map is None and symbols_list:
         symbol_names = []
         for symbol in symbols_list:
