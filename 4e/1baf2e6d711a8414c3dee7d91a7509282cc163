@@ -1,0 +1,28 @@
+docs/ANDROID.md
+  s_3ce4fa53ecd7da::t_630f5faf3f86f6 67
+  s_3ce4fa53ecd7da::t_f40f700a639bba 3,15,21,32,42,49,77,114,118,122,126,130,145,152,154,164,171-172,174-175,179-180
+  s_3ce4fa53ecd7da::t_66954e9267709a 89-106,131-144,176,181
+  s_3ce4fa53ecd7da::t_7a151d30524086 170
+  s_3ce4fa53ecd7da::t_aaa4fe67df850c 173
+  s_3ce4fa53ecd7da::t_ceeafae6f882b7 1-2,4-14,16-20,22-31,33-41,43-48,50-66,68-76,78-88,107-113,115-117,119-121,123-125,127-129,146-151,153,155-163,165-169,177-178
+README.md
+  s_3ce4fa53ecd7da::t_3a20c660203041 50
+docs/METADATA.md
+  s_3ce4fa53ecd7da::t_f1a4d31fb4d22c 102,106,108-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4e1baf2e6d711a8414c3dee7d91a7509282cc163",
+  "prompts": {},
+  "sessions": {
+    "s_3ce4fa53ecd7da": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d487783-7c87-41e7-96af-769eda82e374",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
