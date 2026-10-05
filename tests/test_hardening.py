@@ -221,7 +221,7 @@ def test_reviews_table_survives_markup_payload():
 @pytest.mark.parametrize(
     "ref,expected_host",
     [
-        ("ghcr.io/appthreat/blintdb-vcpkg:v2", "ghcr.io"),
+        ("ghcr.io/appthreat/blintdb-vcpkg:v4", "ghcr.io"),
         ("ghcr.io/x@sha256:" + "a" * 64, "ghcr.io"),
         ("registry.example.com:5000/x:1", "registry.example.com:5000"),
         ("localhost:5000/x", "localhost:5000"),

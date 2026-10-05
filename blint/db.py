@@ -257,14 +257,9 @@ SYMBOL_SOURCES = (
 
 
 def _resolve_db_file(db_file: str | None = None) -> str | None:
-    database_file = db_file or BLINTDB_LOC
-    if database_file and os.path.exists(database_file):
-        return database_file
-    if database_file and os.path.basename(database_file) == "blint.db":
-        candidate = os.path.join(os.path.dirname(database_file), "blint-v2.db")
-        if os.path.exists(candidate):
-            return candidate
-    return database_file
+    # Databases are always named blint.db; the major version they target is
+    # carried by the OCI image tag they were pulled from.
+    return db_file or BLINTDB_LOC
 
 
 def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection | None:
@@ -394,7 +389,7 @@ def _supported_schema_version(meta: dict[str, str]) -> bool:
 
 
 def build_symbol_source_map(metadata: dict | None) -> dict[str, list[str]]:
-    """Extract source-aware symbol buckets matching the blintdb v2 schema.
+    """Extract source-aware symbol buckets matching the blintdb schema.
 
     Imported symbols are excluded (F2b.1): an import names the library that
     *provides* it, not the artifact, so matching on imports makes every
@@ -1821,7 +1816,7 @@ def detect_binaries_utilized(
     db_file: str | None = None,
     limit: int = 20,
 ) -> tuple[set, dict]:
-    """Resolve likely component purls using the local blintdb v2 schema."""
+    """Resolve likely component purls using the local blintdb database."""
     if symbol_source_map is None and symbols_list:
         symbol_names = []
         for symbol in symbols_list:
