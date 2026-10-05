@@ -1380,7 +1380,13 @@ def check_android_page_16k(f: str, metadata: dict[str, Any], rule_obj: dict[str,
         )
     detail = "not 16 KB-page compatible: " + "; ".join(reasons)
     if enforced is None:
-        return f"{detail}; Play requires 16 KB support from targetSdk 35"
+        # No app targetSdk (a standalone .so, such as a system image's
+        # library): the Play requirement applies to no known app, so the
+        # layout fact is reported below the policy's severity.
+        return {
+            "severity": "medium",
+            "evidence": f"{detail}; Play requires 16 KB support from targetSdk 35",
+        }
     return f"{detail}; Play requires it for this app (targets API {context['target_sdk']} >= 35)"
 
 
