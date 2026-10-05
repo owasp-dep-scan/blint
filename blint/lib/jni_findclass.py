@@ -1,4 +1,4 @@
-"""The FindClass confirmer for ``ambiguous_dynamic`` entries (A8 N3).
+"""The FindClass confirmer for ``ambiguous_dynamic`` entries.
 
 An ``ambiguous_dynamic`` entry is a dex ``native`` declaration whose
 (name, signature) pair is claimed by more than one recovered
@@ -25,8 +25,8 @@ tables are registered for which class:
 - Cross-function registrations (the fbjni chain): the registrar
   stack-copies its slice and calls ``HybridClass<T>::registerHybrid``,
   which materializes the class name and makes the JNIEnv
-  ``RegisterNatives`` vtable call. A9 P3 carries the caller's argument
-  registers into the callee's first state, so the callee's (methods,
+  ``RegisterNatives`` vtable call. The caller's argument registers are
+  carried into the callee's first state, so the callee's (methods,
   count) read there; the methods pointer arrives as the stack copy's
   marker and is tied back to the static table by the registrar's memcpy
   (or its single table materialisation, for an inlined copy). A merged
@@ -54,13 +54,11 @@ import struct
 from blint.lib.jni import _read_cstring
 from blint.logger import LOG
 
+
 # JNIEnv vtable slots (the JNINativeInterface order, reserved0-3 first):
-# FindClass is entry 6, RegisterNatives entry 215. The slot's byte offset and
-# the JNINativeMethod entry stride scale with the ABI's word size: 215*8/24
-# on the 64-bit ABIs, 215*4/12 on i386 and arm32.
-REGISTER_NATIVES_VTABLE_OFFSET = 215 * 8
-
-
+# FindClass is entry 6, RegisterNatives entry 215. The slot's byte offset
+# (1720 on the 64-bit ABIs, 860 on i386 and arm32) is what the tokens
+# below match as nyxstone prints it.
 def _vtable_slot_tokens(arch: str) -> tuple[str, ...]:
     """The RegisterNatives vtable access as nyxstone prints it, per arch.
 
@@ -166,7 +164,7 @@ def _walk_function(
     """Decode one function and step the absint model over it.
 
     ``incoming`` seeds the first state with the caller's argument
-    registers at its direct call (A9 P3), with caller-frame ``("sp", k)``
+    registers at its direct call, with caller-frame ``("sp", k)``
     symbolics rewritten to ``("caller_sp", k)`` so a stack copy keeps its
     identity without aliasing this function's own frame. On i386 it also
     carries the caller's whole register map and the outgoing argument
@@ -291,7 +289,7 @@ def _walk_function(
     # registrar may name its class only on the cold init path the compiler
     # places below the call, so they are held until the walk knows every
     # class name the function materializes. Only a materialization below
-    # every vtable call (the measured init-path placement, which no later
+    # every vtable call (the cold init-path placement, which no later
     # call consumes) may pair with them.
     unclassed_runtime: list[tuple] = []
     class_event_addresses: list[int] = []
@@ -1668,7 +1666,7 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
     run registered piecemeal resolves entry by entry. A registration in
     a callee (the fbjni ``registerHybrid`` shape) resolves the same way
     once the caller's argument registers are carried into the callee's
-    first state (A9 P3): the methods pointer arrives as the stack copy's
+    first state: the methods pointer arrives as the stack copy's
     marker and its static origin - the registrar's memcpy source or its
     single table materialisation - names the range. What neither path
     resolves (a runtime-computed count, a chain naming two classes)
@@ -1863,8 +1861,8 @@ def confirm_table_ranges(parsed_obj, tables: list[dict]) -> list[dict]:
 
     # Phase B/C: the registrar chain. Same-function registrations carry
     # their (methods, count) in the model's registers and resolve as
-    # address ranges. A9 P3: the fbjni callee reads its (methods, count)
-    # from the caller's argument registers carried across the direct
+    # address ranges. The fbjni callee reads its (methods, count) from
+    # the caller's argument registers carried across the direct
     # call - the methods pointer arrives as the stack copy's
     # ("caller_sp", k) marker, tied back to the static table by the
     # registrar's own memcpy (dst == that stack slot, src == a

@@ -1,4 +1,4 @@
-"""blintdb identification of Android native libraries (A6.3, rule 38).
+"""blintdb identification of Android native libraries.
 
 A blintdb match is symbol evidence, not identity: a library that statically
 links a project's code matches that project without *being* it.
@@ -7,9 +7,10 @@ links a project's code matches that project without *being* it.
   child component of the host. It replaces the host's identity only when the
   host's DT_SONAME is one of the project's own library names in the
   database. A file name alone is a hint.
-- Versions come from the artifact, never from the database row, which holds
-  the vcpkg port's version (the corpus OsmAnd bundles PROJ 8.2.0; the port
-  row says 9.8.1). The strings are read under ``blint.lib.banners``' rules.
+- Versions come from the artifact, never from the database row, which
+  holds the vcpkg port's version, not the bundled upstream one (OsmAnd
+  bundles PROJ 8.2.0 while its port row says 9.8.1). The strings are read
+  under ``blint.lib.banners``' rules.
 - A framework record for the same bytes wins over a match it contradicts or
   duplicates (``framework_claims``).
 """
