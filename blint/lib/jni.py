@@ -1,4 +1,4 @@
-"""JNI surface facts for Android native libraries (A5).
+"""JNI surface facts for Android native libraries.
 
 Static registration: a native method's implementation is exported under a
 name the JNI specification's "Resolving Native Method Names" chapter
@@ -34,7 +34,6 @@ from blint.logger import LOG
 # positional: _1 _, _2 ;, _3 [, _0wxyz U+wxyz (lowercase hex).
 _ESCAPES = {"1": "_", "2": ";", "3": "["}
 _HEX4_RE = re.compile(r"^[0-9a-f]{4}$")
-_DESCRIPTOR_START = "L[BCSIJFDZ"
 
 JNI_ON_LOAD = "JNI_OnLoad"
 JNI_ON_UNLOAD = "JNI_OnUnload"
@@ -343,6 +342,178 @@ def _load_library_method_indices(methods: list) -> list[int]:
     return indices
 
 
+# ------------------------------------------- JNA direct-mapping evidence
+
+_JNA_NATIVE_CLASS = "Lcom/sun/jna/Native;"
+
+
+def _jna_register_indices(methods: list) -> list[int]:
+    """Method-pool indices of ``com.sun.jna.Native.register`` overloads."""
+    indices = []
+    for index, method in enumerate(methods):
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            if (
+                index <= 0xFFFF
+                and str(method.name) == "register"
+                and method.has_class
+                and method.cls.fullname == _JNA_NATIVE_CLASS
+            ):
+                indices.append(index)
+    return indices
+
+
+def _jna_direct_mapped_class(
+    caller: str, native_classes: set[str], defined_classes: set[str]
+) -> str | None:
+    """The class JNA's caller-class ``register`` overloads bind: the calling
+    class when it declares a native method, else the nearest enclosing
+    class that does (JNA's ``findDirectMappedClass``). None when the walk
+    reaches a class this dex does not define."""
+    cls = caller
+    while cls in defined_classes:
+        if cls in native_classes:
+            return cls
+        if "$" not in cls:
+            return None
+        cls = cls.rsplit("$", 1)[0]
+    return None
+
+
+def _jna_helper_constant(
+    methods_by_key: dict[str, object], pools, helper: str | None, depth: int = 2
+) -> str | None:
+    """The one constant a helper returns: the string constant held on every
+    path to a ``return-object``, or the constant a returned call's own
+    helper yields (one step per ``depth``, uniffi's Kotlin ``access$``
+    accessor in front of ``findLibraryName``). A return of a computed value
+    (uniffi's property override) names no constant. None unless exactly one
+    constant remains."""
+    if not helper or depth < 0:
+        return None
+    method = methods_by_key.get(helper)
+    if method is None or not getattr(method, "bytecode", None):
+        return None
+    from blint.lib.dalvik import disassemble_method
+    from blint.lib.dalvik_dataflow import INVOKE_RESULT, STRING, analyze
+
+    try:
+        instructions = disassemble_method(method, pools)
+        flow = analyze(instructions)
+    except Exception:  # one malformed method must not drop the evidence
+        return None
+    constants: set[str] = set()
+    for inst in instructions:
+        if inst.name != "return-object" or not inst.registers:
+            continue
+        value = flow.state_before.get(inst.offset, {}).get(inst.registers[0])
+        if value is None:
+            continue
+        if value.kind == STRING:
+            constants.add(value.value)
+        elif value.kind == INVOKE_RESULT:
+            constant = _jna_helper_constant(methods_by_key, pools, str(value.value), depth - 1)
+            if constant is not None:
+                constants.add(constant)
+    return next(iter(constants)) if len(constants) == 1 else None
+
+
+def collect_jna_register_facts(dex_metadata: dict) -> dict[str, dict]:
+    """JNA direct-mapping registration evidence from one dex.
+
+    Returns ``{dotted class: {"library": name-or-None}}`` for every class a
+    ``com.sun.jna.Native.register`` call in this dex registers. JNA binds
+    each native method of the registered class, at run time, to the
+    exported symbol of the same name in the registered library, so this
+    evidence is what makes a plain-name export a candidate for those
+    declarations. The registered class is the call's ``Class`` argument
+    when a class literal holds it on every path to the call; the
+    caller-class overloads register the calling class, or the nearest
+    enclosing class that declares a native method. A ``Class`` argument
+    the dex does not name (a parameter) is evidence for no class, and a
+    class that merely calls another class's registrar is never the
+    registered one. ``library`` is the string constant the call passes on
+    every path, or the one constant the invoked helper returns (uniffi's
+    ``findLibraryName`` fallback); None when the name is computed, or when
+    two calls registering the class disagree.
+    """
+    from blint.lib.dalvik import DexPools, disassemble_method
+    from blint.lib.dalvik_dataflow import CLASS, INVOKE_RESULT, STRING, analyze
+
+    methods = dex_metadata.get("methods") or []
+    register_indices = _jna_register_indices(methods)
+    if not register_indices:
+        return {}
+    native_classes: set[str] = set()
+    defined_classes: set[str] = set()
+    for method in methods:
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            if not method.has_class:
+                continue
+            owner = _dotted_class(method.cls.fullname)
+            if _is_native_access(method.access_flags):
+                native_classes.add(owner)
+                defined_classes.add(owner)
+            elif getattr(method, "bytecode", None):
+                defined_classes.add(owner)
+    pools: DexPools | None = None
+    methods_by_key: dict[str, object] | None = None
+    patterns = [index.to_bytes(2, "little") for index in register_indices]
+    registered: dict[str, set[str | None]] = {}
+    for method in methods:
+        bytecode = getattr(method, "bytecode", None)
+        if not bytecode:
+            continue
+        raw = bytes(bytecode)
+        if not any(pattern in raw for pattern in patterns):
+            continue
+        caller = ""
+        with contextlib.suppress(AttributeError, RuntimeError, TypeError):
+            caller = _dotted_class(method.cls.fullname) if method.has_class else ""
+        if not caller or caller.startswith("com.sun.jna."):
+            continue
+        if pools is None:
+            try:
+                pools = DexPools.from_metadata(dex_metadata)
+            except (AttributeError, TypeError, ValueError):
+                break
+        try:
+            flow = analyze(disassemble_method(method, pools))
+        except Exception:
+            continue
+        for site in flow.call_sites:
+            target = str(site.method or "")
+            if not target.startswith(f"{_JNA_NATIVE_CLASS}->register("):
+                continue
+            if target.startswith(f"{_JNA_NATIVE_CLASS}->register(Ljava/lang/Class;"):
+                literal = site.arguments[0] if site.arguments else None
+                cls = (
+                    _dotted_class(str(literal.value))
+                    if literal is not None and literal.kind == CLASS
+                    else None
+                )
+            else:
+                cls = _jna_direct_mapped_class(caller, native_classes, defined_classes)
+            if cls is None:
+                continue
+            library = None
+            name = site.arguments[-1] if "Ljava/lang/String;)" in target else None
+            if name is not None and name.kind == STRING:
+                library = name.value
+            elif name is not None and name.kind == INVOKE_RESULT:
+                if methods_by_key is None:
+                    methods_by_key = {}
+                    for candidate in methods:
+                        rendered = DexPools._render_method(candidate)
+                        if rendered and "->" in rendered:
+                            methods_by_key.setdefault(rendered, candidate)
+                library = _jna_helper_constant(methods_by_key, pools, str(name.value))
+            registered.setdefault(cls, set()).add(library)
+    return {
+        cls: {"library": next(iter(libraries)) if len(libraries) == 1 else None}
+        for cls, libraries in registered.items()
+    }
+
+
 # ----------------------------------------------------- the static join
 
 
@@ -425,8 +596,40 @@ def join_static(dex_natives: list[dict], surface: dict | None) -> dict:
 # ---------------------------------------------------- the app-level summary
 
 # Listing bound for the exported summary, the same shape of cap the other
-# app summaries use (a listing bound only; no rule reads these lists).
+# app summaries use. The callgraph's JNI edges and the reviews read the
+# full join (``build_jni_join_summary(..., capped=False)``); only the
+# metadata copy is cut (``cap_jni_join``).
 JOIN_LISTING_CAP = 256
+_JOIN_LISTS = (
+    "bound",
+    "bound_dynamic",
+    "ambiguous_dynamic",
+    "unbound_dex_natives",
+    "undeclared_exports",
+)
+
+
+def _cap_join_lists(abi_join: dict) -> dict:
+    """One ABI's join with each list cut to its first ``JOIN_LISTING_CAP``
+    entries and a ``<list>_truncated`` flag beside a cut one."""
+    capped = dict(abi_join)
+    for key in _JOIN_LISTS:
+        full = abi_join.get(key) or []
+        capped[key] = full[:JOIN_LISTING_CAP]
+        if len(full) > JOIN_LISTING_CAP:
+            capped[f"{key}_truncated"] = True
+    return capped
+
+
+def cap_jni_join(join: dict) -> dict:
+    """The metadata copy of a full join summary: every listing cut to
+    ``JOIN_LISTING_CAP`` entries, the counts untouched."""
+    capped = dict(join)
+    capped["load_library"] = (join.get("load_library") or [])[:JOIN_LISTING_CAP]
+    capped["per_abi"] = {
+        abi: _cap_join_lists(abi_join) for abi, abi_join in (join.get("per_abi") or {}).items()
+    }
+    return capped
 
 
 def _slot_address(table_entry: dict) -> int | None:
@@ -460,6 +663,10 @@ def _join_abi_lists(
     abi: str,
     confirmed_ranges: dict[tuple[str, str], list[dict]] | None = None,
     runtime_registrations: dict[tuple[str, str], list[dict]] | None = None,
+    jna_registers: dict[str, dict] | None = None,
+    jna_dispatch_abis: set[str] | None = None,
+    plain_exports: dict[tuple[str, str], dict[str, str] | None] | None = None,
+    capped: bool = True,
 ) -> dict:
     """One ABI's join across every library that ships in it.
 
@@ -472,19 +679,27 @@ def _join_abi_lists(
     signature both match (the class is unknown in the table, so signature
     equality is required, and the pair must be unique on both sides;
     otherwise the declarations are listed as ambiguous_dynamic with the
-    number of candidate entries). A8 N3: an ambiguous declaration binds
-    when the registering function chain's constant class name - the
+    number of candidate entries). An ambiguous declaration binds when
+    the registering function chain's constant class name - the
     ``FindClass`` confirmer's answer, per (library, abi) and table - names
     exactly one of the pair's declaring classes and exactly one candidate
     entry names it; anything the confirmer cannot decide stays ambiguous.
-    What neither answers is unbound, and each library's unclaimed exports
-    are its undeclared list. An ambiguous declaration whose candidate
-    entries all sit inside ranges the confirmer resolved, in an ABI where
-    no resolved registration names its class, carries
-    ``candidates_registered_elsewhere``: a mark, not a binding. Its own
-    registration, if any, is in a table the join did not recover. Counts
-    reflect the full sets; the lists are capped at ``JOIN_LISTING_CAP``
-    with a ``truncated`` flag.
+    What no table answers can still bind by name through JNA direct
+    mapping - a ``Native.register`` call in the dex registers the
+    declaring class, ``libjnidispatch.so`` ships in this
+    ABI, and exactly one same-ABI library exports the name (the register
+    call's constant names the library when there is one, JNA mapping
+    ``foo`` to ``libfoo.so``); those rows carry ``confirmed_by:
+    "jna_direct"``, and a name more than one library exports is listed
+    ambiguous with every exporter. What nothing answers is unbound, and
+    each library's unclaimed exports are its undeclared list. An
+    ambiguous declaration whose candidate entries all sit inside ranges
+    the confirmer resolved, in an ABI where no resolved registration
+    names its class, carries ``candidates_registered_elsewhere``: a mark,
+    not a binding. Its own registration, if any, is in a table the join
+    did not recover. Counts reflect the full sets; unless ``capped`` is
+    False the lists are cut at ``JOIN_LISTING_CAP`` with a ``truncated``
+    flag.
     """
     bound: list[dict] = []
     bound_dynamic: list[dict] = []
@@ -546,6 +761,16 @@ def _join_abi_lists(
         if range_abi == abi
         for entry_range in ranges
     }
+    # JNA direct mapping binds by exported name; the per-ABI view of the
+    # plain exports (ground rule 36) is built once.
+    jna_name_exports: dict[str, list[tuple[str, str]]] = {}
+    jna_here = bool(jna_registers) and abi in (jna_dispatch_abis or set())
+    if jna_here:
+        for (name, export_abi), exports in (plain_exports or {}).items():
+            if export_abi != abi or not exports:
+                continue
+            for export_name, value in exports.items():
+                jna_name_exports.setdefault(export_name, []).append((name, value))
     for pair, classes in pending.items():
         matches = table_entries.get(pair) or []
         if len(matches) == 1 and len(classes) == 1:
@@ -636,33 +861,57 @@ def _join_abi_lists(
                 ):
                     record["candidates_registered_elsewhere"] = True
                 ambiguous.append(record)
-            else:
-                unbound.append(record)
+                continue
+            # No table answers this pair; JNA direct mapping may still
+            # bind it by exported name, when the declaring class
+            # registered with JNA and this ABI ships libjnidispatch.so.
+            if jna_here and cls in jna_registers:
+                register = jna_registers[cls].get("library")
+                wanted = f"lib{register}.so" if register else None
+                exporters = [
+                    (name, value)
+                    for name, value in jna_name_exports.get(native_entry["name"]) or []
+                    if wanted is None or name == wanted
+                ]
+                if len(exporters) == 1:
+                    library, value = exporters[0]
+                    bound_dynamic.append(
+                        {
+                            **native_entry,
+                            "class": cls,
+                            "abi": abi,
+                            "library": library,
+                            "fn_addr": value,
+                            "confirmed_by": "jna_direct",
+                        }
+                    )
+                    continue
+                if exporters:
+                    # two or more exporters of the name and no register
+                    # constant to pick one: ambiguous, every exporter listed
+                    record["jna_exporters"] = sorted({name for name, _ in exporters})
+                    ambiguous.append(record)
+                    continue
+            unbound.append(record)
     result = {
         "counts": {
             "libraries": sum(1 for name in lib_abis if abi in lib_abis[name]),
             "bound": len(bound),
             "bound_dynamic": len(bound_dynamic),
+            "jna_direct": sum(
+                1 for entry in bound_dynamic if entry.get("confirmed_by") == "jna_direct"
+            ),
             "ambiguous_dynamic": len(ambiguous),
             "unbound_dex_natives": len(unbound),
             "undeclared_exports": len(undeclared),
         },
-        "bound": bound[:JOIN_LISTING_CAP],
-        "bound_dynamic": bound_dynamic[:JOIN_LISTING_CAP],
-        "ambiguous_dynamic": ambiguous[:JOIN_LISTING_CAP],
-        "unbound_dex_natives": unbound[:JOIN_LISTING_CAP],
-        "undeclared_exports": undeclared[:JOIN_LISTING_CAP],
+        "bound": bound,
+        "bound_dynamic": bound_dynamic,
+        "ambiguous_dynamic": ambiguous,
+        "unbound_dex_natives": unbound,
+        "undeclared_exports": undeclared,
     }
-    for key_list, full in (
-        ("bound", bound),
-        ("bound_dynamic", bound_dynamic),
-        ("ambiguous_dynamic", ambiguous),
-        ("unbound_dex_natives", unbound),
-        ("undeclared_exports", undeclared),
-    ):
-        if len(full) > JOIN_LISTING_CAP:
-            result[f"{key_list}_truncated"] = True
-    return result
+    return _cap_join_lists(result) if capped else result
 
 
 def _confirm_ambiguous_tables(
@@ -672,14 +921,14 @@ def _confirm_ambiguous_tables(
     lib_locations: dict[tuple[str, str], dict],
 ) -> dict[tuple[str, str], list[dict]]:
     """Per (library, abi): the registration ranges the FindClass confirmer
-    resolved (A8 N3) - ``[{begin, end, class}]`` over the recovered
+    resolved - ``[{begin, end, class}]`` over the recovered
     tables' addresses.
 
     Runs only where the join can be ambiguous at all - (name, signature)
     pairs several dex classes declare, or pairs more than one recovered
     entry answers - and only re-reads the (library, abi) copies that hold
-    candidate tables. The 23 of 27 corpus APKs without such pairs pay one
-    pass over the dex facts and nothing else. Any failure degrades to "no
+    candidate tables. Apps without such pairs pay one pass over the dex
+    facts and nothing else. Any failure degrades to "no
     confirmation": the entries stay ambiguous, never guessed.
     """
     from collections import Counter, defaultdict
@@ -733,16 +982,23 @@ def _confirm_ambiguous_tables(
     return confirmed
 
 
-def _library_join_facts(parsed) -> tuple[dict | None, dict | None]:
-    """The static JNI surface and the recovered ``RegisterNatives``
-    tables from one parsed copy of a library - the join's light parse
-    (dynamic symbols plus F1's function starts for stripped builds, not
-    full metadata)."""
+def _library_join_facts(
+    parsed, want_plain_exports: bool = False
+) -> tuple[dict | None, dict | None, dict[str, str] | None]:
+    """The static JNI surface, the recovered ``RegisterNatives`` tables and
+    (on request) the plain exported-FUNC map from one parsed copy of a
+    library - the join's light parse (dynamic symbols plus F1's function
+    starts for stripped builds, not full metadata). The plain map, when
+    asked for, is ``{exported FUNC name: address}`` for every defined
+    dynamic function - the names JNA direct mapping binds by; it is
+    collected only when the app's dex carries ``Native.register``
+    evidence, so every other app pays nothing for it."""
     from blint.lib.binary_elf import parse_symbols
     from blint.lib.funcdisc.unwind import discover_functions
 
     entries, _ = parse_symbols(parsed.dynamic_symbols)
     surface = parse_static_jni_surface(entries)
+    plain_exports: dict[str, str] | None = {} if want_plain_exports else None
     # F1: function starts from the defined dynamic FUNCs plus the unwind
     # tables (stripped builds).
     starts: set[int] = set()
@@ -759,6 +1015,8 @@ def _library_join_facts(parsed) -> tuple[dict | None, dict | None]:
         starts.add(address)
         if entry.get("name"):
             addr_to_name.setdefault(address, entry["name"])
+            if plain_exports is not None:
+                plain_exports[entry["name"]] = entry.get("value") or hex(address)
     for discovered in discover_functions(parsed) or []:
         # discovery records carry hex strings in metadata form and plain
         # ints from the direct call
@@ -766,13 +1024,15 @@ def _library_join_facts(parsed) -> tuple[dict | None, dict | None]:
         with contextlib.suppress(TypeError, ValueError):
             starts.add((address if isinstance(address, int) else int(address, 16)) & ~1)
     tables = recover_register_natives_tables(parsed, starts, addr_to_name) if starts else None
-    return surface, tables
+    if plain_exports is not None and not plain_exports:
+        plain_exports = None
+    return surface, tables, plain_exports
 
 
 def build_jni_join_summary(
-    app_file: str, native: dict, confirm_findclass: bool = False
+    app_file: str, native: dict, confirm_findclass: bool = False, capped: bool = True
 ) -> dict | None:
-    """The app-level dex <-> native static join (A5.2 E2).
+    """The app-level dex <-> native static join.
 
     Per ABI (ground rule 36: one result per ``(abi, library)``, never a
     silent first-or-best), every dex ``native`` declaration is bound to
@@ -785,13 +1045,18 @@ def build_jni_join_summary(
     nothing there - never another ABI's tables in its place. A library
     whose first parsed copy owns neither a static surface nor a recovered
     table is not parsed again for its other ABIs (the same sources build
-    every ABI's copy).
+    every ABI's copy) - unless the app's dex carries JNA
+    ``Native.register`` evidence, whose plain-name exports are then part
+    of every copy's parse.
     ``System.loadLibrary`` call sites map to ``lib<name>.so`` members.
     Bounded: counts always, the first ``JOIN_LISTING_CAP`` entries of
-    each list, ``truncated`` flags beside. ``confirm_findclass`` (set by
+    each list, ``truncated`` flags beside - or, with ``capped=False``,
+    every entry (``cap_jni_join`` cuts that copy later). ``confirm_findclass`` (set by
     ``--disassemble``) runs the FindClass confirmer over the
-    (library, abi) copies that hold ambiguous tables; without it no row
-    is ever confirmed or marked ``candidates_registered_elsewhere``.
+    (library, abi) copies that hold ambiguous tables and the JNA
+    direct-mapping evidence walk over the app's dex; without it no row
+    is ever confirmed or marked ``candidates_registered_elsewhere``, and
+    no row binds through ``Native.register``.
     """
     from blint.lib.android import _iter_app_dex_files
     from blint.lib.android_native import LibraryReader
@@ -799,21 +1064,40 @@ def build_jni_join_summary(
 
     natives: list[dict] = []
     load_library: list[dict] = []
+    # JNA direct-mapping evidence, from a dex bytecode walk the default
+    # join does not do (it decodes only loadLibrary call sites), so it
+    # runs only under the confirmers' flag.
+    jna_registers: dict[str, dict] = {}
     try:
         for adex, _ in _iter_app_dex_files(app_file):
-            facts = collect_dex_native_facts(parse_dex(adex))
+            dex_metadata = parse_dex(adex)
+            facts = collect_dex_native_facts(dex_metadata)
             natives.extend(facts["natives"])
             load_library.extend(facts["load_library"])
+            if confirm_findclass:
+                jna_registers.update(collect_jna_register_facts(dex_metadata))
     except Exception as exc:  # a malformed app must not abort the analysis
         LOG.debug(f"jni join: dex facts failed for {app_file}: {exc}")
         return None
     if not natives and not load_library:
         return None
 
+    # JNA's dispatch library must ship in an ABI for its bindings to be
+    # loadable there at all.
+    jna_dispatch_abis = {
+        loc.get("abi")
+        for lib in native.get("libraries") or []
+        if lib.get("name") == "libjnidispatch.so"
+        for loc in lib.get("locations") or []
+        if loc.get("abi")
+    }
+    jna_active = bool(jna_registers)
+
     # One light parse per (library, abi) copy (keyed ground-rule-36); the
     # join needs only the dynamic-symbol surface, not full metadata.
     surfaces: dict[tuple[str, str], dict | None] = {}
     register_tables: dict[tuple[str, str], dict] = {}
+    plain_exports: dict[tuple[str, str], dict[str, str] | None] = {}
     abis: set[str] = set()
     lib_abis: dict[str, set[str]] = {}
     lib_locations: dict[tuple[str, str], dict] = {}
@@ -841,11 +1125,12 @@ def build_jni_join_summary(
                 parsed_ok = False
                 owns = False
                 for abi in sorted(by_name[name]):
-                    if parsed_ok and not owns:
+                    if parsed_ok and not owns and not jna_active:
                         # One successfully parsed copy that owns neither a
                         # surface nor a table settles the library: the same
                         # sources build every ABI's copy, so the remaining
-                        # copies are not read.
+                        # copies are not read. A JNA-registering app keeps
+                        # reading: its plain exports are part of the join.
                         continue
                     data = None
                     with contextlib.suppress(Exception):
@@ -857,10 +1142,14 @@ def build_jni_join_summary(
                         if parsed is None or isinstance(parsed, lief.lief_errors):
                             continue
                         parsed_ok = True
-                        surface, tables = _library_join_facts(parsed)
+                        surface, tables, exports = _library_join_facts(
+                            parsed, want_plain_exports=jna_active
+                        )
                         surfaces[(name, abi)] = surface
                         if tables:
                             register_tables[(name, abi)] = tables
+                        if exports:
+                            plain_exports[(name, abi)] = exports
                         owns = owns or surface is not None or tables is not None
                     except Exception as exc:
                         LOG.debug(f"jni join: surface parse failed for {name}: {exc}")
@@ -876,7 +1165,16 @@ def build_jni_join_summary(
     )
     for abi in sorted(abis):
         per_abi[abi] = _join_abi_lists(
-            natives, surfaces, register_tables, lib_abis, abi, confirmed_classes
+            natives,
+            surfaces,
+            register_tables,
+            lib_abis,
+            abi,
+            confirmed_classes,
+            jna_registers=jna_registers,
+            jna_dispatch_abis=jna_dispatch_abis,
+            plain_exports=plain_exports,
+            capped=capped,
         )
     # Tables built at run time: where the join leaves dex natives unbound,
     # the registrar walk may still read the entry words off the stack.
@@ -938,6 +1236,10 @@ def build_jni_join_summary(
                     abi,
                     confirmed_classes,
                     runtime_registrations,
+                    jna_registers=jna_registers,
+                    jna_dispatch_abis=jna_dispatch_abis,
+                    plain_exports=plain_exports,
+                    capped=capped,
                 )
 
     # loadLibrary("x") -> libx.so member presence, per ABI where it ships.
@@ -966,7 +1268,9 @@ def build_jni_join_summary(
             "load_library_sites": len(load_library),
             "abis": len(abis),
         },
-        "load_library": load_library_summary[:JOIN_LISTING_CAP],
+        "load_library": load_library_summary[:JOIN_LISTING_CAP]
+        if capped
+        else load_library_summary,
         "per_abi": per_abi,
     }
 
@@ -1080,7 +1384,7 @@ def relative_relocation_map(parsed_obj) -> tuple[dict[int, int], list[str]]:
 
 def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
     """``{slot address: target VA}`` from absolute relocations whose symbol
-    is *defined in this object* (A8 N2: fbjni's merged tables).
+    is *defined in this object* (fbjni's merged tables).
 
     fbjni's ``makeNativeMethod`` emits ``{name, kDescriptor, &call}`` where
     the signature and fnPtr words name preemptible weak dynsym symbols -
@@ -1088,8 +1392,7 @@ def defined_symbol_relocation_map(parsed_obj) -> dict[int, int]:
     ``.rodata``) and ``MethodWrapper<...>::call`` /
     ``FunctionWrapperWithJniEntryPoint<...>::call`` (FUNCs) - so the linker
     keeps ``R_*_ABS*`` against the symbol instead of folding the word to
-    ``R_*_RELATIVE`` (measured in N0(b): 167 of RnHello's 221 unbound
-    declarations sit in such triples). The target is the symbol's value
+    ``R_*_RELATIVE``. The target is the symbol's value
     plus a RELA addend; REL forms (arm32) keep theirs in the stored word.
     Imported symbols (section index 0) have no link-time value and are
     ignored.
@@ -1128,7 +1431,7 @@ def recover_register_natives_tables(
 
     A table is an array of ``{const char *name, const char *signature,
     void *fnPtr}`` whose three pointers are linker-relocated: R_*_RELATIVE
-    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape (A8 N2) - an
+    (RELR, packed), or - fbjni's ``makeNativeMethod`` shape - an
     absolute relocation against the preemptible weak dynsym symbols the
     macro names (``jmethod_traits<F>::kDescriptor`` for the signature,
     ``MethodWrapper<...>::call`` for the fnPtr), which the linker cannot

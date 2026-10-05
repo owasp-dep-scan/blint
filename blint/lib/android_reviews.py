@@ -341,8 +341,12 @@ def _bound_native_count(join: dict) -> int:
     total = 0
     for abi_summary in (join.get("per_abi") or {}).values():
         if isinstance(abi_summary, dict):
+            # the counts cover the full sets; the listings are capped
+            counts = abi_summary.get("counts") or {}
             for key in ("bound", "bound_dynamic"):
-                if isinstance(abi_summary.get(key), list):
+                if isinstance(counts.get(key), int):
+                    total += counts[key]
+                elif isinstance(abi_summary.get(key), list):
                     total += len(abi_summary[key])
     return total
 

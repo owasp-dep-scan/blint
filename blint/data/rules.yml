@@ -764,8 +764,9 @@
     page sizes on 64-bit devices on Google Play. Starting February 1, 2027, if
     your app updates don't support 16 KB memory page sizes, you won't be able
     to release these updates." 32-bit ABIs are exempt and never flagged
-    (rule 35). Conditional on targetSdk (rule 37); without app context the
-    finding states the policy level.
+    (rule 35). Conditional on targetSdk (rule 37); without an app targetSdk
+    (a standalone .so) the finding states the policy level at medium
+    severity, since no known app is bound by the policy.
   severity: high
 - id: CHECK_ANDROID_EXTRACT_NATIVE_LIBS
   title: Compressed or unaligned .so with extractNativeLibs=false (loader refuses from API 23)
