@@ -257,18 +257,9 @@ SYMBOL_SOURCES = (
 
 
 def _resolve_db_file(db_file: str | None = None) -> str | None:
-    database_file = db_file or BLINTDB_LOC
-    if database_file and os.path.exists(database_file):
-        return database_file
-    if database_file and os.path.basename(database_file) == "blint.db":
-        # blint-db names its databases after the blint major version they
-        # target, so accept both the current v4 artifacts and the earlier
-        # v2 ones.
-        for alternate_name in ("blint-v4.db", "blint-v2.db"):
-            candidate = os.path.join(os.path.dirname(database_file), alternate_name)
-            if os.path.exists(candidate):
-                return candidate
-    return database_file
+    # Databases are always named blint.db; the major version they target is
+    # carried by the OCI image tag they were pulled from.
+    return db_file or BLINTDB_LOC
 
 
 def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection | None:

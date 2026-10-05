@@ -1456,15 +1456,9 @@ if not BLINTDB_HOME:
         BLINTDB_HOME = user_data_dir("blintdb")
 os.makedirs(BLINTDB_HOME, exist_ok=True)
 
+# Databases are always named blint.db; the major version they target is
+# carried by the OCI image tag they were pulled from.
 BLINTDB_LOC = os.path.join(BLINTDB_HOME, "blint.db")
-if not os.path.exists(BLINTDB_LOC):
-    # blint-db names its databases after the blint major version they target,
-    # so accept both the current v4 artifacts and the earlier v2 ones.
-    for alternate_blintdb_name in ("blint-v4.db", "blint-v2.db"):
-        alternate_blintdb_loc = os.path.join(BLINTDB_HOME, alternate_blintdb_name)
-        if os.path.exists(alternate_blintdb_loc):
-            BLINTDB_LOC = alternate_blintdb_loc
-            break
 
 BLINTDB_IMAGE_URL = os.getenv(
     "BLINTDB_IMAGE_URL",
