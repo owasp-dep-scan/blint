@@ -597,6 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
             "ghcr.io/appthreat/blintdb-meson-musl:v4",
             "ghcr.io/appthreat/blintdb-conan-linux-amd64:v4",
             "ghcr.io/appthreat/blintdb-conan-darwin-arm64:v4",
+            "ghcr.io/appthreat/blintdb-homebrew-darwin-arm64:v4",
         ],
         default=BLINTDB_IMAGE_URL,
         help=f"Blintdb image url. Defaults to {BLINTDB_IMAGE_URL}. The environment variable `BLINTDB_IMAGE_URL` is an alternative way to set this value.",
