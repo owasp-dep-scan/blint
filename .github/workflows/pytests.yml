@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
       fail-fast: false
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -41,6 +41,10 @@ jobs:
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ matrix.python-version }}
+        # The 3.15 GA build is not in the python-versions manifest yet, so 3.15
+        # resolves 3.15.0-rc.3 until it lands and then self-upgrades. Drop the
+        # flag once the GA build is available.
+        allow-prereleases: true
     - name: Display Python version
       run: python -c "import sys; print(sys.version)"
     - name: Use Node.js
@@ -70,9 +74,15 @@ jobs:
         LDFLAGS: "-L/opt/homebrew/lib"
         CPPFLAGS: "-I/opt/homebrew/include"
     - name: Install all
-      run: |        
+      run: |
         poetry install --without=extended --all-extras
       if: runner.os == 'Windows'
+      env:
+        # Needed when multi-demangle has to build from source (a Windows
+        # interpreter without a published wheel): the vendored Swift demangler
+        # headers do not compile under MSVC.
+        CC: clang
+        CXX: clang++
     - name: Test with pytest
       run: |
         poetry run pytest --cov=blint -m "not slow" tests
