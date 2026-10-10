@@ -15,16 +15,15 @@ from typing import Any
 
 import lief
 import multi_demangle
-import oras.client
 from ar import Archive, ArchiveError
 from custom_json_diff.lib.utils import file_write
 from defusedxml.ElementTree import ParseError, fromstring
-from oras.logger import setup_logger
 from orjson import orjson
 from rich import box
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
+from blint.lib import oci_pull
 from blint.config import (
     BLINT_MAX_HEX_BYTES,
     BLINTDB_HOME,
@@ -47,7 +46,6 @@ from blint.cyclonedx.spec import (
 )
 from blint.logger import LOG, console
 
-setup_logger(quiet=True, debug=False)
 
 CHARSET: str = string.digits + string.ascii_letters + r"""!&@"""
 
@@ -368,7 +366,7 @@ def _validate_blintdb_ref(ref: str) -> str | None:
 
 def blintdb_setup(args: BlintOptions) -> None:
     """
-    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg' using oras client
+    This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg'
     and puts it into $BLINTDB_LOC path.
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
@@ -387,7 +385,6 @@ def blintdb_setup(args: BlintOptions) -> None:
         LOG.debug(f"blintdb is present at {BLINTDB_LOC}. Skipping refresh.")
         return
     try:
-        oras_client = oras.client.OrasClient()
         target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
         host = _validate_blintdb_ref(target_url)
         if host is None:
@@ -410,12 +407,13 @@ def blintdb_setup(args: BlintOptions) -> None:
                 target_url,
             )
         LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
-        oras_client.pull(
-            target=target_url,
-            outdir=BLINTDB_HOME,
-            allowed_media_type=[],
-            overwrite=True,
-        )
+        pulled = oci_pull.stream_pull(target_url, BLINTDB_HOME)
+        if BLINTDB_LOC not in [str(path) for path in pulled]:
+            LOG.error(
+                "Pulled artifact did not contain a blint.db layer: %s",
+                [path.name for path in pulled],
+            )
+            return
         os.environ["USE_BLINTDB"] = "true"
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except Exception as e:
