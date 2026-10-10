@@ -10,7 +10,9 @@ dependencies = [
     "rich>=15.0.0",
     "PyYAML>=6.0.3",
     "defusedxml>=0.7.1",
-    "pydantic[email]>=2.13.3",
+    # 2.14.0 is the first pydantic that pairs with pydantic-core 2.50.0,
+    # which is the first core release shipping CPython 3.15 wheels.
+    "pydantic[email]>=2.14.0",
     "orjson>=3.11.7",
     "multi-demangle>=2.1.0",
     "ar>=1.0.1",
@@ -38,9 +40,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10,<3.16"
 include = ["blint/data/*.yml"]
 
 [project.urls]
