@@ -23,7 +23,6 @@ from rich import box
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
-from blint.lib import oci_pull
 from blint.config import (
     BLINT_MAX_HEX_BYTES,
     BLINTDB_HOME,
@@ -44,8 +43,8 @@ from blint.cyclonedx.spec import (
     Method,
     Technique,
 )
+from blint.lib import oci_pull
 from blint.logger import LOG, console
-
 
 CHARSET: str = string.digits + string.ascii_letters + r"""!&@"""
 
