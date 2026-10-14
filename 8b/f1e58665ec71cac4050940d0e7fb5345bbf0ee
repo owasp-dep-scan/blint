@@ -1,0 +1,14 @@
+.github/workflows/bintests.yml
+  h_0926447d100ad2 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8bf1e58665ec71cac4050940d0e7fb5345bbf0ee",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
