@@ -1,0 +1,14 @@
+.github/workflows/pytests.yml
+  h_0926447d100ad2 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8160c39a5eccaad87d7a6e6e19b15ebcb9518fd5",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
