@@ -72,6 +72,16 @@ For **disassembly support**, which enables instruction-level analysis of functio
 pip install blint[extended]
 ```
 
+### Via Homebrew
+
+On macOS and Linux, Homebrew installs the standalone `blint` binary from the [OWASP dep-scan tap](https://github.com/owasp-dep-scan/homebrew-tap), so no Python installation is needed. `brew trust` accepts the tap, which Homebrew requires before loading formulae from a third-party tap when `HOMEBREW_REQUIRE_TAP_TRUST` is set:
+
+```shell
+brew tap owasp-dep-scan/tap
+brew trust --tap owasp-dep-scan/tap
+brew install blint
+```
+
 ### Via Container Image
 
 You can also run blint using the official container image available on GitHub Container Registry. This is a convenient way to run blint without installing Python or any dependencies on your host machine.
