@@ -448,7 +448,9 @@ def test_runner_scans_inf_beside_its_service_binary(tmp_path):
         "CHECK_PNP_WRITABLE_CODE_DESTINATION",
     } <= by_file["vendorbt.inf"]
     assert "CHECK_PNP_PRIVILEGED_COMPONENT" in by_file["VendorSvc.exe"]
-    metadata = json.loads((reports / "VendorSvc.exe-metadata.json").read_text())
+    # export_metadata lowercases the report file name; a case-sensitive
+    # filesystem (linux) stores exactly that name.
+    metadata = json.loads((reports / "vendorsvc.exe-metadata.json").read_text())
     assert metadata["driver_package"]["packages"][0]["inf"] == "vendorbt.inf"
     inf_unit = json.loads((reports / "vendorbt.inf-metadata.json").read_text())
     assert inf_unit["exe_type"] == "inf"
@@ -467,7 +469,7 @@ def test_runner_reads_inf_members_of_a_driver_cab(tmp_path):
     reports, by_file = _run(tmp_path, cab)
     assert "CHECK_PNP_SYSTEM_SERVICE" in by_file["vendorbt.inf"]
     assert "CHECK_PNP_PRIVILEGED_COMPONENT" in by_file["VendorSvc.exe"]
-    metadata = json.loads((reports / "VendorSvc.exe-metadata.json").read_text())
+    metadata = json.loads((reports / "vendorsvc.exe-metadata.json").read_text())
     # Relative to the cabinet, never the extraction directory.
     assert metadata["driver_package"]["packages"][0]["inf"] == "vendorbt.inf"
     coverage = json.loads((reports / "analysis-coverage.json").read_text())
