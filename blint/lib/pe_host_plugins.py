@@ -160,6 +160,38 @@ def _printable_at(content: bytes, offset: int, is_wide: bool) -> bool:
     return content[offset + 1] == 0 and 0x20 <= content[offset] < 0x7F
 
 
+def _export_triples(
+    names: set[str], roles: list[str], exclude_prefixes: tuple[str, ...] = ()
+) -> list[str]:
+    """Exports forming an (open, collect, close) triple around one shared stem.
+
+    Performance libraries name their entry points freely and record the
+    names in the registry (OpenDiskObject / CollectDiskObjectData /
+    CloseDiskObject, PerfMon_Open / PerfMon_Collect / PerfMon_Close), so the
+    contract is the triple, not fixed names. The middle role anchors the
+    match; a trailing "Data" on it may be absent from the other two.
+    Triples whose stem starts with an excluded prefix are another API that
+    happens to share the shape.
+    """
+    if len(roles) != 3:
+        return []
+    first, anchor, last = roles
+    found: set[str] = set()
+    for name in names:
+        index = name.find(anchor)
+        if index < 0:
+            continue
+        prefix, suffix = name[:index], name[index + len(anchor) :]
+        if exclude_prefixes and prefix.startswith(exclude_prefixes):
+            continue
+        tails = {suffix, suffix[: -len("Data")]} if suffix.endswith("Data") else {suffix}
+        for tail in tails:
+            opener, closer = f"{prefix}{first}{tail}", f"{prefix}{last}{tail}"
+            if opener in names and closer in names:
+                found.update((opener, name, closer))
+    return sorted(found)
+
+
 def _match_contracts(
     names: set[str], registration_lookup, table: dict
 ) -> list[dict[str, Any]]:
@@ -180,6 +212,14 @@ def _match_contracts(
         if kind == "exports":
             wanted = [str(n) for n in spec.get("export_names") or []]
             matched = sorted(n for n in wanted if n in names)
+            if not matched:
+                continue
+        elif kind == "export_triple":
+            matched = _export_triples(
+                names,
+                [str(r) for r in spec.get("export_roles") or []],
+                tuple(str(p) for p in spec.get("exclude_prefixes") or []),
+            )
             if not matched:
                 continue
         elif kind == "com_inproc":

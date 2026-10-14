@@ -58,6 +58,26 @@ PERSISTENCE_MARKERS: tuple[tuple[str, bytes], ...] = (
     ("services_control_set", b"system\\currentcontrolset\\services"),
 )
 
+# Strings the privilege reviews weigh (privilege_reviews.py), each naming
+# what it evidences: the interactive desktop a SYSTEM payload targets, the
+# LocalSystem SID, an INI file inside a directory standard users can write
+# to, any INI file name, and hardware-ID templates of pluggable buses.
+# Regular expressions match within one string (no NUL in between).
+PRIVILEGE_MARKERS: tuple[tuple[str, bytes | re.Pattern], ...] = (
+    ("interactive_desktop", b"winsta0\\default"),
+    ("local_system_sid", b"s-1-5-18"),
+    (
+        "user_writable_config",
+        re.compile(
+            rb"(?:programdata|\\users\\public|%public%|%allusersprofile%)[^\x00]{0,160}?\.ini(?![a-z0-9])"
+        ),
+    ),
+    ("ini_file_name", re.compile(rb"[a-z0-9_\-]{1,64}\.ini(?![a-z0-9])")),
+    ("device_id_template", b"usb\\vid_"),
+    ("device_id_template", b"hid\\vid_"),
+    ("device_id_template", b"bthenum\\"),
+)
+
 # RPC: the MIDL-generated RPC_SERVER_INTERFACE carries Length (4 bytes)
 # then the InterfaceId RPC_SYNTAX_IDENTIFIER (GUID at +0x04, version at
 # +0x14). The call site's IfSpec argument points at it.
@@ -157,36 +177,66 @@ def collect_persistence_surfaces(parsed_obj: lief.PE.Binary) -> dict[str, Any] |
     product legitimately references IFEO - the rules consuming this block
     weigh the surface against the rest of the image.
     """
+    counts, evidence = _scan_markers(parsed_obj, PERSISTENCE_MARKERS)
+    if not counts:
+        return None
+    return {
+        "surfaces": counts,
+        "evidence": evidence,
+        "source": "section_scan",
+        "note": "a reference is not a write; weigh with the rest of the image",
+    }
+
+
+def collect_privilege_markers(parsed_obj: lief.PE.Binary) -> dict[str, Any] | None:
+    """The privilege-relevant strings the image names, or None.
+
+    Like the persistence surfaces, these are references read from section
+    bytes in both encodings, not behaviour; the reviews that read them
+    always pair a marker with imports that could act on it.
+    """
+    counts, evidence = _scan_markers(parsed_obj, PRIVILEGE_MARKERS)
+    if not counts:
+        return None
+    return {"markers": counts, "evidence": evidence, "source": "section_scan"}
+
+
+def _scan_markers(
+    parsed_obj: lief.PE.Binary, markers: tuple[tuple[str, bytes | re.Pattern], ...]
+) -> tuple[dict[str, int], dict[str, list[str]]]:
+    """Exact per-name match counts and bounded evidence snippets."""
     counts: dict[str, int] = {}
     evidence: dict[str, list[str]] = {}
     for view in _iter_section_views(parsed_obj):
         lowered = view.lower()
-        for surface, marker in PERSISTENCE_MARKERS:
-            # Walk the actual occurrences. Taking `lowered.find(marker)` for
-            # every evidence slot re-reported the first hit, so a listing
-            # bound of four could only ever hold one distinct snippet per
-            # view and the second Run key an image names was never shown -
-            # the evidence said less than the count it sat beside.
-            start = lowered.find(marker)
-            while start >= 0:
+        for surface, marker in markers:
+            for start in _marker_offsets(lowered, marker):
                 counts[surface] = counts.get(surface, 0) + 1
                 seen = evidence.setdefault(surface, [])
                 if len(seen) < PERSISTENCE_LISTING_LIMIT:
                     try:
                         snippet = view[start : start + 64].split(b"\x00")[0].decode("latin-1")
                     except (UnicodeDecodeError, ValueError):
-                        snippet = marker.decode("latin-1")
+                        snippet = surface
                     if snippet not in seen:
                         seen.append(snippet)
-                start = lowered.find(marker, start + len(marker))
-    if not counts:
-        return None
-    return {
-        "surfaces": dict(sorted(counts.items())),
-        "evidence": {surface: evidence[surface] for surface in sorted(counts)},
-        "source": "section_scan",
-        "note": "a reference is not a write; weigh with the rest of the image",
-    }
+    return dict(sorted(counts.items())), {name: evidence[name] for name in sorted(counts)}
+
+
+def _marker_offsets(lowered: bytes, marker: bytes | re.Pattern):
+    """Start offsets of every occurrence of a substring or pattern marker.
+
+    Each occurrence is walked, not just the first, so the evidence listing
+    holds distinct snippets up to its bound and the count beside it is exact.
+    """
+    if isinstance(marker, re.Pattern):
+        for match in marker.finditer(lowered):
+            yield match.start()
+        return
+    start = lowered.find(marker)
+    while start >= 0:
+        yield start
+        start = lowered.find(marker, start + len(marker))
 
 
 def collect_amsi_references(parsed_obj: lief.PE.Binary) -> dict[str, Any] | None:

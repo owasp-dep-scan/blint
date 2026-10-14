@@ -72,6 +72,7 @@ from blint.lib.pe_usermode_surface import (
     collect_amsi_references,
     collect_com_registration,
     collect_persistence_surfaces,
+    collect_privilege_markers,
 )
 from blint.lib.utils import (
     camel_to_snake,
@@ -681,6 +682,14 @@ def construct_pe_security_properties(metadata: dict, parsed_obj: lief.PE.Binary,
                     lc_properties["safe_seh"] = int(load_config.se_handler_count or 0) > 0
                 except (AttributeError, TypeError, ValueError):
                     lc_properties["safe_seh"] = False
+            # /DEPENDENTLOADFLAG: LOAD_LIBRARY_SEARCH_SYSTEM32 (0x800) makes the
+            # loader resolve this image's dependencies from System32 only, so
+            # a DLL planted beside it is never picked up.
+            try:
+                dependent_load_flags = int(load_config.dependent_load_flags or 0)
+            except (AttributeError, TypeError, ValueError):
+                dependent_load_flags = 0
+            lc_properties["dll_search_system32"] = bool(dependent_load_flags & 0x800)
             if int(load_config.enclave_configuration_ptr or 0):
                 # Presence-only: the enclave configuration either exists or
                 # the property is omitted; absence is the Windows norm, not a
@@ -1075,6 +1084,8 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
             metadata["persistence_surfaces"] = persistence
         if amsi := collect_amsi_references(parsed_obj):
             metadata["amsi_references"] = amsi
+        if privilege_markers := collect_privilege_markers(parsed_obj):
+            metadata["privilege_markers"] = privilege_markers
         rdata_section = parsed_obj.get_section(".rdata")
         text_section = parsed_obj.get_section(".text")
         # If there are no .rdata and .text section, then attempt to look for two alphanumeric sections

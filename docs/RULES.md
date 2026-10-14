@@ -393,6 +393,7 @@ The implant rule group is defined in `blint/data/annotations/review_implants_pe.
 | Rule                                   | The contradiction it reports                                                                   |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `PE_IMPERSONATES_SYSTEM_MODULE`        | Version resource claims a Microsoft module name under a different publisher, unsigned          |
+| `PE_SYSTEM_MODULE_NAME_WITHOUT_IDENTITY` | File named like a Windows system DLL, unsigned, with no Microsoft version identity           |
 | `PE_STUB_EXPORT_THUNK_TABLE`           | Exports at a uniform small stride, with no real forwarders: a generated thunk array            |
 | `PE_UNRESOLVED_SIBLING_MODULE_LOAD`    | A `LoadLibrary` target absent from the import table whose name is a near-miss of a real module |
 | `PE_HOST_PROCESS_NAME_GATE`            | A DLL comparing its host process against a runtime-assembled `.exe` name                       |
@@ -402,6 +403,17 @@ The implant rule group is defined in `blint/data/annotations/review_implants_pe.
 | `HOST_AUTHENTICATION_DOWNGRADE`        | Registry values whose only effect is to lower an authentication boundary                       |
 | `EMBEDDED_ENCRYPTED_PAYLOAD`           | An opaque region dominating its section, beside identified crypto primitives                   |
 | `CUSTOM_COMMAND_DISPATCH_TABLE`        | A runtime-populated table of code pointers, plus an execution primitive                        |
+
+The SYSTEM-foothold group lives in `blint/data/annotations/review_usermode_win.yml` and dispatches
+to `blint/lib/privilege_reviews.py`. Each rule pairs imports with the `privilege_markers` section
+scan; with `--disassemble`, a recovered call-site constant confirms the shape, and recovered calls
+that all pass a different constant rule it out.
+
+| Rule                           | What it reports                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `DLL_SYSTEM_SESSION_LAUNCH`    | A non-service DLL that moves its token into the console session (`SetTokenInformation(TokenSessionId)`), names `WinSta0\Default` and calls `CreateProcessAsUser` |
+| `SERVICE_USER_WRITABLE_CONFIG` | A service that reads INI settings, writes the registry and names an INI file in ProgramData or Public |
+| `DEVICE_IDENTITY_SPOOFING`     | SetupDi device creation and driver install in an image carrying USB/HID/Bluetooth hardware-ID templates |
 
 The native Android group is defined in `blint/data/annotations/review_binary_android.yml`. Its
 call-site rules read the `call_site_arguments` block, so they need `--disassemble` and an arm64 or

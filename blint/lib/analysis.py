@@ -52,6 +52,12 @@ from blint.lib.checks import (
     check_objc_load_methods,  # noqa: F401
     check_packed,  # noqa: F401
     check_pie,  # noqa: F401
+    check_pnp_autoload_registration,  # noqa: F401
+    check_pnp_installer_software,  # noqa: F401
+    check_pnp_privileged_component,  # noqa: F401
+    check_pnp_system_service,  # noqa: F401
+    check_pnp_vendor_coinstaller,  # noqa: F401
+    check_pnp_writable_code_destination,  # noqa: F401
     check_privileged_host_plugin,  # noqa: F401
     check_profile_development,  # noqa: F401
     check_profile_expired,  # noqa: F401

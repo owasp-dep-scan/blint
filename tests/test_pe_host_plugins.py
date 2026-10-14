@@ -543,12 +543,14 @@ def test_contract_table_shape():
     assert table, "the contract table must load"
     privileges = {"system", "local_service", "protected", "inherited"}
     for contract_id, spec in table.items():
-        assert spec.get("kind") in ("exports", "com_inproc"), contract_id
+        assert spec.get("kind") in ("exports", "export_triple", "com_inproc"), contract_id
         assert spec.get("host_process"), contract_id
         assert spec.get("host_privilege") in privileges, contract_id
         assert spec.get("documentation"), contract_id
         if spec["kind"] == "exports":
             assert spec.get("export_names"), contract_id
+        elif spec["kind"] == "export_triple":
+            assert len(spec.get("export_roles") or []) == 3, contract_id
         else:
             assert spec.get("com_export") and spec.get("registration_pattern"), contract_id
 
@@ -598,6 +600,11 @@ def test_real_print_monitors_on_the_slice():
         ("mswsock.dll", "winsock_service_provider"),
         ("SmartcardCredentialProvider.dll", "credential_provider"),
         ("credprovs.dll", "credential_provider"),
+        ("perfdisk.dll", "performance_library"),
+        ("perfos.dll", "performance_library"),
+        ("bitsperf.dll", "performance_library"),
+        ("usbperf.dll", "performance_library"),
+        ("winspool.drv", "performance_library"),
     ],
 )
 def test_registered_system_plugins_classify_correctly(dll, expected):
@@ -605,7 +612,8 @@ def test_registered_system_plugins_classify_correctly(dll, expected):
     is registered at the contract's extension point (LSA Security/
     Notification Packages, W32Time TimeProviders, NetworkProvider order,
     Print Monitors, the Winsock catalog, Authentication Credential
-    Providers), and blint must assign exactly that contract. Runs on the
+    Providers, Services\*\Performance Library), and blint must assign
+    exactly that contract. Runs on the
     VM gate; the lsa_password_filter row is also CHECK_LSA_PLUGIN's
     benign population (scecli.dll is the registered notification
     package)."""
@@ -708,6 +716,8 @@ def test_contract_table_carries_no_key_the_loader_ignores():
         "title",
         "kind",
         "export_names",
+        "export_roles",
+        "exclude_prefixes",
         "com_export",
         "registration_pattern",
         "host_process",
@@ -743,3 +753,57 @@ def test_rule_scope_covers_the_toolchain_exe_types():
     ):
         exe_types = set(analysis_mod.rules_dict[rule_id].get("exe_types") or [])
         assert {"PE32", "PE64", "dotnetbinary", "gobinary", "genericbinary"} <= exe_types, rule_id
+
+
+@pytest.mark.parametrize(
+    "exports,expected",
+    [
+        (
+            ["OpenDiskObject", "CollectDiskObjectData", "CloseDiskObject"],
+            ["CloseDiskObject", "CollectDiskObjectData", "OpenDiskObject"],
+        ),
+        (
+            ["PerfMon_Open", "PerfMon_Collect", "PerfMon_Close", "DllRegisterServer"],
+            ["PerfMon_Close", "PerfMon_Collect", "PerfMon_Open"],
+        ),
+        (["Open", "Collect", "Close"], ["Close", "Collect", "Open"]),
+    ],
+)
+def test_performance_library_contract_is_the_triple(write_pe, exports, expected):
+    """The registered names on the measurement VM (perfdisk, bitsperf,
+    msscntrs): a performance library records its own entry point names in
+    the registry, so the contract is the triple around one stem."""
+    metadata = _parse_full(write_pe("perfext.dll", _build_pe_dll(export_names=exports)))
+    contracts = {c["id"]: c for c in metadata["host_plugin"]["contracts"]}
+    perf = contracts["performance_library"]
+    assert perf["matched_exports"] == expected
+    assert perf["host_privilege"] == "system"
+    assert "WmiPrvSE.exe" in perf["host_process"]
+
+
+@pytest.mark.parametrize(
+    "exports",
+    [
+        ["OpenDiskObject", "CollectDiskObjectData"],
+        ["OpenFoo", "CollectBar", "CloseFoo"],
+        ["opendisk", "collectdisk", "closedisk"],
+        ["PdhOpenQuery", "PdhCollectQueryData", "PdhCloseQuery"],
+    ],
+)
+def test_performance_library_needs_a_matching_triple(write_pe, exports):
+    metadata = _parse_full(write_pe("notperf.dll", _build_pe_dll(export_names=exports)))
+    ids = {c["id"] for c in (metadata.get("host_plugin") or {}).get("contracts") or []}
+    assert "performance_library" not in ids
+
+
+@pytest.mark.skipif(
+    not os.path.exists(os.path.join(WINDOWS_SYSTEM32, "pdh.dll")),
+    reason="not running on Windows",
+)
+def test_pdh_consumer_api_is_not_a_performance_library():
+    """pdh.dll exports PdhOpenQuery / PdhCollectQueryData / PdhCloseQuery:
+    the reading side of performance data, registered under no Performance
+    key on the measurement VM."""
+    metadata = _parse_full(os.path.join(WINDOWS_SYSTEM32, "pdh.dll"))
+    ids = {c["id"] for c in (metadata.get("host_plugin") or {}).get("contracts") or []}
+    assert "performance_library" not in ids

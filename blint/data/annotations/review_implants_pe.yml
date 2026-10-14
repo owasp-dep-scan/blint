@@ -21,6 +21,13 @@ rules:
       hashes before acting: a repackaged or resource-patched build of legitimate software can reach
       the same state without malicious intent.
     check_type: binary_analysis
+  - id: PE_SYSTEM_MODULE_NAME_WITHOUT_IDENTITY
+    title: Unsigned file named like a Windows system DLL carries no Microsoft identity
+    summary: The file's own name is a module Windows ships, but it is unsigned and its version resource is missing or names another publisher.
+    description: |
+      This file is named after a DLL that Windows ships, such as cryptbase.dll, version.dll or dbghelp.dll, but it is unsigned and its version resource either does not exist or does not name Microsoft. Windows searches an application's own directory before System32 for many of these modules, so a copy placed beside a program is loaded instead of the real one. That is DLL planting, and the file's name is the whole mechanism. In the Plug&Pwn research a SYSTEM process started from a user-writable folder loads a planted CRYPTBASE.dll this way.
+      PE_IMPERSONATES_SYSTEM_MODULE covers a file whose version resource claims the system module's name; this rule covers the simpler payload that takes only the file name and keeps no version resource at all. Compatibility layers (Wine builds, graphics wrappers such as DXVK's dxgi.dll) and resource-patched redistributables can match legitimately, so identify the product before acting.
+    check_type: binary_analysis
   - id: PE_STUB_EXPORT_THUNK_TABLE
     title: Export table is a uniform array of stubs rather than implementations
     summary: Every export sits at the same small stride from the next and none is a real forwarded export.

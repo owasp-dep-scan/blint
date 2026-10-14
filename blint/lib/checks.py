@@ -1464,3 +1464,145 @@ def check_android_memtag(f: str, metadata: dict[str, Any], rule_obj: dict[str, A
         f"MTE note: {memtag['level']} tag checking on {detail}; the loader "
         "prepares tagged memory at load time"
     )
+
+
+def _third_party_inf(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """The INF block of a non-Microsoft driver package, or None.
+
+    Windows' own inbox packages are left to Microsoft's servicing; these
+    rules are about vendor code that Plug and Play installs on its own.
+    """
+    block = metadata.get("inf")
+    if not isinstance(block, dict) or block.get("refused"):
+        return None
+    provider = str((block.get("version") or {}).get("provider") or "").strip().lower()
+    if provider.startswith("microsoft"):
+        return None
+    return block
+
+
+def _device_ids_note(block: dict[str, Any]) -> str:
+    ids = block.get("external_ids") or []
+    shown = ", ".join(str(device_id) for device_id in ids[:3])
+    more = f" and {len(ids) - 3} more" if len(ids) > 3 else ""
+    return f"matched by {shown}{more}"
+
+
+def check_pnp_vendor_coinstaller(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """A vendor co-installer in a package a pluggable device can pull in."""
+    block = _third_party_inf(metadata)
+    if not block or not block.get("external_bus"):
+        return True
+    vendor = [co for co in block.get("co_installers") or [] if not co.get("framework")]
+    if not vendor:
+        return True
+    names = ", ".join(sorted({f"{co.get('dll')} ({co.get('scope')})" for co in vendor}))
+    return f"co-installer {names}; {_device_ids_note(block)}"
+
+
+def check_pnp_system_service(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """A SYSTEM user-mode service in a package a pluggable device can pull in."""
+    from blint.lib.inf import privileged_roles
+
+    block = _third_party_inf(metadata)
+    if not block or not block.get("external_bus"):
+        return True
+    services = [role for role in privileged_roles(block) if role["role"] == "system_service"]
+    if not services:
+        return True
+    names = ", ".join(
+        sorted(
+            {
+                f"{role.get('name')} ({role.get('binary_name')}, {role.get('start')} start)"
+                for role in services
+            }
+        )
+    )
+    return f"service {names}; {_device_ids_note(block)}"
+
+
+def check_pnp_installer_software(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """AddSoftware that runs an installer as SYSTEM after a pluggable device installs."""
+    block = _third_party_inf(metadata)
+    if not block or not block.get("external_bus"):
+        return True
+    software = [item for item in block.get("software") or [] if item.get("software_type") == 1]
+    if not software:
+        return True
+    names = ", ".join(
+        sorted(
+            {f"{item.get('name')} ({item.get('binary_name') or 'no binary'})" for item in software}
+        )
+    )
+    return f"runs {names}; {_device_ids_note(block)}"
+
+
+def check_pnp_autoload_registration(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """A vendor package that registers something Windows loads or runs automatically."""
+    block = _third_party_inf(metadata)
+    if not block or not block.get("pnp_matchable"):
+        return True
+    registrations = block.get("registrations") or []
+    if not registrations:
+        return True
+    described = sorted(
+        {
+            f"{entry.get('surface')} ({entry.get('subkey') or 'HKR'}\\{entry.get('value_name')})"
+            for entry in registrations
+        }
+    )
+    return "registers " + "; ".join(described[:4])
+
+
+def check_pnp_writable_code_destination(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """Executable code copied into a directory standard users can write to."""
+    block = metadata.get("inf")
+    if not isinstance(block, dict) or block.get("refused"):
+        return True
+    planted = [
+        copy
+        for copy in block.get("copies") or []
+        if copy.get("writable") and copy.get("executable")
+    ]
+    if not planted:
+        return True
+    described = sorted(
+        {
+            f"{copy.get('file')} -> {copy.get('writable')}"
+            + (f"\\{copy.get('subdir')}" if copy.get("subdir") else "")
+            for copy in planted
+        }
+    )
+    return "copies " + ", ".join(described[:4])
+
+
+def check_pnp_privileged_component(
+    f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]
+) -> bool | str:
+    """This binary is what a vendor driver package runs as SYSTEM for a pluggable device."""
+    context = metadata.get("driver_package")
+    if not isinstance(context, dict):
+        return True
+    described = []
+    for package in context.get("packages") or []:
+        provider = str(package.get("provider") or "").strip().lower()
+        if provider.startswith("microsoft") or not package.get("external_bus"):
+            continue
+        roles = sorted({str(role.get("role")) for role in package.get("roles") or []})
+        if not roles:
+            continue
+        ids = ", ".join(str(device_id) for device_id in (package.get("external_ids") or [])[:2])
+        described.append(f"{'/'.join(roles)} of {package.get('inf')} (matched by {ids})")
+    if not described:
+        return True
+    return "; ".join(described[:2])

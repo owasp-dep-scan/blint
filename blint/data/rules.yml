@@ -447,6 +447,54 @@
     - dotnetbinary
     - gobinary
     - genericbinary
+- id: CHECK_PNP_VENDOR_COINSTALLER
+  title: Driver Package Runs a Vendor Co-Installer
+  description: |
+    This third-party driver package registers a co-installer (CoInstallers32, or a class co-installer under Control\CoDeviceInstallers) and declares hardware IDs on a bus anyone can attach a device to: USB, HID, Bluetooth, SD or FireWire. When Windows sees a matching device it can download the package from Windows Update and run the co-installer as SYSTEM during installation, with no prompt and no logged-on user. Plugging in a device, real or emulated, or redirecting one over RDP, is enough to run this vendor code as SYSTEM, which is the delivery step of the Razer, SteelSeries and Plug&Pwn attacks.
+    Microsoft stopped signing new packages that contain co-installers in January 2023, and setting DisableCoInstallers=1 under HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Device Installer stops them from running. Microsoft's own framework co-installers (WUDFCoInstaller, WdfCoInstaller, WUDFUpdate, WinUSBCoInstaller) run no vendor logic and are not reported, and neither are packages whose provider is Microsoft.
+  severity: medium
+  exe_types:
+    - inf
+- id: CHECK_PNP_SYSTEM_SERVICE
+  title: Driver Package Installs a SYSTEM Service for a Pluggable Device
+  description: |
+    This third-party driver package installs a user-mode Windows service that runs as LocalSystem (AddService with a Win32 service type and no other account), and its hardware IDs sit on a bus anyone can attach a device to. Plugging in a matching device can therefore make Windows download the package and start vendor service code as SYSTEM, without a prompt or a logged-on user. DisableCoInstallers does not stop this: the service comes from the package's primary install, which is how the Plug&Pwn research still installed the Atheros service behind CVE-2019-10617 on fully patched Windows 11.
+    Many legitimate tablet, Bluetooth and peripheral packages ship such a service, so treat this as attack-surface context. Review the service binary, which blint reports as CHECK_PNP_PRIVILEGED_COMPONENT when it is scanned beside the INF, and consider device installation restrictions for the bus.
+  severity: low
+  exe_types:
+    - inf
+- id: CHECK_PNP_INSTALLER_SOFTWARE
+  title: Driver Package Runs Installer Software
+  description: |
+    This third-party driver package uses AddSoftware with SoftwareType 1, which makes Windows run the named installer (an EXE or MSI) as SYSTEM after the device installs, and its hardware IDs sit on a bus anyone can attach a device to. Like a co-installer, this runs vendor code as SYSTEM in response to a device being plugged in, but DisableCoInstallers does not stop it. Review what the installer does and whether it reads anything a standard user can write.
+  severity: medium
+  exe_types:
+    - inf
+- id: CHECK_PNP_AUTOLOAD_REGISTRATION
+  title: Driver Package Registers an Autoload Extension Point
+  description: |
+    This third-party driver package writes a registry location that makes Windows load or run code automatically: a performance counter library (Services\<name>\Performance\Library, loaded by WMI as SYSTEM), a print monitor (loaded by the spooler as SYSTEM), an LSA package, Image File Execution Options, AppInit or AppCert DLLs, Winlogon, a network or time provider, or a Run key. Device installation runs as SYSTEM, so the package can register these without the administrator ever seeing the change. These are the same locations the Plug&Pwn research targets after gaining a registry write. A legitimate package rarely needs one, so confirm the registered binary is the vendor's and lives in a directory only administrators can write.
+  severity: medium
+  exe_types:
+    - inf
+- id: CHECK_PNP_WRITABLE_CODE_DESTINATION
+  title: Driver Package Copies Code to a User-Writable Directory
+  description: |
+    This driver package copies an executable file (EXE, DLL, SYS or script) into a directory that standard users can write to under the default ACLs: a folder on the system drive root (DIRID 24), a ProgramData subfolder (DIRID 16419) or Public Documents (DIRID 16430). Installation runs as SYSTEM, but anything placed there can later be replaced, or have a DLL planted beside it, by any local user. If a privileged process runs that code, this becomes a local privilege escalation. The Intel RealSense chain in the Plug&Pwn research is this shape: SYSTEM runs a binary from a folder under C:\ that users can write to, and it loads a planted CRYPTBASE.dll. Install code under Program Files or the driver store instead.
+  severity: high
+  exe_types:
+    - inf
+- id: CHECK_PNP_PRIVILEGED_COMPONENT
+  title: Binary Runs as SYSTEM When a Matching Device Is Plugged In
+  description: |
+    A third-party driver package next to this binary names it as a LocalSystem service, a co-installer or AddSoftware installer software, and the package's hardware IDs sit on a bus anyone can attach a device to (USB, HID, Bluetooth, SD, FireWire). Plugging in a matching device can make Windows download the package and run this binary as SYSTEM with no prompt and no logged-on user. A logic bug in it, such as acting on a file in ProgramData, an open named pipe or a registry value a user controls, is therefore reachable by anyone with physical access or RDP USB redirection. This is the Plug&Pwn attack surface. The finding is context for the binary's other findings, and it appears only when blint scans the binary beside the INF that declares it.
+  severity: info
+  exe_types:
+    - PE32
+    - PE64
+    - dotnetbinary
+    - gobinary
+    - genericbinary
 - id: CHECK_DLL_CHARACTERISTICS
   title: Missing dll Security Characteristics
   description: |

@@ -23,6 +23,7 @@ from blint.lib.implant_reviews import (
     IMPLANT_RULE_EVALUATORS,
     evaluate_implant_rule,
 )
+from blint.lib.privilege_reviews import PRIVILEGE_RULE_EVALUATORS, evaluate_privilege_rule
 
 # Primitives that grant a caller direct hardware or physical-memory reach.
 HARDWARE_PRIMITIVE_IMPORTS: set[str] = {
@@ -579,6 +580,9 @@ def _evaluate_binary_analysis(rule_id: str, metadata: dict) -> list[dict]:
 
     if rule_id in ANDROID_RULE_EVALUATORS:
         return evaluate_android_rule(rule_id, metadata)
+
+    if rule_id in PRIVILEGE_RULE_EVALUATORS:
+        return evaluate_privilege_rule(rule_id, metadata)
 
     if rule_id in (
         "USERMODE_DIRECT_SYSCALL",
