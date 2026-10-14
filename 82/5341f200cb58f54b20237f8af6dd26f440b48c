@@ -1,0 +1,14 @@
+tests/test_inf.py
+  h_0926447d100ad2 451-453,472
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "825341f200cb58f54b20237f8af6dd26f440b48c",
+  "prompts": {},
+  "humans": {
+    "h_0926447d100ad2": {
+      "author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
