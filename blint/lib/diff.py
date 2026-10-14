@@ -104,6 +104,7 @@ HARDENING_POLARITY: dict[str, str] = {
     "retpoline": "hardening",
     "force_integrity": "hardening",
     "enclave": "hardening",
+    "dll_search_system32": "hardening",
     "arm64ec": "observe",
     "arm64x": "observe",
     "debug_info": "observe",

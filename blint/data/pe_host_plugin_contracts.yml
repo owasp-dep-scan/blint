@@ -28,6 +28,7 @@
 #   time_provider              (TimeProvOpen):                    3 DLLs
 #   appcert                    (CreateProcessNotify):             0 DLLs
 #   credential_provider        (COM + registration string):      16 DLLs
+#   performance_library        (Open/Collect/Close triple):     19 DLLs
 #   audio_processing_object    (COM + registration string):       2 DLLs
 #
 # An `exports` contract is satisfied by *any* one of its export_names -
@@ -235,6 +236,33 @@ contracts:
       MITRE ATT&CK (T1546.009) and reverse engineering, which is the
       provenance recorded here. Zero system32 DLLs export it on the
       measurement machine.
+
+  performance_library:
+    title: Performance counter library (Open/Collect/Close entry points)
+    kind: export_triple
+    export_roles:
+      - Open
+      - Collect
+      - Close
+    exclude_prefixes:
+      - Pdh
+    host_process: WmiPrvSE.exe (WMI performance provider) and any reader of HKEY_PERFORMANCE_DATA
+    host_privilege: system
+    registration_hint: HKLM\SYSTEM\CurrentControlSet\Services\<name>\Performance (Library, Open, Collect, Close)
+    documentation: https://learn.microsoft.com/en-us/windows/win32/perfctrs/creating-a-performance-extension-dll
+    notes: >-
+      A performance extension DLL exports Open, Collect and Close functions
+      whose names it chooses and records in the service's Performance key
+      (perfdisk.dll: OpenDiskObject, CollectDiskObjectData, CloseDiskObject),
+      so the contract is the triple sharing one stem rather than fixed
+      names. WMI loads the library into WmiPrvSE.exe as SYSTEM when its
+      Win32_PerfRawData class is queried, which is how the Plug&Pwn research
+      turns a registry write to Performance\Library into code execution.
+      A payload that only runs DllMain and exports nothing is not a
+      library by this contract; DLL_SYSTEM_SESSION_LAUNCH covers it. The
+      PDH consumer API (PdhOpenQuery, PdhCollectQueryData, PdhCloseQuery)
+      has the same shape but reads counters instead of providing them, so
+      Pdh-prefixed triples are excluded.
 
   credential_provider:
     title: Credential provider (COM in-proc with registration reference)

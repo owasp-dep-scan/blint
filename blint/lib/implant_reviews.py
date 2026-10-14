@@ -428,6 +428,45 @@ def _evaluate_impersonates_system_module(metadata: dict) -> list[dict]:
     ]
 
 
+def _on_disk_name(metadata: dict) -> str:
+    """The file's own name, lowercased, whatever separator its path uses."""
+    path = str(metadata.get("file_path") or metadata.get("name") or "")
+    return path.replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+
+
+def _evaluate_system_module_name_without_identity(metadata: dict) -> list[dict]:
+    """A file named like a Windows system DLL that carries no Microsoft identity at all."""
+    name = _on_disk_name(metadata)
+    if name not in MICROSOFT_SYSTEM_MODULES:
+        return []
+    vendors = [_version_vendor(metadata)]
+    # The full VERSIONINFO decode keeps tables the resource summary can drop.
+    for table in ((metadata.get("version_info") or {}).get("strings") or {}).values():
+        if isinstance(table, dict):
+            vendors += [str(table.get(field, "")).lower() for field in _VENDOR_FIELDS]
+    if any(marker in vendor for vendor in vendors for marker in _MICROSOFT_MARKERS):
+        return []
+    if not _is_unsigned(metadata) or _evaluate_impersonates_system_module(metadata):
+        # Signed files have an identity; a forged version resource is the
+        # stronger PE_IMPERSONATES_SYSTEM_MODULE finding already.
+        return []
+    version_metadata = ((metadata.get("resources") or {}).get("version_metadata")) or {}
+    return [
+        {
+            "file_name": name,
+            "declared_company": version_metadata.get("CompanyName", ""),
+            "version_resource": bool(version_metadata),
+            "signature": "unsigned",
+            "detail": (
+                f"The file is named '{name}', a module Windows ships, but it is unsigned and "
+                f"its version resource does not name Microsoft. Placed in an application "
+                f"directory, it is loaded instead of the real module: the DLL planting step "
+                f"of side-loading attacks such as Plug&Pwn's CRYPTBASE.dll."
+            ),
+        }
+    ]
+
+
 def _evaluate_stub_export_thunk_table(metadata: dict) -> list[dict]:
     """An export table that is a generated array of stubs, not implementations."""
     exports = metadata.get("exports") or []
@@ -964,6 +1003,7 @@ def _evaluate_elf_build_sandbox_gate(metadata: dict) -> list[dict]:
 # a lookup rather than a chain of comparisons.
 IMPLANT_RULE_EVALUATORS: dict[str, Any] = {
     "PE_IMPERSONATES_SYSTEM_MODULE": _evaluate_impersonates_system_module,
+    "PE_SYSTEM_MODULE_NAME_WITHOUT_IDENTITY": _evaluate_system_module_name_without_identity,
     "PE_STUB_EXPORT_THUNK_TABLE": _evaluate_stub_export_thunk_table,
     "PE_UNRESOLVED_SIBLING_MODULE_LOAD": _evaluate_unresolved_sibling_module_load,
     "PE_HOST_PROCESS_NAME_GATE": _evaluate_host_process_name_gate,

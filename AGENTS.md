@@ -28,6 +28,8 @@ Primary workflows:
 - `blint/lib/disassembler.py`: nyxstone-backed function disassembly and metrics.
 - `blint/lib/sbom.py`: CycloneDX object construction and dependency modeling.
 - `blint/lib/android.py`: APK/AAB metadata extraction and component mapping.
+- `blint/lib/inf.py`: Windows driver package INF reader (hardware IDs, services, co-installers, AddSoftware, autoload registrations, copy destinations) and the `driver_package` context for binaries an INF names.
+- `blint/lib/privilege_reviews.py`: SYSTEM-foothold reviews (session-hopping payload DLLs, services acting on user-writable config, device-identity spoofing).
 - `blint/db.py`: blintdb v2 SQLite-assisted component identification from symbols, binary-name hints, and disassembly hashes.
 - `blint/data/rules.yml`: built-in hardening/security checks.
 - `blint/data/annotations/*.yml`: built-in capability and behavior reviews.

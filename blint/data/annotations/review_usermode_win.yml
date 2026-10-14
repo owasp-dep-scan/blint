@@ -68,3 +68,33 @@ rules:
       - T1546.010 (AppInit DLLs)
       - T1546.012 (Image File Execution Options Injection)
     check_type: binary_analysis
+  - id: DLL_SYSTEM_SESSION_LAUNCH
+    title: Library moves its own token into the console session and starts a process
+    summary: A non-service DLL duplicates a token, sets its TokenSessionId to the console session, names WinSta0\Default and calls CreateProcessAsUser, which puts a SYSTEM process on the logged-on user's desktop when the DLL runs as SYSTEM.
+    description: |
+      This library imports DuplicateTokenEx, SetTokenInformation, CreateProcessAsUser and a console-session lookup (WTSGetActiveConsoleSessionId or WTSEnumerateSessions). Together they move the process's own token into the logged-on user's session and start a process with it. Changing a token's session needs SeTcbPrivilege, so this only works from SYSTEM, and the result is a SYSTEM process on the user's desktop. It is the standard payload of a DLL that reaches SYSTEM through an autoload registration (a print monitor, a performance counter library loaded by WmiPrvSE) or DLL planting. The Plug&Pwn proof of concept does exactly this from DllMain, adding CREATE_BREAKAWAY_FROM_JOB because WmiPrvSE runs in a job.
+      Services start UI in a user's session legitimately, so the rule leaves out executables (Process Explorer, remote-management and virtualisation guest agents) and svchost service DLLs that export ServiceMain or SvchostPushServiceGlobals (TabSvc.dll and gpsvc.dll on Windows 11). It also requires a reference to WinSta0\Default, in the section bytes or as a stack-built string: without it the new process lands on the service desktop where no one can use it. With --disassemble, a recovered SetTokenInformation call must pass TokenSessionId (12); calls recovered with other information classes rule the finding out, and a confirmed call names its function.
+    attack:
+      - T1134.002 (Access Token Manipulation: Create Process with Token)
+      - T1574.002 (Hijack Execution Flow: DLL Side-Loading)
+    check_type: binary_analysis
+  - id: SERVICE_USER_WRITABLE_CONFIG
+    title: Service reads INI settings, writes the registry and names a user-writable location
+    summary: A Windows service imports GetPrivateProfile* and registry create/set/delete APIs, and names an INI file inside ProgramData or Public, directories standard users can write to.
+    description: |
+      This image registers as a Windows service, reads INI-style settings (GetPrivateProfileString and related APIs), can create, set or delete registry keys and values, and names an INI file inside a directory standard users can write to under the default ACLs (ProgramData or Public). With --disassemble, an image that looks up ProgramData by CSIDL (SHGetFolderPath with CSIDL_COMMON_APPDATA) and carries an INI file name also counts. If the service takes registry operations from a file there, any local user can drive SYSTEM registry writes. That is CVE-2019-10617: the Qualcomm Atheros AtherosSvc service reads C:\ProgramData\Atheros\AtherosServiceConfig.ini when it receives control code 133 and performs the registry operations the file describes. Plug&Pwn installs that service by emulating a USB Bluetooth adapter and uses it to point a performance counter library or print monitor at an attacker DLL.
+      blint sees that the pieces are present, not that they are connected. Check what the service does with the values. A ProgramData path that is not an INI file (OneDriveSetup.exe names ProgramData only in log messages) and an INI file next to the binary in Program Files keep the rule silent.
+    attack:
+      - T1068 (Exploitation for Privilege Escalation)
+      - T1112 (Modify Registry)
+    check_type: binary_analysis
+  - id: DEVICE_IDENTITY_SPOOFING
+    title: Registers a device under a pluggable-device identity and installs a driver for it
+    summary: SetupDi device creation, a hardware-ID property write and a driver install call, in an image that carries USB, HID or Bluetooth hardware-ID templates.
+    description: |
+      This image creates a device node (SetupDiCreateDeviceInfo, SetupDiSetDeviceRegistryProperty, SetupDiCallClassInstaller), installs a driver for it (CM_Setup_DevNode, DiInstallDevice or UpdateDriverForPlugAndPlayDevices), and carries hardware-ID templates for a pluggable bus such as USB\VID_ or HID\VID_. That runs the Plug and Play installation path, including Windows Update driver lookup, for a device that is not attached. The Plug&Pwn pnp_simulate tool does this to find which Windows Update packages a fake USB device would pull in. Driver development and device management tools legitimately create root-enumerated devices, but rarely under another vendor's USB identity.
+      With --disassemble, a recovered SetupDiCallClassInstaller call must pass DIF_REGISTERDEVICE (0x19), and calls recovered with other install functions only rule the finding out.
+    attack:
+      - T1200 (Hardware Additions)
+      - T1068 (Exploitation for Privilege Escalation)
+    check_type: binary_analysis

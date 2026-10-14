@@ -28,6 +28,13 @@ from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, s
 from blint.lib.clickonce import clickonce_metadata, is_clickonce_file, parse_clickonce
 from blint.lib.container import bounded_temp_dir
 from blint.lib.finding_ids import attach_finding_ids
+from blint.lib.inf import (
+    driver_package_context,
+    find_inf_files,
+    inf_metadata,
+    is_inf_file,
+    parse_inf,
+)
 from blint.lib.ios import (
     collect_ios_app_detailed,
     enrich_with_bundle_context,
@@ -105,6 +112,20 @@ def _validate_sdk_path(blint_options: BlintOptions) -> None:
         len(index.libraries),
         index.file_count,
     )
+
+
+def _attach_driver_package(
+    metadata: dict[str, Any], path: str, display_root: str | None = None
+) -> None:
+    """Record the driver packages beside a Windows binary that name it.
+
+    Added after parse so the parse cache keeps holding facts about the bytes
+    alone; the package context depends on what sits next to the file.
+    """
+    if not isinstance(metadata, dict) or metadata.get("binary_type") != "PE":
+        return
+    if context := driver_package_context(path, display_root=display_root):
+        metadata["driver_package"] = context
 
 
 def _load_catalog_index(blint_options: BlintOptions) -> dict | None:
@@ -202,6 +223,8 @@ def run_default_mode(blint_options: BlintOptions) -> None:
             macos_bundles += files
         if files := find_clickonce_files(src):
             # Text-format containers the binary sniff cannot see.
+            exe_files += [f for f in files if f not in exe_files]
+        if files := find_inf_files(src):
             exe_files += [f for f in files if f not in exe_files]
     # A bundle directory covers everything inside it (the walker descends
     # into embedded bundles itself), so loose executables discovered within
@@ -803,11 +826,19 @@ class AnalysisRunner:
             if cab_processed:
                 self._mark_success("top-level")
             return
+        elif is_inf_file(f):
+            self._finalize_metadata(
+                f, inf_metadata(parse_inf(f), f), blint_options, wants_callgraph_outputs
+            )
+            self._mark_success("top-level")
+            self.progress.advance(self.task)
+            return
         else:
             should_disassemble = blint_options.disassemble and not is_wasm_file(f)
             if blint_options.disassemble and not should_disassemble:
                 LOG.debug(f"Skipping disassembly for wasm file {f}")
             metadata = self._parse_with_cache(f, blint_options, "top-level")
+            _attach_driver_package(metadata, f)
         if is_clickonce_file(f):
             # ClickOnce manifests are XML: parse, report declared facts,
             # done — no member extraction (the referenced assemblies live
@@ -962,6 +993,7 @@ class AnalysisRunner:
                     }
                     member_metadata["name"] = member_name
                     member_metadata["file_path"] = member_name
+                    _attach_driver_package(member_metadata, member_path, display_root=temp_dir)
                     self._finalize_metadata(
                         member_path, member_metadata, blint_options, wants_callgraph_outputs
                     )
@@ -1148,6 +1180,19 @@ class AnalysisRunner:
             }
             self._finalize_metadata(f, metadata, blint_options, wants_callgraph_outputs)
             for member_name, member_path in sorted(extracted.items()):
+                if is_inf_file(member_path):
+                    self._mark_attempted("cab-member")
+                    inf_unit = inf_metadata(parse_inf(member_path), member_name)
+                    inf_unit["container"] = {
+                        "kind": "cab",
+                        "member_path": member_name,
+                        "role": "cab-member",
+                    }
+                    self._finalize_metadata(
+                        member_path, inf_unit, blint_options, wants_callgraph_outputs
+                    )
+                    self._mark_success("cab-member")
+                    continue
                 if os.path.splitext(member_path)[1].lower() not in (".exe", ".dll", ".sys"):
                     continue
                 self.progress.update(
@@ -1166,6 +1211,7 @@ class AnalysisRunner:
                     }
                     member_metadata["name"] = member_name
                     member_metadata["file_path"] = member_name
+                    _attach_driver_package(member_metadata, member_path, display_root=temp_dir)
                     self._finalize_metadata(
                         member_path, member_metadata, blint_options, wants_callgraph_outputs
                     )
