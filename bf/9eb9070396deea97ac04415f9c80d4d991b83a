@@ -1,0 +1,41 @@
+blint/lib/banners.py
+  s_1d1e2598f8cdc5::t_4dcd2fa58d8675 429-430
+  s_1d1e2598f8cdc5::t_de5124152a7e52 60-61,73,245-270,465-466
+tests/test_embedded_ident.py
+  s_1d1e2598f8cdc5::t_64aff33038c257 1-246
+blint/lib/embedded_ident.py
+  s_1d1e2598f8cdc5::t_d5e01d66ad2a36 264
+  s_1d1e2598f8cdc5::t_5ca805335b75b2 1-263,265-302
+blint/lib/binary.py
+  s_1d1e2598f8cdc5::t_9a0d78b6526884 214,1340-1343
+blint/lib/sbom.py
+  s_1d1e2598f8cdc5::t_ce43e1b3326a35 1427-1428,1432-1435,1437-1474,1709-1716
+docs/CUSTOM_PROPERTIES.md
+  s_1d1e2598f8cdc5::t_3459940aeb0cc3 190,195-213
+docs/METADATA.md
+  s_1d1e2598f8cdc5::t_0b3f4804e03e60 632-672
+tests/data/embedded/brotli_error_table.c
+  s_1d1e2598f8cdc5::t_6fbcc8d3cec0f9 1-46
+tests/data/embedded/build.sh
+  s_1d1e2598f8cdc5::t_f5b5d2915bf249 1-13
+tests/data/embedded/dotnet_compression_native.c
+  s_1d1e2598f8cdc5::t_359a634b60127d 1-19
+tests/data/embedded/node_runtime.c
+  s_1d1e2598f8cdc5::t_372c6c1ffa0f71 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bf9eb9070396deea97ac04415f9c80d4d991b83a",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
