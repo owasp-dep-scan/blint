@@ -239,6 +239,53 @@ def test_dotnet_pe_product_version_resource():
     assert record["version"] == "8.0.32"
 
 
+_STAMP = "@(#)Version 8.0.3226.50405 @Commit: b9a49e4a6d3a444a3685e318c74a7892d01873f7"
+
+
+def test_dotnet_jit_is_identified():
+    record = _dotnet_record({}, _cstrings(_STAMP), {"jitStartup", "getJit", "jitBuildString"})
+    assert record["properties"]["dotnet_file_version"] == "8.0.3226.50405"
+    assert "version" not in record
+
+
+def test_dotnet_host_without_exports_is_identified():
+    """The dotnet muxer and apphosts export nothing; their hostfxr strings mark them."""
+    contents = _cstrings("hostfxr_main_startupinfo", "COREHOST_TRACE", "8.0.32", _STAMP)
+    record = _dotnet_record({}, contents, set())
+    assert record["version"] == "8.0.32"
+    assert record["evidence"][0]["what"] == ".NET host (muxer or apphost) strings"
+    assert _dotnet_record({}, _cstrings("COREHOST_TRACE", _STAMP), set()) is None
+
+
+def test_dotnet_stamp_after_another_sccs_string():
+    contents = _cstrings("@(#)Version 1.2 of something else", _STAMP)
+    record = _dotnet_record({}, contents, {"SystemNative_Read"})
+    assert record["properties"]["dotnet_file_version"] == "8.0.3226.50405"
+
+
+def test_dotnet_product_version_resource_must_agree_with_the_stamp():
+    metadata = {"resources": {"version_metadata": {"ProductVersion": "8.0.31+0123456789ab"}}}
+    record = _dotnet_record(metadata, _cstrings(_STAMP), {"CompressionNative_Crc32"})
+    assert "version" not in record
+    assert record["properties"]["dotnet_file_version"] == "8.0.3226.50405"
+    assert any("disagreeing" in item["what"] for item in record["evidence"])
+
+
+def test_pe_resources_are_not_read_for_embedded_code():
+    """An installer's .rsrc can be hundreds of MB and never holds the decoder."""
+    from types import SimpleNamespace
+
+    from blint.lib.embedded_ident import _section_contents
+
+    binary = SimpleNamespace(
+        sections=[
+            SimpleNamespace(name=".rsrc", content=b"resource payload"),
+            SimpleNamespace(name=".rdata", content=b"program strings"),
+        ]
+    )
+    assert _section_contents(binary) == [b"program strings"]
+
+
 def test_dotnet_export_family_alone_is_not_an_identification():
     assert _dotnet_record({}, [], {"SystemNative_Read"}) is None
     assert _dotnet_record({}, _cstrings("@(#)Version 8.0.3226.1 @Commit: abcdef1"), set()) is None

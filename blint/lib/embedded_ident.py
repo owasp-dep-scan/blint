@@ -117,8 +117,11 @@ BROTLI_FIX_STATE_RANK = {"absent": 0, "unknown": 1, "present": 2}
 DOTNET_EXPORT_RE = re.compile(
     r"^_?(?:coreclr_initialize$|hostfxr_|corehost_|SystemNative_|CompressionNative_"
     r"|CryptoNative_|GlobalizationNative_|SystemIOPortsNative_|AndroidCryptoNative_"
-    r"|AppleCryptoNative_)"
+    r"|AppleCryptoNative_|jitStartup$|getJit$|jitBuildString$)"
 )
+# The .NET host executables (the dotnet muxer and every app's apphost) export
+# nothing; they load hostfxr through these names and honour this variable.
+DOTNET_HOST_STRINGS = ("hostfxr_main_startupinfo", "COREHOST_TRACE")
 DOTNET_SCCSID_MARKER = b"@(#)Version "
 DOTNET_SCCSID_RE = re.compile(
     rb"@\(#\)Version (?P<file_version>\d+\.\d+\.\d+\.\d+) @Commit: (?P<commit>[0-9a-f]{7,40})"
@@ -126,6 +129,12 @@ DOTNET_SCCSID_RE = re.compile(
 DOTNET_PRODUCT_VERSION_RE = re.compile(
     r"^(?P<version>\d+\.\d+\.\d+)(?:\+(?P<commit>[0-9a-f]{7,40}))?$"
 )
+
+
+# PE resources hold icons, manifests and an installer's payload, never the
+# decoder or a runtime's strings, and can be hundreds of MB; the version
+# resource is read by the PE parser instead.
+SKIPPED_SECTIONS = {".rsrc"}
 
 
 def _section_contents(parsed_obj) -> list[bytes]:
@@ -136,6 +145,8 @@ def _section_contents(parsed_obj) -> list[bytes]:
         return contents
     for section in sections:
         if not is_string_bearing_section(section):
+            continue
+        if (getattr(section, "name", "") or "").lower() in SKIPPED_SECTIONS:
             continue
         try:
             content = bytes(section.content)
@@ -351,17 +362,25 @@ def _dotnet_version(
         ((metadata.get("resources") or {}).get("version_metadata") or {}).get("ProductVersion")
         or ""
     )
+    candidate = None
+    if file_version:
+        major, minor, build, _ = file_version.split(".")
+        candidate = f"{major}.{minor}.{int(build) // 100}"
     if match := DOTNET_PRODUCT_VERSION_RE.match(str(product).strip()):
+        if candidate and match.group("version") != candidate:
+            # A resource that disagrees with the stamped build is not taken
+            # over the stamp.
+            return None, {
+                "what": "PE ProductVersion resource disagreeing with the stamped file version",
+                "where": "resources",
+                "value": str(product).strip()[:80],
+            }
         return match.group("version"), {
             "what": "PE ProductVersion resource",
             "where": "resources",
             "value": str(product).strip()[:80],
         }
-    if not file_version:
-        return None, None
-    major, minor, build, _ = file_version.split(".")
-    candidate = f"{major}.{minor}.{int(build) // 100}"
-    if _has_c_string(contents, candidate):
+    if candidate and _has_c_string(contents, candidate):
         return candidate, {
             "what": "product version string agreeing with the stamped file version",
             "where": "strings",
@@ -370,36 +389,55 @@ def _dotnet_version(
     return None, None
 
 
+def _dotnet_stamp(contents: list[bytes]):
+    """The first well-formed native build stamp in any section, or None.
+
+    Every occurrence of the marker is tried: another ``@(#)Version`` string
+    (an SCCS what-string of some other component) can come first.
+    """
+    for content in contents:
+        start = 0
+        while (index := content.find(DOTNET_SCCSID_MARKER, start)) != -1:
+            if match := DOTNET_SCCSID_RE.match(content, index):
+                return match
+            start = index + 1
+    return None
+
+
 def _dotnet_record(metadata: dict, contents: list[bytes], defined: set[str]) -> dict | None:
     """The .NET runtime record for a runtime-pack native library, or None."""
     exports = sorted(name for name in defined if DOTNET_EXPORT_RE.match(name))
-    if not exports:
+    if exports:
+        evidence = [
+            {
+                "what": ".NET runtime pack native export family",
+                "where": "symbols",
+                "value": ", ".join(exports[:4]),
+            }
+        ]
+    elif all(_has_c_string(contents, value) for value in DOTNET_HOST_STRINGS):
+        evidence = [
+            {
+                "what": ".NET host (muxer or apphost) strings",
+                "where": "strings",
+                "value": ", ".join(DOTNET_HOST_STRINGS),
+            }
+        ]
+    else:
         return None
-    evidence = [
-        {
-            "what": ".NET runtime pack native export family",
-            "where": "symbols",
-            "value": ", ".join(exports[:4]),
-        }
-    ]
     properties: dict[str, str] = {}
     file_version = None
-    for content in contents:
-        index = content.find(DOTNET_SCCSID_MARKER)
-        if index == -1:
-            continue
-        if match := DOTNET_SCCSID_RE.match(content, index):
-            file_version = match.group("file_version").decode("ascii")
-            properties["dotnet_file_version"] = file_version
-            properties["dotnet_source_commit"] = match.group("commit").decode("ascii")
-            evidence.append(
-                {
-                    "what": "native build stamp (dotnet/runtime eng/native/version)",
-                    "where": "data",
-                    "value": match.group(0).decode("ascii"),
-                }
-            )
-            break
+    if match := _dotnet_stamp(contents):
+        file_version = match.group("file_version").decode("ascii")
+        properties["dotnet_file_version"] = file_version
+        properties["dotnet_source_commit"] = match.group("commit").decode("ascii")
+        evidence.append(
+            {
+                "what": "native build stamp (dotnet/runtime eng/native/version)",
+                "where": "data",
+                "value": match.group(0).decode("ascii"),
+            }
+        )
     version, version_evidence = _dotnet_version(metadata, contents, file_version)
     if version_evidence:
         evidence.append(version_evidence)
