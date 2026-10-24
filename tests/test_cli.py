@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -139,13 +140,90 @@ def test_db_download_success_exits_zero(monkeypatch, tmp_path):
     home = _point_blintdb_at(monkeypatch, tmp_path)
 
     def pull(target, outdir):
-        home.mkdir(parents=True, exist_ok=True)
-        (home / "blint.db").write_bytes(b"")
+        _write_sqlite(home / "blint.db")
         return [home / "blint.db"]
 
     monkeypatch.setattr(oci_pull, "stream_pull", pull)
     monkeypatch.setattr(sys, "argv", ["blint", "--no-banner", "-q", "db", "--download"])
     assert cli.main() is None
+
+
+def _write_sqlite(db_file):
+    import sqlite3
+
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    # A pull replaces the file whole, whatever was there.
+    db_file.unlink(missing_ok=True)
+    with sqlite3.connect(db_file) as connection:
+        connection.execute("create table t (x blob)")
+        connection.executemany("insert into t values (?)", [(b"x" * 4096,)] * 8)
+    return db_file
+
+
+@pytest.mark.parametrize("length", [0, 50])
+def test_empty_or_tiny_blintdb_is_downloaded_again(monkeypatch, tmp_path, length):
+    """SQLite opens an empty file as an empty database: blint.db cut short
+    before its first page was treated as complete."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    home.mkdir()
+    db_file = home / "blint.db"
+    db_file.write_bytes(b"SQLite format 3\x00"[:length] + b"\x00" * max(0, length - 16))
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        _write_sqlite(db_file)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert len(pulled) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_pull_into_a_symlinked_or_relative_home_succeeds(monkeypatch, tmp_path):
+    """stream_pull names what it wrote by resolved path; macOS /tmp and /var
+    are symlinks, so comparing raw paths failed a good pull."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    for home in (str(tmp_path / "link"), os.path.relpath(real)):
+        monkeypatch.setattr(utils, "BLINTDB_HOME", home)
+        monkeypatch.setattr(utils, "BLINTDB_LOC", os.path.join(home, "blint.db"))
+        (real / "blint.db").unlink(missing_ok=True)
+
+        def pull(target, outdir):
+            return [_write_sqlite(Path(outdir).resolve() / "blint.db")]
+
+        monkeypatch.setattr(oci_pull, "stream_pull", pull)
+        assert utils.blintdb_setup(BlintOptions(db_mode=True))
+
+
+def test_db_download_resumes_an_interrupted_refresh(monkeypatch, tmp_path):
+    """An old blint.db and the .part a refresh left: the download resumes."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    db_file = _write_sqlite(home / "blint.db")
+    (home / ".blint.db.0123456789abcdef.part").write_bytes(b"partial")
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert pulled == []
+    assert utils.blintdb_setup(BlintOptions(db_mode=True))
+    assert len(pulled) == 1
 
 
 def test_truncated_blintdb_is_downloaded_again(monkeypatch, tmp_path):

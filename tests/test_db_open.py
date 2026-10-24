@@ -138,3 +138,15 @@ def test_sqlite_truncation_ignores_files_without_a_sqlite_header(tmp_path: Path)
     not_sqlite = tmp_path / "blint.db"
     not_sqlite.write_bytes(b"\x00" * 200)
     assert db_module.sqlite_truncation(str(not_sqlite)) is None
+
+
+@pytest.mark.parametrize("length", [0, 50])
+def test_a_file_shorter_than_the_sqlite_header_is_truncated(tmp_path: Path, caplog, length):
+    """SQLite opens an empty file as an empty database; for blint it is a
+    download cut off before the first page."""
+    db_file = tmp_path / "blint.db"
+    db_file.write_bytes(b"SQLite format 3\x00"[:length] + b"\x00" * max(0, length - 16))
+    assert db_module.sqlite_truncation(str(db_file)) == (length, 100)
+    with caplog.at_level("ERROR"):
+        assert get(str(db_file)) is None
+    assert "truncated" in caplog.text

@@ -387,10 +387,16 @@ def blintdb_setup(args: BlintOptions) -> bool:
             BLINTDB_LOC,
             *truncated,
         )
+    # A refresh interrupted after blint.db was first downloaded leaves its
+    # .part beside the old database; `blint db --download` resumes it.
+    interrupted = args.db_mode and any(
+        Path(BLINTDB_HOME).glob(f".{os.path.basename(BLINTDB_LOC)}.*.part")
+    )
     # Should we refresh the database
     if (
         os.path.exists(BLINTDB_LOC)
         and not truncated
+        and not interrupted
         and not BLINTDB_REFRESH
         and (not args.image_url or args.image_url == BLINTDB_IMAGE_URL)
     ):
@@ -420,7 +426,10 @@ def blintdb_setup(args: BlintOptions) -> bool:
             )
         LOG.info(f"About to download the blintdb from {target_url} to {BLINTDB_HOME}")
         pulled = oci_pull.stream_pull(target_url, BLINTDB_HOME)
-        if BLINTDB_LOC not in [str(path) for path in pulled]:
+        # The pull names what it wrote by resolved path; BLINTDB_HOME may be
+        # relative or reached through a symlink (/tmp on macOS).
+        expected = os.path.realpath(BLINTDB_LOC)
+        if expected not in [os.path.realpath(path) for path in pulled]:
             LOG.error(
                 "Pulled artifact did not contain a blint.db layer: %s",
                 [path.name for path in pulled],

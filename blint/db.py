@@ -269,8 +269,10 @@ def sqlite_truncation(db_file: str) -> tuple[int, int] | None:
     size in pages (offset 28), which is valid when the change counter
     (offset 24) equals the version-valid-for number (offset 92). A download
     cut short leaves a file shorter than that, which SQLite opens happily and
-    fails on later. None means the file is complete, or its header carries no
-    usable size to compare with.
+    fails on later. A file shorter than the header itself, an empty one
+    included, is cut short too: SQLite opens an empty file as an empty
+    database, which holds nothing to match against. None means the file is
+    complete, or its header carries no usable size to compare with.
     """
     try:
         actual = os.path.getsize(db_file)
@@ -278,7 +280,9 @@ def sqlite_truncation(db_file: str) -> tuple[int, int] | None:
             header = handle.read(100)
     except OSError:
         return None
-    if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
+    if len(header) < 100:
+        return (actual, 100)
+    if not header.startswith(b"SQLite format 3\x00"):
         return None
     page_size = int.from_bytes(header[16:18], "big")
     if page_size == 1:
