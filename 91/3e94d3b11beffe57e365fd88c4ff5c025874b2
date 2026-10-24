@@ -1,0 +1,25 @@
+blint/db.py
+  s_1d1e2598f8cdc5::t_dfbc3b42b12142 272-275,283-285
+blint/lib/utils.py
+  s_1d1e2598f8cdc5::t_70ae6c04c39d80 390-394,399,429-432
+tests/test_cli.py
+  s_1d1e2598f8cdc5::t_b9fe05793170b7 1,143,151-228
+tests/test_db_open.py
+  s_1d1e2598f8cdc5::t_357f63fbcbea9a 141-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "913e94d3b11beffe57e365fd88c4ff5c025874b2",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
