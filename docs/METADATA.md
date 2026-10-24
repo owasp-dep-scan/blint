@@ -638,7 +638,7 @@ The key is absent when nothing matched, which never means "verified absent":
 ```json
 {
   "library": "brotli",
-  "purl": "pkg:github/google/brotli",
+  "purl": "pkg:generic/brotli",
   "evidence": [
     {
       "what": "BrotliDecoderErrorString error-name table (prefixed names)",

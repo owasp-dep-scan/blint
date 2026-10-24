@@ -50,7 +50,7 @@ import lief
 from blint.lib.binary_common import is_string_bearing_section
 from blint.logger import LOG
 
-BROTLI_PURL = "pkg:github/google/brotli"
+BROTLI_PURL = "pkg:generic/brotli"
 DOTNET_RUNTIME_PURL = "pkg:github/dotnet/runtime"
 DOTNET_RUNTIME_CPE = "cpe:2.3:a:microsoft:.net:{version}:*:*:*:*:*:*:*"
 

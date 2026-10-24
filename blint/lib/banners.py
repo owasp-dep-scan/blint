@@ -248,7 +248,7 @@ VERSION_RULES: tuple[dict, ...] = (
         # https://nodejs.org/download/release/v24.22.1/node-v24.22.1.tar.gz.
         # The unofficial-builds mirror uses the same path under its own host.
         "project": "nodejs",
-        "purl": "pkg:generic/nodejs",
+        "purl": "pkg:generic/node",
         "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
         "banner": True,
         "regex": re.compile(
@@ -261,7 +261,7 @@ VERSION_RULES: tuple[dict, ...] = (
         # The inspector's /json/version "Browser" field, compiled into every
         # build that has the inspector, release URLs or not.
         "project": "nodejs",
-        "purl": "pkg:generic/nodejs",
+        "purl": "pkg:generic/node",
         "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
         "banner": True,
         "regex": re.compile(r"^node\.js/v(?P<version>\d+\.\d+\.\d+)$"),

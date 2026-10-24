@@ -68,7 +68,7 @@ def test_brotli_fix_state_from_fixtures(fixture, fix_state, table):
     metadata = parse(str(_EMBEDDED / fixture))
     record = _record(metadata, "brotli")
     assert record is not None
-    assert record["purl"] == "pkg:github/google/brotli"
+    assert record["purl"] == "pkg:generic/brotli"
     assert "version" not in record
     assert record["properties"] == {
         "brotli_block_switch_fix": fix_state,
@@ -183,7 +183,7 @@ def test_node_banner_from_release_url_and_inspector_string():
     result = detect_vendored_banners(metadata)
     assert [(b["purl"], b["cpe"]) for b in result["banners"]] == [
         (
-            "pkg:generic/nodejs@24.22.1",
+            "pkg:generic/node@24.22.1",
             "cpe:2.3:a:nodejs:node.js:24.22.1:*:*:*:*:*:*:*",
         )
     ]
@@ -197,7 +197,7 @@ def test_node_string_in_an_addon_is_a_mention():
     }
     result = detect_vendored_banners(metadata)
     assert result["banners"] == []
-    assert [m["purl"] for m in result["mentions"]] == ["pkg:generic/nodejs@24.22.1"]
+    assert [m["purl"] for m in result["mentions"]] == ["pkg:generic/node@24.22.1"]
 
 
 def _sbom(tmp_path: Path, fixture: str) -> dict:
@@ -233,9 +233,9 @@ def test_patched_and_unpatched_node_produce_different_sboms(tmp_path):
     seen = {}
     for version in ("24.22.0", "24.22.1"):
         components = _flatten(_sbom_components(tmp_path, f"node-{version}.so"))
-        node = next(c for c in components if c.get("purl", "").startswith("pkg:generic/nodejs"))
-        brotli = next(c for c in components if c.get("purl") == "pkg:github/google/brotli")
-        assert node["purl"] == f"pkg:generic/nodejs@{version}"
+        node = next(c for c in components if c.get("purl", "").startswith("pkg:generic/node"))
+        brotli = next(c for c in components if c.get("purl") == "pkg:generic/brotli")
+        assert node["purl"] == f"pkg:generic/node@{version}"
         assert node["cpe"] == f"cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*"
         seen[version] = _properties(brotli)["internal:brotli_block_switch_fix"]
         assert _properties(brotli)["internal:vendored_attribution"] == "embedded_identification"
@@ -283,7 +283,7 @@ def test_macho_dylib_identity_is_not_a_dependency_of_itself(tmp_path):
 
 _BROTLI_RECORD = {
     "library": "brotli",
-    "purl": "pkg:github/google/brotli",
+    "purl": "pkg:generic/brotli",
     "evidence": [{"what": "error-name table", "where": "strings", "value": "..."}],
     "properties": {"brotli_block_switch_fix": "absent", "brotli_error_table": "prefixed"},
 }
