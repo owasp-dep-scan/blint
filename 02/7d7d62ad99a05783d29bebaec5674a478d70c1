@@ -1,0 +1,33 @@
+blint/lib/binary.py
+  s_1d1e2598f8cdc5::t_5fa021aa4bfb16 1343
+blint/lib/embedded_ident.py
+  s_1d1e2598f8cdc5::t_6cc03ade77f178 15-30,34-35,50-54,66-70,85-88,100-114,149-150,157,162,164-173,192-235,237,239,241-242,247,255,258,260-286,294-302,304-308,320-345,423-456,458-459,461-477,483,486-487
+blint/lib/sbom.py
+  s_1d1e2598f8cdc5::t_27fa00634a513d 11,50,709-716,918-940,948,1626-1630,1632,1635-1636,1639-1640,1646-1652,1657,1659,3256-3260
+tests/data/embedded/brotli_error_table.c
+  s_1d1e2598f8cdc5::t_0c12fcddd4235b 7-10,39-45
+tests/data/embedded/brotli_rust_ffi.c
+  s_1d1e2598f8cdc5::t_9363dd7d85c8de 1-25
+tests/data/embedded/build.sh
+  s_1d1e2598f8cdc5::t_9034a287b90eb6 5-21,36-40
+tests/data/embedded/node_constants.c
+  s_1d1e2598f8cdc5::t_8d5c36125f44c4 1-16
+tests/test_embedded_ident.py
+  s_1d1e2598f8cdc5::t_8819d4fd5c932a 23-25,74,143-205,301-302,304,307,309-313,317-374,376-377,379-381,476-477,486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "027d7d62ad99a05783d29bebaec5674a478d70c1",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
