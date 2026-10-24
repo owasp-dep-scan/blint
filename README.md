@@ -251,8 +251,9 @@ Binary linter and SBOM generator.
 options:
   -h, --help            show this help message and exit
   -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
-                        Source directories, container images or binary files.
-                        Defaults to current directory.
+                        Source directories, binary files or an exported
+                        container image filesystem (a directory). Defaults to
+                        current directory.
   -o, --reports REPORTS_DIR
                         Reports directory. Defaults to reports.
   --no-error            Continue on error to prevent build from breaking.
@@ -352,8 +353,9 @@ usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT]
 options:
   -h, --help            show this help message and exit
   -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
-                        Source directories, container images or binary files.
-                        Defaults to current directory.
+                        Source directories, binary files or an exported
+                        container image filesystem (a directory). Defaults to
+                        current directory.
   -o, --output-file SBOM_OUTPUT
                         SBOM output file. Defaults to sbom-binary-
                         postbuild.cdx.json in current directory.

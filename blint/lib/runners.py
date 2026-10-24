@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any, Literal
@@ -165,6 +166,42 @@ def _load_catalog_index(blint_options: BlintOptions) -> dict | None:
     return index
 
 
+def check_inputs(blint_options: BlintOptions) -> None:
+    """Fail loudly on inputs blint cannot read, instead of a silent empty run.
+
+    A path that does not exist (a mistyped path, or a container image
+    reference such as ``node:24-slim``, which blint does not pull) is an
+    error: the run exits 1 unless ``--no-error`` is set. A tar archive is
+    a warning only, since it may sit next to real inputs: blint does not
+    unpack image archives such as ``docker save`` output.
+    """
+    missing = [src for src in blint_options.src_dir_image or [] if not os.path.exists(src)]
+    for src in missing:
+        LOG.error(
+            "Input %s does not exist. blint reads files and directories; it does not "
+            "pull container images. Export the image filesystem first, for example "
+            "`docker export $(docker create <image>) | tar -x -C rootfs`, and pass the "
+            "directory.",
+            src,
+        )
+    for src in blint_options.src_dir_image or []:
+        if os.path.isfile(src) and _is_tar_archive(src):
+            LOG.warning(
+                "Input %s is a tar archive, which blint does not unpack (a `docker save` "
+                "image?). Extract the image filesystem and pass the directory instead.",
+                src,
+            )
+    if missing and not blint_options.no_error:
+        sys.exit(1)
+
+
+def _is_tar_archive(path: str) -> bool:
+    try:
+        return tarfile.is_tarfile(path)
+    except OSError:
+        return False
+
+
 def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     """
     Generates an SBOM for the given source directories. Binary files including android apk files are collected
@@ -176,6 +213,7 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
         CycloneDX: Generated CycloneDX SBOM
     """
     _validate_sdk_path(blint_options)
+    check_inputs(blint_options)
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
@@ -206,6 +244,7 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
 
 
 def run_default_mode(blint_options: BlintOptions) -> None:
+    check_inputs(blint_options)
     reset_hex_truncation_count()
     wants_callgraph_outputs = (
         blint_options.render_mermaid_callgraph

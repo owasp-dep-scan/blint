@@ -78,8 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="extend",
         default=[],
         nargs="+",
-        help="Source directories, container images or binary files. Defaults "
-        "to current directory.",
+        help="Source directories, binary files or an exported container image "
+        "filesystem (a directory). Defaults to current directory.",
     )
     parser.add_argument(
         "-o",
@@ -265,7 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="extend",
         default=[],
         nargs="+",
-        help="Source directories, container images or binary files. Defaults to current directory.",
+        help="Source directories, binary files or an exported container image filesystem "
+        "(a directory). Defaults to current directory.",
     )
     sbom_parser.add_argument(
         "-o",

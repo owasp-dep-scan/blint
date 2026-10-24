@@ -171,3 +171,49 @@ def test_truncated_blintdb_is_downloaded_again(monkeypatch, tmp_path):
     assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
     assert len(pulled) == 1
 
+
+def test_sbom_mode_exits_non_zero_for_a_missing_input(tmp_path, caplog):
+    """An image reference or a mistyped path used to write nothing and exit 0."""
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=["node:24.22.0-bookworm-slim"],
+        sbom_output=str(tmp_path / "bom.json"),
+    )
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as excinfo:
+        run_sbom_mode(options)
+    assert excinfo.value.code == 1
+    assert "does not pull container images" in caplog.text
+
+
+def test_missing_input_with_no_error_continues(tmp_path):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    options = BlintOptions(
+        sbom_mode=True,
+        no_error=True,
+        quiet_mode=True,
+        src_dir_image=[str(tmp_path / "missing")],
+        sbom_output=str(tmp_path / "bom.json"),
+    )
+    # Logged, not fatal: the run carries on and simply has nothing to scan.
+    assert run_sbom_mode(options) is False
+
+
+def test_tar_archive_input_warns(tmp_path, caplog):
+    import tarfile
+
+    from blint.config import BlintOptions
+    from blint.lib.runners import check_inputs
+
+    archive = tmp_path / "image.tar"
+    with tarfile.open(archive, "w") as handle:
+        member = tmp_path / "manifest.json"
+        member.write_text("[]")
+        handle.add(member, arcname="manifest.json")
+    with caplog.at_level("WARNING"):
+        check_inputs(BlintOptions(src_dir_image=[str(archive)]))
+    assert "tar archive" in caplog.text
