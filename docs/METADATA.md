@@ -342,7 +342,7 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `is_neural_model`: `true` only when the header magic is Apple's neural-model file magic (`0xbeefface`, LIEF's `MACHO_TYPES.NEURAL_MODEL`); `false` on ordinary Mach-O images (observed `false` on `/bin/ls`, `gh`, and Go toolchain binaries). Present on every Mach-O metadata; it names the file type the header declares, not an analysis verdict, so `false` is the expected value for binaries and libraries.
 
 - **Load Commands:** Mach-O uses load commands instead of a dynamic section.
-  - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF. Each entry carries `name`, `timestamp`, `version` (the `current_version` the load command recorded), `compatibility_version` and `command`, the load command it came from (`LOAD_DYLIB`, `LOAD_WEAK_DYLIB`, `REEXPORT_DYLIB`, ...). LIEF also lists a dylib's own `ID_DYLIB` here; that entry is the dylib's identity, not a dependency, so the dependency passes and the SBOM skip it.
+  - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF. Each entry carries `name`, `timestamp`, `version` (the `current_version` the load command recorded), `compatibility_version` and `command`, the load command it came from (`LOAD_DYLIB`, `LOAD_WEAK_DYLIB`, `REEXPORT_DYLIB`, ...). LIEF also lists a dylib's own `ID_DYLIB` here; that entry is the dylib's identity, not a dependency, so the SBOM, the dependency graph, link hygiene, binary diffs, SDK attribution, dlopen recovery and banner corroboration all skip it.
   - `uuid`: A unique identifier for the binary, used by debuggers and crash report symbolication tools.
   - `rpath`: A runtime search path for libraries.
   - `code_signature`: The embedded code-signature SuperBlob, parsed into semantic detail (see below).
@@ -638,7 +638,7 @@ The key is absent when nothing matched, which never means "verified absent":
 ```json
 {
   "library": "brotli",
-  "purl": "pkg:generic/brotli",
+  "purl": "pkg:generic/brotli?vcs_url=git%2Bhttps:%2F%2Fgithub.com%2Fgoogle%2Fbrotli",
   "evidence": [
     {
       "what": "BrotliDecoderErrorString error-name table (prefixed names)",
@@ -659,16 +659,36 @@ The key is absent when nothing matched, which never means "verified absent":
 ```
 
 - `library`: `brotli` (the google/brotli C decoder) or `dotnet-runtime` (a .NET
-  runtime pack native library).
+  runtime pack native library, the JIT, or the `dotnet` muxer or an apphost).
+- `purl`: the library the file embeds, shared by every file that embeds it.
+  The brotli purl is cdxgen's identity for the decoder.
 - `version` and `cpe`: present only when exact evidence names the version.
   Brotli records are never versioned: the decoder stores its version as an
   immediate, not as data.
-- `properties`: become `internal:` properties on the SBOM component; see the
+- `properties`: describe this file's copy, so the SBOM puts them on the file's
+  own component; see the
   [embedded library properties](CUSTOM_PROPERTIES.md#embedded-library-properties).
+  `brotli_error_table` is `prefixed`, `bare`, `constant` (Node.js's
+  `BROTLI_DECODER_ERROR_FORMAT_*` names beside the decoder, where lld `-O2`
+  merged the decoder's names into them) or `none` (the API or the decoding
+  tables alone). A universal Mach-O adds `brotli_slice_fix_states`.
 - The strings are read as whole NUL-terminated C strings from the
-  string-bearing sections, so the decoder's own table is told apart from
-  Node.js's `BROTLI_DECODER_ERROR_*` constant names, and a prefixed name is
-  never read as its bare form.
+  string-bearing sections (PE `.rsrc` excepted), so the decoder's own table is
+  told apart from Node.js's `BROTLI_DECODER_ERROR_*` constant names, and a
+  prefixed name is never read as its bare form. Each name is counted, so two
+  copies of the table of which only one carries `BLOCK_SWITCH` read `absent`.
+- The Rust port (`brotli-decompressor`), which defines the same C API and
+  carries the same tables but is not affected, is recognised by its crate name
+  and never reported; nor are the tables in a Go binary.
+
+### Runtime identity strings (`identity_strings`)
+
+ELF, PE and Mach-O. Node.js release URLs and inspector strings, and the
+version strings of other runtimes that carry Node.js's URLs (Bun, Deno), found
+on the section bytes but missing from `strings`. A large Mach-O or PE holds more
+strings than `strings` keeps (50,000), and the identity string can sit past that
+cap. The banner layer reads these together with `strings`. Absent when every
+such string is already in `strings`.
 
 ### Framework and runtime identification (`frameworks`, ELF only)
 
