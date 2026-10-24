@@ -178,7 +178,7 @@ The workflow is a two-step process:
     blint db --download
     ```
 
-    This downloads the database to the directory specified by the `BLINTDB_HOME` environment variable. The layers are large (tens of GB), so the download streams to a `.part` file, resumes with HTTP range requests when the connection drops, and is verified against the image digest before it replaces `blint.db`. An interrupted run leaves the `.part` file behind and the next `blint db --download` resumes from it. The command exits non-zero when it cannot produce a verified database, and a truncated `blint.db` left by an older blint is detected and downloaded again rather than used.
+    This downloads the database to the directory specified by the `BLINTDB_HOME` environment variable. The layers are large (tens of GB), so the download streams to a `.part` file, resumes with HTTP range requests when the connection drops, and is verified against the image digest before it replaces `blint.db`. An interrupted run leaves the `.part` file behind and the next `blint db --download` resumes from it, including a refresh interrupted while an older `blint.db` is still in place. A response that does not continue the `.part` exactly restarts the layer, rate limiting (HTTP 429) is retried after the delay the registry asks for, and the finished file's size and digest are checked on the file itself. Only one download runs at a time per `BLINTDB_HOME`: a second one fails at once rather than writing the same file. The command exits non-zero when it cannot produce a verified database (unless `--no-error` is given), and a truncated or empty `blint.db` left by an older blint is detected and downloaded again rather than used.
 
 2.  **Generate the SBOM with blintdb enabled:**
 
@@ -344,14 +344,15 @@ sub-commands:
 <summary><strong>SBOM Sub-command Help</strong></summary>
 
 ```shell
-usage: blint sbom [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o SBOM_OUTPUT]
-                  [--deep] [--stdout] [-q]
+usage: blint sbom [-h] [--no-error] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]]
+                  [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
                   [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]]
                   [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
                   [--wasm-sbom] [--jobs JOBS] [--sdk-path SDK_PATH]
 
 options:
   -h, --help            show this help message and exit
+  --no-error            Continue on error to prevent build from breaking.
   -i, --src SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]
                         Source directories, binary files or an exported
                         container image filesystem (a directory). Defaults to
@@ -387,6 +388,8 @@ options:
                         default; the path must contain .tbd files or the run
                         aborts.
 ```
+
+An input that does not exist is reported and skipped, and the inputs that do exist are still scanned and written; the run then exits 1 unless `--no-error` is given. A symlink whose target is missing is skipped with a warning. blint reads files and directories: to scan a container image, export its filesystem first (`docker export $(docker create <image>) | tar -x -C rootfs`).
 
 </details>
 
@@ -554,11 +557,12 @@ options:
 <summary><strong>DB Sub-command Help</strong></summary>
 
 ```shell
-usage: blint db [-h] [--download]
+usage: blint db [-h] [--no-error] [--download]
                 [--image-url {ghcr.io/appthreat/blintdb-vcpkg:v4,ghcr.io/appthreat/blintdb-vcpkg-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-darwin-arm64:v4,ghcr.io/appthreat/blintdb-vcpkg-musl:v4,ghcr.io/appthreat/blintdb-meson:v4,ghcr.io/appthreat/blintdb-meson-arm64:v4,ghcr.io/appthreat/blintdb-meson-darwin-arm64:v4,ghcr.io/appthreat/blintdb-meson-musl:v4}]
 
 options:
   -h, --help            show this help message and exit
+  --no-error            Continue on error to prevent build from breaking.
   --download            Download the pre-compiled database to the
                         <user data dir>/blintdb
                         directory. Use the environment variable `BLINTDB_HOME`
