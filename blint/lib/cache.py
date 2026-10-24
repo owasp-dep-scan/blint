@@ -72,27 +72,15 @@ from blint.lib.binary import parse as binary_parse
 from blint.logger import LOG
 
 # The stored-metadata shape, part of the cache key beside the file digest,
-# the installed blint version and the options digest.
+# the installed blint version and the options digest. Bump it with every
+# change to what parse() stores: the installed version is frozen at
+# `pip install -e` time in a development checkout, so without a bump a warm
+# cache serves the old shape (a cache once served a pre-W3.2 shape and left
+# every new managed rule matching nothing). v4.0.0 and v4.0.1 shipped 10.
 #
-# Frozen at 10 for the rest of v4 pre-release; it is not bumped per change.
-# The counter earned its reputation honestly — a warm cache once served a
-# pre-W3.2 shape and left every new managed rule matching nothing — but the
-# population a bump protects is people holding caches written by a *released*
-# blint, and there are none: this whole module postdates v3.4.0, the last
-# tag, and no release tag contains any value this constant has ever held.
-# The only holders are development checkouts, where `blint cache clear` is
-# the one-command answer; the cache is opt-in (`--cache`) besides, so an
-# ordinary run never reads a stale entry at all. And `_blint_version()` is
-# the *installed distribution's* version, frozen at `pip install -e` time,
-# so in a development checkout it does not move when the tree does — this
-# constant was doing all the invalidation work and buying almost nothing.
-#
-# **At the v4.0.0 release, reset this to 1** and delete this comment down to
-# that sentence. v4 ships as one shape, nothing in the wild can hold an
-# earlier one, and the counter starts from 1 on the first post-release change
-# to the stored metadata. Until then: change the shape freely, and run
-# `blint cache clear` on any machine that has been running with `--cache`.
-CACHE_SCHEMA_VERSION = 10
+# 11: embedded_libraries, identity_strings, and the load command of each
+#     Mach-O library entry.
+CACHE_SCHEMA_VERSION = 11
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that
