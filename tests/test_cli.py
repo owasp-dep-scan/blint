@@ -295,3 +295,61 @@ def test_tar_archive_input_warns(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         check_inputs(BlintOptions(src_dir_image=[str(archive)]))
     assert "tar archive" in caplog.text
+
+
+def _fixture(name: str) -> str:
+    return str(Path(__file__).resolve().parent / "data" / "embedded" / name)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_dangling_symlink_input_is_skipped_and_the_rest_scanned(tmp_path, caplog):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    dangling = tmp_path / "dangling.so"
+    dangling.symlink_to(tmp_path / "nonexistent" / "libfoo.so")
+    output = tmp_path / "bom.json"
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=[_fixture("brotli-1.2.0-unpatched.so"), str(dangling)],
+        sbom_output=str(output),
+    )
+    with caplog.at_level("WARNING"):
+        assert run_sbom_mode(options)
+    assert output.stat().st_size
+    assert "symbolic link to a missing target" in caplog.text
+    assert "container images" not in caplog.text
+
+
+def test_a_missing_input_fails_the_run_after_the_others_are_scanned(tmp_path, caplog):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    output = tmp_path / "bom.json"
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=[_fixture("brotli-1.2.0-unpatched.so"), str(tmp_path / "typo.so")],
+        sbom_output=str(output),
+    )
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as excinfo:
+        run_sbom_mode(options)
+    assert excinfo.value.code == 1
+    assert output.stat().st_size
+    # A path is not blamed on container images.
+    assert "typo.so does not exist; skipping it" in caplog.text
+    assert "container images" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["sbom", "--no-error", "-i", "x"],
+        ["--no-error", "sbom", "-i", "x"],
+        ["db", "--no-error"],
+    ],
+)
+def test_no_error_is_accepted_before_or_after_the_sub_command(argv):
+    assert build_parser().parse_args(argv).noerror is True
+    # Without it, the sub-command does not set it.
+    without = [arg for arg in argv if arg != "--no-error"]
+    assert build_parser().parse_args(without).noerror is False

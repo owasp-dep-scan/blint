@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import re
 import shutil
 import sys
 import tarfile
@@ -166,33 +167,62 @@ def _load_catalog_index(blint_options: BlintOptions) -> dict | None:
     return index
 
 
-def check_inputs(blint_options: BlintOptions) -> None:
-    """Fail loudly on inputs blint cannot read, instead of a silent empty run.
+# A container image reference: a name with a tag or digest and no path
+# punctuation of its own (node:24.22.0-bookworm-slim, ghcr.io/org/app@sha256:..).
+_IMAGE_REFERENCE_RE = re.compile(
+    r"^(?:[a-z0-9.-]+(?::\d+)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[\w][\w.-]{0,127})?(?:@sha256:[0-9a-f]{64})?$"
+)
+
+
+def _looks_like_image_reference(src: str) -> bool:
+    return (":" in src or "@" in src) and bool(_IMAGE_REFERENCE_RE.match(src))
+
+
+def check_inputs(blint_options: BlintOptions) -> list[str]:
+    """Report the inputs blint cannot read, and go on with the others.
 
     A path that does not exist (a mistyped path, or a container image
     reference such as ``node:24-slim``, which blint does not pull) is an
-    error: the run exits 1 unless ``--no-error`` is set. A tar archive is
-    a warning only, since it may sit next to real inputs: blint does not
-    unpack image archives such as ``docker save`` output.
+    error for that input only: it is dropped, the run goes on with the rest,
+    and the caller exits 1 once the output is written unless ``--no-error``
+    is set. When nothing is left to read the run exits 1 at once (again
+    unless ``--no-error``). A symlink whose target is missing is an entry
+    blint cannot read rather than a mistyped input, so it is skipped with a
+    warning. A tar archive is a warning only, since it may sit next to real
+    inputs: blint does not unpack image archives such as ``docker save``
+    output. Returns the inputs that do not exist.
     """
-    missing = [src for src in blint_options.src_dir_image or [] if not os.path.exists(src)]
+    sources = list(blint_options.src_dir_image or [])
+    missing = [src for src in sources if not os.path.lexists(src)]
+    dangling = [src for src in sources if os.path.lexists(src) and not os.path.exists(src)]
     for src in missing:
-        LOG.error(
-            "Input %s does not exist. blint reads files and directories; it does not "
-            "pull container images. Export the image filesystem first, for example "
-            "`docker export $(docker create <image>) | tar -x -C rootfs`, and pass the "
-            "directory.",
-            src,
-        )
-    for src in blint_options.src_dir_image or []:
+        if _looks_like_image_reference(src):
+            LOG.error(
+                "Input %s does not exist. blint reads files and directories; it does not "
+                "pull container images. Export the image filesystem first, for example "
+                "`docker export $(docker create <image>) | tar -x -C rootfs`, and pass the "
+                "directory.",
+                src,
+            )
+        else:
+            LOG.error("Input %s does not exist; skipping it.", src)
+    for src in dangling:
+        LOG.warning("Input %s is a symbolic link to a missing target; skipping it.", src)
+    for src in sources:
         if os.path.isfile(src) and _is_tar_archive(src):
             LOG.warning(
                 "Input %s is a tar archive, which blint does not unpack (a `docker save` "
                 "image?). Extract the image filesystem and pass the directory instead.",
                 src,
             )
-    if missing and not blint_options.no_error:
+    if missing or dangling:
+        blint_options.src_dir_image = [
+            src for src in sources if src not in missing and src not in dangling
+        ]
+    if missing and not blint_options.src_dir_image and not blint_options.no_error:
         sys.exit(1)
+    return missing
 
 
 def _is_tar_archive(path: str) -> bool:
@@ -213,7 +243,7 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
         CycloneDX: Generated CycloneDX SBOM
     """
     _validate_sdk_path(blint_options)
-    check_inputs(blint_options)
+    missing = check_inputs(blint_options)
     if blint_options.stdout_mode:
         LOG.setLevel(logging.ERROR)
     else:
@@ -240,11 +270,16 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     # into embedded bundles itself), so loose executables discovered within
     # one must not also be analysed as top-level units.
     exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
-    return generate(blint_options, exe_files, android_files, ios_files, macos_bundles)
+    sbom = generate(blint_options, exe_files, android_files, ios_files, macos_bundles)
+    if missing and not blint_options.no_error:
+        # The inputs that exist are in the SBOM; the ones that do not still
+        # fail the run.
+        sys.exit(1)
+    return sbom
 
 
 def run_default_mode(blint_options: BlintOptions) -> None:
-    check_inputs(blint_options)
+    missing = check_inputs(blint_options)
     reset_hex_truncation_count()
     wants_callgraph_outputs = (
         blint_options.render_mermaid_callgraph
@@ -288,6 +323,8 @@ def run_default_mode(blint_options: BlintOptions) -> None:
             "Tune BLINT_MAX_HEX_BYTES (or set to 0 to disable truncation)."
         )
 
+    if missing and not blint_options.no_error:
+        sys.exit(1)
     if os.getenv("CI") and not blint_options.no_error:
         for f in findings:
             if f["severity"] == "critical":
