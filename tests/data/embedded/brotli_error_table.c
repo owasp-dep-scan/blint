@@ -4,8 +4,10 @@
  * 1.0.x returns the bare name, 1.1.0 onwards prefixes it with
  * "_ERROR_FORMAT_". The CVE-2026-111497 fix (google/brotli 0ed4268) added
  * BLOCK_SWITCH (-17). Build flags select the shape:
- *   -DBARE_NAMES   1.0.x table
- *   -DBLOCK_SWITCH the fixed table
+ *   -DBARE_NAMES     1.0.x table
+ *   -DBLOCK_SWITCH   the fixed table
+ *   -DDECODER_TABLES kCodeLengthCodeOrder and kCodeLengthPrefixValue, which stay
+ *                    when a linker drops the error-name table
  * Only the decoder's own strings and API names are reproduced here, not its code.
  */
 #include <stddef.h>
@@ -33,6 +35,13 @@ const char *BrotliDecoderErrorString(int code) {
     default: return "INVALID";
   }
 }
+
+#ifdef DECODER_TABLES
+__attribute__((used)) static const unsigned char kCodeLengthCodeOrder[18] = {
+    1, 2, 3, 4, 0, 5, 17, 6, 16, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+__attribute__((used)) static const unsigned char kCodeLengthPrefixValue[16] = {
+    0, 4, 3, 2, 0, 4, 3, 1, 0, 4, 3, 2, 0, 4, 3, 5};
+#endif
 
 void *BrotliDecoderCreateInstance(void *alloc, void *free_fn, void *opaque) {
   (void)alloc; (void)free_fn; (void)opaque;

@@ -1340,7 +1340,7 @@ def parse(
         # Embedded code that leaves no version banner (the brotli decoder
         # and the .NET runtime pack's native libraries): every native format,
         # read from the section bytes and the symbol buckets settled above.
-        metadata = attach_embedded_libraries(metadata, parsed_obj)
+        metadata = attach_embedded_libraries(metadata, parsed_obj, exe_file)
         # W5.6: the privileged-host plugin surface (04/F) - which plugin
         # contracts the export set satisfies and the host each loads into.
         # An interpretation of already-parsed facts (the export listings and

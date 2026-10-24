@@ -8,6 +8,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal, TextIO, cast
+from urllib.parse import unquote
 
 import orjson
 from custom_json_diff.lib.utils import file_read, file_write
@@ -46,6 +47,7 @@ from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.cab import is_cab_file, parse_cab
 from blint.lib.clickonce import parse_clickonce
+from blint.lib.embedded_ident import BROTLI_FIX_STATE_RANK
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.msi import parse_msi
@@ -704,6 +706,14 @@ EMBEDDED_BLINTDB_PROJECTS = {
 }
 
 
+def _versioned_purl(purl: str | None, version: str | None) -> str | None:
+    """``purl`` with ``version`` set, keeping its qualifiers in place."""
+    if not purl or not version:
+        return purl
+    base, sep, rest = purl.partition("?")
+    return f"{base}@{version}{sep}{rest}"
+
+
 def _blintdb_component_for(components: list[Component], library: str | None) -> Component | None:
     """The blintdb-matched component naming the embedded record's library."""
     names = EMBEDDED_BLINTDB_PROJECTS.get(library or "")
@@ -905,6 +915,29 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
     return lib_components
 
 
+# File-level states a merged component keeps at their weakest. Files are
+# named by their basename, so two node binaries in different directories are
+# one component; a patched copy must not hide an unpatched one.
+WEAKEST_STATE_PROPERTIES = {
+    "internal:brotli_block_switch_fix": BROTLI_FIX_STATE_RANK,
+}
+
+
+def merge_duplicate_file_state(existing: Component, duplicate: Component) -> None:
+    """Fold a duplicate's file-level states into the component kept for both."""
+    for name, rank in WEAKEST_STATE_PROPERTIES.items():
+        new_value = next((p.value for p in duplicate.properties or [] if p.name == name), None)
+        if new_value not in rank:
+            continue
+        current = next((p for p in existing.properties or [] if p.name == name), None)
+        if current is None:
+            existing.properties = (existing.properties or []) + [
+                Property(name=name, value=new_value)
+            ]
+        elif current.value not in rank or rank[new_value] < rank[current.value]:
+            current.value = new_value
+
+
 def _add_to_parent_component(
     metadata_components: list[Component], parent_component: Component
 ) -> None:
@@ -912,6 +945,7 @@ def _add_to_parent_component(
         if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
             mode="python"
         ):
+            merge_duplicate_file_state(mc, parent_component)
             return
     metadata_components.append(parent_component)
 
@@ -1589,36 +1623,40 @@ def process_exe_file(
             lib_components.append(banner_component)
     # Embedded code that leaves no version banner (blint.lib.embedded_ident):
     # the brotli decoder with its CVE-2026-111497 fix state, and the .NET
-    # runtime pack. Same component shape as a banner hit; the record's own
-    # properties (fix state, stamped file version) ride the component.
+    # runtime pack. What a record says about this file's copy (the fix state,
+    # the stamped file version, the evidence) rides the file's own component.
+    # The library component the file depends on is shared by every file that
+    # embeds the same library and carries nothing of any one copy, so a
+    # directory scan keeps a patched copy apart from an unpatched one.
     for embedded in metadata.get("embedded_libraries") or []:
-        embedded_purl = embedded.get("purl")
+        embedded_purl = _versioned_purl(embedded.get("purl"), embedded.get("version"))
         if not embedded_purl:
             continue
-        if embedded.get("version"):
-            embedded_purl = f"{embedded_purl}@{embedded['version']}"
-        embedded_evidence = {
-            "vendored_attribution": "embedded_identification",
+        library = embedded.get("library") or ""
+        file_properties = {
             # Evidence values are comma lists themselves, so entries are
             # joined with "; " rather than the default ", ".
-            "embedded_evidence": "; ".join(
+            "embedded_evidence": f"{library}: "
+            + "; ".join(
                 f"{item.get('what')}: {item.get('value')}"
                 for item in embedded.get("evidence") or []
             ),
             **(embedded.get("properties") or {}),
         }
-        existing = next(
-            (comp for comp in lib_components if comp.purl == embedded_purl), None
-        ) or _blintdb_component_for(lib_components, embedded.get("library"))
-        if existing is not None:
-            for key, value in embedded_evidence.items():
-                existing.properties.append(Property(name=f"internal:{key}", value=str(value)))
+        for key, value in file_properties.items():
+            parent_component.properties.append(Property(name=f"internal:{key}", value=str(value)))
+        if any(comp.purl == embedded_purl for comp in lib_components) or _blintdb_component_for(
+            lib_components, library
+        ):
+            # A banner or blintdb match already names the library this file
+            # depends on.
             continue
         embedded_component = create_dynamic_component(
             {"purl": embedded_purl, "tag": "NEEDED"},
             exe,
-            embedded_evidence,
+            {"vendored_attribution": "embedded_identification"},
         )
+        embedded_component.bom_ref = RefType(unquote(embedded_purl))
         if embedded.get("cpe"):
             embedded_component.cpe = embedded["cpe"]
         lib_components.append(embedded_component)
@@ -3215,8 +3253,11 @@ def trim_components(components: list[Component]) -> list[Component]:
     """
     added_dict: dict[str, Component] = {}
     for comp in components:
-        if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
-            added_dict[comp.bom_ref.model_dump(mode="python")] = comp
+        ref = comp.bom_ref.model_dump(mode="python")
+        if existing := added_dict.get(ref):
+            merge_duplicate_file_state(existing, comp)
+        else:
+            added_dict[ref] = comp
     return [added_dict[k] for k in sorted(added_dict.keys())]
 
 

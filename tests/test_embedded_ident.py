@@ -20,6 +20,9 @@ from blint.config import BlintOptions
 from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import parse
 from blint.lib.embedded_ident import (
+    BROTLI_BOM_REF,
+    BROTLI_DECODER_TABLES,
+    BROTLI_PURL,
     _brotli_record,
     _dotnet_record,
     _has_c_string,
@@ -68,7 +71,7 @@ def test_brotli_fix_state_from_fixtures(fixture, fix_state, table):
     metadata = parse(str(_EMBEDDED / fixture))
     record = _record(metadata, "brotli")
     assert record is not None
-    assert record["purl"] == "pkg:generic/brotli"
+    assert record["purl"] == BROTLI_PURL
     assert "version" not in record
     assert record["properties"] == {
         "brotli_block_switch_fix": fix_state,
@@ -135,6 +138,69 @@ def test_two_copies_report_the_unpatched_one():
         "brotli_block_switch_fix": "absent",
         "brotli_error_table": "prefixed+bare",
     }
+
+
+def test_two_copies_of_one_table_shape_report_the_unpatched_one():
+    # Two copies a linker kept apart, only one of them fixed: the table's
+    # names occur twice and the fix name once.
+    contents = _cstrings(*PREFIXED_TABLE, "_ERROR_FORMAT_BLOCK_SWITCH") + _cstrings(
+        *PREFIXED_TABLE
+    )
+    record = _brotli_record(contents, set())
+    assert record["properties"]["brotli_block_switch_fix"] == "absent"
+    both_fixed = _cstrings(*PREFIXED_TABLE, "_ERROR_FORMAT_BLOCK_SWITCH") * 2
+    assert _brotli_record(both_fixed, set())["properties"]["brotli_block_switch_fix"] == "present"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "fix_state"),
+    [
+        ("brotli-lld-tailmerged-unpatched.so", "absent"),
+        ("brotli-lld-tailmerged-patched.so", "present"),
+        # The decoder API hidden: only its tables mark the decoder.
+        ("brotli-lld-tailmerged-hidden.so", "absent"),
+    ],
+)
+def test_lld_tail_merged_names_are_read_from_the_node_constants(fixture, fix_state):
+    """lld -O2 leaves the decoder's names only as tails of Node's constants."""
+    metadata = parse(str(_EMBEDDED / fixture))
+    assert _record(metadata, "brotli")["properties"] == {
+        "brotli_block_switch_fix": fix_state,
+        "brotli_error_table": "constant",
+    }
+
+
+def test_decoder_tables_alone_are_a_decoder_of_unknown_state():
+    contents = [b"\x90" + BROTLI_DECODER_TABLES[0] + b"\x90" + BROTLI_DECODER_TABLES[1]]
+    record = _brotli_record(contents, set())
+    assert record["properties"] == {
+        "brotli_block_switch_fix": "unknown",
+        "brotli_error_table": "none",
+    }
+    # The encoder keeps only the first table, and the Go port has both.
+    assert _brotli_record([BROTLI_DECODER_TABLES[0]], set()) is None
+    assert _brotli_record(contents, set(), is_go=True) is None
+
+
+def test_rust_port_is_not_the_c_decoder():
+    """brotli-decompressor's FFI shim defines the C API and carries the tables."""
+    assert _record(parse(str(_EMBEDDED / "brotli-rust-ffi.so")), "brotli") is None
+    api = {"BrotliDecoderCreateInstance", "BrotliDecoderDecompressStream"}
+    rust_names = api | {"_ZN19brotli_decompressor3ffi28BrotliDecoderCreateInstance17h0E"}
+    assert _brotli_record([], api, rust_names) is None
+    # The C decoder's own table still identifies a C copy beside the Rust port.
+    contents = _cstrings(*PREFIXED_TABLE) + [b"brotli-decompressor-4.0.1/src/lib.rs"]
+    assert _brotli_record(contents, api, rust_names)["properties"]["brotli_error_table"] == (
+        "prefixed"
+    )
+
+
+def test_every_slice_of_a_universal_macho_is_read():
+    """A universal dylib whose arm64 slice lacks the fix its x86_64 slice has."""
+    metadata = parse(str(_EMBEDDED / "brotli-universal-x86_64-patched.dylib"))
+    properties = _record(metadata, "brotli")["properties"]
+    assert properties["brotli_block_switch_fix"] == "absent"
+    assert properties["brotli_slice_fix_states"] == "x86_64=present, arm64=absent"
 
 
 def test_dotnet_stamp_without_product_string_stays_versionless():
@@ -232,20 +298,87 @@ def _properties(component: dict) -> dict:
 def test_patched_and_unpatched_node_produce_different_sboms(tmp_path):
     seen = {}
     for version in ("24.22.0", "24.22.1"):
-        components = _flatten(_sbom_components(tmp_path, f"node-{version}.so"))
+        bom = _sbom(tmp_path, f"node-{version}.so")
+        components = _flatten(bom["metadata"]["component"].get("components", []) + bom["components"])
         node = next(c for c in components if c.get("purl", "").startswith("pkg:generic/node"))
-        brotli = next(c for c in components if c.get("purl") == "pkg:generic/brotli")
+        brotli = next(c for c in components if c.get("bom-ref") == BROTLI_BOM_REF)
         assert node["purl"] == f"pkg:generic/node@{version}"
         assert node["cpe"] == f"cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*"
-        seen[version] = _properties(brotli)["internal:brotli_block_switch_fix"]
+        assert brotli["purl"] == BROTLI_PURL
         assert _properties(brotli)["internal:vendored_attribution"] == "embedded_identification"
+        assert "internal:brotli_block_switch_fix" not in _properties(brotli)
+        # The fix state belongs to the file that carries the copy.
+        seen[version] = _properties(bom["metadata"]["component"])[
+            "internal:brotli_block_switch_fix"
+        ]
     assert seen == {"24.22.0": "absent", "24.22.1": "present"}
 
 
+def _scan(tmp_path: Path, inputs: list[Path]) -> dict:
+    output = tmp_path / "scan.cdx.json"
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=[str(i) for i in inputs],
+        sbom_output=str(output),
+        quiet_mode=True,
+    )
+    assert run_sbom_mode(options)
+    return orjson.loads(output.read_bytes())
+
+
+def _copy(source: str, target: Path) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes((_EMBEDDED / source).read_bytes())
+    return target
+
+
+def test_directory_scan_keeps_each_copy_fix_state_apart(tmp_path):
+    """One shared brotli component; each file keeps its own copy's state.
+
+    A file whose own name is brotli does not collide with the shared
+    component, so the document has no duplicate bom-ref.
+    """
+    scan_dir = tmp_path / "rootfs"
+    _copy("brotli-1.2.1-patched.so", scan_dir / "libpatched.so")
+    _copy("brotli-1.2.0-unpatched.so", scan_dir / "libunpatched.so")
+    _copy("brotli-1.2.0-unpatched.so", scan_dir / "brotli")
+    bom = _scan(tmp_path, [scan_dir])
+    components = _flatten(bom["metadata"]["component"].get("components", []) + bom["components"])
+    refs = [c["bom-ref"] for c in components]
+    assert len(refs) == len(set(refs))
+    states = {
+        c["name"]: _properties(c).get("internal:brotli_block_switch_fix")
+        for c in components
+        if "internal:brotli_block_switch_fix" in _properties(c)
+    }
+    assert states == {"libpatched.so": "present", "libunpatched.so": "absent", "brotli": "absent"}
+    shared = [c for c in components if c["bom-ref"] == BROTLI_BOM_REF]
+    assert len(shared) == 1
+    depends = {d["ref"]: d.get("dependsOn", []) for d in bom["dependencies"]}
+    for name in states:
+        assert BROTLI_BOM_REF in depends[f"pkg:generic/{name}"]
+
+
+def test_same_named_copies_keep_the_weakest_state(tmp_path):
+    """Two files of one name are one component; the unpatched copy wins."""
+    for order in (("a", "b"), ("b", "a")):
+        scan_dir = tmp_path / "".join(order)
+        _copy("brotli-1.2.1-patched.so", scan_dir / order[0] / "libbrotlidec.so.1")
+        _copy("brotli-1.2.0-unpatched.so", scan_dir / order[1] / "libbrotlidec.so.1")
+        bom = _scan(tmp_path, [scan_dir])
+        # Merged into one file component, the document's own when it is the only one.
+        components = _flatten([bom["metadata"]["component"], *bom["components"]])
+        (copy,) = [c for c in components if c["name"] == "libbrotlidec.so.1"]
+        assert _properties(copy)["internal:brotli_block_switch_fix"] == "absent"
+
+
 def test_dotnet_sbom_component_carries_stamp_properties(tmp_path):
-    components = _flatten(_sbom_components(tmp_path, "libSystem.IO.Compression.Native.so"))
+    bom = _sbom(tmp_path, "libSystem.IO.Compression.Native.so")
+    components = _flatten(bom["metadata"]["component"].get("components", []) + bom["components"])
     runtime = next(c for c in components if c.get("purl") == "pkg:github/dotnet/runtime")
-    properties = _properties(runtime)
+    # The stamp is this file's; the runtime component is shared by every file.
+    assert "internal:dotnet_file_version" not in _properties(runtime)
+    properties = _properties(bom["metadata"]["component"])
     assert properties["internal:dotnet_file_version"] == "8.0.3226.50405"
     assert "export family" in properties["internal:embedded_evidence"]
 
@@ -340,8 +473,8 @@ def test_dylib_own_version_contradicting_the_database_drops_the_db_version(
     assert properties["internal:blintdb_version_contradiction"] == (
         "database row 1.1.0; artifact evidence dylib_current_version=1.2.0"
     )
-    # The embedded record corroborates the match instead of a duplicate.
-    assert properties["internal:brotli_block_switch_fix"] == "absent"
+    # The fix state is the file's; the match stands for the library.
+    assert "internal:brotli_block_switch_fix" not in properties
 
 
 def test_database_only_version_is_marked_as_a_database_match(tmp_path, monkeypatch):
@@ -350,7 +483,7 @@ def test_database_only_version_is_marked_as_a_database_match(tmp_path, monkeypat
     assert brotli.purl == "pkg:generic/brotli@1.1.0"
     properties = _component_properties(brotli)
     assert properties["internal:blintdb_version_basis"] == "database_row"
-    assert properties["internal:brotli_block_switch_fix"] == "absent"
+    assert "internal:brotli_block_switch_fix" not in properties
 
 
 def test_database_version_the_artifact_confirms(tmp_path, monkeypatch):
