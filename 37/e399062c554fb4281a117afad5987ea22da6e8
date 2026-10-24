@@ -1,0 +1,44 @@
+blint/lib/banners.py
+  s_1d1e2598f8cdc5::t_fc8808b230aab1 76-86,356-361,363-371,375-382,471-475,508-513
+  s_1d1e2598f8cdc5::t_ec7adc6af5e43b 434-439
+blint/lib/embedded_ident.py
+  s_1d1e2598f8cdc5::t_3678b449b5ae9e 187-240,580-584,590-591
+blint/lib/sbom.py
+  s_1d1e2598f8cdc5::t_3f2d0f0f566d0d 1765-1771
+  s_1d1e2598f8cdc5::t_39cc31d10d55ba 42,567,593-594,609-651,685-686,696-703,710-714,791-809,815-819,830,835-836,851,855-859,873-878,886,898-906,908-910,917,1663-1665,1667,2078-2083
+tests/data/embedded/build.sh
+  s_1d1e2598f8cdc5::t_46e8dabbfb8e86 20-21,43-45
+tests/data/embedded/bun_runtime.c
+  s_1d1e2598f8cdc5::t_7577074961de74 1-17
+tests/data/embedded/node_runtime.c
+  s_1d1e2598f8cdc5::t_2c4a32668d107a 6-8,13,16
+tests/test_embedded_ident.py
+  s_1d1e2598f8cdc5::t_e582b95eaf3e99 316-337,339-348
+  s_1d1e2598f8cdc5::t_ef2bbc649a95c6 495-511,516,520,523-531,536,538-550,552,554-555,560,566-590,594,597-604,607-617,620-657,660-666,668-675,678-691
+blint/db.py
+  s_1d1e2598f8cdc5::t_49c6be38fe02da 381-382,1308,1462
+blint/lib/diff.py
+  s_1d1e2598f8cdc5::t_d4a75b877f2dd6 336-338
+blint/lib/elf_dlopen.py
+  s_1d1e2598f8cdc5::t_dc779f00900122 223-224
+blint/lib/tbd_index.py
+  s_1d1e2598f8cdc5::t_95d74641dba272 610,614-616
+tests/test_sbom_purl.py
+  s_1d1e2598f8cdc5::t_dfd35762acb17b 290-305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "37e399062c554fb4281a117afad5987ea22da6e8",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
