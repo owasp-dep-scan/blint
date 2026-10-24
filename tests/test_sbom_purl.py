@@ -6,8 +6,11 @@ calling ``strip()`` on them, so unconverted values raise AttributeError. The
 f-string purl construction these call sites used previously tolerated any type.
 """
 
+import os
+
 from packageurl import PackageURL
 
+import blint.lib.sbom as sbom_module
 from blint.lib.sbom import (
     create_library_component,
     default_parent,
@@ -67,7 +70,8 @@ def test_homebrew_opt_install_name_names_the_formula_without_a_version():
             "version": "1.2.0",
             "compatibility_version": "1.0.0",
         },
-        "/opt/homebrew/Cellar/node/26.11.1_1/bin/node",
+        # A copy outside the prefix: this host's opt link says nothing about it.
+        "/srv/artifacts/node",
     )
     purl = PackageURL.from_string(component.purl)
     assert (purl.type, purl.name, purl.version) == ("generic", "brotli", None)
@@ -237,3 +241,49 @@ def test_original_filename_absent_keeps_filename():
     upgrade_parent_to_original_filename(parent, metadata, None)
     assert parent.name == "tool.exe"
     assert not [p for p in (parent.properties or []) if p.name == "internal:filename_original"]
+
+
+def _fake_homebrew(tmp_path, monkeypatch):
+    prefix = tmp_path / "homebrew"
+    keg = prefix / "Cellar" / "brotli" / "1.2.0" / "lib"
+    keg.mkdir(parents=True)
+    (keg / "libbrotlidec.1.2.0.dylib").write_bytes(b"dylib")
+    os.symlink("libbrotlidec.1.2.0.dylib", keg / "libbrotlidec.1.dylib")
+    (prefix / "opt").mkdir()
+    os.symlink(prefix / "Cellar" / "brotli" / "1.2.0", prefix / "opt" / "brotli")
+    node = prefix / "Cellar" / "node" / "26.11.1_1" / "bin"
+    node.mkdir(parents=True)
+    (node / "node").write_bytes(b"node")
+    monkeypatch.setattr(sbom_module, "HOMEBREW_PREFIXES", (f"{prefix}/",))
+    return prefix
+
+
+def test_homebrew_opt_link_takes_the_keg_version_for_a_binary_installed_there(
+    tmp_path, monkeypatch
+):
+    """A binary installed under the prefix loads the keg its opt link points to."""
+    if os.name == "nt":
+        return
+    prefix = _fake_homebrew(tmp_path, monkeypatch)
+    component = create_library_component(
+        {"name": f"{prefix}/opt/brotli/lib/libbrotlidec.1.dylib", "version": "1.2.0"},
+        str(prefix / "Cellar" / "node" / "26.11.1_1" / "bin" / "node"),
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version) == ("brotli", "1.2.0")
+    assert component.version.root == "1.2.0"
+    assert _properties(component)["internal:homebrew_keg_source"] == "host_opt_link"
+
+
+def test_homebrew_opt_link_is_not_resolved_for_a_binary_from_elsewhere(
+    tmp_path, monkeypatch
+):
+    if os.name == "nt":
+        return
+    prefix = _fake_homebrew(tmp_path, monkeypatch)
+    component = create_library_component(
+        {"name": f"{prefix}/opt/brotli/lib/libbrotlidec.1.dylib", "version": "1.2.0"},
+        str(tmp_path / "copied" / "node"),
+    )
+    assert PackageURL.from_string(component.purl).version is None
+    assert "internal:homebrew_keg_source" not in _properties(component)

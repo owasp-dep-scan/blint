@@ -1870,6 +1870,32 @@ def homebrew_install_identity(install_name: str) -> tuple[str, str | None, str] 
     return None
 
 
+def resolve_homebrew_opt_link(install_name: str, exe: str) -> str | None:
+    """The keg version an opt-link install name resolves to on this host.
+
+    An opt link names no version, and resolving it on the scanning machine
+    describes that machine, not necessarily the binary's. When the binary
+    being scanned is itself installed under the same Homebrew prefix, though,
+    this host is where it runs, and the link's target is the keg it loads.
+
+    Returns the keg version, or None when that cannot be shown.
+    """
+    prefix = next((p for p in HOMEBREW_PREFIXES if install_name.startswith(p)), None)
+    if prefix is None or not exe:
+        return None
+    try:
+        if not os.path.realpath(exe).startswith(os.path.realpath(prefix) + os.sep):
+            return None
+        target = os.path.realpath(install_name)
+    except (OSError, ValueError):
+        return None
+    real_prefix = os.path.realpath(prefix) + os.sep
+    if not target.startswith(real_prefix):
+        return None
+    identity = homebrew_install_identity(prefix + target[len(real_prefix):].replace(os.sep, "/"))
+    return identity[1] if identity else None
+
+
 def create_library_component(entry: dict, exe: str) -> Component:
     """
     Processes a library entry and creates a component object.
@@ -1877,9 +1903,11 @@ def create_library_component(entry: dict, exe: str) -> Component:
     A dylib under a Homebrew prefix is named after its formula
     (``pkg:generic/<formula>?package_manager=homebrew#<path>``), the same
     identity blintdb's Homebrew rows use, so it can be matched against the
-    installed formula. Only a Cellar install name carries the keg version;
-    the dylib's own ``current_version`` is the version the binary was linked
-    against, not what is installed, so it stays a property there.
+    installed formula. A Cellar install name carries the keg version, and so
+    does an opt link when the scanned binary is itself installed under that
+    Homebrew prefix (see resolve_homebrew_opt_link); the dylib's own
+    ``current_version`` is the version the binary was linked against, not
+    what is installed, so it stays a property.
 
     Args:
         entry: The entry containing the library information.
@@ -1903,6 +1931,13 @@ def create_library_component(entry: dict, exe: str) -> Component:
         if compatibility_version:
             properties.append(
                 Property(name="internal:compatibility_version", value=compatibility_version)
+            )
+        if keg_version is None and (
+            resolved := resolve_homebrew_opt_link(entry["name"], exe)
+        ):
+            keg_version = resolved
+            properties.append(
+                Property(name="internal:homebrew_keg_source", value="host_opt_link")
             )
         version = purl_field(keg_version)
         purl = PackageURL(
