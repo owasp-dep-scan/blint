@@ -1,0 +1,31 @@
+blint/lib/binary_macho.py
+  s_1d1e2598f8cdc5::t_b99eea693213b9 689-692
+blint/lib/import_attribution.py
+  s_1d1e2598f8cdc5::t_a79f493ee8929d 234-235
+blint/lib/sbom.py
+  s_1d1e2598f8cdc5::t_b48121519285da 1491-1502,1513-1515
+docs/CUSTOM_PROPERTIES.md
+  s_1d1e2598f8cdc5::t_0e1c9e7f4f4776 214-222
+docs/METADATA.md
+  s_1d1e2598f8cdc5::t_efb20c24087278 345
+tests/data/embedded/build.sh
+  s_1d1e2598f8cdc5::t_01d14fdb16aea1 14-18
+tests/test_embedded_ident.py
+  s_1d1e2598f8cdc5::t_8380c5233723c4 203,212-216,251-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1fccf8ff34303aa417921b06d80658dd207d8389",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+blint/lib/sbom.py
+  s_1d1e2598f8cdc5::t_543a3eaae92906 699-833,1456-1470,1612
+docs/CUSTOM_PROPERTIES.md
+  s_1d1e2598f8cdc5::t_a16b1cf169c0a8 180-181,201
+  s_1d1e2598f8cdc5::t_ffec34ea40d0e3 197
+tests/test_embedded_ident.py
+  s_1d1e2598f8cdc5::t_fa9152ebc3e911 281-360
+  s_1d1e2598f8cdc5::t_f8e4444923b40e 186,200,236,238
+blint/lib/banners.py
+  s_1d1e2598f8cdc5::t_693c792e21faab 251,264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7fa700a7a832314c1c5f66c355349476f8f99924",
+  "prompts": {},
+  "sessions": {
+    "s_1d1e2598f8cdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f18b3fe-1204-49e8-8438-701d12ccdff7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
