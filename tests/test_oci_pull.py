@@ -57,7 +57,10 @@ class FakeRegistry(RegistryPullClient):
         range_header = (kwargs.get("headers") or {}).get("Range")
         self.ranges.append(range_header)
         if self.statuses:
-            return FakeResponse(self.statuses.pop(0))
+            status = self.statuses.pop(0)
+            if isinstance(status, tuple):
+                return FakeResponse(status[0], headers=status[1])
+            return FakeResponse(status)
         fail_after = self.drops.pop(0) if self.drops else None
         if range_header and self.honour_range:
             offset = int(range_header.removeprefix("bytes=").rstrip("-"))
@@ -119,12 +122,117 @@ def test_exhausted_resumes_fail_and_keep_the_part_for_the_next_run(tmp_path):
     assert _part_files(tmp_path) == []
 
 
-def test_part_of_another_digest_is_not_resumed(tmp_path):
+def test_part_of_another_digest_is_not_resumed_and_is_removed(tmp_path):
+    """A part left for an older image digest would otherwise sit there, GBs
+    large, for good."""
     stale = tmp_path / ".blint.db.0000000000000000.part"
     stale.write_bytes(b"x" * 100)
     registry = FakeRegistry()
     registry.download_layer_verified(DIGEST, len(BLOB), tmp_path / "blint.db", "blint.db")
     assert registry.ranges == [None]
+    assert _part_files(tmp_path) == []
+
+
+def test_a_second_pull_is_refused_while_one_holds_the_destination(tmp_path):
+    """Two runs sharing BLINTDB_HOME used to append to the same .part."""
+    dest = tmp_path / "blint.db"
+    with (
+        oci_pull._exclusive_lock(tmp_path / ".blint.db.lock", "blint.db"),
+        pytest.raises(PullFailedError, match="another pull is writing"),
+    ):
+        FakeRegistry().download_layer_verified(DIGEST, len(BLOB), dest, "blint.db")
+    assert not dest.exists()
+    FakeRegistry().download_layer_verified(DIGEST, len(BLOB), dest, "blint.db")
+    assert dest.read_bytes() == BLOB
+
+
+def test_the_file_itself_is_verified_before_it_lands(tmp_path, monkeypatch):
+    """The digest of the stream is not the digest of the file when anything
+    else wrote to it."""
+    dest = tmp_path / "blint.db"
+
+    def fetch_with_extra_bytes(self, digest, size, part_file, written, label):
+        part_file.write_bytes(BLOB + b"appended by someone else")
+
+    monkeypatch.setattr(RegistryPullClient, "_fetch_into", fetch_with_extra_bytes)
+    with pytest.raises(PullFailedError, match="Size mismatch"):
+        FakeRegistry().download_layer_verified(DIGEST, len(BLOB), dest, "blint.db")
+    assert not dest.exists()
+    assert _part_files(tmp_path) == []
+
+
+class MisreadRangeRegistry(FakeRegistry):
+    """A proxy that answers a Range request with a 206 the part cannot take."""
+
+    def __init__(self, mode):
+        super().__init__(drops=[4096])
+        self.mode = mode
+
+    def request(self, method, path, **kwargs):
+        range_header = (kwargs.get("headers") or {}).get("Range")
+        if not range_header:
+            return super().request(method, path, **kwargs)
+        self.ranges.append(range_header)
+        offset = int(range_header.removeprefix("bytes=").rstrip("-"))
+        end = f"{len(BLOB) - 1}/{len(BLOB)}"
+        if self.mode == "early-start":
+            start = offset - 1000
+            return FakeResponse(206, BLOB[start:], {"Content-Range": f"bytes {start}-{end}"})
+        if self.mode == "no-content-range":
+            return FakeResponse(206, BLOB[offset:], {})
+        return FakeResponse(206, BLOB[offset:], {"Content-Range": f"Bytes {offset}-{end}"})
+
+
+@pytest.mark.parametrize(
+    ("mode", "ranges"),
+    [
+        # A 206 that does not start where the part ends is never appended.
+        ("early-start", [None, "bytes=4096-", None]),
+        ("no-content-range", [None, "bytes=4096-", None]),
+        # Range units are case-insensitive (RFC 9110).
+        ("unit-case", [None, "bytes=4096-"]),
+    ],
+)
+def test_a_partial_response_is_appended_only_where_the_part_ends(tmp_path, mode, ranges):
+    registry = MisreadRangeRegistry(mode)
+    dest = tmp_path / "blint.db"
+    registry.download_layer_verified(DIGEST, len(BLOB), dest, "blint.db")
+    assert dest.read_bytes() == BLOB
+    assert registry.ranges == ranges
+
+
+def test_rate_limiting_is_retried_after_the_delay_the_registry_asks(tmp_path, monkeypatch):
+    delays = []
+    monkeypatch.setattr(oci_pull.time, "sleep", delays.append)
+    registry = FakeRegistry(statuses=[(429, {"Retry-After": "7"}), (429, {"Retry-After": "9999"})])
+    dest = tmp_path / "blint.db"
+    registry.download_layer_verified(DIGEST, len(BLOB), dest, "blint.db")
+    assert dest.read_bytes() == BLOB
+    assert delays == [7.0, oci_pull.RETRY_AFTER_CAP_SECONDS]
+
+
+def test_manifest_fetch_is_retried(monkeypatch):
+    manifest = {"layers": []}
+    replies = [
+        FakeResponse(503),
+        FakeResponse(429, headers={"Retry-After": "1"}),
+        requests.exceptions.ConnectionError("reset"),
+    ]
+
+    class Manifest(FakeResponse):
+        def json(self):
+            return manifest
+
+    def request(self, method, path, **kwargs):
+        reply = replies.pop(0) if replies else Manifest(200)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(RegistryPullClient, "request", request)
+    client = RegistryPullClient("ghcr.io", "appthreat/blintdb-test")
+    assert client.get_manifest("v1") == manifest
+    assert replies == []
 
 
 def test_digest_mismatch_never_lands_and_drops_the_part(tmp_path):
