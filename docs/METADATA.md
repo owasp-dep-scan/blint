@@ -629,6 +629,47 @@ Entries whose addresses already appear in the symbol-driven buckets never replac
 
 On ELF, `function_extent` records the size reconciliation that follows the merge (see `docs/DISASSEMBLE.md`, "Function extents"): `sizes_rejected` (impossible sizes dropped), `sizes_corrected` (sizes replaced by a higher-precedence source) and `entries_checked`. The first two are also surfaced in `analysis_coverage.functions`.
 
+### Embedded library identification (`embedded_libraries`)
+
+ELF, PE and Mach-O. One record per embedded library or runtime that leaves no
+version banner for the banner layer to read, from `blint/lib/embedded_ident.py`.
+The key is absent when nothing matched, which never means "verified absent":
+
+```json
+{
+  "library": "brotli",
+  "purl": "pkg:github/google/brotli",
+  "evidence": [
+    {
+      "what": "BrotliDecoderErrorString error-name table (prefixed names)",
+      "where": "strings",
+      "value": "_ERROR_FORMAT_EXUBERANT_NIBBLE, _ERROR_FORMAT_EXUBERANT_META_NIBBLE, ..."
+    },
+    {
+      "what": "CVE-2026-111497 fix marker (google/brotli 0ed4268)",
+      "where": "strings",
+      "value": "_ERROR_FORMAT_BLOCK_SWITCH absent"
+    }
+  ],
+  "properties": {
+    "brotli_block_switch_fix": "absent",
+    "brotli_error_table": "prefixed"
+  }
+}
+```
+
+- `library`: `brotli` (the google/brotli C decoder) or `dotnet-runtime` (a .NET
+  runtime pack native library).
+- `version` and `cpe`: present only when exact evidence names the version.
+  Brotli records are never versioned: the decoder stores its version as an
+  immediate, not as data.
+- `properties`: become `internal:` properties on the SBOM component; see the
+  [embedded library properties](CUSTOM_PROPERTIES.md#embedded-library-properties).
+- The strings are read as whole NUL-terminated C strings from the
+  string-bearing sections, so the decoder's own table is told apart from
+  Node.js's `BROTLI_DECODER_ERROR_*` constant names, and a prefixed name is
+  never read as its bare form.
+
 ### Framework and runtime identification (`frameworks`, ELF only)
 
 One record per identified framework or runtime, emitted only when evidence

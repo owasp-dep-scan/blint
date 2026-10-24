@@ -57,6 +57,8 @@ BANNER_API_ANCHORS = {
     "curl": re.compile(r"^_?curl_", re.IGNORECASE),
     "expat": re.compile(r"^_?(?:XML_|expat_)", re.IGNORECASE),
     "libpng": re.compile(r"^_?png_", re.IGNORECASE),
+    # Node-API is defined by the runtime itself; an addon only imports it.
+    "nodejs": re.compile(r"^_?(?:napi_|node_api_)"),
 }
 
 # The library's own shared object, by name, for deciding whether a banner's
@@ -68,6 +70,7 @@ BANNER_LIBRARY_LINK_NAMES = {
     "curl": re.compile(r"(?:^|/)libcurl\.", re.IGNORECASE),
     "expat": re.compile(r"(?:^|/)libexpat\.", re.IGNORECASE),
     "libpng": re.compile(r"(?:^|/)libpng", re.IGNORECASE),
+    "nodejs": re.compile(r"(?:^|/)libnode\.", re.IGNORECASE),
 }
 
 # OPENSSL_VERSION_TEXT as a whole string, "OpenSSL 3.0.2 15 Mar 2022": the
@@ -240,6 +243,32 @@ VERSION_RULES: tuple[dict, ...] = (
         "source": "libpng png.h",
     },
     {
+        # process.release.sourceUrl / headersUrl of a release build
+        # (NODE_HAS_RELEASE_URLS), e.g.
+        # https://nodejs.org/download/release/v24.22.1/node-v24.22.1.tar.gz.
+        # The unofficial-builds mirror uses the same path under its own host.
+        "project": "nodejs",
+        "purl": "pkg:generic/nodejs",
+        "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
+        "banner": True,
+        "regex": re.compile(
+            r"\bnodejs\.org/download/release/v(?P<version>\d+\.\d+\.\d+)/node-v\d"
+        ),
+        "what": "NODE_RELEASE_URLFPFX",
+        "source": "Node.js src/node_metadata.cc",
+    },
+    {
+        # The inspector's /json/version "Browser" field, compiled into every
+        # build that has the inspector, release URLs or not.
+        "project": "nodejs",
+        "purl": "pkg:generic/nodejs",
+        "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
+        "banner": True,
+        "regex": re.compile(r"^node\.js/v(?P<version>\d+\.\d+\.\d+)$"),
+        "what": "inspector Browser string",
+        "source": "Node.js src/inspector_socket_server.cc",
+    },
+    {
         "project": "libpng",
         "regex": _BARE_VERSION_RE,
         "unique": True,
@@ -397,7 +426,8 @@ def detect_vendored_banners(metadata: dict) -> dict:
 
     Returns a dict with a ``banners`` list of corroborated matches
     (``library``, ``version``, ``purl``, ``banner`` — the matched string,
-    truncated — and ``api_symbol_count``), a ``mentions`` list of
+    truncated — ``api_symbol_count``, and ``cpe`` when the rule names one),
+    a ``mentions`` list of
     banner-shaped strings the artifact's own symbols do not corroborate
     (same entry shape), and a ``state`` naming why the layer did or did not
     run. Multiple versions of the same library are reported separately:
@@ -432,6 +462,8 @@ def detect_vendored_banners(metadata: dict) -> dict:
                 "purl": f"{signature['purl']}@{version}",
                 "banner": value[:256],
             }
+            if cpe := signature.get("cpe"):
+                entry["cpe"] = cpe.format(version=version)
             # A mention only when the artifact defines none of the API and the
             # code demonstrably lives elsewhere (it links or imports the
             # library): a stale build-time string. Otherwise a component

@@ -211,6 +211,7 @@ from blint.lib.elf_dlopen import (  # noqa: F401
 from blint.lib.elf_linkmap import (  # noqa: F401
     resolve_link_closure,
 )
+from blint.lib.embedded_ident import attach_embedded_libraries
 from blint.lib.entropy import analyze_binary_entropy
 from blint.lib.funcdisc.unwind import (
     discover_functions,
@@ -1336,6 +1337,10 @@ def parse(
                 metadata["strings_source"] = "user_strings_heap"
         if "strings" not in metadata:
             metadata["strings"] = parse_strings(parsed_obj)
+        # Embedded code that leaves no version banner (the brotli decoder
+        # and the .NET runtime pack's native libraries): every native format,
+        # read from the section bytes and the symbol buckets settled above.
+        metadata = attach_embedded_libraries(metadata, parsed_obj)
         # W5.6: the privileged-host plugin surface (04/F) - which plugin
         # contracts the export set satisfies and the host each loads into.
         # An interpretation of already-parsed facts (the export listings and

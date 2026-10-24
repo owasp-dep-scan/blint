@@ -1424,16 +1424,54 @@ def process_exe_file(
         if existing is not None:
             for key, value in banner_evidence.items():
                 existing.properties.append(Property(name=f"internal:{key}", value=value))
+            if banner.get("cpe") and not existing.cpe:
+                existing.cpe = banner["cpe"]
         else:
             # Name and version come from the purl, the same way every other
             # dynamic component derives them.
-            lib_components.append(
-                create_dynamic_component(
-                    {"purl": banner["purl"], "tag": "NEEDED"},
-                    exe,
-                    banner_evidence,
-                )
+            banner_component = create_dynamic_component(
+                {"purl": banner["purl"], "tag": "NEEDED"},
+                exe,
+                banner_evidence,
             )
+            if banner.get("cpe"):
+                banner_component.cpe = banner["cpe"]
+            lib_components.append(banner_component)
+    # Embedded code that leaves no version banner (blint.lib.embedded_ident):
+    # the brotli decoder with its CVE-2026-111497 fix state, and the .NET
+    # runtime pack. Same component shape as a banner hit; the record's own
+    # properties (fix state, stamped file version) ride the component.
+    for embedded in metadata.get("embedded_libraries") or []:
+        embedded_purl = embedded.get("purl")
+        if not embedded_purl:
+            continue
+        if embedded.get("version"):
+            embedded_purl = f"{embedded_purl}@{embedded['version']}"
+        embedded_evidence = {
+            "vendored_attribution": "embedded_identification",
+            # Evidence values are comma lists themselves, so entries are
+            # joined with "; " rather than the default ", ".
+            "embedded_evidence": "; ".join(
+                f"{item.get('what')}: {item.get('value')}"
+                for item in embedded.get("evidence") or []
+            ),
+            **(embedded.get("properties") or {}),
+        }
+        existing = next(
+            (comp for comp in lib_components if comp.purl == embedded_purl), None
+        )
+        if existing is not None:
+            for key, value in embedded_evidence.items():
+                existing.properties.append(Property(name=f"internal:{key}", value=str(value)))
+            continue
+        embedded_component = create_dynamic_component(
+            {"purl": embedded_purl, "tag": "NEEDED"},
+            exe,
+            embedded_evidence,
+        )
+        if embedded.get("cpe"):
+            embedded_component.cpe = embedded["cpe"]
+        lib_components.append(embedded_component)
     # Banner-shaped strings the artifact's symbols do not corroborate are
     # mentions, not dependencies (F2b.2: assetutil's stale "deflate 1.2.5"
     # while linking libz.1.dylib at 1.2.12). Recorded on the parent so the
@@ -1667,6 +1705,14 @@ def create_library_component(entry: dict, exe: str) -> Component:
             Property(name="internal:srcFile", value=exe),
             Property(name="internal:libPath", value=entry["name"]),
         ],
+    )
+    comp = Component(
+        type=Type.library,
+        name=name,
+        version=version,
+        purl=purl,
+        evidence=create_component_evidence(exe, 0.8),
+        properties=properties,
     )
     if entry.get("tag") == "NEEDED":
         comp.scope = Scope.required
