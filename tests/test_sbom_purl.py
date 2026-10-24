@@ -6,11 +6,15 @@ calling ``strip()`` on them, so unconverted values raise AttributeError. The
 f-string purl construction these call sites used previously tolerated any type.
 """
 
+import os
+
 from packageurl import PackageURL
 
+import blint.lib.sbom as sbom_module
 from blint.lib.sbom import (
     create_library_component,
     default_parent,
+    homebrew_install_identity,
     purl_field,
 )
 
@@ -47,6 +51,69 @@ def test_create_library_component_tolerates_missing_versions():
     component = create_library_component({"name": "/usr/lib/libutil.dylib"}, "/bin/ls")
     assert component.purl.startswith("pkg:file/libutil.dylib")
     assert PackageURL.from_string(component.purl).version is None
+
+
+def _properties(component) -> dict:
+    return {p.name: p.value for p in component.properties}
+
+
+def test_homebrew_opt_install_name_names_the_formula_without_a_version():
+    """Homebrew node links /opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib.
+
+    The opt link names the formula but not what is installed, and the
+    dylib's current_version is only what the binary was linked against, so
+    the version stays out of the purl and rides a property.
+    """
+    component = create_library_component(
+        {
+            "name": "/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib",
+            "version": "1.2.0",
+            "compatibility_version": "1.0.0",
+        },
+        # A copy outside the prefix: this host's opt link says nothing about it.
+        "/srv/artifacts/node",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.type, purl.name, purl.version) == ("generic", "brotli", None)
+    assert purl.qualifiers == {"package_manager": "homebrew"}
+    assert purl.subpath == "lib/libbrotlidec.1.dylib"
+    assert component.name == "libbrotlidec.1.dylib"
+    assert component.version is None
+    properties = _properties(component)
+    assert properties["internal:homebrew_formula"] == "brotli"
+    assert properties["internal:linked_current_version"] == "1.2.0"
+    assert properties["internal:compatibility_version"] == "1.0.0"
+
+
+def test_homebrew_cellar_install_name_carries_the_keg_version():
+    component = create_library_component(
+        {"name": "/usr/local/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib", "version": "3.0.0"},
+        "/usr/local/bin/curl",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version, purl.subpath) == ("openssl@3", "3.6.3", "lib/libssl.3.dylib")
+    assert component.version.root == "3.6.3"
+    assert _properties(component)["internal:linked_current_version"] == "3.0.0"
+
+
+def test_homebrew_dylibs_of_one_formula_keep_distinct_refs():
+    refs = {
+        create_library_component({"name": f"/opt/homebrew/opt/brotli/lib/{lib}"}, "/x").bom_ref.root
+        for lib in ("libbrotlidec.1.dylib", "libbrotlienc.1.dylib")
+    }
+    assert len(refs) == 2
+
+
+def test_homebrew_install_identity_ignores_other_prefixes():
+    assert homebrew_install_identity("/usr/lib/libSystem.B.dylib") is None
+    assert homebrew_install_identity("/usr/local/lib/libfoo.dylib") is None
+    assert homebrew_install_identity("@rpath/libbrotlidec.1.dylib") is None
+    assert homebrew_install_identity("/opt/homebrew/opt/brotli") is None
+    assert homebrew_install_identity("/opt/homebrew/Cellar/brotli/1.2.0/lib/x.dylib") == (
+        "brotli",
+        "1.2.0",
+        "lib/x.dylib",
+    )
 
 
 def test_default_parent_still_finds_a_build_bom_identity_for_a_dll():
@@ -174,3 +241,65 @@ def test_original_filename_absent_keeps_filename():
     upgrade_parent_to_original_filename(parent, metadata, None)
     assert parent.name == "tool.exe"
     assert not [p for p in (parent.properties or []) if p.name == "internal:filename_original"]
+
+
+def _fake_homebrew(tmp_path, monkeypatch):
+    prefix = tmp_path / "homebrew"
+    keg = prefix / "Cellar" / "brotli" / "1.2.0" / "lib"
+    keg.mkdir(parents=True)
+    (keg / "libbrotlidec.1.2.0.dylib").write_bytes(b"dylib")
+    os.symlink("libbrotlidec.1.2.0.dylib", keg / "libbrotlidec.1.dylib")
+    (prefix / "opt").mkdir()
+    os.symlink(prefix / "Cellar" / "brotli" / "1.2.0", prefix / "opt" / "brotli")
+    node = prefix / "Cellar" / "node" / "26.11.1_1" / "bin"
+    node.mkdir(parents=True)
+    (node / "node").write_bytes(b"node")
+    monkeypatch.setattr(sbom_module, "HOMEBREW_PREFIXES", (f"{prefix}/",))
+    return prefix
+
+
+def test_homebrew_opt_link_takes_the_keg_version_for_a_binary_installed_there(
+    tmp_path, monkeypatch
+):
+    """A binary installed under the prefix loads the keg its opt link points to."""
+    if os.name == "nt":
+        return
+    prefix = _fake_homebrew(tmp_path, monkeypatch)
+    component = create_library_component(
+        {"name": f"{prefix}/opt/brotli/lib/libbrotlidec.1.dylib", "version": "1.2.0"},
+        str(prefix / "Cellar" / "node" / "26.11.1_1" / "bin" / "node"),
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version) == ("brotli", "1.2.0")
+    assert component.version.root == "1.2.0"
+    assert _properties(component)["internal:homebrew_keg_source"] == "host_opt_link"
+
+
+def test_homebrew_opt_link_is_not_resolved_for_a_binary_from_elsewhere(
+    tmp_path, monkeypatch
+):
+    if os.name == "nt":
+        return
+    prefix = _fake_homebrew(tmp_path, monkeypatch)
+    component = create_library_component(
+        {"name": f"{prefix}/opt/brotli/lib/libbrotlidec.1.dylib", "version": "1.2.0"},
+        str(tmp_path / "copied" / "node"),
+    )
+    assert PackageURL.from_string(component.purl).version is None
+    assert "internal:homebrew_keg_source" not in _properties(component)
+
+
+def test_homebrew_keg_revision_is_kept_out_of_the_purl_version():
+    """A keg rebuilt without an upstream change is 1.5.7_1; advisories name 1.5.7.
+
+    The keg version is still recorded, as cdxgen's pkg:brew version and
+    osquery's homebrew_packages report it.
+    """
+    component = create_library_component(
+        {"name": "/opt/homebrew/Cellar/zstd/1.5.7_1/lib/libzstd.1.dylib", "version": "1.5.7"},
+        "/opt/homebrew/bin/node",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version) == ("zstd", "1.5.7")
+    assert component.version.root == "1.5.7"
+    assert _properties(component)["internal:homebrew_pkg_version"] == "1.5.7_1"

@@ -607,10 +607,13 @@ def enrich_macho_sdk_attribution(metadata: dict, sdk_path: str) -> dict | None:
     function never downgrades it.
     """
     index = load_or_build_index(sdk_path)
+    # A dylib's own LC_ID_DYLIB is its identity, not a library it links.
     declared = [
         (entry.get("name") or "")
         for entry in metadata.get("libraries") or []
-        if isinstance(entry, dict) and (entry.get("name") or "")
+        if isinstance(entry, dict)
+        and (entry.get("name") or "")
+        and entry.get("command") != "ID_DYLIB"
     ]
     if not declared:
         return None

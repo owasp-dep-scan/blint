@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -96,3 +97,259 @@ def test_glibc_baseline_flag_rejects_malformed_versions():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["--glibc-baseline", "two-point-two-eight"])
+
+
+def _point_blintdb_at(monkeypatch, tmp_path):
+    from blint.lib import utils
+    from blint.logger import LOG
+
+    # main() -q disables the shared logger for the rest of the process;
+    # restore it so later caplog-based tests still see records.
+    monkeypatch.setattr(LOG, "disabled", LOG.disabled)
+    home = tmp_path / "blintdb"
+    monkeypatch.setattr(utils, "BLINTDB_HOME", str(home))
+    monkeypatch.setattr(utils, "BLINTDB_LOC", str(home / "blint.db"))
+    return home
+
+
+def test_db_download_failure_exits_non_zero(monkeypatch, tmp_path):
+    """4.0.1 logged "Blintdb Download failed" and exited 0."""
+    import sys
+
+    from blint import cli
+    from blint.lib import oci_pull
+
+    _point_blintdb_at(monkeypatch, tmp_path)
+
+    def failing_pull(target, outdir):
+        raise oci_pull.PullFailedError("Manifest fetch failed (404)")
+
+    monkeypatch.setattr(oci_pull, "stream_pull", failing_pull)
+    monkeypatch.setattr(sys, "argv", ["blint", "--no-banner", "-q", "db", "--download"])
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 1
+
+
+def test_db_download_success_exits_zero(monkeypatch, tmp_path):
+    import sys
+
+    from blint import cli
+    from blint.lib import oci_pull
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+
+    def pull(target, outdir):
+        _write_sqlite(home / "blint.db")
+        return [home / "blint.db"]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    monkeypatch.setattr(sys, "argv", ["blint", "--no-banner", "-q", "db", "--download"])
+    assert cli.main() is None
+
+
+def _write_sqlite(db_file):
+    import sqlite3
+
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    # A pull replaces the file whole, whatever was there.
+    db_file.unlink(missing_ok=True)
+    with sqlite3.connect(db_file) as connection:
+        connection.execute("create table t (x blob)")
+        connection.executemany("insert into t values (?)", [(b"x" * 4096,)] * 8)
+    return db_file
+
+
+@pytest.mark.parametrize("length", [0, 50])
+def test_empty_or_tiny_blintdb_is_downloaded_again(monkeypatch, tmp_path, length):
+    """SQLite opens an empty file as an empty database: blint.db cut short
+    before its first page was treated as complete."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    home.mkdir()
+    db_file = home / "blint.db"
+    db_file.write_bytes(b"SQLite format 3\x00"[:length] + b"\x00" * max(0, length - 16))
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        _write_sqlite(db_file)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert len(pulled) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_pull_into_a_symlinked_or_relative_home_succeeds(monkeypatch, tmp_path):
+    """stream_pull names what it wrote by resolved path; macOS /tmp and /var
+    are symlinks, so comparing raw paths failed a good pull."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    for home in (str(tmp_path / "link"), os.path.relpath(real)):
+        monkeypatch.setattr(utils, "BLINTDB_HOME", home)
+        monkeypatch.setattr(utils, "BLINTDB_LOC", os.path.join(home, "blint.db"))
+        (real / "blint.db").unlink(missing_ok=True)
+
+        def pull(target, outdir):
+            return [_write_sqlite(Path(outdir).resolve() / "blint.db")]
+
+        monkeypatch.setattr(oci_pull, "stream_pull", pull)
+        assert utils.blintdb_setup(BlintOptions(db_mode=True))
+
+
+def test_db_download_resumes_an_interrupted_refresh(monkeypatch, tmp_path):
+    """An old blint.db and the .part a refresh left: the download resumes."""
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    db_file = _write_sqlite(home / "blint.db")
+    (home / ".blint.db.0123456789abcdef.part").write_bytes(b"partial")
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert pulled == []
+    assert utils.blintdb_setup(BlintOptions(db_mode=True))
+    assert len(pulled) == 1
+
+
+def test_truncated_blintdb_is_downloaded_again(monkeypatch, tmp_path):
+    import sqlite3
+
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    home.mkdir()
+    db_file = home / "blint.db"
+    with sqlite3.connect(db_file) as connection:
+        connection.execute("create table t (x blob)")
+        connection.executemany("insert into t values (?)", [(b"x" * 4096,)] * 8)
+    db_file.write_bytes(db_file.read_bytes()[:-4096])
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert len(pulled) == 1
+
+
+def test_sbom_mode_exits_non_zero_for_a_missing_input(tmp_path, caplog):
+    """An image reference or a mistyped path used to write nothing and exit 0."""
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=["node:24.22.0-bookworm-slim"],
+        sbom_output=str(tmp_path / "bom.json"),
+    )
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as excinfo:
+        run_sbom_mode(options)
+    assert excinfo.value.code == 1
+    assert "does not pull container images" in caplog.text
+
+
+def test_missing_input_with_no_error_continues(tmp_path):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    options = BlintOptions(
+        sbom_mode=True,
+        no_error=True,
+        quiet_mode=True,
+        src_dir_image=[str(tmp_path / "missing")],
+        sbom_output=str(tmp_path / "bom.json"),
+    )
+    # Logged, not fatal: the run carries on and simply has nothing to scan.
+    assert run_sbom_mode(options) is False
+
+
+def test_tar_archive_input_warns(tmp_path, caplog):
+    import tarfile
+
+    from blint.config import BlintOptions
+    from blint.lib.runners import check_inputs
+
+    archive = tmp_path / "image.tar"
+    with tarfile.open(archive, "w") as handle:
+        member = tmp_path / "manifest.json"
+        member.write_text("[]")
+        handle.add(member, arcname="manifest.json")
+    with caplog.at_level("WARNING"):
+        check_inputs(BlintOptions(src_dir_image=[str(archive)]))
+    assert "tar archive" in caplog.text
+
+
+def _fixture(name: str) -> str:
+    return str(Path(__file__).resolve().parent / "data" / "embedded" / name)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_dangling_symlink_input_is_skipped_and_the_rest_scanned(tmp_path, caplog):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    dangling = tmp_path / "dangling.so"
+    dangling.symlink_to(tmp_path / "nonexistent" / "libfoo.so")
+    output = tmp_path / "bom.json"
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=[_fixture("brotli-1.2.0-unpatched.so"), str(dangling)],
+        sbom_output=str(output),
+    )
+    with caplog.at_level("WARNING"):
+        assert run_sbom_mode(options)
+    assert output.stat().st_size
+    assert "symbolic link to a missing target" in caplog.text
+    assert "container images" not in caplog.text
+
+
+def test_a_missing_input_fails_the_run_after_the_others_are_scanned(tmp_path, caplog):
+    from blint.config import BlintOptions
+    from blint.lib.runners import run_sbom_mode
+
+    output = tmp_path / "bom.json"
+    options = BlintOptions(
+        sbom_mode=True,
+        src_dir_image=[_fixture("brotli-1.2.0-unpatched.so"), str(tmp_path / "typo.so")],
+        sbom_output=str(output),
+    )
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as excinfo:
+        run_sbom_mode(options)
+    assert excinfo.value.code == 1
+    assert output.stat().st_size
+    # A path is not blamed on container images.
+    assert "typo.so does not exist; skipping it" in caplog.text
+    assert "container images" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["sbom", "--no-error", "-i", "x"],
+        ["--no-error", "sbom", "-i", "x"],
+        ["db", "--no-error"],
+    ],
+)
+def test_no_error_is_accepted_before_or_after_the_sub_command(argv):
+    assert build_parser().parse_args(argv).noerror is True
+    # Without it, the sub-command does not set it.
+    without = [arg for arg in argv if arg != "--no-error"]
+    assert build_parser().parse_args(without).noerror is False

@@ -54,6 +54,21 @@ def build_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _add_subcommand_no_error(subparser: argparse.ArgumentParser) -> None:
+    """Accept --no-error after the sub-command too (`blint sbom --no-error`).
+
+    SUPPRESS keeps the sub-command from resetting a top-level --no-error:
+    argparse lets a sub-parser's defaults overwrite the parent's values.
+    """
+    subparser.add_argument(
+        "--no-error",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        dest="noerror",
+        help="Continue on error to prevent build from breaking.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="blint",
@@ -78,8 +93,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="extend",
         default=[],
         nargs="+",
-        help="Source directories, container images or binary files. Defaults "
-        "to current directory.",
+        help="Source directories, binary files or an exported container image "
+        "filesystem (a directory). Defaults to current directory.",
     )
     parser.add_argument(
         "-o",
@@ -258,6 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
         "sbom", help="Command to generate SBOM for supported binaries."
     )
     sbom_parser.set_defaults(sbom_mode=True)
+    _add_subcommand_no_error(sbom_parser)
     sbom_parser.add_argument(
         "-i",
         "--src",
@@ -265,7 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="extend",
         default=[],
         nargs="+",
-        help="Source directories, container images or binary files. Defaults to current directory.",
+        help="Source directories, binary files or an exported container image filesystem "
+        "(a directory). Defaults to current directory.",
     )
     sbom_parser.add_argument(
         "-o",
@@ -576,6 +593,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     db_parser = subparsers.add_parser("db", help="Command to manage the pre-compiled database.")
     db_parser.set_defaults(db_mode=True)
+    _add_subcommand_no_error(db_parser)
     db_parser.add_argument(
         "--download",
         action="store_true",
@@ -909,12 +927,16 @@ def main() -> None:
     blint_options = handle_args(args)
     if blint_options.quiet_mode:
         LOG.disabled = True
-    blintdb_setup(blint_options)
+    blintdb_ready = blintdb_setup(blint_options)
 
     # SBOM command
     if blint_options.sbom_mode:
         run_sbom_mode(blint_options)
     elif blint_options.db_mode:
+        # `blint db --download` exists to produce a verified database; a pull
+        # that did not is a failed command, not a quiet no-op.
+        if not blintdb_ready and not blint_options.no_error:
+            sys.exit(1)
         return
     # Default case
     else:

@@ -262,6 +262,38 @@ def _resolve_db_file(db_file: str | None = None) -> str | None:
     return db_file or BLINTDB_LOC
 
 
+def sqlite_truncation(db_file: str) -> tuple[int, int] | None:
+    """``(actual, expected)`` bytes when a SQLite file is shorter than its header says.
+
+    The 100-byte header records the page size (offset 16) and the database
+    size in pages (offset 28), which is valid when the change counter
+    (offset 24) equals the version-valid-for number (offset 92). A download
+    cut short leaves a file shorter than that, which SQLite opens happily and
+    fails on later. A file shorter than the header itself, an empty one
+    included, is cut short too: SQLite opens an empty file as an empty
+    database, which holds nothing to match against. None means the file is
+    complete, or its header carries no usable size to compare with.
+    """
+    try:
+        actual = os.path.getsize(db_file)
+        with open(db_file, "rb") as handle:
+            header = handle.read(100)
+    except OSError:
+        return None
+    if len(header) < 100:
+        return (actual, 100)
+    if not header.startswith(b"SQLite format 3\x00"):
+        return None
+    page_size = int.from_bytes(header[16:18], "big")
+    if page_size == 1:
+        page_size = 65536
+    page_count = int.from_bytes(header[28:32], "big")
+    if not page_count or header[24:28] != header[92:96]:
+        return None
+    expected = page_size * page_count
+    return (actual, expected) if actual < expected else None
+
+
 def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection | None:
     """Open a direct connection to the local blintdb SQLite database.
 
@@ -276,6 +308,14 @@ def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection |
     """
     database_file = _resolve_db_file(db_file)
     if not database_file or not os.path.exists(database_file):
+        return None
+    if truncated := sqlite_truncation(database_file):
+        LOG.error(
+            "blintdb at %s is truncated (%d of %d bytes), most likely an interrupted "
+            "download; continuing without blintdb. Delete it or run `blint db --download`.",
+            database_file,
+            *truncated,
+        )
         return None
     flags = apsw.SQLITE_OPEN_NOFOLLOW
     flags |= apsw.SQLITE_OPEN_READONLY if read_only else apsw.SQLITE_OPEN_READWRITE
@@ -342,7 +382,8 @@ def _decode_hex_csv(value: str | None) -> set[str]:
     return decoded
 
 
-def _normalize_binary_name(value: str | None) -> str:
+def normalize_binary_name(value: str | None) -> str:
+    """A binary name as blintdb matches it: ``libbrotlidec.1.dylib`` is ``brotlidec``."""
     if not value:
         return ""
     name = Path(str(value)).name.lower()
@@ -1268,7 +1309,7 @@ def _finalize_project_matches(
         binary_name_match = bool(
             target_binary_names
             and target_binary_names.intersection(
-                {_normalize_binary_name(name) for name in match["matched_binary_names"]}
+                {normalize_binary_name(name) for name in match["matched_binary_names"]}
             )
         )
         # Fuzzy, CFG and import evidence never takes part in the surfacing
@@ -1422,7 +1463,7 @@ def lookup_project_matches(
             )
             return []
         project_matches: dict = {}
-        target_binary_name = _normalize_binary_name(
+        target_binary_name = normalize_binary_name(
             (binary_metadata or {}).get("name") or (binary_metadata or {}).get("file_path")
         )
         target_binary_names = {target_binary_name} if target_binary_name else set()

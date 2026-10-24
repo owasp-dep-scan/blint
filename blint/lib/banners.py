@@ -57,6 +57,8 @@ BANNER_API_ANCHORS = {
     "curl": re.compile(r"^_?curl_", re.IGNORECASE),
     "expat": re.compile(r"^_?(?:XML_|expat_)", re.IGNORECASE),
     "libpng": re.compile(r"^_?png_", re.IGNORECASE),
+    # Node-API is defined by the runtime itself; an addon only imports it.
+    "nodejs": re.compile(r"^_?(?:napi_|node_api_)"),
 }
 
 # The library's own shared object, by name, for deciding whether a banner's
@@ -68,6 +70,18 @@ BANNER_LIBRARY_LINK_NAMES = {
     "curl": re.compile(r"(?:^|/)libcurl\.", re.IGNORECASE),
     "expat": re.compile(r"(?:^|/)libexpat\.", re.IGNORECASE),
     "libpng": re.compile(r"(?:^|/)libpng", re.IGNORECASE),
+    "nodejs": re.compile(r"(?:^|/)libnode\.", re.IGNORECASE),
+}
+
+# Runtimes that implement Node-API themselves and carry Node.js's release
+# URLs for building addons: Bun reports the headersUrl of the Node.js release
+# it is compatible with. Their own version string marks them, and a Node.js
+# string inside them names a compatibility target, not a bundled Node.js.
+BANNER_FOREIGN_RUNTIMES = {
+    "nodejs": (
+        ("Bun", re.compile(r"^Bun v\d+\.\d+\.\d+\b|^bun-v\d+\.\d+\.\d+$")),
+        ("Deno", re.compile(r"https://dl\.deno\.land/|^deno_core::")),
+    ),
 }
 
 # OPENSSL_VERSION_TEXT as a whole string, "OpenSSL 3.0.2 15 Mar 2022": the
@@ -240,6 +254,32 @@ VERSION_RULES: tuple[dict, ...] = (
         "source": "libpng png.h",
     },
     {
+        # process.release.sourceUrl / headersUrl of a release build
+        # (NODE_HAS_RELEASE_URLS), e.g.
+        # https://nodejs.org/download/release/v24.22.1/node-v24.22.1.tar.gz.
+        # The unofficial-builds mirror uses the same path under its own host.
+        "project": "nodejs",
+        "purl": "pkg:generic/node",
+        "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
+        "banner": True,
+        "regex": re.compile(
+            r"\bnodejs\.org/download/release/v(?P<version>\d+\.\d+\.\d+)/node-v\d"
+        ),
+        "what": "NODE_RELEASE_URLFPFX",
+        "source": "Node.js src/node_metadata.cc",
+    },
+    {
+        # The inspector's /json/version "Browser" field, compiled into every
+        # build that has the inspector, release URLs or not.
+        "project": "nodejs",
+        "purl": "pkg:generic/node",
+        "cpe": "cpe:2.3:a:nodejs:node.js:{version}:*:*:*:*:*:*:*",
+        "banner": True,
+        "regex": re.compile(r"^node\.js/v(?P<version>\d+\.\d+\.\d+)$"),
+        "what": "inspector Browser string",
+        "source": "Node.js src/inspector_socket_server.cc",
+    },
+    {
         "project": "libpng",
         "regex": _BARE_VERSION_RE,
         "unique": True,
@@ -313,17 +353,31 @@ REJECTED_SIGNATURES = (
 
 
 def _iter_string_values(metadata: dict) -> list[str]:
-    """Return the extracted string values a banner scan reads."""
-    strings = metadata.get("strings")
-    if not isinstance(strings, list):
-        return []
+    """Return the extracted string values a banner scan reads.
+
+    ``identity_strings`` are the runtime identity strings the section-byte
+    scan found (``blint.lib.embedded_ident``), which the capped string list
+    of a large Mach-O or PE can miss.
+    """
     values = []
-    for entry in strings:
-        if isinstance(entry, dict) and entry.get("value"):
-            values.append(str(entry["value"]))
-        elif isinstance(entry, str) and entry:
-            values.append(entry)
+    for key in ("strings", "identity_strings"):
+        strings = metadata.get(key)
+        if not isinstance(strings, list):
+            continue
+        for entry in strings:
+            if isinstance(entry, dict) and entry.get("value"):
+                values.append(str(entry["value"]))
+            elif isinstance(entry, str) and entry:
+                values.append(entry)
     return values
+
+
+def _foreign_runtime(project: str, string_values: list[str]) -> str | None:
+    """The other runtime whose own strings the artifact carries, if any."""
+    for runtime, marker in BANNER_FOREIGN_RUNTIMES.get(project, ()):
+        if any(marker.search(value) for value in string_values if len(value) <= 512):
+            return runtime
+    return None
 
 
 def is_probable_banner_string(value: str) -> bool:
@@ -377,7 +431,12 @@ def _provided_externally(metadata: dict, library: str) -> bool:
             ):
                 return True
         for dylib in metadata.get("libraries") or []:
-            if isinstance(dylib, dict) and link_name.search(str(dylib.get("name") or "")):
+            # A dylib's own LC_ID_DYLIB is the artifact itself, not a link.
+            if (
+                isinstance(dylib, dict)
+                and dylib.get("command") != "ID_DYLIB"
+                and link_name.search(str(dylib.get("name") or ""))
+            ):
                 return True
     anchor = BANNER_API_ANCHORS.get(library)
     if anchor:
@@ -397,7 +456,8 @@ def detect_vendored_banners(metadata: dict) -> dict:
 
     Returns a dict with a ``banners`` list of corroborated matches
     (``library``, ``version``, ``purl``, ``banner`` — the matched string,
-    truncated — and ``api_symbol_count``), a ``mentions`` list of
+    truncated — ``api_symbol_count``, and ``cpe`` when the rule names one),
+    a ``mentions`` list of
     banner-shaped strings the artifact's own symbols do not corroborate
     (same entry shape), and a ``state`` naming why the layer did or did not
     run. Multiple versions of the same library are reported separately:
@@ -408,6 +468,11 @@ def detect_vendored_banners(metadata: dict) -> dict:
     if not string_values:
         return {"banners": [], "mentions": [], "state": BANNER_LAYER_INACTIVE_NO_STRINGS}
     api_counts = _defined_api_symbol_counts(metadata)
+    foreign = {
+        project: runtime
+        for project in BANNER_FOREIGN_RUNTIMES
+        if (runtime := _foreign_runtime(project, string_values))
+    }
     banners = []
     mentions = []
     seen = set()
@@ -432,13 +497,20 @@ def detect_vendored_banners(metadata: dict) -> dict:
                 "purl": f"{signature['purl']}@{version}",
                 "banner": value[:256],
             }
+            if cpe := signature.get("cpe"):
+                entry["cpe"] = cpe.format(version=version)
             # A mention only when the artifact defines none of the API and the
             # code demonstrably lives elsewhere (it links or imports the
             # library): a stale build-time string. Otherwise a component
             # claim - corroborated by defined API symbols, or undisproved in
             # a stripped image that has nowhere else for the code to be.
             api_count = api_counts.get(signature["project"], 0)
-            if api_count == 0 and _provided_externally(metadata, signature["project"]):
+            if runtime := foreign.get(signature["project"]):
+                # Another runtime defines the same API: its symbols
+                # corroborate nothing about this project.
+                entry["reason"] = f"{runtime} runtime; implements the {signature['project']} API"
+                mentions.append(entry)
+            elif api_count == 0 and _provided_externally(metadata, signature["project"]):
                 mentions.append(entry)
             else:
                 entry["api_symbol_count"] = api_count

@@ -820,3 +820,19 @@ def test_store_survives_opening_before_another_worker_created_the_schema(tmp_pat
     stored = next(probe.execute("SELECT COUNT(*) FROM ParseCache"))[0]
     probe.close()
     assert stored == 2
+
+
+def test_an_entry_of_the_shape_v4_0_shipped_is_not_served(tmp_path, monkeypatch):
+    """parse() gained embedded_libraries and identity_strings after v4.0.1.
+
+    A development checkout keeps the installed version it was installed
+    with, so only the schema version tells an entry stored without those
+    keys from a current one.
+    """
+    cache = ParseCache(cache_dir=str(tmp_path / "c"))
+    monkeypatch.setattr(cache_mod, "CACHE_SCHEMA_VERSION", 10)
+    assert cache.put("dd" * 32, "d", {"binary_type": "MachO", "libraries": []})
+    monkeypatch.undo()
+    assert cache_mod.CACHE_SCHEMA_VERSION > 10
+    assert cache.get("dd" * 32, "/x", "d") is None
+    cache.close()

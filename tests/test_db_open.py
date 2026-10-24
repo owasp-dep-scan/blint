@@ -111,3 +111,42 @@ def test_symlinked_home_end_to_end_sbom_degrades(real_v2_db: Path, tmp_path: Pat
     )
     assert detected == set()
     assert evidence == {}
+
+
+def _truncate(db_file: Path, keep: int) -> None:
+    data = db_file.read_bytes()
+    db_file.write_bytes(data[:keep])
+
+
+def test_sqlite_truncation_is_none_for_a_complete_database(real_v2_db: Path):
+    assert db_module.sqlite_truncation(str(real_v2_db)) is None
+
+
+def test_get_refuses_a_truncated_database(real_v2_db: Path, caplog):
+    # An interrupted download leaves the header intact and the pages short:
+    # SQLite opens such a file and fails later, mid-SBOM.
+    size = real_v2_db.stat().st_size
+    page_size = int.from_bytes(real_v2_db.read_bytes()[16:18], "big")
+    _truncate(real_v2_db, size - page_size)
+    assert db_module.sqlite_truncation(str(real_v2_db)) == (size - page_size, size)
+    with caplog.at_level("ERROR"):
+        assert get(str(real_v2_db)) is None
+    assert "truncated" in caplog.text
+
+
+def test_sqlite_truncation_ignores_files_without_a_sqlite_header(tmp_path: Path):
+    not_sqlite = tmp_path / "blint.db"
+    not_sqlite.write_bytes(b"\x00" * 200)
+    assert db_module.sqlite_truncation(str(not_sqlite)) is None
+
+
+@pytest.mark.parametrize("length", [0, 50])
+def test_a_file_shorter_than_the_sqlite_header_is_truncated(tmp_path: Path, caplog, length):
+    """SQLite opens an empty file as an empty database; for blint it is a
+    download cut off before the first page."""
+    db_file = tmp_path / "blint.db"
+    db_file.write_bytes(b"SQLite format 3\x00"[:length] + b"\x00" * max(0, length - 16))
+    assert db_module.sqlite_truncation(str(db_file)) == (length, 100)
+    with caplog.at_level("ERROR"):
+        assert get(str(db_file)) is None
+    assert "truncated" in caplog.text

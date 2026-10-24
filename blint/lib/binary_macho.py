@@ -686,6 +686,10 @@ def add_mach0_libraries(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bi
                     "timestamp": library.timestamp,
                     "version": current_version_str,
                     "compatibility_version": compat_version_str,
+                    # LIEF lists the dylib's own LC_ID_DYLIB among its
+                    # libraries; the command tells that identity apart from
+                    # the LC_LOAD_* dependencies.
+                    "command": str(library.command).rsplit(".", 1)[-1],
                 }
             )
     except (AttributeError, IndexError, ValueError) as e:

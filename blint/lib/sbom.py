@@ -8,6 +8,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal, TextIO, cast
+from urllib.parse import unquote
 
 import orjson
 from custom_json_diff.lib.utils import file_read, file_write
@@ -38,6 +39,7 @@ from blint.db import (
     build_function_hash_index,
     build_symbol_source_map,
     detect_binaries_utilized,
+    normalize_binary_name,
 )
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_blintdb import screen_standalone_matches
@@ -46,6 +48,7 @@ from blint.lib.banners import detect_vendored_banners
 from blint.lib.binary import is_wasm_file, parse
 from blint.lib.cab import is_cab_file, parse_cab
 from blint.lib.clickonce import parse_clickonce
+from blint.lib.embedded_ident import BROTLI_FIX_STATE_RANK
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.msi import parse_msi
@@ -561,7 +564,7 @@ def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
 
 
 def _artifact_version_evidence(
-    exe: str, metadata: dict, project_name: str
+    exe: str, metadata: dict, project_name: str, banner_result: dict | None = None
 ) -> dict[str, list[str]]:
     """Version-bearing evidence read from the artifact itself.
 
@@ -587,7 +590,8 @@ def _artifact_version_evidence(
     )
     if soname_versions:
         evidence["soname"] = soname_versions
-    banner_result = detect_vendored_banners(metadata)
+    if banner_result is None:
+        banner_result = detect_vendored_banners(metadata)
     banner_versions = sorted(
         {
             identity[1]
@@ -600,6 +604,49 @@ def _artifact_version_evidence(
     if banner_versions:
         evidence["banner"] = banner_versions
     return evidence
+
+
+# Homebrew's revision suffix: a keg rebuilt without an upstream change is
+# 1.3.1_1. The upstream version is what advisories and other evidence name.
+HOMEBREW_REVISION_RE = re.compile(r"^(?P<version>.+)_(?P<revision>\d+)$")
+
+
+def split_homebrew_revision(version: str | None) -> tuple[str | None, str | None]:
+    """``(upstream version, revision)`` of a Homebrew keg version."""
+    if version and (match := HOMEBREW_REVISION_RE.match(version)):
+        return match.group("version"), match.group("revision")
+    return version, None
+
+
+def _comparable_version(version: str | None) -> str | None:
+    """A version with any Homebrew revision dropped, for comparing evidence."""
+    return split_homebrew_revision(version)[0]
+
+
+def homebrew_upstream_purl(purl: str) -> tuple[str, str | None]:
+    """A Homebrew blintdb purl with its keg revision moved out of the version.
+
+    blint-db names a Homebrew row after the keg directory (zlib@1.3.1_1), but
+    advisories and the artifact's own evidence name the upstream release.
+    Returns the purl with the upstream version and the keg version it came
+    from (cdxgen's pkg:brew version and osquery's homebrew_packages report
+    the same keg version), or the purl unchanged and None. String surgery,
+    as in ``_unversioned_purl``, so the rest of the purl stays as stored.
+    """
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return purl, None
+    if (parsed.qualifiers or {}).get("package_manager") != "homebrew":
+        return purl, None
+    upstream, revision = split_homebrew_revision(parsed.version)
+    if not revision:
+        return purl, None
+    base, sep, qualifiers = purl.partition("?")
+    name_part, at, stored = base.rpartition("@")
+    if not at or unquote(stored) != parsed.version:
+        return purl, None
+    return f"{name_part}@{upstream}{sep}{qualifiers}", parsed.version
 
 
 def _unversioned_purl(purl: str) -> str | None:
@@ -635,6 +682,8 @@ def _resolve_version_conflicts(
     """
     notes: dict[str, dict[str, str]] = {}
     groups: dict[tuple, list[str]] = {}
+    # One banner scan serves every group: it reads only the artifact.
+    banner_result: dict | None = None
     for purl in detected:
         key = _purl_group_key(purl)
         if key is not None:
@@ -644,15 +693,25 @@ def _resolve_version_conflicts(
         if len(purls) < 2:
             continue
         project_name = re.sub(r"@\d+$", "", key[2])
-        artifact_evidence = _artifact_version_evidence(exe, metadata, project_name)
-        evidence_values = {v for versions in artifact_evidence.values() for v in versions}
+        if banner_result is None:
+            banner_result = detect_vendored_banners(metadata)
+        artifact_evidence = _artifact_version_evidence(
+            exe, metadata, project_name, banner_result
+        )
+        evidence_values = {
+            _comparable_version(v) for versions in artifact_evidence.values() for v in versions
+        }
         versions = {}
         for purl in purls:
             try:
                 versions[purl] = PackageURL.from_string(purl).version or ""
             except ValueError:
                 versions[purl] = ""
-        matching = {purl for purl, version in versions.items() if version in evidence_values}
+        matching = {
+            purl
+            for purl, version in versions.items()
+            if _comparable_version(version) in evidence_values
+        }
         detail = {
             "candidates": ", ".join(
                 f"{versions[purl]} (score {evidence_by_purl.get(purl, {}).get('score')})"
@@ -693,6 +752,182 @@ def _resolve_version_conflicts(
                 f"{detail['candidates']}; artifact evidence consulted: {detail['evidence']}"
             )
         }
+    return resolved, notes
+
+
+# blintdb project names an embedded identification corroborates, by the
+# record's library: a database match on the same code gains the record's
+# properties (the brotli fix state) instead of standing beside a duplicate.
+EMBEDDED_BLINTDB_PROJECTS = {
+    "brotli": {"brotli", "google-brotli"},
+}
+
+
+def _versioned_purl(purl: str | None, version: str | None) -> str | None:
+    """``purl`` with ``version`` set, keeping its qualifiers in place."""
+    if not purl or not version:
+        return purl
+    base, sep, rest = purl.partition("?")
+    return f"{base}@{version}{sep}{rest}"
+
+
+def _blintdb_component_for(components: list[Component], library: str | None) -> Component | None:
+    """The blintdb-matched component naming the embedded record's library."""
+    names = EMBEDDED_BLINTDB_PROJECTS.get(library or "")
+    if not names:
+        return None
+    for comp in components:
+        if not any(p.name == "internal:blintdb_attribution" for p in comp.properties or []):
+            continue
+        try:
+            parsed = PackageURL.from_string(comp.purl or "")
+        except ValueError:
+            continue
+        if re.sub(r"@\d+$", "", parsed.name) in names:
+            return comp
+    return None
+
+
+def _is_own_library(install_name: str, project_binary_names) -> bool:
+    """Whether a dylib's install name is one of the project's own libraries.
+
+    The project's libraries are the binary names its blintdb rows hold, read
+    the way blintdb matches names (``libbrotlidec.1.dylib`` is ``brotlidec``).
+    """
+    own = normalize_binary_name(install_name)
+    return bool(own) and own in {
+        normalize_binary_name(name) for name in project_binary_names or []
+    }
+
+
+def _exact_version_evidence(
+    exe: str,
+    metadata: dict,
+    project_name: str,
+    project_binary_names=None,
+    banner_result: dict | None = None,
+) -> dict[str, list[str]]:
+    """Versions the artifact itself states for ``project_name``.
+
+    Narrower than ``_artifact_version_evidence``: only sources that name the
+    artifact's own version, so a disagreement with a database row is a real
+    contradiction rather than a stray number in a directory name. The
+    sources are a version banner naming the project, a Homebrew Cellar path
+    naming the project's keg, and the dylib's own LC_ID_DYLIB
+    current_version, which counts only when the dylib is one of the
+    project's own libraries (``project_binary_names``): a dylib that embeds
+    zlib says nothing about zlib's version.
+    """
+    evidence: dict[str, list[str]] = {}
+    own_versions = sorted(
+        {
+            str(entry["version"])
+            for entry in metadata.get("libraries") or []
+            if isinstance(entry, dict)
+            and entry.get("command") == "ID_DYLIB"
+            and entry.get("version")
+            and entry.get("version") != "0.0.0"
+            and _is_own_library(str(entry.get("name") or ""), project_binary_names)
+        }
+    )
+    if own_versions:
+        evidence["dylib_current_version"] = own_versions
+    if banner_result is None:
+        banner_result = detect_vendored_banners(metadata)
+    banner_versions = sorted(
+        {
+            identity[1]
+            for banner in banner_result["banners"]
+            if (identity := _generic_package_identity(banner.get("purl")))
+            and identity[0] == project_name
+            and identity[1]
+        }
+    )
+    if banner_versions:
+        evidence["banner"] = banner_versions
+    if (homebrew := homebrew_install_identity(str(exe))) and homebrew[1]:
+        formula, keg_version, _ = homebrew
+        if re.sub(r"@\d+$", "", formula) == project_name:
+            evidence["homebrew_keg"] = [keg_version]
+    return evidence
+
+
+# Evidence of the artifact's own version that can contradict a database row.
+# A dylib's current_version only confirms one: even for the project's own
+# library it is often an ABI number (libyaml-0.2.dylib is 3.9.0, pcre2 17.1.0,
+# libssl.3.dylib 3.0.0) rather than the release.
+ARTIFACT_IDENTITY_EVIDENCE = ("homebrew_keg",)
+
+
+def _check_versions_against_artifact(
+    detected: set[str],
+    evidence_by_purl: dict,
+    exe: str,
+    metadata: dict,
+    decided: set[str] | None = None,
+) -> tuple[set[str], dict[str, dict[str, str]]]:
+    """Keep a database version only where the artifact does not contradict it.
+
+    A blintdb row's version is the version of the build that went into the
+    database, not a fact about this artifact: a database holding only
+    brotli 1.1.0 names every brotli it matches 1.1.0. Where the artifact is
+    installed in the project's own Homebrew keg and no evidence equals the
+    row's version, the component loses the version and records both, so
+    the artifact's own evidence is never overridden. A banner, or the
+    current_version of the project's own dylib, confirms a row
+    (``artifact_evidence``) but never drops one.
+    Every versioned blintdb component records its basis:
+    ``artifact_evidence`` when the artifact agrees, ``database_row`` when
+    only the row says so. ``decided`` names the purls the version-conflict
+    pass already chose by artifact evidence; they are not checked again.
+    """
+    notes: dict[str, dict[str, str]] = {}
+    resolved = set(detected)
+    banner_result = detect_vendored_banners(metadata)
+    for purl in sorted(detected):
+        try:
+            parsed = PackageURL.from_string(purl)
+        except ValueError:
+            continue
+        if not parsed.version:
+            continue
+        if decided and purl in decided:
+            notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
+            continue
+        project_name = re.sub(r"@\d+$", "", parsed.name)
+        evidence = _exact_version_evidence(
+            exe,
+            metadata,
+            project_name,
+            (evidence_by_purl.get(purl) or {}).get("matched_binary_names"),
+            banner_result,
+        )
+        # A Homebrew revision (1.3.1_1) names the same upstream release.
+        values = {_comparable_version(v) for versions in evidence.values() for v in versions}
+        # A banner of another version can be a second copy of the library in
+        # the same binary, and a dylib's current_version can be an ABI
+        # number, so both confirm a row but never contradict one; the keg
+        # the artifact is installed in can.
+        identity_values = {
+            v
+            for key in ARTIFACT_IDENTITY_EVIDENCE
+            for v in evidence.get(key, [])
+        }
+        stated = "; ".join(f"{k}={','.join(v)}" for k, v in evidence.items())
+        if _comparable_version(parsed.version) in values:
+            notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
+        elif not identity_values:
+            notes[purl] = {"blintdb_version_basis": "database_row"}
+        elif unversioned := _unversioned_purl(purl):
+            resolved.discard(purl)
+            resolved.add(unversioned)
+            if purl in evidence_by_purl:
+                evidence_by_purl.setdefault(unversioned, evidence_by_purl[purl])
+            notes[unversioned] = {
+                "blintdb_version_contradiction": (
+                    f"database row {parsed.version}; artifact evidence {stated}"
+                )
+            }
     return resolved, notes
 
 
@@ -770,6 +1005,29 @@ def components_from_recovered_dependencies(recovered: list[dict]) -> list[Compon
     return lib_components
 
 
+# File-level states a merged component keeps at their weakest. Files are
+# named by their basename, so two node binaries in different directories are
+# one component; a patched copy must not hide an unpatched one.
+WEAKEST_STATE_PROPERTIES = {
+    "internal:brotli_block_switch_fix": BROTLI_FIX_STATE_RANK,
+}
+
+
+def merge_duplicate_file_state(existing: Component, duplicate: Component) -> None:
+    """Fold a duplicate's file-level states into the component kept for both."""
+    for name, rank in WEAKEST_STATE_PROPERTIES.items():
+        new_value = next((p.value for p in duplicate.properties or [] if p.name == name), None)
+        if new_value not in rank:
+            continue
+        current = next((p for p in existing.properties or [] if p.name == name), None)
+        if current is None:
+            existing.properties = (existing.properties or []) + [
+                Property(name=name, value=new_value)
+            ]
+        elif current.value not in rank or rank[new_value] < rank[current.value]:
+            current.value = new_value
+
+
 def _add_to_parent_component(
     metadata_components: list[Component], parent_component: Component
 ) -> None:
@@ -777,6 +1035,7 @@ def _add_to_parent_component(
         if mc.bom_ref.model_dump(mode="python") == parent_component.bom_ref.model_dump(
             mode="python"
         ):
+            merge_duplicate_file_state(mc, parent_component)
             return
     metadata_components.append(parent_component)
 
@@ -1318,6 +1577,21 @@ def process_exe_file(
             binaries_detected, version_notes = _resolve_version_conflicts(
                 binaries_detected, binary_evidence, exe, metadata
             )
+            # A database row never overrides the version the artifact
+            # states for itself; see _check_versions_against_artifact.
+            binaries_detected, basis_notes = _check_versions_against_artifact(
+                binaries_detected,
+                binary_evidence,
+                exe,
+                metadata,
+                decided={
+                    purl
+                    for purl, note in version_notes.items()
+                    if "blintdb_version_evidence" in note
+                },
+            )
+            for purl, note in basis_notes.items():
+                version_notes.setdefault(purl, {}).update(note)
         else:
             version_notes = {}
             LOG.debug(f"Unable to identify a blintdb match for {exe}.")
@@ -1386,8 +1660,11 @@ def process_exe_file(
                 # a version conflict, or the recorded ambiguity when none did.
                 **(version_notes.get(binary_purl) or {}),
             }
+            component_purl, keg_version = homebrew_upstream_purl(binary_purl)
+            if keg_version:
+                evidence_metadata["homebrew_pkg_version"] = keg_version
             comp = create_dynamic_component(
-                {"purl": binary_purl, "tag": "NEEDED"},
+                {"purl": component_purl, "tag": "NEEDED"},
                 exe,
                 {
                     key: value
@@ -1424,16 +1701,58 @@ def process_exe_file(
         if existing is not None:
             for key, value in banner_evidence.items():
                 existing.properties.append(Property(name=f"internal:{key}", value=value))
+            if banner.get("cpe") and not existing.cpe:
+                existing.cpe = banner["cpe"]
         else:
             # Name and version come from the purl, the same way every other
             # dynamic component derives them.
-            lib_components.append(
-                create_dynamic_component(
-                    {"purl": banner["purl"], "tag": "NEEDED"},
-                    exe,
-                    banner_evidence,
-                )
+            banner_component = create_dynamic_component(
+                {"purl": banner["purl"], "tag": "NEEDED"},
+                exe,
+                banner_evidence,
             )
+            if banner.get("cpe"):
+                banner_component.cpe = banner["cpe"]
+            lib_components.append(banner_component)
+    # Embedded code that leaves no version banner (blint.lib.embedded_ident):
+    # the brotli decoder with its CVE-2026-111497 fix state, and the .NET
+    # runtime pack. What a record says about this file's copy (the fix state,
+    # the stamped file version, the evidence) rides the file's own component.
+    # The library component the file depends on is shared by every file that
+    # embeds the same library and carries nothing of any one copy, so a
+    # directory scan keeps a patched copy apart from an unpatched one.
+    for embedded in metadata.get("embedded_libraries") or []:
+        embedded_purl = _versioned_purl(embedded.get("purl"), embedded.get("version"))
+        if not embedded_purl:
+            continue
+        library = embedded.get("library") or ""
+        file_properties = {
+            # Evidence values are comma lists themselves, so entries are
+            # joined with "; " rather than the default ", ".
+            "embedded_evidence": f"{library}: "
+            + "; ".join(
+                f"{item.get('what')}: {item.get('value')}"
+                for item in embedded.get("evidence") or []
+            ),
+            **(embedded.get("properties") or {}),
+        }
+        for key, value in file_properties.items():
+            parent_component.properties.append(Property(name=f"internal:{key}", value=str(value)))
+        if any(comp.purl == embedded_purl for comp in lib_components) or _blintdb_component_for(
+            lib_components, library
+        ):
+            # A banner or blintdb match already names the library this file
+            # depends on.
+            continue
+        embedded_component = create_dynamic_component(
+            {"purl": embedded_purl, "tag": "NEEDED"},
+            exe,
+            {"vendored_attribution": "embedded_identification"},
+        )
+        embedded_component.bom_ref = RefType(unquote(embedded_purl))
+        if embedded.get("cpe"):
+            embedded_component.cpe = embedded["cpe"]
+        lib_components.append(embedded_component)
     # Banner-shaped strings the artifact's symbols do not corroborate are
     # mentions, not dependencies (F2b.2: assetutil's stale "deflate 1.2.5"
     # while linking libz.1.dylib at 1.2.12). Recorded on the parent so the
@@ -1443,13 +1762,30 @@ def process_exe_file(
             Property(
                 name="internal:vendored_banner_mentions",
                 value="; ".join(
-                    f"{mention['purl']} (string only; no {mention['library']} "
-                    "API symbols defined in this artifact)"
+                    f"{mention['purl']} ("
+                    + (
+                        mention.get("reason")
+                        or f"string only; no {mention['library']} API symbols defined in "
+                        "this artifact"
+                    )
+                    + ")"
                     for mention in banner_mentions
                 ),
             )
         )
 
+    # A dylib's own LC_ID_DYLIB install name and version describe this
+    # artifact, not something it links, so they ride the parent component.
+    for entry in metadata.get("libraries") or []:
+        if isinstance(entry, dict) and entry.get("command") == "ID_DYLIB":
+            for key, value in (
+                ("dylib_install_name", entry.get("name")),
+                ("dylib_current_version", entry.get("version")),
+            ):
+                if value:
+                    parent_component.properties.append(
+                        Property(name=f"internal:{key}", value=str(value))
+                    )
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     # Automatically promote application dependencies to the parent. Filter out any components with empty properties, as these are unparseable blobs.
@@ -1460,6 +1796,9 @@ def process_exe_file(
         lib_components.append(parent_component)
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
+            if entry.get("command") == "ID_DYLIB":
+                # The artifact itself, recorded on the parent above.
+                continue
             comp = create_library_component(entry, exe)
             lib_components.append(comp)
     if metadata.get("dynamic_entries"):
@@ -1640,9 +1979,71 @@ def process_wasm_file(
     return lib_components
 
 
+# Homebrew's install prefixes on macOS (Apple silicon, then Intel).
+HOMEBREW_PREFIXES = ("/opt/homebrew/", "/usr/local/")
+
+
+def homebrew_install_identity(install_name: str) -> tuple[str, str | None, str] | None:
+    """The Homebrew formula an install name points into.
+
+    ``<prefix>/opt/<formula>/<path>`` is the formula's stable opt link: it
+    names the formula but not the installed version, which changes on
+    upgrade without the linking binary changing. ``<prefix>/Cellar/
+    <formula>/<version>/<path>`` names the keg version too. Returns
+    ``(formula, keg version or None, path inside the keg)``, or None for any
+    other install name.
+    """
+    if not install_name:
+        return None
+    prefix = next((p for p in HOMEBREW_PREFIXES if install_name.startswith(p)), None)
+    if prefix is None:
+        return None
+    parts = install_name[len(prefix):].split("/")
+    if len(parts) >= 3 and parts[0] == "opt" and parts[1]:
+        return parts[1], None, "/".join(parts[2:])
+    if len(parts) >= 4 and parts[0] == "Cellar" and parts[1] and parts[2]:
+        return parts[1], parts[2], "/".join(parts[3:])
+    return None
+
+
+def resolve_homebrew_opt_link(install_name: str, exe: str) -> str | None:
+    """The keg version an opt-link install name resolves to on this host.
+
+    An opt link names no version, and resolving it on the scanning machine
+    describes that machine, not necessarily the binary's. When the binary
+    being scanned is itself installed under the same Homebrew prefix, though,
+    this host is where it runs, and the link's target is the keg it loads.
+
+    Returns the keg version, or None when that cannot be shown.
+    """
+    prefix = next((p for p in HOMEBREW_PREFIXES if install_name.startswith(p)), None)
+    if prefix is None or not exe:
+        return None
+    try:
+        if not os.path.realpath(exe).startswith(os.path.realpath(prefix) + os.sep):
+            return None
+        target = os.path.realpath(install_name)
+    except (OSError, ValueError):
+        return None
+    real_prefix = os.path.realpath(prefix) + os.sep
+    if not target.startswith(real_prefix):
+        return None
+    identity = homebrew_install_identity(prefix + target[len(real_prefix):].replace(os.sep, "/"))
+    return identity[1] if identity else None
+
+
 def create_library_component(entry: dict, exe: str) -> Component:
     """
     Processes a library entry and creates a component object.
+
+    A dylib under a Homebrew prefix is named after its formula
+    (``pkg:generic/<formula>?package_manager=homebrew#<path>``), the same
+    identity blintdb's Homebrew rows use, so it can be matched against the
+    installed formula. A Cellar install name carries the keg version, and so
+    does an opt link when the scanned binary is itself installed under that
+    Homebrew prefix (see resolve_homebrew_opt_link); the dylib's own
+    ``current_version`` is the version the binary was linked against, not
+    what is installed, so it stays a property.
 
     Args:
         entry: The entry containing the library information.
@@ -1653,20 +2054,54 @@ def create_library_component(entry: dict, exe: str) -> Component:
     """
     name = os.path.basename(entry["name"])
     version = purl_field(entry.get("version"))
-    qualifiers = {}
-    if compatibility_version := purl_field(entry.get("compatibility_version")):
-        qualifiers["compatibility_version"] = compatibility_version
-    purl = PackageURL(type="file", name=name, version=version, qualifiers=qualifiers).to_string()
+    compatibility_version = purl_field(entry.get("compatibility_version"))
+    properties = [
+        Property(name="internal:srcFile", value=exe),
+        Property(name="internal:libPath", value=entry["name"]),
+    ]
+    if homebrew := homebrew_install_identity(entry["name"]):
+        formula, keg_version, keg_path = homebrew
+        properties.append(Property(name="internal:homebrew_formula", value=formula))
+        if version:
+            properties.append(Property(name="internal:linked_current_version", value=version))
+        if compatibility_version:
+            properties.append(
+                Property(name="internal:compatibility_version", value=compatibility_version)
+            )
+        if keg_version is None and (
+            resolved := resolve_homebrew_opt_link(entry["name"], exe)
+        ):
+            keg_version = resolved
+            properties.append(
+                Property(name="internal:homebrew_keg_source", value="host_opt_link")
+            )
+        # The keg version carries Homebrew's revision (1.5.7_1); the purl
+        # names the upstream release and the keg version rides a property.
+        upstream, _ = split_homebrew_revision(keg_version)
+        if keg_version:
+            properties.append(Property(name="internal:homebrew_pkg_version", value=keg_version))
+        version = purl_field(upstream)
+        purl = PackageURL(
+            type="generic",
+            name=formula,
+            version=version,
+            qualifiers={"package_manager": "homebrew"},
+            subpath=keg_path or None,
+        ).to_string()
+    else:
+        qualifiers = {}
+        if compatibility_version:
+            qualifiers["compatibility_version"] = compatibility_version
+        purl = PackageURL(
+            type="file", name=name, version=version, qualifiers=qualifiers
+        ).to_string()
     comp = Component(
         type=Type.library,
         name=name,
         version=version,
         purl=purl,
         evidence=create_component_evidence(exe, 0.8),
-        properties=[
-            Property(name="internal:srcFile", value=exe),
-            Property(name="internal:libPath", value=entry["name"]),
-        ],
+        properties=properties,
     )
     if entry.get("tag") == "NEEDED":
         comp.scope = Scope.required
@@ -2921,8 +3356,11 @@ def trim_components(components: list[Component]) -> list[Component]:
     """
     added_dict: dict[str, Component] = {}
     for comp in components:
-        if not added_dict.get(comp.bom_ref.model_dump(mode="python")):
-            added_dict[comp.bom_ref.model_dump(mode="python")] = comp
+        ref = comp.bom_ref.model_dump(mode="python")
+        if existing := added_dict.get(ref):
+            merge_duplicate_file_state(existing, comp)
+        else:
+            added_dict[ref] = comp
     return [added_dict[k] for k in sorted(added_dict.keys())]
 
 
