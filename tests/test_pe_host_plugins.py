@@ -608,7 +608,7 @@ def test_real_print_monitors_on_the_slice():
     ],
 )
 def test_registered_system_plugins_classify_correctly(dll, expected):
-    """The registry ground truth from the measurement VM: every DLL here
+    r"""The registry ground truth from the measurement VM: every DLL here
     is registered at the contract's extension point (LSA Security/
     Notification Packages, W32Time TimeProviders, NetworkProvider order,
     Print Monitors, the Winsock catalog, Authentication Credential
