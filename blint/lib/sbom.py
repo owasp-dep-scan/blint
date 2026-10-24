@@ -1669,8 +1669,13 @@ def process_exe_file(
             Property(
                 name="internal:vendored_banner_mentions",
                 value="; ".join(
-                    f"{mention['purl']} (string only; no {mention['library']} "
-                    "API symbols defined in this artifact)"
+                    f"{mention['purl']} ("
+                    + (
+                        mention.get("reason")
+                        or f"string only; no {mention['library']} API symbols defined in "
+                        "this artifact"
+                    )
+                    + ")"
                     for mention in banner_mentions
                 ),
             )

@@ -73,6 +73,17 @@ BANNER_LIBRARY_LINK_NAMES = {
     "nodejs": re.compile(r"(?:^|/)libnode\.", re.IGNORECASE),
 }
 
+# Runtimes that implement Node-API themselves and carry Node.js's release
+# URLs for building addons: Bun reports the headersUrl of the Node.js release
+# it is compatible with. Their own version string marks them, and a Node.js
+# string inside them names a compatibility target, not a bundled Node.js.
+BANNER_FOREIGN_RUNTIMES = {
+    "nodejs": (
+        ("Bun", re.compile(r"^Bun v\d+\.\d+\.\d+\b|^bun-v\d+\.\d+\.\d+$")),
+        ("Deno", re.compile(r"https://dl\.deno\.land/|^deno_core::")),
+    ),
+}
+
 # OPENSSL_VERSION_TEXT as a whole string, "OpenSSL 3.0.2 15 Mar 2022": the
 # form the framework detector needs before it calls a file OpenSSL.
 OPENSSL_VERSION_TEXT_RE = re.compile(
@@ -342,17 +353,31 @@ REJECTED_SIGNATURES = (
 
 
 def _iter_string_values(metadata: dict) -> list[str]:
-    """Return the extracted string values a banner scan reads."""
-    strings = metadata.get("strings")
-    if not isinstance(strings, list):
-        return []
+    """Return the extracted string values a banner scan reads.
+
+    ``identity_strings`` are the runtime identity strings the section-byte
+    scan found (``blint.lib.embedded_ident``), which the capped string list
+    of a large Mach-O or PE can miss.
+    """
     values = []
-    for entry in strings:
-        if isinstance(entry, dict) and entry.get("value"):
-            values.append(str(entry["value"]))
-        elif isinstance(entry, str) and entry:
-            values.append(entry)
+    for key in ("strings", "identity_strings"):
+        strings = metadata.get(key)
+        if not isinstance(strings, list):
+            continue
+        for entry in strings:
+            if isinstance(entry, dict) and entry.get("value"):
+                values.append(str(entry["value"]))
+            elif isinstance(entry, str) and entry:
+                values.append(entry)
     return values
+
+
+def _foreign_runtime(project: str, string_values: list[str]) -> str | None:
+    """The other runtime whose own strings the artifact carries, if any."""
+    for runtime, marker in BANNER_FOREIGN_RUNTIMES.get(project, ()):
+        if any(marker.search(value) for value in string_values if len(value) <= 512):
+            return runtime
+    return None
 
 
 def is_probable_banner_string(value: str) -> bool:
@@ -438,6 +463,11 @@ def detect_vendored_banners(metadata: dict) -> dict:
     if not string_values:
         return {"banners": [], "mentions": [], "state": BANNER_LAYER_INACTIVE_NO_STRINGS}
     api_counts = _defined_api_symbol_counts(metadata)
+    foreign = {
+        project: runtime
+        for project in BANNER_FOREIGN_RUNTIMES
+        if (runtime := _foreign_runtime(project, string_values))
+    }
     banners = []
     mentions = []
     seen = set()
@@ -470,7 +500,12 @@ def detect_vendored_banners(metadata: dict) -> dict:
             # claim - corroborated by defined API symbols, or undisproved in
             # a stripped image that has nowhere else for the code to be.
             api_count = api_counts.get(signature["project"], 0)
-            if api_count == 0 and _provided_externally(metadata, signature["project"]):
+            if runtime := foreign.get(signature["project"]):
+                # Another runtime defines the same API: its symbols
+                # corroborate nothing about this project.
+                entry["reason"] = f"{runtime} runtime; implements the {signature['project']} API"
+                mentions.append(entry)
+            elif api_count == 0 and _provided_externally(metadata, signature["project"]):
                 mentions.append(entry)
             else:
                 entry["api_symbol_count"] = api_count

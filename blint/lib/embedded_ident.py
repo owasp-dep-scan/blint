@@ -184,6 +184,60 @@ def _has_bytes(contents: list[bytes], needle: bytes) -> bool:
     return any(needle in content for content in contents)
 
 
+# Runtime identity strings found on section bytes rather than in the capped
+# string list: the strings a large Mach-O or PE holds past MAX_EXTRACTED_STRINGS
+# are never extracted, and Node.js's inspector string can sit there. The anchors
+# are the Node.js rules' literal parts (blint.lib.banners) and the version
+# strings of runtimes that carry Node.js's URLs without being Node.js.
+IDENTITY_STRING_ANCHORS = (
+    b"nodejs.org/download/release/v",
+    b"node.js/v",
+    b"Bun v",
+    b"bun-v",
+    b"dl.deno.land/",
+)
+# What a string around an anchor must be to count.
+IDENTITY_STRING_RE = re.compile(
+    r"nodejs\.org/download/release/v\d+\.\d+\.\d+/node-v\d"
+    r"|^node\.js/v\d+\.\d+\.\d+$"
+    r"|^Bun v\d+\.\d+\.\d+\b|^bun-v\d+\.\d+\.\d+$"
+    r"|https://dl\.deno\.land/"
+)
+MAX_IDENTITY_STRING_LEN = 512
+MAX_IDENTITY_STRINGS = 32
+
+
+def _c_string_around(content: bytes, index: int) -> str | None:
+    """The printable NUL-delimited string that holds ``content[index]``."""
+    start = index
+    floor = max(0, index - MAX_IDENTITY_STRING_LEN)
+    while start > floor and 0x20 <= content[start - 1] <= 0x7E:
+        start -= 1
+    end = content.find(b"\x00", index, index + MAX_IDENTITY_STRING_LEN)
+    if end == -1:
+        return None
+    raw = content[start:end]
+    if not raw or any(not 0x20 <= byte <= 0x7E for byte in raw):
+        return None
+    return raw.decode("ascii")
+
+
+def identity_strings(contents: list[bytes]) -> list[str]:
+    """Runtime identity strings in the section bytes, in first-seen order."""
+    found: list[str] = []
+    for content in contents:
+        for anchor in IDENTITY_STRING_ANCHORS:
+            start = 0
+            while (index := content.find(anchor, start)) != -1:
+                start = index + 1
+                value = _c_string_around(content, index)
+                if value and value not in found and IDENTITY_STRING_RE.search(value):
+                    found.append(value)
+                    if len(found) >= MAX_IDENTITY_STRINGS:
+                        return found
+    return found
+
+
 def _defined_symbol_names(metadata: dict) -> set[str]:
     """Names the artifact defines itself: exports and non-imported symbols."""
     names: set[str] = set()
@@ -523,9 +577,16 @@ def attach_embedded_libraries(metadata: dict, parsed_obj, exe_file: str | None =
     try:
         contents = _section_contents(parsed_obj)
         records = identify_embedded_libraries(parsed_obj, metadata, exe_file, contents)
+        extracted = {
+            entry.get("value") if isinstance(entry, dict) else entry
+            for entry in metadata.get("strings") or []
+        }
+        missing = [value for value in identity_strings(contents) if value not in extracted]
     except (AttributeError, TypeError, ValueError) as e:
         LOG.debug(f"Embedded library identification failed: {type(e).__name__}: {e}")
         return metadata
     if records:
         metadata["embedded_libraries"] = records
+    if missing:
+        metadata["identity_strings"] = missing
     return metadata

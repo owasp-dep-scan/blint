@@ -313,6 +313,39 @@ def test_node_string_in_an_addon_is_a_mention():
     assert [m["purl"] for m in result["mentions"]] == ["pkg:generic/node@24.22.1"]
 
 
+def test_bun_is_not_node():
+    """Bun carries Node.js's headersUrl and implements Node-API itself."""
+    metadata = parse(str(_EMBEDDED / "bun-1.4.3.so"))
+    result = detect_vendored_banners(metadata)
+    assert result["banners"] == []
+    assert [(m["purl"], m["reason"]) for m in result["mentions"]] == [
+        ("pkg:generic/node@26.3.0", "Bun runtime; implements the nodejs API")
+    ]
+
+
+def test_bun_sbom_has_no_node_component(tmp_path):
+    bom = _sbom(tmp_path, "bun-1.4.3.so")
+    components = _flatten([bom["metadata"]["component"], *bom.get("components", [])])
+    assert not any("pkg:generic/node" in (c.get("purl") or "") for c in components)
+    assert "Bun runtime" in _properties(bom["metadata"]["component"])[
+        "internal:vendored_banner_mentions"
+    ]
+
+
+def test_node_identity_past_the_string_cap(monkeypatch):
+    """A large Mach-O holds more strings than are extracted; the inspector
+    string can sit past the cap, so the Node.js rules also read section bytes."""
+    from blint.lib import binary_common
+
+    monkeypatch.setattr(binary_common, "MAX_EXTRACTED_STRINGS", 0)
+    metadata = parse(str(_EMBEDDED / "node-24.18.0-inspector-only.dylib"))
+    assert metadata["identity_strings"] == ["node.js/v24.18.0"]
+    result = detect_vendored_banners(metadata)
+    assert [(b["purl"], b["cpe"]) for b in result["banners"]] == [
+        ("pkg:generic/node@24.18.0", "cpe:2.3:a:nodejs:node.js:24.18.0:*:*:*:*:*:*:*")
+    ]
+
+
 def _sbom(tmp_path: Path, fixture: str) -> dict:
     output = tmp_path / f"{fixture}.cdx.json"
     options = BlintOptions(

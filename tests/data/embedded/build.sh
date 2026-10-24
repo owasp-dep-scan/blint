@@ -17,6 +17,8 @@ if [ "${1:-}" = "lld" ]; then
     brotli_error_table.c node_constants.c
   # The Rust port's FFI shim: the C API and tables, but not the C decoder.
   clang $LLD -o brotli-rust-ffi.so brotli_rust_ffi.c
+  # Bun: Node-API and Node.js's headers URL, but not Node.js.
+  clang $LLD -o bun-1.4.3.so bun_runtime.c
   exit 0
 fi
 command -v gcc >/dev/null || { apt-get update -qq && apt-get install -y -qq gcc libc6-dev >/dev/null; }
@@ -38,3 +40,6 @@ gcc $CFLAGS -DPRODUCT_VERSION='"8.0.32"' -o libSystem.IO.Compression.Native-prod
 #   clang -O2 -arch x86_64 -DBLOCK_SWITCH -dynamiclib -Wl,-x -o x86_64.dylib brotli_error_table.c
 #   clang -O2 -arch arm64 -dynamiclib -Wl,-x -o arm64.dylib brotli_error_table.c
 #   lipo -create x86_64.dylib arm64.dylib -output brotli-universal-x86_64-patched.dylib
+# The Mach-O Node.js fixture keeps only the inspector string (no release URLs):
+#   clang -O2 -dynamiclib -DNODE_VERSION_STRING='"24.18.0"' -DNO_RELEASE_URLS -Wl,-x \
+#     -o node-24.18.0-inspector-only.dylib node_runtime.c
