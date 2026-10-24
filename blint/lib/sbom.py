@@ -39,6 +39,7 @@ from blint.db import (
     build_function_hash_index,
     build_symbol_source_map,
     detect_binaries_utilized,
+    normalize_binary_name,
 )
 from blint.lib.android import build_app_dex_callgraph, collect_app_metadata
 from blint.lib.android_blintdb import screen_standalone_matches
@@ -563,7 +564,7 @@ def _purl_group_key(purl: str) -> tuple[str, str, str, str] | None:
 
 
 def _artifact_version_evidence(
-    exe: str, metadata: dict, project_name: str
+    exe: str, metadata: dict, project_name: str, banner_result: dict | None = None
 ) -> dict[str, list[str]]:
     """Version-bearing evidence read from the artifact itself.
 
@@ -589,7 +590,8 @@ def _artifact_version_evidence(
     )
     if soname_versions:
         evidence["soname"] = soname_versions
-    banner_result = detect_vendored_banners(metadata)
+    if banner_result is None:
+        banner_result = detect_vendored_banners(metadata)
     banner_versions = sorted(
         {
             identity[1]
@@ -602,6 +604,49 @@ def _artifact_version_evidence(
     if banner_versions:
         evidence["banner"] = banner_versions
     return evidence
+
+
+# Homebrew's revision suffix: a keg rebuilt without an upstream change is
+# 1.3.1_1. The upstream version is what advisories and other evidence name.
+HOMEBREW_REVISION_RE = re.compile(r"^(?P<version>.+)_(?P<revision>\d+)$")
+
+
+def split_homebrew_revision(version: str | None) -> tuple[str | None, str | None]:
+    """``(upstream version, revision)`` of a Homebrew keg version."""
+    if version and (match := HOMEBREW_REVISION_RE.match(version)):
+        return match.group("version"), match.group("revision")
+    return version, None
+
+
+def _comparable_version(version: str | None) -> str | None:
+    """A version with any Homebrew revision dropped, for comparing evidence."""
+    return split_homebrew_revision(version)[0]
+
+
+def homebrew_upstream_purl(purl: str) -> tuple[str, str | None]:
+    """A Homebrew blintdb purl with its keg revision moved out of the version.
+
+    blint-db names a Homebrew row after the keg directory (zlib@1.3.1_1), but
+    advisories and the artifact's own evidence name the upstream release.
+    Returns the purl with the upstream version and the keg version it came
+    from (cdxgen's pkg:brew version and osquery's homebrew_packages report
+    the same keg version), or the purl unchanged and None. String surgery,
+    as in ``_unversioned_purl``, so the rest of the purl stays as stored.
+    """
+    try:
+        parsed = PackageURL.from_string(purl)
+    except ValueError:
+        return purl, None
+    if (parsed.qualifiers or {}).get("package_manager") != "homebrew":
+        return purl, None
+    upstream, revision = split_homebrew_revision(parsed.version)
+    if not revision:
+        return purl, None
+    base, sep, qualifiers = purl.partition("?")
+    name_part, at, stored = base.rpartition("@")
+    if not at or unquote(stored) != parsed.version:
+        return purl, None
+    return f"{name_part}@{upstream}{sep}{qualifiers}", parsed.version
 
 
 def _unversioned_purl(purl: str) -> str | None:
@@ -637,6 +682,8 @@ def _resolve_version_conflicts(
     """
     notes: dict[str, dict[str, str]] = {}
     groups: dict[tuple, list[str]] = {}
+    # One banner scan serves every group: it reads only the artifact.
+    banner_result: dict | None = None
     for purl in detected:
         key = _purl_group_key(purl)
         if key is not None:
@@ -646,15 +693,25 @@ def _resolve_version_conflicts(
         if len(purls) < 2:
             continue
         project_name = re.sub(r"@\d+$", "", key[2])
-        artifact_evidence = _artifact_version_evidence(exe, metadata, project_name)
-        evidence_values = {v for versions in artifact_evidence.values() for v in versions}
+        if banner_result is None:
+            banner_result = detect_vendored_banners(metadata)
+        artifact_evidence = _artifact_version_evidence(
+            exe, metadata, project_name, banner_result
+        )
+        evidence_values = {
+            _comparable_version(v) for versions in artifact_evidence.values() for v in versions
+        }
         versions = {}
         for purl in purls:
             try:
                 versions[purl] = PackageURL.from_string(purl).version or ""
             except ValueError:
                 versions[purl] = ""
-        matching = {purl for purl, version in versions.items() if version in evidence_values}
+        matching = {
+            purl
+            for purl, version in versions.items()
+            if _comparable_version(version) in evidence_values
+        }
         detail = {
             "candidates": ", ".join(
                 f"{versions[purl]} (score {evidence_by_purl.get(purl, {}).get('score')})"
@@ -731,15 +788,35 @@ def _blintdb_component_for(components: list[Component], library: str | None) -> 
     return None
 
 
-def _exact_version_evidence(exe: str, metadata: dict, project_name: str) -> dict[str, list[str]]:
+def _is_own_library(install_name: str, project_binary_names) -> bool:
+    """Whether a dylib's install name is one of the project's own libraries.
+
+    The project's libraries are the binary names its blintdb rows hold, read
+    the way blintdb matches names (``libbrotlidec.1.dylib`` is ``brotlidec``).
+    """
+    own = normalize_binary_name(install_name)
+    return bool(own) and own in {
+        normalize_binary_name(name) for name in project_binary_names or []
+    }
+
+
+def _exact_version_evidence(
+    exe: str,
+    metadata: dict,
+    project_name: str,
+    project_binary_names=None,
+    banner_result: dict | None = None,
+) -> dict[str, list[str]]:
     """Versions the artifact itself states for ``project_name``.
 
     Narrower than ``_artifact_version_evidence``: only sources that name the
     artifact's own version, so a disagreement with a database row is a real
     contradiction rather than a stray number in a directory name. The
-    sources are the dylib's own LC_ID_DYLIB current_version, a version
-    banner naming the project, and a Homebrew Cellar path naming the
-    project's keg.
+    sources are a version banner naming the project, a Homebrew Cellar path
+    naming the project's keg, and the dylib's own LC_ID_DYLIB
+    current_version, which counts only when the dylib is one of the
+    project's own libraries (``project_binary_names``): a dylib that embeds
+    zlib says nothing about zlib's version.
     """
     evidence: dict[str, list[str]] = {}
     own_versions = sorted(
@@ -750,11 +827,13 @@ def _exact_version_evidence(exe: str, metadata: dict, project_name: str) -> dict
             and entry.get("command") == "ID_DYLIB"
             and entry.get("version")
             and entry.get("version") != "0.0.0"
+            and _is_own_library(str(entry.get("name") or ""), project_binary_names)
         }
     )
     if own_versions:
         evidence["dylib_current_version"] = own_versions
-    banner_result = detect_vendored_banners(metadata)
+    if banner_result is None:
+        banner_result = detect_vendored_banners(metadata)
     banner_versions = sorted(
         {
             identity[1]
@@ -769,14 +848,15 @@ def _exact_version_evidence(exe: str, metadata: dict, project_name: str) -> dict
     if (homebrew := homebrew_install_identity(str(exe))) and homebrew[1]:
         formula, keg_version, _ = homebrew
         if re.sub(r"@\d+$", "", formula) == project_name:
-            # A keg version carries Homebrew's revision suffix (26.11.1_1).
-            evidence["homebrew_keg"] = [keg_version.split("_", 1)[0]]
+            evidence["homebrew_keg"] = [keg_version]
     return evidence
 
 
-# Exact evidence of the artifact's own version, as opposed to evidence of a
-# library copy inside it.
-ARTIFACT_IDENTITY_EVIDENCE = ("dylib_current_version", "homebrew_keg")
+# Evidence of the artifact's own version that can contradict a database row.
+# A dylib's current_version only confirms one: even for the project's own
+# library it is often an ABI number (libyaml-0.2.dylib is 3.9.0, pcre2 17.1.0,
+# libssl.3.dylib 3.0.0) rather than the release.
+ARTIFACT_IDENTITY_EVIDENCE = ("homebrew_keg",)
 
 
 def _check_versions_against_artifact(
@@ -790,11 +870,12 @@ def _check_versions_against_artifact(
 
     A blintdb row's version is the version of the build that went into the
     database, not a fact about this artifact: a database holding only
-    brotli 1.1.0 names every brotli it matches 1.1.0. Where the artifact
-    states its own version for the project (its LC_ID_DYLIB or Homebrew
-    keg, from ``_exact_version_evidence``) and no evidence equals the row's,
-    the component loses the version and records both, so the artifact's own
-    evidence is never overridden.
+    brotli 1.1.0 names every brotli it matches 1.1.0. Where the artifact is
+    installed in the project's own Homebrew keg and no evidence equals the
+    row's version, the component loses the version and records both, so
+    the artifact's own evidence is never overridden. A banner, or the
+    current_version of the project's own dylib, confirms a row
+    (``artifact_evidence``) but never drops one.
     Every versioned blintdb component records its basis:
     ``artifact_evidence`` when the artifact agrees, ``database_row`` when
     only the row says so. ``decided`` names the purls the version-conflict
@@ -802,6 +883,7 @@ def _check_versions_against_artifact(
     """
     notes: dict[str, dict[str, str]] = {}
     resolved = set(detected)
+    banner_result = detect_vendored_banners(metadata)
     for purl in sorted(detected):
         try:
             parsed = PackageURL.from_string(purl)
@@ -813,18 +895,26 @@ def _check_versions_against_artifact(
             notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
             continue
         project_name = re.sub(r"@\d+$", "", parsed.name)
-        evidence = _exact_version_evidence(exe, metadata, project_name)
-        values = {v for versions in evidence.values() for v in versions}
+        evidence = _exact_version_evidence(
+            exe,
+            metadata,
+            project_name,
+            (evidence_by_purl.get(purl) or {}).get("matched_binary_names"),
+            banner_result,
+        )
+        # A Homebrew revision (1.3.1_1) names the same upstream release.
+        values = {_comparable_version(v) for versions in evidence.values() for v in versions}
         # A banner of another version can be a second copy of the library in
-        # the same binary, so it confirms a row but never contradicts one;
-        # the artifact's own identity (its LC_ID_DYLIB, its keg) can.
+        # the same binary, and a dylib's current_version can be an ABI
+        # number, so both confirm a row but never contradict one; the keg
+        # the artifact is installed in can.
         identity_values = {
             v
             for key in ARTIFACT_IDENTITY_EVIDENCE
             for v in evidence.get(key, [])
         }
         stated = "; ".join(f"{k}={','.join(v)}" for k, v in evidence.items())
-        if parsed.version in values:
+        if _comparable_version(parsed.version) in values:
             notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
         elif not identity_values:
             notes[purl] = {"blintdb_version_basis": "database_row"}
@@ -1570,8 +1660,11 @@ def process_exe_file(
                 # a version conflict, or the recorded ambiguity when none did.
                 **(version_notes.get(binary_purl) or {}),
             }
+            component_purl, keg_version = homebrew_upstream_purl(binary_purl)
+            if keg_version:
+                evidence_metadata["homebrew_pkg_version"] = keg_version
             comp = create_dynamic_component(
-                {"purl": binary_purl, "tag": "NEEDED"},
+                {"purl": component_purl, "tag": "NEEDED"},
                 exe,
                 {
                     key: value
@@ -1982,7 +2075,12 @@ def create_library_component(entry: dict, exe: str) -> Component:
             properties.append(
                 Property(name="internal:homebrew_keg_source", value="host_opt_link")
             )
-        version = purl_field(keg_version)
+        # The keg version carries Homebrew's revision (1.5.7_1); the purl
+        # names the upstream release and the keg version rides a property.
+        upstream, _ = split_homebrew_revision(keg_version)
+        if keg_version:
+            properties.append(Property(name="internal:homebrew_pkg_version", value=keg_version))
+        version = purl_field(upstream)
         purl = PackageURL(
             type="generic",
             name=formula,

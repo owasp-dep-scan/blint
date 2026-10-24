@@ -378,7 +378,8 @@ def _decode_hex_csv(value: str | None) -> set[str]:
     return decoded
 
 
-def _normalize_binary_name(value: str | None) -> str:
+def normalize_binary_name(value: str | None) -> str:
+    """A binary name as blintdb matches it: ``libbrotlidec.1.dylib`` is ``brotlidec``."""
     if not value:
         return ""
     name = Path(str(value)).name.lower()
@@ -1304,7 +1305,7 @@ def _finalize_project_matches(
         binary_name_match = bool(
             target_binary_names
             and target_binary_names.intersection(
-                {_normalize_binary_name(name) for name in match["matched_binary_names"]}
+                {normalize_binary_name(name) for name in match["matched_binary_names"]}
             )
         )
         # Fuzzy, CFG and import evidence never takes part in the surfacing
@@ -1458,7 +1459,7 @@ def lookup_project_matches(
             )
             return []
         project_matches: dict = {}
-        target_binary_name = _normalize_binary_name(
+        target_binary_name = normalize_binary_name(
             (binary_metadata or {}).get("name") or (binary_metadata or {}).get("file_path")
         )
         target_binary_names = {target_binary_name} if target_binary_name else set()

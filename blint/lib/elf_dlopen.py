@@ -220,7 +220,8 @@ def _declared_dependencies(metadata: dict) -> set[str]:
         if entry.get("tag") in ("NEEDED", "SONAME") and entry.get("name"):
             declared.add(entry["name"])
     for entry in metadata.get("libraries") or []:
-        if isinstance(entry, dict) and entry.get("name"):
+        # A dylib's own LC_ID_DYLIB is the object itself (see _self_names).
+        if isinstance(entry, dict) and entry.get("name") and entry.get("command") != "ID_DYLIB":
             declared.add(entry["name"].rsplit("/", 1)[-1])
     for entry in metadata.get("dlopen_dependencies") or []:
         if isinstance(entry, dict) and entry.get("name"):

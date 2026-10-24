@@ -492,48 +492,85 @@ def test_macho_dylib_identity_is_not_a_dependency_of_itself(tmp_path):
     assert properties["internal:dylib_current_version"] == "1.2.0"
 
 
+def test_no_dependency_pass_counts_a_dylibs_own_identity():
+    from blint.lib.banners import _provided_externally
+    from blint.lib.diff import _extract_dependencies
+    from blint.lib.elf_dlopen import _declared_dependencies
+
+    metadata = {
+        "libraries": [
+            {"name": "/opt/homebrew/opt/zlib/lib/libz.1.dylib", "command": "ID_DYLIB"},
+            {"name": "/usr/lib/libSystem.B.dylib", "command": "LOAD_DYLIB"},
+        ]
+    }
+    assert _extract_dependencies(metadata) == (["/usr/lib/libSystem.B.dylib"], "libraries")
+    assert _declared_dependencies(metadata) == {"libSystem.B.dylib"}
+    # libz.1.dylib itself does not "link" libz, so zlib's banner is no mention.
+    assert not _provided_externally(metadata, "zlib")
+
+
 # --- blintdb versions against the artifact's own evidence -----------------
 
 _BROTLI_RECORD = {
     "library": "brotli",
-    "purl": "pkg:generic/brotli",
+    "purl": BROTLI_PURL,
     "evidence": [{"what": "error-name table", "where": "strings", "value": "..."}],
     "properties": {"brotli_block_switch_fix": "absent", "brotli_error_table": "prefixed"},
 }
+_ZLIB_SYMBOLS = ("deflate", "inflate", "zlibVersion", "compress2", "uncompress", "crc32")
 
 
-def _blintdb_brotli_components(tmp_path, monkeypatch, own_version=None):
-    """process_exe_file with a database holding only brotli 1.1.0.
+def _process_with_db(
+    tmp_path,
+    monkeypatch,
+    project_purl: str,
+    metadata: dict,
+    exe: str = "/tmp/demo/libz.1.dylib",
+    binary_name: str = "libz.1.dylib",
+):
+    """process_exe_file against a one-row database; returns (components, parents).
 
     The database's six zlib-named symbols are what the fixture builder
     stores; the project row is what the match reports.
     """
-    from tests.test_sbom_blintdb import _run_process_exe_with_db
+    from types import SimpleNamespace
 
+    from blint.lib.sbom import process_exe_file
+    from tests.test_sbom_blintdb import _create_blintdb_with_purl
+
+    db_file = tmp_path / "blint.db"
+    _create_blintdb_with_purl(db_file, project_purl, binary_name=binary_name)
+    sbom = SimpleNamespace(metadata=SimpleNamespace(component=SimpleNamespace(components=[])))
+    monkeypatch.setattr("blint.db.BLINTDB_LOC", str(db_file))
+    monkeypatch.setattr("blint.lib.sbom.parse", lambda _e, disassemble=False, sdk_path=None: metadata)
+    components = process_exe_file({}, False, exe, sbom, [], {}, True, True)
+    return components, sbom.metadata.component.components
+
+
+def _dylib_metadata(install_name: str, own_version: str | None, **extra) -> dict:
     metadata = {
-        "name": "libbrotlidec.1.dylib",
+        "name": install_name.rsplit("/", 1)[-1],
         "binary_type": "MachO",
-        "symtab_symbols": [
-            {"name": name}
-            for name in ("deflate", "inflate", "zlibVersion", "compress2", "uncompress", "crc32")
-        ],
-        "embedded_libraries": [_BROTLI_RECORD],
+        "symtab_symbols": [{"name": name} for name in _ZLIB_SYMBOLS],
+        **extra,
     }
     if own_version:
         metadata["libraries"] = [
             {
-                "name": "/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib",
+                "name": install_name,
                 "version": own_version,
                 "compatibility_version": "1.0.0",
                 "command": "ID_DYLIB",
             }
         ]
-    return _run_process_exe_with_db(
-        tmp_path,
-        monkeypatch,
-        "pkg:generic/brotli@1.1.0",
-        metadata,
-        binary_name="libbrotlidec.1.dylib",
+    return metadata
+
+
+def _brotli_dylib(own_version=None):
+    return _dylib_metadata(
+        "/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib",
+        own_version,
+        embedded_libraries=[_BROTLI_RECORD],
     )
 
 
@@ -541,33 +578,114 @@ def _component_properties(component) -> dict:
     return {p.name: p.value for p in component.properties or []}
 
 
-def test_dylib_own_version_contradicting_the_database_drops_the_db_version(
-    tmp_path, monkeypatch
-):
-    """The darwin meson blintdb holds only brotli 1.1.0 and named Homebrew's
-    libbrotlidec.1.2.0.dylib 1.1.0, against the dylib's own current_version."""
-    components = _blintdb_brotli_components(tmp_path, monkeypatch, own_version="1.2.0")
-    brotli = [c for c in components if "brotli" in (c.purl or "")]
-    assert [c.purl for c in brotli] == ["pkg:generic/brotli"]
-    properties = _component_properties(brotli[0])
-    assert properties["internal:blintdb_version_contradiction"] == (
-        "database row 1.1.0; artifact evidence dylib_current_version=1.2.0"
-    )
-    # The fix state is the file's; the match stands for the library.
-    assert "internal:brotli_block_switch_fix" not in properties
+def _versions(components, name: str) -> dict[str, dict]:
+    return {
+        c.purl: {k: v for k, v in _component_properties(c).items() if "blintdb_version" in k}
+        for c in components
+        if name in (c.purl or "")
+    }
 
 
 def test_database_only_version_is_marked_as_a_database_match(tmp_path, monkeypatch):
-    components = _blintdb_brotli_components(tmp_path, monkeypatch)
-    (brotli,) = [c for c in components if "brotli" in (c.purl or "")]
-    assert brotli.purl == "pkg:generic/brotli@1.1.0"
-    properties = _component_properties(brotli)
-    assert properties["internal:blintdb_version_basis"] == "database_row"
-    assert "internal:brotli_block_switch_fix" not in properties
+    components, parents = _process_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/brotli@1.1.0",
+        _brotli_dylib(),
+        binary_name="libbrotlidec.1.dylib",
+    )
+    assert _versions(components, "brotli") == {
+        "pkg:generic/brotli@1.1.0": {"internal:blintdb_version_basis": "database_row"}
+    }
+    # The database match is what the file depends on; the fix state is the
+    # file's, and no second brotli component stands beside the match.
+    (parent,) = parents
+    assert _component_properties(parent)["internal:brotli_block_switch_fix"] == "absent"
+    assert all(c.bom_ref.root != BROTLI_BOM_REF for c in components)
 
 
-def test_database_version_the_artifact_confirms(tmp_path, monkeypatch):
-    components = _blintdb_brotli_components(tmp_path, monkeypatch, own_version="1.1.0")
-    (brotli,) = [c for c in components if "brotli" in (c.purl or "")]
-    assert brotli.purl == "pkg:generic/brotli@1.1.0"
-    assert _component_properties(brotli)["internal:blintdb_version_basis"] == "artifact_evidence"
+def test_database_version_the_dylib_itself_confirms(tmp_path, monkeypatch):
+    components, _ = _process_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/brotli@1.1.0",
+        _brotli_dylib(own_version="1.1.0"),
+        binary_name="libbrotlidec.1.dylib",
+    )
+    assert _versions(components, "brotli") == {
+        "pkg:generic/brotli@1.1.0": {"internal:blintdb_version_basis": "artifact_evidence"}
+    }
+
+
+def test_dylib_own_version_never_drops_a_database_version(tmp_path, monkeypatch):
+    """A current_version is often an ABI number, so it only confirms a row.
+
+    Homebrew's libyaml-0.2.dylib is libyaml 0.2.5 with current_version
+    3.9.0, and a database row of 0.2.5 is right.
+    """
+    components, _ = _process_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/yaml@0.2.5",
+        _dylib_metadata("/opt/homebrew/opt/libyaml/lib/libyaml-0.2.dylib", "3.9.0"),
+        binary_name="libyaml-0.2.dylib",
+    )
+    assert _versions(components, "yaml") == {
+        "pkg:generic/yaml@0.2.5": {"internal:blintdb_version_basis": "database_row"}
+    }
+
+
+@pytest.mark.parametrize(
+    ("install_name", "own_version"),
+    [
+        # ffmpeg's libavcodec with zlib statically linked into it.
+        ("/opt/homebrew/opt/ffmpeg/lib/libavcodec.61.dylib", "61.19.100"),
+        # libssl.3.dylib carries the ABI 3.0.0 for every OpenSSL 3.x.
+        ("/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib", "3.0.0"),
+    ],
+)
+def test_another_dylibs_version_says_nothing_about_an_embedded_project(
+    tmp_path, monkeypatch, install_name, own_version
+):
+    metadata = _dylib_metadata(install_name, own_version, name="libz.1.dylib")
+    components, _ = _process_with_db(tmp_path, monkeypatch, "pkg:generic/zlib@1.3.1", metadata)
+    assert _versions(components, "zlib") == {
+        "pkg:generic/zlib@1.3.1": {"internal:blintdb_version_basis": "database_row"}
+    }
+
+
+def test_the_keg_the_dylib_is_installed_in_contradicts_a_database_version(
+    tmp_path, monkeypatch
+):
+    components, _ = _process_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/brotli@1.1.0",
+        _brotli_dylib(own_version="1.2.0"),
+        exe="/opt/homebrew/Cellar/brotli/1.2.0/lib/libbrotlidec.1.dylib",
+        binary_name="libbrotlidec.1.dylib",
+    )
+    assert _versions(components, "brotli") == {
+        "pkg:generic/brotli": {
+            "internal:blintdb_version_contradiction": (
+                "database row 1.1.0; artifact evidence dylib_current_version=1.2.0; "
+                "homebrew_keg=1.2.0"
+            )
+        }
+    }
+
+
+def test_a_homebrew_revision_names_the_same_release(tmp_path, monkeypatch):
+    """blint-db names Homebrew rows after the keg, revision and all."""
+    components, _ = _process_with_db(
+        tmp_path,
+        monkeypatch,
+        "pkg:generic/zlib@1.3.1_1?package_manager=homebrew&tap=homebrew/core",
+        _dylib_metadata("/opt/homebrew/opt/zlib/lib/libz.1.dylib", "1.3.1"),
+        exe="/opt/homebrew/Cellar/zlib/1.3.1_1/lib/libz.1.dylib",
+    )
+    (zlib,) = [c for c in components if "zlib" in (c.purl or "")]
+    assert zlib.purl == "pkg:generic/zlib@1.3.1?package_manager=homebrew&tap=homebrew/core"
+    properties = _component_properties(zlib)
+    assert properties["internal:blintdb_version_basis"] == "artifact_evidence"
+    assert properties["internal:homebrew_pkg_version"] == "1.3.1_1"

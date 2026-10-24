@@ -431,7 +431,12 @@ def _provided_externally(metadata: dict, library: str) -> bool:
             ):
                 return True
         for dylib in metadata.get("libraries") or []:
-            if isinstance(dylib, dict) and link_name.search(str(dylib.get("name") or "")):
+            # A dylib's own LC_ID_DYLIB is the artifact itself, not a link.
+            if (
+                isinstance(dylib, dict)
+                and dylib.get("command") != "ID_DYLIB"
+                and link_name.search(str(dylib.get("name") or ""))
+            ):
                 return True
     anchor = BANNER_API_ANCHORS.get(library)
     if anchor:

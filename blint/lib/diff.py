@@ -333,6 +333,9 @@ def _extract_dependencies(metadata: dict[str, Any]) -> tuple[list[str], str]:
     if isinstance(libraries, list) and libraries:
         names = []
         for entry in libraries:
+            # A dylib's own LC_ID_DYLIB is its identity, not a linked library.
+            if isinstance(entry, dict) and entry.get("command") == "ID_DYLIB":
+                continue
             if isinstance(entry, dict) and entry.get("name"):
                 names.append(str(entry["name"]))
             elif isinstance(entry, str) and entry:

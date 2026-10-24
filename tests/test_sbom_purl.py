@@ -287,3 +287,19 @@ def test_homebrew_opt_link_is_not_resolved_for_a_binary_from_elsewhere(
     )
     assert PackageURL.from_string(component.purl).version is None
     assert "internal:homebrew_keg_source" not in _properties(component)
+
+
+def test_homebrew_keg_revision_is_kept_out_of_the_purl_version():
+    """A keg rebuilt without an upstream change is 1.5.7_1; advisories name 1.5.7.
+
+    The keg version is still recorded, as cdxgen's pkg:brew version and
+    osquery's homebrew_packages report it.
+    """
+    component = create_library_component(
+        {"name": "/opt/homebrew/Cellar/zstd/1.5.7_1/lib/libzstd.1.dylib", "version": "1.5.7"},
+        "/opt/homebrew/bin/node",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version) == ("zstd", "1.5.7")
+    assert component.version.root == "1.5.7"
+    assert _properties(component)["internal:homebrew_pkg_version"] == "1.5.7_1"
