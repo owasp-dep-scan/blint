@@ -696,6 +696,141 @@ def _resolve_version_conflicts(
     return resolved, notes
 
 
+# blintdb project names an embedded identification corroborates, by the
+# record's library: a database match on the same code gains the record's
+# properties (the brotli fix state) instead of standing beside a duplicate.
+EMBEDDED_BLINTDB_PROJECTS = {
+    "brotli": {"brotli", "google-brotli"},
+}
+
+
+def _blintdb_component_for(components: list[Component], library: str | None) -> Component | None:
+    """The blintdb-matched component naming the embedded record's library."""
+    names = EMBEDDED_BLINTDB_PROJECTS.get(library or "")
+    if not names:
+        return None
+    for comp in components:
+        if not any(p.name == "internal:blintdb_attribution" for p in comp.properties or []):
+            continue
+        try:
+            parsed = PackageURL.from_string(comp.purl or "")
+        except ValueError:
+            continue
+        if re.sub(r"@\d+$", "", parsed.name) in names:
+            return comp
+    return None
+
+
+def _exact_version_evidence(exe: str, metadata: dict, project_name: str) -> dict[str, list[str]]:
+    """Versions the artifact itself states for ``project_name``.
+
+    Narrower than ``_artifact_version_evidence``: only sources that name the
+    artifact's own version, so a disagreement with a database row is a real
+    contradiction rather than a stray number in a directory name. The
+    sources are the dylib's own LC_ID_DYLIB current_version, a version
+    banner naming the project, and a Homebrew Cellar path naming the
+    project's keg.
+    """
+    evidence: dict[str, list[str]] = {}
+    own_versions = sorted(
+        {
+            str(entry["version"])
+            for entry in metadata.get("libraries") or []
+            if isinstance(entry, dict)
+            and entry.get("command") == "ID_DYLIB"
+            and entry.get("version")
+            and entry.get("version") != "0.0.0"
+        }
+    )
+    if own_versions:
+        evidence["dylib_current_version"] = own_versions
+    banner_result = detect_vendored_banners(metadata)
+    banner_versions = sorted(
+        {
+            identity[1]
+            for banner in banner_result["banners"]
+            if (identity := _generic_package_identity(banner.get("purl")))
+            and identity[0] == project_name
+            and identity[1]
+        }
+    )
+    if banner_versions:
+        evidence["banner"] = banner_versions
+    if (homebrew := homebrew_install_identity(str(exe))) and homebrew[1]:
+        formula, keg_version, _ = homebrew
+        if re.sub(r"@\d+$", "", formula) == project_name:
+            # A keg version carries Homebrew's revision suffix (26.11.1_1).
+            evidence["homebrew_keg"] = [keg_version.split("_", 1)[0]]
+    return evidence
+
+
+# Exact evidence of the artifact's own version, as opposed to evidence of a
+# library copy inside it.
+ARTIFACT_IDENTITY_EVIDENCE = ("dylib_current_version", "homebrew_keg")
+
+
+def _check_versions_against_artifact(
+    detected: set[str],
+    evidence_by_purl: dict,
+    exe: str,
+    metadata: dict,
+    decided: set[str] | None = None,
+) -> tuple[set[str], dict[str, dict[str, str]]]:
+    """Keep a database version only where the artifact does not contradict it.
+
+    A blintdb row's version is the version of the build that went into the
+    database, not a fact about this artifact: a database holding only
+    brotli 1.1.0 names every brotli it matches 1.1.0. Where the artifact
+    states its own version for the project (its LC_ID_DYLIB or Homebrew
+    keg, from ``_exact_version_evidence``) and no evidence equals the row's,
+    the component loses the version and records both, so the artifact's own
+    evidence is never overridden.
+    Every versioned blintdb component records its basis:
+    ``artifact_evidence`` when the artifact agrees, ``database_row`` when
+    only the row says so. ``decided`` names the purls the version-conflict
+    pass already chose by artifact evidence; they are not checked again.
+    """
+    notes: dict[str, dict[str, str]] = {}
+    resolved = set(detected)
+    for purl in sorted(detected):
+        try:
+            parsed = PackageURL.from_string(purl)
+        except ValueError:
+            continue
+        if not parsed.version:
+            continue
+        if decided and purl in decided:
+            notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
+            continue
+        project_name = re.sub(r"@\d+$", "", parsed.name)
+        evidence = _exact_version_evidence(exe, metadata, project_name)
+        values = {v for versions in evidence.values() for v in versions}
+        # A banner of another version can be a second copy of the library in
+        # the same binary, so it confirms a row but never contradicts one;
+        # the artifact's own identity (its LC_ID_DYLIB, its keg) can.
+        identity_values = {
+            v
+            for key in ARTIFACT_IDENTITY_EVIDENCE
+            for v in evidence.get(key, [])
+        }
+        stated = "; ".join(f"{k}={','.join(v)}" for k, v in evidence.items())
+        if parsed.version in values:
+            notes[purl] = {"blintdb_version_basis": "artifact_evidence"}
+        elif not identity_values:
+            notes[purl] = {"blintdb_version_basis": "database_row"}
+        elif unversioned := _unversioned_purl(purl):
+            resolved.discard(purl)
+            resolved.add(unversioned)
+            if purl in evidence_by_purl:
+                evidence_by_purl.setdefault(unversioned, evidence_by_purl[purl])
+            notes[unversioned] = {
+                "blintdb_version_contradiction": (
+                    f"database row {parsed.version}; artifact evidence {stated}"
+                )
+            }
+    return resolved, notes
+
+
 def format_abi_requirements(abi_analysis: dict) -> str:
     """Format the ABI floor each version provider imposes as one property line.
 
@@ -1318,6 +1453,21 @@ def process_exe_file(
             binaries_detected, version_notes = _resolve_version_conflicts(
                 binaries_detected, binary_evidence, exe, metadata
             )
+            # A database row never overrides the version the artifact
+            # states for itself; see _check_versions_against_artifact.
+            binaries_detected, basis_notes = _check_versions_against_artifact(
+                binaries_detected,
+                binary_evidence,
+                exe,
+                metadata,
+                decided={
+                    purl
+                    for purl, note in version_notes.items()
+                    if "blintdb_version_evidence" in note
+                },
+            )
+            for purl, note in basis_notes.items():
+                version_notes.setdefault(purl, {}).update(note)
         else:
             version_notes = {}
             LOG.debug(f"Unable to identify a blintdb match for {exe}.")
@@ -1459,7 +1609,7 @@ def process_exe_file(
         }
         existing = next(
             (comp for comp in lib_components if comp.purl == embedded_purl), None
-        )
+        ) or _blintdb_component_for(lib_components, embedded.get("library"))
         if existing is not None:
             for key, value in embedded_evidence.items():
                 existing.properties.append(Property(name=f"internal:{key}", value=str(value)))
