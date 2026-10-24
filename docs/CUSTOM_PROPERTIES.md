@@ -211,6 +211,15 @@ These properties come from `blint.lib.embedded_ident`, which identifies embedded
 
 The .NET component carries a version only when an exact source names it: the PE `ProductVersion` resource, or a `<major>.<minor>.<patch>` string that agrees with the stamped file version (`libcoreclr`, `libhostfxr` and `libhostpolicy` carry one). Libraries with only the stamp, such as `libSystem.IO.Compression.Native`, stay versionless and record the stamp instead.
 
+## Mach-O identity properties
+
+A dylib's own `LC_ID_DYLIB` describes the artifact itself, so it is recorded on the artifact's component rather than emitted as a dependency of itself.
+
+| Property                         | Value type   | When emitted                            | What it captures                                                                                                                       |
+| -------------------------------- | ------------ | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal:dylib_install_name`    | single value | On a Mach-O dylib's own component       | The install name from the dylib's `LC_ID_DYLIB`, for example `/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib`.                       |
+| `internal:dylib_current_version` | single value | On a Mach-O dylib's own component       | The dylib's own `current_version`. It is exact evidence of the dylib's version and is what contradicts a different blintdb row version. |
+
 ## Homebrew library properties
 
 A Mach-O library linked from a Homebrew prefix (`/opt/homebrew/` or `/usr/local/`) is named after its formula rather than its file: `pkg:generic/<formula>[@<version>]?package_manager=homebrew#<path inside the keg>`, the identity blintdb's Homebrew rows use. Only a Cellar install name (`<prefix>/Cellar/<formula>/<version>/...`) carries the installed keg version. The usual opt link (`<prefix>/opt/<formula>/...`) names the formula but not its version, so the purl stays versionless; the dylib's `current_version` in the load command is the version the binary was linked against, not what is installed now, and is kept as a property. Other dylibs keep their `pkg:file` purl.

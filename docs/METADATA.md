@@ -342,7 +342,7 @@ Mach-O files are the standard for macOS, iOS, and other Apple operating systems.
   - `is_neural_model`: `true` only when the header magic is Apple's neural-model file magic (`0xbeefface`, LIEF's `MACHO_TYPES.NEURAL_MODEL`); `false` on ordinary Mach-O images (observed `false` on `/bin/ls`, `gh`, and Go toolchain binaries). Present on every Mach-O metadata; it names the file type the header declares, not an analysis verdict, so `false` is the expected value for binaries and libraries.
 
 - **Load Commands:** Mach-O uses load commands instead of a dynamic section.
-  - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF.
+  - `libraries`: A list of required dylibs, equivalent to `NEEDED` entries in ELF. Each entry carries `name`, `timestamp`, `version` (the `current_version` the load command recorded), `compatibility_version` and `command`, the load command it came from (`LOAD_DYLIB`, `LOAD_WEAK_DYLIB`, `REEXPORT_DYLIB`, ...). LIEF also lists a dylib's own `ID_DYLIB` here; that entry is the dylib's identity, not a dependency, so the dependency passes and the SBOM skip it.
   - `uuid`: A unique identifier for the binary, used by debuggers and crash report symbolication tools.
   - `rpath`: A runtime search path for libraries.
   - `code_signature`: The embedded code-signature SuperBlob, parsed into semantic detail (see below).

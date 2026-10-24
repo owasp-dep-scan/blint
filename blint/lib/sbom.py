@@ -1488,6 +1488,18 @@ def process_exe_file(
             )
         )
 
+    # A dylib's own LC_ID_DYLIB install name and version describe this
+    # artifact, not something it links, so they ride the parent component.
+    for entry in metadata.get("libraries") or []:
+        if isinstance(entry, dict) and entry.get("command") == "ID_DYLIB":
+            for key, value in (
+                ("dylib_install_name", entry.get("name")),
+                ("dylib_current_version", entry.get("version")),
+            ):
+                if value:
+                    parent_component.properties.append(
+                        Property(name=f"internal:{key}", value=str(value))
+                    )
     if not sbom.metadata.component.components:
         sbom.metadata.component.components = []
     # Automatically promote application dependencies to the parent. Filter out any components with empty properties, as these are unparseable blobs.
@@ -1498,6 +1510,9 @@ def process_exe_file(
         lib_components.append(parent_component)
     if metadata.get("libraries"):
         for entry in metadata.get("libraries"):
+            if entry.get("command") == "ID_DYLIB":
+                # The artifact itself, recorded on the parent above.
+                continue
             comp = create_library_component(entry, exe)
             lib_components.append(comp)
     if metadata.get("dynamic_entries"):

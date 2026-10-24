@@ -231,7 +231,8 @@ def declared_libraries(metadata: dict) -> list[str]:
 
     if metadata.get("binary_type") == "MachO":
         for entry in metadata.get("libraries") or []:
-            if isinstance(entry, dict):
+            # A dylib's own LC_ID_DYLIB is its identity, not a dependency.
+            if isinstance(entry, dict) and entry.get("command") != "ID_DYLIB":
                 add(entry.get("name", ""))
         return declared
     for entry in metadata.get("dynamic_entries") or []:

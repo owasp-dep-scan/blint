@@ -200,7 +200,7 @@ def test_node_string_in_an_addon_is_a_mention():
     assert [m["purl"] for m in result["mentions"]] == ["pkg:generic/nodejs@24.22.1"]
 
 
-def _sbom_components(tmp_path: Path, fixture: str) -> list[dict]:
+def _sbom(tmp_path: Path, fixture: str) -> dict:
     output = tmp_path / f"{fixture}.cdx.json"
     options = BlintOptions(
         sbom_mode=True,
@@ -209,7 +209,11 @@ def _sbom_components(tmp_path: Path, fixture: str) -> list[dict]:
         quiet_mode=True,
     )
     assert run_sbom_mode(options)
-    bom = orjson.loads(output.read_bytes())
+    return orjson.loads(output.read_bytes())
+
+
+def _sbom_components(tmp_path: Path, fixture: str) -> list[dict]:
+    bom = _sbom(tmp_path, fixture)
     return bom["metadata"]["component"].get("components", []) + bom.get("components", [])
 
 
@@ -244,3 +248,33 @@ def test_dotnet_sbom_component_carries_stamp_properties(tmp_path):
     properties = _properties(runtime)
     assert properties["internal:dotnet_file_version"] == "8.0.3226.50405"
     assert "export family" in properties["internal:embedded_evidence"]
+
+
+def test_macho_dylib_identity_is_not_a_dependency_of_itself(tmp_path):
+    """LIEF lists a dylib's own LC_ID_DYLIB among its libraries.
+
+    It is the artifact's identity: the install name and current_version
+    ride the parent component, and no library component or declared
+    dependency names the dylib itself.
+    """
+    from blint.lib.import_attribution import declared_libraries
+
+    fixture = _EMBEDDED / "libbrotlidec.1.2.0.dylib"
+    metadata = parse(str(fixture))
+    identity = [e for e in metadata["libraries"] if e.get("command") == "ID_DYLIB"]
+    assert [(e["name"], e["version"]) for e in identity] == [
+        ("/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib", "1.2.0")
+    ]
+    assert "libbrotlidec.1.dylib" not in declared_libraries(metadata)
+    assert _record(metadata, "brotli")["properties"]["brotli_block_switch_fix"] == "absent"
+
+    bom = _sbom(tmp_path, fixture.name)
+    components = _flatten(bom["metadata"]["component"].get("components", []) + bom["components"])
+    assert not any("libbrotlidec.1.dylib" in (c.get("purl") or "") for c in components)
+    # A single input's parent is the document's own component.
+    properties = _properties(bom["metadata"]["component"])
+    assert properties["internal:dylib_install_name"] == (
+        "/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib"
+    )
+    assert properties["internal:dylib_current_version"] == "1.2.0"
+

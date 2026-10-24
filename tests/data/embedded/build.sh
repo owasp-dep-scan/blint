@@ -11,3 +11,8 @@ gcc $CFLAGS -DNODE_VERSION_STRING='"24.22.0"' -o node-24.22.0.so node_runtime.c 
 gcc $CFLAGS -DNODE_VERSION_STRING='"24.22.1"' -DBLOCK_SWITCH -o node-24.22.1.so node_runtime.c brotli_error_table.c
 gcc $CFLAGS -DBARE_NAMES -o libSystem.IO.Compression.Native.so dotnet_compression_native.c brotli_error_table.c
 gcc $CFLAGS -DPRODUCT_VERSION='"8.0.32"' -o libSystem.IO.Compression.Native-product.so dotnet_compression_native.c brotli_error_table.c
+# The Mach-O fixture is built on macOS (arm64): a Homebrew-shaped dylib whose
+# own LC_ID_DYLIB names the opt link and current_version 1.2.0.
+#   clang -O2 -dynamiclib -install_name /opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib \
+#     -current_version 1.2.0 -compatibility_version 1.0.0 -Wl,-x \
+#     -o libbrotlidec.1.2.0.dylib brotli_error_table.c
