@@ -96,3 +96,78 @@ def test_glibc_baseline_flag_rejects_malformed_versions():
     parser = build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["--glibc-baseline", "two-point-two-eight"])
+
+
+def _point_blintdb_at(monkeypatch, tmp_path):
+    from blint.lib import utils
+    from blint.logger import LOG
+
+    # main() -q disables the shared logger for the rest of the process;
+    # restore it so later caplog-based tests still see records.
+    monkeypatch.setattr(LOG, "disabled", LOG.disabled)
+    home = tmp_path / "blintdb"
+    monkeypatch.setattr(utils, "BLINTDB_HOME", str(home))
+    monkeypatch.setattr(utils, "BLINTDB_LOC", str(home / "blint.db"))
+    return home
+
+
+def test_db_download_failure_exits_non_zero(monkeypatch, tmp_path):
+    """4.0.1 logged "Blintdb Download failed" and exited 0."""
+    import sys
+
+    from blint import cli
+    from blint.lib import oci_pull
+
+    _point_blintdb_at(monkeypatch, tmp_path)
+
+    def failing_pull(target, outdir):
+        raise oci_pull.PullFailedError("Manifest fetch failed (404)")
+
+    monkeypatch.setattr(oci_pull, "stream_pull", failing_pull)
+    monkeypatch.setattr(sys, "argv", ["blint", "--no-banner", "-q", "db", "--download"])
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 1
+
+
+def test_db_download_success_exits_zero(monkeypatch, tmp_path):
+    import sys
+
+    from blint import cli
+    from blint.lib import oci_pull
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+
+    def pull(target, outdir):
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "blint.db").write_bytes(b"")
+        return [home / "blint.db"]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    monkeypatch.setattr(sys, "argv", ["blint", "--no-banner", "-q", "db", "--download"])
+    assert cli.main() is None
+
+
+def test_truncated_blintdb_is_downloaded_again(monkeypatch, tmp_path):
+    import sqlite3
+
+    from blint.config import BlintOptions
+    from blint.lib import oci_pull, utils
+
+    home = _point_blintdb_at(monkeypatch, tmp_path)
+    home.mkdir()
+    db_file = home / "blint.db"
+    with sqlite3.connect(db_file) as connection:
+        connection.execute("create table t (x blob)")
+        connection.executemany("insert into t values (?)", [(b"x" * 4096,)] * 8)
+    db_file.write_bytes(db_file.read_bytes()[:-4096])
+    pulled = []
+
+    def pull(target, outdir):
+        pulled.append(target)
+        return [db_file]
+
+    monkeypatch.setattr(oci_pull, "stream_pull", pull)
+    assert utils.blintdb_setup(BlintOptions(use_blintdb=True))
+    assert len(pulled) == 1
+

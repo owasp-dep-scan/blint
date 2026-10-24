@@ -111,3 +111,30 @@ def test_symlinked_home_end_to_end_sbom_degrades(real_v2_db: Path, tmp_path: Pat
     )
     assert detected == set()
     assert evidence == {}
+
+
+def _truncate(db_file: Path, keep: int) -> None:
+    data = db_file.read_bytes()
+    db_file.write_bytes(data[:keep])
+
+
+def test_sqlite_truncation_is_none_for_a_complete_database(real_v2_db: Path):
+    assert db_module.sqlite_truncation(str(real_v2_db)) is None
+
+
+def test_get_refuses_a_truncated_database(real_v2_db: Path, caplog):
+    # An interrupted download leaves the header intact and the pages short:
+    # SQLite opens such a file and fails later, mid-SBOM.
+    size = real_v2_db.stat().st_size
+    page_size = int.from_bytes(real_v2_db.read_bytes()[16:18], "big")
+    _truncate(real_v2_db, size - page_size)
+    assert db_module.sqlite_truncation(str(real_v2_db)) == (size - page_size, size)
+    with caplog.at_level("ERROR"):
+        assert get(str(real_v2_db)) is None
+    assert "truncated" in caplog.text
+
+
+def test_sqlite_truncation_ignores_files_without_a_sqlite_header(tmp_path: Path):
+    not_sqlite = tmp_path / "blint.db"
+    not_sqlite.write_bytes(b"\x00" * 200)
+    assert db_module.sqlite_truncation(str(not_sqlite)) is None

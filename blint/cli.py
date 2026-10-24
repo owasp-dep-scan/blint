@@ -909,12 +909,16 @@ def main() -> None:
     blint_options = handle_args(args)
     if blint_options.quiet_mode:
         LOG.disabled = True
-    blintdb_setup(blint_options)
+    blintdb_ready = blintdb_setup(blint_options)
 
     # SBOM command
     if blint_options.sbom_mode:
         run_sbom_mode(blint_options)
     elif blint_options.db_mode:
+        # `blint db --download` exists to produce a verified database; a pull
+        # that did not is a failed command, not a quiet no-op.
+        if not blintdb_ready:
+            sys.exit(1)
         return
     # Default case
     else:

@@ -178,7 +178,7 @@ The workflow is a two-step process:
     blint db --download
     ```
 
-    This downloads the database to the directory specified by the `BLINTDB_HOME` environment variable.
+    This downloads the database to the directory specified by the `BLINTDB_HOME` environment variable. The layers are large (tens of GB), so the download streams to a `.part` file, resumes with HTTP range requests when the connection drops, and is verified against the image digest before it replaces `blint.db`. An interrupted run leaves the `.part` file behind and the next `blint db --download` resumes from it. The command exits non-zero when it cannot produce a verified database, and a truncated `blint.db` left by an older blint is detected and downloaded again rather than used.
 
 2.  **Generate the SBOM with blintdb enabled:**
 

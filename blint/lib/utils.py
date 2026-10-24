@@ -43,6 +43,7 @@ from blint.cyclonedx.spec import (
     Method,
     Technique,
 )
+from blint.db import sqlite_truncation
 from blint.lib import oci_pull
 from blint.logger import LOG, console
 
@@ -363,26 +364,38 @@ def _validate_blintdb_ref(ref: str) -> str | None:
     return host
 
 
-def blintdb_setup(args: BlintOptions) -> None:
+def blintdb_setup(args: BlintOptions) -> bool:
     """
     This function downloads blint-db package from 'ghcr.io/appthreat/blintdb-vcpkg'
     and puts it into $BLINTDB_LOC path.
     If there is not path in $BLINTDB_LOC, it will add it to $HOME/blindb.
     $USE_BLINTDB is required to be set "true" or "1", in order to use blintdb
+
+    Returns False when a download was needed and did not produce a verified
+    blint.db, so ``blint db --download`` can exit non-zero; True otherwise.
     """
     if not os.getenv("USE_BLINTDB") and not args.use_blintdb and not args.db_mode:
         LOG.debug(f"Skipping blintdb setup, USE_BLINTDB={os.getenv('USE_BLINTDB')}")
-        return
+        return True
     if not os.path.exists(BLINTDB_HOME):
         os.makedirs(BLINTDB_HOME)
+    truncated = os.path.exists(BLINTDB_LOC) and sqlite_truncation(BLINTDB_LOC)
+    if truncated:
+        LOG.error(
+            "blintdb at %s is truncated (%d of %d bytes), most likely an interrupted "
+            "download; downloading it again.",
+            BLINTDB_LOC,
+            *truncated,
+        )
     # Should we refresh the database
     if (
         os.path.exists(BLINTDB_LOC)
+        and not truncated
         and not BLINTDB_REFRESH
         and (not args.image_url or args.image_url == BLINTDB_IMAGE_URL)
     ):
         LOG.debug(f"blintdb is present at {BLINTDB_LOC}. Skipping refresh.")
-        return
+        return True
     try:
         target_url = args.image_url if args.db_mode and args.image_url else BLINTDB_IMAGE_URL
         host = _validate_blintdb_ref(target_url)
@@ -392,7 +405,7 @@ def blintdb_setup(args: BlintOptions) -> None:
                 "Expected registry/repo[:tag|@sha256:<digest>].",
                 target_url,
             )
-            return
+            return False
         if host not in BLINTDB_TRUSTED_REGISTRIES:
             LOG.warning(
                 "blintdb image %s is not on a trusted registry (%s); a poisoned "
@@ -412,11 +425,13 @@ def blintdb_setup(args: BlintOptions) -> None:
                 "Pulled artifact did not contain a blint.db layer: %s",
                 [path.name for path in pulled],
             )
-            return
+            return False
         os.environ["USE_BLINTDB"] = "true"
         LOG.debug(f"Blintdb stored at {BLINTDB_HOME}")
     except Exception as e:
         LOG.error(f"Blintdb Download failed: {e}")
+        return False
+    return True
 
 
 def is_exe(src: str) -> bool:

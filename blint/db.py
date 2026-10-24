@@ -262,6 +262,34 @@ def _resolve_db_file(db_file: str | None = None) -> str | None:
     return db_file or BLINTDB_LOC
 
 
+def sqlite_truncation(db_file: str) -> tuple[int, int] | None:
+    """``(actual, expected)`` bytes when a SQLite file is shorter than its header says.
+
+    The 100-byte header records the page size (offset 16) and the database
+    size in pages (offset 28), which is valid when the change counter
+    (offset 24) equals the version-valid-for number (offset 92). A download
+    cut short leaves a file shorter than that, which SQLite opens happily and
+    fails on later. None means the file is complete, or its header carries no
+    usable size to compare with.
+    """
+    try:
+        actual = os.path.getsize(db_file)
+        with open(db_file, "rb") as handle:
+            header = handle.read(100)
+    except OSError:
+        return None
+    if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
+        return None
+    page_size = int.from_bytes(header[16:18], "big")
+    if page_size == 1:
+        page_size = 65536
+    page_count = int.from_bytes(header[28:32], "big")
+    if not page_count or header[24:28] != header[92:96]:
+        return None
+    expected = page_size * page_count
+    return (actual, expected) if actual < expected else None
+
+
 def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection | None:
     """Open a direct connection to the local blintdb SQLite database.
 
@@ -276,6 +304,14 @@ def get(db_file: str | None = None, read_only: bool = True) -> apsw.Connection |
     """
     database_file = _resolve_db_file(db_file)
     if not database_file or not os.path.exists(database_file):
+        return None
+    if truncated := sqlite_truncation(database_file):
+        LOG.error(
+            "blintdb at %s is truncated (%d of %d bytes), most likely an interrupted "
+            "download; continuing without blintdb. Delete it or run `blint db --download`.",
+            database_file,
+            *truncated,
+        )
         return None
     flags = apsw.SQLITE_OPEN_NOFOLLOW
     flags |= apsw.SQLITE_OPEN_READONLY if read_only else apsw.SQLITE_OPEN_READWRITE
