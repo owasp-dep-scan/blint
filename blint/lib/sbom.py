@@ -1678,9 +1678,43 @@ def process_wasm_file(
     return lib_components
 
 
+# Homebrew's install prefixes on macOS (Apple silicon, then Intel).
+HOMEBREW_PREFIXES = ("/opt/homebrew/", "/usr/local/")
+
+
+def homebrew_install_identity(install_name: str) -> tuple[str, str | None, str] | None:
+    """The Homebrew formula an install name points into.
+
+    ``<prefix>/opt/<formula>/<path>`` is the formula's stable opt link: it
+    names the formula but not the installed version, which changes on
+    upgrade without the linking binary changing. ``<prefix>/Cellar/
+    <formula>/<version>/<path>`` names the keg version too. Returns
+    ``(formula, keg version or None, path inside the keg)``, or None for any
+    other install name.
+    """
+    if not install_name:
+        return None
+    prefix = next((p for p in HOMEBREW_PREFIXES if install_name.startswith(p)), None)
+    if prefix is None:
+        return None
+    parts = install_name[len(prefix):].split("/")
+    if len(parts) >= 3 and parts[0] == "opt" and parts[1]:
+        return parts[1], None, "/".join(parts[2:])
+    if len(parts) >= 4 and parts[0] == "Cellar" and parts[1] and parts[2]:
+        return parts[1], parts[2], "/".join(parts[3:])
+    return None
+
+
 def create_library_component(entry: dict, exe: str) -> Component:
     """
     Processes a library entry and creates a component object.
+
+    A dylib under a Homebrew prefix is named after its formula
+    (``pkg:generic/<formula>?package_manager=homebrew#<path>``), the same
+    identity blintdb's Homebrew rows use, so it can be matched against the
+    installed formula. Only a Cellar install name carries the keg version;
+    the dylib's own ``current_version`` is the version the binary was linked
+    against, not what is installed, so it stays a property there.
 
     Args:
         entry: The entry containing the library information.
@@ -1691,21 +1725,35 @@ def create_library_component(entry: dict, exe: str) -> Component:
     """
     name = os.path.basename(entry["name"])
     version = purl_field(entry.get("version"))
-    qualifiers = {}
-    if compatibility_version := purl_field(entry.get("compatibility_version")):
-        qualifiers["compatibility_version"] = compatibility_version
-    purl = PackageURL(type="file", name=name, version=version, qualifiers=qualifiers).to_string()
-    comp = Component(
-        type=Type.library,
-        name=name,
-        version=version,
-        purl=purl,
-        evidence=create_component_evidence(exe, 0.8),
-        properties=[
-            Property(name="internal:srcFile", value=exe),
-            Property(name="internal:libPath", value=entry["name"]),
-        ],
-    )
+    compatibility_version = purl_field(entry.get("compatibility_version"))
+    properties = [
+        Property(name="internal:srcFile", value=exe),
+        Property(name="internal:libPath", value=entry["name"]),
+    ]
+    if homebrew := homebrew_install_identity(entry["name"]):
+        formula, keg_version, keg_path = homebrew
+        properties.append(Property(name="internal:homebrew_formula", value=formula))
+        if version:
+            properties.append(Property(name="internal:linked_current_version", value=version))
+        if compatibility_version:
+            properties.append(
+                Property(name="internal:compatibility_version", value=compatibility_version)
+            )
+        version = purl_field(keg_version)
+        purl = PackageURL(
+            type="generic",
+            name=formula,
+            version=version,
+            qualifiers={"package_manager": "homebrew"},
+            subpath=keg_path or None,
+        ).to_string()
+    else:
+        qualifiers = {}
+        if compatibility_version:
+            qualifiers["compatibility_version"] = compatibility_version
+        purl = PackageURL(
+            type="file", name=name, version=version, qualifiers=qualifiers
+        ).to_string()
     comp = Component(
         type=Type.library,
         name=name,

@@ -11,6 +11,7 @@ from packageurl import PackageURL
 from blint.lib.sbom import (
     create_library_component,
     default_parent,
+    homebrew_install_identity,
     purl_field,
 )
 
@@ -47,6 +48,68 @@ def test_create_library_component_tolerates_missing_versions():
     component = create_library_component({"name": "/usr/lib/libutil.dylib"}, "/bin/ls")
     assert component.purl.startswith("pkg:file/libutil.dylib")
     assert PackageURL.from_string(component.purl).version is None
+
+
+def _properties(component) -> dict:
+    return {p.name: p.value for p in component.properties}
+
+
+def test_homebrew_opt_install_name_names_the_formula_without_a_version():
+    """Homebrew node links /opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib.
+
+    The opt link names the formula but not what is installed, and the
+    dylib's current_version is only what the binary was linked against, so
+    the version stays out of the purl and rides a property.
+    """
+    component = create_library_component(
+        {
+            "name": "/opt/homebrew/opt/brotli/lib/libbrotlidec.1.dylib",
+            "version": "1.2.0",
+            "compatibility_version": "1.0.0",
+        },
+        "/opt/homebrew/Cellar/node/26.11.1_1/bin/node",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.type, purl.name, purl.version) == ("generic", "brotli", None)
+    assert purl.qualifiers == {"package_manager": "homebrew"}
+    assert purl.subpath == "lib/libbrotlidec.1.dylib"
+    assert component.name == "libbrotlidec.1.dylib"
+    assert component.version is None
+    properties = _properties(component)
+    assert properties["internal:homebrew_formula"] == "brotli"
+    assert properties["internal:linked_current_version"] == "1.2.0"
+    assert properties["internal:compatibility_version"] == "1.0.0"
+
+
+def test_homebrew_cellar_install_name_carries_the_keg_version():
+    component = create_library_component(
+        {"name": "/usr/local/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib", "version": "3.0.0"},
+        "/usr/local/bin/curl",
+    )
+    purl = PackageURL.from_string(component.purl)
+    assert (purl.name, purl.version, purl.subpath) == ("openssl@3", "3.6.3", "lib/libssl.3.dylib")
+    assert component.version.root == "3.6.3"
+    assert _properties(component)["internal:linked_current_version"] == "3.0.0"
+
+
+def test_homebrew_dylibs_of_one_formula_keep_distinct_refs():
+    refs = {
+        create_library_component({"name": f"/opt/homebrew/opt/brotli/lib/{lib}"}, "/x").bom_ref.root
+        for lib in ("libbrotlidec.1.dylib", "libbrotlienc.1.dylib")
+    }
+    assert len(refs) == 2
+
+
+def test_homebrew_install_identity_ignores_other_prefixes():
+    assert homebrew_install_identity("/usr/lib/libSystem.B.dylib") is None
+    assert homebrew_install_identity("/usr/local/lib/libfoo.dylib") is None
+    assert homebrew_install_identity("@rpath/libbrotlidec.1.dylib") is None
+    assert homebrew_install_identity("/opt/homebrew/opt/brotli") is None
+    assert homebrew_install_identity("/opt/homebrew/Cellar/brotli/1.2.0/lib/x.dylib") == (
+        "brotli",
+        "1.2.0",
+        "lib/x.dylib",
+    )
 
 
 def test_default_parent_still_finds_a_build_bom_identity_for_a_dll():

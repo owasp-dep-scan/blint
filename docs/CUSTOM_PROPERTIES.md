@@ -211,6 +211,16 @@ These properties come from `blint.lib.embedded_ident`, which identifies embedded
 
 The .NET component carries a version only when an exact source names it: the PE `ProductVersion` resource, or a `<major>.<minor>.<patch>` string that agrees with the stamped file version (`libcoreclr`, `libhostfxr` and `libhostpolicy` carry one). Libraries with only the stamp, such as `libSystem.IO.Compression.Native`, stay versionless and record the stamp instead.
 
+## Homebrew library properties
+
+A Mach-O library linked from a Homebrew prefix (`/opt/homebrew/` or `/usr/local/`) is named after its formula rather than its file: `pkg:generic/<formula>[@<version>]?package_manager=homebrew#<path inside the keg>`, the identity blintdb's Homebrew rows use. Only a Cellar install name (`<prefix>/Cellar/<formula>/<version>/...`) carries the installed keg version. The usual opt link (`<prefix>/opt/<formula>/...`) names the formula but not its version, so the purl stays versionless; the dylib's `current_version` in the load command is the version the binary was linked against, not what is installed now, and is kept as a property. Other dylibs keep their `pkg:file` purl.
+
+| Property                            | Value type   | When emitted                                  | What it captures                                                                                  |
+| ----------------------------------- | ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `internal:homebrew_formula`         | single value | On library components under a Homebrew prefix | The formula the install name points into, for example `brotli` or `openssl@3`.                    |
+| `internal:linked_current_version`   | single value | On Homebrew library components                | The `current_version` the load command recorded: the library version at link time.                |
+| `internal:compatibility_version`    | single value | On Homebrew library components                | The `compatibility_version` from the load command (a purl qualifier on `pkg:file` dylibs instead). |
+
 ## ELF ABI and runtime dependency properties
 
 These properties come from the ELF ABI analysis. Most sit on the parent component and describe the binary as a whole. The last three sit on the library components recovered for runtime-loaded dependencies. See [`abi_analysis`](METADATA.md#abi_analysis) for how the values are derived.
