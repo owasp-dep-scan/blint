@@ -4,7 +4,7 @@
 
 The OWASP dep-scan team and community take security bugs seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
 
-To report a security issue, email [team@appthreat.com](mailto:team@appthreat.com) and include the word **"SECURITY"** in the subject line.
+To report a security issue, email [cloud@appthreat.com](mailto:cloud@appthreat.com) and include the word **"SECURITY"** in the subject line.
 
 The OWASP dep-scan team will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
 
@@ -91,8 +91,8 @@ When unsure, report privately with a minimal reproducer and impact narrative.
 
 Security fixes are supported for the most recent two tagged versions:
 
-- latest stable release (for example `v4.0.0` at the time of writing)
-- previous (`v3.4.0` which is the previous release at the time of writing)
+- latest stable release (`v4.0.1` at the time of writing)
+- previous (`v4.0.0`)
 
 Older versions may not receive security fixes. Please upgrade before reporting if
 you are running a release older than the two versions listed above.
