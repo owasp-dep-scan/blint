@@ -409,13 +409,41 @@ def test_decode_pointer_string_reads_wide_strings():
         decode_pointer_string("/etc/passwd".encode("utf-16-le") + b"\x00\x00" + trailing)
         == "/etc/passwd"
     )
-    # No terminator in the window: the even prefix is read, as the ASCII path
-    # reads an unterminated run, and a trailing odd byte is dropped.
-    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00") == "abcd"
-    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00e") == "abcd"
+    # No terminator in the window: nothing is read, in either encoding. The
+    # pointer read is a fixed-size window, and bytes that never show a
+    # terminator do not say where the literal ends; a trailing odd byte
+    # cannot change that.
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00") is None
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00e") is None
     # A \x00\x00 straddling odd offsets is data, not a terminator: the pairs
     # around it decode to non-text and the whole run is rejected.
     assert decode_pointer_string(b"a\x00b\x00c\x00\x00d\x00e\x00f\x00") is None
+
+
+def test_decode_pointer_string_rejects_a_window_without_any_nul():
+    """The ubuntu-latest failure of issue 276, pinned as bytes.
+
+    The runner's /bin/ls became the Rust (uutils) coreutils build, whose
+    rodata packs literals back to back with no NUL terminators, so a pointer
+    into that run reads a window of printable bytes with no NUL anywhere.
+    Reading the whole window spliced every literal it crossed into one
+    value, which the real-image test in test_pointer_materialisation.py
+    exposed as a byte that was not the NUL the string ended on.
+    """
+    window = (
+        b"No such file or directory"
+        b"cp-error-cannot-statcp-error-cannot-create-special-file"
+        b"LiteralMaybeOpenDoubleCloseKeyAlignWidthFirstStyle"
+        b"cp-debug-enum-yescp-debug-enum-avoidedTemplateErrorstate"
+        b"Too many levels of symbolic linkssystem.posix_acl_access"
+        b"system.posix_a"
+    )
+    assert b"\x00" not in window
+    assert decode_pointer_string(window + b"c" * 64) is None
+    # The same bytes with a terminator present resolve to exactly what the
+    # image holds, however much unrelated text follows.
+    terminated = window + b"\x00next literal"
+    assert decode_pointer_string(terminated) == window.decode("ascii")
 
 
 def test_decode_pointer_string_minimum_stays_a_character_count():
@@ -459,7 +487,7 @@ def test_decode_pointer_string_encodings_are_mutually_exclusive():
     # Pure ASCII: the wide reading of the same bytes is CJK and loses.
     assert decode_pointer_string(b"abcdefgh\x00") == "abcdefgh"
     # Zero-padded: the ASCII reading truncates to one character, wide wins.
-    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00") == "abcd"
+    assert decode_pointer_string(b"a\x00b\x00c\x00d\x00\x00\x00") == "abcd"
 
 
 def test_driver_codes_fall_back_when_the_block_is_absent_or_truncated():
