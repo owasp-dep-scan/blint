@@ -1,0 +1,25 @@
+blint/lib/absint.py
+  s_bdc23528ba9124::t_76635b98be949a 3243,3248-3250,3256
+  s_bdc23528ba9124::t_06ce0d261d871c 3284-3290,3300-3301,3304-3306
+tests/test_callsite_block.py
+  s_bdc23528ba9124::t_b83138ca11efed 423-428,432-448
+  s_bdc23528ba9124::t_8eda6aae5f6111 412-417
+  s_bdc23528ba9124::t_cc851d266adcce 490
+  s_bdc23528ba9124::t_3f9f7407660453 429-431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cbde2bc2d80e83484a11e37cf6eaf69347946574",
+  "prompts": {},
+  "sessions": {
+    "s_bdc23528ba9124": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_e47dbef9-14cb-417b-8791-d8bc73211171",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
