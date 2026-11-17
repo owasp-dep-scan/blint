@@ -3240,20 +3240,20 @@ MAX_NAMED_CAPPED_FUNCTIONS = 20
 MIN_PLAIN_POINTER_VALUE = 0x10000
 
 
-def _wide_terminated_prefix(data: bytes) -> bytes:
+def _wide_terminated_prefix(data: bytes) -> bytes | None:
     """Return the bytes up to the first aligned UTF-16 NUL terminator.
 
     Pairs are formed from the first byte of the run, so the terminator is a
     ``\\x00\\x00`` at an even offset — the same bytes straddling odd offsets
-    are data, not a terminator. A run with no terminator yields its
-    even-length prefix: a trailing odd byte cannot be half of a character,
-    which is :func:`_decode_one`'s rule for the same situation.
+    are data, not a terminator. A run with no terminator anywhere yields
+    None: nothing in the bytes says where the literal ends, so there is no
+    prefix to vouch for.
     """
     end = len(data) - (len(data) % 2)
     for i in range(0, end, 2):
         if data[i] == 0 and data[i + 1] == 0:
             return data[:i]
-    return data[:end]
+    return None
 
 
 def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
@@ -3281,6 +3281,13 @@ def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
     ASCII string's NUL — or a lone surrogate after a wide string's — would
     veto an otherwise valid reading. Returns None when the bytes do not read
     as text in either encoding.
+
+    A run whose terminator never appears inside the window is rejected in
+    both encodings. Bytes without a NUL are not evidence of where a string
+    ends, and reading the whole window would manufacture one: Rust binaries
+    pack rodata literals back to back with no terminators (the length lives
+    in a register), and a C string longer than the window would be reported
+    as a false prefix. Both stay unresolved rather than misnamed.
     """
     if not data:
         return None
@@ -3290,9 +3297,13 @@ def decode_pointer_string(data: bytes, min_length: int = 4) -> str | None:
             if len(data) < min_length * 2:
                 continue
             usable = _wide_terminated_prefix(data)
+            if usable is None:
+                continue
         else:
             nul = data.find(b"\x00")
-            usable = data if nul == -1 else data[:nul]
+            if nul == -1:
+                continue
+            usable = data[:nul]
         try:
             text = usable.decode(encoding)
         except (UnicodeDecodeError, ValueError):
