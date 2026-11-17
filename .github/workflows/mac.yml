@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             binary_name: blint-darwin-arm64
           - os: macos-15-intel
             binary_name: blint-darwin-amd64
