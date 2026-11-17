@@ -1,0 +1,19 @@
+.github/workflows/mac.yml
+  s_bdc23528ba9124::t_0daaf9a06fed1d 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "da88985e030cf5f93d343a268ba95bcf6779ab92",
+  "prompts": {},
+  "sessions": {
+    "s_bdc23528ba9124": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_e47dbef9-14cb-417b-8791-d8bc73211171",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
