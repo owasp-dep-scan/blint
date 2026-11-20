@@ -145,6 +145,13 @@ def _wasm_function_offset(fn: dict) -> int | None:
     return None
 
 
+def _wasm_module_id(value: Any) -> int | None:
+    """Returns a core module id from a 2.2 report, or None when it has none."""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
 def parse_wasm_metadata(
     exe_file: str,
     metadata: dict,
@@ -355,9 +362,13 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     outranks natives: the target of an import edge is named exactly by the
     module, not attributed from evidence, so it stays high.
 
-    For multi-core-module components the wasm-tools graph itself is approximate
-    (per-module index spaces may collide), so this conversion inherits that
-    limitation rather than adding one.
+    wasm-tools 2.2 reports a component's core modules as separate graphs whose
+    nodes carry ``module_id`` and whose edges carry ``from_module`` and
+    ``to_module``. When module ids are present, nodes, import names, addresses
+    and edges are keyed by (module id, index), and node names read
+    ``module[<id>]::<name>`` so same-named functions of different core modules
+    stay apart. Core modules and wasm-tools 2.1 reports have one index space
+    and are converted exactly as before.
 
     Args:
         wasm_report: The full wasm_tools parser report.
@@ -376,6 +387,16 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     if not wasm_nodes:
         return {}
 
+    # wasm-tools 2.2 keeps each core module of a component as its own graph and
+    # tags nodes with ``module_id``. An index is only meaningful together with
+    # that id, so every lookup below is keyed by (module id, index). Core
+    # modules and 2.1 reports carry no module ids and keep a single index
+    # space, which the None module id stands for.
+    scoped = any(_wasm_module_id(node.get("module_id")) is not None for node in wasm_nodes)
+
+    def scope(module_id: Any, index: Any) -> tuple[int | None, Any]:
+        return (_wasm_module_id(module_id) if scoped else None, index)
+
     # ADDRESS_FMT keeps these node addresses identical to the ones in
     # metadata["functions"], so a node can be cross-referenced by string match.
     addresses = {}
@@ -383,13 +404,22 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
         if isinstance(fn, dict) and isinstance(fn.get("index"), int):
             offset = _wasm_function_offset(fn)
             if offset is not None:
-                addresses[fn["index"]] = ADDRESS_FMT.format(offset).strip()
+                addresses[scope(fn.get("core_module"), fn["index"])] = ADDRESS_FMT.format(
+                    offset
+                ).strip()
 
-    imported_names: dict[int, str] = {}
+    imported_names: dict[tuple[int | None, Any], str] = {}
     nodes: list[dict[str, Any]] = []
-    index_to_id: dict[int, int] = {}
-    for wasm_node in sorted(wasm_nodes, key=lambda node: node["index"]):
+    index_to_id: dict[tuple[int | None, Any], int] = {}
+    for wasm_node in sorted(
+        wasm_nodes,
+        key=lambda node: (
+            -1 if (mid := scope(node.get("module_id"), 0)[0]) is None else mid,
+            node["index"],
+        ),
+    ):
         index = wasm_node["index"]
+        key = scope(wasm_node.get("module_id"), index)
         name = demangle_symbolic_name(str(wasm_node.get("name") or "")).strip() or f"func[{index}]"
         if wasm_node.get("imported"):
             # Match the "module::name" form used for wasm imports in
@@ -397,10 +427,13 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
             # import table.
             module = str(wasm_node.get("module") or "")
             import_name = demangle_symbolic_name(str(wasm_node.get("import_name") or ""))
-            imported_names[index] = f"{module}::{import_name}" if module or import_name else name
+            imported_names[key] = f"{module}::{import_name}" if module or import_name else name
             continue
-        address = addresses.get(index, "")
-        index_to_id[index] = len(nodes)
+        if key[0] is not None:
+            # Same-named functions of different core modules stay apart.
+            name = f"module[{key[0]}]::{name}"
+        address = addresses.get(key, "")
+        index_to_id[key] = len(nodes)
         nodes.append(
             {
                 "id": len(nodes),
@@ -419,15 +452,15 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     for edge in wasm_graph.get("edges") or []:
         if not isinstance(edge, dict):
             continue
-        src = index_to_id.get(edge.get("from"))
+        src = index_to_id.get(scope(edge.get("from_module"), edge.get("from")))
         if src is None:
             continue
         kind = str(edge.get("kind") or "direct")
-        dst_index = edge.get("to")
-        dst = index_to_id.get(dst_index)
+        dst_key = scope(edge.get("to_module"), edge.get("to"))
+        dst = index_to_id.get(dst_key)
         if dst is not None:
             edge_counts[(src, dst, kind)] += 1
-        elif target := imported_names.get(dst_index):
+        elif target := imported_names.get(dst_key):
             reason = "import" if kind == "direct" else f"import:{kind}"
             external_counts[(src, target, reason)] += 1
 
