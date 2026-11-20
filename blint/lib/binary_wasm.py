@@ -367,8 +367,10 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     ``to_module``. When module ids are present, nodes, import names, addresses
     and edges are keyed by (module id, index), and node names read
     ``module[<id>]::<name>`` so same-named functions of different core modules
-    stay apart. Core modules and wasm-tools 2.1 reports have one index space
-    and are converted exactly as before.
+    stay apart. Synthetic ``component:type<N>`` nodes and their ``canon`` edges
+    are not host imports: the node is never an ``external`` target, and the
+    core function a canon edge lifts is marked ``exported``. Core modules and wasm-tools 2.1 reports have one
+    index space and are converted exactly as before.
 
     Args:
         wasm_report: The full wasm_tools parser report.
@@ -408,6 +410,21 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
                     offset
                 ).strip()
 
+    # wasm-tools 2.2 adds synthetic ``component:type<N>`` nodes that stand for
+    # a canon lift and point at the core function it exports. They are not
+    # host functions, so they never become external targets. The fact the
+    # edge carries is kept by marking the lifted core function as exported.
+    synthetic_keys = {
+        scope(node.get("module_id"), node["index"]) for node in wasm_nodes if node.get("synthetic")
+    }
+    lifted_keys = {
+        scope(edge.get("to_module"), edge.get("to"))
+        for edge in wasm_graph.get("edges") or []
+        if isinstance(edge, dict)
+        and edge.get("kind") == "canon"
+        and scope(edge.get("from_module"), edge.get("from")) in synthetic_keys
+    }
+
     imported_names: dict[tuple[int | None, Any], str] = {}
     nodes: list[dict[str, Any]] = []
     index_to_id: dict[tuple[int | None, Any], int] = {}
@@ -421,6 +438,8 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
         index = wasm_node["index"]
         key = scope(wasm_node.get("module_id"), index)
         name = demangle_symbolic_name(str(wasm_node.get("name") or "")).strip() or f"func[{index}]"
+        if wasm_node.get("synthetic"):
+            continue
         if wasm_node.get("imported"):
             # Match the "module::name" form used for wasm imports in
             # metadata["dynamic_symbols"] so external targets line up with the
@@ -440,7 +459,7 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
                 "key": f"{address}::{name}" if address else name,
                 "name": name,
                 "address": address,
-                "exported": bool(wasm_node.get("exported")),
+                "exported": bool(wasm_node.get("exported")) or key in lifted_keys,
             }
         )
 

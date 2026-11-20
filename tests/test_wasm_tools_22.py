@@ -155,3 +155,35 @@ def test_21_shaped_component_report_keeps_integer_keys(component):
     assert all("module[" not in node["name"] for node in callgraph["nodes"])
     # With one flattened index space, index 0 is the last import seen.
     assert callgraph["node_count"] == 6
+
+
+def test_synthetic_nodes_are_never_external_targets(component):
+    report = copy.deepcopy(component)
+    # A defined function calling the synthetic node must not produce an
+    # external edge either.
+    report["call_graph"]["edges"].append(
+        {"from": 1, "from_module": 0, "to": 10000001, "to_module": None, "kind": "direct"}
+    )
+    callgraph = build_wasm_callgraph(report)
+    assert callgraph["external"] == []
+    assert callgraph["edges"] == []
+    assert not any("component:type" in node["name"] for node in callgraph["nodes"])
+
+
+def test_canon_lift_target_is_marked_exported(component):
+    report = copy.deepcopy(component)
+    for node in report["call_graph"]["nodes"]:
+        node["exported"] = False
+    callgraph = build_wasm_callgraph(report)
+    exported = {node["name"] for node in callgraph["nodes"] if node["exported"]}
+    # The two canon edges lift module 0 functions 1 and 3 (run and run2).
+    assert exported == {"module[0]::cm32p2||run", "module[0]::cm32p2||run2"}
+
+
+def test_canon_edges_do_not_change_21_shaped_output(component):
+    """Without synthetic nodes there is nothing to mark, so exported stays as reported."""
+    report = as_21_report(component)
+    for node in report["call_graph"]["nodes"]:
+        node["exported"] = False
+    callgraph = build_wasm_callgraph(report)
+    assert not any(node["exported"] for node in callgraph["nodes"])
