@@ -1,0 +1,24 @@
+tests/test_wasm_tools_22.py
+  s_7318da1b9edd46::t_f62a14632d7a57 83-157
+blint/lib/binary_wasm.py
+  s_7318da1b9edd46::t_f62a14632d7a57 417
+  s_7318da1b9edd46::t_32576e87f245ea 148-154,365-371,390-399,407-409,411,413-416,418-420,422,430,432-436,455,459-460,463
+tests/test_binary.py
+  s_7318da1b9edd46::t_81be3cf1607b2c 1713-1717,1727-1733,1735
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "222e5f75f90de6852ea546187d31c4497543156d",
+  "prompts": {},
+  "sessions": {
+    "s_7318da1b9edd46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4cd02e-10f8-411b-a4d1-40ff6af5049b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
