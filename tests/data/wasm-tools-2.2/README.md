@@ -7,7 +7,8 @@ Each file was written from the module of the same name in `tests/data` with
 the `feature/2.2.0-roadmap` branch of wasm-tools (reports `2.2.0`):
 
     from wasm_tools.api import parse_wasm_file
-    report = parse_wasm_file(path, include_strings=True, include_call_graph=True)
+    report = parse_wasm_file(path, include_strings=True, include_call_graph=True,
+                             include_instructions=False)
     report["file"] = os.path.basename(path)
     json.dump(report, fh, indent=1, sort_keys=True)
 

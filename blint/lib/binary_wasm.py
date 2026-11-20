@@ -394,8 +394,9 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     ``module[<id>]::<name>`` so same-named functions of different core modules
     stay apart. Synthetic ``component:type<N>`` nodes and their ``canon`` edges
     are not host imports: the node is never an ``external`` target, and the
-    core function a canon edge lifts is marked ``exported``. Core modules and wasm-tools 2.1 reports have one
-    index space and are converted exactly as before.
+    core function a canon edge lifts is marked ``exported``. Core modules and
+    wasm-tools 2.1 reports have one index space and are converted exactly as
+    before.
 
     Args:
         wasm_report: The full wasm_tools parser report.

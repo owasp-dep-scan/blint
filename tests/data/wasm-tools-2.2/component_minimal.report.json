@@ -86,292 +86,25 @@
   },
   "features": {
    "derived": {
-    "avg_instructions_per_function": 14.5,
-    "branch_density": 0.069,
-    "call_op_ratio": 0.069,
+    "avg_instructions_per_function": 0.0,
+    "branch_density": 0.0,
+    "call_op_ratio": 0.0,
     "code_section_share": 0.0,
     "data_section_share": 0.0,
     "exported_function_count": 1,
     "f64_arith_ratio": 0.0,
     "function_count": 2,
-    "indirect_call_ratio": 0.0345,
-    "loop_function_ratio": 0.5,
-    "mem_op_ratio": 0.069,
+    "indirect_call_ratio": 0.0,
+    "loop_function_ratio": 0.0,
+    "mem_op_ratio": 0.0,
     "simd_ratio": 0.0
    },
-   "distinct_opcodes": 15,
-   "histogram_total": 29,
-   "ngram_top": [
-    {
-     "count": 2,
-     "gram": "local.get|local.get",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "block|loop",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "block|loop|local.get",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "br_if|local.get",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "br_if|local.get|i32.const",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "br|end",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "br|end|end",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "call_indirect|end",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "call|local.set",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "call|local.set|block",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "end|end",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "end|end|i32.const",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "end|i32.const",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "end|i32.const|local.get",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.add|end",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|call_indirect",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|call_indirect|end",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.const",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.const|call_indirect",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.load",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.load|i32.const",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.sub",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|i32.sub|local.set",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|local.get",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.const|local.get|i32.store",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.eqz|br_if",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.eqz|br_if|local.get",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.load|i32.const",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.load|i32.const|i32.const",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.store|i32.const",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.store|i32.const|i32.load",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "i32.sub|local.set",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "i32.sub|local.set|br",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|call",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.get|call|local.set",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.add",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.add|end",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.const",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.const|i32.sub",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.eqz",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.eqz|br_if",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.store",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.get|i32.store|i32.const",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|local.get|call",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.get|local.get|i32.add",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.set|block",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.set|block|loop",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "local.set|br",
-     "n": 2
-    },
-    {
-     "count": 1,
-     "gram": "local.set|br|end",
-     "n": 3
-    },
-    {
-     "count": 1,
-     "gram": "loop|local.get",
-     "n": 2
-    }
-   ],
-   "opcode_histogram": {
-    "block": 1,
-    "br": 1,
-    "br_if": 1,
-    "call": 1,
-    "call_indirect": 1,
-    "end": 4,
-    "i32.add": 1,
-    "i32.const": 5,
-    "i32.eqz": 1,
-    "i32.load": 1,
-    "i32.store": 1,
-    "i32.sub": 1,
-    "local.get": 7,
-    "local.set": 2,
-    "loop": 1
-   },
+   "distinct_opcodes": 0,
+   "histogram_total": 0,
+   "ngram_top": [],
+   "opcode_histogram": {},
    "prefix_counts": {
-    "core": 29,
+    "core": 0,
     "fb": 0,
     "fc": 0,
     "fd": 0,
@@ -381,15 +114,15 @@
   "findings": [],
   "profiles": {
    "compute": {
-    "loop_branch_ops": 2,
+    "loop_branch_ops": 0,
     "loop_memory_ops": 0,
-    "max_loop_depth": 1
+    "max_loop_depth": 0
    },
    "control_flow": {
     "call_ref_unguarded_ops": 0,
     "callsite_conversion_ops": 0,
     "export_reachable_functions": 2,
-    "indirect_call_ops": 1,
+    "indirect_call_ops": 0,
     "table_mutation_ops": 0,
     "unreachable_functions": 0
    },
@@ -397,7 +130,7 @@
     "bulk_memory_ops": 0,
     "data_segment_total_bytes": 12,
     "loop_memory_grow_ops": 0,
-    "memory_access_ops": 2,
+    "memory_access_ops": 0,
     "memory_grow_ops": 0
    }
   },
@@ -1029,32 +762,8 @@
       },
       "index": 0,
       "instruction_count": 4,
-      "instructions": [
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 73,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [
-         1
-        ],
-        "offset": 75,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [],
-        "offset": 77,
-        "opcode": "i32.add"
-       },
-       {
-        "immediates": [],
-        "offset": 78,
-        "opcode": "end"
-       }
-      ],
+      "instructions": [],
+      "instructions_omitted": true,
       "name": "",
       "offset": 70,
       "signature_index": 0
@@ -1086,176 +795,8 @@
       },
       "index": 1,
       "instruction_count": 25,
-      "instructions": [
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 83,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [
-         1
-        ],
-        "offset": 85,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 87,
-        "opcode": "call"
-       },
-       {
-        "immediates": [
-         2
-        ],
-        "offset": 89,
-        "opcode": "local.set"
-       },
-       {
-        "immediates": [
-         -64
-        ],
-        "offset": 91,
-        "opcode": "block"
-       },
-       {
-        "immediates": [
-         -64
-        ],
-        "offset": 93,
-        "opcode": "loop"
-       },
-       {
-        "immediates": [
-         2
-        ],
-        "offset": 95,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [],
-        "offset": 97,
-        "opcode": "i32.eqz"
-       },
-       {
-        "immediates": [
-         1
-        ],
-        "offset": 98,
-        "opcode": "br_if"
-       },
-       {
-        "immediates": [
-         2
-        ],
-        "offset": 100,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [
-         1
-        ],
-        "offset": 102,
-        "opcode": "i32.const"
-       },
-       {
-        "immediates": [],
-        "offset": 104,
-        "opcode": "i32.sub"
-       },
-       {
-        "immediates": [
-         2
-        ],
-        "offset": 105,
-        "opcode": "local.set"
-       },
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 107,
-        "opcode": "br"
-       },
-       {
-        "immediates": [],
-        "offset": 109,
-        "opcode": "end"
-       },
-       {
-        "immediates": [],
-        "offset": 110,
-        "opcode": "end"
-       },
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 111,
-        "opcode": "i32.const"
-       },
-       {
-        "immediates": [
-         2
-        ],
-        "offset": 113,
-        "opcode": "local.get"
-       },
-       {
-        "immediates": [
-         1,
-         0
-        ],
-        "offset": 115,
-        "opcode": "i32.store"
-       },
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 118,
-        "opcode": "i32.const"
-       },
-       {
-        "immediates": [
-         1,
-         0
-        ],
-        "offset": 120,
-        "opcode": "i32.load"
-       },
-       {
-        "immediates": [
-         1
-        ],
-        "offset": 123,
-        "opcode": "i32.const"
-       },
-       {
-        "immediates": [
-         0
-        ],
-        "offset": 125,
-        "opcode": "i32.const"
-       },
-       {
-        "immediates": [
-         0,
-         0
-        ],
-        "offset": 127,
-        "opcode": "call_indirect"
-       },
-       {
-        "immediates": [],
-        "offset": 130,
-        "opcode": "end"
-       }
-      ],
+      "instructions": [],
+      "instructions_omitted": true,
       "local_decls": [
        [
         1,
@@ -1515,7 +1056,7 @@
    "body_size": 7,
    "core_module": 0,
    "features": {
-    "body_hash": "sha256:ed257164338b215f8e593cb2646ed74478f1eec212fe734ff84aca47f59cd65a",
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "br_table_count": 0,
     "calls_imported_functions": false,
     "const_branch_density": 0.0,
@@ -1532,38 +1073,14 @@
     "has_table_mutation": false,
     "has_tail_call": false,
     "imported_callees": 0,
-    "instruction_count": 4,
+    "instruction_count": 0,
     "max_br_table_targets_in_loop": 0,
     "max_loop_depth": 0
    },
    "index": 0,
    "instruction_count": 4,
-   "instructions": [
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 73,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [
-      1
-     ],
-     "offset": 75,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [],
-     "offset": 77,
-     "opcode": "i32.add"
-    },
-    {
-     "immediates": [],
-     "offset": 78,
-     "opcode": "end"
-    }
-   ],
+   "instructions": [],
+   "instructions_omitted": true,
    "name": "",
    "offset": 70,
    "signature_index": 0
@@ -1573,199 +1090,31 @@
    "body_size": 51,
    "core_module": 0,
    "features": {
-    "body_hash": "sha256:93a3ae14aad466670d7f7022b59fc471d91c7b9526a435c0a1b74b01ed1236a6",
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "br_table_count": 0,
     "calls_imported_functions": false,
     "const_branch_density": 0.0,
     "has_atomics": false,
     "has_bulk_memory": false,
     "has_call_ref": false,
-    "has_direct_call": true,
+    "has_direct_call": false,
     "has_exceptions": false,
     "has_gc_ops": false,
-    "has_indirect_call": true,
-    "has_loop": true,
+    "has_indirect_call": false,
+    "has_loop": false,
     "has_memory_grow": false,
     "has_simd": false,
     "has_table_mutation": false,
     "has_tail_call": false,
     "imported_callees": 0,
-    "instruction_count": 25,
+    "instruction_count": 0,
     "max_br_table_targets_in_loop": 0,
-    "max_loop_depth": 1
+    "max_loop_depth": 0
    },
    "index": 1,
    "instruction_count": 25,
-   "instructions": [
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 83,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [
-      1
-     ],
-     "offset": 85,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 87,
-     "opcode": "call"
-    },
-    {
-     "immediates": [
-      2
-     ],
-     "offset": 89,
-     "opcode": "local.set"
-    },
-    {
-     "immediates": [
-      -64
-     ],
-     "offset": 91,
-     "opcode": "block"
-    },
-    {
-     "immediates": [
-      -64
-     ],
-     "offset": 93,
-     "opcode": "loop"
-    },
-    {
-     "immediates": [
-      2
-     ],
-     "offset": 95,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [],
-     "offset": 97,
-     "opcode": "i32.eqz"
-    },
-    {
-     "immediates": [
-      1
-     ],
-     "offset": 98,
-     "opcode": "br_if"
-    },
-    {
-     "immediates": [
-      2
-     ],
-     "offset": 100,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [
-      1
-     ],
-     "offset": 102,
-     "opcode": "i32.const"
-    },
-    {
-     "immediates": [],
-     "offset": 104,
-     "opcode": "i32.sub"
-    },
-    {
-     "immediates": [
-      2
-     ],
-     "offset": 105,
-     "opcode": "local.set"
-    },
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 107,
-     "opcode": "br"
-    },
-    {
-     "immediates": [],
-     "offset": 109,
-     "opcode": "end"
-    },
-    {
-     "immediates": [],
-     "offset": 110,
-     "opcode": "end"
-    },
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 111,
-     "opcode": "i32.const"
-    },
-    {
-     "immediates": [
-      2
-     ],
-     "offset": 113,
-     "opcode": "local.get"
-    },
-    {
-     "immediates": [
-      1,
-      0
-     ],
-     "offset": 115,
-     "opcode": "i32.store"
-    },
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 118,
-     "opcode": "i32.const"
-    },
-    {
-     "immediates": [
-      1,
-      0
-     ],
-     "offset": 120,
-     "opcode": "i32.load"
-    },
-    {
-     "immediates": [
-      1
-     ],
-     "offset": 123,
-     "opcode": "i32.const"
-    },
-    {
-     "immediates": [
-      0
-     ],
-     "offset": 125,
-     "opcode": "i32.const"
-    },
-    {
-     "immediates": [
-      0,
-      0
-     ],
-     "offset": 127,
-     "opcode": "call_indirect"
-    },
-    {
-     "immediates": [],
-     "offset": 130,
-     "opcode": "end"
-    }
-   ],
+   "instructions": [],
+   "instructions_omitted": true,
    "local_decls": [
     [
      1,
