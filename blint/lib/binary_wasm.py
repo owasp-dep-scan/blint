@@ -131,6 +131,20 @@ def trim_wasm_instruction_streams(report: dict) -> int:
     return dropped_total
 
 
+def _wasm_function_offset(fn: dict) -> int | None:
+    """Returns the file offset to report as a function's address.
+
+    wasm-tools 2.2 adds ``body_offset``, the offset of the body itself. The
+    older ``offset`` is the parser position before the body size and the local
+    declarations, so it is only used when a 2.1 report has no ``body_offset``.
+    """
+    for key in ("body_offset", "offset"):
+        value = fn.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
 def parse_wasm_metadata(
     exe_file: str,
     metadata: dict,
@@ -275,7 +289,7 @@ def parse_wasm_metadata(
         {
             "index": fn.get("index"),
             "name": demangle_symbolic_name(str(fn.get("name", ""))),
-            "address": ADDRESS_FMT.format(int(fn.get("offset", 0))).strip(),
+            "address": ADDRESS_FMT.format(_wasm_function_offset(fn) or 0).strip(),
             "size": fn.get("body_size", 0),
             "instruction_count": fn.get("instruction_count", 0),
         }
@@ -367,8 +381,8 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     addresses = {}
     for fn in (wasm_report or {}).get("functions") or []:
         if isinstance(fn, dict) and isinstance(fn.get("index"), int):
-            offset = fn.get("offset")
-            if isinstance(offset, int) and offset >= 0:
+            offset = _wasm_function_offset(fn)
+            if offset is not None:
                 addresses[fn["index"]] = ADDRESS_FMT.format(offset).strip()
 
     imported_names: dict[int, str] = {}
