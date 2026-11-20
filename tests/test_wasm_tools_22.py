@@ -113,9 +113,7 @@ def test_same_index_in_two_modules_does_not_collide(component):
     ]
     callgraph = build_wasm_callgraph(report)
     ids = {node["name"]: node["id"] for node in callgraph["nodes"]}
-    targets = {
-        (item["src"], item["target"]) for item in callgraph["external"]
-    }
+    targets = {(item["src"], item["target"]) for item in callgraph["external"]}
     assert (ids["module[0]::cm32p2||run"], "cm32p2::x") in targets
     assert (ids["module[0]::cm32p2||run_post"], "main::cm32p2_initialize") in targets
 
@@ -135,9 +133,9 @@ def test_defined_functions_in_two_modules_stay_apart(component):
     assert "module[0]::cm32p2||run" in names and "module[1]::cm32p2||run" in names
     module_one = next(n for n in callgraph["nodes"] if n["name"] == "module[1]::cm32p2||run")
     assert module_one["address"] == ""
-    assert {
-        (item["src"], item["target"]) for item in callgraph["external"]
-    } == {(module_one["id"], "main::cm32p2_initialize")}
+    assert {(item["src"], item["target"]) for item in callgraph["external"]} == {
+        (module_one["id"], "main::cm32p2_initialize")
+    }
 
 
 def test_core_module_graph_is_unchanged_by_module_support():
@@ -187,3 +185,48 @@ def test_canon_edges_do_not_change_21_shaped_output(component):
         node["exported"] = False
     callgraph = build_wasm_callgraph(report)
     assert not any(node["exported"] for node in callgraph["nodes"])
+
+
+def test_parser_crash_is_reported_as_parser_failure(monkeypatch, caplog):
+    def crash(*_args, **_kwargs):
+        raise TypeError("unhashable type: 'dict'")
+
+    monkeypatch.setattr(wasm_module, "parse_wasm_file", crash)
+    monkeypatch.setattr(wasm_module.importlib.metadata, "version", lambda _name: "9.9.9")
+    wasm_module.LOG.propagate = True
+    with caplog.at_level(logging.DEBUG, logger=wasm_module.LOG.name):
+        metadata = parse_wasm_metadata("sample.wasm", {})
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "TypeError" in warnings[0].getMessage() and "9.9.9" in warnings[0].getMessage()
+    assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
+    assert metadata["binary_type"] == "WASM"
+    assert len(metadata["errors"]) == 1
+    assert "wasm-tools parser (version 9.9.9) failed" in metadata["errors"][0]
+    assert "Failed to parse wasm file" not in metadata["errors"][0]
+
+
+@pytest.mark.parametrize("exc", [AttributeError("x"), ValueError("bad")])
+def test_parser_crash_survives_missing_version(monkeypatch, exc):
+    def missing(_name):
+        raise wasm_module.importlib.metadata.PackageNotFoundError
+
+    def crash(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(wasm_module, "parse_wasm_file", crash)
+    monkeypatch.setattr(wasm_module.importlib.metadata, "version", missing)
+    metadata = parse_wasm_metadata("sample.wasm", {})
+    assert (
+        f"(version unknown) failed on sample.wasm with {type(exc).__name__}"
+        in (metadata["errors"][0])
+    )
+
+
+def test_os_error_keeps_the_input_failure_message(monkeypatch):
+    def unreadable(*_args, **_kwargs):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(wasm_module, "parse_wasm_file", unreadable)
+    metadata = parse_wasm_metadata("missing.wasm", {})
+    assert metadata["errors"] == ["Failed to parse wasm file missing.wasm: no such file"]

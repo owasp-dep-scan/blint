@@ -5,6 +5,7 @@ orchestrator that imports it.
 """
 
 # pylint: disable=too-many-lines,consider-using-f-string
+import importlib.metadata
 from collections import Counter
 from typing import Any
 
@@ -145,6 +146,14 @@ def _wasm_function_offset(fn: dict) -> int | None:
     return None
 
 
+def _wasm_tools_version() -> str:
+    """Returns the installed wasm-tools version, or "unknown"."""
+    try:
+        return importlib.metadata.version("wasm-tools")
+    except Exception:  # pylint: disable=broad-exception-caught
+        return "unknown"
+
+
 def _wasm_module_id(value: Any) -> int | None:
     """Returns a core module id from a 2.2 report, or None when it has none."""
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -175,8 +184,24 @@ def parse_wasm_metadata(
             )
             or {}
         )
-    except (AttributeError, TypeError, ValueError, OSError) as exc:
+    except OSError as exc:
         metadata["errors"] = [f"Failed to parse wasm file {exe_file}: {exc}"]
+        return metadata
+    except (AttributeError, TypeError, ValueError) as exc:
+        # wasm-tools reports malformed modules in report["errors"] instead of
+        # raising, so these exceptions point at a bug in the parser itself.
+        version = _wasm_tools_version()
+        LOG.warning(
+            f"The wasm-tools parser (version {version}) failed on {exe_file} with "
+            f"{type(exc).__name__}: {exc}. Imports, exports and the call graph are "
+            "missing from the results. Please report this to the wasm-tools project."
+        )
+        LOG.debug(f"wasm-tools parser traceback for {exe_file}", exc_info=True)
+        message = (
+            f"The wasm-tools parser (version {version}) failed on {exe_file} with "
+            f"{type(exc).__name__}: {exc}"
+        )
+        metadata["errors"] = [message]
         return metadata
 
     dropped = trim_wasm_instruction_streams(report)
