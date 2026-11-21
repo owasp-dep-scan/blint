@@ -5,6 +5,7 @@ orchestrator that imports it.
 """
 
 # pylint: disable=too-many-lines,consider-using-f-string
+import importlib.metadata
 from collections import Counter
 from typing import Any
 
@@ -131,6 +132,35 @@ def trim_wasm_instruction_streams(report: dict) -> int:
     return dropped_total
 
 
+def _wasm_function_offset(fn: dict) -> int | None:
+    """Returns the file offset to report as a function's address.
+
+    wasm-tools 2.2 adds ``body_offset``, the offset of the body itself. The
+    older ``offset`` is the parser position before the body size and the local
+    declarations, so it is only used when a 2.1 report has no ``body_offset``.
+    """
+    for key in ("body_offset", "offset"):
+        value = fn.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def _wasm_tools_version() -> str:
+    """Returns the installed wasm-tools version, or "unknown"."""
+    try:
+        return importlib.metadata.version("wasm-tools")
+    except Exception:  # pylint: disable=broad-exception-caught
+        return "unknown"
+
+
+def _wasm_module_id(value: Any) -> int | None:
+    """Returns a core module id from a 2.2 report, or None when it has none."""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
 def parse_wasm_metadata(
     exe_file: str,
     metadata: dict,
@@ -154,8 +184,24 @@ def parse_wasm_metadata(
             )
             or {}
         )
-    except (AttributeError, TypeError, ValueError, OSError) as exc:
+    except OSError as exc:
         metadata["errors"] = [f"Failed to parse wasm file {exe_file}: {exc}"]
+        return metadata
+    except (AttributeError, TypeError, ValueError) as exc:
+        # wasm-tools reports malformed modules in report["errors"] instead of
+        # raising, so these exceptions point at a bug in the parser itself.
+        version = _wasm_tools_version()
+        LOG.warning(
+            f"The wasm-tools parser (version {version}) failed on {exe_file} with "
+            f"{type(exc).__name__}: {exc}. Imports, exports and the call graph are "
+            "missing from the results. Please report this to the wasm-tools project."
+        )
+        LOG.debug(f"wasm-tools parser traceback for {exe_file}", exc_info=True)
+        message = (
+            f"The wasm-tools parser (version {version}) failed on {exe_file} with "
+            f"{type(exc).__name__}: {exc}"
+        )
+        metadata["errors"] = [message]
         return metadata
 
     dropped = trim_wasm_instruction_streams(report)
@@ -275,7 +321,7 @@ def parse_wasm_metadata(
         {
             "index": fn.get("index"),
             "name": demangle_symbolic_name(str(fn.get("name", ""))),
-            "address": ADDRESS_FMT.format(int(fn.get("offset", 0))).strip(),
+            "address": ADDRESS_FMT.format(_wasm_function_offset(fn) or 0).strip(),
             "size": fn.get("body_size", 0),
             "instruction_count": fn.get("instruction_count", 0),
         }
@@ -341,9 +387,16 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     outranks natives: the target of an import edge is named exactly by the
     module, not attributed from evidence, so it stays high.
 
-    For multi-core-module components the wasm-tools graph itself is approximate
-    (per-module index spaces may collide), so this conversion inherits that
-    limitation rather than adding one.
+    wasm-tools 2.2 reports a component's core modules as separate graphs whose
+    nodes carry ``module_id`` and whose edges carry ``from_module`` and
+    ``to_module``. When module ids are present, nodes, import names, addresses
+    and edges are keyed by (module id, index), and node names read
+    ``module[<id>]::<name>`` so same-named functions of different core modules
+    stay apart. Synthetic ``component:type<N>`` nodes and their ``canon`` edges
+    are not host imports: the node is never an ``external`` target, and the
+    core function a canon edge lifts is marked ``exported``. Core modules and
+    wasm-tools 2.1 reports have one index space and are converted exactly as
+    before.
 
     Args:
         wasm_report: The full wasm_tools parser report.
@@ -362,38 +415,77 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     if not wasm_nodes:
         return {}
 
+    # wasm-tools 2.2 keeps each core module of a component as its own graph and
+    # tags nodes with ``module_id``. An index is only meaningful together with
+    # that id, so every lookup below is keyed by (module id, index). Core
+    # modules and 2.1 reports carry no module ids and keep a single index
+    # space, which the None module id stands for.
+    scoped = any(_wasm_module_id(node.get("module_id")) is not None for node in wasm_nodes)
+
+    def scope(module_id: Any, index: Any) -> tuple[int | None, Any]:
+        return (_wasm_module_id(module_id) if scoped else None, index)
+
     # ADDRESS_FMT keeps these node addresses identical to the ones in
     # metadata["functions"], so a node can be cross-referenced by string match.
     addresses = {}
     for fn in (wasm_report or {}).get("functions") or []:
         if isinstance(fn, dict) and isinstance(fn.get("index"), int):
-            offset = fn.get("offset")
-            if isinstance(offset, int) and offset >= 0:
-                addresses[fn["index"]] = ADDRESS_FMT.format(offset).strip()
+            offset = _wasm_function_offset(fn)
+            if offset is not None:
+                addresses[scope(fn.get("core_module"), fn["index"])] = ADDRESS_FMT.format(
+                    offset
+                ).strip()
 
-    imported_names: dict[int, str] = {}
+    # wasm-tools 2.2 adds synthetic ``component:type<N>`` nodes that stand for
+    # a canon lift and point at the core function it exports. They are not
+    # host functions, so they never become external targets. The fact the
+    # edge carries is kept by marking the lifted core function as exported.
+    synthetic_keys = {
+        scope(node.get("module_id"), node["index"]) for node in wasm_nodes if node.get("synthetic")
+    }
+    lifted_keys = {
+        scope(edge.get("to_module"), edge.get("to"))
+        for edge in wasm_graph.get("edges") or []
+        if isinstance(edge, dict)
+        and edge.get("kind") == "canon"
+        and scope(edge.get("from_module"), edge.get("from")) in synthetic_keys
+    }
+
+    imported_names: dict[tuple[int | None, Any], str] = {}
     nodes: list[dict[str, Any]] = []
-    index_to_id: dict[int, int] = {}
-    for wasm_node in sorted(wasm_nodes, key=lambda node: node["index"]):
+    index_to_id: dict[tuple[int | None, Any], int] = {}
+    for wasm_node in sorted(
+        wasm_nodes,
+        key=lambda node: (
+            -1 if (mid := scope(node.get("module_id"), 0)[0]) is None else mid,
+            node["index"],
+        ),
+    ):
         index = wasm_node["index"]
+        key = scope(wasm_node.get("module_id"), index)
         name = demangle_symbolic_name(str(wasm_node.get("name") or "")).strip() or f"func[{index}]"
+        if wasm_node.get("synthetic"):
+            continue
         if wasm_node.get("imported"):
             # Match the "module::name" form used for wasm imports in
             # metadata["dynamic_symbols"] so external targets line up with the
             # import table.
             module = str(wasm_node.get("module") or "")
             import_name = demangle_symbolic_name(str(wasm_node.get("import_name") or ""))
-            imported_names[index] = f"{module}::{import_name}" if module or import_name else name
+            imported_names[key] = f"{module}::{import_name}" if module or import_name else name
             continue
-        address = addresses.get(index, "")
-        index_to_id[index] = len(nodes)
+        if key[0] is not None:
+            # Same-named functions of different core modules stay apart.
+            name = f"module[{key[0]}]::{name}"
+        address = addresses.get(key, "")
+        index_to_id[key] = len(nodes)
         nodes.append(
             {
                 "id": len(nodes),
                 "key": f"{address}::{name}" if address else name,
                 "name": name,
                 "address": address,
-                "exported": bool(wasm_node.get("exported")),
+                "exported": bool(wasm_node.get("exported")) or key in lifted_keys,
             }
         )
 
@@ -405,15 +497,15 @@ def build_wasm_callgraph(wasm_report: dict) -> dict:
     for edge in wasm_graph.get("edges") or []:
         if not isinstance(edge, dict):
             continue
-        src = index_to_id.get(edge.get("from"))
+        src = index_to_id.get(scope(edge.get("from_module"), edge.get("from")))
         if src is None:
             continue
         kind = str(edge.get("kind") or "direct")
-        dst_index = edge.get("to")
-        dst = index_to_id.get(dst_index)
+        dst_key = scope(edge.get("to_module"), edge.get("to"))
+        dst = index_to_id.get(dst_key)
         if dst is not None:
             edge_counts[(src, dst, kind)] += 1
-        elif target := imported_names.get(dst_index):
+        elif target := imported_names.get(dst_key):
             reason = "import" if kind == "direct" else f"import:{kind}"
             external_counts[(src, target, reason)] += 1
 

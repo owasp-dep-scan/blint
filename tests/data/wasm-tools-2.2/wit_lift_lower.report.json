@@ -1,0 +1,1879 @@
+{
+ "analysis": {
+  "capabilities": [],
+  "dependency_hints": [],
+  "detections": {
+   "format": {
+    "component_version": 13,
+    "confidence": "high",
+    "kind": "component",
+    "layer_version": 1,
+    "module_version": 65549,
+    "signals": [
+     "component_layer"
+    ]
+   },
+   "js_interface": {
+    "builtin_sets": [],
+    "confidence": "none",
+    "detected": false,
+    "entry_trampolines": {
+     "count": 0,
+     "detected": false,
+     "functions": []
+    },
+    "export_count": 0,
+    "exports": [],
+    "import_count": 0,
+    "import_modules": [],
+    "imports": [],
+    "js_string_builtins": 0,
+    "risky_import_signatures": [],
+    "signals": [],
+    "signature_surface": {
+     "boundary_count": 6,
+     "entries": [
+      {
+       "index": 1,
+       "name": "cm32p2||run",
+       "params": [],
+       "results": [
+        "i32"
+       ],
+       "source": "export",
+       "type_index": 1
+      },
+      {
+       "index": 2,
+       "name": "cm32p2||run_post",
+       "params": [
+        "i32"
+       ],
+       "results": [],
+       "source": "export",
+       "type_index": 2
+      },
+      {
+       "index": 3,
+       "name": "cm32p2||run2",
+       "params": [],
+       "results": [
+        "i32"
+       ],
+       "source": "export",
+       "type_index": 1
+      },
+      {
+       "index": 4,
+       "name": "cm32p2||run2_post",
+       "params": [
+        "i32"
+       ],
+       "results": [],
+       "source": "export",
+       "type_index": 2
+      },
+      {
+       "index": 5,
+       "name": "cm32p2_realloc",
+       "params": [
+        "i32",
+        "i32",
+        "i32",
+        "i32"
+       ],
+       "results": [
+        "i32"
+       ],
+       "source": "export",
+       "type_index": 3
+      },
+      {
+       "index": 6,
+       "name": "cm32p2_initialize",
+       "params": [],
+       "results": [],
+       "source": "export",
+       "type_index": 4
+      }
+     ],
+     "risks": [],
+     "risky_boundary_count": 0
+    }
+   },
+   "strings": {
+    "counts": {},
+    "detected": false,
+    "samples": {},
+    "signals": [],
+    "string_count": 0
+   },
+   "wasi": {
+    "confidence": "none",
+    "detected": false,
+    "import_count": 0,
+    "import_modules": [],
+    "variants": []
+   }
+  },
+  "features": {
+   "derived": {
+    "avg_instructions_per_function": 0.0,
+    "branch_density": 0.0,
+    "call_op_ratio": 0.0,
+    "code_section_share": 0.0,
+    "data_section_share": 0.0,
+    "exported_function_count": 6,
+    "f64_arith_ratio": 0.0,
+    "function_count": 6,
+    "indirect_call_ratio": 0.0,
+    "loop_function_ratio": 0.0,
+    "mem_op_ratio": 0.0,
+    "simd_ratio": 0.0
+   },
+   "distinct_opcodes": 0,
+   "histogram_total": 0,
+   "ngram_top": [],
+   "opcode_histogram": {},
+   "prefix_counts": {
+    "core": 0,
+    "fb": 0,
+    "fc": 0,
+    "fd": 0,
+    "fe": 0
+   }
+  },
+  "findings": [],
+  "profiles": {
+   "compute": {
+    "loop_branch_ops": 0,
+    "loop_memory_ops": 0,
+    "max_loop_depth": 0
+   },
+   "control_flow": {
+    "call_ref_unguarded_ops": 0,
+    "callsite_conversion_ops": 0,
+    "export_reachable_functions": 7,
+    "indirect_call_ops": 0,
+    "table_mutation_ops": 0,
+    "unreachable_functions": 0
+   },
+   "memory": {
+    "bulk_memory_ops": 0,
+    "data_segment_total_bytes": 0,
+    "loop_memory_grow_ops": 0,
+    "memory_access_ops": 0,
+    "memory_grow_ops": 0
+   }
+  },
+  "provenance": {
+   "compilers": [],
+   "glue": [],
+   "notes": [],
+   "platform": {
+    "confidence": "none",
+    "evidence": [],
+    "name": "none"
+   },
+   "runtime_target": {
+    "confidence": "none",
+    "name": "unknown"
+   },
+   "stripped_producers": false
+  },
+  "summary": {
+   "finding_count": 0,
+   "risk_score": 0,
+   "risk_tier": "none",
+   "unknown_opcode_count": 0,
+   "unknown_opcodes": []
+  }
+ },
+ "call_graph": {
+  "component_summary": {
+   "canon_edge_count": 2,
+   "canon_type_nodes": 1,
+   "module_count": 2
+  },
+  "edge_count": 2,
+  "edges": [
+   {
+    "from": 10000001,
+    "from_module": null,
+    "kind": "canon",
+    "offset": null,
+    "to": 1,
+    "to_module": 0,
+    "type_index": 1
+   },
+   {
+    "from": 10000001,
+    "from_module": null,
+    "kind": "canon",
+    "offset": null,
+    "to": 3,
+    "to_module": 0,
+    "type_index": 1
+   }
+  ],
+  "import_xrefs": [
+   {
+    "call_count": 0,
+    "callers": [],
+    "func": 0,
+    "import_name": "x",
+    "module": "cm32p2",
+    "module_id": 0,
+    "name": "cm32p2.x"
+   },
+   {
+    "call_count": 0,
+    "callers": [],
+    "func": 0,
+    "import_name": "cm32p2_initialize",
+    "module": "main",
+    "module_id": 1,
+    "name": "cm32p2_initialize"
+   }
+  ],
+  "node_count": 9,
+  "nodes": [
+   {
+    "exported": false,
+    "import_name": "x",
+    "imported": true,
+    "index": 0,
+    "module": "cm32p2",
+    "module_id": 0,
+    "name": "cm32p2.x"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 1,
+    "module_id": 0,
+    "name": "cm32p2||run"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 2,
+    "module_id": 0,
+    "name": "cm32p2||run_post"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 3,
+    "module_id": 0,
+    "name": "cm32p2||run2"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 4,
+    "module_id": 0,
+    "name": "cm32p2||run2_post"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 5,
+    "module_id": 0,
+    "name": "cm32p2_realloc"
+   },
+   {
+    "exported": true,
+    "imported": false,
+    "index": 6,
+    "module_id": 0,
+    "name": "cm32p2_initialize"
+   },
+   {
+    "exported": false,
+    "import_name": "cm32p2_initialize",
+    "imported": true,
+    "index": 0,
+    "module": "main",
+    "module_id": 1,
+    "name": "cm32p2_initialize"
+   },
+   {
+    "exported": false,
+    "imported": true,
+    "index": 10000001,
+    "module_id": null,
+    "name": "component:type1",
+    "synthetic": true
+   }
+  ],
+  "reachability": {
+   "per_module": {
+    "0": {
+     "reachable_count": 6,
+     "reachable_functions": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "roots": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "unreachable_count": 0,
+     "unreachable_functions": []
+    },
+    "1": {
+     "reachable_count": 1,
+     "reachable_functions": [
+      0
+     ],
+     "roots": [
+      0
+     ],
+     "unreachable_count": 0,
+     "unreachable_functions": []
+    }
+   },
+   "reachable_count": 7,
+   "reachable_functions": [
+    [
+     0,
+     1
+    ],
+    [
+     0,
+     2
+    ],
+    [
+     0,
+     3
+    ],
+    [
+     0,
+     4
+    ],
+    [
+     0,
+     5
+    ],
+    [
+     0,
+     6
+    ],
+    [
+     1,
+     0
+    ]
+   ],
+   "roots": [],
+   "unreachable_count": 0,
+   "unreachable_functions": []
+  },
+  "truncated": false
+ },
+ "component": {
+  "canon_records": [
+   {
+    "core_func": 1,
+    "direction": "lift",
+    "func": 1,
+    "module": 0,
+    "type_index": 1
+   },
+   {
+    "core_func": 3,
+    "direction": "lift",
+    "func": 3,
+    "module": 0,
+    "type_index": 1
+   }
+  ],
+  "canonical_options": {
+   "async": false,
+   "lift_count": 2,
+   "lower_count": 1,
+   "options": [
+    "post-return",
+    "post-return"
+   ],
+   "resource_count": 0
+  },
+  "component_version": 13,
+  "core_module_count": 2,
+  "core_modules": [
+   {
+    "analysis": {
+     "capabilities": [],
+     "dependency_hints": [],
+     "detections": {
+      "format": {
+       "confidence": "high",
+       "kind": "core",
+       "module_version": 1,
+       "signals": [
+        "component_or_toolchain_custom_section"
+       ]
+      },
+      "js_interface": {
+       "builtin_sets": [],
+       "confidence": "none",
+       "detected": false,
+       "entry_trampolines": {
+        "count": 0,
+        "detected": false,
+        "functions": []
+       },
+       "export_count": 0,
+       "exports": [],
+       "import_count": 0,
+       "import_modules": [],
+       "imports": [],
+       "js_string_builtins": 0,
+       "risky_import_signatures": [],
+       "signals": [],
+       "signature_surface": {
+        "boundary_count": 6,
+        "entries": [
+         {
+          "index": 1,
+          "name": "cm32p2||run",
+          "params": [],
+          "results": [
+           "i32"
+          ],
+          "source": "export",
+          "type_index": 1
+         },
+         {
+          "index": 2,
+          "name": "cm32p2||run_post",
+          "params": [
+           "i32"
+          ],
+          "results": [],
+          "source": "export",
+          "type_index": 2
+         },
+         {
+          "index": 3,
+          "name": "cm32p2||run2",
+          "params": [],
+          "results": [
+           "i32"
+          ],
+          "source": "export",
+          "type_index": 1
+         },
+         {
+          "index": 4,
+          "name": "cm32p2||run2_post",
+          "params": [
+           "i32"
+          ],
+          "results": [],
+          "source": "export",
+          "type_index": 2
+         },
+         {
+          "index": 5,
+          "name": "cm32p2_realloc",
+          "params": [
+           "i32",
+           "i32",
+           "i32",
+           "i32"
+          ],
+          "results": [
+           "i32"
+          ],
+          "source": "export",
+          "type_index": 3
+         },
+         {
+          "index": 6,
+          "name": "cm32p2_initialize",
+          "params": [],
+          "results": [],
+          "source": "export",
+          "type_index": 4
+         }
+        ],
+        "risks": [],
+        "risky_boundary_count": 0
+       }
+      },
+      "strings": {
+       "counts": {},
+       "detected": false,
+       "samples": {},
+       "signals": [],
+       "string_count": 0
+      },
+      "wasi": {
+       "confidence": "none",
+       "detected": false,
+       "import_count": 0,
+       "import_modules": [],
+       "variants": []
+      }
+     },
+     "features": {
+      "derived": {
+       "avg_instructions_per_function": 1.5,
+       "branch_density": 0.0,
+       "call_op_ratio": 0.0,
+       "code_section_share": 0.0924,
+       "data_section_share": 0.0,
+       "exported_function_count": 6,
+       "f64_arith_ratio": 0.0,
+       "function_count": 6,
+       "indirect_call_ratio": 0.0,
+       "loop_function_ratio": 0.0,
+       "mem_op_ratio": 0.0,
+       "simd_ratio": 0.0
+      },
+      "distinct_opcodes": 2,
+      "histogram_total": 9,
+      "ngram_top": [
+       {
+        "count": 3,
+        "gram": "unreachable|end",
+        "n": 2
+       }
+      ],
+      "opcode_histogram": {
+       "end": 6,
+       "unreachable": 3
+      },
+      "prefix_counts": {
+       "core": 9,
+       "fb": 0,
+       "fc": 0,
+       "fd": 0,
+       "fe": 0
+      }
+     },
+     "findings": [],
+     "profiles": {
+      "compute": {
+       "loop_branch_ops": 0,
+       "loop_memory_ops": 0,
+       "max_loop_depth": 0
+      },
+      "control_flow": {
+       "call_ref_unguarded_ops": 0,
+       "callsite_conversion_ops": 0,
+       "export_reachable_functions": 6,
+       "indirect_call_ops": 0,
+       "table_mutation_ops": 0,
+       "unreachable_functions": 0
+      },
+      "memory": {
+       "bulk_memory_ops": 0,
+       "data_segment_total_bytes": 0,
+       "loop_memory_grow_ops": 0,
+       "memory_access_ops": 0,
+       "memory_grow_ops": 0
+      }
+     },
+     "provenance": {
+      "compilers": [],
+      "glue": [],
+      "notes": [],
+      "platform": {
+       "confidence": "none",
+       "evidence": [],
+       "name": "none"
+      },
+      "runtime_target": {
+       "confidence": "none",
+       "name": "unknown"
+      },
+      "stripped_producers": false
+     },
+     "summary": {
+      "finding_count": 0,
+      "risk_score": 0,
+      "risk_tier": "none",
+      "unknown_opcode_count": 0,
+      "unknown_opcodes": []
+     }
+    },
+    "call_graph": {
+     "edge_count": 0,
+     "edges": [],
+     "import_xrefs": [
+      {
+       "call_count": 0,
+       "callers": [],
+       "func": 0,
+       "import_name": "x",
+       "module": "cm32p2",
+       "name": "cm32p2.x"
+      }
+     ],
+     "node_count": 7,
+     "nodes": [
+      {
+       "exported": false,
+       "import_name": "x",
+       "imported": true,
+       "index": 0,
+       "module": "cm32p2",
+       "name": "cm32p2.x"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 1,
+       "name": "cm32p2||run"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 2,
+       "name": "cm32p2||run_post"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 3,
+       "name": "cm32p2||run2"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 4,
+       "name": "cm32p2||run2_post"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 5,
+       "name": "cm32p2_realloc"
+      },
+      {
+       "exported": true,
+       "imported": false,
+       "index": 6,
+       "name": "cm32p2_initialize"
+      }
+     ],
+     "reachability": {
+      "reachable_count": 6,
+      "reachable_functions": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "roots": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "unreachable_count": 0,
+      "unreachable_functions": []
+     },
+     "truncated": false
+    },
+    "core_module_index": 0,
+    "data_segments": [],
+    "elements": [],
+    "errors": [],
+    "exports": [
+     {
+      "index": 0,
+      "kind": "func",
+      "name": "cm32p2||run",
+      "ref_index": 1
+     },
+     {
+      "index": 1,
+      "kind": "func",
+      "name": "cm32p2||run_post",
+      "ref_index": 2
+     },
+     {
+      "index": 2,
+      "kind": "func",
+      "name": "cm32p2||run2",
+      "ref_index": 3
+     },
+     {
+      "index": 3,
+      "kind": "func",
+      "name": "cm32p2||run2_post",
+      "ref_index": 4
+     },
+     {
+      "index": 4,
+      "kind": "memory",
+      "name": "cm32p2_memory",
+      "ref_index": 0
+     },
+     {
+      "index": 5,
+      "kind": "func",
+      "name": "cm32p2_realloc",
+      "ref_index": 5
+     },
+     {
+      "index": 6,
+      "kind": "func",
+      "name": "cm32p2_initialize",
+      "ref_index": 6
+     }
+    ],
+    "file": "<core-module>",
+    "function_count": 6,
+    "functions": [
+     {
+      "body_offset": 191,
+      "body_size": 3,
+      "features": {
+       "body_hash": "sha256:ef58342bbfc4b24566050444fde5a4d529ed7d45f5f650f29c34965158e697b4",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 2,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 1,
+      "instruction_count": 2,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 189,
+      "signature_index": 1
+     },
+     {
+      "body_offset": 195,
+      "body_size": 2,
+      "features": {
+       "body_hash": "sha256:361e48d0308f20e32dba5fb56328baf18d72ef0ccb43b84f5c262d2a6a1fc6c8",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 1,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 2,
+      "instruction_count": 1,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 193,
+      "signature_index": 2
+     },
+     {
+      "body_offset": 198,
+      "body_size": 3,
+      "features": {
+       "body_hash": "sha256:ef58342bbfc4b24566050444fde5a4d529ed7d45f5f650f29c34965158e697b4",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 2,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 3,
+      "instruction_count": 2,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 196,
+      "signature_index": 1
+     },
+     {
+      "body_offset": 202,
+      "body_size": 2,
+      "features": {
+       "body_hash": "sha256:361e48d0308f20e32dba5fb56328baf18d72ef0ccb43b84f5c262d2a6a1fc6c8",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 1,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 4,
+      "instruction_count": 1,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 200,
+      "signature_index": 2
+     },
+     {
+      "body_offset": 205,
+      "body_size": 3,
+      "features": {
+       "body_hash": "sha256:ef58342bbfc4b24566050444fde5a4d529ed7d45f5f650f29c34965158e697b4",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 2,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 5,
+      "instruction_count": 2,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 203,
+      "signature_index": 3
+     },
+     {
+      "body_offset": 209,
+      "body_size": 2,
+      "features": {
+       "body_hash": "sha256:361e48d0308f20e32dba5fb56328baf18d72ef0ccb43b84f5c262d2a6a1fc6c8",
+       "br_table_count": 0,
+       "calls_imported_functions": false,
+       "const_branch_density": 0.0,
+       "has_atomics": false,
+       "has_bulk_memory": false,
+       "has_call_ref": false,
+       "has_direct_call": false,
+       "has_exceptions": false,
+       "has_gc_ops": false,
+       "has_indirect_call": false,
+       "has_loop": false,
+       "has_memory_grow": false,
+       "has_simd": false,
+       "has_table_mutation": false,
+       "has_tail_call": false,
+       "imported_callees": 0,
+       "instruction_count": 1,
+       "max_br_table_targets_in_loop": 0,
+       "max_loop_depth": 0
+      },
+      "index": 6,
+      "instruction_count": 1,
+      "instructions": [],
+      "instructions_omitted": true,
+      "name": "",
+      "offset": 207,
+      "signature_index": 4
+     }
+    ],
+    "globals": [],
+    "imports": [
+     {
+      "index": 0,
+      "kind": "func",
+      "module": "cm32p2",
+      "name": "x",
+      "type_index": 0
+     }
+    ],
+    "is_component": false,
+    "memories": [
+     {
+      "index": 0,
+      "limits": {
+       "is_64": false,
+       "max": null,
+       "min": 0,
+       "page_size_log2": null,
+       "shared": false
+      }
+     }
+    ],
+    "module_version": 1,
+    "report_contract": "wasm-tools/2",
+    "section_count": 7,
+    "sections": [
+     {
+      "id": 1,
+      "index": 0,
+      "name": "Type",
+      "offset": 10,
+      "size": 25
+     },
+     {
+      "id": 2,
+      "index": 1,
+      "name": "Import",
+      "offset": 37,
+      "size": 12
+     },
+     {
+      "id": 3,
+      "index": 2,
+      "name": "Function",
+      "offset": 51,
+      "size": 7
+     },
+     {
+      "id": 5,
+      "index": 3,
+      "name": "Memory",
+      "offset": 60,
+      "size": 3
+     },
+     {
+      "id": 7,
+      "index": 4,
+      "name": "Export",
+      "offset": 65,
+      "size": 122
+     },
+     {
+      "id": 10,
+      "index": 5,
+      "name": "Code",
+      "offset": 189,
+      "size": 22
+     },
+     {
+      "id": 0,
+      "index": 6,
+      "name": "producers",
+      "offset": 213,
+      "size": 47
+     }
+    ],
+    "start_function": null,
+    "strings": [],
+    "strings_truncated": false,
+    "tables": [],
+    "tags": [],
+    "toolchain": {
+     "languages": [],
+     "processed_by": [
+      {
+       "name": "wit-component",
+       "version": "0.263.0"
+      }
+     ],
+     "sdks": [],
+     "target_features": []
+    },
+    "types": [
+     {
+      "index": 0,
+      "kind": "func",
+      "params": [
+       "i32"
+      ],
+      "results": [
+       "i32"
+      ]
+     },
+     {
+      "index": 1,
+      "kind": "func",
+      "params": [],
+      "results": [
+       "i32"
+      ]
+     },
+     {
+      "index": 2,
+      "kind": "func",
+      "params": [
+       "i32"
+      ],
+      "results": []
+     },
+     {
+      "index": 3,
+      "kind": "func",
+      "params": [
+       "i32",
+       "i32",
+       "i32",
+       "i32"
+      ],
+      "results": [
+       "i32"
+      ]
+     },
+     {
+      "index": 4,
+      "kind": "func",
+      "params": [],
+      "results": []
+     }
+    ]
+   },
+   {
+    "analysis": {
+     "capabilities": [],
+     "dependency_hints": [],
+     "detections": {
+      "format": {
+       "confidence": "high",
+       "kind": "core",
+       "module_version": 1,
+       "signals": [
+        "component_or_toolchain_custom_section"
+       ]
+      },
+      "js_interface": {
+       "builtin_sets": [],
+       "confidence": "none",
+       "detected": false,
+       "entry_trampolines": {
+        "count": 0,
+        "detected": false,
+        "functions": []
+       },
+       "export_count": 0,
+       "exports": [],
+       "import_count": 0,
+       "import_modules": [],
+       "imports": [],
+       "js_string_builtins": 0,
+       "risky_import_signatures": [],
+       "signals": [],
+       "signature_surface": {
+        "boundary_count": 0,
+        "entries": [],
+        "risks": [],
+        "risky_boundary_count": 0
+       }
+      },
+      "strings": {
+       "counts": {},
+       "detected": false,
+       "samples": {},
+       "signals": [],
+       "string_count": 0
+      },
+      "wasi": {
+       "confidence": "none",
+       "detected": false,
+       "import_count": 0,
+       "import_modules": [],
+       "variants": []
+      }
+     },
+     "features": {
+      "derived": {
+       "avg_instructions_per_function": 0.0,
+       "branch_density": 0.0,
+       "call_op_ratio": 0.0,
+       "code_section_share": 0.0,
+       "data_section_share": 0.0,
+       "exported_function_count": 0,
+       "f64_arith_ratio": 0.0,
+       "function_count": 0,
+       "indirect_call_ratio": 0.0,
+       "loop_function_ratio": 0.0,
+       "mem_op_ratio": 0.0,
+       "simd_ratio": 0.0
+      },
+      "distinct_opcodes": 0,
+      "histogram_total": 0,
+      "ngram_top": [],
+      "opcode_histogram": {},
+      "prefix_counts": {
+       "core": 0,
+       "fb": 0,
+       "fc": 0,
+       "fd": 0,
+       "fe": 0
+      }
+     },
+     "findings": [],
+     "profiles": {
+      "compute": {
+       "loop_branch_ops": 0,
+       "loop_memory_ops": 0,
+       "max_loop_depth": 0
+      },
+      "control_flow": {
+       "call_ref_unguarded_ops": 0,
+       "callsite_conversion_ops": 0,
+       "export_reachable_functions": 1,
+       "indirect_call_ops": 0,
+       "table_mutation_ops": 0,
+       "unreachable_functions": 0
+      },
+      "memory": {
+       "bulk_memory_ops": 0,
+       "data_segment_total_bytes": 0,
+       "loop_memory_grow_ops": 0,
+       "memory_access_ops": 0,
+       "memory_grow_ops": 0
+      }
+     },
+     "provenance": {
+      "compilers": [],
+      "glue": [],
+      "notes": [],
+      "platform": {
+       "confidence": "none",
+       "evidence": [],
+       "name": "none"
+      },
+      "runtime_target": {
+       "confidence": "none",
+       "name": "unknown"
+      },
+      "stripped_producers": false
+     },
+     "summary": {
+      "finding_count": 0,
+      "risk_score": 0,
+      "risk_tier": "none",
+      "unknown_opcode_count": 0,
+      "unknown_opcodes": []
+     }
+    },
+    "call_graph": {
+     "edge_count": 0,
+     "edges": [],
+     "import_xrefs": [
+      {
+       "call_count": 0,
+       "callers": [],
+       "func": 0,
+       "import_name": "cm32p2_initialize",
+       "module": "main",
+       "name": "cm32p2_initialize"
+      }
+     ],
+     "node_count": 1,
+     "nodes": [
+      {
+       "exported": false,
+       "import_name": "cm32p2_initialize",
+       "imported": true,
+       "index": 0,
+       "module": "main",
+       "name": "cm32p2_initialize"
+      }
+     ],
+     "reachability": {
+      "reachable_count": 1,
+      "reachable_functions": [
+       0
+      ],
+      "roots": [
+       0
+      ],
+      "unreachable_count": 0,
+      "unreachable_functions": []
+     },
+     "truncated": false
+    },
+    "core_module_index": 1,
+    "data_segments": [],
+    "elements": [],
+    "errors": [],
+    "exports": [],
+    "file": "<core-module>",
+    "function_count": 0,
+    "functions": [],
+    "globals": [],
+    "imports": [
+     {
+      "index": 0,
+      "kind": "func",
+      "module": "main",
+      "name": "cm32p2_initialize",
+      "type_index": 0
+     }
+    ],
+    "is_component": false,
+    "memories": [],
+    "module_version": 1,
+    "report_contract": "wasm-tools/2",
+    "section_count": 5,
+    "sections": [
+     {
+      "id": 1,
+      "index": 0,
+      "name": "Type",
+      "offset": 10,
+      "size": 4
+     },
+     {
+      "id": 2,
+      "index": 1,
+      "name": "Import",
+      "offset": 16,
+      "size": 26
+     },
+     {
+      "id": 8,
+      "index": 2,
+      "name": "Start",
+      "offset": 44,
+      "size": 1
+     },
+     {
+      "id": 0,
+      "index": 3,
+      "name": "producers",
+      "offset": 47,
+      "size": 47
+     },
+     {
+      "id": 0,
+      "index": 4,
+      "name": "name",
+      "offset": 96,
+      "size": 50
+     }
+    ],
+    "start_function": 0,
+    "strings": [],
+    "strings_truncated": false,
+    "tables": [],
+    "tags": [],
+    "toolchain": {
+     "languages": [],
+     "processed_by": [
+      {
+       "name": "wit-component",
+       "version": "0.263.0"
+      }
+     ],
+     "sdks": [],
+     "target_features": []
+    },
+    "types": [
+     {
+      "index": 0,
+      "kind": "func",
+      "params": [],
+      "results": []
+     }
+    ]
+   }
+  ],
+  "detected": true,
+  "export_count": 2,
+  "exported_functions": [
+   {
+    "func": 1,
+    "module": 0,
+    "type_index": 1
+   },
+   {
+    "func": 3,
+    "module": 0,
+    "type_index": 1
+   }
+  ],
+  "exports": [
+   {
+    "index": 1,
+    "kind": "func",
+    "name": "run"
+   },
+   {
+    "index": 3,
+    "kind": "func",
+    "name": "run2"
+   }
+  ],
+  "import_count": 1,
+  "imports": [
+   {
+    "kind": "func",
+    "name": "x",
+    "type_index": 0
+   }
+  ],
+  "interface_packages": [],
+  "interfaces": [],
+  "layer_version": 1,
+  "producers": {
+   "processed-by": [
+    [
+     "wit-component",
+     "0.263.0"
+    ]
+   ]
+  },
+  "wit_packages": []
+ },
+ "data_segments": [],
+ "elements": [],
+ "errors": [],
+ "exports": [
+  {
+   "core_module": 0,
+   "index": 0,
+   "kind": "func",
+   "name": "cm32p2||run",
+   "ref_index": 1
+  },
+  {
+   "core_module": 0,
+   "index": 1,
+   "kind": "func",
+   "name": "cm32p2||run_post",
+   "ref_index": 2
+  },
+  {
+   "core_module": 0,
+   "index": 2,
+   "kind": "func",
+   "name": "cm32p2||run2",
+   "ref_index": 3
+  },
+  {
+   "core_module": 0,
+   "index": 3,
+   "kind": "func",
+   "name": "cm32p2||run2_post",
+   "ref_index": 4
+  },
+  {
+   "core_module": 0,
+   "index": 4,
+   "kind": "memory",
+   "name": "cm32p2_memory",
+   "ref_index": 0
+  },
+  {
+   "core_module": 0,
+   "index": 5,
+   "kind": "func",
+   "name": "cm32p2_realloc",
+   "ref_index": 5
+  },
+  {
+   "core_module": 0,
+   "index": 6,
+   "kind": "func",
+   "name": "cm32p2_initialize",
+   "ref_index": 6
+  }
+ ],
+ "file": "wit_lift_lower.wasm",
+ "function_count": 6,
+ "functions": [
+  {
+   "body_offset": 191,
+   "body_size": 3,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 1,
+   "instruction_count": 2,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 189,
+   "signature_index": 1
+  },
+  {
+   "body_offset": 195,
+   "body_size": 2,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 2,
+   "instruction_count": 1,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 193,
+   "signature_index": 2
+  },
+  {
+   "body_offset": 198,
+   "body_size": 3,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 3,
+   "instruction_count": 2,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 196,
+   "signature_index": 1
+  },
+  {
+   "body_offset": 202,
+   "body_size": 2,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 4,
+   "instruction_count": 1,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 200,
+   "signature_index": 2
+  },
+  {
+   "body_offset": 205,
+   "body_size": 3,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 5,
+   "instruction_count": 2,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 203,
+   "signature_index": 3
+  },
+  {
+   "body_offset": 209,
+   "body_size": 2,
+   "core_module": 0,
+   "features": {
+    "body_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "br_table_count": 0,
+    "calls_imported_functions": false,
+    "const_branch_density": 0.0,
+    "has_atomics": false,
+    "has_bulk_memory": false,
+    "has_call_ref": false,
+    "has_direct_call": false,
+    "has_exceptions": false,
+    "has_gc_ops": false,
+    "has_indirect_call": false,
+    "has_loop": false,
+    "has_memory_grow": false,
+    "has_simd": false,
+    "has_table_mutation": false,
+    "has_tail_call": false,
+    "imported_callees": 0,
+    "instruction_count": 0,
+    "max_br_table_targets_in_loop": 0,
+    "max_loop_depth": 0
+   },
+   "index": 6,
+   "instruction_count": 1,
+   "instructions": [],
+   "instructions_omitted": true,
+   "name": "",
+   "offset": 207,
+   "signature_index": 4
+  }
+ ],
+ "globals": [],
+ "imports": [
+  {
+   "core_module": 0,
+   "index": 0,
+   "kind": "func",
+   "module": "cm32p2",
+   "name": "x",
+   "type_index": 0
+  },
+  {
+   "core_module": 1,
+   "index": 0,
+   "kind": "func",
+   "module": "main",
+   "name": "cm32p2_initialize",
+   "type_index": 0
+  },
+  {
+   "core_module": null,
+   "kind": "component-func",
+   "module": "x",
+   "name": ""
+  }
+ ],
+ "is_component": true,
+ "memories": [
+  {
+   "core_module": 0,
+   "index": 0,
+   "limits": {
+    "is_64": false,
+    "max": null,
+    "min": 0,
+    "page_size_log2": null,
+    "shared": false
+   }
+  }
+ ],
+ "module_version": 65549,
+ "report_contract": "wasm-tools/2",
+ "section_count": 17,
+ "sections": [
+  {
+   "id": 7,
+   "index": 0,
+   "name": "Type",
+   "offset": 10,
+   "size": 8
+  },
+  {
+   "id": 10,
+   "index": 1,
+   "name": "Import",
+   "offset": 20,
+   "size": 6
+  },
+  {
+   "id": 1,
+   "index": 2,
+   "name": "CoreModule",
+   "offset": 29,
+   "size": 260
+  },
+  {
+   "id": 8,
+   "index": 3,
+   "name": "Canon",
+   "offset": 291,
+   "size": 5
+  },
+  {
+   "id": 2,
+   "index": 4,
+   "name": "CoreInstance",
+   "offset": 298,
+   "size": 19
+  },
+  {
+   "id": 6,
+   "index": 5,
+   "name": "Alias",
+   "offset": 319,
+   "size": 19
+  },
+  {
+   "id": 1,
+   "index": 6,
+   "name": "CoreModule",
+   "offset": 341,
+   "size": 146
+  },
+  {
+   "id": 2,
+   "index": 7,
+   "name": "CoreInstance",
+   "offset": 489,
+   "size": 11
+  },
+  {
+   "id": 7,
+   "index": 8,
+   "name": "Type",
+   "offset": 502,
+   "size": 5
+  },
+  {
+   "id": 6,
+   "index": 9,
+   "name": "Alias",
+   "offset": 509,
+   "size": 38
+  },
+  {
+   "id": 8,
+   "index": 10,
+   "name": "Canon",
+   "offset": 549,
+   "size": 8
+  },
+  {
+   "id": 11,
+   "index": 11,
+   "name": "Export",
+   "offset": 559,
+   "size": 9
+  },
+  {
+   "id": 6,
+   "index": 12,
+   "name": "Alias",
+   "offset": 570,
+   "size": 40
+  },
+  {
+   "id": 8,
+   "index": 13,
+   "name": "Canon",
+   "offset": 612,
+   "size": 8
+  },
+  {
+   "id": 11,
+   "index": 14,
+   "name": "Export",
+   "offset": 622,
+   "size": 10
+  },
+  {
+   "id": 0,
+   "index": 15,
+   "name": "CoreCustom",
+   "offset": 635,
+   "size": 187
+  },
+  {
+   "id": 0,
+   "index": 16,
+   "name": "CoreCustom",
+   "offset": 824,
+   "size": 47
+  }
+ ],
+ "start_function": null,
+ "strings": [],
+ "strings_truncated": false,
+ "tables": [],
+ "tags": [],
+ "toolchain": {
+  "languages": [],
+  "processed_by": [
+   {
+    "name": "wit-component",
+    "version": "0.263.0"
+   }
+  ],
+  "sdks": [],
+  "target_features": []
+ },
+ "types": [
+  {
+   "core_module": 0,
+   "index": 0,
+   "kind": "func",
+   "params": [
+    "i32"
+   ],
+   "results": [
+    "i32"
+   ]
+  },
+  {
+   "core_module": 0,
+   "index": 1,
+   "kind": "func",
+   "params": [],
+   "results": [
+    "i32"
+   ]
+  },
+  {
+   "core_module": 0,
+   "index": 2,
+   "kind": "func",
+   "params": [
+    "i32"
+   ],
+   "results": []
+  },
+  {
+   "core_module": 0,
+   "index": 3,
+   "kind": "func",
+   "params": [
+    "i32",
+    "i32",
+    "i32",
+    "i32"
+   ],
+   "results": [
+    "i32"
+   ]
+  },
+  {
+   "core_module": 0,
+   "index": 4,
+   "kind": "func",
+   "params": [],
+   "results": []
+  },
+  {
+   "core_module": 1,
+   "index": 0,
+   "kind": "func",
+   "params": [],
+   "results": []
+  }
+ ]
+}

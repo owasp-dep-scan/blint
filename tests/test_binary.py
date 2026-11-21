@@ -1710,6 +1710,11 @@ def test_trim_wasm_instruction_streams_zero_disables(monkeypatch):
     assert "instructions_truncated" not in report["functions"][0]
 
 
+def wasm_module_ids(wasm_report):
+    nodes = (wasm_report.get("call_graph") or {}).get("nodes") or []
+    return [node["module_id"] for node in nodes if node.get("module_id") is not None]
+
+
 def test_build_wasm_callgraph_converts_component_graph():
     wasm_file = TEST_DATA_DIR / "component_minimal.wasm"
     metadata = parse(str(wasm_file))
@@ -1719,9 +1724,15 @@ def test_build_wasm_callgraph_converts_component_graph():
     assert callgraph["version"] == 2
     assert callgraph["node_count"] == len(callgraph["nodes"]) == 2
     assert callgraph["edge_count"] == len(callgraph["edges"]) == 2
-    assert {node["name"] for node in callgraph["nodes"]} == {"func[0]", "complex_flow"}
+    # wasm-tools 2.2 tags component nodes with a core module id, which blint
+    # shows as a "module[<id>]::" name prefix.
+    prefix = "module[0]::" if wasm_module_ids(metadata["wasm_report"]) else ""
+    assert {node["name"] for node in callgraph["nodes"]} == {
+        f"{prefix}func[0]",
+        f"{prefix}complex_flow",
+    }
     exported = next(node for node in callgraph["nodes"] if node["exported"])
-    assert exported["name"] == "complex_flow"
+    assert exported["name"] == f"{prefix}complex_flow"
     assert exported["address"].startswith("0x")
     kinds = {edge["kind"] for edge in callgraph["edges"]}
     assert kinds == {"direct", "indirect-approx"}
