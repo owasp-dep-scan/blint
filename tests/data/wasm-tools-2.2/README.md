@@ -4,7 +4,7 @@ They let the tests exercise the 2.2 report shape (`body_offset`, `module_id`,
 whichever wasm-tools release is installed.
 
 Each file was written from the module of the same name in `tests/data` with
-the `feature/2.2.0-roadmap` branch of wasm-tools (reports `2.2.0`):
+wasm-tools 2.2.0 from PyPI:
 
     from wasm_tools.api import parse_wasm_file
     report = parse_wasm_file(path, include_strings=True, include_call_graph=True,
