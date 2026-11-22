@@ -1,0 +1,61 @@
+blint/lib/diff.py
+  s_293754ccc01af0::t_a7772f67f34401 103-109
+tests/data/elf-memory-safety/probe.c
+  s_293754ccc01af0::t_b1a62f54408967 60-61
+  s_293754ccc01af0::t_0889ad70abe669 1-44,58-59,62-63
+  s_293754ccc01af0::t_9d38f1307e89d4 45-57
+blint/lib/binary_elf.py
+  s_293754ccc01af0::t_ba975cb98241d9 144-195
+  s_293754ccc01af0::t_3f450fa0bb5284 1077
+  s_293754ccc01af0::t_c3d3a3ccd22b35 11
+  s_293754ccc01af0::t_f4d1eaa6b29751 583,594,746-847
+  s_293754ccc01af0::t_ea596ee2a31e2e 582,608-685
+  s_293754ccc01af0::t_969936c7ff972e 579-581,584-593,595-601,606-607,848-850,1078-1080
+tests/data/elf-memory-safety/small.c
+  s_293754ccc01af0::t_a42a326ff4f525 1-33
+blint/data/rules.yml
+  s_293754ccc01af0::t_f0e7eaf91cbe84 235-274
+tests/data/elf-memory-safety/README.md
+  s_293754ccc01af0::t_4eefb1de39548e 28-31
+  s_293754ccc01af0::t_76428ff4170277 1-27,32-53
+tests/data/elf-memory-safety/build.sh
+  s_293754ccc01af0::t_727eaa98704e12 1-18,20-50,53-55,61-65,68,70,80-91,94-97
+  s_293754ccc01af0::t_239499951a30c4 92-93
+  s_293754ccc01af0::t_f3950d82acaaae 75-79
+  s_293754ccc01af0::t_e3432d8ab52005 56-60
+  s_293754ccc01af0::t_8f9a99f0479712 19
+  s_293754ccc01af0::t_7b6ecbc1542440 66-67,69,71-74
+  s_293754ccc01af0::t_2ccadae5649d2a 51-52
+tests/test_elf_memory_safety.py
+  s_293754ccc01af0::t_ec9f65679f3222 115
+  s_293754ccc01af0::t_a0ab9d16de30d6 1-114,116-175
+blint/lib/binary.py
+  s_293754ccc01af0::t_539281e7c0033f 1451-1455
+  s_293754ccc01af0::t_02d1312cd70ae5 126
+  s_293754ccc01af0::t_241770059fe816 616-629
+  s_293754ccc01af0::t_ebbfc5a7d1915d 1456-1463
+blint/lib/analysis.py
+  s_293754ccc01af0::t_21bbac8e300f42 43,75,84
+blint/lib/checks.py
+  s_293754ccc01af0::t_221a56d5559a3a 1609-1674
+docs/METADATA.md
+  s_293754ccc01af0::t_2442ba80b6721f 102-109
+tests/test_capabilities.py
+  s_293754ccc01af0::t_7022a70238235d 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd8ca02fd8aa498de5032aba13ea4660f10d8961",
+  "prompts": {},
+  "sessions": {
+    "s_293754ccc01af0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_0d2b81b7-0185-4892-82ff-158dbdcf1dfe",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
