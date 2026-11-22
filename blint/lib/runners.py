@@ -24,7 +24,12 @@ from blint.lib.analysis import (
 )
 from blint.lib.android import analyze_android_app
 from blint.lib.android_native import LibraryReader, scan_android_native
-from blint.lib.binary import build_wasm_callgraph, is_wasm_file, parse
+from blint.lib.binary import (
+    attach_sibling_deps_json,
+    build_wasm_callgraph,
+    is_wasm_file,
+    parse,
+)
 from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
 from blint.lib.clickonce import clickonce_metadata, is_clickonce_file, parse_clickonce
@@ -840,6 +845,13 @@ class AnalysisRunner:
         metadata["file_path"] = file_path
         if "name" in metadata:
             metadata["name"] = file_path
+        # The spool lives in a temp directory, so parse() could not see the
+        # <stem>.deps.json a framework-dependent build keeps beside the real
+        # file. Attach it here, from the real path, or the entry would be
+        # stored under a key that includes the sibling's digest while its
+        # payload lacks the sibling's data, and every later hit would replay
+        # that half.
+        attach_sibling_deps_json(metadata, file_path)
         if cache.put(spool_sha, self._parse_options_digest, metadata):
             self._mark_cache("stored", unit_role)
         return metadata

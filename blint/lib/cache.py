@@ -80,7 +80,11 @@ from blint.logger import LOG
 #
 # 11: embedded_libraries, identity_strings, and the load command of each
 #     Mach-O library entry.
-CACHE_SCHEMA_VERSION = 11
+#
+# 12: dotnet_dependencies can now come from the sibling <stem>.deps.json a
+#     framework-dependent build keeps beside the binary, and the sibling's
+#     digest joined the per-file key (see _sibling_deps_digest).
+CACHE_SCHEMA_VERSION = 12
 DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 1024
 # Parse results without a recognized binary_type are not stored: an
 # unrecognized file parses to near-nothing in microseconds, and caching that
@@ -221,6 +225,38 @@ def compute_options_digest(
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _sibling_deps_digest(exe_file: str | None) -> str:
+    """sha256 of the sibling deps.json bytes, or "" when there is none.
+
+    parse() folds the sibling manifest into ``dotnet_dependencies`` when one
+    sits beside a dotnet binary, so two inputs whose binaries are
+    byte-identical but whose siblings differ must not share a cache entry: a
+    rebuild that only bumps a package version leaves the application dll
+    unchanged while rewriting ``app.deps.json``, exactly the case a
+    content-addressed key would otherwise serve stale. The candidate path is
+    derived without reading it first (see ``sibling_deps_json_path``) so the
+    key and the parse agree on which file was folded in.
+    """
+    if not exe_file:
+        return ""
+    from blint.lib.binary_common import sibling_deps_json_path
+
+    candidate = sibling_deps_json_path(exe_file)
+    if not candidate:
+        return ""
+    from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
+
+    try:
+        if os.path.getsize(candidate) > MAX_DEPS_JSON_BYTES:
+            # Mirrors the reader's cap: an oversized file is not a manifest
+            # blint will fold in, so it must not change the key either.
+            return ""
+        with open(candidate, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return ""
+
+
 class ParseCache:
     """SQLite-backed content-addressed store of parse metadata.
 
@@ -348,9 +384,17 @@ class ParseCache:
 
     # -- core operations -----------------------------------------------------
 
-    def cache_key(self, file_sha256: str, options_digest: str) -> str:
+    def cache_key(
+        self, file_sha256: str, options_digest: str, sibling_deps_digest: str = ""
+    ) -> str:
         material = orjson.dumps(
-            [CACHE_SCHEMA_VERSION, file_sha256, _blint_version(), options_digest],
+            [
+                CACHE_SCHEMA_VERSION,
+                file_sha256,
+                _blint_version(),
+                options_digest,
+                sibling_deps_digest,
+            ],
             option=orjson.OPT_SORT_KEYS,
         )
         return hashlib.sha256(material).hexdigest()
@@ -363,7 +407,9 @@ class ParseCache:
         connection = self._connection(create=False)
         if connection is None:
             return None
-        cache_key = self.cache_key(file_sha256, options_digest)
+        cache_key = self.cache_key(
+            file_sha256, options_digest, _sibling_deps_digest(current_path)
+        )
         try:
             rows = _execute(
                 connection,
@@ -444,7 +490,11 @@ class ParseCache:
         connection = self._connection(create=True)
         if connection is None:
             return False
-        cache_key = self.cache_key(file_sha256, options_digest)
+        cache_key = self.cache_key(
+            file_sha256,
+            options_digest,
+            _sibling_deps_digest(str(metadata.get("file_path") or "")),
+        )
         now = time.time()
         try:
             connection.execute(

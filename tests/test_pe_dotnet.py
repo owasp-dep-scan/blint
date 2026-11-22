@@ -28,7 +28,10 @@ Fixture strategy follows the plan's rules:
 import base64
 import contextlib
 import hashlib
+import json
+import os
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -2691,3 +2694,578 @@ def test_real_managed_block_serializes_with_strong_name():
     path = _variant("signed.dll")
     block = parse_pe_dotnet(_lief_parse(path), path)
     json.dumps(block)
+
+
+# --------------------------------------------------------------------------
+# Sibling deps.json — framework-dependent .NET builds (issue #278)
+# --------------------------------------------------------------------------
+
+FXDEP_DIR = os.path.join("tests", "data", "pe", "dotnet-fxdep", "bin", "Release", "net10.0")
+
+
+def _fxdep_file(name: str) -> str:
+    path = os.path.join(FXDEP_DIR, name)
+    if not os.path.exists(path):
+        pytest.skip(f"dotnet-fxdep fixture {name} not present")
+    return path
+
+
+def _manifest(tmp_path, stem: str, payload) -> str:
+    """Write a deps.json beside a placeholder binary and return its path."""
+    binary = tmp_path / stem
+    if stem.endswith(".dll"):
+        binary.write_bytes(b"MZ" + b"\x00" * 62)
+    else:
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+    manifest = tmp_path / f"{os.path.splitext(stem)[0]}.deps.json"
+    if isinstance(payload, (dict, list)):
+        manifest.write_text(json.dumps(payload))
+    else:
+        manifest.write_text(payload)
+    return str(binary)
+
+
+def test_sibling_deps_json_path_derives_the_exact_stem(tmp_path):
+    from blint.lib.binary_common import sibling_deps_json_path
+
+    for stem in ("app.dll", "app.exe", "app", "My.App.dll", "My.App"):
+        binary = tmp_path / stem
+        binary.write_bytes(b"MZ")
+        expected = os.path.join(str(tmp_path), f"{os.path.splitext(stem)[0]}.deps.json")
+        assert sibling_deps_json_path(str(binary)) == expected
+
+
+def test_read_sibling_deps_json_acceptance(tmp_path):
+    from blint.lib.binary_common import read_sibling_deps_json
+
+    good = {
+        "runtimeTarget": {"name": ".NETCoreApp,Version=v10.0"},
+        "libraries": {"Newtonsoft.Json/12.0.3": {"type": "package"}},
+    }
+    assert read_sibling_deps_json(_manifest(tmp_path, "app.dll", good)) == good
+    # The extensionless apphost and the .exe apphost share the same lookup.
+    assert read_sibling_deps_json(_manifest(tmp_path, "app", good)) == good
+    assert read_sibling_deps_json(_manifest(tmp_path, "app.exe", good)) == good
+    # No sibling, malformed JSON, or a JSON document without a non-empty
+    # libraries map is not a dependency manifest.
+    binary = tmp_path / "lonely.dll"
+    binary.write_bytes(b"MZ")
+    assert read_sibling_deps_json(str(binary)) == {}
+    assert read_sibling_deps_json(_manifest(tmp_path, "broken.dll", "not json")) == {}
+    assert read_sibling_deps_json(_manifest(tmp_path, "empty.dll", {"libraries": {}})) == {}
+    assert read_sibling_deps_json(_manifest(tmp_path, "array.dll", [1, 2])) == {}
+
+
+def test_sibling_deps_json_size_cap(tmp_path, monkeypatch):
+    from blint.lib.binary_common import read_sibling_deps_json
+    from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
+
+    payload = {"libraries": {"A/1.0": {"type": "package"}}}
+    binary = _manifest(tmp_path, "app.dll", payload)
+    real_getsize = os.path.getsize
+
+    def fake_getsize(path, *args, **kwargs):
+        if str(path).endswith(".deps.json"):
+            return MAX_DEPS_JSON_BYTES + 1
+        return real_getsize(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "getsize", fake_getsize)
+    assert read_sibling_deps_json(binary) == {}
+
+
+def test_parse_reads_the_sibling_for_every_dotnet_shape():
+    from blint.lib.binary import parse
+
+    # The managed assembly (PE with CLI metadata), the Windows apphost (PE,
+    # dotnet evidence from the apphost shape) and the non-Windows apphost
+    # (Mach-O, evidence from the embedded dotnet-runtime host record) all
+    # pick up the manifest that sits beside them.
+    for name in ("fxapp.dll", "fxapp.exe", "fxapp"):
+        metadata = parse(_fxdep_file(name))
+        libraries = (metadata.get("dotnet_dependencies") or {}).get("libraries", {})
+        assert "Newtonsoft.Json/12.0.3" in libraries
+        assert metadata.get("dotnet_dependencies_source") == "sibling_file"
+
+
+def test_parse_ignores_a_sibling_for_a_non_dotnet_binary(tmp_path):
+    from blint.lib.binary import parse
+
+    # A manifest that happens to sit beside an unrelated native binary is a
+    # coincidence, not a dependency declaration of that binary.
+    payload = {"libraries": {"Newtonsoft.Json/12.0.3": {"type": "package"}}}
+    binary = _manifest(tmp_path, "msvc-hello-x64.exe", payload)
+    metadata = parse(binary)
+    assert not metadata.get("dotnet_dependencies")
+    assert "dotnet_dependencies_source" not in metadata
+
+
+def test_dotnet_assembly_package_names_maps_runtime_paths():
+    from blint.lib.sbom import dotnet_assembly_package_names
+
+    deps = {
+        "targets": {
+            ".NETCoreApp,Version=v10.0": {
+                "Swashbuckle.AspNetCore/6.6.2": {
+                    "runtime": {
+                        "lib/netstandard2.0/Swashbuckle.AspNetCore.Swagger.dll": {},
+                    }
+                },
+                "runtime.win-x64.System.IO.Ports/8.0.0": {
+                    "runtime": {"runtimes/win/lib/net8.0/System.IO.Ports.dll": {}},
+                },
+                "System.IO.Ports/8.0.0": {
+                    "runtime": {"lib/net8.0/System.IO.Ports.dll": {}},
+                },
+            }
+        }
+    }
+    mapping = dotnet_assembly_package_names(deps)
+    assert mapping["swashbuckle.aspnetcore.swagger"] == {"Swashbuckle.AspNetCore"}
+    # An assembly shipped by both the base package and a RID-specific one
+    # maps to both.
+    assert mapping["system.io.ports"] == {
+        "runtime.win-x64.System.IO.Ports",
+        "System.IO.Ports",
+    }
+    # Tolerant of malformed shapes.
+    assert dotnet_assembly_package_names({"targets": {"t": None}}) == {}
+    assert dotnet_assembly_package_names(None) == {}
+
+
+def test_assembly_refs_dropped_when_a_package_provides_the_assembly():
+    from blint.lib.sbom import merge_dotnet_assembly_ref_components, process_dotnet_dependencies
+
+    deps = {
+        "libraries": {
+            "Swashbuckle.AspNetCore/6.6.2": {
+                "type": "package",
+                "sha512": "sha512-" + base64.b64encode(b"\x00" * 64).decode(),
+            }
+        },
+        "targets": {
+            ".NETCoreApp,Version=v10.0": {
+                "Swashbuckle.AspNetCore/6.6.2": {
+                    "runtime": {
+                        "lib/netstandard2.0/Swashbuckle.AspNetCore.Swagger.dll": {
+                            "assemblyVersion": "6.6.2.0"
+                        }
+                    }
+                }
+            }
+        },
+    }
+    merged = merge_dotnet_assembly_ref_components(
+        process_dotnet_dependencies(deps, {}),
+        [
+            # Assembly name differs from the package id: still the package's
+            # own assembly, dropped in favour of the package component.
+            {"name": "Swashbuckle.AspNetCore.Swagger", "version": "6.6.2.0"},
+            # Nothing in the manifest explains the shared framework's
+            # assemblies; the AssemblyRef component keeps its place.
+            {"name": "System.Runtime", "version": "10.0.0.0"},
+        ],
+        deps,
+    )
+    purls = sorted(str(c.purl) for c in merged)
+    assert "pkg:nuget/Swashbuckle.AspNetCore@6.6.2" in purls
+    assert not any(p.startswith("pkg:nuget/Swashbuckle.AspNetCore.Swagger@") for p in purls)
+    assert "pkg:nuget/System.Runtime@10.0.0.0" in purls
+
+
+def test_overlay_known_assembly_refs_are_tagged_then_reconciled():
+    from blint.lib.sbom import (
+        merge_dotnet_assembly_ref_components,
+        process_dotnet_dependencies,
+        reconcile_shadowed_dotnet_components,
+    )
+
+    # A package dll copied beside app.deps.json has no manifest of its own;
+    # its AssemblyRefs point at neighbouring packages the directory's
+    # manifest already named, which is what the overlay carries. The merge
+    # only tags such a ref; the drop waits until the run's full component
+    # set is visible.
+    overlay = {"pkg:nuget/Microsoft.OpenApi": "pkg:nuget/Microsoft.OpenApi@1.6.14"}
+    tagged = merge_dotnet_assembly_ref_components(
+        [],
+        [{"name": "Microsoft.OpenApi", "version": "1.6.14.0"}],
+        None,
+        overlay,
+    )
+    assert [str(c.purl) for c in tagged] == ["pkg:nuget/Microsoft.OpenApi@1.6.14.0"]
+    tag_props = [p for p in tagged[0].properties if p.name == "internal:shadowed_by"]
+    assert [p.value for p in tag_props] == ["pkg:nuget/Microsoft.OpenApi@1.6.14"]
+
+    # When the package component exists in the same run (the app dll was
+    # scanned and its manifest produced it), the tagged ref is dropped and
+    # its edges leave the dependency graph.
+    package_components = process_dotnet_dependencies(
+        {
+            "libraries": {
+                "Microsoft.OpenApi/1.6.14": {
+                    "type": "package",
+                    "sha512": "sha512-" + base64.b64encode(b"\x00" * 64).decode(),
+                }
+            }
+        },
+        {},
+    )
+    survivors, removed = reconcile_shadowed_dotnet_components(
+        package_components + tagged
+    )
+    assert [str(c.purl) for c in survivors] == ["pkg:nuget/Microsoft.OpenApi@1.6.14"]
+    assert removed == {"pkg:nuget/Microsoft.OpenApi@1.6.14.0"}
+
+    # When nothing in the run carries the package (a single dll scanned
+    # inside a directory holding another app's manifest), the ref survives
+    # as the dependency's only representation, with the tag stripped.
+    survivors, removed = reconcile_shadowed_dotnet_components(list(tagged))
+    assert [str(c.purl) for c in survivors] == ["pkg:nuget/Microsoft.OpenApi@1.6.14.0"]
+    assert not removed
+    assert not any(
+        p.name == "internal:shadowed_by" for p in survivors[0].properties
+    )
+
+    # Without the overlay the ref was never tagged at all.
+    kept = merge_dotnet_assembly_ref_components(
+        [], [{"name": "Microsoft.OpenApi", "version": "1.6.14.0"}]
+    )
+    assert not any(
+        p.name == "internal:shadowed_by" for p in kept[0].properties
+    )
+
+
+def test_build_deps_json_index(tmp_path):
+    from blint.lib.sbom import build_deps_json_index
+
+    (tmp_path / "app.deps.json").write_text(
+        json.dumps({"libraries": {"Newtonsoft.Json/12.0.3": {"type": "package"}}})
+    )
+    (tmp_path / "broken.deps.json").write_text("{not json")
+    index = build_deps_json_index([str(tmp_path / "app.dll")])
+    records = index["records"][os.path.dirname(os.path.abspath(str(tmp_path / "app.dll")))]
+    assert [(r["package"], r["version"]) for r in records["newtonsoft.json"]] == [
+        ("Newtonsoft.Json", "12.0.3")
+    ]
+    # Manifests in directories with no binaries being scanned are not read.
+    assert build_deps_json_index([str(tmp_path / "nowhere" / "app.dll")]) == {}
+
+
+def test_fxdep_fixture_components_carry_package_versions():
+    """The issue #278 reproducer's expectation, on the committed build.
+
+    `dotnet build` of the committed project yields a framework-dependent
+    output: `fxapp.dll` references Newtonsoft.Json at assembly version
+    12.0.0.0 while the sibling `fxapp.deps.json` states package version
+    12.0.3. The SBOM must name the package at 12.0.3 exactly once and must
+    not restate it at 12.0.0.0.
+    """
+    from blint.lib.sbom import (
+        _scratch_sbom,
+        build_deps_json_index,
+        process_exe_file,
+    )
+
+    fixture_files = [
+        _fxdep_file("fxapp.dll"),
+        _fxdep_file("Newtonsoft.Json.dll"),
+        _fxdep_file("Serilog.dll"),
+    ]
+    deps_json_index = build_deps_json_index(fixture_files)
+    scratch = _scratch_sbom()
+    components = []
+    per_file = []
+    for dll in fixture_files:
+        produced = process_exe_file(
+            {}, False, dll, scratch, [], {}, False, False, None, deps_json_index
+        )
+        per_file.append(produced)
+        components += produced
+    purls = sorted(str(c.purl) for c in components)
+    assert "pkg:nuget/Newtonsoft.Json@12.0.3" in purls
+    assert not any(
+        p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls
+    )
+    assert "pkg:nuget/Serilog@4.2.0" in purls
+    # A package dll's own parent also takes the manifest's package identity.
+    parent = per_file[1][0]
+    assert str(parent.purl) == "pkg:nuget/Newtonsoft.Json@12.0.3"
+    parent_props = {p.name: p.value for p in parent.properties}
+    assert parent_props["internal:version_source"] == "package_version"
+    # The shared framework's assemblies stay AssemblyRef components with an
+    # honest version source.
+    runtime = next(c for c in components if str(c.purl).startswith("pkg:nuget/System.Runtime@"))
+    runtime_props = {p.name: p.value for p in runtime.properties}
+    assert runtime_props["internal:version_source"] == "assembly_version"
+
+
+def _fxdep_copy(tmp_path, names=("fxapp.dll", "Newtonsoft.Json.dll", "Serilog.dll", "fxapp.deps.json")):
+    import shutil
+
+    for name in names:
+        shutil.copy(_fxdep_file(name), tmp_path / name)
+    return tmp_path
+
+
+def _run_parent(path, index):
+    """(parent component, all components) from process_exe_file for one file.
+
+    A library-typed parent leads the returned components; an
+    application-typed one is attached to the scratch BOM's metadata.
+    """
+    from blint.lib.sbom import _scratch_sbom, process_exe_file
+
+    scratch = _scratch_sbom()
+    components = process_exe_file({}, False, path, scratch, [], {}, False, False, None, index)
+    attached = scratch.metadata.component.components
+    return (attached[0] if attached else components[0]), components
+
+
+def test_native_apphosts_keep_their_generic_identity(tmp_path):
+    """A native apphost shares the application's stem but is not the NuGet
+    package the manifest names for the managed assembly."""
+    from blint.lib.sbom import build_deps_json_index
+
+    _fxdep_copy(tmp_path, ("fxapp", "fxapp.exe", "fxapp.deps.json"))
+    for name in ("fxapp", "fxapp.exe"):
+        path = str(tmp_path / name)
+        parent, components = _run_parent(path, build_deps_json_index([path]))
+        assert str(parent.purl) == "pkg:generic/fxapp"
+        purls = {str(c.purl) for c in components}
+        # The manifest's packages are still the apphost's dependencies.
+        assert "pkg:nuget/Newtonsoft.Json@12.0.3" in purls
+
+
+def test_managed_files_still_take_the_manifest_identity(tmp_path):
+    from blint.lib.sbom import build_deps_json_index
+
+    _fxdep_copy(tmp_path)
+    files = [str(tmp_path / n) for n in ("fxapp.dll", "Newtonsoft.Json.dll", "Serilog.dll")]
+    index = build_deps_json_index(files)
+    seen = {os.path.basename(path): str(_run_parent(path, index)[0].purl) for path in files}
+    assert seen == {
+        "fxapp.dll": "pkg:nuget/fxapp@1.0.0",
+        "Newtonsoft.Json.dll": "pkg:nuget/Newtonsoft.Json@12.0.3",
+        "Serilog.dll": "pkg:nuget/Serilog@4.2.0",
+    }
+
+
+def _two_manifest_dir(tmp_path, other_version, other_file_version=None):
+    """The fixture directory plus a second manifest, copied from the real
+    one with Newtonsoft.Json restated at ``other_version``. The second
+    manifest sorts first, as the corpus's failing cases did."""
+    _fxdep_copy(tmp_path)
+    text = (tmp_path / "fxapp.deps.json").read_text()
+    edited = text.replace("Newtonsoft.Json/12.0.3", f"Newtonsoft.Json/{other_version}")
+    edited = edited.replace('"Newtonsoft.Json": "12.0.3"', f'"Newtonsoft.Json": "{other_version}"')
+    edited = edited.replace("newtonsoft.json/12.0.3", f"newtonsoft.json/{other_version}")
+    if other_file_version:
+        edited = edited.replace("12.0.3.23909", other_file_version)
+    assert edited != text or other_version == "12.0.3"
+    (tmp_path / "aaa.deps.json").write_text(edited)
+    return tmp_path
+
+
+def _newtonsoft_parent(tmp_path):
+    from blint.lib.sbom import build_deps_json_index
+
+    path = str(tmp_path / "Newtonsoft.Json.dll")
+    parent, _ = _run_parent(path, build_deps_json_index([path]))
+    props = {p.name: p.value for p in parent.properties}
+    return str(parent.purl), props["internal:version_source"]
+
+
+def test_package_version_follows_the_manifest_that_matches_the_dll(tmp_path):
+    # The alphabetically first manifest names 13.0.1 with a file version the
+    # dll does not carry; fxapp.deps.json states the dll's own FileVersion.
+    _two_manifest_dir(tmp_path, "13.0.1", "13.0.1.25517")
+    assert _newtonsoft_parent(tmp_path) == (
+        "pkg:nuget/Newtonsoft.Json@12.0.3",
+        "package_version",
+    )
+
+
+def test_disagreeing_manifests_that_match_nothing_keep_the_assembly_identity(tmp_path):
+    # Neither manifest matches the dll on file version, and their package
+    # versions differ: the assembly-version identity stays.
+    _two_manifest_dir(tmp_path, "13.0.1", "13.0.1.25517")
+    text = (tmp_path / "fxapp.deps.json").read_text().replace("12.0.3.23909", "12.0.3.1")
+    (tmp_path / "fxapp.deps.json").write_text(text)
+    purl, source = _newtonsoft_parent(tmp_path)
+    assert source == "assembly_version"
+    assert purl.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0")
+
+
+def test_ambiguous_manifests_keep_the_assembly_identity(tmp_path):
+    # Both manifests state the dll's file version but different package
+    # versions: nothing can settle it.
+    _two_manifest_dir(tmp_path, "12.0.4")
+    purl, source = _newtonsoft_parent(tmp_path)
+    assert source == "assembly_version"
+    assert purl.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0")
+
+
+def test_agreeing_manifests_still_name_the_package_version(tmp_path):
+    _two_manifest_dir(tmp_path, "12.0.3")
+    assert _newtonsoft_parent(tmp_path) == (
+        "pkg:nuget/Newtonsoft.Json@12.0.3",
+        "package_version",
+    )
+
+
+def test_shadowed_assembly_refs_follow_every_candidate_package(tmp_path):
+    from blint.lib.sbom import build_deps_json_index, merge_dotnet_assembly_ref_components
+
+    # With two disagreeing manifests beside the dll, an AssemblyRef to
+    # Newtonsoft.Json is tagged against both candidate packages, so it is
+    # dropped when the dll the scan resolved to either of them is in the run.
+    _two_manifest_dir(tmp_path, "13.0.1", "13.0.1.25517")
+    path = str(tmp_path / "Serilog.dll")
+    index = build_deps_json_index([path])
+    merged = merge_dotnet_assembly_ref_components(
+        [],
+        [{"name": "Newtonsoft.Json", "version": "12.0.0.0"}],
+        None,
+        {},
+        index,
+        path,
+    )
+    tags = sorted(p.value for p in merged[0].properties if p.name == "internal:shadowed_by")
+    assert tags == [
+        "pkg:nuget/Newtonsoft.Json@12.0.3",
+        "pkg:nuget/Newtonsoft.Json@13.0.1",
+    ]
+
+
+def test_malformed_manifest_entries_are_skipped(tmp_path):
+    from blint.lib.sbom import (
+        build_deps_json_index,
+        dotnet_assembly_package_names,
+        process_dotnet_dependencies,
+    )
+
+    _fxdep_copy(tmp_path, ("fxapp.dll", "Newtonsoft.Json.dll"))
+    real = json.loads(Path(_fxdep_file("fxapp.deps.json")).read_text())
+    libraries = dict(real["libraries"])
+    libraries.update(
+        {
+            "NoVersion": {},
+            "Foo/1.0": {"type": "package"},
+            "NotADict/1.0": "text",
+            "Odd/": {"type": "package"},
+            "Digest/1.0": {"type": "package", "sha512": 7, "path": 3},
+        }
+    )
+    payload = dict(real, libraries=libraries)
+    payload["targets"] = {
+        ".NETCoreApp,Version=v10.0": dict(
+            next(iter(real["targets"].values())),
+            **{"Foo/1.0": {"dependencies": ["x"], "runtime": ["y"]}, "Bad": 5},
+        ),
+        "broken": None,
+    }
+    (tmp_path / "fxapp.deps.json").write_text(json.dumps(payload))
+    path = str(tmp_path / "fxapp.dll")
+    _, components = _run_parent(path, build_deps_json_index([path]))
+    purls = {str(c.purl) for c in components}
+    # Well-formed entries of the same file are kept.
+    assert "pkg:nuget/Newtonsoft.Json@12.0.3" in purls
+    assert "pkg:nuget/Foo@1.0" in purls
+    assert not any("NoVersion" in p or "NotADict" in p or "Odd" in p for p in purls)
+    # Odd shapes at the top level do not raise either.
+    assert process_dotnet_dependencies({"libraries": [1], "targets": "x"}, {}) == []
+    assert process_dotnet_dependencies({"libraries": {}, "targets": {"t": []}}, {}) == []
+    assert dotnet_assembly_package_names({"targets": ["x"]}) == {}
+    assert dotnet_assembly_package_names("text") == {}
+
+
+def test_generate_survives_a_malformed_sibling_manifest(tmp_path):
+    _fxdep_copy(tmp_path, ("fxapp.dll",))
+    (tmp_path / "fxapp.deps.json").write_text('{"libraries":{"Foo":{}, "Bar/1.0":{"type":"package"}}}')
+    from blint.config import BlintOptions
+    from blint.lib.sbom import generate
+
+    out = str(tmp_path / "bom.json")
+    options = BlintOptions(
+        sbom_output=out, quiet_mode=True, src_dir_image=[str(tmp_path)]
+    )
+    generate(options, [str(tmp_path / "fxapp.dll")], [])
+    purls = {c["purl"] for c in json.loads(Path(out).read_text()).get("components", [])}
+    assert "pkg:nuget/Bar@1.0" in purls
+
+
+def _generate_purls(tmp_path, files):
+    """Every component purl (nested ones included) of a generate() run."""
+    from blint.config import BlintOptions
+    from blint.lib.sbom import generate
+
+    out = str(tmp_path / "run-bom.json")
+    options = BlintOptions(sbom_output=out, quiet_mode=True, src_dir_image=[str(tmp_path)])
+    generate(options, files, [])
+    bom = json.loads(Path(out).read_text())
+    purls = []
+
+    def walk(components):
+        for comp in components:
+            purls.append(comp["purl"])
+            walk(comp.get("components") or [])
+
+    walk(bom.get("components") or [])
+    walk(bom["metadata"].get("component", {}).get("components") or [])
+    purls.append(bom["metadata"].get("component", {}).get("purl"))
+    return purls
+
+
+def _build_and_obj_dirs(tmp_path, names=("fxapp.dll", "Newtonsoft.Json.dll", "fxapp.deps.json")):
+    """A build directory with its manifest, and a manifest-less ``obj``
+    directory holding a byte-identical copy of the application dll."""
+    import shutil
+
+    build = tmp_path / "bin"
+    obj = tmp_path / "obj"
+    build.mkdir()
+    obj.mkdir()
+    _fxdep_copy(build, names)
+    shutil.copy(_fxdep_file("fxapp.dll"), obj / "fxapp.dll")
+    return build, obj
+
+
+def test_manifest_less_copy_follows_the_described_build_output(tmp_path):
+    build, obj = _build_and_obj_dirs(tmp_path)
+    files = [
+        str(build / "fxapp.dll"),
+        str(build / "Newtonsoft.Json.dll"),
+        str(obj / "fxapp.dll"),
+    ]
+    purls = _generate_purls(tmp_path, files)
+    assert "pkg:nuget/Newtonsoft.Json@12.0.3" in purls
+    assert "pkg:nuget/fxapp@1.0.0" in purls
+    # The copy neither restates the package at its assembly version nor
+    # keeps a second parent under the assembly version.
+    assert not any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
+    assert not any(p.startswith("pkg:nuget/fxapp@1.0.0.0") for p in purls)
+
+
+def test_manifest_less_copy_with_different_content_is_not_aliased(tmp_path):
+    from blint.lib.sbom import build_deps_json_index
+
+    build, obj = _build_and_obj_dirs(tmp_path)
+    # Same name, different bytes: a name alone is not evidence.
+    (obj / "fxapp.dll").write_bytes((obj / "fxapp.dll").read_bytes() + b"\x00")
+    index = build_deps_json_index([str(build / "fxapp.dll"), str(obj / "fxapp.dll")])
+    assert index["aliases"] == {}
+
+
+def test_assembly_ref_survives_when_no_manifest_entry_has_its_version(tmp_path):
+    build, obj = _build_and_obj_dirs(tmp_path, ("fxapp.dll", "fxapp.deps.json"))
+    files = [str(build / "fxapp.dll"), str(obj / "fxapp.dll")]
+    purls = _generate_purls(tmp_path, files)
+    assert not any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
+
+    # The manifest states a different assemblyVersion for Newtonsoft.Json:
+    # the copy's reference to 12.0.0.0 matches nothing and stays.
+    manifest = build / "fxapp.deps.json"
+    text = manifest.read_text()
+    assert '"assemblyVersion": "12.0.0.0"' in text
+    manifest.write_text(text.replace('"assemblyVersion": "12.0.0.0"', '"assemblyVersion": "99.0.0.0"'))
+    purls = _generate_purls(tmp_path, files)
+    assert any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
