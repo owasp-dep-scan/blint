@@ -1,0 +1,23 @@
+blint/lib/sbom.py
+  s_23234c20518dda::t_f59527f5153fe7 2672
+  s_23234c20518dda::t_0668b2f4b5f975 4,3683-3730,3734-3767
+tests/test_pe_dotnet.py
+  s_23234c20518dda::t_3b62cb09847064 3194-3271
+  s_23234c20518dda::t_9447ec8bb89517 2945
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3b2c6791924b552f0e05d1b22effcdedd32b38f8",
+  "prompts": {},
+  "sessions": {
+    "s_23234c20518dda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9336f088-a59c-4ea9-8e6f-c00d75b0ed50",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
