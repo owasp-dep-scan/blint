@@ -1,0 +1,43 @@
+tests/test_cache.py
+  s_338ebbbdae1c95::t_03f42291fef54b 252-282
+blint/lib/binary.py
+  s_338ebbbdae1c95::t_4eb1fb0f98f026 106
+  s_338ebbbdae1c95::t_9659f7ad0b5366 1352-1353
+blint/lib/binary_common.py
+  s_338ebbbdae1c95::t_75651271974c8e 890
+  s_338ebbbdae1c95::t_6f378af04453cf 887-889,891-899
+  s_338ebbbdae1c95::t_950f09561c9ee0 829,855-881
+  s_338ebbbdae1c95::t_a90a9ed2de73f1 882-886
+  s_338ebbbdae1c95::t_06fcfdb0898b53 900-901
+blint/lib/cache.py
+  s_338ebbbdae1c95::t_c031a50fc0a9b5 247-248,250-253
+blint/lib/runners.py
+  s_338ebbbdae1c95::t_f58abca1745779 27-32
+  s_338ebbbdae1c95::t_50bae3b6c8f196 848-854
+docs/METADATA.md
+  s_338ebbbdae1c95::t_6b39095f290482 833
+blint/lib/sbom.py
+  s_338ebbbdae1c95::t_224bc4621cf157 444-453
+  s_338ebbbdae1c95::t_d707e02faf5bd9 2586-2589
+  s_338ebbbdae1c95::t_2a5774c5ba92ec 3427-3467
+  s_338ebbbdae1c95::t_85138da7cd8f9b 2619-2630,2643-2646
+tests/test_pe_dotnet.py
+  s_338ebbbdae1c95::t_4ed1f290c196b9 2874-2879,2883-2885,2887,2893-2900,2910-2927,2931-2933
+  s_338ebbbdae1c95::t_47b37d3bd52749 2901-2909
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "90d03df44fd271dd8bd90f86ea3793d850dd4b08",
+  "prompts": {},
+  "sessions": {
+    "s_338ebbbdae1c95": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_3ed0a738-02bd-4642-8c40-4a9a7831627f",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
