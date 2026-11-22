@@ -1606,3 +1606,69 @@ def check_pnp_privileged_component(
     if not described:
         return True
     return "; ".join(described[:2])
+def check_x86_cet(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """x86 ELF without CET marking (issue 273).
+
+    IBT and SHSTK are opt-in per binary: the loader enables them only when
+    .note.gnu.property carries GNU_PROPERTY_X86_FEATURE_1_AND, so a missing
+    note or missing bits is the binary's own choice, not a parser gap. Only
+    loadable x86 code is in scope (ET_REL objects and other CPUs never see
+    this rule, ground rule 35). Severity is low because the flag is off by
+    default in most toolchains: this is a posture fact like BTI/PAC, not a
+    defect.
+    """
+    memory_safety = metadata.get("memory_safety")
+    if not isinstance(memory_safety, dict) or not isinstance(memory_safety.get("cet"), dict):
+        return True
+    if str(metadata.get("elf_type") or "").upper() == "REL":
+        return True
+    cet = memory_safety["cet"]
+    missing = [
+        name
+        for name, present in (("IBT", cet.get("ibt")), ("SHSTK", cet.get("shstk")))
+        if not present
+    ]
+    if not missing:
+        return True
+    return (
+        f"{', '.join(missing)} not marked in .note.gnu.property; rebuild with -fcf-protection=full"
+    )
+
+
+def check_stack_clash(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Functions with page-crossing frames and no stack probes (issue 273).
+
+    The verdict exists only under --disassemble and only when some function
+    grew the stack by at least a page, because -fstack-clash-protection
+    emits its probing loops exactly there. Anything less is "not
+    determined" in memory_safety and this check stays silent: a gap that
+    was not measured must not read as measured and clean.
+    """
+    memory_safety = metadata.get("memory_safety")
+    clash = (
+        (memory_safety or {}).get("stack_clash_protection")
+        if isinstance(memory_safety, dict)
+        else None
+    )
+    if not isinstance(clash, dict) or clash.get("status") != "unprotected":
+        return True
+    return (
+        f"{clash.get('large_frame_function_count', 0)} function(s) grow the stack by a page "
+        "without probing it; rebuild with -fstack-clash-protection"
+    )
+
+
+def check_fortify(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Unfortified libc calls in a dynamic build (issue 273).
+
+    Level 0 is claimed only when the binary imports plain fortifiable libc
+    calls and carries no __*_chk wrapper anywhere, so the build genuinely
+    ran without _FORTIFY_SOURCE. Static builds and binaries with nothing
+    left to fortify report level None in memory_safety and never see this
+    check: their absence of wrappers is not evidence of a gap.
+    """
+    memory_safety = metadata.get("memory_safety")
+    fortify = (memory_safety or {}).get("fortify") if isinstance(memory_safety, dict) else None
+    if not isinstance(fortify, dict) or fortify.get("level") != 0:
+        return True
+    return "imports unfortified libc calls with no __*_chk wrappers; rebuild with -D_FORTIFY_SOURCE=2 or 3 and -O"

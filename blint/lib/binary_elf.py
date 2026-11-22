@@ -8,6 +8,7 @@ orchestrator that imports it.
 # pylint: disable=too-many-lines,consider-using-f-string
 import contextlib
 import os
+import re
 import struct
 import warnings
 
@@ -139,6 +140,58 @@ SANITIZER_PREFIXES = {
     "msan": "__msan_",
 }
 CFI_SYMBOL = "__cfi_check"
+
+# Clang's single-DSO CFI names its jump-table thunks ``<function>.cfi``;
+# ``__cfi_check`` (the cross-DSO entry point the NDK emits) does not exist
+# in a plain ``clang -fsanitize=cfi`` build, so the suffix is the other
+# half of the CFI evidence.
+CFI_JUMP_TABLE_SUFFIX = ".cfi"
+
+# x86 CET evidence lives in the same .note.gnu.property the AArch64 reader
+# decodes: GNU_PROPERTY_X86_FEATURE_1_AND (0xc0000002 in LLVM's ELF.h) with
+# IBT at bit 0 and SHSTK at bit 1. lief decodes the note into
+# NoteGnuProperty.X86Features features, so the bits are read through lief
+# rather than re-parsed from the description bytes.
+_X86_MACHINE_TYPES = {"X86_64", "I386", "AMD64"}
+
+# glibc FORTIFY wrappers whose call needs a run-time-computed object size
+# (``__builtin_dynamic_object_size``), which only -D_FORTIFY_SOURCE=3 and
+# newer produce; level 2 falls back to the plain function for unknown
+# sizes. Compared after stripping leading underscores so glibc's internal
+# triple-underscore aliases (___memcpy_chk) count too.
+FORTIFY_DYNAMIC_SIZE_BASES = {
+    "memcpy_chk",
+    "memmove_chk",
+    "memset_chk",
+    "mempcpy_chk",
+    "stpcpy_chk",
+}
+# libc entry points glibc fortifies; a dynamic binary importing one of
+# these with no __*_chk import at all was built (or linked) without
+# _FORTIFY_SOURCE, which is what separates level 0 from "nothing to
+# fortify".
+PLAIN_FORTIFIABLE_IMPORTS = {
+    "sprintf",
+    "vsprintf",
+    "strcpy",
+    "stpcpy",
+    "strcat",
+    "strncpy",
+    "strncat",
+    "snprintf",
+    "vsnprintf",
+    "printf",
+    "fprintf",
+    "vprintf",
+    "vfprintf",
+    "sscanf",
+    "memcpy",
+    "mempcpy",
+    "memmove",
+    "memset",
+    "read",
+    "recv",
+}
 
 _AARCH64_FEATURE_NAMES = {
     GNU_PROPERTY_AARCH64_FEATURE_1_BTI: "BTI",
@@ -523,12 +576,113 @@ def parse_android_fortify(symbol_names: set[str]) -> dict | None:
     evidence; the fact records the names. ``__stack_chk_*`` is the canary,
     deliberately excluded here as there.
     """
-    fortified = sorted(
+    fortified = _fortify_chk_names(symbol_names)
+    return {"symbols": fortified} if fortified else None
+
+
+def _elf_symbol_names(metadata: dict, *keys: str) -> set[str]:
+    """Names from the metadata symbol buckets named by ``keys``.
+
+    The sanitizer, CFI and FORTIFY facts read symbol names, and a static
+    build carries its evidence in ``.symtab`` while a dynamic one carries it
+    in the dynamic table (as imports or, for a statically linked runtime,
+    defined symbols), so the neutral facts read both buckets.
+    """
+    names: set[str] = set()
+    for key in keys or ("dynamic_symbols", "symtab_symbols"):
+        for entry in metadata.get(key) or []:
+            if isinstance(entry, dict) and entry.get("name"):
+                names.add(str(entry["name"]))
+    return names
+
+
+def _fortify_chk_names(symbol_names: set[str]) -> list[str]:
+    """The ``__*_chk`` fortify wrapper names, the Android list reused."""
+    return sorted(
         name
         for name in symbol_names
         if name.startswith("__") and name.endswith("_chk") and not name.startswith("__stack_chk")
     )
-    return {"symbols": fortified} if fortified else None
+
+
+def parse_elf_fortify(symbol_names: set[str], dynamic_names: set[str]) -> dict:
+    """FORTIFY level from the wrapper symbols, for every ELF.
+
+    Levels, and what backs each claim: 0 means the dynamic table imports
+    plain fortifiable libc calls and no ``__*_chk`` appears anywhere, so the
+    build had no fortify at all; 2 and 3 both mean fortified (the ``_chk``
+    wrappers are indistinguishable per call site from names alone); 3 is
+    reported when a wrapper of the dynamic-size family (``__memcpy_chk``...)
+    is present, because glibc only reaches those with the run-time object
+    sizes ``_FORTIFY_SOURCE=3`` computes. ``None`` means the binary cannot
+    tell: no wrappers and no plain fortifiable import either, the honest
+    answer for a static binary or one with nothing fortifiable left after
+    inlining.
+    """
+    fortified = _fortify_chk_names(symbol_names)
+    if fortified:
+        bases = {name.lstrip("_") for name in fortified}
+        level = 3 if bases & FORTIFY_DYNAMIC_SIZE_BASES else 2
+    elif any(name in PLAIN_FORTIFIABLE_IMPORTS for name in dynamic_names):
+        level = 0
+    else:
+        level = None
+    return {"level": level, "symbols": fortified}
+
+
+def _decode_x86_cet(parsed_obj: lief.ELF.Binary) -> dict:
+    """IBT and SHSTK bits from the x86 GNU property note, via lief.
+
+    ``-fcf-protection=full`` makes the linker record
+    GNU_PROPERTY_X86_FEATURE_1_AND with both bits; ``=none`` leaves the
+    note without them or drops it entirely, and either way the loader
+    enables nothing, so "note absent" and "bits absent" both report false
+    rather than unknown.
+    """
+    ibt = False
+    shstk = False
+    with contextlib.suppress(AttributeError, TypeError):
+        for note in parsed_obj.notes:
+            if "GNU_PROPERTY" not in str(getattr(note, "type", "")):
+                continue
+            for prop in note.properties:
+                if "X86_FEATURE" not in str(getattr(prop, "type", "")):
+                    continue
+                for _flag, feature in prop.features:
+                    token = str(feature).rsplit(".", 1)[-1].strip().upper()
+                    if token == "IBT":
+                        ibt = True
+                    elif token == "SHSTK":
+                        shstk = True
+    return {"ibt": ibt, "shstk": shstk}
+
+
+def parse_memory_safety(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict:
+    """Format-neutral memory-safety facts for every ELF (issue 273).
+
+    The Android facts keep their own sanitizer and fortify keys for
+    compatibility; this block is the one every ELF carries, whatever libc
+    or linkage it was built for. Sanitizer absence means "no runtime
+    evidence", not "not instrumented": trap-mode UBSan and minimal runtimes
+    link no marker symbols, so their absence cannot be told apart from
+    their absence of evidence. The stack-clash fact joins this block only
+    under ``--disassemble`` (see ``parse_stack_clash_protection``).
+    """
+    symbol_names = _elf_symbol_names(metadata)
+    dynamic_names = _elf_symbol_names(metadata, "dynamic_symbols")
+    facts: dict = {
+        "sanitizers": sorted(
+            kind
+            for kind, prefix in SANITIZER_PREFIXES.items()
+            if any(name.startswith(prefix) for name in symbol_names)
+        ),
+        "cfi": CFI_SYMBOL in symbol_names
+        or any(name.endswith(CFI_JUMP_TABLE_SUFFIX) for name in symbol_names),
+        "fortify": parse_elf_fortify(symbol_names, dynamic_names),
+    }
+    if str(metadata.get("machine_type") or "").upper() in _X86_MACHINE_TYPES:
+        facts["cet"] = _decode_x86_cet(parsed_obj)
+    return facts
 
 
 def parse_android_unwind(parsed_obj: lief.ELF.Binary) -> dict | None:
@@ -587,6 +741,111 @@ def parse_shadow_call_stack(metadata: dict) -> dict | None:
     if not functions:
         return None
     return {"functions": sorted(functions)[:64], "function_count": len(functions)}
+
+
+# The smallest frame -fstack-clash-protection probes: one guard-size page
+# (GCC and Clang default to the target's 4 KiB page). Frames below it never
+# need probes, which is what makes "no probes seen" inconclusive for them.
+STACK_PROBE_PAGE = 4096
+
+# x86 probe writes: GCC emits ``or qword ptr [rsp], 0`` and Clang
+# ``mov qword ptr [rsp], 0`` between page-sized stack adjustments; the
+# size prefix is optional at the line level, so both spellings are matched.
+_X86_PROBE_RE = re.compile(
+    r"^(?:qword ptr |dword ptr |word ptr |byte ptr )?\[rsp(?:\]|,|\+).*, 0$"
+)
+_X86_FRAME_SUB_RE = re.compile(r"^rsp, (\d+)$")
+_AARCH64_FRAME_SUB_RE = re.compile(r"^sp, sp, #(\d+)(?:, lsl #(\d+))?$")
+
+
+def _stack_probe_line(machine: str, mnemonic: str, operand_text: str) -> bool:
+    """Whether one instruction line is a stack-clash probe write."""
+    if machine == "AARCH64":
+        # GCC: ``str xzr, [sp, #1024]``; Clang: ``str xzr, [sp]``.
+        return mnemonic == "str" and re.match(r"^xzr, \[sp[\],]", operand_text) is not None
+    # x86: a constant-zero write through rsp, from either compiler.
+    return (
+        mnemonic in ("or", "mov")
+        and operand_text.endswith(", 0")
+        and _X86_PROBE_RE.match(operand_text) is not None
+    )
+
+
+def _large_frame_adjustment(machine: str, mnemonic: str, operand_text: str) -> bool:
+    """Whether one instruction line grows the stack by at least a page."""
+    if mnemonic != "sub":
+        return False
+    if machine == "AARCH64":
+        match = _AARCH64_FRAME_SUB_RE.match(operand_text)
+        if not match:
+            return False
+        amount = int(match.group(1)) << int(match.group(2) or 0)
+        return amount >= STACK_PROBE_PAGE
+    match = _X86_FRAME_SUB_RE.match(operand_text)
+    return bool(match) and int(match.group(1)) >= STACK_PROBE_PAGE
+
+
+def parse_stack_clash_protection(metadata: dict) -> dict:
+    """Stack-clash protection verdict from disassembled functions (issue 273).
+
+    ``-fstack-clash-protection`` leaves no note and no symbol: its evidence
+    is the probing loop the compilers emit in functions with page-crossing
+    frames (measured on Ubuntu 24.04: GCC ``sub rsp, 4096`` +
+    ``or qword ptr [rsp], 0``, Clang ``sub rsp, 4096`` +
+    ``mov qword ptr [rsp], 0``; on AArch64 ``sub sp, sp, #1, lsl #12`` +
+    ``str xzr, [sp]``). Nyxstone provides text only (AGENTS.md), so the
+    match is on the assembly text, and the whole fact exists only when
+    ``--disassemble`` ran.
+
+    The verdict is three-valued on purpose. A binary where no function
+    grows the stack by a page has no use for probes, so the option cannot
+    be told apart from its absence and the honest answer is "not
+    determined", never "absent".
+    """
+    machine = str(metadata.get("machine_type") or "").upper()
+    probe_functions: list[str] = []
+    probe_count = 0
+    large_frame_functions = 0
+    disassembled = metadata.get("disassembled_functions")
+    if isinstance(disassembled, dict):
+        for func_key, func_data in disassembled.items():
+            assembly = func_data.get("assembly") if isinstance(func_data, dict) else None
+            if not assembly:
+                continue
+            has_probe = False
+            has_large_frame = False
+            for line in str(assembly).splitlines():
+                parts = line.split(maxsplit=1)
+                if len(parts) != 2:
+                    continue
+                mnemonic = parts[0].strip().lower()
+                operand_text = parts[1].strip()
+                if _stack_probe_line(machine, mnemonic, operand_text):
+                    has_probe = True
+                    probe_count += 1
+                elif _large_frame_adjustment(machine, mnemonic, operand_text):
+                    has_large_frame = True
+            if has_large_frame:
+                large_frame_functions += 1
+            if has_probe:
+                probe_functions.append(
+                    str(func_data.get("name") or func_key)
+                    if isinstance(func_data, dict)
+                    else str(func_key)
+                )
+    if probe_functions:
+        status = "protected"
+    elif large_frame_functions:
+        status = "unprotected"
+    else:
+        status = "not determined"
+    return {
+        "status": status,
+        "reason": None if status != "not determined" else "no_function_with_page_crossing_frame",
+        "probe_count": probe_count,
+        "probe_functions": sorted(probe_functions)[:32],
+        "large_frame_function_count": large_frame_functions,
+    }
 
 
 def parse_android_facts(parsed_obj: lief.ELF.Binary, metadata: dict) -> dict | None:
@@ -815,6 +1074,10 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     android_facts = parse_android_facts(parsed_obj, metadata)
     if android_facts is not None:
         metadata["android"] = android_facts
+    # Memory-safety facts for every ELF (issue 273), the format-neutral
+    # twin of the sanitizer/fortify facts above: same symbol evidence, both
+    # buckets, any libc or linkage.
+    metadata["memory_safety"] = parse_memory_safety(parsed_obj, metadata)
     # Framework/runtime identification (04/B, rule 38): evidence-keyed only,
     # stored under "frameworks" when anything matches. Runs after the android
     # facts (the NDK-note detector reads them) and the symbol tables.

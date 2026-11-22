@@ -40,6 +40,7 @@ from blint.lib.checks import (
     check_canary,  # noqa: F401
     check_codesign,  # noqa: F401
     check_dll_characteristics,  # noqa: F401
+    check_fortify,  # noqa: F401
     check_hvci_compatible,  # noqa: F401
     check_kernel_signing_class,  # noqa: F401
     check_known_vulnerable_driver,  # noqa: F401
@@ -71,6 +72,7 @@ from blint.lib.checks import (
     check_signature_not_timestamped,  # noqa: F401
     check_signature_unknown_root,  # noqa: F401
     check_signer_mismatch,  # noqa: F401
+    check_stack_clash,  # noqa: F401
     check_tls_callbacks,  # noqa: F401
     check_trust_info,  # noqa: F401
     check_undeclared_dependencies,  # noqa: F401
@@ -79,6 +81,7 @@ from blint.lib.checks import (
     check_virtual_size,  # noqa: F401
     check_weak_signature_digest,  # noqa: F401
     check_wx_segments,  # noqa: F401
+    check_x86_cet,  # noqa: F401
 )
 from blint.lib.utils import (
     create_findings_table,

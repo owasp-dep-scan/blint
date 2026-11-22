@@ -232,6 +232,46 @@
     # it fired on every benign managed DLL once exe_type moved. Mixed-mode
     # native code inside managed images was never checked either (their
     # exe_type was PE32/PE64), so no file that existed before loses a check.
+- id: CHECK_X86_CET
+  title: x86 binary without CET control-flow protection
+  description: |
+    Intel CET (Control-flow Enforcement Technology) has two parts the loader
+    only enables when the binary asks for them in `.note.gnu.property`:
+    IBT (indirect branch tracking, `endbr64` at every indirect target) and
+    SHSTK (the return-address shadow stack). A binary without the
+    GNU_PROPERTY_X86_FEATURE_1_AND marking gets neither, and when it is
+    loaded into a process it also forces the loader to disable CET for the
+    whole process. Rebuild with `-fcf-protection=full` (both GCC and Clang).
+    AArch64 branch protection is CHECK_ANDROID_BTI_PAC's subject; this rule
+    never runs outside x86, and an ELF whose CET facts could not be read
+    (no `cet` block in `memory_safety`) is out of scope too.
+  severity: low
+- id: CHECK_STACK_CLASH
+  title: Page-crossing stack frames without stack-clash protection
+  description: |
+    A function that moves the stack pointer by more than a guard page in one
+    adjustment can jump the guard page entirely: a write below the new frame
+    lands in adjacent mappings, which is the stack clash technique. GCC and
+    Clang prevent it with `-fstack-clash-protection`, which emits probing
+    writes between page-sized stack adjustments. The evidence exists only in
+    disassembly, so this rule needs `--disassemble` and fires only when some
+    function has a page-crossing frame and no probe was found anywhere; a
+    binary with no such frame, or one that was not disassembled, reports "not
+    determined" in `memory_safety` and never sees this rule.
+  severity: medium
+- id: CHECK_FORTIFY
+  title: libc calls without FORTIFY protection
+  description: |
+    `_FORTIFY_SOURCE` makes glibc check the sizes behind `memcpy`, `sprintf`
+    and friends through `__*_chk` wrappers, catching overflows before they
+    corrupt memory; it needs an optimizing build (`-O1` or higher, distros
+    pick 2 or 3). This rule fires when a dynamically linked binary imports
+    plain fortifiable libc calls and carries no `__*_chk` wrapper at all,
+    which is what a build without the macro looks like. Static binaries and
+    binaries whose fortifiable calls were all inlined cannot be told apart
+    from a fortified build by their symbols alone, so they report
+    "not determined" and stay out of scope.
+  severity: medium
 - id: CHECK_RPATH
   title: Avoid rpath and runpath
   description: |

@@ -123,6 +123,7 @@ from blint.lib.binary_elf import (  # noqa: F401
     parse_elf_segments_summary,
     parse_elf_wx_segments,
     parse_shadow_call_stack,
+    parse_stack_clash_protection,
 )
 from blint.lib.binary_macho import (  # noqa: F401
     _macho_address_to_virtual,
@@ -612,6 +613,20 @@ def construct_security_properties(metadata: dict, parsed_obj: lief.Binary) -> di
             "stripped": not metadata.get("static", False),
             "is_signed": bool(metadata.get("signatures")),
         }
+        # Memory-safety facts (issue 273) mirror their boolean verdicts into
+        # the summary; a fact that was not determined is omitted rather than
+        # guessed, the same rule the PE properties follow.
+        memory_safety = metadata.get("memory_safety")
+        if isinstance(memory_safety, dict):
+            if isinstance(memory_safety.get("cet"), dict):
+                properties["cet_ibt"] = bool(memory_safety["cet"].get("ibt"))
+                properties["cet_shadow_stack"] = bool(memory_safety["cet"].get("shstk"))
+            fortify = memory_safety.get("fortify") or {}
+            if fortify.get("level") is not None:
+                properties["fortified"] = bool(fortify.get("symbols"))
+            clash = memory_safety.get("stack_clash_protection") or {}
+            if clash.get("status") in ("protected", "unprotected"):
+                properties["stack_clash_protection"] = clash["status"] == "protected"
     return properties
 
 
@@ -1433,6 +1448,19 @@ def parse(
                 # only; AGENTS.md: text-based, no register metadata).
                 if scs := parse_shadow_call_stack(metadata):
                     metadata["android"]["shadow_call_stack"] = scs
+            if isinstance(parsed_obj, lief.ELF.Binary) and isinstance(
+                metadata.get("memory_safety"), dict
+            ):
+                # Stack-clash probing loops are the same kind of evidence
+                # (issue 273): instruction-stream only, --disassemble only.
+                clash = parse_stack_clash_protection(metadata)
+                metadata["memory_safety"]["stack_clash_protection"] = clash
+                # security_properties was built before disassembly ran, so
+                # its mirror is refreshed here; "not determined" stays out.
+                if clash["status"] in ("protected", "unprotected"):
+                    metadata.setdefault("security_properties", {})["stack_clash_protection"] = (
+                        clash["status"] == "protected"
+                    )
             if isinstance(parsed_obj, lief.PE.Binary) and metadata.get("pre_main_execution"):
                 # W1.4: with disassembly available, the pre-main summary
                 # refreshes so the anti-debug reachability fact can read the
