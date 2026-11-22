@@ -1,0 +1,54 @@
+tests/data/pe/dotnet-fxdep/bin/Release/net10.0/fxapp.deps.json
+  s_338ebbbdae1c95::t_beab3b20aed97e 1-144
+tests/data/pe/dotnet-fxdep/fxapp.csproj
+  s_338ebbbdae1c95::t_beab3b20aed97e 1-14
+docs/METADATA.md
+  s_338ebbbdae1c95::t_95ed68a1efb63d 832-833
+blint/lib/binary_common.py
+  s_338ebbbdae1c95::t_021dc3ac567d16 803-819,830,839-840
+  s_338ebbbdae1c95::t_5aecf8ae752f4c 820-829,831-838,841-854
+blint/lib/sbom.py
+  s_338ebbbdae1c95::t_a5f6be24fd0830 2626,3427-3481
+  s_338ebbbdae1c95::t_fc0c3066ba7a9a 186-190
+  s_338ebbbdae1c95::t_682d9d2b304510 1828
+  s_338ebbbdae1c95::t_13a40b3f12aa6c 2623
+  s_338ebbbdae1c95::t_24fb740abea01c 2554-2584,2586-2588,2600-2604,2618
+  s_338ebbbdae1c95::t_45e858273ab5fe 2625
+  s_338ebbbdae1c95::t_6b35e1005b9798 1825-1827
+  s_338ebbbdae1c95::t_62aea4ef49e019 2589,2605-2612,2624
+tests/data/pe/dotnet-fxdep/Program.cs
+  s_338ebbbdae1c95::t_beab3b20aed97e 1-5
+tests/test_pe_dotnet.py
+  s_338ebbbdae1c95::t_c51b4d0e709e1c 31-32
+  s_338ebbbdae1c95::t_b149cf6c6f04f1 2696-2770,2772-2777,2783-2837,2844-2910,2912-2915,2917-2938,2940,2942-2943,2946-2952,2954-2961
+  s_338ebbbdae1c95::t_c7c6378f94140d 2778-2782
+  s_338ebbbdae1c95::t_b6f3d5aee0211d 2911
+  s_338ebbbdae1c95::t_c3bd989aaab481 2838-2843
+  s_338ebbbdae1c95::t_efc510311b7641 2916,2939,2941,2944-2945,2953
+  s_338ebbbdae1c95::t_2c43add6af9b68 2771
+blint/lib/cache.py
+  s_338ebbbdae1c95::t_643b29ec20086f 228-243,247,249,251-253
+  s_338ebbbdae1c95::t_2b48f5c84c0c79 487-491
+  s_338ebbbdae1c95::t_2297283b3f0cee 381-383,385-391,404-406
+  s_338ebbbdae1c95::t_2328cf8fb0342f 83-87
+  s_338ebbbdae1c95::t_5eb29c517d047c 244-246,248,250
+blint/lib/binary.py
+  s_338ebbbdae1c95::t_0a7c555ab792d2 106
+  s_338ebbbdae1c95::t_c4123ea89d25a0 1345-1363
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c7ee68452566abd61f4cff6a0d82f0e1f2929bbb",
+  "prompts": {},
+  "sessions": {
+    "s_338ebbbdae1c95": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_3ed0a738-02bd-4642-8c40-4a9a7831627f",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}
