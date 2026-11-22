@@ -185,9 +185,10 @@ def generate(
         symbols_purl_map = populate_purl_lookup(blint_options.src_dir_boms)
     # Package assemblies copied beside an app's `.deps.json` (a
     # framework-dependent build output) get their package identity from that
-    # manifest through the same overlay; a source BOM, when present, has
-    # already spoken and keeps precedence.
-    extend_purl_lookup_with_deps_json(symbols_purl_map, exe_files)
+    # manifest. The index is kept apart from the source-BOM overlay: it only
+    # ever names managed assemblies, never a native file that shares a stem
+    # with the application, and a source BOM keeps precedence over it.
+    deps_json_index = build_deps_json_index(exe_files)
     components = []
     dependencies = []
     dependencies_dict: dict[str, set] = {}
@@ -223,6 +224,7 @@ def generate(
                     dependencies_dict,
                     symbols_purl_map,
                     progress,
+                    deps_json_index,
                 )
                 ran_parallel = True
             except PoolStartupError as exc:
@@ -352,6 +354,7 @@ def generate(
                     blint_options.use_blintdb,
                     blint_options.disassemble,
                     blint_options.sdk_path,
+                    deps_json_index,
                 )
         if skipped_wasm:
             LOG.info(
@@ -1145,6 +1148,7 @@ def analyze_unit_sbom(file_path: str, state: dict[str, Any]) -> dict[str, Any]:
         state["use_blintdb"],
         state["disassemble"],
         state.get("sdk_path"),
+        state.get("deps_json_index"),
     )
     return {
         "wasm": False,
@@ -1175,6 +1179,7 @@ def _generate_exes_parallel(
     dependencies_dict: dict[str, set],
     symbols_purl_map: dict,
     progress: Progress,
+    deps_json_index: dict | None = None,
 ) -> int:
     """Run the per-binary SBOM work in a process pool; returns the count of
     wasm files skipped for lack of ``--wasm-sbom``.
@@ -1192,6 +1197,7 @@ def _generate_exes_parallel(
             "deep_mode": blint_options.deep_mode,
             "exports_prefix": blint_options.exports_prefix,
             "symbols_purl_map": symbols_purl_map,
+            "deps_json_index": deps_json_index or {},
             "use_blintdb": blint_options.use_blintdb,
             "disassemble": blint_options.disassemble,
             "wasm_sbom": blint_options.wasm_sbom,
@@ -1263,6 +1269,7 @@ def process_exe_file(
     use_blintdb: bool = False,
     disassemble: bool = False,
     sdk_path: str | None = None,
+    deps_json_index: dict | None = None,
 ) -> list[Component]:
     """
     Processes an executable file, extracts metadata, and generates a Software Bill-of-Materials.
@@ -1278,6 +1285,8 @@ def process_exe_file(
         disassemble (bool): whether to disassemble native binaries.
         sdk_path (str): optional Apple SDK root whose .tbd stubs attribute and
             confirm Mach-O imports (the --sdk-path option).
+        deps_json_index (dict): package identities named by the ``.deps.json``
+            files beside the scanned binaries (``build_deps_json_index``).
 
     Returns:
         list[Component]: The updated list of components.
@@ -1296,7 +1305,14 @@ def process_exe_file(
     # keep the generic parent: the purl states only what blint can back.
     dotnet_metadata = metadata.get("dotnet") or {}
     if (assembly := dotnet_metadata.get("assembly") or {}).get("name"):
-        upgrade_parent_to_assembly_identity(parent_component, assembly, symbols_purl_map)
+        upgrade_parent_to_assembly_identity(
+            parent_component,
+            assembly,
+            symbols_purl_map,
+            deps_json_index,
+            exe,
+            metadata_file_version(metadata),
+        )
     else:
         upgrade_parent_to_original_filename(parent_component, metadata, symbols_purl_map)
     add_signer_evidence(parent_component, metadata)
@@ -1836,6 +1852,8 @@ def process_exe_file(
             metadata["dotnet"]["assembly_refs"],
             metadata.get("dotnet_dependencies"),
             symbols_purl_map,
+            deps_json_index,
+            exe,
         )
     # Convert go dependencies
     if metadata.get("go_dependencies"):
@@ -2576,7 +2594,10 @@ def dotnet_assembly_package_names(dotnet_deps: dict | None) -> dict[str, set[str
     the base one) maps to all of them.
     """
     mapping: dict[str, set[str]] = {}
-    for target in ((dotnet_deps or {}).get("targets") or {}).values():
+    targets = dotnet_deps.get("targets") if isinstance(dotnet_deps, dict) else None
+    if not isinstance(targets, dict):
+        return mapping
+    for target in targets.values():
         if not isinstance(target, dict):
             continue
         for package_key, package_entry in target.items():
@@ -2600,6 +2621,8 @@ def merge_dotnet_assembly_ref_components(
     assembly_refs: list[dict],
     dotnet_deps: dict | None = None,
     symbols_purl_map: dict | None = None,
+    deps_json_index: dict | None = None,
+    file_path: str | None = None,
 ) -> list[Component]:
     """Add AssemblyRef components, one per package name (W3.1 review).
 
@@ -2640,10 +2663,15 @@ def merge_dotnet_assembly_ref_components(
             continue
         if provided_assemblies.get(name.split("/", 1)[-1].lower()):
             continue
+        shadows: list[str] = []
         if overlay_purl := (symbols_purl_map or {}).get(name):
-            comp.properties.append(
-                Property(name="internal:shadowed_by", value=overlay_purl)
+            shadows.append(overlay_purl)
+        if deps_json_index and file_path:
+            shadows += deps_json_package_purls(
+                deps_json_index, file_path, name.split("/", 1)[-1]
             )
+        for shadow in dict.fromkeys(shadows):
+            comp.properties.append(Property(name="internal:shadowed_by", value=shadow))
         existing_names.add(name)
         lib_components.append(comp)
     return lib_components
@@ -2799,6 +2827,9 @@ def upgrade_parent_to_assembly_identity(
     parent: Component,
     assembly: dict,
     symbols_purl_map: dict | None = None,
+    deps_json_index: dict | None = None,
+    file_path: str | None = None,
+    file_version: str | None = None,
 ) -> Component:
     """Restate a managed file's parent component from its CLI-header identity.
 
@@ -2812,7 +2843,11 @@ def upgrade_parent_to_assembly_identity(
 
     When a build BOM (``--src-dir-boms``) already knows this package's
     real package version, its purl wins and the version source becomes the
-    build BOM.
+    build BOM. Failing that, a ``.deps.json`` beside the file supplies the
+    package version, but only when its runtime entry for this file agrees
+    with the file's own FileVersion or assembly version
+    (``resolve_deps_json_identity``); manifests that disagree and cannot be
+    told apart leave the assembly-version identity in place.
     """
     name = assembly.get("name")
     if not name:
@@ -2826,13 +2861,20 @@ def upgrade_parent_to_assembly_identity(
         qualifiers={"token": token} if token else None,
     ).to_string()
     version_source = "assembly_version"
-    if symbols_purl_map:
-        overlay = symbols_purl_map.get(f"pkg:nuget/{name}")
-        if overlay:
-            purl = overlay
-            version = None
-            if "@" in overlay:
-                version = overlay.split("@")[-1].split("?")[0]
+    overlay = symbols_purl_map.get(f"pkg:nuget/{name}") if symbols_purl_map else None
+    if overlay:
+        purl = overlay
+        version = None
+        if "@" in overlay:
+            version = overlay.split("@")[-1].split("?")[0]
+        version_source = "package_version"
+    elif deps_json_index and file_path:
+        resolved = resolve_deps_json_identity(
+            deps_json_index, file_path, version, file_version
+        )
+        if resolved:
+            purl = resolved[0]
+            version = resolved[1]
             version_source = "package_version"
     parent.name = name
     # The model coerces str -> Version only through the constructor, so a
@@ -3249,7 +3291,9 @@ def process_dotnet_dependencies(
         list: New component list
     """
     components = []
-    libraries = dotnet_deps.get("libraries", {})
+    libraries = dotnet_deps.get("libraries") if isinstance(dotnet_deps, dict) else None
+    if not isinstance(libraries, dict):
+        libraries = {}
     # k: 'Microsoft.CodeAnalysis.Analyzers/3.3.4'
     # v: {'type': 'package', 'serviceable': True,
     #      'sha512': 'sha512-AxkxcPR+rheX0SmvpLVIGLhOUXAKG5vuc+aqo5r68g==',
@@ -3257,23 +3301,30 @@ def process_dotnet_dependencies(
     #      'hashPath': 'microsoft.codeanalysis.analyzers.3.3.4.nupkg.sha512'
     #    }
     for k, v in libraries.items():
-        tmp_a = k.split("/")
-        purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
+        key = split_package_key(k)
+        if not key or not isinstance(v, dict):
+            LOG.debug(f"Skipping malformed deps.json library entry {k!r}")
+            continue
+        name, version = key
+        purl = f"pkg:nuget/{name}@{version}"
         hash_content = ""
-        try:
-            hash_content = codecs.encode(
-                base64.b64decode(v.get("sha512").removeprefix("sha512-"), validate=True),
-                encoding="hex",
-            )
-        except binascii.Error:
-            hash_content = str(v.get("hash").removeprefix("sha512-"))
+        digest = v.get("sha512")
+        if isinstance(digest, str):
+            try:
+                hash_content = codecs.encode(
+                    base64.b64decode(digest.removeprefix("sha512-"), validate=True),
+                    encoding="hex",
+                )
+            except (binascii.Error, ValueError):
+                hash_content = ""
+        path = v.get("path")
         comp = Component(
             type=Type.application if v.get("type") == "project" else Type.library,
-            name=tmp_a[0],
-            version=tmp_a[1],
+            name=name,
+            version=version,
             purl=purl,
             scope=Scope.required,
-            evidence=create_component_evidence(v.get("path"), 1.0) if v.get("path") else {},
+            evidence=create_component_evidence(path, 1.0) if path and isinstance(path, str) else {},
             properties=[
                 # W3.5: the deps.json overlay is the one producer that
                 # states actual NuGet package versions; the property keeps
@@ -3288,14 +3339,24 @@ def process_dotnet_dependencies(
             comp.hashes = [Hash(alg=HashAlg.SHA_512, content=hash_content)]
         comp.bom_ref = RefType(purl)
         components.append(comp)
-    targets: dict[str, dict[str, dict]] = dotnet_deps.get("targets", {})
+    targets = dotnet_deps.get("targets") if isinstance(dotnet_deps, dict) else None
+    if not isinstance(targets, dict):
+        targets = {}
     for tv in targets.values():
+        if not isinstance(tv, dict):
+            continue
         for k, v in tv.items():
-            tmp_a = k.split("/")
-            purl = f"pkg:nuget/{tmp_a[0]}@{tmp_a[1]}"
+            key = split_package_key(k)
+            if not key or not isinstance(v, dict):
+                LOG.debug(f"Skipping malformed deps.json target entry {k!r}")
+                continue
+            purl = f"pkg:nuget/{key[0]}@{key[1]}"
             depends_on = []
-            for adep_name, adep_version in v.get("dependencies", {}).items():
-                depends_on.append(f"pkg:nuget/{adep_name}@{adep_version}")
+            dependencies = v.get("dependencies")
+            if isinstance(dependencies, dict):
+                for adep_name, adep_version in dependencies.items():
+                    if isinstance(adep_name, str) and isinstance(adep_version, str):
+                        depends_on.append(f"pkg:nuget/{adep_name}@{adep_version}")
             if not dependencies_dict.get(purl):
                 dependencies_dict[purl] = set()
             dependencies_dict[purl].update(depends_on)
@@ -3450,15 +3511,16 @@ def reconcile_shadowed_dotnet_components(
     survivors: list[Component] = []
     removed: set[str] = set()
     for comp in components:
-        shadow = None
-        for prop in getattr(comp, "properties", None) or []:
-            if prop.name == "internal:shadowed_by":
-                shadow = prop.value
-        if shadow is not None:
+        shadows = [
+            prop.value
+            for prop in getattr(comp, "properties", None) or []
+            if prop.name == "internal:shadowed_by"
+        ]
+        if shadows:
             comp.properties = [
                 prop for prop in comp.properties if prop.name != "internal:shadowed_by"
             ]
-        if shadow and shadow != _ref(comp) and shadow in refs_in_run:
+        if any(shadow and shadow != _ref(comp) and shadow in refs_in_run for shadow in shadows):
             removed.add(_ref(comp))
             continue
         survivors.append(comp)
@@ -3485,38 +3547,79 @@ def trim_components(components: list[Component]) -> list[Component]:
     return [added_dict[k] for k in sorted(added_dict.keys())]
 
 
-def extend_purl_lookup_with_deps_json(
-    symbols_purl_map: dict[str, str], exe_files: list[str]
-) -> None:
-    """Fold the packages named by nearby ``.deps.json`` files into the purl
-    lookup, in place.
+def split_package_key(key: object) -> tuple[str, str] | None:
+    """``Name/1.2.3`` (a deps.json library or target key) as (name, version).
+
+    None for anything that is not a non-empty ``name/version`` string.
+    """
+    if not isinstance(key, str):
+        return None
+    name, _, rest = key.partition("/")
+    version = rest.split("/", 1)[0]
+    if not name or not version:
+        return None
+    return name, version
+
+
+def _version_tuple(value: object) -> tuple | None:
+    """A dotted version padded to four numeric parts, or None when it is not
+    one, so ``13.0`` and ``13.0.0.0`` compare equal."""
+    if not isinstance(value, str):
+        return None
+    match = re.match(r"\s*(\d+(?:\.\d+){0,3})", value)
+    if not match:
+        return None
+    parts = [int(part) for part in match.group(1).split(".")]
+    return tuple(parts + [0] * (4 - len(parts)))
+
+
+def metadata_file_version(metadata: dict[str, Any]) -> str | None:
+    """The PE VERSIONINFO FileVersion of a parsed binary, if it has one."""
+    resources = metadata.get("resources")
+    version_metadata = resources.get("version_metadata") if isinstance(resources, dict) else None
+    if isinstance(version_metadata, dict) and version_metadata.get("FileVersion"):
+        return str(version_metadata["FileVersion"])
+    version_info = metadata.get("version_info")
+    if not isinstance(version_info, dict):
+        return None
+    for table in (version_info.get("strings") or {}).values():
+        if isinstance(table, dict) and table.get("FileVersion"):
+            return str(table["FileVersion"])
+    fixed = version_info.get("fixed")
+    if isinstance(fixed, dict) and fixed.get("file_version"):
+        return str(fixed["file_version"])
+    return None
+
+
+def build_deps_json_index(exe_files: list[str]) -> dict[str, dict[str, list[dict]]]:
+    """Index the packages named by the ``.deps.json`` files beside the scanned
+    binaries: ``{directory: {assembly stem (lowercase): [record, ...]}}``.
 
     A build output directory carries one manifest per application
     (``app.deps.json``), and the package assemblies the build copied beside
     it (``Newtonsoft.Json.dll``) have no manifest of their own: parsed on
     their own, their identity falls back to the assembly version, which
     restates the very package the manifest names at a version that is not a
-    NuGet version. The manifest's ``libraries`` map is the build's own
-    statement of name and package version for each of them, so it feeds the
-    same overlay a source BOM feeds (``populate_purl_lookup``), with the
-    same precedence: an entry already present — from a source BOM, or from
-    a manifest seen earlier in sorted order — is never overwritten.
+    NuGet version. Each record carries the package name and version, the
+    manifest it came from, and the ``assemblyVersion``/``fileVersion`` the
+    manifest states for the assembly, so a file can be matched against the
+    manifest that actually describes it (``resolve_deps_json_identity``).
 
-    Only the directories that hold binaries being scanned are read, and
-    only files ending ``.deps.json`` within them: the lookup is scoped to
-    the build outputs blint was pointed at, not to the whole tree.
+    Only the directories that hold binaries being scanned are read, only
+    files ending ``.deps.json`` within them, and a record is only ever
+    offered to files in the same directory. Malformed manifests and entries
+    are skipped.
     """
     from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
 
-    manifest_dirs: dict[str, None] = {}
-    for exe in exe_files:
-        parent = os.path.dirname(os.path.abspath(exe))
-        manifest_dirs.setdefault(parent, None)
-    for parent in sorted(manifest_dirs):
+    index: dict[str, dict[str, list[dict]]] = {}
+    directories = sorted({os.path.dirname(os.path.abspath(exe)) for exe in exe_files})
+    for parent in directories:
         try:
             names = sorted(os.listdir(parent))
         except OSError:
             continue
+        by_stem: dict[str, list[dict]] = {}
         for name in names:
             if not name.lower().endswith(".deps.json"):
                 continue
@@ -3531,13 +3634,121 @@ def extend_purl_lookup_with_deps_json(
             libraries = decoded.get("libraries") if isinstance(decoded, dict) else None
             if not isinstance(libraries, dict):
                 continue
-            for package_key in libraries:
-                package_name, _, package_version = str(package_key).partition("/")
-                if not package_name or not package_version:
+            manifest_stem = name[: -len(".deps.json")].lower()
+            runtime_files: dict[str, dict[str, dict]] = {}
+            targets = decoded.get("targets")
+            for target in targets.values() if isinstance(targets, dict) else []:
+                if not isinstance(target, dict):
                     continue
-                symbols_purl_map.setdefault(
-                    f"pkg:nuget/{package_name}", f"pkg:nuget/{package_name}@{package_version}"
-                )
+                for package_key, package_entry in target.items():
+                    runtime = package_entry.get("runtime") if isinstance(package_entry, dict) else None
+                    if not isinstance(runtime, dict):
+                        continue
+                    files = runtime_files.setdefault(str(package_key), {})
+                    for runtime_path, stated in runtime.items():
+                        stated = stated if isinstance(stated, dict) else {}
+                        files.setdefault(
+                            os.path.basename(str(runtime_path)).lower(),
+                            {
+                                "av": stated.get("assemblyVersion"),
+                                "fv": stated.get("fileVersion"),
+                            },
+                        )
+            for package_key, library in libraries.items():
+                key = split_package_key(package_key)
+                if not key or not isinstance(library, dict):
+                    LOG.debug(f"Skipping malformed deps.json library entry {package_key!r} in {path}")
+                    continue
+                files = runtime_files.get(package_key) or {}
+                # A package with no runtime assemblies is still findable by
+                # its own name.
+                stems = {
+                    base.removesuffix(".dll"): stated for base, stated in files.items()
+                } or {key[0].lower(): {}}
+                for stem, stated in stems.items():
+                    record = {
+                        "package": key[0],
+                        "version": key[1],
+                        "type": library.get("type"),
+                        "manifest": manifest_stem,
+                        "av": stated.get("av") if isinstance(stated.get("av"), str) else None,
+                        "fv": stated.get("fv") if isinstance(stated.get("fv"), str) else None,
+                    }
+                    bucket = by_stem.setdefault(stem, [])
+                    if record not in bucket:
+                        bucket.append(record)
+        if by_stem:
+            index[parent] = by_stem
+    return index
+
+
+def _deps_json_records(index: dict, file_path: str, assembly_stem: str | None = None) -> list[dict]:
+    directory = os.path.dirname(os.path.abspath(file_path))
+    stem = (assembly_stem or os.path.splitext(os.path.basename(file_path))[0]).lower()
+    return (index.get(directory) or {}).get(stem) or []
+
+
+def deps_json_package_purls(index: dict, file_path: str, assembly_name: str) -> list[str]:
+    """Every package purl the manifests beside ``file_path`` name for the
+    assembly ``assembly_name``."""
+    return list(
+        dict.fromkeys(
+            f"pkg:nuget/{rec['package']}@{rec['version']}"
+            for rec in _deps_json_records(index, file_path, assembly_name)
+        )
+    )
+
+
+def resolve_deps_json_identity(
+    index: dict,
+    file_path: str,
+    assembly_version: str | None,
+    file_version: str | None,
+) -> tuple[str, str] | None:
+    """The package purl and version a managed file takes from the manifests
+    beside it, or None when they do not settle it.
+
+    Several manifests can share a directory (the output of a test project
+    and the projects it references), and they disagree about a package's
+    version. A record whose stated ``fileVersion`` or ``assemblyVersion``
+    differs from the file's own is ruled out. One whose ``fileVersion``
+    equals the file's FileVersion is a match, and so is one whose
+    ``assemblyVersion`` matches or an application's own manifest naming the
+    file; an assembly-version match counts only when the remaining records
+    agree on one package version, because every patch release of a package
+    usually shares an assembly version. With no evidence on either side the
+    records must agree outright.
+    """
+    records = _deps_json_records(index, file_path)
+    file_stem = os.path.splitext(os.path.basename(file_path))[0].lower()
+    file_tuple = _version_tuple(file_version)
+    assembly_tuple = _version_tuple(assembly_version)
+    usable: list[tuple[dict, str]] = []
+    for rec in records:
+        fv_tuple = _version_tuple(rec.get("fv"))
+        av_tuple = _version_tuple(rec.get("av"))
+        fv_cmp = None if file_tuple is None or fv_tuple is None else file_tuple == fv_tuple
+        av_cmp = None if assembly_tuple is None or av_tuple is None else assembly_tuple == av_tuple
+        if fv_cmp is False or av_cmp is False:
+            continue
+        if fv_cmp:
+            kind = "file"
+        elif av_cmp or (rec.get("type") == "project" and rec.get("manifest") == file_stem):
+            kind = "assembly"
+        else:
+            kind = "unknown"
+        usable.append((rec, kind))
+    chosen = {(rec["package"], rec["version"]) for rec, kind in usable if kind == "file"}
+    if not chosen:
+        remaining = {(rec["package"], rec["version"]) for rec, _ in usable}
+        positive = any(kind == "assembly" for _, kind in usable)
+        everything = {(rec["package"], rec["version"]) for rec in records}
+        if len(remaining) == 1 and (positive or len(everything) == 1):
+            chosen = remaining
+    if len(chosen) != 1:
+        return None
+    package, version = next(iter(chosen))
+    return f"pkg:nuget/{package}@{version}", version
 
 
 def populate_purl_lookup(src_dir_boms: list[str]) -> dict[str, str]:
