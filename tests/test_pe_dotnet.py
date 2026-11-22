@@ -2871,25 +2871,66 @@ def test_assembly_refs_dropped_when_a_package_provides_the_assembly():
     assert "pkg:nuget/System.Runtime@10.0.0.0" in purls
 
 
-def test_assembly_refs_dropped_when_the_purl_overlay_knows_the_package():
-    from blint.lib.sbom import merge_dotnet_assembly_ref_components
+def test_overlay_known_assembly_refs_are_tagged_then_reconciled():
+    from blint.lib.sbom import (
+        merge_dotnet_assembly_ref_components,
+        process_dotnet_dependencies,
+        reconcile_shadowed_dotnet_components,
+    )
 
     # A package dll copied beside app.deps.json has no manifest of its own;
     # its AssemblyRefs point at neighbouring packages the directory's
-    # manifest already named, which is what the overlay carries.
+    # manifest already named, which is what the overlay carries. The merge
+    # only tags such a ref; the drop waits until the run's full component
+    # set is visible.
     overlay = {"pkg:nuget/Microsoft.OpenApi": "pkg:nuget/Microsoft.OpenApi@1.6.14"}
-    merged = merge_dotnet_assembly_ref_components(
+    tagged = merge_dotnet_assembly_ref_components(
         [],
         [{"name": "Microsoft.OpenApi", "version": "1.6.14.0"}],
         None,
         overlay,
     )
-    assert merged == []
-    # Without the overlay the ref keeps its assembly-version component.
+    assert [str(c.purl) for c in tagged] == ["pkg:nuget/Microsoft.OpenApi@1.6.14.0"]
+    tag_props = [p for p in tagged[0].properties if p.name == "internal:shadowed_by"]
+    assert [p.value for p in tag_props] == ["pkg:nuget/Microsoft.OpenApi@1.6.14"]
+
+    # When the package component exists in the same run (the app dll was
+    # scanned and its manifest produced it), the tagged ref is dropped and
+    # its edges leave the dependency graph.
+    package_components = process_dotnet_dependencies(
+        {
+            "libraries": {
+                "Microsoft.OpenApi/1.6.14": {
+                    "type": "package",
+                    "sha512": "sha512-" + base64.b64encode(b"\x00" * 64).decode(),
+                }
+            }
+        },
+        {},
+    )
+    survivors, removed = reconcile_shadowed_dotnet_components(
+        package_components + tagged
+    )
+    assert [str(c.purl) for c in survivors] == ["pkg:nuget/Microsoft.OpenApi@1.6.14"]
+    assert removed == {"pkg:nuget/Microsoft.OpenApi@1.6.14.0"}
+
+    # When nothing in the run carries the package (a single dll scanned
+    # inside a directory holding another app's manifest), the ref survives
+    # as the dependency's only representation, with the tag stripped.
+    survivors, removed = reconcile_shadowed_dotnet_components(list(tagged))
+    assert [str(c.purl) for c in survivors] == ["pkg:nuget/Microsoft.OpenApi@1.6.14.0"]
+    assert not removed
+    assert not any(
+        p.name == "internal:shadowed_by" for p in survivors[0].properties
+    )
+
+    # Without the overlay the ref was never tagged at all.
     kept = merge_dotnet_assembly_ref_components(
         [], [{"name": "Microsoft.OpenApi", "version": "1.6.14.0"}]
     )
-    assert [str(c.purl) for c in kept] == ["pkg:nuget/Microsoft.OpenApi@1.6.14.0"]
+    assert not any(
+        p.name == "internal:shadowed_by" for p in kept[0].properties
+    )
 
 
 def test_extend_purl_lookup_with_deps_json(tmp_path):

@@ -103,6 +103,7 @@ from blint.lib.binary_common import (  # noqa: F401  # noqa: F401
     parse_rust_buildinfo,
     parse_strings,
     parse_symbols,
+    attach_sibling_deps_json,
     read_sibling_deps_json,
     recover_rust_deps_from_panic,
     warnings,
@@ -1348,19 +1349,8 @@ def parse(
         # the SBOM is left with AssemblyRef assembly versions where the NuGet
         # package versions belong. The read runs after the embedded-library
         # pass because a native apphost's dotnet evidence (the host record)
-        # is computed there, and only for binaries that carry dotnet
-        # evidence: a manifest next to a non-dotnet file of the same stem is
-        # a coincidence, not a dependency declaration.
-        if not metadata.get("dotnet_dependencies") and (
-            metadata.get("dotnet")
-            or any(
-                isinstance(lib, dict) and lib.get("library") == "dotnet-runtime"
-                for lib in metadata.get("embedded_libraries") or []
-            )
-        ):
-            if sibling_deps := read_sibling_deps_json(exe_file):
-                metadata["dotnet_dependencies"] = sibling_deps
-                metadata["dotnet_dependencies_source"] = "sibling_file"
+        # is computed there; the gate itself lives in the helper.
+        attach_sibling_deps_json(metadata, exe_file)
         # W5.6: the privileged-host plugin surface (04/F) - which plugin
         # contracts the export set satisfies and the host each loads into.
         # An interpretation of already-parsed facts (the export listings and

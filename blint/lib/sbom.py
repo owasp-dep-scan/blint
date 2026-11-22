@@ -441,6 +441,16 @@ def create_sbom(
 
     # Populate the components
     sbom.components = trim_components(components)
+    # Deferred overlay drop: now that every component is known, an
+    # AssemblyRef tagged as shadowed is removed only when the package
+    # component it restates actually exists in this run; otherwise it
+    # survives as the dependency's only representation.
+    sbom.components, shadowed_refs = reconcile_shadowed_dotnet_components(sbom.components)
+    if shadowed_refs:
+        dependencies = [d for d in dependencies if d.get("ref") not in shadowed_refs]
+        for d in dependencies:
+            if isinstance(d.get("dependsOn"), list):
+                d["dependsOn"] = [r for r in d["dependsOn"] if r not in shadowed_refs]
     # If we have only one parent component then promote it to metadata.component
     if sbom.metadata.component.components:
         if len(sbom.metadata.component.components) == 1:
@@ -2573,7 +2583,10 @@ def dotnet_assembly_package_names(dotnet_deps: dict | None) -> dict[str, set[str
             if not isinstance(package_entry, dict):
                 continue
             package_name = str(package_key).split("/", 1)[0]
-            for runtime_path in package_entry.get("runtime") or {}:
+            runtime_entries = package_entry.get("runtime")
+            if not isinstance(runtime_entries, dict):
+                continue
+            for runtime_path in runtime_entries:
                 assembly = os.path.basename(str(runtime_path))
                 if assembly.lower().endswith(".dll"):
                     assembly = assembly[: -len(".dll")]
@@ -2603,13 +2616,18 @@ def merge_dotnet_assembly_ref_components(
     component already carries that dependency with its NuGet version, and a
     second component under the assembly name would restate it at a version
     that is not a NuGet version at all. The purl overlay covers the
-    assemblies with no local manifest of their own — the package dlls a
-    build copies beside ``app.deps.json`` reference each other by assembly
-    version, and the manifest a directory over already named both packages.
-    AssemblyRefs no manifest explains (the shared framework's System.Runtime
-    and friends, which a framework-dependent build resolves from the
-    installed runtime, not from any package) keep their assembly-version
-    components.
+    assemblies with no local manifest of their own, the package dlls a
+    build copies beside ``app.deps.json`` that reference each other by
+    assembly version. For those, this merge only tags the component
+    (``internal:shadowed_by``): at merge time it cannot be known whether
+    the run will ever emit the package the overlay names (a single-dll
+    scan inside a directory holding another app's manifest would otherwise
+    lose the dependency outright), so the actual drop is deferred to
+    ``reconcile_shadowed_dotnet_components`` where the whole component set
+    is visible. AssemblyRefs no manifest explains (the shared framework's
+    System.Runtime and friends, which a framework-dependent build resolves
+    from the installed runtime, not from any package) keep their
+    assembly-version components.
     """
     existing_names = {
         str(getattr(comp, "purl", "") or "").split("@")[0]
@@ -2622,8 +2640,10 @@ def merge_dotnet_assembly_ref_components(
             continue
         if provided_assemblies.get(name.split("/", 1)[-1].lower()):
             continue
-        if symbols_purl_map and symbols_purl_map.get(name):
-            continue
+        if overlay_purl := (symbols_purl_map or {}).get(name):
+            comp.properties.append(
+                Property(name="internal:shadowed_by", value=overlay_purl)
+            )
         existing_names.add(name)
         lib_components.append(comp)
     return lib_components
@@ -3402,6 +3422,47 @@ def track_dependency(
         for acomp in app_components:
             if not dependencies_dict.get(acomp.bom_ref.model_dump(mode="python")):
                 dependencies_dict[acomp.bom_ref.model_dump(mode="python")] = set()
+
+
+def reconcile_shadowed_dotnet_components(
+    components: list[Component],
+) -> tuple[list[Component], set[str]]:
+    """Drop AssemblyRef components whose package this run named at its NuGet
+    version, now that the whole component set is visible.
+
+    ``merge_dotnet_assembly_ref_components`` tags such components with
+    ``internal:shadowed_by`` instead of dropping them, because the purl
+    overlay may know a package name from a manifest or a source BOM while no
+    scanned file ever emits that package's component (a single dll scanned
+    inside a directory that holds another application's manifest). Here,
+    with every component in hand, a tagged component is dropped only when
+    the shadowing component actually exists, and the tag is stripped from
+    survivors either way. Returns the surviving components and the bom refs
+    removed, for the caller to prune from the dependency graph.
+    """
+    def _ref(comp: Component) -> str:
+        try:
+            return comp.bom_ref.model_dump(mode="python")
+        except AttributeError:
+            return str(getattr(comp, "purl", "") or "")
+
+    refs_in_run = {_ref(comp) for comp in components}
+    survivors: list[Component] = []
+    removed: set[str] = set()
+    for comp in components:
+        shadow = None
+        for prop in getattr(comp, "properties", None) or []:
+            if prop.name == "internal:shadowed_by":
+                shadow = prop.value
+        if shadow is not None:
+            comp.properties = [
+                prop for prop in comp.properties if prop.name != "internal:shadowed_by"
+            ]
+        if shadow and shadow != _ref(comp) and shadow in refs_in_run:
+            removed.add(_ref(comp))
+            continue
+        survivors.append(comp)
+    return survivors, removed
 
 
 def trim_components(components: list[Component]) -> list[Component]:

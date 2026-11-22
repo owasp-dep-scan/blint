@@ -244,7 +244,13 @@ def _sibling_deps_digest(exe_file: str | None) -> str:
     candidate = sibling_deps_json_path(exe_file)
     if not candidate:
         return ""
+    from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
+
     try:
+        if os.path.getsize(candidate) > MAX_DEPS_JSON_BYTES:
+            # Mirrors the reader's cap: an oversized file is not a manifest
+            # blint will fold in, so it must not change the key either.
+            return ""
         with open(candidate, "rb") as handle:
             return hashlib.sha256(handle.read()).hexdigest()
     except OSError:

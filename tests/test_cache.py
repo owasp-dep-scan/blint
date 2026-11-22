@@ -249,6 +249,37 @@ def test_cold_vs_warm_byte_identical_wasm(cache_options):
     _assert_replay_equals_cold(warm, cold)
 
 
+def test_cold_vs_warm_byte_identical_framework_dependent_dotnet(cache_options, tmp_path):
+    """The spool miss path must fold the sibling deps.json back in.
+
+    A cache miss parses a spooled copy in a temp directory, where no
+    ``<stem>.deps.json`` exists; without the post-spool attach, the entry
+    would be stored under a key that includes the real sibling's digest
+    while the payload lacks the sibling's data, and every later hit would
+    replay that half (issue #278's manifest, silently missing again).
+    """
+    src = (
+        REPO_ROOT
+        / "tests"
+        / "data"
+        / "pe"
+        / "dotnet-fxdep"
+        / "bin"
+        / "Release"
+        / "net10.0"
+    )
+    dst = tmp_path / "net10.0"
+    dst.mkdir()
+    for name in ("fxapp.dll", "fxapp.deps.json"):
+        shutil.copy2(src / name, dst / name)
+    warm, cold = _cached_parse_then_cold_parse(cache_options, str(dst / "fxapp.dll"))
+    libraries = (cold.get("dotnet_dependencies") or {}).get("libraries", {})
+    assert "Newtonsoft.Json/12.0.3" in libraries
+    assert (warm.get("dotnet_dependencies") or {}).get("libraries", {}) == libraries
+    assert warm.get("dotnet_dependencies_source") == "sibling_file"
+    _assert_replay_equals_cold(warm, cold)
+
+
 def test_cold_vs_warm_byte_identical_signed_macho(cache_options, tmp_path):
     """A signed Mach-O caches and replays byte-identically.
 

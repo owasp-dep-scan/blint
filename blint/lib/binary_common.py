@@ -826,7 +826,7 @@ def read_sibling_deps_json(exe_file: str) -> dict:
     ``dotnet build``/``dotnet publish`` shape) writes ``app.dll``,
     ``app.exe``/``app`` and ``app.deps.json`` as sibling files: the manifest
     never touches the binary, so both overlay readers above come back empty
-    and only the AssemblyRef table remains — assembly versions where the
+    and only the AssemblyRef table remains, assembly versions where the
     NuGet package versions belong.
 
     Acceptance mirrors the bundle reader: a JSON object with a ``libraries``
@@ -850,6 +850,53 @@ def read_sibling_deps_json(exe_file: str) -> dict:
     if isinstance(decoded, dict) and isinstance(decoded.get("libraries"), dict) and decoded.get("libraries"):
         return decoded
     return {}
+
+
+def attach_sibling_deps_json(metadata: dict, exe_file: str) -> None:
+    """Fold a binary's ``<stem>.deps.json`` into ``metadata`` in place.
+
+    Only for binaries that carry dotnet evidence: a CLI metadata block (the
+    managed dll), a dotnet shape block (the PE apphost and the bundle
+    shapes), or an embedded ``dotnet-runtime`` host record (the ELF and
+    Mach-O apphosts). A manifest next to a non-dotnet file of the same stem
+    is a coincidence, not a dependency declaration. Nothing happens when
+    ``dotnet_dependencies`` is already set by an embedded source.
+
+    The parse cache's miss path parses a spooled copy of the binary in a
+    temp directory (runners.py), where no sibling exists; it re-attaches
+    through this same function after rewriting the spool path back to the
+    real one, so a cold parse, a warm replay and an uncached parse all
+    return the same metadata.
+    """
+    if metadata.get("dotnet_dependencies"):
+        return
+    if not (
+        metadata.get("dotnet")
+        or any(
+            isinstance(lib, dict) and lib.get("library") == "dotnet-runtime"
+            for lib in metadata.get("embedded_libraries") or []
+        )
+    ):
+        return
+    if sibling_deps := read_sibling_deps_json(exe_file):
+        # Insert directly after ``strings``, the last key parse() sets
+        # unconditionally before its own attach site, so a spool-path
+        # attach and an in-parse attach produce the same insertion order
+        # and the cache's byte-identity contract holds.
+        anchor = "strings"
+        reordered: dict = {}
+        inserted = False
+        for key, value in metadata.items():
+            reordered[key] = value
+            if key == anchor:
+                reordered["dotnet_dependencies"] = sibling_deps
+                reordered["dotnet_dependencies_source"] = "sibling_file"
+                inserted = True
+        if not inserted:
+            reordered["dotnet_dependencies"] = sibling_deps
+            reordered["dotnet_dependencies_source"] = "sibling_file"
+        metadata.clear()
+        metadata.update(reordered)
 
 
 GO_BUILDINFO_MAGIC = b"\xff Go buildinf:"
