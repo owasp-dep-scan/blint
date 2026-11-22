@@ -183,6 +183,11 @@ def generate(
     symbols_purl_map: dict = {}
     if blint_options.src_dir_boms:
         symbols_purl_map = populate_purl_lookup(blint_options.src_dir_boms)
+    # Package assemblies copied beside an app's `.deps.json` (a
+    # framework-dependent build output) get their package identity from that
+    # manifest through the same overlay; a source BOM, when present, has
+    # already spoken and keeps precedence.
+    extend_purl_lookup_with_deps_json(symbols_purl_map, exe_files)
     components = []
     dependencies = []
     dependencies_dict: dict[str, set] = {}
@@ -1817,7 +1822,10 @@ def process_exe_file(
     # could not be read — never an empty list that reads as "no deps".
     if metadata.get("dotnet", {}).get("assembly_refs"):
         lib_components = merge_dotnet_assembly_ref_components(
-            lib_components, metadata["dotnet"]["assembly_refs"]
+            lib_components,
+            metadata["dotnet"]["assembly_refs"],
+            metadata.get("dotnet_dependencies"),
+            symbols_purl_map,
         )
     # Convert go dependencies
     if metadata.get("go_dependencies"):
@@ -2543,8 +2551,42 @@ def write_ios_callgraphs(app_file: str, sbom_output: str) -> None:
         shutil.rmtree(app["temp_dir"], ignore_errors=True)
 
 
+def dotnet_assembly_package_names(dotnet_deps: dict | None) -> dict[str, set[str]]:
+    """Map assembly simple names to the package ids that ship them.
+
+    Built from the ``targets`` of a deps.json: every package entry's
+    ``runtime`` map keys are the assembly files it deploys
+    (``lib/netstandard2.0/Newtonsoft.Json.dll``), so the file stem names the
+    assembly the package provides. This is the exact assembly-to-package map
+    for AssemblyRefs whose simple name differs from the package id (the
+    ``Swashbuckle.AspNetCore`` package ships the
+    ``Swashbuckle.AspNetCore.SwaggerGen`` assembly): the resolver deploys the
+    package, the assembly name is only its internal file naming. An assembly
+    shipped by several packages (RID-specific ``runtime.*`` variants beside
+    the base one) maps to all of them.
+    """
+    mapping: dict[str, set[str]] = {}
+    for target in ((dotnet_deps or {}).get("targets") or {}).values():
+        if not isinstance(target, dict):
+            continue
+        for package_key, package_entry in target.items():
+            if not isinstance(package_entry, dict):
+                continue
+            package_name = str(package_key).split("/", 1)[0]
+            for runtime_path in package_entry.get("runtime") or {}:
+                assembly = os.path.basename(str(runtime_path))
+                if assembly.lower().endswith(".dll"):
+                    assembly = assembly[: -len(".dll")]
+                if assembly:
+                    mapping.setdefault(assembly.lower(), set()).add(package_name)
+    return mapping
+
+
 def merge_dotnet_assembly_ref_components(
-    lib_components: list[Component], assembly_refs: list[dict]
+    lib_components: list[Component],
+    assembly_refs: list[dict],
+    dotnet_deps: dict | None = None,
+    symbols_purl_map: dict | None = None,
 ) -> list[Component]:
     """Add AssemblyRef components, one per package name (W3.1 review).
 
@@ -2555,14 +2597,32 @@ def merge_dotnet_assembly_ref_components(
     the same library. Keying on the purl would let both through and put
     one package in the SBOM twice at two versions, only one of which is a
     NuGet version. Where the overlay spoke, it wins.
+
+    The same rule drops an AssemblyRef whose assembly is *provided by* a
+    package in the deps.json even when the names differ: the package
+    component already carries that dependency with its NuGet version, and a
+    second component under the assembly name would restate it at a version
+    that is not a NuGet version at all. The purl overlay covers the
+    assemblies with no local manifest of their own — the package dlls a
+    build copies beside ``app.deps.json`` reference each other by assembly
+    version, and the manifest a directory over already named both packages.
+    AssemblyRefs no manifest explains (the shared framework's System.Runtime
+    and friends, which a framework-dependent build resolves from the
+    installed runtime, not from any package) keep their assembly-version
+    components.
     """
     existing_names = {
         str(getattr(comp, "purl", "") or "").split("@")[0]
         for comp in lib_components
     }
+    provided_assemblies = dotnet_assembly_package_names(dotnet_deps)
     for comp in process_dotnet_assembly_refs(assembly_refs):
         name = comp.purl.split("@")[0]
         if name in existing_names:
+            continue
+        if provided_assemblies.get(name.split("/", 1)[-1].lower()):
+            continue
+        if symbols_purl_map and symbols_purl_map.get(name):
             continue
         existing_names.add(name)
         lib_components.append(comp)
@@ -3362,6 +3422,61 @@ def trim_components(components: list[Component]) -> list[Component]:
         else:
             added_dict[ref] = comp
     return [added_dict[k] for k in sorted(added_dict.keys())]
+
+
+def extend_purl_lookup_with_deps_json(
+    symbols_purl_map: dict[str, str], exe_files: list[str]
+) -> None:
+    """Fold the packages named by nearby ``.deps.json`` files into the purl
+    lookup, in place.
+
+    A build output directory carries one manifest per application
+    (``app.deps.json``), and the package assemblies the build copied beside
+    it (``Newtonsoft.Json.dll``) have no manifest of their own: parsed on
+    their own, their identity falls back to the assembly version, which
+    restates the very package the manifest names at a version that is not a
+    NuGet version. The manifest's ``libraries`` map is the build's own
+    statement of name and package version for each of them, so it feeds the
+    same overlay a source BOM feeds (``populate_purl_lookup``), with the
+    same precedence: an entry already present — from a source BOM, or from
+    a manifest seen earlier in sorted order — is never overwritten.
+
+    Only the directories that hold binaries being scanned are read, and
+    only files ending ``.deps.json`` within them: the lookup is scoped to
+    the build outputs blint was pointed at, not to the whole tree.
+    """
+    from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
+
+    manifest_dirs: dict[str, None] = {}
+    for exe in exe_files:
+        parent = os.path.dirname(os.path.abspath(exe))
+        manifest_dirs.setdefault(parent, None)
+    for parent in sorted(manifest_dirs):
+        try:
+            names = sorted(os.listdir(parent))
+        except OSError:
+            continue
+        for name in names:
+            if not name.lower().endswith(".deps.json"):
+                continue
+            path = os.path.join(parent, name)
+            try:
+                if os.path.getsize(path) > MAX_DEPS_JSON_BYTES:
+                    continue
+                with open(path, "rb") as handle:
+                    decoded = orjson.loads(handle.read())
+            except (OSError, orjson.JSONDecodeError):
+                continue
+            libraries = decoded.get("libraries") if isinstance(decoded, dict) else None
+            if not isinstance(libraries, dict):
+                continue
+            for package_key in libraries:
+                package_name, _, package_version = str(package_key).partition("/")
+                if not package_name or not package_version:
+                    continue
+                symbols_purl_map.setdefault(
+                    f"pkg:nuget/{package_name}", f"pkg:nuget/{package_name}@{package_version}"
+                )
 
 
 def populate_purl_lookup(src_dir_boms: list[str]) -> dict[str, str]:

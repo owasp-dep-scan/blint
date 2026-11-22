@@ -800,6 +800,58 @@ def parse_overlay(parsed_obj: lief.Binary) -> dict[str, dict]:
     return deps
 
 
+def sibling_deps_json_path(exe_file: str) -> str | None:
+    """The ``<stem>.deps.json`` candidate path for a binary, or None.
+
+    The build writes the manifest under the binary's own stem in the same
+    directory (``app.dll`` → ``app.deps.json``, extensionless apphost
+    ``app`` → ``app.deps.json``), so this derivation is the whole lookup.
+    Existence is deliberately not checked here: the parse cache keys on the
+    candidate's bytes when present, and must not read the filesystem twice
+    with two different answers.
+    """
+    base = os.path.basename(exe_file or "")
+    if not base:
+        return None
+    parent = os.path.dirname(os.path.abspath(exe_file))
+    return os.path.join(parent, f"{os.path.splitext(base)[0]}.deps.json")
+
+
+def read_sibling_deps_json(exe_file: str) -> dict:
+    """The ``<stem>.deps.json`` a framework-dependent build keeps beside the
+    binary.
+
+    A single-file publish embeds the manifest in the binary and the bundler's
+    copy rides the overlay, but a framework-dependent build (the default
+    ``dotnet build``/``dotnet publish`` shape) writes ``app.dll``,
+    ``app.exe``/``app`` and ``app.deps.json`` as sibling files: the manifest
+    never touches the binary, so both overlay readers above come back empty
+    and only the AssemblyRef table remains — assembly versions where the
+    NuGet package versions belong.
+
+    Acceptance mirrors the bundle reader: a JSON object with a ``libraries``
+    map is a dependency manifest, anything else is not. Returns {} when no
+    sibling exists, it is unreadable, oversized (MAX_DEPS_JSON_BYTES) or not
+    a manifest.
+    """
+    from blint.lib.pe_dotnet_shape import MAX_DEPS_JSON_BYTES
+
+    candidate = sibling_deps_json_path(exe_file)
+    if not candidate:
+        return {}
+    try:
+        if os.path.getsize(candidate) > MAX_DEPS_JSON_BYTES:
+            LOG.debug(f"Sibling deps.json {candidate} is over the size cap; not read")
+            return {}
+        with open(candidate, "rb") as handle:
+            decoded = orjson.loads(handle.read())
+    except (OSError, orjson.JSONDecodeError):
+        return {}
+    if isinstance(decoded, dict) and isinstance(decoded.get("libraries"), dict) and decoded.get("libraries"):
+        return decoded
+    return {}
+
+
 GO_BUILDINFO_MAGIC = b"\xff Go buildinf:"
 # go/src/debug/buildinfo: the blob opens with a 32-byte header — the magic, a
 # pointer size and a flags byte. Flags bit 0x2 marks the inline layout
