@@ -1,6 +1,7 @@
 import base64
 import binascii
 import codecs
+import hashlib
 import os
 import re
 import shutil
@@ -2668,7 +2669,7 @@ def merge_dotnet_assembly_ref_components(
             shadows.append(overlay_purl)
         if deps_json_index and file_path:
             shadows += deps_json_package_purls(
-                deps_json_index, file_path, name.split("/", 1)[-1]
+                deps_json_index, file_path, name.split("/", 1)[-1], comp.purl.split("@")[-1].split("?")[0]
             )
         for shadow in dict.fromkeys(shadows):
             comp.properties.append(Property(name="internal:shadowed_by", value=shadow))
@@ -3679,24 +3680,91 @@ def build_deps_json_index(exe_files: list[str]) -> dict[str, dict[str, list[dict
                         bucket.append(record)
         if by_stem:
             index[parent] = by_stem
-    return index
+    if not index:
+        return {}
+    return {"records": index, "aliases": _deps_json_aliases(index, exe_files)}
+
+
+def _sha256_of(path: str) -> str | None:
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _deps_json_aliases(
+    records_by_dir: dict[str, dict[str, list[dict]]], exe_files: list[str]
+) -> dict[str, str]:
+    """Map a manifest-less file to a byte-identical scanned file that has
+    manifest records in its own directory.
+
+    ``dotnet build`` leaves the same assembly in ``obj/`` (no manifest) and
+    in ``bin/`` (with one). Identical content is evidence that the copy is
+    the described assembly; a shared name alone is not, so only files with
+    the same name and the same SHA-256 are paired.
+    """
+    described: dict[str, list[str]] = {}
+    undescribed: dict[str, list[str]] = {}
+    for exe in exe_files:
+        path = os.path.abspath(exe)
+        base = os.path.basename(path).lower()
+        stem = os.path.splitext(base)[0]
+        by_stem = records_by_dir.get(os.path.dirname(path)) or {}
+        (described if stem in by_stem else undescribed).setdefault(base, []).append(path)
+    aliases: dict[str, str] = {}
+    for base, copies in undescribed.items():
+        sources = described.get(base)
+        if not sources:
+            continue
+        source_hashes: dict[str, str] = {}
+        for source in sorted(sources):
+            if digest := _sha256_of(source):
+                source_hashes.setdefault(digest, source)
+        for copy in copies:
+            if (digest := _sha256_of(copy)) and digest in source_hashes:
+                aliases[copy] = source_hashes[digest]
+    return aliases
 
 
 def _deps_json_records(index: dict, file_path: str, assembly_stem: str | None = None) -> list[dict]:
-    directory = os.path.dirname(os.path.abspath(file_path))
-    stem = (assembly_stem or os.path.splitext(os.path.basename(file_path))[0]).lower()
-    return (index.get(directory) or {}).get(stem) or []
+    """Manifest records for a file: those beside it, or beside the
+    byte-identical file it is an alias of."""
+    path = os.path.abspath(file_path)
+    if assembly_stem is None:
+        path = (index.get("aliases") or {}).get(path, path)
+    directory = os.path.dirname(path)
+    stem = (assembly_stem or os.path.splitext(os.path.basename(path))[0]).lower()
+    return ((index.get("records") or {}).get(directory) or {}).get(stem) or []
 
 
-def deps_json_package_purls(index: dict, file_path: str, assembly_name: str) -> list[str]:
-    """Every package purl the manifests beside ``file_path`` name for the
-    assembly ``assembly_name``."""
-    return list(
-        dict.fromkeys(
-            f"pkg:nuget/{rec['package']}@{rec['version']}"
-            for rec in _deps_json_records(index, file_path, assembly_name)
-        )
-    )
+def deps_json_package_purls(
+    index: dict, file_path: str, assembly_name: str, assembly_version: str | None = None
+) -> list[str]:
+    """Every package purl that may restate the AssemblyRef
+    ``assembly_name`` at ``assembly_version``.
+
+    Manifests beside ``file_path`` count for any version. Manifests anywhere
+    else in the run count only when their runtime entry has the same
+    assembly name and the same assemblyVersion, since a build's other
+    outputs (``obj/``, a sibling project) describe the packages the
+    reference resolves to.
+    """
+    purls = [
+        f"pkg:nuget/{rec['package']}@{rec['version']}"
+        for rec in _deps_json_records(index, file_path, assembly_name)
+    ]
+    wanted = _version_tuple(assembly_version)
+    if wanted is not None:
+        stem = assembly_name.lower()
+        for by_stem in (index.get("records") or {}).values():
+            for rec in by_stem.get(stem) or []:
+                if _version_tuple(rec.get("av")) == wanted:
+                    purls.append(f"pkg:nuget/{rec['package']}@{rec['version']}")
+    return list(dict.fromkeys(purls))
 
 
 def resolve_deps_json_identity(

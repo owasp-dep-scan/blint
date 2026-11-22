@@ -2942,7 +2942,7 @@ def test_build_deps_json_index(tmp_path):
     )
     (tmp_path / "broken.deps.json").write_text("{not json")
     index = build_deps_json_index([str(tmp_path / "app.dll")])
-    records = index[os.path.dirname(os.path.abspath(str(tmp_path / "app.dll")))]
+    records = index["records"][os.path.dirname(os.path.abspath(str(tmp_path / "app.dll")))]
     assert [(r["package"], r["version"]) for r in records["newtonsoft.json"]] == [
         ("Newtonsoft.Json", "12.0.3")
     ]
@@ -3191,3 +3191,81 @@ def test_generate_survives_a_malformed_sibling_manifest(tmp_path):
     generate(options, [str(tmp_path / "fxapp.dll")], [])
     purls = {c["purl"] for c in json.loads(Path(out).read_text()).get("components", [])}
     assert "pkg:nuget/Bar@1.0" in purls
+
+
+def _generate_purls(tmp_path, files):
+    """Every component purl (nested ones included) of a generate() run."""
+    from blint.config import BlintOptions
+    from blint.lib.sbom import generate
+
+    out = str(tmp_path / "run-bom.json")
+    options = BlintOptions(sbom_output=out, quiet_mode=True, src_dir_image=[str(tmp_path)])
+    generate(options, files, [])
+    bom = json.loads(Path(out).read_text())
+    purls = []
+
+    def walk(components):
+        for comp in components:
+            purls.append(comp["purl"])
+            walk(comp.get("components") or [])
+
+    walk(bom.get("components") or [])
+    walk(bom["metadata"].get("component", {}).get("components") or [])
+    purls.append(bom["metadata"].get("component", {}).get("purl"))
+    return purls
+
+
+def _build_and_obj_dirs(tmp_path, names=("fxapp.dll", "Newtonsoft.Json.dll", "fxapp.deps.json")):
+    """A build directory with its manifest, and a manifest-less ``obj``
+    directory holding a byte-identical copy of the application dll."""
+    import shutil
+
+    build = tmp_path / "bin"
+    obj = tmp_path / "obj"
+    build.mkdir()
+    obj.mkdir()
+    _fxdep_copy(build, names)
+    shutil.copy(_fxdep_file("fxapp.dll"), obj / "fxapp.dll")
+    return build, obj
+
+
+def test_manifest_less_copy_follows_the_described_build_output(tmp_path):
+    build, obj = _build_and_obj_dirs(tmp_path)
+    files = [
+        str(build / "fxapp.dll"),
+        str(build / "Newtonsoft.Json.dll"),
+        str(obj / "fxapp.dll"),
+    ]
+    purls = _generate_purls(tmp_path, files)
+    assert "pkg:nuget/Newtonsoft.Json@12.0.3" in purls
+    assert "pkg:nuget/fxapp@1.0.0" in purls
+    # The copy neither restates the package at its assembly version nor
+    # keeps a second parent under the assembly version.
+    assert not any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
+    assert not any(p.startswith("pkg:nuget/fxapp@1.0.0.0") for p in purls)
+
+
+def test_manifest_less_copy_with_different_content_is_not_aliased(tmp_path):
+    from blint.lib.sbom import build_deps_json_index
+
+    build, obj = _build_and_obj_dirs(tmp_path)
+    # Same name, different bytes: a name alone is not evidence.
+    (obj / "fxapp.dll").write_bytes((obj / "fxapp.dll").read_bytes() + b"\x00")
+    index = build_deps_json_index([str(build / "fxapp.dll"), str(obj / "fxapp.dll")])
+    assert index["aliases"] == {}
+
+
+def test_assembly_ref_survives_when_no_manifest_entry_has_its_version(tmp_path):
+    build, obj = _build_and_obj_dirs(tmp_path, ("fxapp.dll", "fxapp.deps.json"))
+    files = [str(build / "fxapp.dll"), str(obj / "fxapp.dll")]
+    purls = _generate_purls(tmp_path, files)
+    assert not any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
+
+    # The manifest states a different assemblyVersion for Newtonsoft.Json:
+    # the copy's reference to 12.0.0.0 matches nothing and stays.
+    manifest = build / "fxapp.deps.json"
+    text = manifest.read_text()
+    assert '"assemblyVersion": "12.0.0.0"' in text
+    manifest.write_text(text.replace('"assemblyVersion": "12.0.0.0"', '"assemblyVersion": "99.0.0.0"'))
+    purls = _generate_purls(tmp_path, files)
+    assert any(p.startswith("pkg:nuget/Newtonsoft.Json@12.0.0.0") for p in purls)
