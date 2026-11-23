@@ -102,12 +102,12 @@ jobs:
             # host runner user so the upload/release steps can read them.
             chown -R "$HOST_UID:$HOST_GID" dist build *.spec 2>/dev/null || true
           '
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         path: ./blint/dist
         name: ${{ matrix.binary_name }}
     - name: Release
-      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+      uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
       if: startsWith(github.ref, 'refs/tags/')
       with:
         files: |
