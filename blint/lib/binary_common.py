@@ -1218,6 +1218,29 @@ def _decompress_capped(data: bytes, cap: int) -> bytes:
     return out
 
 
+def _drop_root_package(packages: list[dict]) -> list[dict]:
+    """
+    Remove the root crate from cargo-auditable packages.
+
+    Each package's ``dependencies`` are positions in the full list, so they are
+    remapped to positions in the returned list. References to the root crate
+    are dropped.
+    """
+    kept = [
+        idx for idx, pkg in enumerate(packages) if isinstance(pkg, dict) and "root" not in pkg
+    ]
+    new_index = {old: new for new, old in enumerate(kept)}
+    deps = []
+    for idx in kept:
+        pkg = dict(packages[idx])
+        if isinstance(pkg.get("dependencies"), list):
+            pkg["dependencies"] = [
+                new_index[d] for d in pkg["dependencies"] if isinstance(d, int) and d in new_index
+            ]
+        deps.append(pkg)
+    return deps
+
+
 def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     """
     Parse the rust build info section that are cargo-auditable to extract rust dependencies.
@@ -1241,9 +1264,7 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
             audit_data = orjson.loads(json_string)
 
             if audit_data and audit_data["packages"]:
-                packages = audit_data["packages"]
-                deps = [x for x in packages if "root" not in x]
-                return deps
+                return _drop_root_package(audit_data["packages"])
     except (orjson.JSONDecodeError, zlib.error, Exception) as e:
         LOG.debug(f"Failed to parse .dep-v0 section: {e}")
     if not deps:
