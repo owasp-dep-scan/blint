@@ -1,0 +1,36 @@
+tests/test_api_entrypoints.py
+  s_293754ccc01af0::t_4088eae50ab615 1-259
+  s_293754ccc01af0::t_e0abe367c3c0d9 260-280
+docs/API.md
+  s_293754ccc01af0::t_6c15622a21bd2d 1-148
+README.md
+  s_293754ccc01af0::t_31bc1ebc34f713 48
+blint/api.py
+  s_293754ccc01af0::t_b163b006fb04a2 17-28,35,41-42,44,47-49,52-88,229-234,236-246,248-264,298,300-302,304,306-308,310-681
+blint/config.py
+  s_293754ccc01af0::t_c7e2441dcc956a 1314-1317,1366-1370
+blint/lib/diff.py
+  s_293754ccc01af0::t_b6b2165bcb5466 51,251-255
+blint/lib/finding_ids.py
+  s_293754ccc01af0::t_ec5fd6793c3c89 167-210
+blint/lib/runners.py
+  s_293754ccc01af0::t_941f569675f851 37,1579-1581
+blint/lib/sbom.py
+  s_293754ccc01af0::t_e1a2201bdfe67f 425,481-484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2293212a19a0077c58c4baec007c1e4496410826",
+  "prompts": {},
+  "sessions": {
+    "s_293754ccc01af0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_0d2b81b7-0185-4892-82ff-158dbdcf1dfe",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
