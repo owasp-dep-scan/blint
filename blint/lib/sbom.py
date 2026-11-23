@@ -422,7 +422,7 @@ def generate(
 def create_sbom(
     components: list[Component],
     dependencies: list[dict],
-    output_file: str | TextIO,
+    output_file: str | TextIO | None,
     sbom: CycloneDX,
     deep_mode: bool,
     symbols_purl_map: dict,
@@ -478,7 +478,10 @@ def create_sbom(
     LOG.debug(
         f"SBOM includes {len(sbom.components)} components and {len(sbom.dependencies)} dependencies"
     )
-    if output_file is sys.stdout:
+    if output_file is None:
+        # The API's no-file mode: the document is returned, never written.
+        pass
+    elif output_file is sys.stdout:
         print(
             sbom.model_dump_json(
                 indent=2,

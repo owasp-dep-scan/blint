@@ -34,7 +34,7 @@ from blint.lib.cab import extract_cab_members, is_cab_file, parse_cab
 from blint.lib.cache import CacheKeyError, ParseCache, compute_options_digest, sha256_file
 from blint.lib.clickonce import clickonce_metadata, is_clickonce_file, parse_clickonce
 from blint.lib.container import bounded_temp_dir
-from blint.lib.finding_ids import attach_finding_ids
+from blint.lib.finding_ids import attach_finding_ids, attach_review_ids
 from blint.lib.inf import (
     driver_package_context,
     find_inf_files,
@@ -1576,6 +1576,9 @@ class AnalysisRunner:
         self.reviewer.run_review(metadata)
         if self.reviewer.results:
             review = self.reviewer.process_review(f, exe_name)
+            # Stable review ids (the review twin of finding_id) are attached
+            # per binary, before the reviews join the run-wide list.
+            attach_review_ids(f, metadata, review)
             self.reviews += review
 
 

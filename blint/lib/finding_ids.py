@@ -164,3 +164,47 @@ def attach_finding_ids(
             finding_id = compute_finding_id(rule_id, identity, f"{locator}\x00#{seen_before}")
         finding["finding_id"] = finding_id
     return len(findings)
+
+
+def compute_review_id(rule_id: Any, identity: str, locator: str) -> str:
+    """Compute the stable ID for one review from the same three inputs.
+
+    Same scheme, same hash, one extra discriminator: the ``"review"``
+    marker keeps review ids and finding ids disjoint namespaces, so a rule
+    id that someday fires as both a check and a review cannot make the two
+    collide. What goes in and what stays out is exactly the finding_id
+    contract above.
+    """
+    payload = "\x00".join((_ID_SCHEME, "review", str(rule_id or ""), identity, locator))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_ID_LENGTH]
+
+
+def attach_review_ids(
+    file_path: str, metadata: dict[str, Any], reviews: list[dict[str, Any]]
+) -> int:
+    """Attach a ``review_id`` field to each review, in place.
+
+    The review twin of ``attach_finding_ids``: same identity digest (the
+    binary's sha256), same evidence locator (a review's ``evidence`` is the
+    matched symbol/function list), same occurrence-counter disambiguation,
+    so suppressions and baselines keyed on review ids behave exactly like
+    the ones keyed on finding ids.
+    """
+    if not reviews:
+        return 0
+    identity = binary_identity_digest(metadata, file_path)
+    occurrences: dict[str, int] = {}
+    for review in reviews:
+        rule_id = review.get("id")
+        locator = evidence_locator(review)
+        review_id = compute_review_id(rule_id, identity, locator)
+        seen_before = occurrences.get(review_id, 0)
+        occurrences[review_id] = seen_before + 1
+        if seen_before:
+            LOG.warning(
+                f"Review {rule_id} in {file_path} repeats with identical evidence; "
+                "disambiguating its stable id by occurrence."
+            )
+            review_id = compute_review_id(rule_id, identity, f"{locator}\x00#{seen_before}")
+        review["review_id"] = review_id
+    return len(reviews)
