@@ -1,0 +1,35 @@
+.github/workflows/linux.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 34,77,82
+.github/workflows/musl.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 105,110
+.github/workflows/bintests.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 37
+.github/workflows/corpus.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 46
+.github/workflows/publish.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 33,69,102,110
+.github/workflows/drivertests.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 44,64,72,112
+.github/workflows/pytests.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 38,42,52,56
+.github/workflows/win.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 29,32,57,62
+.github/workflows/mac.yml
+  s_8f9f7f69c1f35b::t_1e51378b65813f 34,87,92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a8f3a2ada118211cab142ec47d4f72e3c3f2aa5f",
+  "prompts": {},
+  "sessions": {
+    "s_8f9f7f69c1f35b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2389e459-1f7b-4d6a-89fa-f4b7d6698be9",
+        "model": "claude-haiku-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
