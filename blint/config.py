@@ -1311,7 +1311,10 @@ class BlintOptions:
     wasm_strings: bool = True
     wasm_call_graph: bool = True
     image_url: str | None = ""
-    sbom_output: str | TextIO = ""
+    # None is the API's "no file requested" sentinel: in sbom mode no default
+    # output path is filled in and nothing is written, where "" (the CLI
+    # default) resolves to sbom-binary-postbuild.cdx.json under reports_dir.
+    sbom_output: str | TextIO | None = ""
     sbom_output_dir: str = ""
     src_dir_boms: list[str] = field(default_factory=list)
     src_dir_image: list[str] = field(default_factory=list)
@@ -1360,7 +1363,11 @@ class BlintOptions:
         if self.sbom_mode and self.deep_mode:
             self.disassemble = True
         if self.sbom_mode:
-            if self.stdout_mode:
+            if self.sbom_output is None:
+                # API call with no output file: nothing to resolve and
+                # nothing will be written (create_sbom skips None).
+                pass
+            elif self.stdout_mode:
                 self.sbom_output = sys.stdout
             else:
                 # stdout was handled above, so the remaining branches are str.

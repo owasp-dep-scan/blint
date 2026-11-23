@@ -164,3 +164,44 @@ def attach_finding_ids(
             finding_id = compute_finding_id(rule_id, identity, f"{locator}\x00#{seen_before}")
         finding["finding_id"] = finding_id
     return len(findings)
+
+
+def compute_review_id(rule_id: Any, identity: str, occurrence: int = 0) -> str:
+    """Compute the stable ID for one review.
+
+    Same scheme and hash as ``compute_finding_id`` with a ``"review"``
+    marker, so review ids and finding ids are disjoint namespaces even for a
+    rule id that fires as both. A review is one entry per rule per binary,
+    so the rule id and the binary identity name it on their own. Its
+    ``evidence`` (the matched symbols and functions) is deliberately left
+    out: it grows when a rule gains a pattern, when ``--disassemble`` adds
+    function evidence, or when ``EVIDENCE_LIMIT`` changes, and none of that
+    should make a suppressed or baselined review look new.
+    """
+    parts = [_ID_SCHEME, "review", str(rule_id or ""), identity]
+    if occurrence:
+        parts.append(f"#{occurrence}")
+    payload = "\x00".join(parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_ID_LENGTH]
+
+
+def attach_review_ids(
+    file_path: str, metadata: dict[str, Any], reviews: list[dict[str, Any]]
+) -> int:
+    """Attach a ``review_id`` field to each review, in place.
+
+    The review twin of ``attach_finding_ids``: the same identity digest (the
+    binary's sha256), so suppressions and baselines keyed on review ids
+    follow the same rules as those keyed on finding ids. A rule id that
+    repeats within one binary's reviews is told apart by its position.
+    """
+    if not reviews:
+        return 0
+    identity = binary_identity_digest(metadata, file_path)
+    occurrences: dict[str, int] = {}
+    for review in reviews:
+        rule_id = str(review.get("id") or "")
+        seen_before = occurrences.get(rule_id, 0)
+        occurrences[rule_id] = seen_before + 1
+        review["review_id"] = compute_review_id(rule_id, identity, seen_before)
+    return len(reviews)

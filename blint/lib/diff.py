@@ -48,6 +48,7 @@ from blint.config import BlintOptions
 from blint.lib.finding_ids import (
     attach_finding_ids,
     attach_pairing_keys,
+    attach_review_ids,
     compute_finding_pairing_key,
     evidence_locator,
 )
@@ -247,6 +248,11 @@ def _recompute_findings_reviews(side: DiffSide) -> None:
         side.reviews = reviewer.process_review(
             side.path, os.path.basename(metadata.get("name") or side.path)
         )
+        # Same condition as the findings above: a metadata-JSON side with no
+        # recorded sha256 cannot mint a binary-identity id, so its reviews
+        # pair and report without one rather than with a fabricated digest.
+        if side.kind == "binary" or (metadata.get("hashes") or {}).get("sha256"):
+            attach_review_ids(side.path, metadata, side.reviews)
 
 
 def _ensure_comparable(old: DiffSide, new: DiffSide) -> None:

@@ -45,6 +45,7 @@ flowchart TD
 - **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
   - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
   - For the custom CycloneDX properties blint adds to the BOM, see the [Custom Properties Documentation](./docs/CUSTOM_PROPERTIES.md).
+  - To drive blint from Python (SBOMs, diffs, findings and reviews with typed results), see the [API reference](./docs/API.md).
   - Navigate to the [disassembly guide](./docs/DISASSEMBLE.md).
   - For callgraph internals and analyst-facing interpretation, see the [callgraph guide](./docs/CALLGRAPH.md).
 - **Android Deep Analysis:** In deep mode blint parses the dex classes, detects bundled service and tracker SDKs, and runs a Dalvik behavioural review that decodes the bytecode and flags risky behaviours such as dynamic code loading, reflection, native command execution, weak cryptography, and cleartext networking. The findings are attached to the BOM as custom properties. When disassembly is enabled, blint also writes a Dalvik callgraph sidecar next to the BOM. Native code (`lib/<abi>/*.so` of an APK/AAB or a standalone `.so`) gets its own analysis path: per-ABI bionic ELF facts and loader/hardening checks, framework identification in the SBOM, and a dex↔native JNI join that binds declared natives to their implementations (see the [Android native guide](./docs/ANDROID.md)).
