@@ -1,0 +1,15 @@
+# The default (full) preset reports 1,477 errors on this codebase; the
+# high-confidence basic preset gates CI while annotation work catches up.
+preset = "basic"
+
+# tests/scripts holds corpus builders that import sibling scripts and the
+# separate blint-db repository through sys.path inserts, so those imports
+# cannot resolve inside this project.
+project-includes = [
+    "**/*.py*",
+]
+project-excludes = [
+    "tests/scripts/**",
+    "**/__pycache__",
+    "**/.venv",
+]
