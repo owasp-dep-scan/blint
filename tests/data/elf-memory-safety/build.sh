@@ -58,6 +58,24 @@ build gcc-stack-clash-off $CC_GCC -O2 -fno-stack-clash-protection
 $CC_GCC -O2 -fstack-clash-protection -o "$outdir/gcc-small-only" "$small_src" \
     && echo "built $outdir/gcc-small-only"
 
+# frame.c: a frame that is not a multiple of the page (GCC on AArch64 loads
+# it into a register before the sub) and zero stores at the stack top that
+# are not probes.
+frame_src="$(dirname "$0")/frame.c"
+$CC_GCC -O2 -fstack-clash-protection -o "$outdir/gcc-frame-on" "$frame_src" && echo "built $outdir/gcc-frame-on"
+$CC_GCC -O2 -fno-stack-clash-protection -o "$outdir/gcc-frame-off" "$frame_src" && echo "built $outdir/gcc-frame-off"
+if [ "$have_clang" = 1 ]; then
+    $CC_CLANG -O2 -fstack-clash-protection -o "$outdir/clang-frame-on" "$frame_src" && echo "built $outdir/clang-frame-on"
+    $CC_CLANG -O2 -fno-stack-clash-protection -o "$outdir/clang-frame-off" "$frame_src" && echo "built $outdir/clang-frame-off"
+fi
+
+# sized.c at level 2 imports __memcpy_chk and __memset_chk, which is why
+# the wrapper names cannot tell level 2 from level 3.
+if [ "$arch" = x86_64 ]; then
+    $CC_GCC -O2 -D_FORTIFY_SOURCE=2 -o "$outdir/gcc-fortify2-sized" "$(dirname "$0")/sized.c" \
+        && echo "built $outdir/gcc-fortify2-sized"
+fi
+
 # FORTIFY levels (levels 2 and 3 need an optimizing compiler to fire).
 build gcc-fortify0 $CC_GCC -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 build gcc-fortify2 $CC_GCC -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2
