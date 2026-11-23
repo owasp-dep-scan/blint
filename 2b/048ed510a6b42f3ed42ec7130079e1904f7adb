@@ -1,0 +1,25 @@
+Info.plist
+  s_8f9f7f69c1f35b::t_9a1a2a9254d10c 12
+Dockerfile
+  s_8f9f7f69c1f35b::t_9a1a2a9254d10c 8
+pyproject.toml
+  s_8f9f7f69c1f35b::t_9a1a2a9254d10c 3
+file_version_info.txt
+  s_8f9f7f69c1f35b::t_9a1a2a9254d10c 10-11,35,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b048ed510a6b42f3ed42ec7130079e1904f7adb",
+  "prompts": {},
+  "sessions": {
+    "s_8f9f7f69c1f35b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2389e459-1f7b-4d6a-89fa-f4b7d6698be9",
+        "model": "claude-haiku-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
