@@ -3450,7 +3450,8 @@ def process_rust_dependencies(
         # Recover the dependency tree
         if dependency.get("dependencies"):
             for adep in dependency.get("dependencies"):
-                dependencies_dict[purl].add(idx_to_purl[adep])
+                if adep in idx_to_purl:
+                    dependencies_dict[purl].add(idx_to_purl[adep])
     return components
 
 
