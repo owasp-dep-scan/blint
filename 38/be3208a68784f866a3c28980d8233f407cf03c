@@ -1,0 +1,25 @@
+blint/lib/binary_macho.py
+  s_9bdf1fb056a16e::t_d40118aab946b6 108-112,161-164,169
+blint/lib/sbom.py
+  s_9bdf1fb056a16e::t_bb8ade3a299ade 53,132-178,459-461,1543-1548,1552-1553,1566-1567
+docs/METADATA.md
+  s_9bdf1fb056a16e::t_82c80e14f321c8 572-575,602
+tests/test_sbom_scan_paths.py
+  s_9bdf1fb056a16e::t_82127e5dda81d6 1-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "38be3208a68784f866a3c28980d8233f407cf03c",
+  "prompts": {},
+  "sessions": {
+    "s_9bdf1fb056a16e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5db4f345-e6bc-4bcc-8c44-d321d0eeaa20",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
