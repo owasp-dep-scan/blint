@@ -1,4 +1,4 @@
-"""Tests for the sbom/diff/batch API entry points and review ids (issue 272).
+"""Tests for the sbom/diff/batch API entry points and review ids.
 
 Every test here calls only ``blint.api``: the point of the public API is
 that a consumer never imports an internal helper, so the tests hold
@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from blint.api import (
+    AnalysisFailedError,
     AnalysisResult,
     BlintApiError,
     BlintdbUnavailableError,
@@ -96,6 +97,21 @@ def test_sbom_blintdb_failure_raises_instead_of_degrading(monkeypatch, tmp_path)
         sbom(PLAIN_ELF, use_blintdb=True)
     # The failure left no half-written output behind.
     assert list(tmp_path.iterdir()) == []
+
+
+def test_sbom_generation_failure_raises_and_writes_nothing(monkeypatch, tmp_path) -> None:
+    import blint.lib.sbom as sbom_module
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("worker died while processing a unit")
+
+    monkeypatch.setattr(sbom_module, "generate", broken)
+    out = tmp_path / "bom.json"
+    with pytest.raises(AnalysisFailedError) as excinfo:
+        sbom(PLAIN_ELF, output_file=out)
+    assert excinfo.value.record["error_type"] == "RuntimeError"
+    assert isinstance(excinfo.value, BlintApiError)
+    assert not out.exists()
 
 
 def test_sbom_error_hierarchy_is_public() -> None:
@@ -191,10 +207,21 @@ def test_reviews_carry_stable_ids() -> None:
     ids = [r["review_id"] for r in result.reviews]
     assert all(isinstance(i, str) and len(i) == 32 for i in ids)
     assert len(set(ids)) == len(ids), "review ids must be unique within one binary"
-    # A fresh call mints the same ids: the digest is over the rule, the
-    # binary bytes and the evidence, never the run.
+    # A fresh call mints the same ids: the digest is over the rule and the
+    # binary bytes, never the run.
     again = analyze(FORTIFIED_ELF)
     assert [r["review_id"] for r in again.reviews] == ids
+
+
+def test_review_ids_do_not_follow_the_evidence() -> None:
+    """More evidence for the same review (here from disassembly) keeps its id."""
+    plain = analyze(FORTIFIED_ELF)
+    deeper = analyze(FORTIFIED_ELF, disassemble=True)
+    plain_ids = {r["id"]: r["review_id"] for r in plain.reviews}
+    deeper_ids = {r["id"]: r["review_id"] for r in deeper.reviews}
+    shared = plain_ids.keys() & deeper_ids.keys()
+    assert shared
+    assert all(plain_ids[rule] == deeper_ids[rule] for rule in shared)
 
 
 def test_review_ids_separate_binaries_and_findings() -> None:

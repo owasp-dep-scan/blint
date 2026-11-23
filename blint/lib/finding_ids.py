@@ -166,16 +166,22 @@ def attach_finding_ids(
     return len(findings)
 
 
-def compute_review_id(rule_id: Any, identity: str, locator: str) -> str:
-    """Compute the stable ID for one review from the same three inputs.
+def compute_review_id(rule_id: Any, identity: str, occurrence: int = 0) -> str:
+    """Compute the stable ID for one review.
 
-    Same scheme, same hash, one extra discriminator: the ``"review"``
-    marker keeps review ids and finding ids disjoint namespaces, so a rule
-    id that someday fires as both a check and a review cannot make the two
-    collide. What goes in and what stays out is exactly the finding_id
-    contract above.
+    Same scheme and hash as ``compute_finding_id`` with a ``"review"``
+    marker, so review ids and finding ids are disjoint namespaces even for a
+    rule id that fires as both. A review is one entry per rule per binary,
+    so the rule id and the binary identity name it on their own. Its
+    ``evidence`` (the matched symbols and functions) is deliberately left
+    out: it grows when a rule gains a pattern, when ``--disassemble`` adds
+    function evidence, or when ``EVIDENCE_LIMIT`` changes, and none of that
+    should make a suppressed or baselined review look new.
     """
-    payload = "\x00".join((_ID_SCHEME, "review", str(rule_id or ""), identity, locator))
+    parts = [_ID_SCHEME, "review", str(rule_id or ""), identity]
+    if occurrence:
+        parts.append(f"#{occurrence}")
+    payload = "\x00".join(parts)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:_ID_LENGTH]
 
 
@@ -184,27 +190,18 @@ def attach_review_ids(
 ) -> int:
     """Attach a ``review_id`` field to each review, in place.
 
-    The review twin of ``attach_finding_ids``: same identity digest (the
-    binary's sha256), same evidence locator (a review's ``evidence`` is the
-    matched symbol/function list), same occurrence-counter disambiguation,
-    so suppressions and baselines keyed on review ids behave exactly like
-    the ones keyed on finding ids.
+    The review twin of ``attach_finding_ids``: the same identity digest (the
+    binary's sha256), so suppressions and baselines keyed on review ids
+    follow the same rules as those keyed on finding ids. A rule id that
+    repeats within one binary's reviews is told apart by its position.
     """
     if not reviews:
         return 0
     identity = binary_identity_digest(metadata, file_path)
     occurrences: dict[str, int] = {}
     for review in reviews:
-        rule_id = review.get("id")
-        locator = evidence_locator(review)
-        review_id = compute_review_id(rule_id, identity, locator)
-        seen_before = occurrences.get(review_id, 0)
-        occurrences[review_id] = seen_before + 1
-        if seen_before:
-            LOG.warning(
-                f"Review {rule_id} in {file_path} repeats with identical evidence; "
-                "disambiguating its stable id by occurrence."
-            )
-            review_id = compute_review_id(rule_id, identity, f"{locator}\x00#{seen_before}")
-        review["review_id"] = review_id
+        rule_id = str(review.get("id") or "")
+        seen_before = occurrences.get(rule_id, 0)
+        occurrences[rule_id] = seen_before + 1
+        review["review_id"] = compute_review_id(rule_id, identity, seen_before)
     return len(reviews)

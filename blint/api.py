@@ -40,8 +40,12 @@ import orjson
 
 from blint.config import BLINTDB_IMAGE_URL, BlintOptions
 from blint.lib.diff import DiffError, diff_binary_metadata
-from blint.lib.runners import AnalysisRunner
-from blint.lib.utils import blintdb_setup, gen_file_list, json_serializer
+from blint.lib.runners import (
+    AnalysisRunner,
+    discover_default_mode_inputs,
+    discover_sbom_inputs,
+)
+from blint.lib.utils import blintdb_setup, json_serializer
 from blint.logger import LOG
 
 # Serializes the rule-state users (analyze/analyze_many/diff): the engine's
@@ -448,18 +452,7 @@ def analyze_many(
         use_cache=use_cache,
         sdk_path=sdk_path,
     )
-    exe_files = gen_file_list(options.src_dir_image)
-    macos_bundles: list[str] = []
-    from blint.lib.inf import find_inf_files
-    from blint.lib.macos_bundle import find_macos_bundles, path_inside_any_bundle
-    from blint.lib.utils import find_clickonce_files
-
-    for src in options.src_dir_image:
-        macos_bundles += find_macos_bundles(src) or []
-        for finder in (find_clickonce_files, find_inf_files):
-            exe_files += [f for f in (finder(src) or []) if f not in exe_files]
-    exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
-    exe_files += macos_bundles
+    exe_files = discover_default_mode_inputs(options.src_dir_image)
     batch = BatchAnalysisResult()
     if not exe_files:
         batch.coverage = {
@@ -560,15 +553,15 @@ def sbom(
         BlintdbUnavailableError: ``use_blintdb=True`` and the database
             could not be downloaded or verified. The SBOM is not returned
             in that case: a degraded SBOM must not read like a complete one.
+        AnalysisFailedError: a unit could not be processed; nothing is
+            returned or written, and ``record`` names the error.
     """
     sources = _normalize_sources(path)
     missing = [p for p in sources if not os.path.exists(p)]
     if missing:
         raise FileNotFoundError(f"no such file or directory: {missing[0]}")
     from blint.lib.binary_wasm import is_wasm_file
-    from blint.lib.macos_bundle import find_macos_bundles, path_inside_any_bundle
     from blint.lib.sbom import generate
-    from blint.lib.utils import find_android_files, find_clickonce_files, find_ios_files
 
     output_path = os.fspath(output_file) if output_file is not None else None
     options = BlintOptions(
@@ -588,28 +581,19 @@ def sbom(
         jobs=int(jobs),
     )
     coverage: dict[str, Any] = {"inputs": sources}
-    if use_blintdb and not blintdb_setup(options):
-        raise BlintdbUnavailableError(
-            "the blintdb database could not be downloaded or verified; no SBOM was generated"
-        )
     with _QuietLogs(quiet):
-        exe_files = gen_file_list(options.src_dir_image)
-        for src in options.src_dir_image:
-            exe_files += [f for f in (find_clickonce_files(src) or []) if f not in exe_files]
-        android_files: list[str] = []
-        ios_files: list[str] = []
-        macos_bundles: list[str] = []
-        for src in options.src_dir_image:
-            android_files += find_android_files(src) or []
-            ios_files += find_ios_files(src) or []
-            macos_bundles += find_macos_bundles(src) or []
-        exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
+        if use_blintdb and not blintdb_setup(options):
+            raise BlintdbUnavailableError(
+                "the blintdb database could not be downloaded or verified; no SBOM was generated"
+            )
+        inputs = discover_sbom_inputs(options.src_dir_image)
+        exe_files = inputs.exe_files
         skipped_wasm = [] if wasm_sbom else [f for f in exe_files if is_wasm_file(f)]
         coverage["units"] = {
             "executables": len(exe_files),
-            "android_apps": len(android_files),
-            "ios_apps": len(ios_files),
-            "macos_bundles": len(macos_bundles),
+            "android_apps": len(inputs.android_files),
+            "ios_apps": len(inputs.ios_files),
+            "macos_bundles": len(inputs.macos_bundles),
         }
         coverage["skipped"] = {
             "wasm": skipped_wasm,
@@ -618,10 +602,21 @@ def sbom(
                 "(Component Model interface imports only)"
             ),
         }
-        if not (exe_files or android_files or ios_files or macos_bundles):
+        if not (exe_files or inputs.android_files or inputs.ios_files or inputs.macos_bundles):
             coverage["notes"] = ["no analyzable inputs were discovered"]
             return SbomResult(bom=None, coverage=coverage, output_file=None)
-        sbom_obj = generate(options, exe_files, android_files, ios_files, macos_bundles)
+        try:
+            sbom_obj = generate(
+                options, exe_files, inputs.android_files, inputs.ios_files, inputs.macos_bundles
+            )
+        except Exception as exc:
+            # SBOM generation stops at the first unit it cannot process (a
+            # missing component would make the document wrong), so the
+            # failure is raised, never returned as a shorter SBOM.
+            raise AnalysisFailedError(
+                f"SBOM generation failed: {type(exc).__name__}: {exc}",
+                {"error_type": type(exc).__name__, "message": str(exc)},
+            ) from exc
         if sbom_obj is False:
             coverage["notes"] = ["no analyzable inputs were discovered"]
             return SbomResult(bom=None, coverage=coverage, output_file=None)
@@ -668,7 +663,7 @@ def diff(
             or the two sides are not two versions of one binary (different
             exe_type or architecture).
     """
-    with _QuietLogs(quiet), _ANALYSIS_LOCK:
+    with _ANALYSIS_LOCK, _QuietLogs(quiet):
         try:
             report = diff_binary_metadata(
                 os.fspath(old),

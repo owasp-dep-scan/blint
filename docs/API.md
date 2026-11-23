@@ -42,9 +42,9 @@ configuration failure such as a bad SDK path).
 
 The batch twin of `analyze()`: one engine run over a file, a directory or
 a mix of both, with results split back per unit. Discovery mirrors the
-CLI's default mode (directory walk for executables, macOS bundles,
-ClickOnce manifests, archive extraction). Same keyword arguments as
-`analyze()`.
+CLI's default mode and shares its code (directory walk for executables,
+macOS bundles, ClickOnce manifests, INF files, archive extraction). Same
+keyword arguments as `analyze()`.
 
 Returns `BatchAnalysisResult` with `results` (one `AnalysisResult` per
 unit, input order), `coverage` (the run-level block) and `unmatched`
@@ -76,10 +76,12 @@ input was discovered, with the reason in `coverage`), `coverage`
 (the inputs, the discovered unit counts, and the skipped wasm files with
 the reason) and `output_file` (the path written, or `None`).
 
-Raises `FileNotFoundError` and `BlintdbUnavailableError` (`use_blintdb`
+Raises `FileNotFoundError`, `BlintdbUnavailableError` (`use_blintdb`
 was set and the database could not be downloaded or verified; no SBOM is
 returned in that case, because a degraded SBOM must not read like a
-complete one).
+complete one) and `AnalysisFailedError` (a unit could not be processed;
+SBOM generation stops rather than leaving the component out, nothing is
+written, and `.record` names the error).
 
 This entry point holds no lock: component mapping reads no rule state,
 so concurrent `sbom()` calls run in parallel with each other and with
@@ -105,9 +107,13 @@ directory, or the sides are not two versions of one binary: different
 ## Stable ids
 
 Findings carry `finding_id` and reviews carry `review_id`, both computed
-by `blint.lib.finding_ids` from the same three inputs: the rule id, the
-sha256 of the analyzed file's bytes, and a canonical serialization of the
-item's evidence. Both are 32 hex characters.
+by `blint.lib.finding_ids` and both 32 hex characters. A finding id hashes
+the rule id, the sha256 of the analyzed file's bytes, and a canonical
+serialization of the finding's evidence. A review id hashes only the rule
+id and the file's sha256: blint reports one review per rule per binary, so
+those two already name it, and its evidence (the matched symbols and
+functions) is left out because it grows when a rule gains a pattern, when
+`disassemble` adds function evidence, or when `EVIDENCE_LIMIT` changes.
 
 Deliberately left out of both hashes, so none of these re-track an item:
 rendered prose (titles and descriptions), the file path and `exe_name`,
@@ -117,9 +123,9 @@ keeps them; a rebuild changes the file bytes and therefore mints new ids
 by design. Consumers diffing two *versions* of one binary must pair on
 evidence, not on these ids; `blint diff` does that internally.
 
-Reviews use the same scheme with one discriminator so a rule id that
-someday fires as both a check and a review can never make a finding id
-and a review id collide.
+Review ids carry an extra marker in the hash input, so a rule id that
+fires as both a check and a review can never make a finding id and a
+review id collide.
 
 ## Exceptions
 
