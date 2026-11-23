@@ -101,6 +101,13 @@ HARDENING_POLARITY: dict[str, str] = {
     "cfg_export_suppression": "hardening",
     "cet_shadow_stack": "hardening",
     "cet_shadow_stack_strict": "hardening",
+    # ELF memory-safety mirrors; "fortified" and
+    # "stack_clash_protection" are omitted from security_properties when the
+    # underlying fact was not determined, so a change row here always means
+    # two determined values disagreed.
+    "cet_ibt": "hardening",
+    "fortified": "hardening",
+    "stack_clash_protection": "hardening",
     "rfg": "hardening",
     "retpoline": "hardening",
     "force_integrity": "hardening",

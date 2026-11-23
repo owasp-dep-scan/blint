@@ -1606,3 +1606,69 @@ def check_pnp_privileged_component(
     if not described:
         return True
     return "; ".join(described[:2])
+
+
+def check_x86_cet(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """x86 ELF without CET marking.
+
+    IBT and SHSTK are opt-in per binary: the loader enables them only when
+    .note.gnu.property carries GNU_PROPERTY_X86_FEATURE_1_AND, so a missing
+    note or missing bits is the binary's own choice, not a parser gap.
+    Relocatable objects are not loaded as they are, and Android's bionic
+    loader has no CET support, so neither is in scope. Severity is low
+    because the flag is off by default in most toolchains: this is a
+    posture fact like BTI/PAC, not a defect.
+    """
+    memory_safety = metadata.get("memory_safety")
+    if not isinstance(memory_safety, dict) or not isinstance(memory_safety.get("cet"), dict):
+        return True
+    if str(metadata.get("elf_type") or "").upper() == "REL":
+        return True
+    if metadata.get("is_targeting_android") or isinstance(metadata.get("android"), dict):
+        return True
+    cet = memory_safety["cet"]
+    missing = [
+        name
+        for name, present in (("IBT", cet.get("ibt")), ("SHSTK", cet.get("shstk")))
+        if not present
+    ]
+    if not missing:
+        return True
+    return f"{', '.join(missing)} not marked in .note.gnu.property; rebuild with -fcf-protection=full"
+
+
+def check_stack_clash(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """Functions with page-crossing frames and no stack probes.
+
+    The verdict exists only under --disassemble and only when some function
+    grows the stack by at least a page, because -fstack-clash-protection
+    places its probes exactly there. A verdict that was not measured is
+    "not determined" in memory_safety and this check stays silent.
+    """
+    memory_safety = metadata.get("memory_safety")
+    clash = memory_safety.get("stack_clash_protection") if isinstance(memory_safety, dict) else None
+    if not isinstance(clash, dict) or clash.get("status") not in ("unprotected", "partial"):
+        return True
+    names = ", ".join(clash.get("unprobed_functions") or [])
+    count = clash.get("unprobed_function_count", 0)
+    return (
+        f"{count} function(s) grow the stack by a page or more without probing it"
+        + (f" ({names})" if names and count <= 3 else "")
+        + "; rebuild with -fstack-clash-protection"
+    )
+
+
+def check_fortify(f: str, metadata: dict[str, Any], rule_obj: dict[str, Any]) -> bool | str:
+    """String and stdio calls in a build without _FORTIFY_SOURCE.
+
+    Fires only on the "unfortified" state: a glibc binary imports a stdio
+    call that every fortified build routes through its __*_chk wrapper and
+    carries no wrapper anywhere. Static, musl and Android builds, and
+    binaries with no such import, are "not determined" and never reach this
+    check.
+    """
+    memory_safety = metadata.get("memory_safety")
+    fortify = memory_safety.get("fortify") if isinstance(memory_safety, dict) else None
+    if not isinstance(fortify, dict) or fortify.get("status") != "unfortified":
+        return True
+    return "imports printf-family calls with no __*_chk wrappers anywhere; rebuild with -O2 -D_FORTIFY_SOURCE=3"
