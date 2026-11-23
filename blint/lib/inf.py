@@ -528,17 +528,21 @@ def is_inf_file(path: str) -> bool:
     return re.search(r"^\s*\[version\]", text, re.IGNORECASE | re.MULTILINE) is not None
 
 
-def find_inf_files(src: str) -> list[str]:
+def find_inf_files(src: str, exclude=None) -> list[str]:
     """Driver package INFs under a directory, or the path itself when it is one."""
+    from blint.lib.exclude import compile_excludes, is_excluded_file, prune_excluded_dirs
     from blint.lib.utils import filter_ignored_dirs
+
+    matcher = compile_excludes(exclude)
 
     if os.path.isfile(src):
         return [os.path.abspath(src)] if is_inf_file(src) else []
     found = []
     for root, dirs, files in os.walk(src):
         filter_ignored_dirs(dirs)
+        prune_excluded_dirs(src, root, dirs, matcher)
         for name in files:
-            if name.lower().endswith(".inf"):
+            if name.lower().endswith(".inf") and not is_excluded_file(src, root, name, matcher):
                 path = os.path.join(root, name)
                 if is_inf_file(path):
                     found.append(os.path.abspath(path))

@@ -45,6 +45,12 @@ from blint.cyclonedx.spec import (
 )
 from blint.db import sqlite_truncation
 from blint.lib import oci_pull
+from blint.lib.exclude import (
+    ExcludeMatcher,
+    compile_excludes,
+    is_excluded_file,
+    prune_excluded_dirs,
+)
 from blint.logger import LOG, console
 
 CHARSET: str = string.digits + string.ascii_letters + r"""!&@"""
@@ -476,21 +482,25 @@ def filter_ignored_dirs(dirs: list[str]) -> None:
             dirs.remove(d)
 
 
-def find_exe_files(src: str) -> list[str]:
+def find_exe_files(src: str, exclude: Iterable[str] | ExcludeMatcher | None = None) -> list[str]:
     """
     Method to find files with given extension
 
     Args:
         src (str): Source path
+        exclude: Globs anchored at ``src`` for entries to skip (see
+            ``blint.lib.exclude``).
 
     Returns:
         list: List of filtered files
     """
     result = []
+    matcher = compile_excludes(exclude)
     for root, dirs, files in os.walk(src):
         filter_ignored_dirs(dirs)
+        prune_excluded_dirs(src, root, dirs, matcher)
         for file in files:
-            if is_ignored_file(file):
+            if is_ignored_file(file) or is_excluded_file(src, root, file, matcher):
                 continue
             full_path = os.path.join(root, file)
             for ar_extn in KNOWN_AR_EXTNS:
@@ -505,14 +515,16 @@ def find_exe_files(src: str) -> list[str]:
 ANDROID_APP_EXTNS: tuple[str, ...] = (".apk", ".aab", ".apkm", ".apks", ".xapk")
 
 
-def find_android_files(path: str) -> list[str]:
+def find_android_files(
+    path: str, exclude: Iterable[str] | ExcludeMatcher | None = None
+) -> list[str]:
     """
     Method to find android app files
 
     :param path: Project directory
     :return: List of android files
     """
-    return find_files(path, list(ANDROID_APP_EXTNS))
+    return find_files(path, list(ANDROID_APP_EXTNS), exclude)
 
 
 def is_android_app(path: str) -> bool:
@@ -532,24 +544,26 @@ IOS_APP_EXTNS: tuple[str, ...] = (".ipa",)
 CLICKONCE_EXTS: tuple[str, ...] = (".application",)
 
 
-def find_clickonce_files(path: str) -> list[str]:
+def find_clickonce_files(
+    path: str, exclude: Iterable[str] | ExcludeMatcher | None = None
+) -> list[str]:
     """
     Discover ClickOnce deployment manifests (``.application``) under a path.
 
     :param path: Project directory
     :return: List of ClickOnce deployment manifests
     """
-    return find_files(path, list(CLICKONCE_EXTS))
+    return find_files(path, list(CLICKONCE_EXTS), exclude)
 
 
-def find_ios_files(path: str) -> list[str]:
+def find_ios_files(path: str, exclude: Iterable[str] | ExcludeMatcher | None = None) -> list[str]:
     """
     Method to find iOS/macOS app archive files (``.ipa``).
 
     :param path: Project directory
     :return: List of iOS app files
     """
-    return find_files(path, list(IOS_APP_EXTNS))
+    return find_files(path, list(IOS_APP_EXTNS), exclude)
 
 
 def find_bom_files(path: str) -> list[str]:
@@ -563,17 +577,24 @@ def find_bom_files(path: str) -> list[str]:
     return find_files(path, app_extns)
 
 
-def find_files(path: str, extns: list[str]) -> list[str]:
+def find_files(
+    path: str, extns: list[str], exclude: Iterable[str] | ExcludeMatcher | None = None
+) -> list[str]:
     """
-    Method to find files matching an extension
+    Method to find files matching an extension, skipping the entries the
+    ``exclude`` globs (anchored at ``path``) name.
     """
     result = []
+    matcher = compile_excludes(exclude)
     if os.path.isfile(path):
         result += [path for ext in extns if path.endswith(ext)]
     else:
         for root, dirs, files in os.walk(path):
             filter_ignored_dirs(dirs)
+            prune_excluded_dirs(path, root, dirs, matcher)
             for file in files:
+                if is_excluded_file(path, root, file, matcher):
+                    continue
                 result += [os.path.join(root, file) for ext in extns if file.endswith(ext)]
     return result
 
@@ -694,7 +715,9 @@ def create_findings_table(files: list[str], title: str) -> Table:
     return table
 
 
-def gen_file_list(src: list[str]) -> list[str]:
+def gen_file_list(
+    src: list[str], exclude: Iterable[str] | ExcludeMatcher | None = None
+) -> list[str]:
     """Generates a list of files from the given source.
 
     This function generates a list of executable files from a source directory
@@ -702,6 +725,8 @@ def gen_file_list(src: list[str]) -> list[str]:
 
     Args:
         src (list[str]): A source file/directory
+        exclude: Globs anchored at each source directory for entries to skip.
+            A file named directly in ``src`` is never excluded.
 
     Returns:
         list[str]: A list of files.
@@ -709,7 +734,7 @@ def gen_file_list(src: list[str]) -> list[str]:
     files = []
     for s in src:
         if os.path.isdir(s):
-            files += find_exe_files(s)
+            files += find_exe_files(s, exclude)
         else:
             if is_ignored_file(s):
                 continue

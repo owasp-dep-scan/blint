@@ -44,7 +44,11 @@ The batch twin of `analyze()`: one engine run over a file, a directory or
 a mix of both, with results split back per unit. Discovery mirrors the
 CLI's default mode and shares its code (directory walk for executables,
 macOS bundles, ClickOnce manifests, INF files, archive extraction). Same
-keyword arguments as `analyze()`.
+keyword arguments as `analyze()`, plus `exclude`: a list of globs for
+entries the directory walk skips, anchored at each scanned directory with
+cdxgen's `--exclude` semantics (`test/**` skips the top-level `test`
+directory, `**/test/**` every `test` directory; forward-slash matching on
+every OS). A file named directly is never excluded.
 
 Returns `BatchAnalysisResult` with `results` (one `AnalysisResult` per
 unit, input order), `coverage` (the run-level block) and `unmatched`
@@ -66,7 +70,7 @@ Keyword arguments: `deep` (deep analysis, `--deep`), `use_blintdb`
 (`--use-blintdb`), `blintdb_image_url` (download location for the blintdb
 image; blint's built-in URL by default), `src_dir_boms` (source BOMs for
 purl enrichment), `wasm_sbom` (emit wasm Component Model components;
-wasm files are skipped otherwise and reported), `android_abis` (restrict
+wasm files are skipped otherwise and reported), `exclude` (globs to skip, as for `analyze_many()`), `android_abis` (restrict
 Android analysis to these ABIs), `output_file` (write the document here),
 `jobs` (parallel workers), `quiet`.
 

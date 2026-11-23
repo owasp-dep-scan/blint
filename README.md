@@ -142,6 +142,16 @@ blint -i /path/to/macho-binary -o /tmp/blint --sdk-path "$(xcrun --show-sdk-path
 
 The same flag exists on `blint sbom`, where it attributes and confirms the Mach-O dependency edges in the BOM.
 
+### Excluding directories and files
+
+`--exclude GLOB` (repeatable, on the default command and on `blint sbom`) keeps the walk from entering matching directories or reporting matching files. The globs follow cdxgen's `--exclude`: they are anchored at each scanned directory and matched against the path below it with forward slashes on every operating system, so the same pattern works on Windows. `*` stays inside one path segment, `**` stands for any number of segments, and `[abc]`, `?` and `{a,b}` work as in a shell. Quote the globs so the shell does not expand them.
+
+```shell
+blint sbom -i /path/to/repo -o sbom.cdx.json --exclude 'test/**' --exclude '**/node_modules/**'
+```
+
+`test/**` excludes only the top-level `test` directory, `*/test/**` the `test` directory one level down, and `**/test/**` every `test` directory at any depth. A file named directly with `-i` is never excluded. The Python API takes the same list as `exclude=[...]` in `blint.api.sbom` and `blint.api.analyze_many`.
+
 ## Understanding the Output
 
 blint produces several JSON artifacts in the specified reports directory.
@@ -243,7 +253,7 @@ usage: blint [-h] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]] [-o REPORTS_DIR]
              [--export-callgraph-graphml] [--export-callgraph-gexf]
              [--callgraph-min-confidence {low,medium,high}]
              [--custom-rules-dir CUSTOM_RULES_DIR] [--catalog-dir CATALOG_DIR]
-             [--sdk-path SDK_PATH] [--cache] [--jobs JOBS]
+             [--exclude GLOB] [--sdk-path SDK_PATH] [--cache] [--jobs JOBS]
              [--glibc-baseline VERSION] [-q]
              {sbom,callgraph-match,canonicalize,capabilities,diff,db,cache} ...
 
@@ -302,6 +312,12 @@ options:
                         it code_signature.scope stays 'none' with
                         catalog_lookup 'not_performed' and no unsigned claim
                         is made.
+  --exclude GLOB        Skip directories and files matching this glob while
+                        looking for binaries. Anchored at each scanned
+                        directory, as in cdxgen: `test/**` skips the top-level
+                        test directory only, `**/test/**` skips test
+                        directories at any depth. Matched against forward-slash
+                        paths on every OS. Repeatable.
   --sdk-path SDK_PATH   Path to an Apple SDK root whose .tbd stubs are used to
                         attribute and confirm Mach-O imports (for example the
                         path printed by `xcrun --show-sdk-path`). Off by
@@ -349,7 +365,7 @@ usage: blint sbom [-h] [--no-error] [-i SRC_DIR_IMAGE [SRC_DIR_IMAGE ...]]
                   [-o SBOM_OUTPUT] [--deep] [--stdout] [-q]
                   [--exports-prefix EXPORTS_PREFIX [EXPORTS_PREFIX ...]]
                   [--bom-src SRC_DIR_BOMS [SRC_DIR_BOMS ...]] [--use-blintdb]
-                  [--wasm-sbom] [--jobs JOBS] [--sdk-path SDK_PATH]
+                  [--wasm-sbom] [--jobs JOBS] [--exclude GLOB] [--sdk-path SDK_PATH]
 
 options:
   -h, --help            show this help message and exit
@@ -384,6 +400,12 @@ options:
   --jobs JOBS           Parse up to N binaries in parallel worker processes.
                         Accepts a positive integer, 0 or 'auto' for the CPU
                         count. Defaults to 1 (sequential, unchanged behavior).
+  --exclude GLOB        Skip directories and files matching this glob while
+                        looking for binaries. Anchored at each scanned
+                        directory, as in cdxgen: `test/**` skips the top-level
+                        test directory only, `**/test/**` skips test
+                        directories at any depth. Matched against forward-slash
+                        paths on every OS. Repeatable.
   --sdk-path SDK_PATH   Path to an Apple SDK root whose .tbd stubs are used to
                         attribute and confirm Mach-O dependency edges. Off by
                         default; the path must contain .tbd files or the run

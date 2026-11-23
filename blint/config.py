@@ -1344,6 +1344,10 @@ class BlintOptions:
     # and confirmed against the SDK's .tbd stubs under the `sdk_tbd`
     # attribution source; a path with no .tbd files is a hard error.
     sdk_path: str | None = None
+    # Globs for directory and file entries the walks skip (--exclude,
+    # repeatable), anchored at each scanned directory with cdxgen's
+    # semantics; see blint.lib.exclude.
+    exclude: list[str] = field(default_factory=list)
     # Opt into catalog-signature resolution (--catalog-dir). Off by default:
     # the path names a catalog tree (a copied CatRoot) the analyst supplies,
     # so using one is the caller's call. When set, PEs with no embedded

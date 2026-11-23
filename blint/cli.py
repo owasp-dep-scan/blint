@@ -207,6 +207,18 @@ def build_parser() -> argparse.ArgumentParser:
         "is made.",
     )
     parser.add_argument(
+        "--exclude",
+        dest="exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Skip directories and files matching this glob while looking for "
+        "binaries. Anchored at each scanned directory, as in cdxgen: `test/**` "
+        "skips the top-level test directory only, `**/test/**` skips test "
+        "directories at any depth. Matched against forward-slash paths on "
+        "every OS. Repeatable.",
+    )
+    parser.add_argument(
         "--sdk-path",
         dest="sdk_path",
         default=None,
@@ -361,6 +373,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Parse up to N binaries in parallel worker processes. Accepts a "
         "positive integer, 0 or 'auto' for the CPU count. Defaults to 1 "
         "(sequential, unchanged behavior).",
+    )
+    sbom_parser.add_argument(
+        "--exclude",
+        dest="exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Skip directories and files matching this glob while looking for "
+        "binaries. Anchored at each scanned directory, as in cdxgen: `test/**` "
+        "skips the top-level test directory only, `**/test/**` skips test "
+        "directories at any depth. Matched against forward-slash paths on "
+        "every OS. Repeatable.",
     )
     sbom_parser.add_argument(
         "--sdk-path",
@@ -732,6 +756,7 @@ def handle_args(args: argparse.Namespace | None = None) -> BlintOptions:
         use_cache=args.use_cache,
         jobs=jobs,
         sdk_path=getattr(args, "sdk_path", None),
+        exclude=list(getattr(args, "exclude", None) or []),
         catalog_dir=getattr(args, "catalog_dir", None),
     )
     return blint_options

@@ -202,7 +202,7 @@ def test_run_default_mode_renders_mermaid_callgraph(tmp_path, monkeypatch):
         },
     }
 
-    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src, _exclude=None: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr(
         "blint.lib.runners.run_checks",
@@ -263,7 +263,7 @@ def test_run_default_mode_renders_mermaid_without_findings(tmp_path, monkeypatch
         },
     }
 
-    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src, _exclude=None: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
@@ -313,7 +313,7 @@ def test_run_default_mode_exports_graphml_and_gexf_callgraphs(tmp_path, monkeypa
         },
     }
 
-    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src: [str(fake_binary)])
+    monkeypatch.setattr("blint.lib.runners.gen_file_list", lambda _src, _exclude=None: [str(fake_binary)])
     monkeypatch.setattr("blint.lib.runners.parse", lambda _f, _d, **_kwargs: dict(fake_metadata))
     monkeypatch.setattr("blint.lib.runners.run_checks", lambda _f, _m: [])
 
