@@ -1,0 +1,23 @@
+blint/lib/binary_common.py
+  s_98ea78017b8f28::t_6948b01fc0195f 1221-1243,1267
+blint/lib/sbom.py
+  s_98ea78017b8f28::t_e651724ff3d3a5 3453-3454
+tests/test_sbom_rust.py
+  s_98ea78017b8f28::t_0754d49d3a0b83 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1dc0030c7f84bb18745d801e05bb16db413f0107",
+  "prompts": {},
+  "sessions": {
+    "s_98ea78017b8f28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c4129cdd-c466-4454-99be-8c39fe1e02b3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
