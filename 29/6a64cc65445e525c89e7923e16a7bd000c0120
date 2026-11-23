@@ -1,0 +1,19 @@
+tests/test_runners.py
+  s_9bdf1fb056a16e::t_a43c513f4da5b2 205,266,316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "296a64cc65445e525c89e7923e16a7bd000c0120",
+  "prompts": {},
+  "sessions": {
+    "s_9bdf1fb056a16e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5db4f345-e6bc-4bcc-8c44-d321d0eeaa20",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
