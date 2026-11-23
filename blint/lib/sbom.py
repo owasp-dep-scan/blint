@@ -50,6 +50,7 @@ from blint.lib.binary import is_wasm_file, parse
 from blint.lib.cab import is_cab_file, parse_cab
 from blint.lib.clickonce import parse_clickonce
 from blint.lib.embedded_ident import BROTLI_FIX_STATE_RANK
+from blint.lib.exclude import relative_posix
 from blint.lib.ios import collect_ios_app
 from blint.lib.macos_bundle import collect_macos_bundle
 from blint.lib.msi import parse_msi
@@ -126,6 +127,53 @@ def default_parent(src_dirs: list[str], symbols_purl_map: dict | None = None) ->
     component = Component(type=pkg_type, name=name, version=version, purl=purl)
     component.bom_ref = RefType(purl)
     return component
+
+
+def _is_file_record(symbol: dict) -> bool:
+    """True for a symbol-table entry that names a file rather than a symbol."""
+    return bool(symbol.get("debug_map_path")) or str(symbol.get("type", "")).upper() == "FILE"
+
+
+def relativize_scan_paths(components: list[Component], roots: list[str]) -> None:
+    """Rewrite the scanned files' absolute paths as paths below the scan root.
+
+    ``internal:srcFile`` properties and identity-evidence method values name
+    the file blint read. They become forward-slash paths relative to the scan
+    root that holds the file, so a BOM does not carry the layout of the
+    machine that built it. A file given directly is named by its file name,
+    and a path outside every root (an extracted temporary copy, say) is left
+    as it is.
+    """
+    bases = []
+    for root in roots:
+        absolute = os.path.abspath(root)
+        bases.append(os.path.dirname(absolute) if os.path.isfile(absolute) else absolute)
+
+    def rel(value: str) -> str:
+        if not isinstance(value, str) or not os.path.isabs(value):
+            return value
+        for base in bases:
+            relative = relative_posix(os.path.abspath(value), base)
+            if relative:
+                return relative
+        return value
+
+    def visit(component: Component) -> None:
+        for prop in component.properties or []:
+            if prop.name == "internal:srcFile":
+                prop.value = rel(prop.value)
+        identities = component.evidence.identity if component.evidence else None
+        if identities and not isinstance(identities, list):
+            identities = [identities]
+        for identity in identities or []:
+            for method in identity.methods or []:
+                if method.value:
+                    method.value = rel(method.value)
+        for child in component.components or []:
+            visit(child)
+
+    for component in components:
+        visit(component)
 
 
 def default_metadata(src_dirs: list[str]) -> Metadata:
@@ -408,6 +456,9 @@ def generate(
         # dependency list has no meaningful order of its own, so sorting both
         # fixes that and makes the parallel merge order-independent.
         dependencies += [{"ref": k, "dependsOn": sorted(v)} for k, v in dependencies_dict.items()]
+    relativize_scan_paths(
+        [*components, sbom.metadata.component], list(blint_options.src_dir_image or [])
+    )
     # Create the BOM file `blint_options.sbom_output` as well as return the generated BOM object
     return create_sbom(
         components,
@@ -1489,11 +1540,17 @@ def process_exe_file(
                     value=SYMBOL_DELIMITER.join(export_functions),
                 )
             )
+        # File records of the debug map (ELF STT_FILE, Mach-O N_SO/N_OSO)
+        # name source and object files on the build machine; they are not
+        # symbols and stay out of the BOM.
+        symtab_entries = [
+            f for f in metadata.get("symtab_symbols", []) if f and not _is_file_record(f)
+        ]
         symtab_symbols = sorted(
             {
                 f["name"]
-                for f in metadata.get("symtab_symbols", [])
-                if f and not any(f["name"].startswith(p) for p in export_prefixes)
+                for f in symtab_entries
+                if not any(f["name"].startswith(p) for p in export_prefixes)
             }
         )
         if symtab_symbols:
@@ -1506,8 +1563,8 @@ def process_exe_file(
         exported_symtab_symbols = sorted(
             {
                 f["name"]
-                for f in metadata.get("symtab_symbols", [])
-                if f and any(f["name"].startswith(p) for p in export_prefixes)
+                for f in symtab_entries
+                if any(f["name"].startswith(p) for p in export_prefixes)
             }
         )
         if exported_symtab_symbols:

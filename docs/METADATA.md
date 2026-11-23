@@ -569,6 +569,10 @@ Representative WASM fixtures used by tests are available under `tests/data/*.was
 
 This collection of attributes describes the functions and data within the binary, providing insight into its structure and capabilities.
 
+### Scanned file paths in the SBOM
+
+`blint sbom` writes the file it read in `internal:srcFile` and in the identity evidence method value as a forward-slash path relative to the scanned directory (`bin/release/prog`). A file given directly with `-i` is named by its file name, and a path outside every scanned directory (an extracted temporary copy) is left as it is.
+
 ### Symbol Tables: `symtab_symbols` and `dynamic_symbols`
 
 Symbols are names for locations in memory, typically corresponding to functions or global variables. BLint extracts symbols from two primary sources, which serve different purposes.
@@ -595,6 +599,7 @@ Symbols are names for locations in memory, typically corresponding to functions 
 - **`symtab_symbols`**: This is the full symbol table (`.symtab` in ELF), containing names for _all_ functions and global variables, including internal, non-exported ones.
   - **Purpose**: Provides a comprehensive map of the binary's internal structure.
   - **Use Case**: Invaluable for reverse engineering, as it gives names to internal functions.
+  - **File records**: ELF `STT_FILE` entries and the Mach-O debug-map stabs `N_SO`, `N_OSO` and `N_SOL` name source and object files, usually with the paths of the machine that built the binary, rather than symbols. The Mach-O entries carry `"debug_map_path": true`. They stay in this metadata, and `blint sbom` leaves them out of `internal:symtab_symbols` so a BOM does not carry the build machine's layout.
   - **Limitation**: This table is often stripped from production binaries to reduce size and hinder reverse engineering. Its absence is a key indicator (`"stripped": true` in `security_properties`).
 
 - **`dynamic_symbols`**: This is the smaller symbol table (`.dynsym` in ELF) used by the dynamic linker at runtime. It only contains symbols that are imported from or exported to other shared libraries.
