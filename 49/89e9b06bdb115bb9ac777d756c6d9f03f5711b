@@ -1,0 +1,50 @@
+README.md
+  s_9bdf1fb056a16e::t_c4efdcac6a8088 145-154,256,315-320,368,403-408
+blint/api.py
+  s_9bdf1fb056a16e::t_50e671a6d65562 409,431-433,458,460,518,548-550,590,599
+blint/cli.py
+  s_9bdf1fb056a16e::t_e7c85dc1ff19ce 209-220,377-388,759
+blint/config.py
+  s_9bdf1fb056a16e::t_8e6bd1f0609519 1347-1350
+blint/lib/exclude.py
+  s_9bdf1fb056a16e::t_57c973d7fcab15 1-171
+blint/lib/inf.py
+  s_9bdf1fb056a16e::t_cce7e7c705084e 531,533,536-537,543,545
+blint/lib/macos_bundle.py
+  s_9bdf1fb056a16e::t_a5fad4dcdffb2d 25,602,612,617-618
+blint/lib/runners.py
+  s_9bdf1fb056a16e::t_a5f4474b31bbcf 10,252-254,263,266,269,275,281,286,288,290,292,315,345
+blint/lib/utils.py
+  s_9bdf1fb056a16e::t_ec23b3c36fb003 48-53,485,491-492,498,501,503,518-520,527,547-549,556,559,566,580-582,584-585,588,594,596-597,718-720,728-729,737
+docs/API.md
+  s_9bdf1fb056a16e::t_a3e31899763421 47-51,73
+tests/test_exclude.py
+  s_9bdf1fb056a16e::t_5f6488656184c6 1-183
+blint/lib/binary_macho.py
+  s_9bdf1fb056a16e::t_d40118aab946b6 108-112,161-163,169
+  s_9bdf1fb056a16e::t_821836a2e440fd 164
+blint/lib/sbom.py
+  s_9bdf1fb056a16e::t_bb8ade3a299ade 53,132-178,459-461,1543-1548,1552-1553,1566-1567
+docs/METADATA.md
+  s_9bdf1fb056a16e::t_82c80e14f321c8 572-575,602
+tests/test_sbom_scan_paths.py
+  s_9bdf1fb056a16e::t_82127e5dda81d6 1-107
+tests/test_runners.py
+  s_9bdf1fb056a16e::t_a43c513f4da5b2 205,266,316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4989e9b06bdb115bb9ac777d756c6d9f03f5711b",
+  "prompts": {},
+  "sessions": {
+    "s_9bdf1fb056a16e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5db4f345-e6bc-4bcc-8c44-d321d0eeaa20",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
