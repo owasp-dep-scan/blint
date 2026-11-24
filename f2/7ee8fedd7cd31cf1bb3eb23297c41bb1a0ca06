@@ -1,0 +1,23 @@
+Info.plist
+  s_7318da1b9edd46::t_a73443859b84a3 12
+file_version_info.txt
+  s_7318da1b9edd46::t_67be29fb63ea63 10-11,35,40
+pyproject.toml
+  s_7318da1b9edd46::t_09f003568d7165 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f27ee8fedd7cd31cf1bb3eb23297c41bb1a0ca06",
+  "prompts": {},
+  "sessions": {
+    "s_7318da1b9edd46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec4cd02e-10f8-411b-a4d1-40ff6af5049b",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
