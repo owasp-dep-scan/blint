@@ -1,0 +1,26 @@
+.github/workflows/pytests.yml
+  s_aaee579a5278f8::t_1dcbf6ab14a427 96-98
+pyproject.toml
+  s_aaee579a5278f8::t_4cdb10e64c764f 61
+pyrefly.toml
+  s_aaee579a5278f8::t_b9a6093d7ec18a 1-12
+  s_aaee579a5278f8::t_1d2772ef5d26e7 13-15
+poetry.lock
+  s_aaee579a5278f8::t_9ee2bf5c14b7e6 1,1845,1855-1878,2572,2577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ddaa0680163d752da5e6a1e28cf9660d993e641a",
+  "prompts": {},
+  "sessions": {
+    "s_aaee579a5278f8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_5e7ef323-4862-458f-9597-0fa3f73f8197",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Team AppThreat <cloud@appthreat.com>"
+    }
+  }
+}

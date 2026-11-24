@@ -1,0 +1,27 @@
+pyproject.toml
+  s_aaee579a5278f8::t_4cdb10e64c764f 61
+pyrefly.toml
+  s_aaee579a5278f8::t_b9a6093d7ec18a 1-12
+  s_aaee579a5278f8::t_1d2772ef5d26e7 13-15
+.github/workflows/pytests.yml
+  s_aaee579a5278f8::t_1dcbf6ab14a427 96,100-101
+  s_aaee579a5278f8::t_ab47469a6c2cf7 97-99
+poetry.lock
+  s_aaee579a5278f8::t_9ee2bf5c14b7e6 1,1845,1855-1878,2572,2577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e415eff630cddeeba888d341a8b5168b1ce3670c",
+  "prompts": {},
+  "sessions": {
+    "s_aaee579a5278f8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_5e7ef323-4862-458f-9597-0fa3f73f8197",
+        "model": "GLM-5.3"
+      },
+      "human_author": null
+    }
+  }
+}
