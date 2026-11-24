@@ -406,6 +406,7 @@ def analyze_many(
     custom_rules_dir: str | None = None,
     use_cache: bool = False,
     sdk_path: str | None = None,
+    exclude: Sequence[str] = (),
     quiet: bool = True,
 ) -> BatchAnalysisResult:
     """Analyze several binaries or directories and return per-file results.
@@ -427,6 +428,9 @@ def analyze_many(
         custom_rules_dir: extra YAML rule directory, this call only.
         use_cache: use the content-addressed parse cache (``--cache``).
         sdk_path: Apple SDK root for .tbd import attribution.
+        exclude: globs for directory walks to skip (``--exclude``), anchored
+            at each scanned directory with cdxgen's semantics (``test/**``,
+            ``**/fixtures/**``); see ``blint.lib.exclude``.
         quiet: suppress blint's logging and progress output (default).
 
     Returns:
@@ -451,8 +455,9 @@ def analyze_many(
         custom_rules_dir=custom_rules_dir,
         use_cache=use_cache,
         sdk_path=sdk_path,
+        exclude=list(exclude),
     )
-    exe_files = discover_default_mode_inputs(options.src_dir_image)
+    exe_files = discover_default_mode_inputs(options.src_dir_image, options.exclude)
     batch = BatchAnalysisResult()
     if not exe_files:
         batch.coverage = {
@@ -510,6 +515,7 @@ def sbom(
     src_dir_boms: Sequence[str] = (),
     wasm_sbom: bool = False,
     android_abis: Sequence[str] = (),
+    exclude: Sequence[str] = (),
     output_file: str | os.PathLike[str] | None = None,
     jobs: int = 1,
     quiet: bool = True,
@@ -539,6 +545,9 @@ def sbom(
             otherwise, and the skipped paths are reported in the result.
         android_abis: analyze only these Android ABIs (``--android-abi``);
             empty means every ABI the app ships.
+        exclude: globs for directory walks to skip (``--exclude``), anchored
+            at each scanned directory with cdxgen's semantics (``test/**``,
+            ``**/fixtures/**``); see ``blint.lib.exclude``.
         output_file: write the document to this path (``-o``). ``None``
             (the default) writes nothing anywhere.
         jobs: parallel workers for large scans (``--jobs``).
@@ -578,6 +587,7 @@ def sbom(
         src_dir_boms=list(src_dir_boms),
         wasm_sbom=bool(wasm_sbom),
         android_abis=list(android_abis),
+        exclude=list(exclude),
         jobs=int(jobs),
     )
     coverage: dict[str, Any] = {"inputs": sources}
@@ -586,7 +596,7 @@ def sbom(
             raise BlintdbUnavailableError(
                 "the blintdb database could not be downloaded or verified; no SBOM was generated"
             )
-        inputs = discover_sbom_inputs(options.src_dir_image)
+        inputs = discover_sbom_inputs(options.src_dir_image, options.exclude)
         exe_files = inputs.exe_files
         skipped_wasm = [] if wasm_sbom else [f for f in exe_files if is_wasm_file(f)]
         coverage["units"] = {

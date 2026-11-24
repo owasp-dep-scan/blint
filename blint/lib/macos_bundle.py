@@ -22,6 +22,7 @@ reading the same vocabulary would drift.
 import os
 import plistlib
 
+from blint.lib.exclude import compile_excludes
 from blint.lib.ios import bundle_info_from_plist, read_privacy_manifest
 from blint.lib.macos_host_plugins import classify_host_plugin
 from blint.lib.provisioning import (
@@ -598,7 +599,7 @@ def _walk_embedded_bundle(
         entry["bundle_path"] = os.path.relpath(entry["path"], top_dir).replace(os.sep, "/")
 
 
-def find_macos_bundles(src: str) -> list[str]:
+def find_macos_bundles(src: str, exclude=None) -> list[str]:
     """Discover top-level macOS bundle directories under ``src``.
 
     A bundle found inside another bundle is not reported — the walker above
@@ -608,10 +609,13 @@ def find_macos_bundles(src: str) -> list[str]:
     if is_macos_bundle(src):
         return [os.path.abspath(src)]
     bundles: list[str] = []
+    matcher = compile_excludes(exclude)
     for root, dirs, _files in os.walk(src):
         kept = []
         for d in sorted(dirs):
             full = os.path.join(root, d)
+            if matcher.is_excluded(full, src):
+                continue
             if full.lower().endswith(MACOS_BUNDLE_SUFFIXES):
                 bundles.append(os.path.abspath(full))
             else:

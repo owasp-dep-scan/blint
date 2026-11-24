@@ -105,6 +105,11 @@ def parse_mach0_wx_segments(parsed_obj: lief.MachO.Binary) -> list[dict]:
     return wx_segments
 
 
+#: n_type values of the stab entries whose names are file paths: N_SO (source
+#: file), N_OSO (object file) and N_SOL (included source file).
+MACHO_DEBUG_PATH_STABS = frozenset({0x64, 0x66, 0x84})
+
+
 def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
     """
     Parses the symbols and determines the executable type.
@@ -153,10 +158,15 @@ def parse_macho_symbols(symbols) -> tuple[list[dict], str]:
             symbol_name = _lookup_demangled(demangled, symbol_name)
             if not exe_type:
                 exe_type = guess_exe_type(symbol_name)
+            # N_SO, N_OSO and N_SOL stabs are debug-map file records: their
+            # names are paths on the machine that linked the binary, not
+            # symbols. They are flagged so the SBOM can leave them out.
+            is_debug_path = (getattr(symbol, "raw_type", 0) or 0) in MACHO_DEBUG_PATH_STABS
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 symbols_list.append(
                     {
+                        **({"debug_map_path": True} if is_debug_path else {}),
                         "name": (f"{libname}::{symbol_name}" if libname else symbol_name),
                         "short_name": symbol_name,
                         "category": symbol.category,

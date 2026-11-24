@@ -7,6 +7,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -248,7 +249,9 @@ class SbomInputs:
     macos_bundles: list[str]
 
 
-def discover_default_mode_inputs(src_dirs: list[str]) -> list[str]:
+def discover_default_mode_inputs(
+    src_dirs: list[str], exclude: Iterable[str] | None = None
+) -> list[str]:
     """Every unit the default (analysis) mode visits under ``src_dirs``.
 
     Binaries the file walk finds, plus the text-format containers its binary
@@ -257,36 +260,36 @@ def discover_default_mode_inputs(src_dirs: list[str]) -> list[str]:
     into embedded bundles itself), so loose executables found within one
     are not also returned as units of their own.
     """
-    exe_files = gen_file_list(src_dirs)
+    exe_files = gen_file_list(src_dirs, exclude)
     macos_bundles: list[str] = []
     for src in src_dirs:
-        if files := find_macos_bundles(src):
+        if files := find_macos_bundles(src, exclude):
             macos_bundles += files
         for finder in (find_clickonce_files, find_inf_files):
-            if files := finder(src):
+            if files := finder(src, exclude):
                 exe_files += [f for f in files if f not in exe_files]
     exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
     return exe_files + macos_bundles
 
 
-def discover_sbom_inputs(src_dirs: list[str]) -> SbomInputs:
+def discover_sbom_inputs(src_dirs: list[str], exclude: Iterable[str] | None = None) -> SbomInputs:
     """Every unit ``blint sbom`` visits under ``src_dirs``, by kind.
 
     Executables exclude anything inside a discovered macOS bundle, for the
     same reason as in ``discover_default_mode_inputs``.
     """
-    exe_files = gen_file_list(src_dirs)
+    exe_files = gen_file_list(src_dirs, exclude)
     android_files: list[str] = []
     ios_files: list[str] = []
     macos_bundles: list[str] = []
     for src in src_dirs:
-        if files := find_clickonce_files(src):
+        if files := find_clickonce_files(src, exclude):
             exe_files += [f for f in files if f not in exe_files]
-        if files := find_android_files(src):
+        if files := find_android_files(src, exclude):
             android_files += files
-        if files := find_ios_files(src):
+        if files := find_ios_files(src, exclude):
             ios_files += files
-        if files := find_macos_bundles(src):
+        if files := find_macos_bundles(src, exclude):
             macos_bundles += files
     exe_files = [f for f in exe_files if not path_inside_any_bundle(f, macos_bundles)]
     return SbomInputs(exe_files, android_files, ios_files, macos_bundles)
@@ -309,7 +312,7 @@ def run_sbom_mode(blint_options: BlintOptions) -> CycloneDX | Literal[False]:
     else:
         if blint_options.sbom_output_dir and not os.path.exists(blint_options.sbom_output_dir):
             os.makedirs(blint_options.sbom_output_dir)
-    inputs = discover_sbom_inputs(blint_options.src_dir_image)
+    inputs = discover_sbom_inputs(blint_options.src_dir_image, blint_options.exclude)
     wasm_files = [f for f in inputs.exe_files if is_wasm_file(f)]
     if wasm_files:
         LOG.info(f"Found {len(wasm_files)} wasm file(s); these will be skipped in SBOM processing")
@@ -339,7 +342,7 @@ def run_default_mode(blint_options: BlintOptions) -> None:
         LOG.info(
             "Callgraph export was requested without --disassemble; no callgraph artifacts will be generated."
         )
-    exe_files = discover_default_mode_inputs(blint_options.src_dir_image)
+    exe_files = discover_default_mode_inputs(blint_options.src_dir_image, blint_options.exclude)
     analyzer = AnalysisRunner()
     findings, reviews, fuzzables, callgraphs = analyzer.start(blint_options, exe_files)
     report(
