@@ -1,0 +1,53 @@
+tests/test_graalvm_sbom.py
+  s_c708015f1facf9::t_e1908fee7c805a 161
+  s_c708015f1facf9::t_1be734fbb248b9 160
+  s_c708015f1facf9::t_c6ea3136b9317d 1-104,106-158,162-212
+  s_c708015f1facf9::t_f7488881524723 105
+  s_c708015f1facf9::t_7f0eb990ca23f9 159
+blint/lib/binary_macho.py
+  s_c708015f1facf9::t_c9a1082b22fab3 36,580
+blint/lib/binary_elf.py
+  s_c708015f1facf9::t_565302dcfba285 31
+  s_c708015f1facf9::t_c9a1082b22fab3 1164
+blint/lib/binary_pe.py
+  s_c708015f1facf9::t_c9a1082b22fab3 1221
+  s_c708015f1facf9::t_4da0f5fb5aadaf 30
+blint/lib/sbom.py
+  s_c708015f1facf9::t_d6e9b4d18650c4 3565,3568,3577,3584-3588
+  s_c708015f1facf9::t_ecbb63f643df58 3613
+  s_c708015f1facf9::t_0c003da5167d5c 3521-3564,3566-3567,3569-3576,3578-3583,3589-3612,3614-3620
+  s_c708015f1facf9::t_3f92f7f516672d 1937-1942
+docs/CUSTOM_PROPERTIES.md
+  s_c708015f1facf9::t_87773ec661d766 260
+blint/lib/binary_common.py
+  s_c708015f1facf9::t_7974d516d6a5b0 1275-1306,1320-1325,1350-1413
+  s_c708015f1facf9::t_7330d6b912b0a1 1307-1319,1326-1349
+README.md
+  s_c708015f1facf9::t_2a4146999e280d 44
+tests/graalvm_sbom_fixtures.py
+  s_c708015f1facf9::t_4e684620ec5c23 239
+  s_c708015f1facf9::t_e1908fee7c805a 242-245
+  s_c708015f1facf9::t_6761e992a1042c 1-11,13-18,20-28,30-42,44-105,110-114,126-127,129,131,136-144,146-148,152-155,157,159,161,164,167,170,184,187-191,198,200,202-214,246-249,253-255,257-260,263-270,273-274,276-283,285,288-316,318-322,324-333,335-343
+  s_c708015f1facf9::t_a0279676191257 12,19,29,43,106-109,115-125,128,130,132-135,145,149-151,156,158,160,162-163,165-166,168-169,171-172,185-186,193-197,199,201,215-237,240-241,250-252,256,261-262,271-272,275,284,286-287,317,323,334
+  s_c708015f1facf9::t_1be734fbb248b9 192
+  s_c708015f1facf9::t_72dd04fd64dbc9 238
+  s_c708015f1facf9::t_0ec39b604a1d83 173-183
+docs/METADATA.md
+  s_c708015f1facf9::t_dad4d342bcd3c7 847
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2abfd208bf877cc62664cbd58e9eea97cfb7bed9",
+  "prompts": {},
+  "sessions": {
+    "s_c708015f1facf9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "sess_522cb6c8-5246-4e6e-81a7-dfbc51bb2bf5",
+        "model": "GLM-5.3"
+      },
+      "human_author": "Prabhu Subramanian <prabhu@appthreat.com>"
+    }
+  }
+}
