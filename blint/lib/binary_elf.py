@@ -28,6 +28,7 @@ from blint.lib.binary_common import (
     detect_exe_type,
     parse_functions,
     parse_go_buildinfo,
+    parse_graalvm_sbom,
     parse_notes,
     parse_overlay,
     parse_relro,
@@ -1160,6 +1161,7 @@ def add_elf_metadata(exe_file: str, metadata: dict, parsed_obj: lief.ELF.Binary)
     metadata["dotnet_dependencies"] = parse_overlay(parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
+    metadata["graalvm_sbom"] = parse_graalvm_sbom(parsed_obj)
     # The ABI, runtime-loading and link-closure passes all read the symbol and
     # dynamic-entry buckets populated above, so they have to run last.
     metadata["abi_analysis"] = analyze_elf_abi(metadata)

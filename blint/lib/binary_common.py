@@ -1272,6 +1272,145 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     return deps
 
 
+# Upper bounds on the SBOM a GraalVM native image embeds behind the global
+# ``sbom`` symbol (the gzip-compressed CycloneDX payload) and ``sbom_length``
+# (its size). Both are attacker-controlled binary content like ``.dep-v0``, so
+# the stored payload is refused past a cap before it is read and a gzip bomb is
+# refused past the decompressed cap instead of expanding without limit (CWE-409).
+# A real compressed SBOM sits far below either bound.
+MAX_GRAALVM_SBOM_BYTES = 64 * 1024 * 1024
+
+GRAALVM_SBOM_SYMBOL_NAMES = ("sbom", "_sbom")
+GRAALVM_SBOM_LENGTH_SYMBOL_NAMES = ("sbom_length", "_sbom_length")
+
+
+def _symbol_address(parsed_obj: lief.Binary, names: tuple[str, ...]) -> int | None:
+    """The virtual address of the first of ``names`` the binary exports.
+
+    Mach-O spellings carry a leading underscore in the symbol table, so both
+    forms are accepted everywhere. A symbol without a usable address is
+    treated as absent.
+    """
+    for name in names:
+        try:
+            symbol = parsed_obj.get_symbol(name)
+        except (AttributeError, TypeError, ValueError) as e:
+            LOG.debug(f"Symbol lookup for {name} failed: {e}")
+            continue
+        address = _parse_address(getattr(symbol, "value", None))
+        if address is not None and address > 0:
+            return address
+    return None
+
+
+def _content_at(parsed_obj: lief.Binary, address: int, size: int) -> bytes | None:
+    """``size`` bytes at the virtual ``address``, or None when unreadable.
+
+    The read is bounded by the binary's mapped extent: LIEF serves file bytes
+    for a virtual range a segment no longer covers, so a declared length that
+    runs past the mapping would otherwise be answered with whatever follows in
+    the file instead of being refused.
+    """
+    extent = _mapped_extent(parsed_obj)
+    if extent is not None and address + size > extent:
+        LOG.debug(
+            f"Read at {address:#x} for {size} bytes runs past the mapped extent {extent:#x}"
+        )
+        return None
+    try:
+        data = bytes(parsed_obj.get_content_from_virtual_address(address, size))
+    except (AttributeError, TypeError, ValueError, RuntimeError) as e:
+        LOG.debug(f"Read at {address:#x} for {size} bytes failed: {e}")
+        return None
+    return data if len(data) == size else None
+
+
+def _mapped_extent(parsed_obj: lief.Binary) -> int | None:
+    """The highest virtual address the binary maps, when its format says.
+
+    ELF and Mach-O expose loadable segments; a PE exposes sections, whose
+    virtual addresses are RVAs on the same scale as the export addresses the
+    reader works with.
+    """
+    ends = []
+    with contextlib.suppress(AttributeError, TypeError):
+        for segment in parsed_obj.segments:
+            base = _parse_address(getattr(segment, "virtual_address", None))
+            size = _parse_address(getattr(segment, "virtual_size", None))
+            if base is not None and size is not None:
+                ends.append(base + size)
+    if not ends:
+        with contextlib.suppress(AttributeError, TypeError):
+            for section in parsed_obj.sections:
+                base = _parse_address(getattr(section, "virtual_address", None))
+                size = _parse_address(getattr(section, "virtual_size", None))
+                if base is not None and size is not None:
+                    ends.append(base + size)
+    return max(ends) if ends else None
+
+
+def _gunzip_capped(data: bytes, cap: int) -> bytes:
+    """gzip-inflate ``data`` but never produce more than ``cap`` bytes.
+
+    Raises ``zlib.error`` when the stream would exceed the cap, the same
+    contract ``_decompress_capped`` gives the cargo manifest. The window bits
+    name the gzip wrapper (31), not the raw deflate stream the cargo section
+    carries.
+    """
+    decompressor = zlib.decompressobj(wbits=31)
+    out = decompressor.decompress(data, cap)
+    if decompressor.unconsumed_tail or not decompressor.eof:
+        raise zlib.error("decompressed size exceeds cap")
+    return out
+
+
+def parse_graalvm_sbom(parsed_obj: lief.Binary) -> dict | None:
+    """
+    Read the CycloneDX SBOM a GraalVM native image embeds behind its global
+    ``sbom`` and ``sbom_length`` symbols (Quarkus builds with
+    ``quarkus.cyclonedx.embedded.enabled`` and Oracle GraalVM's ``--enable-sbom``
+    both produce them).
+
+    ``sbom_length`` is an 8-byte little-endian unsigned integer read from its
+    own address; the SBOM is the gzip-compressed CycloneDX JSON it counts at the
+    ``sbom`` address. Only a JSON object whose ``bomFormat`` is ``CycloneDX`` is
+    accepted. Every failure - a missing symbol, a length over the cap or past
+    the readable memory, invalid gzip, a bomb over the decompressed cap,
+    non-CycloneDX JSON - is logged at debug level and yields None, so a
+    malformed binary never stops the parse.
+
+    Args:
+        parsed_obj (lief.Binary): The parsed object representing the binary.
+
+    Returns:
+        dict | None: The parsed CycloneDX document, None when absent or unreadable.
+    """
+    try:
+        sbom_address = _symbol_address(parsed_obj, GRAALVM_SBOM_SYMBOL_NAMES)
+        if sbom_address is None:
+            return None
+        length_address = _symbol_address(parsed_obj, GRAALVM_SBOM_LENGTH_SYMBOL_NAMES)
+        if length_address is None:
+            return None
+        length_raw = _content_at(parsed_obj, length_address, 8)
+        if length_raw is None:
+            return None
+        sbom_length = int.from_bytes(length_raw, "little", signed=False)
+        if not 0 < sbom_length <= MAX_GRAALVM_SBOM_BYTES:
+            LOG.debug(f"Embedded SBOM length {sbom_length} is outside the accepted range")
+            return None
+        payload = _content_at(parsed_obj, sbom_address, sbom_length)
+        if payload is None:
+            return None
+        document = orjson.loads(_gunzip_capped(payload, MAX_AUDIT_DECOMPRESSED))
+        if isinstance(document, dict) and document.get("bomFormat") == "CycloneDX":
+            return document
+        LOG.debug("Embedded SBOM is not a CycloneDX document")
+    except (orjson.JSONDecodeError, zlib.error, Exception) as e:
+        LOG.debug(f"Failed to parse the embedded GraalVM SBOM: {e}")
+    return None
+
+
 # Mach-O CPU subtype of arm64e (the low 24 bits; the high bits carry the
 # ABI64 flag). The distinction matters because only arm64e slices get
 # pointer authentication, so an aggregate "PAC: no" over a fat binary that

@@ -41,7 +41,7 @@ flowchart TD
 ## Key Features & Use Cases
 
 - **Comprehensive Security Audits:** Automatically checks for common security mitigations like PIE, ASLR, NX, Stack Canaries, and RELRO. Ideal for ensuring your CI/CD pipeline produces hardened binaries.
-- **Software Bill-of-Materials (SBOM) Generation:** Creates [CycloneDX](https://cyclonedx.org/specification/overview/) SBOMs for binaries built with Go, Rust, .NET, and Android toolchains, providing a clear inventory of third-party components for vulnerability management.
+- **Software Bill-of-Materials (SBOM) Generation:** Creates [CycloneDX](https://cyclonedx.org/specification/overview/) SBOMs for binaries built with Go, Rust, .NET, Android and GraalVM native-image toolchains, providing a clear inventory of third-party components for vulnerability management. For a GraalVM native image built with SBOM embedding (Quarkus' `quarkus.cyclonedx.embedded.enabled` or Oracle GraalVM's `--enable-sbom`), blint reads the gzip-compressed CycloneDX document behind the image's `sbom` and `sbom_length` global symbols and emits its components and dependency graph directly, each marked with an `internal:embedded_sbom` property; see the [`graalvm_sbom` metadata attribute](./docs/METADATA.md).
 - **Deep Binary Inspection:** Disassembles, extracts, and analyzes a wealth of information including symbols, functions, dependencies, and build toolchains. This raw data is saved as a detailed JSON file.
   - For a complete guide to all attributes in this file, see the [Technical Metadata Documentation](./docs/METADATA.md).
   - For the custom CycloneDX properties blint adds to the BOM, see the [Custom Properties Documentation](./docs/CUSTOM_PROPERTIES.md).

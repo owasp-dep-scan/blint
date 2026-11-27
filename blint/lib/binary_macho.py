@@ -33,6 +33,7 @@ from blint.lib.binary_common import (
     integer_to_hex_str,
     parse_functions,
     parse_go_buildinfo,
+    parse_graalvm_sbom,
     parse_rust_buildinfo,
 )
 from blint.lib.binary_pe import (  # noqa: F401
@@ -576,6 +577,7 @@ def add_mach0_metadata(exe_file: str, metadata: dict, parsed_obj: lief.MachO.Bin
     metadata = add_mach0_signature(exe_file, metadata, parsed_obj)
     metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
     metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
+    metadata["graalvm_sbom"] = parse_graalvm_sbom(parsed_obj)
     return metadata
 
 

@@ -1934,6 +1934,12 @@ def process_exe_file(
             metadata.get("rust_dependencies"), dependencies_dict
         )
         lib_components += rust_components
+    # Convert the SBOM a GraalVM native image embeds behind its sbom symbol
+    if metadata.get("graalvm_sbom"):
+        graalvm_components = process_graalvm_sbom_dependencies(
+            metadata.get("graalvm_sbom"), dependencies_dict, exe
+        )
+        lib_components += graalvm_components
     if lib_components:
         track_dependency(dependencies_dict, parent_component, lib_components)
     return lib_components
@@ -3509,6 +3515,106 @@ def process_rust_dependencies(
             for adep in dependency.get("dependencies"):
                 if adep in idx_to_purl:
                     dependencies_dict[purl].add(idx_to_purl[adep])
+    return components
+
+
+def process_graalvm_sbom_dependencies(
+    document: dict, dependencies_dict: dict[str, set], exe: str
+) -> list[Component]:
+    """
+    Process the CycloneDX document a GraalVM native image embeds behind its
+    ``sbom`` symbol, the way ``process_rust_dependencies`` handles
+    cargo-auditable data.
+
+    Each embedded component keeps its purl, version, hashes and licenses, and
+    the embedded ``dependencies`` graph is carried over. Every component
+    records that it came from the binary's embedded SBOM
+    (``internal:embedded_sbom``), and its identity evidence names the scanned
+    binary. The document's own ``metadata`` is never copied: the SBOM's parent
+    component describes the binary blint parsed, not whatever produced the
+    embedded document. Components sharing a bom-ref with one blintdb or symbol
+    matching already found are merged by ``trim_components`` when the SBOM is
+    assembled, so no duplicate rows appear.
+
+    Args:
+        document (dict): The parsed CycloneDX document.
+        dependencies_dict (dict[str, set]): The dictionary to store the dependencies.
+        exe (str): Path of the scanned binary.
+
+    Returns:
+        list: New component list.
+    """
+    components = []
+    for entry in document.get("components") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        purl = entry.get("purl")
+        if not name or not purl:
+            # A component without a purl has no matchable identity; skip it
+            # rather than emitting a component no consumer can act on.
+            continue
+        version = entry.get("version") or None
+        try:
+            comp_type = Type(entry.get("type") or Type.library.value)
+        except ValueError:
+            comp_type = Type.library
+        properties = [Property(name="internal:embedded_sbom", value=os.path.basename(exe))]
+        hashes = []
+        for entry_hash in entry.get("hashes") or []:
+            alg = entry_hash.get("alg")
+            content = entry_hash.get("content")
+            try:
+                hashes.append(Hash(alg=HashAlg(alg), content=content))
+            except (KeyError, TypeError, ValueError) as e:
+                LOG.debug(f"Skipping unusable hash {alg} for {name}: {e}")
+        licenses = []
+        for entry_license in entry.get("licenses") or []:
+            if not isinstance(entry_license, dict):
+                continue
+            expression = entry_license.get("expression")
+            if expression:
+                licenses.append({"expression": str(expression)})
+                continue
+            license_entry = entry_license.get("license") or {}
+            license_id = license_entry.get("id")
+            license_name = license_entry.get("name")
+            if license_id or license_name:
+                licenses.append(
+                    {
+                        "license": (
+                            {"id": str(license_id)} if license_id else {"name": str(license_name)}
+                        )
+                    }
+                )
+        comp = Component(
+            type=comp_type,
+            name=name,
+            version=version,
+            purl=purl,
+            hashes=hashes or None,
+            licenses=licenses or None,
+            scope=Scope.required,
+            properties=properties,
+            evidence=create_component_evidence(
+                f"{os.path.basename(exe)}!embedded-sbom", 0.8
+            ),
+        )
+        comp.bom_ref = RefType(purl)
+        components.append(comp)
+        if not dependencies_dict.get(purl):
+            dependencies_dict[purl] = set()
+    # The embedded graph references components by their bom-ref, which is the
+    # purl here, so the edges carry over as declared.
+    for entry in document.get("dependencies") or []:
+        if not isinstance(entry, dict):
+            continue
+        ref = entry.get("ref")
+        if not ref or ref not in dependencies_dict:
+            continue
+        for aref in entry.get("dependsOn") or []:
+            if isinstance(aref, str) and aref != ref:
+                dependencies_dict[ref].add(aref)
     return components
 
 
