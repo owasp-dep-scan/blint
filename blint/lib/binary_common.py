@@ -1272,13 +1272,12 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     return deps
 
 
-# Upper bounds on the SBOM a GraalVM native image embeds behind the global
-# ``sbom`` symbol (the gzip-compressed CycloneDX payload) and ``sbom_length``
-# (its size). Both are attacker-controlled binary content like ``.dep-v0``, so
-# the stored payload is refused past a cap before it is read and a gzip bomb is
-# refused past the decompressed cap instead of expanding without limit (CWE-409).
-# A real compressed SBOM sits far below either bound.
-MAX_GRAALVM_SBOM_BYTES = 64 * 1024 * 1024
+# Upper bound on the stored SBOM a GraalVM native image embeds behind the
+# global ``sbom`` symbol. The payload is attacker-controlled binary content like
+# ``.dep-v0``, so a declared ``sbom_length`` past this cap is refused before any
+# read, and inflation is capped at ``MAX_AUDIT_DECOMPRESSED`` (CWE-409). The
+# compressed SBOM of a Quarkus application is well under 1 MiB.
+MAX_GRAALVM_SBOM_BYTES = MAX_AUDIT_DECOMPRESSED
 
 GRAALVM_SBOM_SYMBOL_NAMES = ("sbom", "_sbom")
 GRAALVM_SBOM_LENGTH_SYMBOL_NAMES = ("sbom_length", "_sbom_length")
@@ -1306,16 +1305,14 @@ def _symbol_address(parsed_obj: lief.Binary, names: tuple[str, ...]) -> int | No
 def _content_at(parsed_obj: lief.Binary, address: int, size: int) -> bytes | None:
     """``size`` bytes at the virtual ``address``, or None when unreadable.
 
-    The read is bounded by the binary's mapped extent: LIEF serves file bytes
-    for a virtual range a segment no longer covers, so a declared length that
-    runs past the mapping would otherwise be answered with whatever follows in
-    the file instead of being refused.
+    The read must lie inside one mapped region: LIEF serves file bytes for a
+    virtual range no segment covers, so a declared length that runs past the
+    region holding the symbol would otherwise be answered with whatever follows
+    in the file instead of being refused.
     """
-    extent = _mapped_extent(parsed_obj)
-    if extent is not None and address + size > extent:
-        LOG.debug(
-            f"Read at {address:#x} for {size} bytes runs past the mapped extent {extent:#x}"
-        )
+    end = _region_end(parsed_obj, address)
+    if end is None or address + size > end:
+        LOG.debug(f"Read at {address:#x} for {size} bytes is outside a mapped region")
         return None
     try:
         data = bytes(parsed_obj.get_content_from_virtual_address(address, size))
@@ -1325,28 +1322,27 @@ def _content_at(parsed_obj: lief.Binary, address: int, size: int) -> bytes | Non
     return data if len(data) == size else None
 
 
-def _mapped_extent(parsed_obj: lief.Binary) -> int | None:
-    """The highest virtual address the binary maps, when its format says.
+def _region_end(parsed_obj: lief.Binary, address: int) -> int | None:
+    """The end of the mapped region that contains ``address``.
 
-    ELF and Mach-O expose loadable segments; a PE exposes sections, whose
-    virtual addresses are RVAs on the same scale as the export addresses the
-    reader works with.
+    ELF and Mach-O expose loadable segments. A PE has no segments, so its
+    sections are used; their virtual addresses are RVAs, on the same scale as
+    the export addresses LIEF reports.
     """
-    ends = []
-    with contextlib.suppress(AttributeError, TypeError):
-        for segment in parsed_obj.segments:
-            base = _parse_address(getattr(segment, "virtual_address", None))
-            size = _parse_address(getattr(segment, "virtual_size", None))
-            if base is not None and size is not None:
-                ends.append(base + size)
-    if not ends:
+    for regions in ("segments", "sections"):
+        found = False
         with contextlib.suppress(AttributeError, TypeError):
-            for section in parsed_obj.sections:
-                base = _parse_address(getattr(section, "virtual_address", None))
-                size = _parse_address(getattr(section, "virtual_size", None))
-                if base is not None and size is not None:
-                    ends.append(base + size)
-    return max(ends) if ends else None
+            for region in getattr(parsed_obj, regions):
+                base = _parse_address(getattr(region, "virtual_address", None))
+                size = _parse_address(getattr(region, "virtual_size", None))
+                if base is None or not size:
+                    continue
+                found = True
+                if base <= address < base + size:
+                    return base + size
+        if found:
+            return None
+    return None
 
 
 def _gunzip_capped(data: bytes, cap: int) -> bytes:
@@ -1374,9 +1370,9 @@ def parse_graalvm_sbom(parsed_obj: lief.Binary) -> dict | None:
     ``sbom_length`` is an 8-byte little-endian unsigned integer read from its
     own address; the SBOM is the gzip-compressed CycloneDX JSON it counts at the
     ``sbom`` address. Only a JSON object whose ``bomFormat`` is ``CycloneDX`` is
-    accepted. Every failure - a missing symbol, a length over the cap or past
-    the readable memory, invalid gzip, a bomb over the decompressed cap,
-    non-CycloneDX JSON - is logged at debug level and yields None, so a
+    accepted. Every failure (a missing symbol, a length over the cap or past
+    the mapped region, invalid gzip, a bomb over the decompressed cap,
+    non-CycloneDX JSON) is logged at debug level and yields None, so a
     malformed binary never stops the parse.
 
     Args:
@@ -1406,7 +1402,7 @@ def parse_graalvm_sbom(parsed_obj: lief.Binary) -> dict | None:
         if isinstance(document, dict) and document.get("bomFormat") == "CycloneDX":
             return document
         LOG.debug("Embedded SBOM is not a CycloneDX document")
-    except (orjson.JSONDecodeError, zlib.error, Exception) as e:
+    except Exception as e:
         LOG.debug(f"Failed to parse the embedded GraalVM SBOM: {e}")
     return None
 

@@ -3518,6 +3518,54 @@ def process_rust_dependencies(
     return components
 
 
+def _embedded_licenses(entry: dict) -> list[dict]:
+    """The license choices of an embedded CycloneDX component, as plain dicts."""
+    licenses = []
+    for choice in entry.get("licenses") or []:
+        if not isinstance(choice, dict):
+            continue
+        if expression := choice.get("expression"):
+            licenses.append({"expression": str(expression)})
+            continue
+        license_entry = choice.get("license") or {}
+        if license_id := license_entry.get("id"):
+            licenses.append({"license": {"id": str(license_id)}})
+        elif license_name := license_entry.get("name"):
+            licenses.append({"license": {"name": str(license_name)}})
+    return licenses
+
+
+def _embedded_hashes(entry: dict) -> list[Hash]:
+    """The hashes of an embedded CycloneDX component blint's model accepts."""
+    hashes = []
+    for entry_hash in entry.get("hashes") or []:
+        if not isinstance(entry_hash, dict):
+            continue
+        alg = entry_hash.get("alg")
+        try:
+            hashes.append(Hash(alg=HashAlg(alg), content=entry_hash.get("content")))
+        except (KeyError, TypeError, ValueError) as e:
+            LOG.debug(f"Skipping unusable hash {alg} for {entry.get('name')}: {e}")
+    return hashes
+
+
+def _flatten_embedded_components(entries: list) -> list[dict]:
+    """Every component of an embedded document, nested ones included.
+
+    A shaded jar lists the libraries it bundles as nested components; they are
+    in the image as much as their parent, so they are returned alongside it.
+    """
+    flat = []
+    pending = list(entries or [])
+    while pending:
+        entry = pending.pop(0)
+        if not isinstance(entry, dict):
+            continue
+        flat.append(entry)
+        pending.extend(entry.get("components") or [])
+    return flat
+
+
 def process_graalvm_sbom_dependencies(
     document: dict, dependencies_dict: dict[str, set], exe: str
 ) -> list[Component]:
@@ -3526,15 +3574,19 @@ def process_graalvm_sbom_dependencies(
     ``sbom`` symbol, the way ``process_rust_dependencies`` handles
     cargo-auditable data.
 
-    Each embedded component keeps its purl, version, hashes and licenses, and
-    the embedded ``dependencies`` graph is carried over. Every component
-    records that it came from the binary's embedded SBOM
-    (``internal:embedded_sbom``), and its identity evidence names the scanned
-    binary. The document's own ``metadata`` is never copied: the SBOM's parent
-    component describes the binary blint parsed, not whatever produced the
-    embedded document. Components sharing a bom-ref with one blintdb or symbol
-    matching already found are merged by ``trim_components`` when the SBOM is
-    assembled, so no duplicate rows appear.
+    Each embedded component, nested ones included, keeps its group, version,
+    purl, scope, hashes and licenses, and records that it came from the
+    binary's embedded SBOM (``internal:embedded_sbom``). Components without a
+    purl are skipped, since nothing can match them. Quarkus marks the
+    build-time libraries that never reach the image with the ``excluded``
+    scope, and that scope is kept so consumers can tell them apart.
+
+    The embedded ``dependencies`` graph is carried over after translating each
+    embedded bom-ref to the purl blint uses as the bom-ref. Edges to or from a
+    component that was skipped, or to the document's own root component, are
+    dropped, so no edge points at a component missing from the output. The
+    document's ``metadata`` is never copied: the SBOM's parent component
+    describes the binary blint parsed.
 
     Args:
         document (dict): The parsed CycloneDX document.
@@ -3544,77 +3596,53 @@ def process_graalvm_sbom_dependencies(
     Returns:
         list: New component list.
     """
+    exe_name = os.path.basename(exe)
     components = []
-    for entry in document.get("components") or []:
-        if not isinstance(entry, dict):
-            continue
+    ref_to_purl: dict[str, str] = {}
+    seen_purls: set[str] = set()
+    for entry in _flatten_embedded_components(document.get("components")):
         name = entry.get("name")
         purl = entry.get("purl")
-        if not name or not purl:
-            # A component without a purl has no matchable identity; skip it
-            # rather than emitting a component no consumer can act on.
+        if not name or not purl or not isinstance(purl, str):
             continue
-        version = entry.get("version") or None
+        ref_to_purl[str(entry.get("bom-ref") or purl)] = purl
+        ref_to_purl[purl] = purl
+        if purl in seen_purls:
+            continue
+        seen_purls.add(purl)
         try:
             comp_type = Type(entry.get("type") or Type.library.value)
         except ValueError:
             comp_type = Type.library
-        properties = [Property(name="internal:embedded_sbom", value=os.path.basename(exe))]
-        hashes = []
-        for entry_hash in entry.get("hashes") or []:
-            alg = entry_hash.get("alg")
-            content = entry_hash.get("content")
-            try:
-                hashes.append(Hash(alg=HashAlg(alg), content=content))
-            except (KeyError, TypeError, ValueError) as e:
-                LOG.debug(f"Skipping unusable hash {alg} for {name}: {e}")
-        licenses = []
-        for entry_license in entry.get("licenses") or []:
-            if not isinstance(entry_license, dict):
-                continue
-            expression = entry_license.get("expression")
-            if expression:
-                licenses.append({"expression": str(expression)})
-                continue
-            license_entry = entry_license.get("license") or {}
-            license_id = license_entry.get("id")
-            license_name = license_entry.get("name")
-            if license_id or license_name:
-                licenses.append(
-                    {
-                        "license": (
-                            {"id": str(license_id)} if license_id else {"name": str(license_name)}
-                        )
-                    }
-                )
+        try:
+            scope = Scope(entry.get("scope") or Scope.required.value)
+        except ValueError:
+            scope = Scope.required
         comp = Component(
             type=comp_type,
+            group=entry.get("group") or None,
             name=name,
-            version=version,
+            version=entry.get("version") or None,
             purl=purl,
-            hashes=hashes or None,
-            licenses=licenses or None,
-            scope=Scope.required,
-            properties=properties,
-            evidence=create_component_evidence(
-                f"{os.path.basename(exe)}!embedded-sbom", 0.8
-            ),
+            hashes=_embedded_hashes(entry) or None,
+            licenses=_embedded_licenses(entry) or None,
+            scope=scope,
+            properties=[Property(name="internal:embedded_sbom", value=exe_name)],
+            evidence=create_component_evidence(f"{exe_name}!embedded-sbom", 0.8),
         )
         comp.bom_ref = RefType(purl)
         components.append(comp)
-        if not dependencies_dict.get(purl):
-            dependencies_dict[purl] = set()
-    # The embedded graph references components by their bom-ref, which is the
-    # purl here, so the edges carry over as declared.
+        dependencies_dict.setdefault(purl, set())
     for entry in document.get("dependencies") or []:
         if not isinstance(entry, dict):
             continue
-        ref = entry.get("ref")
-        if not ref or ref not in dependencies_dict:
+        ref = ref_to_purl.get(str(entry.get("ref")))
+        if not ref:
             continue
         for aref in entry.get("dependsOn") or []:
-            if isinstance(aref, str) and aref != ref:
-                dependencies_dict[ref].add(aref)
+            target = ref_to_purl.get(str(aref))
+            if target and target != ref:
+                dependencies_dict[ref].add(target)
     return components
 
 

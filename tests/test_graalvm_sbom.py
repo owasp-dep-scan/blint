@@ -44,11 +44,6 @@ def document() -> dict:
     return cyclonedx_document()
 
 
-def _macho_binary(blob: bytes):
-    fat = lief.MachO.parse(str(blob)) if isinstance(blob, (str, Path)) else None
-    return fat
-
-
 def test_elf_reader_reads_the_embedded_document(tmp_path, document):
     exe_file = _write(tmp_path, "app.elf", build_elf(gzip_document(document)))
     parsed = lief.ELF.parse(str(exe_file))
@@ -68,19 +63,25 @@ def test_macho_reader_reads_the_embedded_document(tmp_path, document):
 
 
 def test_binary_without_the_symbols_yields_nothing(tmp_path):
-    exe_file = _write(tmp_path, "plain.elf", build_elf(b"\0" * 64, include_sbom=False, include_length=False))
+    exe_file = _write(
+        tmp_path, "plain.elf", build_elf(b"\0" * 64, include_sbom=False, include_length=False)
+    )
     parsed = lief.ELF.parse(str(exe_file))
     assert parse_graalvm_sbom(parsed) is None
 
 
 def test_sbom_symbol_alone_yields_nothing(tmp_path, document):
-    exe_file = _write(tmp_path, "half.elf", build_elf(gzip_document(document), include_length=False))
+    exe_file = _write(
+        tmp_path, "half.elf", build_elf(gzip_document(document), include_length=False)
+    )
     parsed = lief.ELF.parse(str(exe_file))
     assert parse_graalvm_sbom(parsed) is None
 
 
 def test_length_symbol_alone_yields_nothing(tmp_path, document):
-    exe_file = _write(tmp_path, "half2.elf", build_elf(gzip_document(document), include_sbom=False))
+    exe_file = _write(
+        tmp_path, "half2.elf", build_elf(gzip_document(document), include_sbom=False)
+    )
     parsed = lief.ELF.parse(str(exe_file))
     assert parse_graalvm_sbom(parsed) is None
 
@@ -140,9 +141,7 @@ def test_json_that_is_not_cyclonedx_yields_nothing(tmp_path):
 def test_raw_deflate_instead_of_gzip_yields_nothing(tmp_path, document):
     import zlib
 
-    exe_file = _write(
-        tmp_path, "deflate.elf", build_elf(zlib.compress(_compact_bytes(document)))
-    )
+    exe_file = _write(tmp_path, "deflate.elf", build_elf(zlib.compress(_compact_bytes(document))))
     parsed = lief.ELF.parse(str(exe_file))
     assert parse_graalvm_sbom(parsed) is None
 
@@ -165,20 +164,98 @@ def test_dependencies_carry_over_and_components_record_their_origin(tmp_path, do
     assert deps[QUARKUS_PURL] == {MUTINY_PURL}
 
 
-def test_document_metadata_is_never_copied(document, tmp_path):
-    # The function takes the components and the graph, never the metadata:
-    # the embedded document's component describes the producer's view, and
-    # blint's own parent describes the binary it parsed.
+def test_scope_group_and_nested_components_are_kept(tmp_path, document):
+    document["components"][1]["scope"] = "excluded"
+    document["components"][0]["components"] = [
+        {
+            "type": "library",
+            "bom-ref": "shaded-jctools",
+            "group": "org.jctools",
+            "name": "jctools-core",
+            "version": "4.0.7",
+            "purl": "pkg:maven/org.jctools/jctools-core@4.0.7?type=jar",
+        }
+    ]
+    comps = process_graalvm_sbom_dependencies(document, {}, str(tmp_path / "runner"))
+    by_name = {c.name: c for c in comps}
+    assert set(by_name) == {"quarkus-core", "mutiny", "jctools-core"}
+    assert by_name["quarkus-core"].group == "io.quarkus"
+    assert by_name["quarkus-core"].scope.value == "required"
+    assert by_name["mutiny"].scope.value == "excluded"
+
+
+def test_embedded_refs_are_translated_and_dangling_edges_dropped(tmp_path, document):
+    # A producer may use bom-refs that are not purls. Edges are rewritten onto
+    # the purls blint uses as bom-refs, and edges that name the document's root
+    # or a component without a purl are dropped.
+    document["components"][0]["bom-ref"] = "quarkus-core-ref"
+    document["components"][1]["bom-ref"] = "mutiny-ref"
+    document["components"].append({"type": "library", "bom-ref": "no-purl", "name": "local"})
+    document["dependencies"] = [
+        {"ref": "app-root", "dependsOn": ["quarkus-core-ref"]},
+        {"ref": "quarkus-core-ref", "dependsOn": ["mutiny-ref", "no-purl", "missing"]},
+    ]
     deps: dict[str, set] = {}
-    process_graalvm_sbom_dependencies(document, deps, str(tmp_path / "runner"))
-    assert all("metadata" not in str(k) for k in deps)
-    assert "urn:uuid:9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d" not in orjson.dumps(
-        {k: sorted(v) for k, v in deps.items()}).decode()
+    comps = process_graalvm_sbom_dependencies(document, deps, str(tmp_path / "runner"))
+    assert [c.bom_ref.root for c in comps] == [QUARKUS_PURL, MUTINY_PURL]
+    assert deps == {QUARKUS_PURL: {MUTINY_PURL}, MUTINY_PURL: set()}
 
 
-@pytest.mark.skipif(
-    not hasattr(lief.MachO, "parse"), reason="needs the Mach-O parser"
-)
+def test_each_binary_gets_its_own_components(tmp_path, document):
+    # The dependency dict is shared by every binary of a run, so a second
+    # image with the same libraries must still return them for its own parent.
+    deps: dict[str, set] = {}
+    first = process_graalvm_sbom_dependencies(document, deps, str(tmp_path / "a-runner"))
+    second = process_graalvm_sbom_dependencies(document, deps, str(tmp_path / "b-runner"))
+    assert [c.purl for c in first] == [c.purl for c in second] == [QUARKUS_PURL, MUTINY_PURL]
+    assert deps[QUARKUS_PURL] == {MUTINY_PURL}
+
+
+class _Region:
+    def __init__(self, virtual_address: int, virtual_size: int):
+        self.virtual_address = virtual_address
+        self.virtual_size = virtual_size
+
+
+class _FakePE:
+    """The surface of a LIEF PE binary the reader uses: exports reached through
+    ``get_symbol`` with RVA values, sections and no segments."""
+
+    def __init__(self, image: bytes, symbols: dict[str, int], sections: list[_Region]):
+        self.image = image
+        self.symbols = symbols
+        self.sections = sections
+
+    def get_symbol(self, name):
+        if name not in self.symbols:
+            return None
+        return type("Export", (), {"value": self.symbols[name]})()
+
+    def get_content_from_virtual_address(self, address, size):
+        return memoryview(self.image[address : address + size])
+
+
+def _fake_pe(payload: bytes, declared_length: int | None = None) -> _FakePE:
+    length_rva, sbom_rva = 0x1000, 0x1010
+    image = bytearray(sbom_rva + len(payload) + 0x100)
+    image[length_rva : length_rva + 8] = (declared_length or len(payload)).to_bytes(8, "little")
+    image[sbom_rva : sbom_rva + len(payload)] = payload
+    return _FakePE(
+        bytes(image),
+        {"sbom": sbom_rva, "sbom_length": length_rva},
+        [_Region(0x1000, len(image) - 0x1000)],
+    )
+
+
+def test_pe_exports_are_read_within_their_section(document):
+    assert parse_graalvm_sbom(_fake_pe(gzip_document(document)))["bomFormat"] == "CycloneDX"
+
+
+def test_pe_length_past_the_section_is_refused(document):
+    payload = gzip_document(document)
+    assert parse_graalvm_sbom(_fake_pe(payload, declared_length=len(payload) + 0x200)) is None
+
+
 def test_sbom_mode_emits_the_embedded_components(tmp_path, document):
     """End to end through blint sbom: the fixture's embedded SBOM reaches the
     generated document as components with their origin recorded, and the
@@ -207,6 +284,8 @@ def test_sbom_mode_emits_the_embedded_components(tmp_path, document):
     deps = bom.get("dependencies") or []
     edge = next(d for d in deps if d["ref"] == QUARKUS_PURL)
     assert MUTINY_PURL in edge["dependsOn"]
-    # The embedded document's own metadata never reaches the output.
-    embedded_refs = {c["bom-ref"] for c in embedded}
-    assert all(ref in embedded_refs or ref != "urn:uuid:9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d" for ref in embedded_refs)
+    # The embedded document's own metadata never reaches the output: the
+    # parent is the scanned binary, not the application the document names.
+    assert bom["metadata"]["component"]["name"] != "getting-started"
+    assert all(c["name"] != "getting-started" for c in components)
+    assert "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d" not in bom.get("serialNumber", "")

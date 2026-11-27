@@ -118,9 +118,7 @@ def bomb_document(pad_mib: int = 33) -> bytes:
     document = {
         "bomFormat": "CycloneDX",
         "specVersion": "1.7",
-        "components": [
-            {"type": "library", "name": "pad", "purl": f"pkg:generic/pad?x={filler}"}
-        ],
+        "components": [{"type": "library", "name": "pad", "purl": f"pkg:generic/pad?x={filler}"}],
     }
     return gzip.compress(_compact(document).encode(), mtime=0)
 
@@ -159,9 +157,7 @@ def build_elf(
     if include_sbom:
         symtab += _elf_sym(1, ELF_BASE + SYMBOLS_OFF, len(payload))
     if include_length:
-        symtab += _elf_sym(
-            6, ELF_BASE + SYMBOLS_OFF + len(payload), 8
-        )
+        symtab += _elf_sym(6, ELF_BASE + SYMBOLS_OFF + len(payload), 8)
     strtab_off = SYMBOLS_OFF + len(symbols_blob)
     symtab_off = strtab_off + len(strtab)
     shstrtab = b"\0.load\0.symtab\0.strtab\0.shstrtab\0"
@@ -238,9 +234,7 @@ def build_elf(
                 8,
                 SYM_SIZE,
             ),
-            struct.pack(
-                "<IIQQQQIIQQ", 15, SHT_STRTAB, 0, 0, strtab_off, len(strtab), 0, 0, 1, 0
-            ),
+            struct.pack("<IIQQQQIIQQ", 15, SHT_STRTAB, 0, 0, strtab_off, len(strtab), 0, 0, 1, 0),
             struct.pack(
                 "<IIQQQQIIQQ", 23, SHT_STRTAB, 0, 0, shstrtab_off, len(shstrtab), 0, 0, 1, 0
             ),
@@ -300,20 +294,23 @@ def build_macho(
         0,
         0,
     )
-    segment = struct.pack(
-        "<II16sQQQQiiII",
-        LC_SEGMENT_64,
-        SEGMENT_CMD_SIZE + SECTION_CMD_SIZE,
-        b"__TEXT",
-        MACHO_VM_BASE,
-        total,
-        0,
-        total,
-        5,
-        5,
-        1,
-        0,
-    ) + section
+    segment = (
+        struct.pack(
+            "<II16sQQQQiiII",
+            LC_SEGMENT_64,
+            SEGMENT_CMD_SIZE + SECTION_CMD_SIZE,
+            b"__TEXT",
+            MACHO_VM_BASE,
+            total,
+            0,
+            total,
+            5,
+            5,
+            1,
+            0,
+        )
+        + section
+    )
     nsyms = sum([include_sbom, include_length])
     symtab_cmd = struct.pack(
         "<IIIIII",
