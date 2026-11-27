@@ -1272,6 +1272,141 @@ def parse_rust_buildinfo(parsed_obj: lief.Binary) -> list[dict]:
     return deps
 
 
+# Upper bound on the stored SBOM a GraalVM native image embeds behind the
+# global ``sbom`` symbol. The payload is attacker-controlled binary content like
+# ``.dep-v0``, so a declared ``sbom_length`` past this cap is refused before any
+# read, and inflation is capped at ``MAX_AUDIT_DECOMPRESSED`` (CWE-409). The
+# compressed SBOM of a Quarkus application is well under 1 MiB.
+MAX_GRAALVM_SBOM_BYTES = MAX_AUDIT_DECOMPRESSED
+
+GRAALVM_SBOM_SYMBOL_NAMES = ("sbom", "_sbom")
+GRAALVM_SBOM_LENGTH_SYMBOL_NAMES = ("sbom_length", "_sbom_length")
+
+
+def _symbol_address(parsed_obj: lief.Binary, names: tuple[str, ...]) -> int | None:
+    """The virtual address of the first of ``names`` the binary exports.
+
+    Mach-O spellings carry a leading underscore in the symbol table, so both
+    forms are accepted everywhere. A symbol without a usable address is
+    treated as absent.
+    """
+    for name in names:
+        try:
+            symbol = parsed_obj.get_symbol(name)
+        except (AttributeError, TypeError, ValueError) as e:
+            LOG.debug(f"Symbol lookup for {name} failed: {e}")
+            continue
+        address = _parse_address(getattr(symbol, "value", None))
+        if address is not None and address > 0:
+            return address
+    return None
+
+
+def _content_at(parsed_obj: lief.Binary, address: int, size: int) -> bytes | None:
+    """``size`` bytes at the virtual ``address``, or None when unreadable.
+
+    The read must lie inside one mapped region: LIEF serves file bytes for a
+    virtual range no segment covers, so a declared length that runs past the
+    region holding the symbol would otherwise be answered with whatever follows
+    in the file instead of being refused.
+    """
+    end = _region_end(parsed_obj, address)
+    if end is None or address + size > end:
+        LOG.debug(f"Read at {address:#x} for {size} bytes is outside a mapped region")
+        return None
+    try:
+        data = bytes(parsed_obj.get_content_from_virtual_address(address, size))
+    except (AttributeError, TypeError, ValueError, RuntimeError) as e:
+        LOG.debug(f"Read at {address:#x} for {size} bytes failed: {e}")
+        return None
+    return data if len(data) == size else None
+
+
+def _region_end(parsed_obj: lief.Binary, address: int) -> int | None:
+    """The end of the mapped region that contains ``address``.
+
+    ELF and Mach-O expose loadable segments. A PE has no segments, so its
+    sections are used; their virtual addresses are RVAs, on the same scale as
+    the export addresses LIEF reports.
+    """
+    for regions in ("segments", "sections"):
+        found = False
+        with contextlib.suppress(AttributeError, TypeError):
+            for region in getattr(parsed_obj, regions):
+                base = _parse_address(getattr(region, "virtual_address", None))
+                size = _parse_address(getattr(region, "virtual_size", None))
+                if base is None or not size:
+                    continue
+                found = True
+                if base <= address < base + size:
+                    return base + size
+        if found:
+            return None
+    return None
+
+
+def _gunzip_capped(data: bytes, cap: int) -> bytes:
+    """gzip-inflate ``data`` but never produce more than ``cap`` bytes.
+
+    Raises ``zlib.error`` when the stream would exceed the cap, the same
+    contract ``_decompress_capped`` gives the cargo manifest. The window bits
+    name the gzip wrapper (31), not the raw deflate stream the cargo section
+    carries.
+    """
+    decompressor = zlib.decompressobj(wbits=31)
+    out = decompressor.decompress(data, cap)
+    if decompressor.unconsumed_tail or not decompressor.eof:
+        raise zlib.error("decompressed size exceeds cap")
+    return out
+
+
+def parse_graalvm_sbom(parsed_obj: lief.Binary) -> dict | None:
+    """
+    Read the CycloneDX SBOM a GraalVM native image embeds behind its global
+    ``sbom`` and ``sbom_length`` symbols (Quarkus builds with
+    ``quarkus.cyclonedx.embedded.enabled`` and Oracle GraalVM's ``--enable-sbom``
+    both produce them).
+
+    ``sbom_length`` is an 8-byte little-endian unsigned integer read from its
+    own address; the SBOM is the gzip-compressed CycloneDX JSON it counts at the
+    ``sbom`` address. Only a JSON object whose ``bomFormat`` is ``CycloneDX`` is
+    accepted. Every failure (a missing symbol, a length over the cap or past
+    the mapped region, invalid gzip, a bomb over the decompressed cap,
+    non-CycloneDX JSON) is logged at debug level and yields None, so a
+    malformed binary never stops the parse.
+
+    Args:
+        parsed_obj (lief.Binary): The parsed object representing the binary.
+
+    Returns:
+        dict | None: The parsed CycloneDX document, None when absent or unreadable.
+    """
+    try:
+        sbom_address = _symbol_address(parsed_obj, GRAALVM_SBOM_SYMBOL_NAMES)
+        if sbom_address is None:
+            return None
+        length_address = _symbol_address(parsed_obj, GRAALVM_SBOM_LENGTH_SYMBOL_NAMES)
+        if length_address is None:
+            return None
+        length_raw = _content_at(parsed_obj, length_address, 8)
+        if length_raw is None:
+            return None
+        sbom_length = int.from_bytes(length_raw, "little", signed=False)
+        if not 0 < sbom_length <= MAX_GRAALVM_SBOM_BYTES:
+            LOG.debug(f"Embedded SBOM length {sbom_length} is outside the accepted range")
+            return None
+        payload = _content_at(parsed_obj, sbom_address, sbom_length)
+        if payload is None:
+            return None
+        document = orjson.loads(_gunzip_capped(payload, MAX_AUDIT_DECOMPRESSED))
+        if isinstance(document, dict) and document.get("bomFormat") == "CycloneDX":
+            return document
+        LOG.debug("Embedded SBOM is not a CycloneDX document")
+    except Exception as e:
+        LOG.debug(f"Failed to parse the embedded GraalVM SBOM: {e}")
+    return None
+
+
 # Mach-O CPU subtype of arm64e (the low 24 bits; the high bits carry the
 # ABI64 flag). The distinction matters because only arm64e slices get
 # pointer authentication, so an aggregate "PAC: no" over a fat binary that

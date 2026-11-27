@@ -1934,6 +1934,12 @@ def process_exe_file(
             metadata.get("rust_dependencies"), dependencies_dict
         )
         lib_components += rust_components
+    # Convert the SBOM a GraalVM native image embeds behind its sbom symbol
+    if metadata.get("graalvm_sbom"):
+        graalvm_components = process_graalvm_sbom_dependencies(
+            metadata.get("graalvm_sbom"), dependencies_dict, exe
+        )
+        lib_components += graalvm_components
     if lib_components:
         track_dependency(dependencies_dict, parent_component, lib_components)
     return lib_components
@@ -3509,6 +3515,134 @@ def process_rust_dependencies(
             for adep in dependency.get("dependencies"):
                 if adep in idx_to_purl:
                     dependencies_dict[purl].add(idx_to_purl[adep])
+    return components
+
+
+def _embedded_licenses(entry: dict) -> list[dict]:
+    """The license choices of an embedded CycloneDX component, as plain dicts."""
+    licenses = []
+    for choice in entry.get("licenses") or []:
+        if not isinstance(choice, dict):
+            continue
+        if expression := choice.get("expression"):
+            licenses.append({"expression": str(expression)})
+            continue
+        license_entry = choice.get("license") or {}
+        if license_id := license_entry.get("id"):
+            licenses.append({"license": {"id": str(license_id)}})
+        elif license_name := license_entry.get("name"):
+            licenses.append({"license": {"name": str(license_name)}})
+    return licenses
+
+
+def _embedded_hashes(entry: dict) -> list[Hash]:
+    """The hashes of an embedded CycloneDX component blint's model accepts."""
+    hashes = []
+    for entry_hash in entry.get("hashes") or []:
+        if not isinstance(entry_hash, dict):
+            continue
+        alg = entry_hash.get("alg")
+        try:
+            hashes.append(Hash(alg=HashAlg(alg), content=entry_hash.get("content")))
+        except (KeyError, TypeError, ValueError) as e:
+            LOG.debug(f"Skipping unusable hash {alg} for {entry.get('name')}: {e}")
+    return hashes
+
+
+def _flatten_embedded_components(entries: list) -> list[dict]:
+    """Every component of an embedded document, nested ones included.
+
+    A shaded jar lists the libraries it bundles as nested components; they are
+    in the image as much as their parent, so they are returned alongside it.
+    """
+    flat = []
+    pending = list(entries or [])
+    while pending:
+        entry = pending.pop(0)
+        if not isinstance(entry, dict):
+            continue
+        flat.append(entry)
+        pending.extend(entry.get("components") or [])
+    return flat
+
+
+def process_graalvm_sbom_dependencies(
+    document: dict, dependencies_dict: dict[str, set], exe: str
+) -> list[Component]:
+    """
+    Process the CycloneDX document a GraalVM native image embeds behind its
+    ``sbom`` symbol, the way ``process_rust_dependencies`` handles
+    cargo-auditable data.
+
+    Each embedded component, nested ones included, keeps its group, version,
+    purl, scope, hashes and licenses, and records that it came from the
+    binary's embedded SBOM (``internal:embedded_sbom``). Components without a
+    purl are skipped, since nothing can match them. Quarkus marks the
+    build-time libraries that never reach the image with the ``excluded``
+    scope, and that scope is kept so consumers can tell them apart.
+
+    The embedded ``dependencies`` graph is carried over after translating each
+    embedded bom-ref to the purl blint uses as the bom-ref. Edges to or from a
+    component that was skipped, or to the document's own root component, are
+    dropped, so no edge points at a component missing from the output. The
+    document's ``metadata`` is never copied: the SBOM's parent component
+    describes the binary blint parsed.
+
+    Args:
+        document (dict): The parsed CycloneDX document.
+        dependencies_dict (dict[str, set]): The dictionary to store the dependencies.
+        exe (str): Path of the scanned binary.
+
+    Returns:
+        list: New component list.
+    """
+    exe_name = os.path.basename(exe)
+    components = []
+    ref_to_purl: dict[str, str] = {}
+    seen_purls: set[str] = set()
+    for entry in _flatten_embedded_components(document.get("components")):
+        name = entry.get("name")
+        purl = entry.get("purl")
+        if not name or not purl or not isinstance(purl, str):
+            continue
+        ref_to_purl[str(entry.get("bom-ref") or purl)] = purl
+        ref_to_purl[purl] = purl
+        if purl in seen_purls:
+            continue
+        seen_purls.add(purl)
+        try:
+            comp_type = Type(entry.get("type") or Type.library.value)
+        except ValueError:
+            comp_type = Type.library
+        try:
+            scope = Scope(entry.get("scope") or Scope.required.value)
+        except ValueError:
+            scope = Scope.required
+        comp = Component(
+            type=comp_type,
+            group=entry.get("group") or None,
+            name=name,
+            version=entry.get("version") or None,
+            purl=purl,
+            hashes=_embedded_hashes(entry) or None,
+            licenses=_embedded_licenses(entry) or None,
+            scope=scope,
+            properties=[Property(name="internal:embedded_sbom", value=exe_name)],
+            evidence=create_component_evidence(f"{exe_name}!embedded-sbom", 0.8),
+        )
+        comp.bom_ref = RefType(purl)
+        components.append(comp)
+        dependencies_dict.setdefault(purl, set())
+    for entry in document.get("dependencies") or []:
+        if not isinstance(entry, dict):
+            continue
+        ref = ref_to_purl.get(str(entry.get("ref")))
+        if not ref:
+            continue
+        for aref in entry.get("dependsOn") or []:
+            target = ref_to_purl.get(str(aref))
+            if target and target != ref:
+                dependencies_dict[ref].add(target)
     return components
 
 

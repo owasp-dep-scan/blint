@@ -27,6 +27,7 @@ from blint.lib.binary_common import (
     guess_exe_type,
     parse_functions,
     parse_go_buildinfo,
+    parse_graalvm_sbom,
     parse_overlay,
     parse_rust_buildinfo,
 )
@@ -1217,6 +1218,7 @@ def add_pe_metadata(exe_file: str, metadata: dict, parsed_obj: lief.PE.Binary) -
                         )
         metadata["go_dependencies"], metadata["go_formulation"] = parse_go_buildinfo(parsed_obj)
         metadata["rust_dependencies"] = parse_rust_buildinfo(parsed_obj)
+        metadata["graalvm_sbom"] = parse_graalvm_sbom(parsed_obj)
         tls = parsed_obj.tls
         if tls:
             metadata["tls_callbacks"] = [
